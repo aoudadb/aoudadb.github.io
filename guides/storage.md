@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Storage and Persistence"
 nav_order: 13
 parent: "Guides"

@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Backup and Restore"
 nav_order: 8
 parent: "Guides"

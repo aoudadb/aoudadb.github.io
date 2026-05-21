@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Schema Management"
 nav_order: 3
 parent: "Guides"

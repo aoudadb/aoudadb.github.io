@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Schema Lifecycle"
 nav_order: 2
 parent: "Guides"

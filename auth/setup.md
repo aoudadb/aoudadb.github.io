@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Setup and Flows"
 nav_order: 2
 parent: "Auth and Authorization"

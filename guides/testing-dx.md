@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Testing and DX"
 nav_order: 16
 parent: "Guides"

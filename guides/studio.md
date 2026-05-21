@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Studio"
 nav_order: 15
 parent: "Guides"

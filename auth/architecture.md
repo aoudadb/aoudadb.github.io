@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Architecture"
 nav_order: 1
 parent: "Auth and Authorization"

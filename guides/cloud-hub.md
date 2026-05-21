@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Cloud and Hub"
 nav_order: 14
 parent: "Guides"

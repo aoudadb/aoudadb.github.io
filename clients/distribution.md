@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Distribution and Licensing"
 nav_order: 2
 parent: "Clients"

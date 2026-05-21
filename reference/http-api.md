@@ -1,4 +1,4 @@
-﻿---
+---
 title: "HTTP API"
 nav_order: 1
 parent: "Reference"

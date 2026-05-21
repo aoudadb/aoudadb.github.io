@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Data Authorization"
 nav_order: 4
 parent: "Auth and Authorization"

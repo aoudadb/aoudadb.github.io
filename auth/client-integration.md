@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Client Integration"
 nav_order: 3
 parent: "Auth and Authorization"

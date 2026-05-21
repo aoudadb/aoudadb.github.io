@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Materialized Queries"
 nav_order: 12
 parent: "Guides"

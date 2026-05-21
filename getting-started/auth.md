@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Authentication Setup"
 nav_order: 2
 parent: "Getting Started"

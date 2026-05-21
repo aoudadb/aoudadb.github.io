@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Backup and Restore"
 nav_order: 4
 parent: "Getting Started"

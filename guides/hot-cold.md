@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Hot/Cold Storage"
 nav_order: 5
 parent: "Guides"

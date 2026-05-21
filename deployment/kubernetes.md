@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Kubernetes and Helm"
 nav_order: 1
 parent: "Deployment"

@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Schema CI/CD"
 nav_order: 4
 parent: "Guides"

@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Partitioning and Multi-tenancy"
 nav_order: 10
 parent: "Guides"

@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Time-series and Clustering"
 nav_order: 11
 parent: "Guides"

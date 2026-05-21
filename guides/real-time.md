@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Real-time Streaming"
 nav_order: 7
 parent: "Guides"

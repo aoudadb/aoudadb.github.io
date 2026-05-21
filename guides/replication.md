@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Replication and Clustering"
 nav_order: 9
 parent: "Guides"

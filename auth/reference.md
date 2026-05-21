@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Reference"
 nav_order: 6
 parent: "Auth and Authorization"
