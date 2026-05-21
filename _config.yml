@@ -48,6 +48,12 @@ collections:
     output: true
 
 # Plugins
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"
+
 plugins:
   - jekyll-remote-theme
   - jekyll-seo-tag
