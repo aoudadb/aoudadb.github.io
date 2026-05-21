@@ -2,9 +2,6 @@ title: "Aouda Documentation"
 description: "Columnar database engine for .NET with a TypeScript client SDK. Embedded or server deployment. Schema-on-write. AI-native."
 theme: just-the-docs
 
-url: "https://aoudadb.github.io"
-baseurl: ""
-
 # Navigation
 search_enabled: true
 search:
