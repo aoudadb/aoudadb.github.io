@@ -1,0 +1,996 @@
+﻿---
+title: "Reference"
+nav_order: 6
+parent: "Auth and Authorization"
+---
+
+# Auth Reference
+
+> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+
+---
+
+## 20. AI Agent Workflows
+
+One of Aouda's key qualities is that AI agents can build and test complete application flows — from database setup to auth to data operations — with minimal friction.
+
+### Level 0: Just a Database (Zero Auth)
+
+```bash
+aouda dev --port 5433 --database myapp
+
+# Agent uses it immediately — zero setup
+curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
+  -d '{ "rows": [{ "id": 1, "customer": "Acme", "total": 249.99 }] }'
+```
+
+### Level 1: Database with Auth (One Command)
+
+```bash
+aouda dev --port 5433 --database myapp --auth
+# → Anon key:         mk_anon_a1b2c3...
+# → Service role key: mk_svc_x7y8z9...
+
+# Agent captures keys and tests the complete flow:
+
+# Sign up a user
+curl -H "Authorization: Bearer mk_anon_a1b2c3..." \
+  -X POST http://localhost:5433/api/databases/myapp/auth/signup \
+  -d '{ "email": "testuser@example.com", "password": "Test123!" }'
+
+# Use the returned JWT for data access
+curl -X POST -H "Authorization: Bearer eyJ..." \
+  -H "Content-Type: application/json" \
+  http://localhost:5433/api/databases/myapp/query \
+  -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
+```
+
+### Level 2: Full Production Setup
+
+```bash
+# 1. Bootstrap server admin
+curl -X POST http://localhost:5433/api/auth/setup \
+  -d '{ "email": "admin@test.local", "password": "AdminPass123!" }'
+
+# 2. Sign in
+TOKEN=$(curl -s http://localhost:5433/api/auth/signin \
+  -d '{ "email": "admin@test.local", "password": "AdminPass123!" }' | jq -r .accessToken)
+
+# 3. Create auth-enabled database
+curl -X POST http://localhost:5433/api/databases \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{ "name": "myapp", "auth": { "enabled": true } }'
+
+# 4. Create a scoped server API key
+curl -X POST http://localhost:5433/api/auth/admin/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{ "name": "myapp-backend", "databaseRoles": { "myapp": ["db_writer"] } }'
+
+# 5. Test the complete flow
+```
+
+### Aouda as SaaS-Auth for AI Agent Apps
+
+```bash
+# Agent starts Aouda with auth
+aouda dev --port 5433 --database myapp --auth
+# Captures: ANON_KEY, SERVICE_KEY
+
+# Agent generates application code:
+#   const db = createAoudaClient({
+#     serverUrl: "http://localhost:5433",
+#     database: "myapp",
+#     auth: { apiKey: SERVICE_KEY }
+#   });
+#
+#   app.post("/api/signup", async (req, res) => {
+#     const result = await db.auth.signUp(req.body.email, req.body.password);
+#     res.json(result);
+#   });
+
+# Agent tests end-to-end:
+curl -X POST http://localhost:3000/api/signup \
+  -d '{ "email": "alice@test.com", "password": "Test123!" }'
+# → User created in Aouda, JWT returned
+
+curl -X POST http://localhost:3000/api/login \
+  -d '{ "email": "alice@test.com", "password": "Test123!" }'
+# → JWT returned
+```
+
+Zero external dependencies, zero cloud signups, zero configuration files.
+
+---
+
+## 21. API Reference
+
+### Application Auth Endpoints
+
+All endpoints under `/api/databases/{db}/auth/...`.
+
+| Endpoint | Method | Auth Required | Description |
+|----------|--------|---------------|-------------|
+| `.../auth/signup` | POST | API key (anon or higher) | Register a new user |
+| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens |
+| `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token |
+| `.../auth/signout` | POST | User JWT | Revoke session |
+| `.../auth/me` | GET | User JWT | Get current user profile |
+| `.../auth/me` | PATCH | User JWT | Update user metadata |
+| `.../auth/password` | PUT | User JWT | Change password |
+
+### Application Auth Admin Endpoints
+
+All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `.../admin/users` | GET | List users (paginated, filterable) |
+| `.../admin/users` | POST | Create a user — password optional; omit to create invite-pending account |
+| `.../admin/users/{id}` | GET | Get user details |
+| `.../admin/users/{id}` | PATCH | Update user |
+| `.../admin/users/{id}/disable` | POST | Disable user |
+| `.../admin/users/{id}/enable` | POST | Enable user |
+| `.../admin/users/{id}/roles` | GET | List user's roles |
+| `.../admin/users/{id}/roles` | PUT | Replace user's role assignments |
+| `.../admin/roles` | GET | List roles |
+| `.../admin/roles` | POST | Create custom role |
+| `.../admin/roles/{id}` | PATCH | Update role |
+| `.../admin/roles/{id}` | DELETE | Delete custom role |
+| `.../admin/api-keys` | GET | List API keys |
+| `.../admin/api-keys` | POST | Create custom API key |
+| `.../admin/api-keys/{id}` | DELETE | Revoke API key |
+| `.../admin/regenerate-keys` | POST | Regenerate auto-generated keys |
+
+#### Response Bodies
+
+**`GET .../admin/users`** — Query parameters: `limit` (default 20, max 100), `offset`, `email`, `status`.
+
+```json
+{
+  "users": [
+    {
+      "id":        "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "email":     "alice@example.com",
+      "status":    "active",
+      "createdAt": "2026-01-15T10:30:00Z"
+    }
+  ],
+  "totalCount": 42
+}
+```
+
+**`POST .../admin/users`** — Request: `{ "email": "...", "password"?: "...", "displayName"?: "..." }`. Omit `password` to create an invite-pending account. Returns `201 Created` on success, `409 Conflict` if email already exists.
+
+```json
+{
+  "id":          "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "email":       "alice@example.com",
+  "displayName": "Alice",
+  "createdAt":   "2026-01-15T10:30:00Z",
+  "passwordSet": false
+}
+```
+
+**`GET .../admin/users/{id}`** — Returns full user details including current role assignments.
+
+```json
+{
+  "id":        "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "email":     "alice@example.com",
+  "status":    "active",
+  "createdAt": "2026-01-15T10:30:00Z",
+  "updatedAt": "2026-01-15T10:30:00Z",
+  "roles": [
+    { "roleName": "derive_admin", "scope": null }
+  ]
+}
+```
+
+`PUT .../admin/users/{id}/roles` is a full-replacement operation. Send the complete desired role list using:
+`{ "roles": [ { "roleName": "db_reader", "scope": "mydb" } ] }`.
+To add a single role without dropping existing roles, first `GET` current roles, merge client-side, then `PUT` the merged list.
+`POST .../admin/users/{id}/roles` is not supported and returns `405 Method Not Allowed`.
+
+### ADRA Admin Endpoints
+
+All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
+
+**Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](Auth-Data-Authorization.md#198-admin-api-partition-grants)):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201) |
+| `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
+| `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
+
+**RLS Resolvers** — define within-partition row filter rules ([§19.9](Auth-Data-Authorization.md#199-admin-api-rls-resolvers)):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `.../admin/rls-resolvers` | POST | Create a resolver with rules (returns 201) |
+| `.../admin/rls-resolvers` | GET | List resolvers; optional `?targetTable=` filter |
+| `.../admin/rls-resolvers/{id}` | GET | Get resolver with full rules list |
+| `.../admin/rls-resolvers/{id}` | PATCH | Update resolver description and/or replace rules |
+| `.../admin/rls-resolvers/{id}` | DELETE | Delete resolver and all its rules (204 / 404) |
+
+---
+
+## 22. Error Handling
+
+### Common Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_API_KEY_REQUIRED` | 401 | App auth endpoint called without API key | Include `Authorization: Bearer mk_anon_...` |
+| `AUTH_INVALID_CREDENTIALS` | 401 | Wrong email or password | Show "Invalid credentials" |
+| `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token or re-sign-in |
+| `AUTH_TOKEN_REVOKED` | 401 | Session was signed out | Redirect to sign-in |
+| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token expired or revoked | Redirect to sign-in |
+| `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts | Wait for lockout to expire |
+| `AUTH_RATE_LIMITED` | 429 | Too many requests | Implement backoff |
+| `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email already registered | Show "Account exists" |
+| `AUTHORIZATION_DENIED` | 403 | Valid token but no role for this database | Check role assignments |
+| `INSUFFICIENT_PERMISSIONS` | 403 | Valid token but role lacks the operation | Assign appropriate role |
+
+### Handle by Error Code
+
+```typescript
+try {
+  await client.auth.signIn(email, password);
+} catch (err) {
+  if (err instanceof AoudaAuthenticationError) {
+    switch (err.code) {
+      case "AUTH_INVALID_CREDENTIALS":
+        showError("Invalid email or password");
+        break;
+      case "AUTH_ACCOUNT_LOCKED":
+        showError("Account locked. Try again later.");
+        break;
+      case "AUTH_API_KEY_REQUIRED":
+        showError("Configuration error: API key missing");
+        break;
+      default:
+        showError("Authentication failed");
+    }
+  }
+}
+```
+
+---
+
+## 23. Security Best Practices
+
+### Password Security
+
+- Aouda uses **Argon2id** for password hashing (OWASP recommended, NIST SP 800-63B compliant).
+- Default minimum password length: 8 characters.
+- Account lockout after 10 failed attempts (15-minute lockout).
+- Passwords are never stored, logged, or returned in API responses.
+
+### API Key Security
+
+- **`anon` keys** (`mk_anon_`) are safe to embed in frontend code — they grant limited access only.
+- **`service_role` keys** (`mk_svc_`) must be kept secret — they grant full database access.
+- **Server keys** (`mk_srv_`) must be kept secret and stored in environment variables.
+- Auto-generated keys are shown only once at creation time. Store them securely.
+- Rotate keys periodically via the regeneration endpoint.
+
+### Token Security
+
+- Store access tokens in memory (not localStorage) when possible.
+- Store refresh tokens in secure, httpOnly cookies or secure storage.
+- Use short access token lifetimes (15 minutes default).
+
+### Transport Security
+
+- **Always use HTTPS** in production.
+- HTTP is acceptable only in local development.
+
+### Rate Limiting
+
+Default rate limits for auth endpoints:
+- Sign-in: 20 attempts per minute per IP
+- Sign-up: 5 attempts per minute per IP
+
+### Audit Logging
+
+All auth events are logged to the `_audit_log` table: sign-up, sign-in, sign-out, failed attempts, password changes, role changes, admin actions.
+
+---
+
+## 24. Validating Aouda JWTs in Your Backend
+
+Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any JWT validation library can verify Aouda-issued tokens **with zero custom code** — the same way you would configure Auth0, Keycloak, or Supabase.
+
+> **Gateway / reverse proxy deployments** — In production, Aouda is often not exposed directly to the internet. It runs behind an API gateway or reverse proxy (nginx, Kong, ASP.NET Core gateway, etc.) that forwards requests to the internal Aouda server. In these deployments, consuming services point at the **gateway's public URL**, not the internal Aouda address.
+>
+> Set `Aouda:BaseUrl = "https://api.your-domain.com"` in server configuration. Aouda will use this value for the `iss` claim in all JWTs and for every URI in the OIDC discovery document. Consuming services then configure their JWT validation to point at `https://api.your-domain.com/api/databases/{db}` — they never need to know the internal Aouda address.
+>
+> In the examples below, `https://your-aouda-server.com` represents this public-facing base URL, whether it is Aouda directly or a gateway in front of it.
+
+### Discovery Endpoints
+
+| Endpoint | URL |
+|----------|-----|
+| OIDC Discovery | `GET /api/databases/{db}/auth/.well-known/openid-configuration` |
+| JWKS (public keys) | `GET /api/databases/{db}/auth/.well-known/jwks.json` |
+
+Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database.
+
+### JWT Claims
+
+| Claim | Value |
+|-------|-------|
+| `iss` | `{base_url}/api/databases/{db}` |
+| `aud` | auth database name |
+| `sub` | user ID (UUID) |
+| `email` | user email |
+| `iat` | issued-at timestamp |
+| `exp` | expiry timestamp |
+| `db_roles` | JSON-encoded role map (if roles are assigned) |
+
+---
+
+### ASP.NET Core
+
+Use `AddJwtBearer` with the OIDC `Authority`. The middleware auto-discovers the JWKS and validates signatures, issuer, and expiry — no manual key management.
+
+```csharp
+builder.Services.AddAuthentication().AddJwtBearer(options =>
+{
+    // Point at the Aouda OIDC discovery document for your database.
+    options.Authority = "https://your-aouda-server.com/api/databases/mydb";
+    options.Audience  = "mydb_auth";   // the auth database name
+
+    // If your Aouda server uses HTTP (local dev only):
+    // options.RequireHttpsMetadata = false;
+});
+```
+
+Then protect your endpoints normally:
+
+```csharp
+app.MapGet("/protected", (ClaimsPrincipal user) =>
+    Results.Ok(new { email = user.FindFirst("email")?.Value }))
+    .RequireAuthorization();
+```
+
+---
+
+### Node.js / Express (jose)
+
+```js
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+
+const JWKS = createRemoteJWKSet(
+    new URL('https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json')
+);
+
+async function verifyAoudaToken(token) {
+    const { payload } = await jwtVerify(token, JWKS, {
+        issuer:   'https://your-aouda-server.com/api/databases/mydb',
+        audience: 'mydb_auth',
+    });
+    return payload; // { sub, email, iat, exp, db_roles, ... }
+}
+```
+
+---
+
+### Spring Boot (Java)
+
+```yaml
+# application.yml
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: https://your-aouda-server.com/api/databases/mydb
+```
+
+Spring Security auto-discovers the JWKS from the OIDC discovery endpoint.
+
+---
+
+### Go (golang-jwt + lestrrat-go/jwx)
+
+```go
+import (
+    "github.com/lestrrat-go/jwx/v2/jwk"
+    "github.com/lestrrat-go/jwx/v2/jwt"
+)
+
+cache := jwk.NewCache(ctx)
+cache.Register("https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json")
+
+func verifyToken(tokenStr string) (jwt.Token, error) {
+    keySet, _ := cache.Get(ctx, "https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json")
+    return jwt.Parse([]byte(tokenStr), jwt.WithKeySet(keySet),
+        jwt.WithValidate(true),
+        jwt.WithIssuer("https://your-aouda-server.com/api/databases/mydb"),
+        jwt.WithAudience("mydb_auth"))
+}
+```
+
+---
+
+### Python (PyJWT + requests)
+
+```python
+import requests
+import jwt
+from jwt import PyJWKClient
+
+JWKS_URL = "https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json"
+ISSUER   = "https://your-aouda-server.com/api/databases/mydb"
+AUDIENCE = "mydb_auth"
+
+jwks_client = PyJWKClient(JWKS_URL)
+
+def verify_token(token: str) -> dict:
+    signing_key = jwks_client.get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=["RS256"],
+        audience=AUDIENCE,
+        issuer=ISSUER,
+    )
+```
+
+---
+
+### Key Points
+
+- **No shared secrets** — validation uses only the RSA public keys from the JWKS endpoint.
+- **Key rotation is transparent** — the JWKS endpoint always returns all current and rotated keys. Old tokens remain valid until expiry.
+- **JWKS is cached** — the response includes `Cache-Control: public, max-age=3600`. Most JWT libraries handle caching automatically.
+- **Discovery is cached** — the OIDC configuration response includes `Cache-Control: public, max-age=86400`.
+
+---
+
+## 25. Testing Applications That Use Aouda Auth
+
+Application Auth is implemented in the **Aouda HTTP server** — OIDC discovery, JWKS, signup, signin, and JWT issuance are not available through `Aouda.Embedded`. That means **integration tests** that exercise real auth flows need either a running server (`aouda dev`) or an **in-process** server inside the test process.
+
+The **`Aouda.Testing`** NuGet package starts a full Aouda server backed by ASP.NET Core `TestHost` (no real ports, no external process). It exposes API keys, OIDC authority URLs, and fast engine-direct helpers (`CreateUserAsync`, `SignInAsync`) for test setup. See the full guide: **[Getting-Started-Testing.md](Getting-Started-Testing.md)** ([ADR 0024](../decisions/0024-testing-package.md)).
+
+For **unit tests** of your own business logic, mocking auth clients or tokens remains appropriate — use `Aouda.Testing` when you need **end-to-end** behavior against the real Aouda auth stack.
+
+---
+
+## 26. Comparison with Other Auth Services
+
+### 26.1 Auth Service Comparison
+
+| Aspect | Firebase Auth | Supabase Auth | Auth0 / Clerk | **Aouda App Auth** |
+|--------|-------------|---------------|---------------|-------------------|
+| **Architecture** | Google-hosted | GoTrue + Postgres + Redis + Kong | External SaaS | Built into the database engine |
+| **Session store** | Google infra | Redis (separate system) | External | In-memory session cache (no Redis needed) |
+| **Self-hostable** | No | Yes (complex: 6+ services) | No | Yes (single binary) |
+| **Setup** | Dashboard + SDK | Dashboard + RLS + SDK | Dashboard + SDK + webhooks | **One API call** |
+| **Data co-location** | Outside your DB | Same Postgres | Outside your DB | **Same system, separate DB** |
+| **Latency** | Network hop | Postgres + Redis | Network hop | **Memory-first** (~0.1ms) |
+| **Vendor lock-in** | High | Medium | High | **None** (standard JWTs) |
+| **AI agent setup** | 10+ steps | 5+ steps | 8+ steps | **1 command** |
+| **Two-layer model** | API key + user JWT | anon/service_role + user JWT | N/A | **anon/service_role + user JWT** |
+
+**Why Aouda's approach is different:** Traditional auth services create an architectural boundary between your data and your identity. Aouda eliminates this — identity and data live in the same engine (though in separate databases for clean lifecycle management). The session cache is in-memory, sessions don't need Redis, and the operational model is identical to managing any other database.
+
+Like Supabase, auto-generated `anon` and `service_role` keys on database creation mean **the secure path is the default path**.
+
+---
+
+### 26.2 ADRA vs Supabase RLS — Performance and Architecture
+
+Supabase Row-Level Security (RLS) uses PostgreSQL policy expressions evaluated **per-row at query time**. Aouda ADRA (`auth-db-rls`) resolves a predicate **once** and injects it as a WHERE clause. This difference in architecture leads to very different performance and operational characteristics.
+
+#### The PostgreSQL Per-Row Model
+
+```
+Supabase RLS (PostgreSQL):
+
+  Policy:  auth.uid() = owner_id
+
+  Query:   SELECT * FROM sales WHERE company_id = 'acme'
+           (returns 1,000,000 rows before policy filter)
+
+  Evaluation: policy function called 1,000,000 times
+              → even a simple uid() lookup is called per-row
+              → overhead scales linearly with result set size
+```
+
+Because PostgreSQL is disk-based, there is a large latency gap between reading a JWT claim (~0.001ms) and querying a lookup table (~0.1–10ms, requiring disk I/O). This is why Supabase's documentation advises **embedding frequently-used claims in JWTs** — to avoid DB lookups during policy evaluation.
+
+#### Aouda's Predicate Injection Model
+
+```
+Aouda ADRA (auth-db-rls):
+
+  Resolver: owner_id = ? OR team_id IN (?)
+
+  Resolution: predicate resolved once from session cache (~0.001ms)
+              → owner_id = 'usr_alice' OR team_id IN ('team_west', 'team_global')
+
+  Query:   SELECT * FROM sales
+           WHERE company_id = 'acme'
+             AND (owner_id = 'usr_alice' OR team_id IN ('team_west', 'team_global'))
+
+  Evaluation: predicate evaluated by columnar scan engine
+              → same cost as any other WHERE clause
+              → zero additional overhead per row
+```
+
+The predicate is a SQL WHERE clause, not a function call. The columnar engine evaluates it once per column chunk, not once per row.
+
+#### The Cost Comparison
+
+| Operation | PostgreSQL | Aouda |
+|-----------|-----------|-------|
+| Read a JWT claim | ~0.001ms | ~0.001ms |
+| Query auth DB lookup table | ~0.1–10ms (disk I/O) | ~0.01ms (memory-first) |
+| Difference | 100–10,000× | ~10× |
+| Resolution frequency | Per-row | Once per query |
+| Overhead vs no-auth query | Scales with row count | Fixed ~0.001ms |
+
+In Aouda, the traditional tradeoff between JWT-embedded claims (fast, stale) and dynamic DB lookups (flexible, slow) **does not apply**. The auth DB is always memory-first — lookup cost is ~0.01ms regardless of the complexity of the permission model.
+
+#### What This Means for JWT Design
+
+| Scenario | Supabase RLS | Aouda ADRA |
+|---|---|---|
+| User belongs to 5 teams | Embed `team_ids` in JWT claim | Resolve from `_user_partition_grants` at query time |
+| User has 500 permission grants | JWT becomes multi-KB, impacts latency | JWT stays thin; grants in memory-first auth DB |
+| Permission revoked | Effective at next JWT refresh (up to 15 min) | Effective on next request (permission version counter) |
+| Policy requires DB lookup | Avoid — too slow per-row | Allowed — auth DB lookup costs ~0.01ms |
+
+**Aouda enables thin JWTs for complex permission models** — something Supabase RLS cannot offer without accepting significant per-query overhead.
+
+#### Operational Comparison
+
+| | Supabase RLS | Aouda ADRA |
+|---|---|---|
+| Policy language | PostgreSQL SQL expressions | Declarative JSON resolver rules |
+| Policy location | In the database as SQL objects | In auth DB (`_rls_resolvers` table) |
+| Manage policies | SQL migrations or Supabase dashboard | Admin API (`PATCH /rls-resolvers/{id}`) |
+| Test policies | Run SQL queries with `set local role` | Unit test resolver evaluation against mock auth DB |
+| Admin bypass | `set local role service_role` | `role-check` rule with `effect: "allow-all"` |
+| Compound predicates | Full SQL `OR`/`AND` | Composite resolver with `combinator: OR/AND` |
+
+---
+
+## 27. Local Developer Setup for Consumer Applications
+
+This section is for developers building an application that uses Aouda Auth — not for working on Aouda itself. It covers everything you need to get from zero to a fully running local environment where you can develop and debug your application alongside a real Aouda auth server.
+
+---
+
+### 27.1 Install the Aouda CLI
+
+Aouda ships as a **.NET Global Tool**. Install it once on your developer machine:
+
+```powershell
+dotnet tool install --global Aouda.Cli
+```
+
+After installation, the `aouda` command is available in any terminal, any directory, any project:
+
+```powershell
+aouda --version
+aouda dev --help
+```
+
+**Updating:**
+```powershell
+dotnet tool update --global Aouda.Cli
+```
+
+**Uninstalling:**
+```powershell
+dotnet tool uninstall --global Aouda.Cli
+```
+
+> If `aouda` is not recognised after install, close and reopen your terminal. The dotnet tools path (`%USERPROFILE%\.dotnet\tools` on Windows) needs to be in `PATH`. This is configured automatically by the .NET installer; a fresh terminal picks it up.
+
+#### Installing from a Local .nupkg (Pre-NuGet-Release)
+
+If Aouda has not yet been published to NuGet.org, install from a local package file:
+
+```powershell
+# Install from a folder containing the .nupkg
+dotnet tool install --global Aouda.Cli --add-source C:\path\to\aouda\nupkg
+
+# Or run directly from source (no install needed — good for active development)
+dotnet run --project C:\path\to\aouda\src\Aouda.Cli -- dev --port 5433 --database myapp --auth
+```
+
+---
+
+### 27.2 Choose a Persistent Data Directory
+
+When you run `aouda dev` without `--data`, the server is **ephemeral** — all data, including the generated API keys, is lost when the process stops. For development you almost always want persistent mode so your keys and any seeded data survive restarts.
+
+**Choose a directory outside your application repo** — this prevents accidentally committing Aouda data and keeps it stable across `git clean`, branch switches, and repo reclones.
+
+Recommended locations:
+
+```
+Windows:   C:\Users\<you>\AppData\Local\aouda\<app-name>
+           C:\dev\aouda-data\<app-name>
+
+macOS:     ~/.local/share/aouda/<app-name>
+           ~/dev/aouda-data/<app-name>
+
+Linux:     ~/.local/share/aouda/<app-name>
+```
+
+Example:
+```powershell
+aouda dev --port 5433 --database derive --auth --data C:\Users\kimbo\AppData\Local\aouda\derive
+```
+
+> **Do NOT use** a directory inside your application repo (e.g. `.\local-data\aouda`). This directory will accumulate binary segment files. Even with a `.gitignore` entry it creates noise and breaks `git clean -fdx` used by CI scripts.
+
+---
+
+### 27.3 First Run — Capture Your API Keys
+
+On the **first run** with a new `--data` directory, Aouda generates API keys and prints them to stdout once:
+
+```
+Aouda Dev Server
+  URL:       http://localhost:5433
+  Database:  derive
+  Mode:      persistent (C:\Users\kimbo\AppData\Local\aouda\derive)
+  Schema:    schema-on-write enabled
+
+Database: derive (auth enabled)
+  Auth database:    _auth
+  Anon key:         mk_anon_a1b2c3d4e5f6...
+  Service role key: mk_svc_x7y8z9e0f1a2...
+
+Quick start:
+  # Sign up a user (anon key)
+  curl -H "Authorization: Bearer mk_anon_a1b2c3d4e5f6..." \
+    -X POST http://localhost:5433/api/databases/derive/auth/signup \
+    -d '{ "email": "user@example.com", "password": "Pass123!" }'
+
+Press Ctrl+C to stop.
+```
+
+**Copy the `Service role key` (`mk_svc_...`) now.** This is the only time the full key is shown. Store it as described in §27.4 below.
+
+On every subsequent run with the same `--data` path, the keys already exist and only their prefix is shown:
+
+```
+Database: derive (auth enabled)
+  Auth database:    _auth
+  Keys were already created earlier and cannot be re-displayed.
+  Anon key prefix:  mk_anon_a1b2...
+  Service prefix:   mk_svc_x7y8...
+  Regenerate keys:  POST /api/databases/derive/auth/admin/regenerate-keys
+```
+
+If you lose the key, regenerate it:
+```powershell
+curl -X POST http://localhost:5433/api/databases/derive/auth/admin/regenerate-keys `
+  -H "Authorization: Bearer mk_svc_x7y8..." `
+  -H "Content-Type: application/json"
+```
+
+---
+
+### 27.4 Store Keys in appsettings.Development.json
+
+Your application reads Aouda Auth configuration from `appsettings.json` / `appsettings.Development.json`. The recommended structure separates the OIDC Authority (for JWT validation) from the client connection details (for the Aouda client):
+
+```json
+// appsettings.Development.json  ← git-ignored, each developer maintains their own
+{
+  "AoudaAuth": {
+    "Authority":    "http://localhost:5433/api/databases/derive",
+    "Audience":     "_auth",
+    "ServerUrl":    "http://localhost:5433",
+    "DatabaseName": "derive",
+    "ServiceKey":   "mk_svc_x7y8z9e0f1a2..."
+  }
+}
+```
+
+| Key | Purpose | Where It Comes From |
+|-----|---------|---------------------|
+| `Authority` | Base URL for OIDC Discovery — used by `options.Authority` in `AddJwtBearer` | Constructed from server URL + database name |
+| `Audience` | JWT `aud` claim — always the auth database name | Always `_auth` (unless you named it differently) |
+| `ServerUrl` | Aouda server base URL — used to construct the `AoudaClient` | Your server address |
+| `DatabaseName` | Which database the `AoudaClient` connects to | The name you passed to `aouda dev --database` |
+| `ServiceKey` | The `mk_svc_...` key — grants full database access (backend only) | Printed on first run of `aouda dev --auth` |
+
+**In your application's `Program.cs`:**
+
+```csharp
+// JWT validation — one option auto-configures everything via OIDC Discovery
+builder.Services.AddAuthentication()
+    .AddJwtBearer(options =>
+    {
+        options.Authority            = builder.Configuration["AoudaAuth:Authority"]!;
+        options.Audience             = builder.Configuration["AoudaAuth:Audience"] ?? "_auth";
+        options.RequireHttpsMetadata = false; // dev only — remove for production
+    });
+
+// Aouda client — for calling auth endpoints (signin, signup, etc.)
+builder.Services.AddSingleton(_ => new AoudaClient(new AoudaClientOptions
+{
+    ServerUrl    = builder.Configuration["AoudaAuth:ServerUrl"]!,
+    DatabaseName = builder.Configuration["AoudaAuth:DatabaseName"]!,
+    AppAuth      = new AppAuthOptions { ApiKey = builder.Configuration["AoudaAuth:ServiceKey"]! }
+}));
+```
+
+#### What to Commit vs What to Git-Ignore
+
+```
+# In .gitignore of your application repo:
+appsettings.Development.json       ← contains real key — never commit
+appsettings.*.json                 ← covers all environment-specific files (optional, broader)
+
+# Commit a template file instead:
+appsettings.Development.template.json   ← checked in, shows structure with placeholder values
+```
+
+`appsettings.Development.template.json` (safe to commit):
+
+```json
+{
+  "AoudaAuth": {
+    "Authority":    "http://localhost:5433/api/databases/derive",
+    "Audience":     "_auth",
+    "ServerUrl":    "http://localhost:5433",
+    "DatabaseName": "derive",
+    "ServiceKey":   "REPLACE_WITH_MK_SVC_KEY_FROM_AOUDA_DEV"
+  }
+}
+```
+
+New developers copy this to `appsettings.Development.json` and replace the placeholder after running `aouda dev --auth` for the first time.
+
+---
+
+### 27.5 Daily Workflow — Running Both Together
+
+Once set up, the daily workflow is two processes side by side.
+
+#### Option A — Two Terminals (Simplest)
+
+```
+Terminal 1 — Aouda:
+  aouda dev --port 5433 --database derive --auth --data C:\Users\kimbo\AppData\Local\aouda\derive
+
+Terminal 2 — Your application (F5 in IDE, or):
+  dotnet run --project src/Derive.Api
+```
+
+You can set breakpoints in your application code and step through calls to `AoudaAuthServiceClient`. Aouda itself runs as a black box — you trust it works, you're debugging your own integration code.
+
+#### Option B — VS Code: Auto-Start Aouda with F5
+
+Add to `.vscode/tasks.json`:
+
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "start-aouda",
+      "type": "shell",
+      "command": "aouda dev --port 5433 --database derive --auth --data ${env:USERPROFILE}/AppData/Local/aouda/derive",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "aouda" },
+      "problemMatcher": {
+        "pattern": { "regexp": "." },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern":  "Aouda Dev Server",
+          "endsPattern":    "Press Ctrl\\+C to stop"
+        }
+      }
+    }
+  ]
+}
+```
+
+Add to `.vscode/launch.json`:
+
+```json
+{
+  "configurations": [
+    {
+      "name": "Derive.Api",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "start-aouda",
+      "program": "${workspaceFolder}/src/Derive.Api/bin/Debug/net8.0/Derive.Api.dll",
+      "cwd": "${workspaceFolder}/src/Derive.Api",
+      "env": { "ASPNETCORE_ENVIRONMENT": "Development" }
+    }
+  ]
+}
+```
+
+Pressing **F5** now starts Aouda in a dedicated terminal panel, waits for it to be ready, then launches your application. A single keystroke runs the full stack.
+
+> **Note on macOS/Linux:** Replace `${env:USERPROFILE}/AppData/Local/aouda/derive` with `${env:HOME}/.local/share/aouda/derive`.
+
+#### Option C — Visual Studio: Launch Profile
+
+In Visual Studio, add a launch profile to `Properties/launchSettings.json` in your API project:
+
+```json
+{
+  "profiles": {
+    "Derive.Api (with Aouda)": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "applicationUrl": "https://localhost:7001;http://localhost:5001",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
+```
+
+For the Aouda process itself, use a pre-build event or a simple `start-aouda.ps1` script at the solution root:
+
+```powershell
+# start-aouda.ps1  — run this once before starting VS
+Start-Process powershell -ArgumentList `
+  "-NoExit -Command aouda dev --port 5433 --database derive --auth --data $env:USERPROFILE\AppData\Local\aouda\derive"
+```
+
+#### Option D — .NET Aspire (Future-Proof)
+
+If your solution adopts .NET Aspire, the AppHost project becomes the single F5 launch point for all services, including Aouda:
+
+```csharp
+// AppHost/Program.cs
+var builder = DistributedApplication.CreateBuilder(args);
+
+var aouda = builder.AddExecutable(
+    "aouda", "aouda", ".",
+    "dev", "--port", "5433", "--database", "derive", "--auth",
+    "--data", Path.Combine(Environment.GetFolderPath(
+        Environment.SpecialFolder.LocalApplicationData), "aouda", "derive"))
+    .WithHttpEndpoint(port: 5433, name: "http");
+
+builder.AddProject<Projects.Derive_Api>("derive-api")
+    .WithEnvironment("AoudaAuth__Authority",
+        $"{aouda.GetEndpoint("http")}/api/databases/derive")
+    .WithEnvironment("AoudaAuth__ServerUrl",
+        aouda.GetEndpoint("http").ToString())
+    .WithReference(aouda);
+
+builder.Build().Run();
+```
+
+F5 on the AppHost starts both Aouda and your API, wires the URLs automatically, and shows both in the Aspire dashboard with unified logs. Service discovery is handled for you — `appsettings.Development.json` no longer needs hard-coded ports.
+
+---
+
+### 27.6 Sharing Aouda with Your Team (Pre-NuGet)
+
+Before Aouda is published to NuGet.org, share it as a local NuGet feed:
+
+**Step 1 — Build the package** (run once after each Aouda update, from the Aouda repo):
+```powershell
+dotnet pack src/Aouda.Cli/Aouda.Cli.csproj -c Release -o ./nupkg
+```
+
+**Step 2 — Share the `nupkg` folder** via a network share, Git LFS, or a shared drive.
+
+**Step 3 — Each developer installs from the local feed:**
+```powershell
+dotnet tool install --global Aouda.Cli --add-source \\shared-drive\aouda-tools
+# or
+dotnet tool install --global Aouda.Cli --add-source C:\path\to\nupkg
+```
+
+**Optional: Add a `nuget.config`** to your application repo so `dotnet tool restore` finds it automatically:
+
+```xml
+<!-- nuget.config at repo root — commit this -->
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <add key="nuget.org"    value="https://api.nuget.org/v3/index.json" />
+    <add key="aouda-local"  value="\\shared-drive\aouda-tools" />
+  </packageSources>
+</configuration>
+```
+
+---
+
+### 27.7 Developer Onboarding Checklist
+
+Add this to your project's `README.md` or `docs/dev/Getting-Started.md`:
+
+```markdown
+## Aouda Auth Setup (one-time per developer machine)
+
+### Prerequisites
+- .NET 8 SDK
+- Aouda CLI: `dotnet tool install --global Aouda.Cli`
+  (or: `dotnet tool install --global Aouda.Cli --add-source \\shared-drive\aouda-tools`)
+
+### First-time setup
+1. Start Aouda dev server:
+   ```
+   aouda dev --port 5433 --database derive --auth --data %USERPROFILE%\AppData\Local\aouda\derive
+   ```
+2. Copy the printed `Service role key` (`mk_svc_...`)
+3. Copy `appsettings.Development.template.json` → `appsettings.Development.json`
+4. Replace `REPLACE_WITH_MK_SVC_KEY_FROM_AOUDA_DEV` with your key
+5. Leave the Aouda terminal running; start the application
+
+### Daily workflow
+- Terminal 1: `aouda dev --port 5433 --database derive --auth --data %USERPROFILE%\AppData\Local\aouda\derive`
+- Terminal 2: F5 (or `dotnet run`)
+```
+
+---
+
+### 27.8 Troubleshooting
+
+**`aouda: command not found` after install**
+Close and reopen your terminal. The dotnet tools directory (`%USERPROFILE%\.dotnet\tools`) was added to PATH by the .NET installer but the current session hasn't reloaded it.
+
+**Port 5433 already in use**
+Another process (often a previous `aouda dev` left running, or a local PostgreSQL instance) has the port. Either kill the existing process or use a different port:
+```powershell
+aouda dev --port 5434 --database derive --auth --data ...
+# Update AoudaAuth:Authority and AoudaAuth:ServerUrl in appsettings.Development.json to match
+```
+
+**`AoudaAuth:ServiceKey is not configured` error in application**
+The application is starting before `appsettings.Development.json` has been populated. Check that:
+1. The file exists (copy from `appsettings.Development.template.json`)
+2. `ASPNETCORE_ENVIRONMENT` is set to `Development`
+3. The `ServiceKey` value is not the placeholder string
+
+**Keys shown as prefix only on startup (cannot see full key)**
+Keys are stable for the lifetime of the `--data` directory. If you need to retrieve a key, regenerate it:
+```powershell
+curl -X POST http://localhost:5433/api/databases/derive/auth/admin/regenerate-keys `
+  -H "Authorization: Bearer <your-current-mk_svc_prefix>..." `
+  -H "Content-Type: application/json"
+# Returns new keys — update appsettings.Development.json
+```
+
+**Application starts but JWT validation fails (401 on all requests)**
+Confirm the OIDC Discovery endpoint is reachable:
+```powershell
+curl http://localhost:5433/api/databases/derive/auth/.well-known/openid-configuration
+# Should return JSON with issuer, jwks_uri, etc.
+# If this fails, Aouda is not running or the port/database name is wrong
+```
+Also verify that `AoudaAuth:Authority` in `appsettings.Development.json` exactly matches `http://localhost:<port>/api/databases/<database-name>` — no trailing slash.
+
+**Data directory grows over time**
+Aouda stores WAL segments and column files in the data directory. For development this is normal and manageable. If it grows large (gigabytes), the safest cleanup is:
+```powershell
+# Stop aouda dev first, then:
+Remove-Item -Recurse -Force C:\Users\kimbo\AppData\Local\aouda\derive
+# Next run will recreate everything — you will need to capture keys again
+```
+
+---
+
+## See Also
+
+- **[Getting Started](Getting-Started.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
+- **[ADR 0023: Authentication and Authorization](../decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC
+- **[ADR 0025: Auth-DB-Resolved Authorization (ADRA)](../decisions/0025-adra-auth-db-resolved-authorization.md)** — Full ADRA design rationale, auth modes, resolver model, performance analysis
+- **[Wire Protocol](../protocol/WIRE-PROTOCOL.md)** — HTTP API reference including auth headers
+- **[P12 Auth Tasks](../tasks/P12-Authentication-Authorization-Tasks.md)** — P12 implementation history
+- **[P14 ADRA Tasks](../tasks/P14-ADRA-Tasks.md)** — P14 ADRA implementation overview

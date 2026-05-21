@@ -1,0 +1,74 @@
+# Aouda
+
+> Aouda is a columnar database engine for .NET with a TypeScript client SDK (`@aouda/client`).
+> Dual deployment: embedded (in-process, no server needed) or server (standalone HTTP server).
+> Schema-on-write by default. Zero index management. AI-native bootstrap with `aouda dev`.
+> Two-layer auth model: server auth (who can connect) + application auth (your app's end users).
+
+## Quick orientation
+
+- Install CLI: `dotnet tool install -g Aouda.Cli`
+- Start dev server: `aouda dev` (port 5433, database "default", schema-on-write)
+- Install .NET client: `dotnet add package Aouda.Client`
+- Install TypeScript client: `npm install @aouda/client`
+- Docker: `docker run -p 5000:5000 -v aouda-data:/data aouda/server`
+
+## Getting Started
+
+- [Getting Started](https://aoudadb.github.io/getting-started/): Full onboarding — embedded mode, server mode, insert, query, schema, auth
+- [Authentication Setup](https://aoudadb.github.io/getting-started/auth/): Two-layer auth, API keys, aouda init, application auth service
+- [Testing](https://aoudadb.github.io/getting-started/testing/): In-process integration tests with Aouda.Testing package
+- [Backup and Restore](https://aoudadb.github.io/getting-started/backup/): Incremental backups, PITR, S3-compatible storage
+
+## Clients and SDKs
+
+- [TypeScript Client (@aouda/client)](https://aoudadb.github.io/clients/typescript/): Query builder, typed queries, auth, MCP cluster tools, admin APIs
+- [Distribution and Licensing](https://aoudadb.github.io/clients/distribution/): NuGet packages, npm package, CLI tool, Docker images, Helm charts
+
+## Auth and Authorization
+
+- [Auth and Authorization Overview](https://aoudadb.github.io/auth/): Two independent auth systems — server auth vs application auth
+- [Auth Architecture](https://aoudadb.github.io/auth/architecture/): Deployment models A-D, ADRA modes, PLS/RLS
+- [Setup and Flows](https://aoudadb.github.io/auth/setup/): Signup, signin, token lifecycle, practical setup sequences
+- [Client Integration](https://aoudadb.github.io/auth/client-integration/): .NET and TypeScript integration patterns
+- [Data Authorization](https://aoudadb.github.io/auth/authorization/): ADRA modes — jwt-claim, auth-db-pls, auth-db-rls
+- [Use Cases](https://aoudadb.github.io/auth/use-cases/): Common implementation patterns and applied scenarios
+- [Auth Reference](https://aoudadb.github.io/auth/reference/): API endpoints, error codes, operational notes
+
+## Core Guides
+
+- [Query Execution](https://aoudadb.github.io/guides/query/): Runtime model, predicates, joins, aggregations, pagination
+- [Schema Lifecycle](https://aoudadb.github.io/guides/schema/): Schema-on-write, explicit schema, evolution, inference modes
+- [Schema Management](https://aoudadb.github.io/guides/schema-management/): Declarative schema, aouda.schema.json, diff and apply
+- [Schema CI/CD](https://aoudadb.github.io/guides/schema-cicd/): Schema lifecycle in CI/CD pipelines
+- [Hot/Cold Storage](https://aoudadb.github.io/guides/hot-cold/): Memory control, temperature policies, hot retention
+- [Write Path Durability](https://aoudadb.github.io/guides/write-durability/): WAL model, write concern, crash recovery
+- [Real-time Streaming](https://aoudadb.github.io/guides/real-time/): WebSocket streaming, availability status, usage playbooks
+- [Backup and Restore](https://aoudadb.github.io/guides/backup/): Incremental manifests, PITR, retention, REST APIs
+- [Replication and Clustering](https://aoudadb.github.io/guides/replication/): Cluster lifecycle, witness role, node management
+- [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): Partition keys, tenant isolation
+- [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling
+- [Materialized Queries](https://aoudadb.github.io/guides/materialized/): Materialized query definitions, refresh, Studio browser
+- [Storage and Persistence](https://aoudadb.github.io/guides/storage/): Columnar storage model, segment lifecycle, WAL
+- [Cloud and Hub](https://aoudadb.github.io/guides/cloud-hub/): Hub backend, cloud control plane, Kubernetes operator
+- [Studio](https://aoudadb.github.io/guides/studio/): Web management console — data explorer, cluster ops, backup UI
+- [Testing and DX](https://aoudadb.github.io/guides/testing-dx/): Aouda.Testing package, xUnit/NUnit/MSTest fixtures
+
+## Deployment
+
+- [Kubernetes and Helm](https://aoudadb.github.io/deployment/kubernetes/): Deploy Aouda and Studio to Kubernetes using charts/aouda-cluster
+
+## AI Agents
+
+- [AI Agent Usage](https://aoudadb.github.io/ai/): AI-native bootstrap, two-layer auth for generated apps, ADRA modes, error contracts
+- [Quick Start for AI Agents](https://aoudadb.github.io/ai/quick-start/): Minimal bootstrap path — dev server, connect, insert, query
+
+## Reference
+
+- [HTTP API Reference](https://aoudadb.github.io/reference/http-api/): Wire protocol, all REST endpoints, request/response shapes
+- [Timestamp Type](https://aoudadb.github.io/reference/timestamp/): Timestamp semantics, storage, query behavior
+- [Changelog](https://aoudadb.github.io/CHANGELOG/): Version history
+
+## Optional
+
+- [Full documentation as single file](https://aoudadb.github.io/llms-full.txt)
