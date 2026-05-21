@@ -1,6 +1,8 @@
-title: "Aouda Documentation"
+title: "Aouda Docs"
 description: "Columnar database engine for .NET with a TypeScript client SDK. Embedded or server deployment. Schema-on-write. AI-native."
 remote_theme: just-the-docs/just-the-docs@v0.10.2
+
+permalink: pretty
 
 # Navigation
 search_enabled: true
@@ -41,13 +43,7 @@ callouts:
     title: Warning
     color: red
 
-# Collections (needed for child nav to work correctly)
-collections:
-  docs:
-    permalink: "/:collection/:path/"
-    output: true
-
-# Plugins
+# Apply Just the Docs default layout to all pages
 defaults:
   - scope:
       path: ""
@@ -57,6 +53,7 @@ defaults:
 plugins:
   - jekyll-remote-theme
   - jekyll-seo-tag
+  - jekyll-include-cache
 
 # Exclude from build
 exclude:

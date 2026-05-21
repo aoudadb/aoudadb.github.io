@@ -2,7 +2,6 @@
 title: "Home"
 nav_order: 0
 description: "Aouda — columnar database engine for .NET with TypeScript client SDK"
-permalink: /
 ---
 
 # Aouda Documentation

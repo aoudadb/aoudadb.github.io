@@ -1,4 +1,4 @@
-# Aouda Documentation
+# Aouda Docs
 
 This repository contains the public documentation for [Aouda](https://github.com/aoudadb) — a columnar database engine for .NET with a TypeScript client SDK.
 
