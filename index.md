@@ -12,24 +12,86 @@ Aouda is a **columnar database engine** for .NET with a TypeScript client SDK. I
 
 ## Install and run in 60 seconds
 
+**Option A — CLI + .NET client:**
+
 ```bash
-# Install the CLI
+# Install the CLI and client
 dotnet tool install -g Aouda.Cli
-
-# Start a dev server (port 5433, database "default", schema-on-write)
-aouda dev
-```
-
-```bash
-# .NET client
 dotnet add package Aouda.Client
 
-# TypeScript client
+# Start a server
+aouda start --port 5433
+# Then in a new terminal: create a database
+aouda databases create --name myapp
+```
+
+```csharp
+// Connect, insert, and query
+using Aouda.Client;
+
+var client = new AoudaClient("http://localhost:5433", "myapp");
+
+await client.GetTable("events").InsertAsync(new Dictionary<string, object?>
+{
+    ["id"] = 1, ["name"] = "page_view", ["duration_ms"] = 123
+});
+
+var rows = await client.GetTable("events")
+    .Where("duration_ms", "gte", 100)
+    .ToListAsync();
+// rows[0]["name"] == "page_view"
+```
+
+**Option B — Embedded (.NET only, no server needed):**
+
+```bash
+dotnet add package Aouda.Embedded
+```
+
+```csharp
+using Aouda.Abstractions;
+using Aouda.Embedded;
+
+await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync();
+
+await db.GetTable("events").InsertAsync(new Dictionary<string, object?>
+{
+    ["id"] = 1, ["name"] = "page_view", ["duration_ms"] = 123
+});
+
+var rows = await db.GetTable("events")
+    .Where("duration_ms", "gte", 100)
+    .ToListAsync();
+// rows[0]["name"] == "page_view"
+// Database is automatically cleaned up when disposed
+```
+
+**Option C — TypeScript client:**
+
+```bash
 npm install @aouda/client
 ```
 
+```typescript
+import { createAoudaClient } from "@aouda/client";
+
+const client = createAoudaClient({
+  serverUrl: "http://localhost:5433",
+  database: "myapp",
+});
+await client.connect();
+
+await client.table("events").insert({ id: 1, name: "page_view", duration_ms: 123 });
+
+const results = await client.table("events")
+  .where("duration_ms", ">=", 100)
+  .execute();
+console.log(results.rows[0].name); // "page_view"
+```
+
+**Option D — Docker (server + Studio):**
+
 ```bash
-# Docker (server + Studio)
 docker compose up
 # Aouda at http://localhost:5000  •  Studio at http://localhost:3000
 ```
@@ -46,7 +108,7 @@ docker compose up
 | **Zero index management** | Zone maps, bloom filters, and sparse primary indexes maintained automatically |
 | **Dual deployment** | Embedded (in-process, no network) or server (HTTP, multi-client, multi-language) |
 | **Two-layer auth** | Server auth (who can connect) + Application auth (your app's end users) — independent systems |
-| **AI-native** | `aouda dev` starts with defaults; structured errors with `suggestion` field; schema inference |
+| **AI-native** | `aouda start` starts with defaults; structured errors include a `suggestion` field explaining what to do next; schema inference from POCO types |
 
 ---
 

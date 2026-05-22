@@ -42,9 +42,11 @@ This means that if your application uses Aouda Auth, writing integration tests t
 
 ```bash
 # Without Aouda.Testing — you need this running before dotnet test:
-aouda dev --database myapp --auth
-# → prints mk_anon_... and mk_svc_... keys
-# → tests only work if this process is running
+aouda start --port 5433
+# (then separately create the auth database:)
+aouda databases create --name myapp --kind auth
+# → prints mk_anon_... and mk_svc_... keys once on creation
+# → tests only work if the server process is still running
 ```
 
 This is **friction**. It breaks `dotnet test` self-sufficiency, complicates CI pipelines, and blocks the AI-agent workflow entirely.
@@ -642,7 +644,7 @@ Do your tests exercise Aouda Auth flows?
 
 ### Comparison Table
 
-| | `Aouda.Embedded` | `Aouda.Testing` | Running `aouda dev` |
+| | `Aouda.Embedded` | `Aouda.Testing` | Running `aouda start` |
 |---|---|---|---|
 | **Auth flows** | ❌ Not available | ✅ Full auth | ✅ Full auth |
 | **External process** | ❌ None | ❌ None | ✅ Required |
