@@ -149,70 +149,74 @@ s3://bucket-name/optional/key/prefix
 
 ---
 
-## Using the backup API directly (embedded / hosted usage)
+## Triggering backup programmatically (hosted usage)
 
-When hosting Aouda in your own process, you can call backup and restore APIs directly:
+When you host Aouda inside your own ASP.NET Core application using `AddAoudaServer()` (see
+[Getting Started: Option C — hosting in your own app](Getting-Started.md#option-c-hosting-in-your-own-aspnet-application)),
+you can trigger backups directly through the DI container instead of going over HTTP.
 
-```csharp
-using Aouda.Engine.Storage.Backup;
-using Aouda.Engine.Replication;
-
-// Create the destination
-await using var destination = ArchiveDestinationFactory.Create(
-    "s3://my-aouda-backups/prod",
-    new S3ArchiveOptions
-    {
-        Region = "us-east-1"
-    });
-
-// Run an incremental backup
-var engine = new BackupEngine(destination);
-var result = await engine.CreateBackupAsync(
-    dataPath: "./data",
-    new BackupOptions
-    {
-        Incremental = true,
-        Parallelism = 4
-    });
-
-Console.WriteLine($"Backup {result.BackupId}: {result.NewBytes} new bytes uploaded");
-```
-
-### Restore from S3
+Resolve `IBackupManagementService` from the application's DI container and call `TriggerBackupAsync`:
 
 ```csharp
-await using var destination = ArchiveDestinationFactory.Create(
-    "s3://my-aouda-backups/prod",
-    new S3ArchiveOptions { Region = "us-east-1" });
+using Aouda.Server.Models;
+using Aouda.Server.Services;
 
-var restoreEngine = new RestoreEngine(destination);
-var result = await restoreEngine.RestoreAsync(
-    targetPath: "./data-restored",
-    new RestoreOptions
-    {
-        BackupId = result.BackupId,
-        VerifyIntegrity = true,
-        CleanTargetDirectory = true
-    });
+// Resolve the backup service from DI (e.g. from a controller, minimal-API handler, or hosted service)
+var backupService = app.Services.GetRequiredService<IBackupManagementService>();
+
+var result = await backupService.TriggerBackupAsync(
+    new TriggerBackupRequest(
+        Destination: null,    // null = use configured destination from appsettings
+        Incremental: true,
+        BaseBackupId: null),
+    cancellationToken);
+
+switch (result)
+{
+    case TriggerBackupResult.Success s:
+        Console.WriteLine($"Backup {s.Response.BackupId}: {s.Response.NewBytes} new bytes uploaded");
+        break;
+    case TriggerBackupResult.Conflict c:
+        Console.WriteLine($"Backup skipped — already in progress: {c.Message}");
+        break;
+    case TriggerBackupResult.InvalidDestination e:
+        Console.WriteLine($"Destination error: {e.Message}");
+        break;
+}
 ```
 
-### Point-in-time restore (PITR)
+`IBackupManagementService` is registered by `AddAoudaServer()`. It handles concurrency control (prevents
+two simultaneous backups), resolves the configured destination, and calls the underlying engine. The
+result is a discriminated union — handle all cases so your code does not silently swallow errors.
+
+For server mode (running Aouda standalone or via Docker), use the REST API or TypeScript client shown
+above — you do not need to host Aouda inside your own process.
+
+To list backups and restore from a specific snapshot, use `ListBackupsAsync` and `RestoreAsync`:
 
 ```csharp
-var result = await restoreEngine.RestoreAsync(
-    targetPath: "./data-pitr",
-    new RestoreOptions
-    {
-        TargetTime = DateTime.UtcNow.AddHours(-2),
-        WalPath = "./data/wal"
-    });
+// List backups — returns { Backups: BackupSummaryDto[], Warning?: string }
+var list = await backupService.ListBackupsAsync(cancellationToken);
+foreach (var backup in list.Backups)
+{
+    Console.WriteLine($"{backup.BackupId}  created {backup.CreatedUtc:u}  {backup.TotalBytes / 1024 / 1024} MB");
+}
+
+// Restore from a specific backup ID
+var restoreResult = await backupService.RestoreAsync(list.Backups[0].BackupId, cancellationToken);
+if (restoreResult is RestoreBackupResult.Success s)
+    Console.WriteLine($"Restored {s.Response.FilesRestored} files in {s.Response.DurationSeconds:F1}s");
 ```
+
+> **Note on PITR:** Point-in-time restore requires replaying WAL records after loading a backup. The WAL
+> replay path is handled by the Aouda engine internally when the WAL retention window covers the target
+> time. Configure `WalRetentionDays` in `appsettings.json` to control how far back the WAL is kept.
 
 ---
 
 ## Backup REST API (server mode)
 
-When running in server mode, trigger backups via the REST API (implemented in P16):
+When running in server mode, trigger backups via the REST API:
 
 ```bash
 # Trigger a backup
@@ -234,7 +238,7 @@ curl http://localhost:5000/admin/backup/schedule \
 curl -X PUT http://localhost:5000/admin/backup/schedule \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{ "cron": "0 2 * * *", "enabled": true }'
+  -d '{ "cronExpression": "0 2 * * *", "incremental": true }'
 ```
 
 ### TypeScript client
@@ -243,15 +247,19 @@ curl -X PUT http://localhost:5000/admin/backup/schedule \
 // Trigger
 await client.admin.backup.trigger();
 
-// List
-const backups = await client.admin.backup.list();
+// List — returns { backups: BackupSummary[], warning?: string }
+const response = await client.admin.backup.list();
+const backups = response.backups;
 
-// Restore
-await client.admin.backup.restore(backups[0].id);
+// Restore — pass backupId (string), not a numeric index
+await client.admin.backup.restore(backups[0].backupId);
 
-// Schedule
+// Schedule — uses cronExpression, not cron; incremental is a required boolean
 const schedule = await client.admin.backup.getSchedule();
-await client.admin.backup.setSchedule({ cron: "0 2 * * *", enabled: true });
+await client.admin.backup.setSchedule({
+  cronExpression: "0 2 * * *",
+  incremental: true,
+});
 ```
 
 ---

@@ -378,7 +378,7 @@ var recent = await db.Engine.Table("sensors")
 | `DataPath` | `string?` | `null` | Directory for data files. `null` = ephemeral (temp dir, auto-deleted). |
 | `EnableWal` | `bool` | `true` | Enable write-ahead log for crash recovery. |
 | `MemoryBudget` | `long?` | `null` | Maximum memory in bytes. `null` = no limit. |
-| `TreatMissingAsEmpty` | `bool` | `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
+| `TreatMissingAsEmpty` | `bool` | `true` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
 **Integration tests that need Application Auth** (OIDC discovery, JWT validation, real signup/signin against the HTTP API) cannot use embedded mode alone, because Application Auth requires the Aouda HTTP server. For those tests, use the **`Aouda.Testing`** package to start an in-process server from `dotnet test` — see [Getting-Started-Testing.md](Getting-Started-Testing.md).
 
@@ -758,7 +758,38 @@ var results = await db.GetTable("orders")
     .ToListAsync();
 ```
 
-Supported predicates: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`.
+Supported predicates: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`. Note: `ne` (not `neq`) is the not-equal operator. Using `ne` with `null` as value translates to `IS NOT NULL`.
+
+### Common Data Operation Errors
+
+**Table not found:** Querying a table that does not exist throws `AoudaNotFoundException` (HTTP 404) unless `TreatMissingAsEmpty` is `true` (the default in `AoudaEmbeddedOptions`, not in `AoudaClientOptions`).
+
+```csharp
+// AoudaClientOptions.TreatMissingAsEmpty defaults to false — throws if table missing
+// AoudaEmbeddedOptions.TreatMissingAsEmpty defaults to true — returns empty
+
+// For the server client, enable it explicitly:
+var client = new AoudaClient(new AoudaClientOptions
+{
+    ServerUrl = "http://localhost:5433",
+    DatabaseName = "myapp",
+    TreatMissingAsEmpty = true  // returns empty list for non-existent tables
+});
+```
+
+**Schema mismatch on insert:** Inserting a value of the wrong type (e.g., a string into an `Int64` column) returns a structured error with an HTTP 400 status and a `suggestion` field explaining what the engine expected:
+
+```json
+{
+  "error": "TYPE_MISMATCH",
+  "message": "Column 'id' expects Int64 but received String 'abc'",
+  "suggestion": "Cast the value to Int64 or check the schema with GET /api/databases/myapp/tables/orders"
+}
+```
+
+**Insert without AutoCreateSchema (server mode):** If `AutoCreateSchema` is `false` (the default in `AoudaClientOptions`) and the table does not exist, inserting throws `AoudaNotFoundException`. Either create the table explicitly first, or set `AutoCreateSchema = true`.
+
+**Missing auth token:** If server auth is enabled and no token is provided, the server returns HTTP 401 with `AUTH_TOKEN_MISSING`. See [Section 8](#8-server-authentication--securing-database-access) for the full error code table.
 
 ### Engine-Level Fluent Queries (Embedded)
 
@@ -1589,8 +1620,8 @@ const branch = await client.branches.get("feature-x");
 // View diff between branch and parent
 const diff = await client.branches.diff("feature-x");
 
-// Merge branch
-await client.branches.merge("feature-x", { strategy: "fast-forward" });
+// Merge branch (execute: true applies changes; omit or dryRun: true to preview only)
+await client.branches.merge("feature-x", { execute: true });
 
 // Delete branch
 await client.branches.delete("feature-x");
