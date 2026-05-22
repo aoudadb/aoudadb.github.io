@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P4, P6, P7, P12, P14
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P6/`, `docs/tasks/P7/`, `docs/tasks/P12/`, `docs/tasks/P14/`
@@ -144,23 +144,23 @@ If you create a table/database without tuning partition or multidb options:
   - Database creation defaults to WAL enabled, replication mode `Replicate`, default temperature `Auto`.
   - Per-database memory cap is unlimited unless configured (`MaxMemoryBytes = null`).
 
-| Setting / behavior | Default | Practical impact |
-|---|---|---|
-| `PartitionOptions.StorageMode` | `Auto` | Starts shared, can promote heavy partitions to dedicated paths |
-| `PartitionOptions.RequirePartitionFilter` | `true` | Safer and usually faster partitioned-table queries by default |
-| `PartitionOptions.PromotionRowThreshold` | `10_000_000` | Auto-promotion can trigger at high row volume |
-| `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Auto-promotion can trigger at high byte volume |
-| `PartitionOptions.InitialBucketCount` | `16` | Shared-partition hashing starts with 16 buckets |
-| `PartitionOptions.LateArrivalPolicy` | `Delta` | Late-arriving rows are routed to delta path |
-| `PartitionOptions.LateArrivalThreshold` | `1 hour` | Defines "late" cutoff when policy needs it |
-| `MigrationOptions.Strategy` | `None` | Retrospective migration is off unless configured |
-| `DatabaseOptions.DefaultTemperature` | `Auto` | New tables in that DB inherit auto temperature |
-| `DatabaseOptions.EnableWal` | `true` | DB has WAL enabled unless explicitly disabled |
-| `DatabaseOptions.ReplicationMode` | `Replicate` | DB participates in replication by default |
-| `DatabaseOptions.MaxMemoryBytes` | `null` | No explicit per-database cap unless set |
-| `PlsCrossPartitionRateLimitOptions.Enabled` | `false` | Cross-partition bypass rate limiting is opt-in |
-| `PlsCrossPartitionRateLimitOptions.PermitLimit` | `60` | Effective only when limiter is enabled |
-| `PlsCrossPartitionRateLimitOptions.WindowSeconds` | `60` | Effective only when limiter is enabled |
+| Setting / behavior | Default | Allowed values | Practical impact |
+|---|---|---|---|
+| `PartitionOptions.StorageMode` | `Auto` | `Auto`, `Dedicated`, `Shared` | Starts shared, can promote heavy partitions to dedicated paths |
+| `PartitionOptions.RequirePartitionFilter` | `true` | `true`, `false` | Safer and usually faster partitioned-table queries by default |
+| `PartitionOptions.PromotionRowThreshold` | `10_000_000` | Non-negative integer | Auto-promotion can trigger at high row volume |
+| `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Non-negative integer (bytes) | Auto-promotion can trigger at high byte volume |
+| `PartitionOptions.InitialBucketCount` | `16` | Integer ≥ 1 | Shared-partition hashing starts with 16 buckets |
+| `PartitionOptions.LateArrivalPolicy` | `Delta` | `Delta`, `Reject`, `Inline` | Late-arriving rows are routed to delta path |
+| `PartitionOptions.LateArrivalThreshold` | `1 hour` | Any positive `TimeSpan` | Defines "late" cutoff when policy needs it |
+| `MigrationOptions.Strategy` | `None` | `None`, `Background`, `Eager`, `Blocking` | Retrospective migration is off unless configured |
+| `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
+| `DatabaseOptions.EnableWal` | `true` | `true`, `false` | DB has WAL enabled unless explicitly disabled |
+| `DatabaseOptions.ReplicationMode` | `Replicate` | `Replicate`, `DoNotReplicate` | DB participates in replication by default |
+| `DatabaseOptions.MaxMemoryBytes` | `null` | `null` (no cap); or any non-negative `long` (bytes) | No explicit per-database cap unless set |
+| `PlsCrossPartitionRateLimitOptions.Enabled` | `false` | `true`, `false` | Cross-partition bypass rate limiting is opt-in |
+| `PlsCrossPartitionRateLimitOptions.PermitLimit` | `60` | Positive integer | Effective only when limiter is enabled |
+| `PlsCrossPartitionRateLimitOptions.WindowSeconds` | `60` | Positive integer (seconds) | Effective only when limiter is enabled |
 
 ## 2.4 Availability status (implementation honesty)
 

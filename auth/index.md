@@ -8,7 +8,7 @@ has_children: true
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P12, P14
 Primary task folders: `docs/tasks/P12/`, `docs/tasks/P14/`
@@ -137,19 +137,19 @@ If you enable auth and keep defaults:
 - default system roles are seeded: `db_admin`, `db_writer`, `db_reader`, `anonymous`;
 - enabling app auth generates system anon/service keys (`mk_anon_...`, `mk_svc_...`) and keeps server key model (`mk_srv_...`) for server-side credentials.
 
-| Setting / behavior | Default | Practical impact |
-|---|---|---|
-| `TokenOptions.AccessTokenLifetime` | `15 minutes` | Short-lived bearer tokens reduce exposure window |
-| `TokenOptions.RefreshTokenLifetime` | `30 days` | Long-lived session continuity with rotation |
-| `TokenOptions.Issuer` | `"aouda"` | Default `iss` when explicit issuer context not overridden |
-| `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | Signature + revocation checks by default |
-| `PasswordPolicy.MinLength` | `8` | Minimum user password length |
-| `PasswordPolicy.MaxLength` | `128` | Upper bound for password size |
-| `UserService.LockoutThreshold` | `10` | Locks after repeated bad credentials |
-| `UserService.LockoutDuration` | `15 minutes` | Temporary lockout cooldown window |
-| `AuthDatabaseOptions.Kind` | `Application` | Explicit auth DB creation defaults to app auth kind |
-| Default roles | `db_admin`, `db_writer`, `db_reader`, `anonymous` | Baseline RBAC scaffolding seeded at auth DB creation |
-| App auth API key gate | API key required on app auth routes | Prevents direct JWT-only calling of signup/signin/refresh endpoints |
+| Setting / behavior | Default | Allowed values | Practical impact |
+|---|---|---|---|
+| `TokenOptions.AccessTokenLifetime` | `15 minutes` | Any positive `TimeSpan` | Short-lived bearer tokens reduce exposure window |
+| `TokenOptions.RefreshTokenLifetime` | `30 days` | Any positive `TimeSpan` | Long-lived session continuity with rotation |
+| `TokenOptions.Issuer` | `"aouda"` | Any non-empty string | Default `iss` when explicit issuer context not overridden |
+| `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | `SignatureOnly`, `Hybrid`, `Stateful` | Signature + revocation checks by default |
+| `PasswordPolicy.MinLength` | `8` | Integer ≥ 1 | Minimum user password length |
+| `PasswordPolicy.MaxLength` | `128` | Integer ≥ `MinLength` | Upper bound for password size |
+| `UserService.LockoutThreshold` | `10` | Positive integer | Locks after repeated bad credentials |
+| `UserService.LockoutDuration` | `15 minutes` | Any positive `TimeSpan` | Temporary lockout cooldown window |
+| `AuthDatabaseOptions.Kind` | `Application` | `Application`, `Server` | Explicit auth DB creation defaults to app auth kind |
+| Default roles | `db_admin`, `db_writer`, `db_reader`, `anonymous` | Fixed (not configurable) | Baseline RBAC scaffolding seeded at auth DB creation |
+| App auth API key gate | API key required on app auth routes | Fixed (not configurable) | Prevents direct JWT-only calling of signup/signin/refresh endpoints |
 
 ## 2.4 Availability status (implementation honesty)
 

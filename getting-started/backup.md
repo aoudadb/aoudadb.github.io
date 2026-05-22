@@ -126,13 +126,13 @@ Credentials are resolved from the standard AWS chain in order:
 
 ## S3 configuration reference
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `Region` | `string?` | `null` | AWS region (e.g. `us-east-1`). Optional when using a custom `ServiceUrl` or when already set in the environment. |
-| `ServiceUrl` | `string?` | `null` | Override endpoint for S3-compatible services. |
-| `ForcePathStyle` | `bool` | `false` | Use path-style URLs. Required for MinIO and LocalStack. |
-| `AccessKeyId` | `string?` | `null` | Explicit access key. Omit to use the standard AWS credential chain. |
-| `SecretAccessKey` | `string?` | `null` | Explicit secret key. Omit to use the standard AWS credential chain. |
+| Field | Type | Default | Allowed values | Description |
+|---|---|---|---|---|
+| `Region` | `string?` | `null` | `null` (resolve from environment); or any AWS region code string (e.g. `us-east-1`, `eu-west-1`) | AWS region. Optional when using a custom `ServiceUrl` or when already set in the environment. |
+| `ServiceUrl` | `string?` | `null` | `null` (use standard AWS endpoint); or any valid HTTP/HTTPS URL string | Override endpoint for S3-compatible services. |
+| `ForcePathStyle` | `bool` | `false` | `true`, `false` | Use path-style URLs. Required for MinIO and LocalStack. |
+| `AccessKeyId` | `string?` | `null` | `null` (use credential chain); or any AWS access key ID string | Explicit access key. Omit to use the standard AWS credential chain. |
+| `SecretAccessKey` | `string?` | `null` | `null` (use credential chain); or any AWS secret key string | Explicit secret key. Omit to use the standard AWS credential chain. |
 
 ---
 

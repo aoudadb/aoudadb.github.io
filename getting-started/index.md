@@ -373,12 +373,12 @@ var recent = await db.Engine.Table("sensors")
 
 ### Embedded Options Reference
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `DataPath` | `string?` | `null` | Directory for data files. `null` = ephemeral (temp dir, auto-deleted). |
-| `EnableWal` | `bool` | `true` | Enable write-ahead log for crash recovery. |
-| `MemoryBudget` | `long?` | `null` | Maximum memory in bytes. `null` = no limit. |
-| `TreatMissingAsEmpty` | `bool` | `true` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
+| Option | Type | Default | Allowed values | Description |
+|--------|------|---------|----------------|-------------|
+| `DataPath` | `string?` | `null` | `null` (ephemeral); any valid filesystem path | Directory for data files. `null` = ephemeral (temp dir, auto-deleted). |
+| `EnableWal` | `bool` | `true` | `true`, `false` | Enable write-ahead log for crash recovery. |
+| `MemoryBudget` | `long?` | `null` | `null` (no limit); any non-negative `long` (bytes) | Maximum memory in bytes. `null` = no limit. |
+| `TreatMissingAsEmpty` | `bool` | `true` | `true`, `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
 **Integration tests that need Application Auth** (OIDC discovery, JWT validation, real signup/signin against the HTTP API) cannot use embedded mode alone, because Application Auth requires the Aouda HTTP server. For those tests, use the **`Aouda.Testing`** package to start an in-process server from `dotnet test` — see [Getting-Started-Testing.md](Getting-Started-Testing.md).
 
@@ -491,10 +491,10 @@ docker run -p 5000:5000 -v aouda-data:/data aouda/server
 
 Key environment variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AOUDA_DATA_PATH` | `/data` | Data directory inside the container |
-| `AOUDA_BIND` | `0.0.0.0:5000` | Bind address |
+| Variable | Default | Allowed values | Description |
+|----------|---------|----------------|-------------|
+| `AOUDA_DATA_PATH` | `/data` | Any valid filesystem path | Data directory inside the container |
+| `AOUDA_BIND` | `0.0.0.0:5000` | Any valid `{address}:{port}` string (e.g. `0.0.0.0:5433`, `127.0.0.1:5000`) | Bind address |
 
 For production with custom configuration, pass environment variables:
 

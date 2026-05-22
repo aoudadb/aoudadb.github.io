@@ -118,14 +118,14 @@ If you do not configure schema management explicitly:
   - API apply defaults to `allowDestructive = false`.
   - CLI apply defaults to no `--allow-destructive`.
 
-| Setting / behavior | Default | Practical impact |
-|---|---|---|
-| `Aouda:Schema:InferenceMode` | `On` | Backward-compatible schema-on-write behavior enabled |
-| `AOUDA_SCHEMA_INFERENCE_MODE` | unset | No override unless explicitly set |
-| Apply option `allowDestructive` | `false` | Drop operations are skipped unless explicitly allowed |
-| Apply option `dryRun` | `false` | Apply executes unless dry-run requested |
-| CLI `schema history` pagination | `limit=50`, `offset=0` | Newest-first history default view |
-| CLI output mode | human-readable | Use `--json` when machine parsing is needed |
+| Setting / behavior | Default | Allowed values | Practical impact |
+|---|---|---|---|
+| `Aouda:Schema:InferenceMode` | `On` | `Off`, `On`, `Extend` (planned — not yet wired) | Backward-compatible schema-on-write behavior enabled |
+| `AOUDA_SCHEMA_INFERENCE_MODE` | unset | `Off`, `On`, `Extend`; or unset (no override) | No override unless explicitly set |
+| Apply option `allowDestructive` | `false` | `true`, `false` | Drop operations are skipped unless explicitly allowed |
+| Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested |
+| CLI `schema history` pagination | `limit=50`, `offset=0` | Any non-negative integer for `limit` and `offset` | Newest-first history default view |
+| CLI output mode | human-readable | `human-readable` (default), `json` (via `--json` flag) | Use `--json` when machine parsing is needed |
 
 ---
 
@@ -815,7 +815,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. |
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | WAL and replication settings for this table. |
-| `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. |
+| `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
 | `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. |
 | `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. |
 | `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Used with `"auth-db-rls"` mode. |
@@ -826,8 +826,8 @@ This section documents every field available in `aouda.schema.json` by type. All
 |---|---|---|---|---|
 | `type` | `type` | `string` | **Required** | Column data type. See valid values below. |
 | `primaryKey` | `primaryKey` | `int` | None | Ordinal position in composite primary key (1-based). Omit if not a PK column. |
-| `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer primary key columns. |
-| `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. |
+| `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer primary key columns. Allowed values: `true`, `false`. |
+| `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. Allowed values: `true`, `false`. |
 | `references` | `references` | `string` | None | Foreign key reference in `"table.column"` format. |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
@@ -900,8 +900,8 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToWeek`, `T
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Whether WAL is enabled for this table. Null = inherit database default. |
-| `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). |
+| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Whether WAL is enabled for this table. Null = inherit database default. Allowed values: `true`, `false`, `null`. |
+| `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). Allowed values: non-negative integer, or `null` (inherit database default). |
 
 #### SchemaSettings (value of `settings`)
 
@@ -913,8 +913,8 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToWeek`, `T
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Database-level WAL default. `true` maps to `DiskBacked` durability mode; `false` maps to `MemoryOnly`. |
-| `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Database-level replication factor. Informational in schema; not currently applied by the apply engine. |
+| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Database-level WAL default. `true` maps to `DiskBacked` durability mode; `false` maps to `MemoryOnly`. Allowed values: `true`, `false`, `null`. |
+| `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Database-level replication factor. Informational in schema; not currently applied by the apply engine. Allowed values: non-negative integer, or `null` (inherit engine default). |
 
 ---
 
