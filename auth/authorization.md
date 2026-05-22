@@ -584,7 +584,7 @@ curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
 curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
   -H "Authorization: Bearer <alice-jwt>" \
   -d '{ "rows": [{ "room_id": "room_99", "body": "Hi there" }] }'
-# → 403 PLS_WRITE_ACCESS_LEVEL_INSUFFICIENT
+# → 403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS
 ```
 
 **Why not embed room memberships in the JWT?** A user in 500 rooms would add ~10 KB to the JWT. With `auth-db-pls`, the JWT carries only Alice's identity; room grants live in the auth DB's `_user_partition_grants` table and are resolved from the in-memory session cache at query time. Granting or revoking room access takes effect on the next request — no token re-issuance required.
@@ -647,7 +647,7 @@ curl -X POST http://localhost:5433/api/databases/crm/query \
 curl -X POST http://localhost:5433/api/databases/crm/tables/sales/rows \
   -H "Authorization: Bearer <user-jwt>" \
   -d '{ "rows": [{ "company_id": "acme", "owner_id": "usr_other", "amount": 5000 }] }'
-# → 403 RLS_WRITE_PREDICATE_VIOLATION (row would not be visible to the inserter)
+# → 403 AUTH_RLS_INSERT_VIOLATION (row would not be visible to the inserter)
 ```
 
 ---

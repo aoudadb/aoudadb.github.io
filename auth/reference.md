@@ -80,7 +80,7 @@ aouda dev --port 5433 --database myapp --auth
 #   const db = createAoudaClient({
 #     serverUrl: "http://localhost:5433",
 #     database: "myapp",
-#     auth: { apiKey: SERVICE_KEY }
+#     appAuth: { apiKey: SERVICE_KEY }
 #   });
 #
 #   app.post("/api/signup", async (req, res) => {
@@ -217,20 +217,75 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 ## 22. Error Handling
 
-### Common Errors
+### Authentication & Token Errors
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_API_KEY_REQUIRED` | 401 | App auth endpoint called without API key | Include `Authorization: Bearer mk_anon_...` |
+| `AUTH_TOKEN_MISSING` | 401 | No `Authorization` header on a protected endpoint | Add `Authorization: Bearer <token>` header |
+| `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature | Discard token; force re-sign-in |
+| `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
+| `AUTH_TOKEN_REVOKED` | 401 | Token was revoked (session signed out) | Redirect to sign-in |
+| `AUTH_API_KEY_REQUIRED` | 401 | App auth endpoint called without an API key | Include `Authorization: Bearer mk_anon_...` for app auth routes |
+| `AUTH_API_KEY_INVALID` | 401 | API key is invalid, revoked, or expired | Regenerate via the admin regenerate-keys endpoint |
+| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected) | Redirect to sign-in; entire token family is invalidated |
+| `UNAUTHORIZED` | 401 | Unrecognised path when server auth is configured (deny-by-default) | Ensure request targets a valid path with a valid credential |
+
+### Signup / Signin Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
 | `AUTH_INVALID_CREDENTIALS` | 401 | Wrong email or password | Show "Invalid credentials" |
-| `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token or re-sign-in |
-| `AUTH_TOKEN_REVOKED` | 401 | Session was signed out | Redirect to sign-in |
-| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token expired or revoked | Redirect to sign-in |
-| `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts | Wait for lockout to expire |
-| `AUTH_RATE_LIMITED` | 429 | Too many requests | Implement backoff |
+| `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts (default: 10) | Wait for the lockout window (default: 15 min) or re-enable via admin |
+| `AUTH_ACCOUNT_DISABLED` | 423 | Account disabled by an administrator | Re-enable via `POST .../admin/users/{id}/enable` |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email already registered | Show "Account exists" |
-| `AUTHORIZATION_DENIED` | 403 | Valid token but no role for this database | Check role assignments |
-| `INSUFFICIENT_PERMISSIONS` | 403 | Valid token but role lacks the operation | Assign appropriate role |
+| `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic; prevents info leakage) | Check server logs; try again |
+| `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format | Prompt the user to correct the email field |
+| `AUTH_PASSWORD_TOO_WEAK` | 400 | Password does not meet the minimum policy (default: 8 chars) | Prompt the user to choose a stronger password |
+| `AUTH_RATE_LIMITED` | 429 | Too many auth requests | Implement exponential backoff |
+
+### Authorization Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTHORIZATION_DENIED` | 403 | Valid token but the caller has no role for this database | Check role assignments via admin API |
+| `INSUFFICIENT_PERMISSIONS` | 403 | Valid token but the role does not grant this operation | Assign an appropriate role |
+| `NOT_AUTHENTICATED` | 401 | No authenticated principal for a protected resource | Send a valid bearer token |
+
+### Partition-Level Security (PLS) Errors
+
+These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | JWT has no `tenant_id` claim for a `jwt-claim` PLS table | Ensure JWT includes the `tenant_id` claim |
+| `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | Explicit partition filter does not match the JWT `tenant_id` | Match the filter to the user's `tenant_id` claim |
+| `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Write targets a partition outside the caller's `tenant_id` | Write to the caller's own partition only |
+| `AUTH_PLS_GRANT_NOT_FOUND` | 403 | Partition not in the user's grant set (`auth-db-pls`) | Create a partition grant for the user via admin API |
+| `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` | 403 | Partition is granted but `access_level` is `read` (write attempted) | Update the grant to `access_level: "write"` or `"admin"` |
+| `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | `Where.Or` predicate mixes partition and non-partition conditions in a fan-out query | Move non-partition conditions to `Where.And` |
+
+### Row-Level Security (RLS) Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate | Insert a row whose fields fall within the user's RLS scope |
+| `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope | Update only fields that keep the row visible to the user |
+
+### ADRA Partition Grant Admin Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
+| `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields | Check that `dimension`, `partitionKey`, and `accessLevel` are all present |
+
+### ADRA RLS Resolver Admin Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_RESOLVER_NOT_FOUND` | 404 | Resolver ID not found | Verify the `resolverId` in the request |
+| `AUTH_RESOLVER_NAME_CONFLICT` | 409 | A resolver with the same name already exists for the target table | Choose a unique resolver name |
+| `AUTH_RESOLVER_INVALID` | 400 | Resolver request has missing or invalid fields | Check that `name`, `targetTable`, and `resolverType` are present |
 
 ### Handle by Error Code
 

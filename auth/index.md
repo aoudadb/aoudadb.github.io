@@ -418,7 +418,7 @@ var client = new AoudaClient(new AoudaClientOptions
 
 var auth = await client.Auth.SignInAsync("user@site.com", "correct horse battery staple");
 var me = await client.Auth.MeAsync();
-Console.WriteLine($"{me.Email} {auth.ExpiresInSeconds}");
+Console.WriteLine($"{me.Email} {auth.ExpiresIn}");
 ```
 
 Expected result: sign-in returns access/refresh tokens, and subsequent calls use the authenticated user context.

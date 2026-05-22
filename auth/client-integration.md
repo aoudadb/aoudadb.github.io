@@ -46,8 +46,11 @@ var client = new AoudaClient(new AoudaClientOptions
 // Full database access — no user sign-in needed
 var allOrders = await client.GetTable("orders").Limit(10).ToListAsync();
 
-// Admin operations
-var users = await client.Auth.Admin.ListUsersAsync();
+// Admin operations — the .NET AuthClient exposes user lifecycle methods only.
+// High-level admin wrappers (list users, assign roles) are not yet in the .NET SDK.
+// Use the HTTP admin endpoints directly:
+//   GET /api/databases/{db}/auth/admin/users
+//   PUT /api/databases/{db}/auth/admin/users/{id}/roles
 ```
 
 ### Backend: Service Key + User Context (PLS Enforcement)

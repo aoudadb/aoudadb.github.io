@@ -222,7 +222,7 @@ Each refresh rotates the refresh token. The old one is immediately invalidated. 
 
 | Mode | How It Works | Revocation | Best For |
 |------|-------------|------------|----------|
-| **Stateless** | JWT signature check only | Wait for expiry | High-throughput APIs |
+| **SignatureOnly** | JWT signature check only | Wait for expiry | High-throughput APIs |
 | **Hybrid** (default) | Signature + in-memory revocation check | Near-instant | Most applications |
 | **Stateful** | Every request checked against session store | Instant | Security-critical apps |
 

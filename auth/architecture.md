@@ -59,11 +59,19 @@ app.get("/api/admin/orders", async (req, res) => {
 });
 
 // Query data — with user context (PLS enforced)
+// Create a per-request client that forwards the user JWT via X-User-Token.
+// There is no .withUserContext() method — PLS user context is set at client construction.
 app.get("/api/my-orders", async (req, res) => {
   const userJwt = req.headers.authorization?.replace("Bearer ", "");
-  const orders = await db.table("orders")
-    .withUserContext(userJwt)
-    .execute();
+  const userScopedClient = createAoudaClient({
+    serverUrl: "http://localhost:5433",
+    database: "myapp",
+    appAuth: {
+      apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... (service key)
+      userToken: userJwt,                     // JWT from frontend → sent as X-User-Token
+    },
+  });
+  const orders = await userScopedClient.table("orders").execute();
   res.json(orders.rows);
 });
 ```
@@ -138,15 +146,25 @@ var authClient = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    Auth = new AuthOptions { ApiKey = "mk_svc_xyz789..." }
+    AppAuth = new AppAuthOptions { ApiKey = "mk_svc_xyz789..." }
 });
 
 // Sign up users
 var result = await authClient.Auth.SignUpAsync("new@example.com", "Pass123!");
 
-// List and manage users
-var users = await authClient.Auth.Admin.ListUsersAsync();
-await authClient.Auth.Admin.AssignRolesAsync("usr_abc", new[] { "premium_user" });
+// List and manage users — the .NET AuthClient exposes user lifecycle methods
+// (SignUpAsync, SignInAsync, MeAsync, ChangePasswordAsync, etc.).
+// Admin operations (list users, assign roles) are not yet wrapped as high-level
+// methods in the .NET SDK (see known gaps). Use the HTTP admin endpoints directly:
+//
+//   POST  /api/databases/{db}/auth/admin/users
+//   GET   /api/databases/{db}/auth/admin/users
+//   PUT   /api/databases/{db}/auth/admin/users/{id}/roles
+//
+// Example via HttpClient or a raw transport call:
+//   var response = await httpClient.GetAsync(
+//       "http://localhost:5433/api/databases/myapp/auth/admin/users");
+//   var users = await response.Content.ReadFromJsonAsync<...>();
 ```
 
 ### Pattern D: Hybrid (Frontend Auth + Backend Data)
