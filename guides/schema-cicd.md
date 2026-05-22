@@ -44,10 +44,127 @@ Use this if your repo is .NET or you prefer the `dotnet aouda` CLI.
 - **On push to main**: Run `dotnet aouda schema apply` against **staging** so that staging always matches the schema in `main`.
 - **On release**: Run `dotnet aouda schema apply` against **production** (and optionally `--env prod` if you use `aouda.schema.prod.json`).
 
-Example workflow files:
+### Workflow 1: PR diff comment (.NET)
 
-- `examples/github-actions/schema-deploy-dotnet.yml` — full example (PR diff comment, apply on merge, apply on release).
-- `examples/github-actions/README.md` — how to copy and configure the workflows.
+Posts the schema plan as a PR comment so reviewers can see exactly what will change before merge.
+
+```yaml
+name: Schema — PR diff comment
+
+on:
+  pull_request:
+    paths:
+      - "aouda.schema*.json"
+
+jobs:
+  schema-diff:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.x"
+
+      - name: Install Aouda CLI
+        run: dotnet tool install Aouda.Cli -g
+
+      - name: Run schema diff
+        id: diff
+        env:
+          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+        run: |
+          PLAN=$(dotnet aouda schema diff 2>&1 || true)
+          echo "plan<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$PLAN"    >> "$GITHUB_OUTPUT"
+          echo "EOF"      >> "$GITHUB_OUTPUT"
+
+      - name: Post diff as PR comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## Schema diff (staging)
+
+            ```
+            ${{ steps.diff.outputs.plan }}
+            ```
+```
+
+### Workflow 2: Apply to staging on merge (.NET)
+
+Runs `schema apply` against staging whenever `main` is updated, keeping staging in sync.
+
+```yaml
+name: Schema — Apply to staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "aouda.schema*.json"
+
+jobs:
+  schema-apply-staging:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.x"
+
+      - name: Install Aouda CLI
+        run: dotnet tool install Aouda.Cli -g
+
+      - name: Apply schema to staging
+        env:
+          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+        run: dotnet aouda schema apply
+```
+
+### Workflow 3: Apply to production on release (.NET)
+
+Runs `schema apply` against production when a GitHub release is published. Uses `--env prod` to merge the production overlay before applying.
+
+```yaml
+name: Schema — Apply to production
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  schema-apply-prod:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.x"
+
+      - name: Install Aouda CLI
+        run: dotnet tool install Aouda.Cli -g
+
+      - name: Apply schema to production
+        env:
+          AOUDA_SERVER: ${{ secrets.AOUDA_PROD_SERVER }}
+          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+        run: dotnet aouda schema apply --env prod
+```
+
+Copy these three files into `.github/workflows/` in your repository, configure the secrets, and adjust the `paths` filter to match where your schema file lives. Full examples (with additional error-handling steps) are also under `examples/github-actions/schema-deploy-dotnet.yml` in the repository.
 
 **Secrets to configure:**
 
@@ -69,11 +186,114 @@ Same flow as .NET:
 - **On push to main**: `npx @aouda/client schema apply` against staging.
 - **On release**: `npx @aouda/client schema apply` against production (with `--env prod` if using overlays).
 
-Example workflow:
+**Secrets**: Same as the .NET variant (`AOUDA_STAGING_SERVER`, `AOUDA_PROD_SERVER`, `AOUDA_DATABASE`).
 
-- `examples/github-actions/schema-deploy-typescript.yml` — full example.
+### Workflow 1: PR diff comment (TypeScript)
 
-**Secrets**: Same as above (`AOUDA_STAGING_SERVER`, `AOUDA_PROD_SERVER`, `AOUDA_DATABASE`).
+```yaml
+name: Schema — PR diff comment (TypeScript)
+
+on:
+  pull_request:
+    paths:
+      - "aouda.schema*.json"
+
+jobs:
+  schema-diff:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run schema diff
+        id: diff
+        env:
+          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+        run: |
+          PLAN=$(npx @aouda/client schema diff 2>&1 || true)
+          echo "plan<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$PLAN"    >> "$GITHUB_OUTPUT"
+          echo "EOF"      >> "$GITHUB_OUTPUT"
+
+      - name: Post diff as PR comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## Schema diff (staging)
+
+            ```
+            ${{ steps.diff.outputs.plan }}
+            ```
+```
+
+### Workflow 2: Apply to staging on merge (TypeScript)
+
+```yaml
+name: Schema — Apply to staging (TypeScript)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "aouda.schema*.json"
+
+jobs:
+  schema-apply-staging:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Apply schema to staging
+        env:
+          AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
+          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+        run: npx @aouda/client schema apply
+```
+
+### Workflow 3: Apply to production on release (TypeScript)
+
+```yaml
+name: Schema — Apply to production (TypeScript)
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  schema-apply-prod:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Apply schema to production
+        env:
+          AOUDA_SERVER: ${{ secrets.AOUDA_PROD_SERVER }}
+          AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
+        run: npx @aouda/client schema apply --env prod
+```
+
+Full examples are also under `examples/github-actions/schema-deploy-typescript.yml` in the repository.
 
 ---
 

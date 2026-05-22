@@ -10,6 +10,18 @@ This guide explains how to add declarative schema management to your project and
 
 ---
 
+## NuGet package: Aouda.Schema.Contract
+
+When writing C# code that works with schema types (`SchemaDocument`, `ApplyOptions`, `SchemaDiffResult`, etc.), install `Aouda.Schema.Contract`:
+
+```bash
+dotnet add package Aouda.Schema.Contract
+```
+
+This is a thin facade package that exposes only the schema model types and result types — not the full server engine. If you already have `Aouda.Client` installed, you do not need `Aouda.Schema.Contract` separately; `Aouda.Client` depends on it and re-exports its types through `ISchemaOperations`. For a full type reference, see the [Schema Lifecycle guide](schema.md).
+
+---
+
 ## Quick Start: Add Schema Management in 5 Minutes
 
 You can get schema management working with a single JSON file and one of two CLIs: **.NET** (`dotnet aouda`) or **TypeScript** (`npx @aouda/client`).
@@ -78,6 +90,24 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
 - **Validate**: Use `schema validate` in CI — it exits 0 if the server matches the file, 1 if there is drift.
 
+### Diff warnings: unsupported changes
+
+Some schema changes cannot be executed by the apply engine — for example, changing a column's type, changing `primaryKey`, `autoIncrement`, or `nullable` on an existing column, or changing partition keys or cluster columns. The diff engine reports these as **warnings** (not changes). Warnings appear in the diff output but are never applied; they always require manual intervention such as dropping and re-creating the column or table.
+
+Always inspect warnings before applying. A warning means the diff cannot close the gap between your desired schema and the running catalog automatically:
+
+```bash
+# View warnings in human-readable diff output
+dotnet aouda schema diff --server http://localhost:5433 --database myapp
+
+# View warnings in JSON format (top-level "warnings" array)
+dotnet aouda schema diff --server http://localhost:5433 --database myapp --json
+```
+
+Example warning: `Column type change from 'Int32' to 'Int64' is not supported. Drop and re-create the column manually.`
+
+See the [Schema Lifecycle guide](schema.md) for a full list of operations that produce warnings vs. changes.
+
 That’s it. Your schema is now in code, and you can run diff/apply in CI/CD. See [Schema CI/CD Guide](Schema-CI-CD-Guide.md) for GitHub Actions and automation.
 
 ---
@@ -141,7 +171,7 @@ Use overlays to keep one schema definition and vary only settings (e.g. replicat
 - `aouda.schema.staging.json` — staging overrides.
 - `aouda.schema.prod.json` — production overrides.
 
-Overlays can only change **settings and policies**, not tables or columns. Select overlay with `--env staging` or `AOUDA_ENVIRONMENT=prod`. See ADR 0019 for the exact merge rules.
+Overlays can only change **database-level settings** (`settings.durability`) and **per-table policy and durability** (`policy`, `durability`). They may not add or remove tables, and may not specify columns, partition keys, or cluster columns. The structural definition (columns, partitionKey, clusterColumns) always comes from the base file. Select overlay with `--env staging` or `AOUDA_ENVIRONMENT=prod`. See ADR 0019 for the exact merge rules.
 
 ### Summary
 

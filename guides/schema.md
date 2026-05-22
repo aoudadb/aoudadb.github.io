@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline  
 Primary owner: Aouda maintainers  
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P4, P7, P8, P14  
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P8/`, `docs/tasks/P14/`  
@@ -389,13 +389,13 @@ This is a full, versioned example set you can keep in git and run end-to-end.
     "customers": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "email": { "type": "String" },
         "name": { "type": "String", "nullable": true },
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
@@ -406,14 +406,14 @@ This is a full, versioned example set you can keep in git and run end-to-end.
     "orders": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "customer_id": { "type": "Int64", "references": "customers.id" },
         "status": { "type": "String" },
         "total_amount": { "type": "Decimal" },
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
@@ -445,13 +445,13 @@ Changes from v1:
     "customers": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "email": { "type": "String" },
         "name": { "type": "String", "nullable": true },
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
@@ -462,7 +462,7 @@ Changes from v1:
     "orders": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "customer_id": { "type": "Int64", "references": "customers.id" },
         "status": { "type": "String" },
         "total_amount": { "type": "Decimal" },
@@ -471,7 +471,7 @@ Changes from v1:
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
@@ -482,7 +482,7 @@ Changes from v1:
     "payments": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "order_id": { "type": "Int64", "references": "orders.id" },
         "provider": { "type": "String" },
         "status": { "type": "String" },
@@ -490,7 +490,7 @@ Changes from v1:
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
@@ -521,13 +521,13 @@ Changes from v2:
     "customers": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "email": { "type": "String" },
         "name": { "type": "String", "nullable": true },
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
@@ -538,7 +538,7 @@ Changes from v2:
     "orders": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "customer_id": { "type": "Int64", "references": "customers.id" },
         "total_amount": { "type": "Decimal" },
         "priority": { "type": "Int32", "nullable": true },
@@ -546,7 +546,7 @@ Changes from v2:
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
@@ -557,7 +557,7 @@ Changes from v2:
     "payments": {
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
-        "tenant_id": { "type": "String", "partitionFunction": "Hash" },
+        "tenant_id": { "type": "String" },
         "order_id": { "type": "Int64", "references": "orders.id" },
         "provider": { "type": "String" },
         "status": { "type": "String" },
@@ -565,7 +565,7 @@ Changes from v2:
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
-        { "column": "tenant_id", "function": "Hash" }
+        { "column": "tenant_id" }
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "ColdPreferred" },
@@ -662,6 +662,259 @@ dotnet aouda schema apply --server http://localhost:5433 --database commerce --f
 | HTTP validate endpoint | Missing | CLI `schema validate` performs diff and exits by drift |
 | .NET CLI `schema seed` | Stubbed | use seed endpoint via HTTP until CLI command is wired |
 | `InferenceMode: Extend` | Deferred | use explicit transition `On` -> export -> `Off` |
+
+### C) Aouda.Schema.Contract NuGet facade
+
+`Aouda.Schema.Contract` is the thin NuGet package external users install to work with schema types in C#. It does not contain the full engine — it recompiles only the schema model and result types from `Aouda.Engine.Schema` under the same namespaces, so you get the exact same types without a dependency on the server-side engine.
+
+When you add `Aouda.Schema.Contract` to your project, you get:
+
+| Type | Namespace | Purpose |
+|---|---|---|
+| `SchemaDocument` | `Aouda.Engine.Schema.Models` | Root type for `aouda.schema.json`: `$schema`, `database`, `tables`, `settings`, `extends` |
+| `TableDefinition` | `Aouda.Engine.Schema.Models` | Per-table structure: `columns`, `partitionKey`, `clusterColumns`, `policy`, `durability`, `partitionLevelSecurity`, `authMode`, `permissionDimension`, `rlsResolverName` |
+| `ColumnDefinition` | `Aouda.Engine.Schema.Models` | Per-column: `type`, `primaryKey`, `autoIncrement`, `nullable`, `references` |
+| `PartitionKeyEntry` | `Aouda.Engine.Schema.Models` | Partition key entry: `column`, `function` |
+| `TablePolicyDto` | `Aouda.Engine.Schema.Models` | Table policy: `storageTemperature` |
+| `TableDurabilityDto` | `Aouda.Engine.Schema.Models` | Table durability: `walEnabled`, `replicationFactor` |
+| `SchemaSettings` | `Aouda.Engine.Schema.Models` | Database-level settings container |
+| `SchemaSettingsDurability` | `Aouda.Engine.Schema.Models` | Database-level durability: `walEnabled`, `replicationFactor` |
+| `ApplyOptions` | `Aouda.Engine.Schema.Apply` | Apply request options: `AllowDestructive`, `DryRun` |
+| `ApplyStatus` | `Aouda.Engine.Schema.Apply` | Outcome of a single applied change (see section D below) |
+| `ApplyResultEntry` | `Aouda.Engine.Schema.Apply` | Per-change apply outcome: `ChangeType`, `TableName`, `ColumnName`, `Status`, `Reason` |
+| `ApplyResultSummary` | `Aouda.Engine.Schema.Apply` | Aggregate counts: `TotalChanges`, `Applied`, `Skipped`, `Failed`, `Planned` |
+| `SchemaApplyResult` | `Aouda.Engine.Schema.Apply` | Full apply result: `Entries`, `Summary` |
+| `SchemaDiffResult` | `Aouda.Engine.Schema.Diff` | Diff output: `Changes`, `Summary`, `Warnings` |
+| `SchemaChangeType` | `Aouda.Engine.Schema.Diff` | Classification of a diff change (see section D below) |
+| `SchemaChangeWarning` | `Aouda.Engine.Schema.Diff` | Warning for unsupported modification: `TableName`, `ColumnName`, `Property`, `ActualValue`, `DesiredValue`, `Message` |
+| `DiffSummary` | `Aouda.Engine.Schema.Diff` | Diff aggregate counts |
+| `MigrationHistoryEntry` | `Aouda.Engine.Schema.History` | History record: `Id`, `Timestamp`, `Source`, `SchemaHash`, `Changes`, `AppliedBy` |
+| `MigrationSource` | `Aouda.Engine.Schema.History` | Who triggered an apply (see section D below) |
+
+The `Aouda.Client` package depends on `Aouda.Schema.Contract` and re-exports these types through its own `ISchemaOperations` interface, so you do not need to install `Aouda.Schema.Contract` separately if you already have `Aouda.Client`.
+
+Install:
+
+```bash
+dotnet add package Aouda.Schema.Contract
+```
+
+The namespaces match exactly what the engine uses internally, so code written against `Aouda.Schema.Contract` types is also valid in embedded-mode projects that reference the engine directly.
+
+### D) Schema type reference (ApplyStatus, SchemaChangeType, MigrationSource, DiffSummary, Warnings)
+
+#### ApplyStatus
+
+`ApplyStatus` is the outcome of executing a single change from the diff:
+
+| Value | Meaning |
+|---|---|
+| `Applied` | Change was successfully executed against the catalog. |
+| `Skipped` | Change was skipped — most commonly because `AllowDestructive` is `false` and the change is destructive. Also skipped for `ReplicationFactor`-only durability changes (not yet representable in the engine policy). |
+| `Failed` | Change execution threw an exception. The apply continues to the next change (continue-on-error). The `Reason` field on `ApplyResultEntry` contains the exception message. |
+| `Planned` | Dry-run mode: the change would have been executed but was not. `DryRun = true` produces all entries with status `Planned`. |
+
+#### SchemaChangeType
+
+`SchemaChangeType` classifies what a diff change represents. The apply engine executes changes in the order listed below (creates first, drops last):
+
+| Value | Destructive | Meaning |
+|---|---|---|
+| `CreateTable` | No | A table exists in desired but not in actual. |
+| `AddColumn` | No | A column exists in desired table but not in actual. |
+| `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
+| `UpdateDurability` | No | The `walEnabled` (or `replicationFactor`) in the table's `durability` changed. |
+| `UpdatePartitionLevelSecurity` | No | The `partitionLevelSecurity` flag on the table changed. |
+| `UpdateAuthorizationOptions` | No | One or more of `authMode`, `permissionDimension`, or `rlsResolverName` changed. |
+| `UpdateSettings` | No | The database-level `settings.durability` changed. |
+| `DropColumn` | **Yes** | A column exists in actual but not in desired. Skipped unless `AllowDestructive = true`. |
+| `DropTable` | **Yes** | A table exists in actual but not in desired. Skipped unless `AllowDestructive = true`. |
+
+#### SchemaDiffResult.Warnings — unsupported modifications
+
+The diff engine produces `Changes` for operations it can execute and `Warnings` for operations it detects but **cannot** execute. Warnings are returned alongside changes and do not become apply entries. They require manual intervention (e.g. drop and re-create the table or column).
+
+Operations that produce warnings (not changes):
+
+| Changed property | Warning message pattern | Action required |
+|---|---|---|
+| Column `type` | `"Column type change from '...' to '...' is not supported."` | Drop column, re-create with new type. |
+| Column `primaryKey` | `"Primary key change ... is not supported."` | Drop table, re-create. |
+| Column `autoIncrement` | `"AutoIncrement change ... is not supported."` | Drop column, re-create. |
+| Column `nullable` | `"Nullable change ... is not supported."` | Drop column, re-create. |
+| Column `references` | `"References change ... is not supported."` | Drop column, re-create. |
+| Table `partitionKey` | `"Partition key change on table '...' is not supported."` | Drop table, re-create. |
+| Table `clusterColumns` | `"Cluster columns change on table '...' is not supported."` | Drop table, re-create. |
+
+Always inspect `SchemaDiffResult.Warnings` after a diff, especially before significant schema migrations. Warnings indicate intent/reality gaps that the apply pass will silently skip.
+
+```csharp
+var diff = await client.Schema.DiffAsync(schema);
+
+if (diff.Warnings is { Count: > 0 })
+{
+    foreach (var w in diff.Warnings)
+        Console.WriteLine($"WARNING {w.TableName}.{w.ColumnName ?? "(table)"} [{w.Property}]: {w.Message}");
+
+    // Decide: abort, or proceed with apply (warnings are not applied — only changes are)
+}
+
+Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChanges} safe, {diff.Summary.DestructiveChanges} destructive)");
+```
+
+#### DiffSummary fields
+
+`DiffSummary` is returned inside `SchemaDiffResult.Summary`:
+
+| Field | Description |
+|---|---|
+| `TotalChanges` | `SafeChanges + DestructiveChanges` |
+| `SafeChanges` | Non-destructive changes |
+| `DestructiveChanges` | Destructive changes (DropColumn, DropTable) |
+| `TablesCreated` | Count of `CreateTable` changes |
+| `TablesDropped` | Count of `DropTable` changes |
+| `ColumnsAdded` | Count of `AddColumn` changes |
+| `ColumnsDropped` | Count of `DropColumn` changes |
+| `PoliciesUpdated` | Count of `UpdatePolicy` changes |
+| `DurabilitiesUpdated` | Count of `UpdateDurability` changes |
+| `OptionsUpdated` | Count of `UpdatePartitionLevelSecurity` + `UpdateAuthorizationOptions` changes |
+| `SettingsUpdated` | Count of `UpdateSettings` changes |
+
+#### MigrationSource
+
+`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply:
+
+| Value | Meaning |
+|---|---|
+| `ApiApply` | Schema apply via REST API (`POST /schema/apply`). Primary source under the current model. |
+| `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
+| `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = On`). |
+| `BranchMerge` | Change applied by merging a branch into the parent catalog. |
+| `StartupApply` | Retained for backward compatibility; not used for new entries. |
+
+### E) Schema JSON field reference (complete)
+
+This section documents every field available in `aouda.schema.json` by type. All fields are optional except `type` on `ColumnDefinition`.
+
+#### SchemaDocument (root)
+
+| Field | JSON key | Type | Required | Notes |
+|---|---|---|---|---|
+| `$schema` | `$schema` | `string` | No | JSON Schema URL for IDE validation. Use `"https://aouda.io/schema/v1.json"`. |
+| `database` | `database` | `string` | Yes (for diff/apply) | Target database name. Must match the `--database` / `AOUDA_DATABASE` value. |
+| `tables` | `tables` | `object` | No | Map of table name → `TableDefinition`. Omit tables to leave them untouched. |
+| `settings` | `settings` | `SchemaSettings` | No | Database-level settings. |
+| `extends` | `extends` | `string` | No (overlay only) | Used in overlay files to identify the base file by name (e.g. `"aouda.schema.json"`). |
+
+#### TableDefinition (entry in `tables`)
+
+| Field | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `columns` | `columns` | `object` | None | Map of column name → `ColumnDefinition`. Required when creating a table. |
+| `partitionKey` | `partitionKey` | `PartitionKeyEntry[]` | None | Ordered list of partition key columns. Omit for non-partitioned tables. |
+| `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. |
+| `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
+| `durability` | `durability` | `TableDurabilityDto` | None | WAL and replication settings for this table. |
+| `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. |
+| `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. |
+| `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. |
+| `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Used with `"auth-db-rls"` mode. |
+
+#### ColumnDefinition (entry in `columns`)
+
+| Field | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `type` | `type` | `string` | **Required** | Column data type. See valid values below. |
+| `primaryKey` | `primaryKey` | `int` | None | Ordinal position in composite primary key (1-based). Omit if not a PK column. |
+| `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer primary key columns. |
+| `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. |
+| `references` | `references` | `string` | None | Foreign key reference in `"table.column"` format. |
+
+Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
+
+**Common mistake:** Using `"Integer"`, `"Long"`, `"Float"`, or `"DateTime"` as type names — these are not valid. Use `Int32`, `Int64`, `Float32`, and `Timestamp` respectively.
+
+#### PartitionKeyEntry (entry in `partitionKey`)
+
+| Field | JSON key | Type | Required | Notes |
+|---|---|---|---|---|
+| `column` | `column` | `string` | Yes | Name of the partition key column. Must match a column in `columns`. |
+| `function` | `function` | `string` | No | Partition function to apply to the column value. See valid values below. |
+
+Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`. Omit the `function` field (or use `"None"`) to use the column value as-is for routing.
+
+**Common mistake:** Using `"Hash"` as a partition function — this is not a valid schema-file `function` value. Partition hashing for storage routing (XxHash64) is applied internally by the storage engine when `partitionStorage = "Shared"` or `"Auto"`. You do not need to, and cannot, configure it via the schema file.
+
+**Example — time-partitioned table (partition by day):**
+
+```json
+{
+  "events": {
+    "columns": {
+      "id":         { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+      "ts":         { "type": "Timestamp" },
+      "tenant_id":  { "type": "String" },
+      "payload":    { "type": "String", "nullable": true }
+    },
+    "partitionKey": [
+      { "column": "ts", "function": "TruncateToDay" }
+    ],
+    "clusterColumns": ["ts"],
+    "policy": { "storageTemperature": "Auto" },
+    "durability": { "walEnabled": true }
+  }
+}
+```
+
+**Example — tenant-partitioned table (string key, no function):**
+
+```json
+{
+  "orders": {
+    "columns": {
+      "id":         { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
+      "tenant_id":  { "type": "String" },
+      "status":     { "type": "String" },
+      "amount":     { "type": "Decimal" },
+      "created_at": { "type": "Timestamp" }
+    },
+    "partitionKey": [
+      { "column": "tenant_id" }
+    ],
+    "clusterColumns": ["created_at"],
+    "policy": { "storageTemperature": "Auto" },
+    "durability": { "walEnabled": true },
+    "partitionLevelSecurity": true,
+    "authMode": "jwt-claim"
+  }
+}
+```
+
+#### TablePolicyDto (value of `policy`)
+
+| Field | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `storageTemperature` | `storageTemperature` | `string` | `"Auto"` | Storage temperature policy. Valid values: `"Auto"`, `"HotOnly"`, `"ColdPreferred"`. |
+
+#### TableDurabilityDto (value of `durability`)
+
+| Field | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Whether WAL is enabled for this table. Null = inherit database default. |
+| `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). |
+
+#### SchemaSettings (value of `settings`)
+
+| Field | JSON key | Type | Notes |
+|---|---|---|---|
+| `durability` | `durability` | `SchemaSettingsDurability` | Database-level durability settings. |
+
+#### SchemaSettingsDurability (value of `settings.durability`)
+
+| Field | JSON key | Type | Default | Notes |
+|---|---|---|---|---|
+| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Database-level WAL default. `true` maps to `DiskBacked` durability mode; `false` maps to `MemoryOnly`. |
+| `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Database-level replication factor. Informational in schema; not currently applied by the apply engine. |
 
 ---
 
