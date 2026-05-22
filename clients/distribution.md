@@ -8,7 +8,7 @@ parent: "Clients"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-04-01
+Last updated: 2026-04-08
 
 Coverage phases: P4, P8, P11, P13
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P8/`, `docs/tasks/P11/`, `docs/tasks/P13/`

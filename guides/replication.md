@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P4, P6, P7
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P6/`, `docs/tasks/P7/`
@@ -393,8 +393,8 @@ Key implementation anchors:
 | `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | appsettings/env | Timeout behavior |
 | `Aouda:Health:Thresholds:ReplicationLagDegradedSeconds` | int | `10` | positive | appsettings/env | Health degraded threshold |
 | `Aouda:Health:Thresholds:ReplicationLagUnhealthySeconds` | int | `60` | positive | appsettings/env | Health unhealthy threshold |
-| Query parameter `readPreference` | string | `Primary` behavior | known preference names | per request | Overrides header when both set |
-| Header `X-Read-Preference` | string | unset | known preference names | per request | Used when query param absent |
+| Query parameter `readPreference` | string | `Primary` behavior | `Primary`, `PrimaryPreferred`, `Secondary`, `SecondaryPreferred`, `Nearest`, `Hidden`, `SecondaryWithMaxLag` (case-insensitive; unknown values silently default to `Primary`) | per request | Overrides header when both set |
+| Header `X-Read-Preference` | string | unset | same values as `readPreference` query parameter | per request | Used when query param absent |
 | Header `X-Aouda-Fencing-Token` | int string | unset | integer token | per request | Validated on write endpoints |
 
 Configuration precedence and operational notes:
@@ -611,7 +611,7 @@ var rows = await client.GetTable("orders")
 
 Expected result: topology/status calls return admin replication information; query includes read preference header and is accepted only if serving node can satisfy the requested preference.
 
-Common mistake: assuming `ReadPreference.SecondaryWithMaxLag` exists in `.NET` protocol enum; it currently does not.
+Common mistake: assuming `ReadPreference.SecondaryWithMaxLag` exists in `Aouda.Protocol.ReadPreference` (the NuGet-facing enum). It does not — `Aouda.Protocol.ReadPreference` has only `Primary`, `PrimaryPreferred`, `Secondary`, `SecondaryPreferred`, `Nearest`, `Hidden`. The value `SecondaryWithMaxLag` exists only in `Aouda.Engine.Replication.ReadPreference` (internal engine type). Passing `"SecondaryWithMaxLag"` as a string to the HTTP `readPreference` parameter is accepted by the engine enum parser, but the lag threshold options are not yet wired at the query endpoint — it behaves as a role-only secondary check.
 
 ### TypeScript example
 

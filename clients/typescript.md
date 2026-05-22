@@ -20,7 +20,7 @@ _Repo: `aouda-client-ts`_
 - **Type-safe query builder** — fluent API for queries, joins, aggregates, filters
 - **CRUD operations** — insert, update, delete with full type safety
 - **Schema management** — create/alter tables, type generation CLI
-- **Branch operations** — create, delete, diff, merge, branch-scoped queries
+- **Branch operations** — create, delete, diff, merge via `client.branches.*`
 - **Real-time streaming** — WebSocket subscriptions for live data
 - **Admin API coverage** — health, metrics, replication, cluster, backup, config, node
 - **Authentication** — session auth, API key auth, token management
@@ -60,28 +60,56 @@ npm install @aouda/client
 import { AoudaClient } from '@aouda/client';
 
 const client = new AoudaClient({
-  url: 'http://localhost:5000',
+  serverUrl: 'http://localhost:5000',
   database: 'mydb',
 });
+await client.connect();
 ```
 
 ### With Authentication
 
 ```typescript
-// API key auth
+// App auth with anon API key (for end-user sign-in flows)
 const client = new AoudaClient({
-  url: 'http://localhost:5000',
+  serverUrl: 'http://localhost:5000',
   database: 'mydb',
-  apiKey: 'mk_app_abc123...',
+  appAuth: { apiKey: 'mk_anon_abc123...' },
 });
+await client.connect();
 
-// Session auth
+// App auth with service key (backend service acting on behalf of users)
 const client = new AoudaClient({
-  url: 'http://localhost:5000',
+  serverUrl: 'http://localhost:5000',
   database: 'mydb',
+  appAuth: { apiKey: 'mk_svc_abc123...' },
 });
-await client.auth.login({ email: 'user@example.com', password: 'secret' });
+await client.connect();
+
+// Server/admin auth with API key
+const client = new AoudaClient({
+  serverUrl: 'http://localhost:5000',
+  database: 'mydb',
+  serverAuth: { apiKey: 'mk_srv_abc123...' },
+});
+await client.connect();
+
+// Session auth — use appAuth for Layer-1, then signIn for Layer-2 user identity
+const client = new AoudaClient({
+  serverUrl: 'http://localhost:5000',
+  database: 'mydb',
+  appAuth: { apiKey: 'mk_anon_abc123...' },
+});
+await client.connect();
+await client.auth.signIn('user@example.com', 'secret');
 ```
+
+**Auth option rules:**
+- `appAuth` and `serverAuth` are mutually exclusive.
+- Within each, `apiKey` and `token` are mutually exclusive.
+- `refreshToken` requires `token` to also be set.
+- The `apiKey` is a Layer-1 connection key (`mk_anon_`, `mk_svc_`, `mk_srv_`, or custom `mk_`). Call `client.auth.signIn()` to establish Layer-2 user identity.
+
+**Common mistake:** passing `apiKey` at the top level (no such option exists — it must be nested inside `appAuth` or `serverAuth`).
 
 ---
 
@@ -91,7 +119,7 @@ await client.auth.login({ email: 'user@example.com', password: 'secret' });
 
 ```typescript
 const users = await client.table('users')
-  .where(w => w.field('active').eq(true))
+  .where('active', '=', true)
   .orderBy('name', 'asc')
   .limit(10)
   .execute();
@@ -99,9 +127,11 @@ const users = await client.table('users')
 
 ### Projection
 
+`select()` takes column names as rest arguments (not an array):
+
 ```typescript
 const names = await client.table('users')
-  .select(['name', 'email'])
+  .select('name', 'email')
   .execute();
 ```
 
@@ -119,41 +149,61 @@ const page2 = await client.table('users')
 
 ```typescript
 const count = await client.table('users')
-  .where(w => w.field('active').eq(true))
+  .where('active', '=', true)
   .count();
 ```
 
 ### All Filter Operators
 
+`where(column, operator, value)` adds an AND predicate. All operators:
+
 ```typescript
-// Comparison
-w.field('age').gt(18)
-w.field('age').gte(18)
-w.field('age').lt(65)
-w.field('age').lte(65)
-w.field('name').eq('Alice')
-w.field('name').ne('Bob')
+// Equality / comparison
+.where('age', '>', 18)
+.where('age', '>=', 18)
+.where('age', '<', 65)
+.where('age', '<=', 65)
+.where('name', '=', 'Alice')
+.where('name', '!=', 'Bob')
 
 // Extended operators (P16)
-w.field('role').in(['admin', 'owner'])
-w.field('status').notIn(['deleted', 'archived'])
-w.field('name').like('A%')
-w.field('email').isNull()
-w.field('email').isNotNull()
-w.field('age').between(18, 65)
+.where('role', 'in', ['admin', 'owner'])
+.where('status', 'notIn', ['deleted', 'archived'])
+.where('name', 'like', 'A%')
+.where('email', 'isNull')
+.where('email', 'isNotNull')
+.where('age', 'between', [18, 65])  // two-element [min, max] tuple
 ```
 
-### Nested Groups
+Multiple `.where()` calls are combined with AND at the top level.
+
+### Nested Groups (OR inside AND)
+
+Use `whereGroup(fn)` with a `WhereGroupBuilder` for nested boolean logic. Inside the group, `where()` ANDs predicates and `orWhere()` ORs them:
 
 ```typescript
+// Matches: active=true AND (role='admin' OR role='owner')
 const results = await client.table('users')
-  .where(w => w
-    .field('active').eq(true)
-    .and(g => g
-      .field('role').eq('admin')
-      .or()
-      .field('role').eq('owner')
+  .where('active', '=', true)
+  .whereGroup(g => g
+    .where('role', '=', 'admin')
+    .orWhere('role', '=', 'owner')
+  )
+  .execute();
+```
+
+For deeper nesting, use `subgroup()` inside a `WhereGroupBuilder`:
+
+```typescript
+// Matches: status='active' AND ((role='admin' AND region='us') OR tier='enterprise')
+const results = await client.table('users')
+  .where('status', '=', 'active')
+  .whereGroup(g => g
+    .subgroup(inner => inner
+      .where('role', '=', 'admin')
+      .where('region', '=', 'us')
     )
+    .orWhere('tier', '=', 'enterprise')
   )
   .execute();
 ```
@@ -164,13 +214,15 @@ const results = await client.table('users')
 
 All five join types are supported with full post-join operations.
 
+Join methods take `(rightTable, leftColumn, rightColumn)` as positional string arguments. For multi-column keys, pass two string arrays instead.
+
 ### Inner Join
 
 ```typescript
 const orders = await client.table('orders')
-  .join('customers', { left: 'customerId', right: 'id' })
-  .select(['orders.id', 'customers.name', 'orders.total'])
-  .where(w => w.field('orders.total').gt(100))
+  .join('customers', 'customerId', 'id')
+  .select('orders.id', 'customers.name', 'orders.total')
+  .where('orders.total', '>', 100)
   .orderBy('orders.total', 'desc')
   .limit(50)
   .execute();
@@ -180,7 +232,7 @@ const orders = await client.table('orders')
 
 ```typescript
 const all = await client.table('customers')
-  .leftJoin('orders', { left: 'id', right: 'customerId' })
+  .leftJoin('orders', 'id', 'customerId')
   .execute();
 ```
 
@@ -188,7 +240,7 @@ const all = await client.table('customers')
 
 ```typescript
 const result = await client.table('orders')
-  .rightJoin('products', { left: 'productId', right: 'id' })
+  .rightJoin('products', 'productId', 'id')
   .execute();
 ```
 
@@ -196,7 +248,7 @@ const result = await client.table('orders')
 
 ```typescript
 const result = await client.table('students')
-  .fullJoin('enrollments', { left: 'id', right: 'studentId' })
+  .fullJoin('enrollments', 'id', 'studentId')
   .execute();
 ```
 
@@ -210,12 +262,11 @@ const result = await client.table('colors')
 
 ### Multi-Column Join Keys
 
+Pass two parallel string arrays — left columns and right columns must have equal length:
+
 ```typescript
 const result = await client.table('orders')
-  .join('shipments', [
-    { left: 'orderId', right: 'orderId' },
-    { left: 'warehouseId', right: 'warehouseId' },
-  ])
+  .join('shipments', ['orderId', 'warehouseId'], ['orderId', 'warehouseId'])
   .execute();
 ```
 
@@ -223,18 +274,18 @@ const result = await client.table('orders')
 
 ```typescript
 const result = await client.table('orders')
-  .join('customers', { left: 'customerId', right: 'id' })
-  .join('products', { left: 'orders.productId', right: 'id' })
-  .join('categories', { left: 'products.categoryId', right: 'id' })
-  .select(['orders.id', 'customers.name', 'products.name', 'categories.name'])
+  .join('customers', 'customerId', 'id')
+  .join('products', 'orders.productId', 'id')
+  .join('categories', 'products.categoryId', 'id')
+  .select('orders.id', 'customers.name', 'products.name', 'categories.name')
   .execute();
 ```
 
 ### Post-Join Operations
 
 All standard operations work after joins:
-- `select([...])` — project specific columns
-- `where(w => ...)` — filter on any column (use prefixed names)
+- `select('col1', 'col2', ...)` — project specific columns (rest args, not an array)
+- `where(column, op, value)` — filter on any column (use `'table.column'` for prefixed names)
 - `orderBy(column, direction)` — sort on any column
 - `limit(n)` / `offset(n)` — pagination
 - Aggregates — sum, min, max, count, groupBy
@@ -269,7 +320,7 @@ const salesByCustomer = await client.table('orders')
 
 const countByStatus = await client.table('tasks')
   .count()
-  .groupBy('status', 'priority')
+  .groupBy('status', 'priority')   // rest args, not an array
   .execute();
 ```
 
@@ -297,7 +348,7 @@ await client.table('events').insertMany([
 
 ```typescript
 await client.table('users')
-  .where(w => w.field('id').eq(123))
+  .where('id', '=', 123)
   .update({ active: false });
 ```
 
@@ -305,7 +356,7 @@ await client.table('users')
 
 ```typescript
 await client.table('users')
-  .where(w => w.field('id').eq(123))
+  .where('id', '=', 123)
   .delete();
 ```
 
@@ -319,26 +370,37 @@ await client.table('users')
 // List tables
 const tables = await client.tables.list();
 
+// Get table schema
+const schema = await client.tables.get('users');
+
 // Create table
-await client.tables.create({
+await client.tables.createTable({
+  database: 'mydb',
   name: 'users',
   columns: [
-    { name: 'id', type: 'int', isPrimaryKey: true },
-    { name: 'name', type: 'string' },
-    { name: 'email', type: 'string' },
+    { name: 'id', type: 'Int64', primaryKeyOrder: 1 },
+    { name: 'name', type: 'String' },
+    { name: 'email', type: 'String' },
   ],
 });
 
-// Alter table
-await client.tables.alter('users', {
-  addColumns: [{ name: 'phone', type: 'string' }],
-});
+// Add a column
+await client.tables.addColumn('users', { database: 'mydb', name: 'phone', type: 'String' });
+
+// Rename a column
+await client.tables.renameColumn('users', 'phone', { database: 'mydb', newName: 'phoneNumber' });
+
+// Drop a column
+await client.tables.dropColumn('users', 'phoneNumber');
+
+// Delete a table
+await client.tables.deleteTable('users');
 ```
 
 ### Type Generation CLI
 
 ```bash
-npx @aouda/client generate --url http://localhost:5000 --database mydb --output ./types
+npx @aouda/client generate --server http://localhost:5000 --database mydb --output ./types
 ```
 
 Generates TypeScript interfaces from Aouda table schemas.
@@ -346,39 +408,42 @@ Generates TypeScript interfaces from Aouda table schemas.
 ### Schema Seed CLI
 
 ```bash
-npx @aouda/client schema seed --file seed.json --database mydb --url http://localhost:5000
+npx @aouda/client schema seed --server http://localhost:5000 --database mydb --file seed.json
 ```
 
 ---
 
 ## 9) Branches
 
+Branches are schema-level constructs managed via `client.branches`. Data operations always target the current database; branch-scoped data queries are not supported directly on `TableQuery`.
+
 ```typescript
-// List branches
+// List branches (excludes implicit main)
 const branches = await client.branches.list();
 
-// Create branch
-await client.branches.create('feature-x');
+// Create branch (parent defaults to "main")
+await client.branches.create({ name: 'feature-x' });
 
-// Query on branch
-const data = await client.table('users')
-  .onBranch('feature-x')
-  .execute();
+// Create branch from a specific parent
+await client.branches.create({ name: 'feature-x', from: 'main' });
 
-// Insert on branch
-await client.table('users')
-  .onBranch('feature-x')
-  .insert({ name: 'Test User' });
+// Get branch details
+const branch = await client.branches.get('feature-x');
 
-// Diff
+// Diff branch vs parent (schema changes only)
 const diff = await client.branches.diff('feature-x');
 
-// Merge
-await client.branches.merge('feature-x');
+// Dry-run merge (returns plan without applying)
+const plan = await client.branches.merge('feature-x');
+
+// Execute merge (apply schema changes to parent)
+const result = await client.branches.merge('feature-x', { execute: true });
 
 // Delete
 await client.branches.delete('feature-x');
 ```
+
+**Note:** `client.branches.merge()` with no options (or `dryRun: true`) returns a `MergeResult` with the plan. Pass `{ execute: true }` to actually apply the merge and get back a `MergeExecutionResult`.
 
 ---
 
@@ -386,16 +451,50 @@ await client.branches.delete('feature-x');
 
 ### WebSocket Subscriptions
 
+`subscribe()` is synchronous (no `await`). It returns a `Subscription` that is also an `AsyncIterable`. Unsubscribe with `await subscription.unsubscribe()`.
+
+The subscription delivers two event types via `onChange`:
+- `op: "insert"` — a row was inserted; `row` contains the new row.
+- `op: "update"` — a row was updated; `row` is the new row, `prev` is the previous row.
+- `op: "delete"` — a row was deleted; `key` contains the deleted primary key.
+
+An `onSnapshot` callback receives the initial consistent snapshot of existing rows when the subscription first connects.
+
 ```typescript
-const subscription = await client.table('events')
+// Callback style
+const subscription = client.table('events')
   .subscribe({
-    onInsert: (row) => console.log('New:', row),
-    onUpdate: (row) => console.log('Updated:', row),
-    onDelete: (row) => console.log('Deleted:', row),
+    onSnapshot: (rows, version) => console.log('Initial rows:', rows),
+    onChange: (event) => {
+      if (event.op === 'insert') console.log('New:', event.row);
+      if (event.op === 'update') console.log('Updated:', event.row, 'was:', event.prev);
+      if (event.op === 'delete') console.log('Deleted key:', event.key);
+    },
+    onError: (err) => console.error('Subscription error:', err),
   });
 
-// Later: unsubscribe
-subscription.unsubscribe();
+// Async-iterator style
+for await (const event of subscription) {
+  if (event.type === 'snapshot') {
+    console.log('Snapshot rows:', event.rows);
+  } else {
+    console.log('Change:', event.op, event.row ?? event.key);
+  }
+}
+
+// Unsubscribe (always await — it sends an unsubscribe frame to the server)
+await subscription.unsubscribe();
+```
+
+Subscriptions can also be filtered using the query builder's `where()` predicates:
+
+```typescript
+// Subscribe only to events matching a filter
+const sub = client.table('events')
+  .where('severity', '=', 'error')
+  .subscribe({
+    onChange: (event) => console.log('Error event:', event.row),
+  });
 ```
 
 ---
@@ -504,15 +603,20 @@ const caps = await client.admin.capabilities();
 
 | Tool Name | Purpose |
 |-----------|---------|
-| `aouda_cluster_status` | Cluster health and topology |
-| `aouda_cluster_nodes` | Per-node details |
-| `aouda_backup_trigger` | Trigger backup |
-| `aouda_backup_list` | List backups |
-| `aouda_backup_restore` | Restore from backup |
-| `aouda_cluster_add_node` | Join node to cluster |
-| `aouda_cluster_remove_node` | Leave cluster |
-| `aouda_cluster_promote` | Promote secondary |
-| `aouda_cluster_failover` | Step down primary |
+| `aouda_cluster_status` | Replication status, topology, and optional WAL coverage |
+| `aouda_cluster_health` | Health, readiness, replication health, and optional detail + node info |
+| `aouda_backup_trigger` | Trigger an immediate backup |
+| `aouda_backup_list` | List existing backups |
+| `aouda_backup_restore` | Restore a backup by ID |
+| `aouda_backup_get_schedule` | Get current backup schedule |
+| `aouda_backup_set_schedule` | Update backup schedule |
+| `aouda_cluster_join` | Join this node to a replica set |
+| `aouda_cluster_leave` | Leave cluster and return to standalone |
+| `aouda_cluster_promote` | Trigger election to promote this node to primary |
+| `aouda_cluster_failover` | Step down current primary and trigger new election |
+| `aouda_cluster_drain` | Mark a node as draining for maintenance |
+| `aouda_cluster_get_config` | Get mutable cluster configuration |
+| `aouda_cluster_patch_config` | Patch mutable cluster config fields (`heartbeatIntervalMs`, `electionTimeoutMs`) |
 
 ### Usage
 
@@ -520,14 +624,22 @@ const caps = await client.admin.capabilities();
 import { createAoudaClusterMcpToolSet } from '@aouda/client';
 
 const tools = createAoudaClusterMcpToolSet(client);
-// tools is an array of { name, description, inputSchema, execute } objects
-// Register with your MCP host implementation
+// tools is an object keyed by tool name, e.g. tools.aouda_cluster_status
+// Each value: { name, description, inputSchema, execute }
+// Register individual tools with your MCP host implementation
+
+// Example: read cluster status
+const status = await tools.aouda_cluster_status.execute({ includeCoverage: true });
+
+// Example: trigger backup
+const result = await tools.aouda_backup_trigger.execute({ incremental: true });
 ```
 
-Each tool has:
-- Stable name (e.g. `aouda_cluster_status`)
-- JSON Schema `inputSchema`
-- `execute(params)` handler calling typed `client.admin.*` methods
+Each tool definition has:
+- `name` — stable tool name (e.g. `aouda_cluster_status`)
+- `description` — human-readable description for the MCP host
+- `inputSchema` — JSON Schema object describing valid inputs
+- `execute(params)` — async handler calling typed `client.admin.*` methods
 
 Documentation: `aouda-client-ts/docs/dev/MCP-Cluster-Tools.md`.
 
@@ -536,24 +648,28 @@ Documentation: `aouda-client-ts/docs/dev/MCP-Cluster-Tools.md`.
 ## 13) Materialized Queries
 
 ```typescript
+import { MaterializedQueryType } from '@aouda/client';
+
 // List materialized queries
 const queries = await client.materializedQueries.list();
 
-// Create
+// Create — type and config are required
 await client.materializedQueries.create({
   name: 'active_users_summary',
   sourceTable: 'users',
-  query: { where: { active: true } },
+  type: MaterializedQueryType.Filter,         // 4 — only active rows
+  config: { where: [{ column: 'active', op: '=', value: true }] },
 });
 
 // Check status
 const status = await client.materializedQueries.status('active_users_summary');
-// status.freshness: 'up-to-date' | 'stale' | 'processing'
+// status.state: 0=Building, 1=Ready, 2=Rebuilding, 3=Error
+// status.rowCount, status.lastUpdatedUtc, status.errorMessage
 
-// Query results
-const results = await client.materializedQueries.query('active_users_summary', {
-  limit: 100,
-});
+// Query results (returns all rows; options reserved for future use)
+const results = await client.materializedQueries.query('active_users_summary');
+// results.rows: Record<string, unknown>[]
+// results.stats: { rowsScanned, rowsReturned, executionMs }
 
 // Drop
 await client.materializedQueries.drop('active_users_summary');
@@ -563,19 +679,22 @@ await client.materializedQueries.drop('active_users_summary');
 
 ## 14) Columnar Output
 
-For high-performance data processing, bypass row conversion:
+For high-performance data processing, bypass row conversion and get the raw columnar payload directly. `select()` takes rest args (not an array):
 
 ```typescript
 const columnar = await client.table('events')
-  .select(['timestamp', 'value'])
+  .select('timestamp', 'value')
   .limit(10000)
   .toColumnar();
 
 // columnar.columns: ['timestamp', 'value']
-// columnar.types: ['datetime', 'double']
-// columnar.data: [[...timestamps], [...values]]
+// columnar.types: ['Timestamp', 'Double']   ← exact wire type names (capitalized)
+// columnar.data: [[...ticks as numbers], [...values]]
 // columnar.rowCount: 10000
+// columnar.stats: { rowsScanned, rowsReturned, segmentsAccessed, executionMs }
 ```
+
+`columnar.types` contains the server-declared Aouda type names (`'Int64'`, `'String'`, `'Timestamp'`, `'Double'`, etc.). Timestamp values arrive as Int64 .NET ticks — use `coerceColumnarValue(value, typeName)` (exported from `@aouda/client`) to convert them to ISO 8601 strings if needed.
 
 ---
 
@@ -586,11 +705,11 @@ const columnar = await client.table('events')
 | P5 | Core client, query builder, CRUD, schema, type generation CLI | Foundation |
 | P6 | Multi-database support | `new AoudaClient({ database: 'db2' })` |
 | P10 | WebSocket transport, streaming API | Real-time subscriptions |
-| P12 | Session auth, API key auth | `client.auth.login()`, `apiKey` option |
+| P12 | Session auth, API key auth | `client.auth.signIn()`, `apiKey` option |
 | P14 | Server-side count, WhereClause groups | `count()`, nested `whereGroup` |
 | P15 | All join types (inner/left/right/full/cross), chained joins, multi-column keys | `join()`, `leftJoin()`, `rightJoin()`, `fullJoin()`, `crossJoin()` |
 | P16 H.1 | Aggregate query builder | `sum()`, `min()`, `max()`, `groupBy()` |
-| P16 H.2 | Extended filter operators | `in()`, `notIn()`, `like()`, `isNull()`, `isNotNull()`, `between()` |
+| P16 H.2 | Extended filter operators | `where(col, 'in', [...])`, `'notIn'`, `'like'`, `'isNull'`, `'isNotNull'`, `'between'` |
 | P16 H.3 | Materialized queries client API | `client.materializedQueries.*` |
 | P16 H.4 | Columnar output API | `.toColumnar()` |
 | P16 H.5 | Schema seed CLI | `npx @aouda/client schema seed` |

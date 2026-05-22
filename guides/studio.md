@@ -209,8 +209,34 @@ Read-only display of all server configuration. Mutable settings are editable inl
 
 | Mode | How to Activate | Behavior |
 |------|----------------|----------|
-| Direct | Set `NEXT_PUBLIC_AOUDA_URL` | Single server, no login required |
-| Hub | Set `NEXT_PUBLIC_HUB_URL` | Login to Hub, browse org servers, switch between them |
+| Direct | Set `NEXT_PUBLIC_AOUDA_URL` (build-time) or `AOUDA_STUDIO_DEFAULT_SERVER` (runtime) | Single server, no login required |
+| Hub | Set `NEXT_PUBLIC_HUB_URL` (build-time) | Login to Hub, browse org servers, switch between them |
+
+### Environment Variables
+
+Studio uses two categories of environment variables:
+
+**Build-time variables** (`NEXT_PUBLIC_*`) — baked into the JavaScript bundle at `next build`. Must be set before building the Docker image or running `npm run build`.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `NEXT_PUBLIC_AOUDA_URL` | Default server URL (fallback when `AOUDA_STUDIO_DEFAULT_SERVER` is not set at runtime) | `http://localhost:5000` |
+| `NEXT_PUBLIC_HUB_URL` | Hub API URL; when non-empty, enables Hub login mode | `""` (disabled) |
+
+**Runtime variables** — read by the Next.js server process at startup. Can be set on the Docker container without rebuilding the image.
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `AOUDA_STUDIO_DEFAULT_SERVER` | Default Aouda server URL (takes precedence over `NEXT_PUBLIC_AOUDA_URL`) | — |
+| `AOUDA_STUDIO_HUB_URL` | Hub API URL at runtime | — |
+| `AOUDA_STUDIO_THEME` | UI theme: `system`, `light`, or `dark` | `system` |
+| `AOUDA_STUDIO_CONFIG_PATH` | Path to `aouda-studio.config.json` | `./aouda-studio.config.json` |
+
+**Resolution order** for `defaultServer`:
+1. `AOUDA_STUDIO_DEFAULT_SERVER` (runtime env)
+2. `defaultServer` field in `aouda-studio.config.json`
+3. `NEXT_PUBLIC_AOUDA_URL` (build-time env)
+4. Hard-coded default: `http://localhost:5000`
 
 ### Server Switcher
 
@@ -318,7 +344,7 @@ View, create, and revoke server admin API keys from Studio settings/auth page.
 | UI Components | shadcn/ui |
 | Styling | Tailwind CSS |
 | Data Fetching | TanStack Query |
-| Data Grid | TanStack Table |
+| Data Grid | Glide Data Grid (`@glideapps/glide-data-grid`) |
 | State (local) | React `useState` |
 | State (global) | Zustand stores |
 | State (server) | TanStack Query cache |

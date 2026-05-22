@@ -45,9 +45,15 @@ The Aouda server binary is a single executable supporting subcommand dispatch.
 
 | Command | Purpose | Key Options |
 |---------|---------|-------------|
-| `aouda start` | Production server with persistent storage | `--data-dir <path>`, `--bind <ip:port>`, `--port <port>` |
-| `aouda dev` | Ephemeral development server (in-memory, no auth, fast startup) | `--db <name>`, `--port <port>`, `--auth`, `--data-dir <path>` |
+| `aouda start` | Production server with persistent storage | `--data-dir <path>`, `--bind <ip:port>`, `--port <port>`, `--join <primary:port>`, `--role <role>` |
+| `aouda stop` | Gracefully stop a locally-running server | `--server <url>`, `--force` |
 | `aouda version` | Print version and exit | — |
+| `aouda databases <subcommand>` | Database administration | `list`, `get`, `create`, `drop` (each with `--server`, `--name`, `--token`) |
+| `aouda schema <subcommand>` | Schema management | `diff`, `apply`, `export`, `validate`, `history` |
+| `aouda init` | First-run server admin bootstrap | `--server <url>`, `--admin-email`, `--admin-password` |
+| `aouda create-admin` | Create first admin user directly to engine (no HTTP) | `--email`, `--password`, `--data`, `--auth-database` |
+| `aouda bulk-load` | Bulk-load rows into multiple tables atomically | `--tables <list>`, `--file <path>`, `--server`, `--database` |
+| `aouda table bulk-load` | Bulk-load rows into a single table | `<table>`, `--file <path>`, `--server`, `--database` |
 
 ### Production Mode (`aouda start`)
 
@@ -60,16 +66,15 @@ aouda start --data-dir ./data --bind 0.0.0.0:5000
 - Configuration via environment variables (`AOUDA_*`) or config files
 - `--port` forwarded to existing ASP.NET Core configuration system
 
-### Development Mode (`aouda dev`)
+### Development Mode
+
+`aouda dev` is not a shipped command. For local development with ephemeral data, use `aouda start` with a temporary directory:
 
 ```bash
-aouda dev --db myapp --port 5000
+aouda start --data-dir /tmp/aouda-dev --bind 127.0.0.1:5000
 ```
 
-- Starts in <2 seconds with in-memory storage
-- Schema inference enabled by default (tables auto-created on first insert)
-- No authentication required (unless `--auth` flag is set)
-- Optional `--data-dir` for persistent dev data across restarts
+This gives fast startup with persistent-across-restarts behavior. For a fully ephemeral (no retained files) experience, delete the data directory between runs.
 
 ### CLI-to-Config Mapping
 
@@ -77,6 +82,7 @@ aouda dev --db myapp --port 5000
 |----------|-----------|---------------------|
 | `--data-dir` | `Aouda:DataPath` | `AOUDA_DATAPATH` |
 | `--bind` | `Aouda:Bind` | `AOUDA_BIND` |
+| `--port` | `Aouda:Port` | `AOUDA_PORT` |
 | `--role` | `Aouda:Role` | `AOUDA_ROLE` |
 | `--join` | `Aouda:Join` | `AOUDA_JOIN` |
 
@@ -125,6 +131,7 @@ docker run -p 3000:3000 -e AOUDA_STUDIO_DEFAULT_SERVER=http://aouda:5000 aouda/s
 | `AOUDA_STUDIO_DEFAULT_SERVER` | Default Aouda server URL | — |
 | `AOUDA_STUDIO_HUB_URL` | Hub API URL (enables Hub mode) | — |
 | `AOUDA_STUDIO_THEME` | UI theme | `system` |
+| `AOUDA_STUDIO_CONFIG_PATH` | Path to `aouda-studio.config.json` | `./aouda-studio.config.json` |
 
 ### Docker Compose — Single Node
 
@@ -363,8 +370,8 @@ All management APIs are under the `/admin/` prefix, separated from data APIs und
 
 | Area | Prefix | Endpoints |
 |------|--------|-----------|
-| Cluster | `/admin/cluster/` | join, leave, promote, failover, drain, config |
-| Backup | `/admin/backup/` | trigger, list, restore, schedule |
+| Cluster | `/admin/cluster/` | `POST join`, `DELETE leave`, `POST promote`, `POST failover`, `POST drain/{nodeAddress}`, `GET config`, `PATCH config` |
+| Backup | `/admin/backup/` | `POST trigger`, `GET list`, `POST restore/{id}`, `GET schedule`, `PUT schedule` |
 | Config | `/admin/config` | get, patch, schema |
 | Capabilities | `/admin/capabilities` | server capabilities discovery |
 | Node | `/admin/node` | node info, logs, log streaming (SSE) |
@@ -374,6 +381,125 @@ All management APIs are under the `/admin/` prefix, separated from data APIs und
 When a server auth database is configured, all admin endpoints require a bearer token (server auth scope). When no auth database is configured, admin endpoints pass through (same graceful behavior as all other endpoints).
 
 Server admin API keys (`mk_srv_` prefix) can be created, listed, and revoked via `/api/auth/admin/keys`.
+
+### Cluster API Examples
+
+```bash
+# Join a node to a cluster
+curl -s -X POST http://localhost:5000/admin/cluster/join \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mk_srv_..." \
+     -d '{"primaryAddress":"192.168.1.10:5000","replicaSetName":"prod-rs"}'
+# → 200 + { "message": "Joined cluster successfully", "replicaSetName": "prod-rs" }
+
+# Get cluster config
+curl -s http://localhost:5000/admin/cluster/config \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + { "mode": "cluster", "replicaSetName": "prod-rs", ... }
+
+# Patch mutable cluster config (heartbeatIntervalMs, electionTimeoutMs)
+curl -s -X PATCH http://localhost:5000/admin/cluster/config \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mk_srv_..." \
+     -d '{"heartbeatIntervalMs":3000}'
+# → 200 + updated config
+
+# Trigger failover (primary steps down)
+curl -s -X POST http://localhost:5000/admin/cluster/failover \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + { "message": "Primary stepped down; election triggered" }
+
+# Leave cluster (revert to standalone)
+curl -s -X DELETE http://localhost:5000/admin/cluster/leave \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + { "message": "Left cluster, now running as standalone" }
+```
+
+### Backup API Examples
+
+```bash
+# Trigger an immediate backup
+curl -s -X POST http://localhost:5000/admin/backup/trigger \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mk_srv_..." \
+     -d '{"incremental":true}'
+# → 202 + { "backupId": "...", "totalBytes": 1048576, "newBytes": 65536, ... }
+
+# List available backups
+curl -s http://localhost:5000/admin/backup/list \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + { "backups": [ { "backupId": "...", "createdUtc": "...", ... } ] }
+
+# Restore from a backup
+curl -s -X POST http://localhost:5000/admin/backup/restore/<backupId> \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + { "backupId": "...", "filesRestored": 42, "integrityVerified": true, ... }
+
+# Get backup schedule
+curl -s http://localhost:5000/admin/backup/schedule \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + { "cronExpression": null, "incremental": true }
+
+# Set backup schedule (daily at 02:00)
+curl -s -X PUT http://localhost:5000/admin/backup/schedule \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mk_srv_..." \
+     -d '{"cronExpression":"0 2 * * *","incremental":true}'
+```
+
+TypeScript client examples:
+
+```typescript
+import { createAoudaClient } from "@aouda/client";
+
+const client = createAoudaClient({
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
+  serverAuth: { apiKey: "mk_srv_..." },
+});
+
+// Cluster management
+await client.admin.cluster.join({ primaryAddress: "192.168.1.10:5000", replicaSetName: "prod-rs" });
+const config = await client.admin.cluster.getConfig();
+await client.admin.cluster.patchConfig({ heartbeatIntervalMs: 3000 });
+await client.admin.cluster.failover();
+await client.admin.cluster.leave();
+
+// Backup management
+const result = await client.admin.backup.trigger({ incremental: true });
+const list = await client.admin.backup.list();
+const restored = await client.admin.backup.restore(list.backups[0].backupId);
+const schedule = await client.admin.backup.getSchedule();
+await client.admin.backup.setSchedule({ cronExpression: "0 2 * * *", incremental: true });
+```
+
+.NET client examples:
+
+```csharp
+using Aouda.Client;
+using Aouda.Client.Admin;
+
+await using var client = new AoudaClient(new AoudaClientOptions
+{
+    ServerUrl = "http://localhost:5000",
+    DatabaseName = "appdb",
+    ServerAuth = new ServerAuthOptions { ApiKey = "mk_srv_..." }
+});
+
+// Backup management
+var result = await client.Backup.TriggerAsync(new TriggerBackupRequest(Incremental: true));
+Console.WriteLine($"Backup {result.BackupId}: {result.NewBytes} new bytes");
+
+var list = await client.Backup.ListAsync();
+foreach (var b in list.Backups)
+    Console.WriteLine($"  {b.BackupId}  {b.CreatedUtc:u}  {b.TotalBytes / 1024} KB");
+
+var restored = await client.Backup.RestoreAsync(list.Backups[0].BackupId);
+Console.WriteLine($"Restored {restored.FilesRestored} files in {restored.DurationSeconds:F1}s");
+
+var schedule = await client.Backup.GetScheduleAsync();
+await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *" });
+```
 
 ### CORS
 

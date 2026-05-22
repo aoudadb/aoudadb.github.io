@@ -277,34 +277,41 @@ Content-Type: application/json
 
 #### Auth Error Responses
 
-All auth errors follow the standard error format with additional fields for programmatic handling:
+Auth errors (from the auth middleware and auth endpoints) use the `AuthErrorPayload` shape, which is **different from the general `ProtocolError` format** used by query/table endpoints:
 
 ```json
 {
-  "error": "Access token has expired",
-  "code": "AUTH_TOKEN_EXPIRED",
-  "message": "The access token in the Authorization header has expired.",
-  "suggestion": "Use POST /api/auth/refresh with your refresh token to obtain a new access token.",
-  "docs": "https://docs.aouda.io/auth/token-refresh"
+  "error": "AUTH_TOKEN_EXPIRED",
+  "message": "Access token has expired.",
+  "suggestion": "Refresh the token using the /refresh endpoint or re-authenticate.",
+  "detail": "optional additional context",
+  "requestId": "req_abc123"
 }
 ```
 
-**403 errors include structured details:**
+Fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `error` | string | Machine-readable error code (e.g. `AUTH_TOKEN_EXPIRED`). Use this for programmatic handling. |
+| `message` | string | Human-readable description of the error. |
+| `suggestion` | string? | Actionable advice for the caller. |
+| `detail` | string? | Optional additional context (e.g. claim name, partition key). |
+| `requestId` | string? | Correlation ID echoed from `X-Request-Id` header if provided. |
+
+**Common mistake:** Auth errors do **not** have a separate `"code"` field — the `"error"` field itself is the machine-readable code. This is the opposite of `ProtocolError` (general query errors) where `"error"` is human-readable and `"code"` is the code.
+
+**403 ADRA errors include structured detail strings:**
 
 ```json
 {
-  "error": "Insufficient permissions",
-  "code": "INSUFFICIENT_PERMISSIONS",
-  "details": {
-    "requiredOperation": "write",
-    "database": "myapp",
-    "table": "orders",
-    "currentRoles": ["db_reader"]
-  }
+  "error": "AUTH_PLS_GRANT_NOT_FOUND",
+  "message": "Access denied for query on table 'orders'. The requested partition is not in the user's grant set.",
+  "suggestion": "Request a partition grant for this dimension, or contact an administrator.",
+  "detail": "dimension=org_id, partitionKey=org-xyz",
+  "requestId": "req_abc123"
 }
 ```
-
-## Read Preferences
 
 ## Read Preferences
 
@@ -374,20 +381,45 @@ All errors return a JSON body with this structure:
 | `COLUMN_NOT_FOUND` | 404 | The specified column does not exist |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
 | `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
+| `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 409 | HTTP DDL rejected because the table is managed by declarative schema apply (`InferenceMode: Extend`) |
+| `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
+| `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
+| `BRANCH_EXISTS` | 409 | A branch with the specified name already exists |
+| `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
+| `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
+| `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter |
 
 #### Authentication Errors (4xx)
+
+Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-error-responses) above) where the `"error"` field is the machine-readable code.
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `AUTH_TOKEN_MISSING` | 401 | Missing or empty `Authorization: Bearer` header |
-| `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid |
+| `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`) |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
 | `AUTH_API_KEY_INVALID` | 401 | API key invalid, revoked, or expired |
 | `AUTH_API_KEY_REQUIRED` | 401 | App auth endpoint requires an API key (`anon` or higher) but none was provided |
-| `NOT_AUTHENTICATED` | 401 | Authentication required (e.g. database has auth enabled but no valid token) |
+| `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
+| `NOT_AUTHENTICATED` | 401 | Authentication required (database has auth enabled but no valid token) |
 | `AUTHORIZATION_DENIED` | 403 | Authenticated but no role for the target database |
 | `INSUFFICIENT_PERMISSIONS` | 403 | Authenticated but role lacks required operation (e.g. read-only role attempting write) |
+| `AUTH_INVALID_CREDENTIALS` | 401 | Signin credentials are invalid (wrong password or non-existent email) |
+| `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
+| `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
+| `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
+| `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic message to prevent information leakage) |
+| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is invalid, expired, or revoked |
+| `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email is already registered in this auth database |
+| `AUTH_PASSWORD_TOO_WEAK` | 400 | Password does not meet the minimum password policy |
+| `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format |
+| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | PLS: required tenant claim missing from the JWT for this table |
+| `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | PLS: explicit partition filter does not match the token's tenant claim |
+| `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | PLS: write request targets a partition outside the tenant scope |
+| `AUTH_PLS_GRANT_NOT_FOUND` | 403 | PLS (auth-db-pls): requested partition is not in the user's grant set |
+| `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` | 403 | PLS: partition is granted but access level is `read`, which does not allow writes |
+| `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | PLS: `Where.Or` predicate shape is incompatible with safe auth-db-pls partition enforcement |
 
 #### State Errors (4xx)
 
@@ -467,11 +499,26 @@ Execute a query against a table.
 ```json
 {
   "and": [{"column": "...", "op": "...", "value": ...}],
-  "or": [{"column": "...", "op": "...", "value": ...}]
+  "or": [{"column": "...", "op": "...", "value": ...}],
+  "groups": [{"and": [...], "or": [...]}]
 }
 ```
 
-**Operators:** `eq`, `ne`, `gt`, `gte`, `lt`, `lte`
+`groups` contains nested `WhereClause` objects that are AND-combined with the top-level `and`/`or`. Use `groups` to express nested boolean logic (e.g. `AND(OR(...))`). Each group can itself contain `and`, `or`, and nested `groups`.
+
+**Operators:**
+
+| Operator | Description | Example value |
+|----------|-------------|---------------|
+| `eq` | Equal | `"active"`, `true`, `42` |
+| `ne` | Not equal | `"deleted"` |
+| `gt` | Greater than | `100` |
+| `gte` | Greater than or equal | `18` |
+| `lt` | Less than | `65` |
+| `lte` | Less than or equal | `1000.0` |
+| `in` | Value in array | `["admin", "owner"]` |
+| `nin` | Value not in array | `["deleted", "archived"]` |
+| `like` | SQL LIKE pattern | `"A%"` |
 
 **Order By Clause:**
 

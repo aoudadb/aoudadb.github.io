@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-05-18
+Last updated: 2026-05-22
 
 Coverage phases: P4 (Epic D + Epic I), P7 follow-up, P24-B (S3 provider)
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P24/`
@@ -86,7 +86,8 @@ Zero-config reality:
 - Backup metrics and health exposure.
 
 ### Partial / host-only
-- Backup/restore execution is engine-host accessible, not exposed as public server/client admin API.
+
+- Engine-host direct APIs (`BackupEngine`, `RestoreEngine`, `BackupLifecycleManager`) are also available for embedded/custom host usage alongside the server REST API.
 
 ### Not implemented yet
 - Azure Blob Storage and Google Cloud Storage archive destinations.
@@ -344,46 +345,235 @@ This override path is the same pattern used by test/development hosts when they 
 
 ### Current public surfaces
 
+- Server admin REST API (P16):
+  - `POST /admin/backup/trigger` — trigger an immediate backup (returns 202 with result)
+  - `GET /admin/backup/list` — list all available backups at the configured destination
+  - `POST /admin/backup/restore/{id}` — restore from a backup by ID; restarts engine after restore
+  - `GET /admin/backup/schedule` — get the current backup schedule
+  - `PUT /admin/backup/schedule` — set a backup schedule (5-field cron expression or `null` to disable)
+
 - Observability HTTP:
   - `GET /api/admin/metrics`
   - `GET /api/admin/metrics/summary`
   - `GET /api/admin/metrics/{subsystem}`
   - `GET /health/detailed`
 
-- Engine-host APIs:
+- Engine-host APIs (for embedded/custom host usage):
   - `BackupEngine.CreateBackupAsync/ListBackupsAsync/GetBackupAsync`
   - `RestoreEngine.RestoreAsync/ListBackupsAsync/FindBackupForPitrAsync/VerifyBackupAsync`
   - `BackupLifecycleManager.EnforceRetentionAsync/AnalyzeRetentionAsync/GarbageCollectAsync`
 
-### Missing public execution APIs
+### .NET client (`client.Backup`)
 
-- No server backup/restore execution controller endpoints.
-- No high-level `.NET` client API in `Aouda.Client`.
-- No TypeScript backup/restore execution API in `@aouda/client`.
+Access via `AoudaClient.Backup` property.
+
+```csharp
+using Aouda.Client;
+using Aouda.Client.Admin;
+
+await using var client = new AoudaClient(new AoudaClientOptions
+{
+    ServerUrl = "http://localhost:5000",
+    DatabaseName = "appdb",
+    ServerAuth = new ServerAuthOptions { ApiKey = "mk_srv_..." }
+});
+
+// Trigger an immediate backup
+var result = await client.Backup.TriggerAsync(new TriggerBackupRequest(Incremental: true));
+Console.WriteLine($"Backup {result.BackupId}: {result.TotalBytes} total bytes, {result.NewBytes} new bytes");
+
+// List all backups (newest first)
+var list = await client.Backup.ListAsync();
+foreach (var b in list.Backups)
+    Console.WriteLine($"  {b.BackupId}  {b.CreatedUtc:u}  {b.TotalBytes / 1024} KB");
+
+// Restore from a specific backup
+var restoreResult = await client.Backup.RestoreAsync(list.Backups[0].BackupId);
+Console.WriteLine($"Restored {restoreResult.FilesRestored} files, " +
+                  $"integrity verified: {restoreResult.IntegrityVerified}");
+
+// Get and update the backup schedule
+var schedule = await client.Backup.GetScheduleAsync();
+// Set a daily schedule at 02:00 UTC; pass null CronExpression to disable
+await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *" });
+```
+
+### TypeScript client (`client.admin.backup`)
+
+```typescript
+import { createAoudaClient } from "@aouda/client";
+
+const client = createAoudaClient({
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
+  serverAuth: { apiKey: "mk_srv_..." },
+});
+
+// Trigger backup
+const result = await client.admin.backup.trigger({ incremental: true });
+console.log(`Backup ${result.backupId}: ${result.newBytes} new bytes`);
+
+// List backups
+const list = await client.admin.backup.list();
+for (const b of list.backups)
+  console.log(`  ${b.backupId}  ${b.createdUtc}  ${b.totalBytes} bytes`);
+
+// Restore
+const restored = await client.admin.backup.restore(list.backups[0].backupId);
+console.log(`Restored ${restored.filesRestored} files`);
+
+// Schedule
+const schedule = await client.admin.backup.getSchedule();
+await client.admin.backup.setSchedule({ ...schedule, cronExpression: "0 2 * * *" });
+```
+
+### HTTP examples
+
+```bash
+# Trigger a backup (requires server-auth scope)
+curl -s -X POST http://localhost:5000/admin/backup/trigger \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mk_srv_..." \
+     -d '{"incremental":true}'
+# → 202 + TriggerBackupResponse
+
+# List backups
+curl -s http://localhost:5000/admin/backup/list \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + { "backups": [...] }
+
+# Restore backup by id
+curl -s -X POST "http://localhost:5000/admin/backup/restore/<backupId>" \
+     -H "Authorization: Bearer mk_srv_..."
+# → 200 + RestoreBackupResponse
+
+# Set a daily schedule at 02:00
+curl -s -X PUT http://localhost:5000/admin/backup/schedule \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mk_srv_..." \
+     -d '{"cronExpression":"0 2 * * *","incremental":true}'
+# → 200 + BackupSchedule
+```
+
+### Common error responses
+
+| Status | Condition |
+|--------|-----------|
+| 202 | Trigger: backup completed |
+| 400 | Trigger: invalid destination URI |
+| 409 | Trigger or restore: a backup/restore is already in progress |
+| 503 | Trigger or restore: archive not configured or engine not ready |
+| 404 | Restore: backup ID not found |
 
 ### TypeScript observability example
 
-```ts
+```typescript
 const snapshot = await client.admin.metrics.snapshot();
 console.log(snapshot.backup.operationsCompleted);
 const summary = await client.admin.metrics.summary();
 console.log(summary.lastBackupHoursAgo);
 ```
 
+### Missing / not yet implemented
+
+| Intended capability | Status | Workaround |
+|---------------------|--------|------------|
+| `aouda backup create/list/restore` CLI subcommands | Not implemented | Use `curl` or client SDK against `/admin/backup/*` |
+| Azure Blob Storage archive destination | Not implemented | Use `s3://` or local path |
+| Google Cloud Storage archive destination | Not implemented | Use `s3://` or local path |
+
 ## 2.12 Scenario playbooks
 
-1. **Embedded incremental backup (local)**
-   - Create `LocalArchiveDestination` and call `BackupEngine.CreateBackupAsync`.
-   - Repeat incremental backups and verify reduced `NewBytes`.
-2. **Embedded incremental backup (S3)**
-   - Set `Destination = "s3://my-bucket/my-db"` and provide S3 credentials.
-   - `ArchiveDestinationFactory.Create` returns `S3ArchiveDestination`; the rest of the backup/restore flow is identical.
-3. **Disaster restore to known backup**
-   - Select backup id, call `RestoreEngine.RestoreAsync`, keep `VerifyIntegrity=true`.
-4. **PITR restore with archive**
-   - Provide `TargetTime`, ensure archive window covers target, replay WAL.
-5. **Retention policy rollout**
-   - Run `AnalyzeRetentionAsync` first (dry-run), then `EnforceRetentionAsync` with `Execute=true`.
+### 1. Server-managed incremental backup via API
+
+When using Aouda in server mode with the admin API:
+
+```bash
+# One-time: configure archive destination in appsettings.json (see §2.10)
+# Then trigger a backup via API
+curl -s -X POST http://localhost:5000/admin/backup/trigger \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer mk_srv_..." \
+     -d '{"incremental":true}'
+# → 202 + { "backupId": "...", "totalBytes": ..., "newBytes": ..., ... }
+```
+
+Subsequent triggers with `"incremental":true` will only upload blobs that changed (SHA256 dedup). Monitor `newBytes` vs `totalBytes` to verify the incremental chain is working.
+
+### 2. Embedded incremental backup (local)
+
+In embedded/custom host scenarios, use `BackupEngine` directly:
+
+```csharp
+var destination = new LocalArchiveDestination("./archive");
+var engine = new BackupEngine(aoudaEngine, destination);
+var result = await engine.CreateBackupAsync(new BackupOptions());
+Console.WriteLine($"Backup {result.BackupId}: {result.NewBytes} new bytes");
+```
+
+Repeat incremental backups and verify reduced `NewBytes` on each subsequent call.
+
+### 3. Embedded incremental backup (S3)
+
+```csharp
+// Requires S3ArchiveProvider.Register() at startup (done automatically in Aouda.Server)
+var destination = ArchiveDestinationFactory.Create("s3://my-bucket/my-db");
+var engine = new BackupEngine(aoudaEngine, destination);
+var result = await engine.CreateBackupAsync(new BackupOptions { Incremental = true });
+```
+
+### 4. Disaster restore to known backup (server API)
+
+```bash
+# List backups to find the ID
+curl -s http://localhost:5000/admin/backup/list \
+     -H "Authorization: Bearer mk_srv_..."
+
+# Restore by ID
+curl -s -X POST "http://localhost:5000/admin/backup/restore/<backupId>" \
+     -H "Authorization: Bearer mk_srv_..."
+# Server restarts the engine after a successful restore
+```
+
+### 5. Disaster restore to known backup (embedded)
+
+```csharp
+var result = await restoreEngine.RestoreAsync(new RestoreOptions
+{
+    BackupId = "<backupId>",
+    VerifyIntegrity = true,   // default true — always verify on restore
+    CleanTargetDirectory = true
+});
+Console.WriteLine($"Restored {result.FilesRestored} files, integrity verified: {result.IntegrityVerified}");
+```
+
+### 6. PITR restore with archived WAL (embedded)
+
+```csharp
+var result = await restoreEngine.RestoreAsync(new RestoreOptions
+{
+    TargetTime = DateTimeOffset.Parse("2026-05-01T12:00:00Z"),
+    WalPath = "./data/wal",
+    VerifyIntegrity = true
+});
+```
+
+Ensure the archive window covers the target time (controlled by `WalRetentionDays`). If the target time is outside the window, `RestoreAsync` throws `PitrWindowException`.
+
+### 7. Retention policy rollout
+
+```csharp
+// Step 1: dry-run to see what will be deleted
+var analysis = await lifecycleManager.AnalyzeRetentionAsync(retentionPolicy);
+Console.WriteLine($"Would delete {analysis.ManifestsToDelete.Count} manifests");
+
+// Step 2: execute with chain preservation safeguard
+await lifecycleManager.EnforceRetentionAsync(retentionPolicy, new LifecycleOptions { Execute = true });
+```
+
+### 8. Scheduled backups via Studio
+
+In the Studio backup management page (§7 of the Studio guide), you can set a cron schedule using the built-in cron builder. The schedule is persisted in `backup-config.json` and survives restarts.
 
 ## 2.13 Operations and observability
 
