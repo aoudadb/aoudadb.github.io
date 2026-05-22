@@ -53,6 +53,10 @@
 - [Cloud and Hub](https://aoudadb.github.io/guides/cloud-hub/): Hub backend, cloud control plane, Kubernetes operator
 - [Studio](https://aoudadb.github.io/guides/studio/): Web management console — data explorer, cluster ops, backup UI
 - [Testing and DX](https://aoudadb.github.io/guides/testing-dx/): Aouda.Testing package, xUnit/NUnit/MSTest fixtures
+- [Bulk Load](https://aoudadb.github.io/guides/bulk-load/)
+- [Graph and Vector](https://aoudadb.github.io/guides/graph-vector/)
+- [Primary Key Indexing and Memory](https://aoudadb.github.io/guides/pk-indexing/)
+- [Server and Multi-Database](https://aoudadb.github.io/guides/server-multi-database/)
 
 ## Deployment
 
