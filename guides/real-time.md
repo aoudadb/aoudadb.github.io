@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P10 (with integration dependencies on P12/P14 auth and ADRA behavior)
 Primary task folders: `docs/tasks/P10/`
@@ -514,13 +514,105 @@ Sec-WebSocket-Version: 13
 Sec-WebSocket-Key: <key>
 ```
 
+**Step 1 — authenticate (client → server):**
+
 ```json
 {"type":"auth","token":"<jwt-or-api-key>","database":"appdb","wire_mode":"json"}
 ```
 
+**Step 1 response — `auth_ok` (server → client on success):**
+
+```json
+{"type":"auth_ok","user_id":"user-123","expires_at":"2026-06-01T00:00:00Z","wire_mode":"json"}
+```
+
+Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `wire_mode` (the negotiated wire mode).
+
+**Step 1 response — `auth_error` (server → client on failure):**
+
+```json
+{"type":"auth_error","code":"AUTH_INVALID_TOKEN","message":"Token signature verification failed"}
+```
+
+**Step 2 — subscribe (client → server):**
+
 ```json
 {"type":"subscribe","id":"sub-orders","target":"orders","resume_from":123}
 ```
+
+`resume_from` is optional. Omit it on a fresh subscription; include the last seen version on reconnect.
+
+**Step 2 response — `snapshot` then `change` (server → client):**
+
+```json
+{"type":"snapshot","id":"sub-orders","rows":[{"id":1,"status":"open"}],"version":456}
+```
+
+```json
+{"type":"change","id":"sub-orders","op":"insert","row":{"id":2,"status":"pending"},"prev":null,"key":null,"version":457}
+```
+
+`op` values: `"insert"`, `"update"`, `"delete"`. For `update`, `prev` carries the previous row state. For `delete`, `key` carries the primary-key payload and `row` is null.
+
+**Unsubscribe (client → server) and confirmation (server → client):**
+
+```json
+{"type":"unsubscribe","id":"sub-orders"}
+```
+
+```json
+{"type":"unsubscribed","id":"sub-orders"}
+```
+
+**Write stream lifecycle:**
+
+```json
+{"type":"stream_open","id":"stream-1","table":"orders","mode":"upsert"}
+```
+
+Server acknowledges with `stream_ready` before the client may send rows:
+
+```json
+{"type":"stream_ready","id":"stream-1"}
+```
+
+```json
+{"type":"stream_rows","id":"stream-1","seq":1,"rows":[{"id":1,"status":"open"}]}
+```
+
+```json
+{"type":"stream_ack","id":"stream-1","through":1,"errors":null}
+```
+
+`through` is the highest sequence number durably acknowledged. `errors` is null or a list of `{index, code, message}` objects for per-row rejections.
+
+```json
+{"type":"stream_close","id":"stream-1"}
+```
+
+```json
+{"type":"stream_closed","id":"stream-1"}
+```
+
+**Heartbeat (server → client, periodic):**
+
+```json
+{"type":"heartbeat","version":460}
+```
+
+`version` carries the current global change sequence. Clients can use this to detect lag.
+
+**Ping / pong (client liveness check):**
+
+```json
+{"type":"ping"}
+```
+
+```json
+{"type":"pong"}
+```
+
+**Long-poll connect:**
 
 ```http
 POST /api/databases/appdb/stream/longpoll/connect

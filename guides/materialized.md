@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P4, P10, P11
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P10/`, `docs/tasks/P11/`
@@ -218,8 +218,8 @@ If you create a materialized query with standard helpers and no special options:
 - MQ types declared in enum but not implemented end-to-end as maintainers:
   - `FirstPerKey`
   - `TopNPerGroup`
-- TypeScript and HTTP management surface for MQ lifecycle:
-  - no first-class create/drop/list/status API path for MQ definitions in server/TS SDK.
+
+Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list/status) were shipped in P16 Epic H (task H.3) and are no longer reserved. See §2.11 for the API reference.
 
 ## 2.5 Phase coverage matrix
 
@@ -435,6 +435,50 @@ Expected result: MQ is created and eventually `Ready`; default query may route t
 
 Common mistake: assuming `CreateMaterializedQueryAsync` alone builds maintainers for all enum types; only implemented pattern paths are fully functional.
 
+### TypeScript example (lifecycle management via `client.materializedQueries`)
+
+The TypeScript management API was shipped in P16 (Epic H, task H.3). Use `client.materializedQueries` to create, drop, list, check status, and query MQ results.
+
+```typescript
+import { createAoudaClient } from "@aouda/client";
+import { MaterializedQueryType } from "@aouda/client";
+
+const client = createAoudaClient({
+  serverUrl: "http://localhost:5000",
+  database: "appdb",
+});
+
+// Create a latest-per-key MQ (type 1 = LatestPerKey)
+await client.materializedQueries.create({
+  name: "latest_order_per_customer",
+  sourceTable: "orders",
+  type: 1,
+  config: {
+    groupByColumn: "customer_id",
+    orderByColumn: "created_at",
+    descending: true,
+  },
+});
+
+// Check status (state: 0=Building, 1=Ready, 2=Rebuilding, 3=Error)
+const status = await client.materializedQueries.status("latest_order_per_customer");
+console.log(status.state, status.rowCount);
+
+// List all materialized queries for the database
+const all = await client.materializedQueries.list();
+
+// Execute a query directly against the MQ result set
+const result = await client.materializedQueries.query("latest_order_per_customer");
+console.log(result.rows);
+
+// Drop the MQ and its result table
+await client.materializedQueries.drop("latest_order_per_customer");
+```
+
+Expected result: MQ is created, transitions to `state: 1` (Ready), and the result set is queryable directly or as a normal table.
+
+The `MaterializedQueryType` constant object maps names to their numeric wire values: `{ LatestPerKey: 1, FirstPerKey: 2, Aggregate: 3, Filter: 4, TopNPerGroup: 5 }`. Only `LatestPerKey` (1), `Aggregate` (3), and `Filter` (4) are fully shipped end-to-end. Passing `FirstPerKey` (2) or `TopNPerGroup` (5) creates a definition record but no maintainer is wired.
+
 ### TypeScript example (query and subscribe MQ result as table)
 
 ```typescript
@@ -456,11 +500,47 @@ const sub = client.table("latest_order_per_customer").subscribe({
 
 Expected result: query and subscription both work through regular table APIs.
 
-Common mistake: looking for a dedicated `client.materializedQueries.*` management API in TypeScript (not currently available).
+Common mistake: the dedicated `client.materializedQueries.*` API is for lifecycle management (create/drop/list/status); reading result rows still uses the normal table query or subscribe path, or `client.materializedQueries.query(name)` for a direct snapshot read.
 
 ### HTTP / protocol examples
 
-Query MQ result table (same as normal table):
+**MQ lifecycle management (shipped in P16 SH2):**
+
+```http
+POST /api/databases/appdb/materialized-queries
+Content-Type: application/json
+
+{
+  "version": 1,
+  "name": "latest_order_per_customer",
+  "sourceTable": "orders",
+  "type": 1,
+  "configJson": "{\"groupByColumn\":\"customer_id\",\"orderByColumn\":\"created_at\",\"descending\":true}"
+}
+```
+
+```http
+GET /api/databases/appdb/materialized-queries
+```
+
+```http
+GET /api/databases/appdb/materialized-queries/latest_order_per_customer
+```
+
+```http
+DELETE /api/databases/appdb/materialized-queries/latest_order_per_customer
+```
+
+**Query MQ result set directly:**
+
+```http
+POST /api/databases/appdb/materialized-queries/latest_order_per_customer/query
+Content-Type: application/json
+
+{}
+```
+
+**Query MQ result table via standard query endpoint (same as normal table):**
 
 ```http
 POST /api/databases/appdb/query
@@ -478,7 +558,7 @@ Content-Type: application/json
 }
 ```
 
-Streaming subscribe (same as normal target):
+**Streaming subscribe (same as normal target):**
 
 ```json
 {
@@ -496,11 +576,11 @@ Common mistake: expecting a protocol field like `target_kind = materialized_quer
 
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Create latest-per-key MQ | `CreateLatestPerKeyAsync(...)` | Missing | Missing | Partial | .NET-only management surface |
-| Create aggregate MQ | `CreateAggregateQueryAsync(...)` | Missing | Missing | Partial | .NET-only management surface |
-| Create filter MQ | `CreateFilterQueryAsync(...)` | Missing | Missing | Partial | .NET-only management surface |
-| Generic create/drop/list/status | `CreateMaterializedQueryAsync`, `DropMaterializedQueryAsync`, `ListMaterializedQueriesAsync`, `GetMaterializedQueryStatusAsync` | Missing | Missing | Partial | HTTP/TS management parity not shipped |
-| Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute()` | `POST /api/databases/{db}/query` | Implemented | Preferred cross-surface path is normal table query |
+| Create latest-per-key MQ | `CreateLatestPerKeyAsync(...)` | `client.materializedQueries.create(spec)` with `type: 1` | `POST /api/databases/{db}/materialized-queries` | Implemented | TS and HTTP management surfaces shipped in P16 |
+| Create aggregate MQ | `CreateAggregateQueryAsync(...)` | `client.materializedQueries.create(spec)` with `type: 3` | Same endpoint | Implemented | TS and HTTP shipped in P16 |
+| Create filter MQ | `CreateFilterQueryAsync(...)` | `client.materializedQueries.create(spec)` with `type: 4` | Same endpoint | Implemented | TS and HTTP shipped in P16 |
+| Generic create/drop/list/status | `CreateMaterializedQueryAsync`, `DropMaterializedQueryAsync`, `ListMaterializedQueriesAsync`, `GetMaterializedQueryStatusAsync` | `client.materializedQueries.create/drop/list/status` | `GET/POST/DELETE /api/databases/{db}/materialized-queries[/{name}]` | Implemented | Full TS + HTTP surface shipped in P16 |
+| Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute()` or `client.materializedQueries.query(name)` | `POST /api/databases/{db}/query` or `POST /api/databases/{db}/materialized-queries/{name}/query` | Implemented | Two paths: normal table query or dedicated MQ query endpoint |
 | Subscribe MQ results | `GetTable(queryName).SubscribeAsync()` pattern in client tests | `client.table(queryName).subscribe(...)` | standard `subscribe` message `target=queryName` | Implemented | No MQ-specific target type |
 | Auto-routing base query to MQ | `TableQuery` matcher + `WithDirectScan()` | Missing explicit control | Not exposed as route flag | Partial | Routing logic is server-side engine behavior |
 | Explain routing decision | `ExplainRoutingAsync(...)` | Missing | Missing | Partial | .NET diagnostic API only |
@@ -509,7 +589,6 @@ Common mistake: expecting a protocol field like `target_kind = materialized_quer
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| Create/drop/list/status MQs via server API | No dedicated HTTP controller + TS wrappers | Manage in .NET engine host; consume results as tables | Follow-up from P4 Epic H parity work | High |
 | Distinct not-ready subscription error | No `MATERIALIZED_QUERY_NOT_READY` protocol/server code | Current `TABLE_NOT_FOUND` handling | `docs/BACKLOG.md` BL-053 | Low |
 | JOIN-based MQ definitions | No query/API support for JOIN materialization | Build denormalized source table first | `docs/BACKLOG.md` BL-010 (depends BL-009) | Medium |
 | Rich routed-query controls in TS | No TS equivalent of .NET `WithDirectScan()` | Use query shape changes / backend controls | Future query API parity work | Medium |

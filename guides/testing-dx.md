@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-04-01
+Last updated: 2026-05-22
 
 Coverage phases: P7, P11, P12, P13
 Primary task folders: `docs/tasks/P7/`, `docs/tasks/P11/`, `docs/tasks/P12/`, `docs/tasks/P13/`
@@ -114,6 +114,7 @@ If you do nothing beyond basic package install and default options:
 | `AoudaTestServerOptions.DataPath` | `null` | Temp directory is auto-created and deleted on dispose |
 | `AoudaTestServerOptions.Port` | `5433` | Document-only under TestHost (useful for parity/config readability) |
 | `AoudaTestServerOptions.ConfigureServices` | `null` | No service overrides unless caller opts in |
+| `AoudaTestServerOptions.CorsAllowedOrigins` | `null` | CORS policy not injected; cross-origin requests fail |
 | `aouda-test --scenario` | `all` | Full scenario category set runs by default |
 | `aouda-test --duration` | `300` | Global max runtime cap in seconds |
 | `aouda-test --concurrency` | `10` | Shared default client parallelism |
@@ -308,6 +309,7 @@ Key implementation anchors:
 | `AoudaTestServerOptions.DataPath` | `string?` | `null` | null or valid path | .NET test code | Null => ephemeral with auto-delete |
 | `AoudaTestServerOptions.Port` | `int` | `5433` | int | .NET test code | Informational in TestServer mode |
 | `AoudaTestServerOptions.ConfigureServices` | `Action<IServiceCollection>?` | `null` | callback or null | .NET test code | Allows service overrides in tests |
+| `AoudaTestServerOptions.CorsAllowedOrigins` | `IReadOnlyList<string>?` | `null` | list of origin strings or null | .NET test code | Null disables CORS policy injection; set to allow cross-origin requests in test scenarios (e.g. `["http://localhost:3000"]`) |
 | `aouda dev --port` | int | `5433` | positive int | CLI | Kestrel/TestServer parity option |
 | `aouda dev --data` | string? | `null` | path or null | CLI | Null => ephemeral dev mode |
 | `aouda dev --database` | string | `default` | string | CLI | Initial dev DB |
@@ -533,7 +535,7 @@ Suggested tuning sequence:
 
 ## 2.15 Verification ledger
 
-Last verification date (UTC): `2026-04-01`.
+Last verification date (UTC): `2026-04-01` (package tests); supplementary source audit `2026-05-22`.
 
 | Verification scope | Command | Result | Date (UTC) | Notes |
 |---|---|---|---|---|
