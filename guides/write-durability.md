@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P0, P1, P6, P7
 Primary task folders: `docs/tasks/P6/`, `docs/tasks/P7/`
@@ -120,11 +120,11 @@ When you do not set durability knobs explicitly:
   - Database default `EnableWal = true` (`DatabaseOptions`).
   - Table-level `Durability.EnableWal` is nullable; null inherits database default.
 - Replication mode:
-  - Database default `ReplicationMode = Sync`.
+  - Database default `ReplicationMode = Replicate`.
 - Write concern:
-  - Database default `WriteConcern = Majority`.
+  - Database default `WriteConcern = One`.
   - Database default `WriteConcernTimeoutMs = 5000`.
-  - Database default timeout behavior `OnWriteConcernTimeout = Fail`.
+  - Database default timeout behavior `OnWriteConcernTimeout = DegradeAndLog`.
   - Per-write override can be sent on DML protocol payloads.
 - Effective resolution precedence:
   1. Per-write override (`Insert/Update/Delete` request field)
@@ -267,23 +267,23 @@ Design characteristics:
 
 ### Server configuration (`appsettings.json` -> `DatabaseConfigSection`)
 
-| Setting | Scope | Type | Default | Notes |
-|---|---|---|---|---|
-| `EnableWal` | Database default | bool | `true` | Can be overridden by table durability when API wired. |
-| `ReplicationMode` | Database default | enum string | `Sync` | Parsed via `DatabaseConfigConversion`. |
-| `WriteConcern` | Database default | enum string | `Majority` | Validated by options validator. |
-| `WriteConcernTimeoutMs` | Database default | int | `5000` | Validator enforces minimum (100ms). |
-| `OnWriteConcernTimeout` | Database default | enum string | `Fail` | `Fail`, `Degrade`, `DegradeAndLog`. |
+| Setting | Scope | Type | Default | Allowed values | Notes |
+|---|---|---|---|---|---|
+| `EnableWal` | Database default | bool | `true` | `true`, `false` | Can be overridden per table when the table durability API is wired. |
+| `ReplicationMode` | Database default | enum string | `Replicate` | `Replicate`, `DoNotReplicate` | Whether this database participates in WAL streaming replication. |
+| `WriteConcern` | Database default | enum string | `One` | `One`, `Majority`, `All` | `One` = primary ACK only (async replication); `Majority` = quorum of replicas; `All` = every configured replica must ACK. |
+| `WriteConcernTimeoutMs` | Database default | int | `5000` | `>=100` | Milliseconds to wait for replica ACKs before applying the timeout behavior. Validator enforces minimum of 100ms. |
+| `OnWriteConcernTimeout` | Database default | enum string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | `Fail` = return an error to the caller; `Degrade` = return success without full ACKs; `DegradeAndLog` = same as `Degrade` but also writes a server warning log. |
 
 ### Engine/catalog durability model (`TableDurabilityOptions`)
 
-| Property | Type | Nullable | Meaning |
-|---|---|---|---|
-| `EnableWal` | bool | yes | Table WAL override; null inherits db setting. |
-| `EnableReplication` | bool | yes | Table replication participation override. |
-| `WriteConcern` | enum | yes | Table default write concern override. |
-| `WriteConcernTimeoutMs` | int | yes | Table default timeout override. |
-| `OnWriteConcernTimeout` | enum | yes | Table default timeout behavior override. |
+| Property | Type | Nullable | Allowed values | Meaning |
+|---|---|---|---|---|
+| `EnableWal` | bool | yes | `true`, `false`, `null` | WAL override for this table. `null` inherits the database default. Cannot be `true` if the database has `EnableWal = false`. |
+| `EnableReplication` | bool | yes | `true`, `false`, `null` | Whether this table's WAL frames are included in the replication stream. `null` inherits the database default. |
+| `WriteConcern` | enum | yes | `One`, `Majority`, `All`, `null` | Write concern override for this table. `null` inherits the database default. Same semantics as the database-level setting. |
+| `WriteConcernTimeoutMs` | int | yes | `>=100`, `null` | Timeout override in milliseconds. `null` inherits the database default. |
+| `OnWriteConcernTimeout` | enum | yes | `Fail`, `Degrade`, `DegradeAndLog`, `null` | Timeout behavior override. `null` inherits the database default. Same semantics as the database-level setting. |
 
 Validation and invariants:
 - Table `EnableWal = true` is invalid when database `EnableWal = false`.
@@ -313,7 +313,7 @@ await client.Databases.CreateAsync(new CreateDatabaseRequest
 {
     Name = "orders",
     EnableWal = true,
-    ReplicationMode = "Sync"
+    ReplicationMode = "Replicate"
 });
 
 // NOTE: Current RemoteTableQuery insert/update/delete APIs do not yet expose
@@ -333,7 +333,7 @@ const client = new AoudaClient("http://localhost:5000");
 
 await client.databases.create("orders", {
   enableWal: true,
-  replicationMode: "sync"
+  replicationMode: "Replicate"
 });
 
 // Current query builder does not expose writeConcern on insert/update/delete.
@@ -351,7 +351,7 @@ Content-Type: application/json
 {
   "name": "orders",
   "enableWal": true,
-  "replicationMode": "Sync"
+  "replicationMode": "Replicate"
 }
 ```
 

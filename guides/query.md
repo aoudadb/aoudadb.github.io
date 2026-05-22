@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-05-22
 
 Coverage phases: P3, P4, P7, P12
 Primary task folders: `docs/tasks/P3/`, `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P12/`
@@ -153,10 +153,10 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | REST query endpoint with validation and typed errors | Yes | No | No | P4 EpicA report + `QueryController` + `QueryIntegrationTests` | Supports request/body validation and protocol error mapping. |
 | Fluent projection/filter/pagination/ordering in engine API | Yes | No | No | `TableQuery` + storage tests + API tests | Immutable chaining with ordering and pagination behavior. |
 | .NET remote fluent ordering/query parity | Yes | No | No | `RemoteTableQuery` + client wiring | Includes `OrderBy`, `ThenBy`, `WithCrossPartitionAccess`. |
-| TypeScript fluent ordering/query parity | Yes | Partial | No | `query-builder.ts` + `query-builder.test.ts` | Core parity present; nested group API not exposed. |
+| TypeScript fluent ordering/query parity | Yes | No | No | `query-builder.ts` + `query-builder.test.ts` | Core parity present including nested group API (`whereGroup()`). Resolved P14, BL-044. |
 | Nested boolean groups over HTTP (`WhereClause.Groups`) | Yes | No | No | `Messages.cs` + `QueryTranslator` recursion | Server/wire supports nested groups. |
-| Nested boolean groups in .NET client builders | No | Yes | No | `RemoteConditionBuilder` + `QueryMessageBuilder` | Groups flattened; nested composition not fully emitted. |
-| Nested boolean groups in TypeScript builder | No | Yes | No | `aouda-client-ts/src/types.ts` + `query-builder.ts` | `WhereClause` has `and/or` only. |
+| Nested boolean groups in .NET client builders | Yes | No | No | `RemoteConditionBuilder` + `QueryMessageBuilder` | Resolved P14, BL-044; nested group composition now emitted. |
+| Nested boolean groups in TypeScript builder | Yes | No | No | `aouda-client-ts/src/query-builder.ts` (`WhereGroupBuilder`, `whereGroup()`) | `whereGroup()` builds nested `WhereClause.groups` entries. Resolved P14, BL-044. |
 | Hot + cold + unflushed HRA unified visibility | Yes | No | No | P4 R10.4 report + `TableQuery` + P7 summary tests | Virtual hot segment merged into query execution paths. |
 | Delta segment query inclusion | Yes | No | No | P4 BL007 report + `QueryEngine` page reader delta branch | Transparent to callers. |
 | Page pruning and multi-column pruning | Yes | Partial | No | `QueryEngine`, `RowFilterEngine`, `PagePruner` usage | Ongoing tuning and backlog refinement remain. |
@@ -300,19 +300,26 @@ Precedence/override notes:
 | `lte` | Less than or equal | `{ "column":"price", "op":"lte", "value":1000 }` |
 
 Notes:
-- Server-side validator currently accepts only the six operators above for this query API.
+- The server-side `QueryTranslator.IsValidOperator` accepts only the six comparison operators above (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`). Requests containing any other operator string are rejected with a validation error.
+- The TypeScript client also accepts user-facing operators `in`, `notIn`, `like`, `isNull`, `isNotNull`, and `between`. The `isNull`/`isNotNull` and `between` operators are expanded client-side to standard wire predicates before the request is sent (see SDK mapping table below). The `in`, `notIn`, and `like` operators are translated to wire ops `in`, `nin`, `like` respectively, but the server's current validator rejects them — these are planned for a future server-side extension.
 - Type normalization is column-aware in `QueryTranslator` (for example `Timestamp`, `Date`, `Bool`, unsigned numeric types).
 
 #### SDK symbol/operator mapping
 
-| SDK input | Sent wire op |
-|---|---|
-| `=` | `eq` |
-| `!=` | `ne` |
-| `>` | `gt` |
-| `>=` | `gte` |
-| `<` | `lt` |
-| `<=` | `lte` |
+| SDK input | SDK | Sent wire op | Server-side support |
+|---|---|---|---|
+| `=` | All | `eq` | Yes |
+| `!=` | All | `ne` | Yes |
+| `>` | All | `gt` | Yes |
+| `>=` | All | `gte` | Yes |
+| `<` | All | `lt` | Yes |
+| `<=` | All | `lte` | Yes |
+| `in` | TypeScript only | `in` | No — server rejects; planned extension |
+| `notIn` | TypeScript only | `nin` | No — server rejects; planned extension |
+| `like` | TypeScript only | `like` | No — server rejects; planned extension |
+| `isNull` | TypeScript only | `eq null` (expanded client-side) | Yes — expanded before sending |
+| `isNotNull` | TypeScript only | `ne null` (expanded client-side) | Yes — expanded before sending |
+| `between` | TypeScript only | `gte min` + `lte max` (expanded client-side) | Yes — two AND predicates |
 
 #### Other common query options
 
@@ -333,20 +340,19 @@ Notes:
 |---|---|---|---|---|---|
 | Basic query execute | `RemoteTableQuery.ToColumnarAsync()/ToListAsync()` | `table().execute()` | `POST /api/databases/{db}/query` | Implemented | Columnar is default response shape. |
 | Filtering (AND-style chaining) | `.Where(...)`, `.WhereAnd(...)`, `.WhereOr(...)` | `.where(...)` (AND chaining) | `where.and`, `where.or` | Implemented | TS builder emits `and` for chained where. |
-| Nested boolean groups | Partial (flattening in builder path) | Missing builder surface | `where.groups` supported | Partial | Server supports; SDK ergonomics lag (`BL-044`). |
+| Nested boolean groups | `.whereGroup()` / `WhereGroupBuilder` (P14, BL-044) | `.whereGroup()` / `WhereGroupBuilder` (P14, BL-044) | `where.groups` supported | Implemented | Both .NET and TypeScript builder surfaces now emit nested `groups`. |
 | Projection | `.Select(...)` | `.select(...)` | `select` | Implemented | Null/omitted means all columns. |
 | Pagination | `.Skip()`, `.Limit()` | `.offset()`, `.limit()` | `offset`, `limit` | Implemented | `limit=0` treated as unlimited. |
 | Ordering | `.OrderBy().ThenBy()` | `.orderBy().thenBy()` | `orderBy[]` | Implemented | Max 8 order-by columns. |
-| Count convenience | `.CountAsync()` → `/query/count` | `.count()` (query-based until updated) | `POST .../query/count` | Partial | TypeScript client follow-up. |
+| Count convenience | `.CountAsync()` → `/query/count` | `.count()` uses `/query?limit=0` (not the dedicated endpoint) | `POST .../query/count` | Partial | .NET uses dedicated count endpoint; TS adoption is an open follow-up. |
 | Cross-partition query flag | `.WithCrossPartitionAccess()` | No dedicated fluent method in current builder | `crossPartitionAccess` bool | Partial | TS can still send raw request outside builder. |
 
 ### B) Missing API matrix
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| Nested group builder parity (.NET) | `.Group(...)`-style nested condition API in `RemoteConditionBuilder` | Build raw `QueryMessage.Where.Groups` when using lower-level transport | `BL-044` | High |
-| Nested group builder parity (TypeScript) | `groups` in `WhereClause` + fluent group builder | Use flat `and/or` only, or custom transport payload | `BL-044` | High |
-| Efficient count endpoint | Implemented (`/query/count`, .NET) | Use query execution with `limit=0` and rowCount | TS adoption | Medium |
+| TypeScript `in`/`notIn`/`like` operators — server-side support | Server `QueryTranslator.IsValidOperator` only accepts `eq/ne/gt/gte/lt/lte`; TS client sends `in`/`nin`/`like` which the server rejects | Use `eq`/`ne` predicates or filter client-side until server-side extension ships | Planned extension of `IsValidOperator` | High |
+| TypeScript `count()` dedicated endpoint adoption | TS `count()` uses `/query?limit=0` instead of `POST /query/count` | .NET `CountAsync` is correct; TS is functionally equivalent but incurs columnar decode overhead | TS client adoption | Medium |
 | Fluent JOIN workflows | `Join()` API across SDK fluent builders | Use planner/internal paths only (no stable public fluent route) | `BL-009` | High |
 | JOINed materialized query support | Materialized-query JOIN definition + maintenance | Single-table materialized patterns only | `BL-010` | Medium |
 
@@ -519,8 +525,8 @@ Quick-answer matrix:
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| Nested `WhereClause.Groups` parity across SDKs | Server supports groups but SDK ergonomics lag | Add SDK tests that round-trip nested groups (groups-within-groups) into wire payload | High |
-| Depth guardrail for recursive groups | Prevent extreme nested payload abuse | Add translator validation tests for max group depth and explicit error code | High |
+| TypeScript `in`/`notIn`/`like` server-side wiring | TS client emits `in`/`nin`/`like` wire ops that the server `IsValidOperator` currently rejects; real gap between client behavior and server validation | Once server-side validator is extended, add integration tests round-tripping these operators end-to-end | High |
+| Depth guardrail regression coverage | `MaxWhereClauseNestingDepth = 5` is implemented in `ProtocolConstants` and validated by `QueryTranslator`; resolved P14, BL-044 | Add regression tests that submit groups at depths 5 (allowed) and 6 (rejected) to confirm boundary is stable | Medium |
 | Count endpoint efficiency baseline | Baseline large-table count latency vs full query | Add benchmark comparing `/query/count` vs materialized full query | Medium |
 | Cross-partition query builder parity in TS | Missing fluent API increases accidental inconsistencies | Add TS builder API + integration tests for `crossPartitionAccess` request emission | Medium |
 | Materialized query auto-routing explainability tests | Ensure routing decisions remain deterministic | Extend `MaterializedQueryAutoRoutingTests` with coverage of rejected matches and fallback path | Medium |
@@ -533,7 +539,7 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 
 - ~~Nested group construction is not first-class in current SDK query builders~~ — ✅ **Resolved (P14, BL-044)**: WhereClause.Groups adopted end-to-end across SDKs/helpers with nested group support.
 - ~~No max-depth validation for deeply recursive `WhereClause.Groups`~~ — ✅ **Resolved (P14, BL-044)**: depth guardrails implemented.
-- ~~TypeScript client count may still use full query~~ — ✅ **Resolved (P14, BL-026)**: server-side `POST .../query/count` endpoint shipped; both .NET `CountAsync` and TS `count()` use it.
+- ~~TypeScript client count may still use full query~~ — ⚠️ **Partially resolved (P14, BL-026)**: server-side `POST .../query/count` endpoint is shipped and .NET `RemoteTableQuery.CountAsync` uses it. However, the TypeScript `count()` method in `query-builder.ts` still sends `POST .../query` with `limit=0` and reads `rowCount` from the response — it does **not** use the dedicated `/query/count` endpoint. The TS client adoption remains an open follow-up.
 - ~~Fluent/public JOIN APIs remain unavailable~~ — ✅ **Resolved (P14 BL-009, P15)**: complete join engine with all five join types (INNER, LEFT, RIGHT, FULL OUTER, CROSS), post-join SELECT/WHERE/ORDER BY/LIMIT/aggregates, multi-column keys, chained joins (up to 8 tables), Grace hash join with spill-to-disk. Exposed in both .NET `TableQuery` and TypeScript `@aouda/client` query builders.
 - ~~Bool predicate overload parity~~ — ✅ **Resolved (P14, BL-038)**: `ConstBool`, `ColumnRef.Eq/Ne(bool)` added.
 - ~~Guid PK mixed-type comparison failure~~ — ✅ **Resolved (P14, BL-039)**: added `IsGuid`/`CompileGuid` path in `RowFilterEngine`.
