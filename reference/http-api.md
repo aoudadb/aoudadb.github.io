@@ -493,6 +493,8 @@ Execute a query against a table.
 | `orderBy` | object[] | No | Sort columns (see below) |
 | `offset` | number | No | Rows to skip (default: 0) |
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
+| `crossPartitionAccess` | boolean | No | When `true`, queries on partitioned tables do not require a partition-key filter. Without this, queries on partitioned tables without a partition filter return `PARTITION_FILTER_REQUIRED`. Default: `false`. |
+| `joins` | object[] | No | JOIN clauses to apply in order (see below). |
 
 **Where Clause:**
 
@@ -500,9 +502,19 @@ Execute a query against a table.
 {
   "and": [{"column": "...", "op": "...", "value": ...}],
   "or": [{"column": "...", "op": "...", "value": ...}],
-  "groups": [{"and": [...], "or": [...]}]
+  "groups": [
+    {
+      "and": [{"column": "tenant_id", "op": "eq", "value": 42}]
+    }
+  ]
 }
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `and` | Condition[] | All conditions must match (AND). |
+| `or` | Condition[] | Any condition must match (OR). |
+| `groups` | WhereClause[] | Nested sub-clauses. Each group is AND'd with the top-level conditions. Enables safe composition of independent filter layers (e.g., PLS partition scope + RLS row scope). Maximum nesting depth: **5** (`ProtocolConstants.MaxWhereClauseNestingDepth`). |
 
 `groups` contains nested `WhereClause` objects that are AND-combined with the top-level `and`/`or`. Use `groups` to express nested boolean logic (e.g. `AND(OR(...))`). Each group can itself contain `and`, `or`, and nested `groups`.
 
@@ -520,6 +532,13 @@ Execute a query against a table.
 | `nin` | Value not in array | `["deleted", "archived"]` |
 | `like` | SQL LIKE pattern | `"A%"` |
 
+Encoding conventions:
+- `isNull` — encode as `{ "op": "eq", "value": null }`
+- `isNotNull` — encode as `{ "op": "ne", "value": null }`
+- `between` — encode as two conditions: `{ "op": "gte", "value": lower }` + `{ "op": "lte", "value": upper }`
+
+Unknown operator strings return `INVALID_OPERATOR` (400).
+
 **Order By Clause:**
 
 ```json
@@ -535,6 +554,37 @@ Execute a query against a table.
 | `descending` | boolean | No | Sort direction: `false` (default) = ASC, `true` = DESC |
 
 **Note:** Maximum 8 ORDER BY columns. First column is primary sort, subsequent columns are tie-breakers.
+
+**Join Clause:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `table` | string | Yes | Right-side table name to join. |
+| `type` | string | No | Join type: `"inner"` (default), `"left"`, `"right"`, `"full"`, `"cross"`. |
+| `leftColumn` | string | No | Left key column for single-column joins. |
+| `rightColumn` | string | No | Right key column for single-column joins. |
+| `leftColumns` | string[] | No | Left key columns for multi-column joins. |
+| `rightColumns` | string[] | No | Right key columns for multi-column joins. |
+
+For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
+
+**Join example:**
+```json
+{
+  "database": "mydb",
+  "table": "orders",
+  "select": ["orders.id", "customers.name", "orders.total"],
+  "joins": [
+    {
+      "table": "customers",
+      "type": "inner",
+      "leftColumn": "customer_id",
+      "rightColumn": "id"
+    }
+  ],
+  "limit": 100
+}
+```
 
 **Columnar Response (default):**
 
@@ -1033,7 +1083,8 @@ Insert one or more rows into a table.
   "rows": [
     { "status": "pending", "price": 100.50 },
     { "status": "shipped", "price": 200.00 }
-  ]
+  ],
+  "writeConcern": "majority"
 }
 ```
 
@@ -1041,6 +1092,7 @@ Insert one or more rows into a table.
 |-------|------|----------|-------------|
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
 | `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
+| `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
 
 **Response:** `200 OK`
 
@@ -1051,6 +1103,13 @@ Insert one or more rows into a table.
   "generatedValues": {
     "0": { "id": 42 },
     "1": { "id": 43 }
+  },
+  "writeConcernStatus": {
+    "requested": "majority",
+    "achieved": "majority",
+    "acksReceived": 2,
+    "acksRequired": 2,
+    "wasDegraded": false
   }
 }
 ```
@@ -1060,6 +1119,17 @@ Insert one or more rows into a table.
 | `rowsInserted` | number | Number of rows successfully inserted |
 | `executionMs` | number | Server-side execution time in milliseconds |
 | `generatedValues` | object? | Generated values for auto-increment columns. Keys are row indices (as strings), values are objects mapping column names to generated values. Only present when auto-increment columns exist. |
+| `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"` (no replication wait). See `WriteConcernStatus` below. |
+
+**`WriteConcernStatus` object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `requested` | string | The write concern level that was requested. |
+| `achieved` | string | The write concern level that was actually achieved. |
+| `acksReceived` | number | Number of secondary ACKs received. |
+| `acksRequired` | number | Number of secondary ACKs required. |
+| `wasDegraded` | boolean | Whether the write was degraded due to timeout. |
 
 **Errors:**
 
@@ -1087,7 +1157,8 @@ Update rows matching a WHERE filter.
   "set": {
     "status": "shipped",
     "updated_at": "2026-02-06T12:00:00Z"
-  }
+  },
+  "writeConcern": "majority"
 }
 ```
 
@@ -1096,13 +1167,15 @@ Update rows matching a WHERE filter.
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
 | `where` | object | Yes | WHERE clause with at least one predicate. Uses same format as query endpoint. Server returns 400 if missing or empty. |
 | `set` | object | Yes | Column values to update. Keys are column names, values are new values. Server returns 400 if missing or empty. Server validates column names exist in schema. |
+| `writeConcern` | string? | No | Write-concern override. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
 
 **Response:** `200 OK`
 
 ```json
 {
   "rowsUpdated": 3,
-  "executionMs": 12
+  "executionMs": 12,
+  "writeConcernStatus": null
 }
 ```
 
@@ -1110,6 +1183,7 @@ Update rows matching a WHERE filter.
 |-------|------|-------------|
 | `rowsUpdated` | number | Number of rows affected by the update |
 | `executionMs` | number | Server-side execution time in milliseconds |
+| `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"`. Same structure as in insert response. |
 
 **Note:** Returns `rowsUpdated: 0` with 200 status when WHERE predicates match no rows. This is not an error.
 
@@ -1134,20 +1208,24 @@ Delete rows matching a WHERE filter.
       { "column": "status", "op": "eq", "value": "cancelled" },
       { "column": "created_at", "op": "lt", "value": "2025-01-01" }
     ]
-  }
+  },
+  "writeConcern": "majority"
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
 | `where` | object | Yes | WHERE clause with at least one predicate. Uses same format as query endpoint. Server returns 400 if missing or empty. |
+| `writeConcern` | string? | No | Write-concern override. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
 
 **Response:** `200 OK`
 
 ```json
 {
   "rowsDeleted": 5,
-  "executionMs": 8
+  "executionMs": 8,
+  "writeConcernStatus": null
 }
 ```
 
@@ -1155,6 +1233,7 @@ Delete rows matching a WHERE filter.
 |-------|------|-------------|
 | `rowsDeleted` | number | Number of rows deleted |
 | `executionMs` | number | Server-side execution time in milliseconds |
+| `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"`. Same structure as in insert response. |
 
 **Note:** Returns `rowsDeleted: 0` with 200 status when WHERE predicates match no rows. This is not an error.
 
@@ -1786,22 +1865,715 @@ Get cluster topology.
 
 The following features are not yet supported:
 
-1. **Nested AND/OR**: Only one level of AND and OR is supported. Nested predicates (e.g., `AND(OR(...))`) are not supported.
-2. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC.
-3. **Expression-based ORDER BY**: Only column names can be used for ordering, not expressions.
+1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC.
+2. **Expression-based ORDER BY**: Only column names can be used for ordering, not expressions.
 
-These limitations are tracked in the backlog for future enhancement.
+**Note — WhereClause nesting:** Earlier versions of this document stated that nested AND/OR was not supported. This is no longer accurate. The `groups` field in `WhereClause` supports up to **5** levels of nesting (`ProtocolConstants.MaxWhereClauseNestingDepth = 5`). Each group is AND'd with the top-level conditions, enabling safe composition of independent filter layers (e.g., partition scope + row scope). See the `groups` field description in the [Query Endpoint](#query-endpoint) section for details.
+
+Remaining limitations are tracked in the backlog for future enhancement.
 
 ---
 
 ## Future Extensions
 
-The following are not part of v1 but may be added in future versions:
+The following are candidates for future versions:
 
-- Binary protocol support (MessagePack, Protobuf)
-- WebSocket streaming for large result sets
-- Batch query endpoint
+- Protobuf binary protocol support (MessagePack is already implemented — see [WebSocket Streaming Protocol](#websocket-streaming-protocol) below)
+- Batch HTTP query endpoint (multiple queries in a single request)
 - GraphQL endpoint
+
+---
+
+## WebSocket Streaming Protocol
+
+Aouda provides a full-duplex WebSocket API for real-time table subscriptions and high-throughput streaming writes.
+
+### Endpoint
+
+```
+ws://{host}/api/ws
+wss://{host}/api/ws   (TLS)
+```
+
+### Connection and Wire Modes
+
+Upon connecting, the client **must** immediately send an `auth` message. All non-auth messages sent before authentication completes are rejected.
+
+Messages default to JSON encoding. MessagePack binary encoding can be negotiated by setting `"wire_mode": "msgpack"` in the `auth` message. The server echoes the accepted mode in `auth_ok`. Once negotiated, all messages in both directions use the agreed wire mode.
+
+**Serialization:** All field names on the wire are `snake_case` (e.g., `wire_mode`, `resume_from`, `stream_open`).
+
+**Wire mode values:**
+
+| Wire mode string | Description |
+|---|---|
+| `"json"` | JSON text (default) |
+| `"msgpack"` | MessagePack binary |
+
+### Type Discriminator
+
+Every message is a JSON object (or MessagePack map) with a top-level `"type"` field. The receiver peeks `"type"` to dispatch to the correct deserializer. Unknown `type` values are silently discarded.
+
+---
+
+### Client → Server Messages
+
+#### `auth`
+
+Authenticate the connection and optionally negotiate wire mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"auth"` |
+| `token` | string? | No | Bearer token. Required when server auth is enabled. |
+| `database` | string | Yes | Database name this connection is scoped to. |
+| `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
+
+**Example:**
+```json
+{
+  "type": "auth",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "database": "my_db",
+  "wire_mode": "json"
+}
+```
+
+**Server responds with:** `auth_ok` or `auth_error`.
+
+---
+
+#### `subscribe`
+
+Subscribe to a table stream. The server immediately sends a `snapshot` of current matching rows, then streams `change` messages as rows are inserted, updated, or deleted.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"subscribe"` |
+| `id` | string | Yes | Client-assigned subscription ID. Must be unique per connection. Used to correlate `snapshot`, `change`, and `error` messages. |
+| `target` | string | Yes | Table name to subscribe to. |
+| `filter` | object? | No | Optional filter predicate (same `WhereClause` format as the query endpoint). Only matching rows appear in the snapshot and change stream. |
+| `resume_from` | number? | No | Resume from this global sequence version. When provided, the server replays changes from that point instead of sending a full snapshot. Use the `version` from a prior `snapshot` or `change` message. |
+
+**Example:**
+```json
+{
+  "type": "subscribe",
+  "id": "sub-orders-1",
+  "target": "orders",
+  "filter": {
+    "and": [{"column": "status", "op": "eq", "value": "active"}]
+  }
+}
+```
+
+**Server responds with:** `snapshot` (initial data), then `change` messages as data changes.
+
+---
+
+#### `unsubscribe`
+
+Cancel an active subscription.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"unsubscribe"` |
+| `id` | string | Yes | Subscription ID to cancel. |
+
+**Example:**
+```json
+{"type": "unsubscribe", "id": "sub-orders-1"}
+```
+
+**Server responds with:** `unsubscribed`.
+
+---
+
+#### `stream_open`
+
+Open a write stream to a table for continuous high-throughput inserts without per-batch HTTP round-trips.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"stream_open"` |
+| `id` | string | Yes | Client-assigned stream ID. Must be unique per connection. |
+| `table` | string | Yes | Target table name. |
+| `mode` | string | Yes | Write mode. Currently only `"insert"` is defined. |
+
+**Example:**
+```json
+{
+  "type": "stream_open",
+  "id": "stream-metrics-1",
+  "table": "metrics",
+  "mode": "insert"
+}
+```
+
+**Server responds with:** `stream_ready`.
+
+---
+
+#### `stream_rows`
+
+Send a batch of rows on an open write stream.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"stream_rows"` |
+| `id` | string | Yes | Stream ID (must match a prior `stream_open`). |
+| `seq` | number | Yes | Monotonically increasing sequence number for this batch. Must start at 1 and increment by 1 per batch. The server uses this to detect gaps and for acknowledgement. |
+| `rows` | array | Yes | Array of row objects to insert. Same format as the HTTP insert endpoint. |
+
+**Example:**
+```json
+{
+  "type": "stream_rows",
+  "id": "stream-metrics-1",
+  "seq": 1,
+  "rows": [
+    {"sensor_id": 42, "value": 98.6, "recorded_at": "2026-05-22T11:00:00Z"},
+    {"sensor_id": 42, "value": 99.1, "recorded_at": "2026-05-22T11:00:05Z"}
+  ]
+}
+```
+
+**Server responds with:** `stream_ack` after durable write, or `error` on failure.
+
+---
+
+#### `stream_close`
+
+Signal end of a write stream. The client must not send further `stream_rows` on this ID after sending this message.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"stream_close"` |
+| `id` | string | Yes | Stream ID to close. |
+
+**Example:**
+```json
+{"type": "stream_close", "id": "stream-metrics-1"}
+```
+
+**Server responds with:** `stream_closed`.
+
+---
+
+#### `ping`
+
+Liveness check. The server responds immediately with `pong`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"ping"` |
+
+**Example:**
+```json
+{"type": "ping"}
+```
+
+---
+
+### Server → Client Messages
+
+#### `auth_ok`
+
+Successful authentication acknowledgement.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"auth_ok"` |
+| `user_id` | string? | Authenticated user ID. Null for API key or unauthenticated connections. |
+| `expires_at` | string? | ISO 8601 UTC token expiry. Null if the token does not expire. |
+| `wire_mode` | string? | Negotiated wire mode: `"json"` or `"msgpack"`. Null means `"json"`. |
+
+**Example:**
+```json
+{
+  "type": "auth_ok",
+  "user_id": "usr_abc123",
+  "expires_at": "2026-05-23T11:00:00Z",
+  "wire_mode": "json"
+}
+```
+
+---
+
+#### `auth_error`
+
+Authentication failure. The server closes the connection after sending this message.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"auth_error"` |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). |
+| `message` | string | Human-readable error description. |
+
+**Example:**
+```json
+{
+  "type": "auth_error",
+  "code": "AUTH_TOKEN_EXPIRED",
+  "message": "Token has expired"
+}
+```
+
+---
+
+#### `heartbeat`
+
+Periodic liveness signal carrying the current global sequence version. Clients can detect change-stream gaps by comparing consecutive `version` values.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"heartbeat"` |
+| `version` | number | Current global sequence version (monotonically increasing). |
+
+**Example:**
+```json
+{"type": "heartbeat", "version": 100042}
+```
+
+---
+
+#### `error`
+
+General error, optionally scoped to a subscription or stream ID.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"error"` |
+| `id` | string? | Subscription or stream ID this error is scoped to. Null for connection-level errors. |
+| `code` | string | Error code (see Error Codes section). |
+| `message` | string | Human-readable error description. |
+
+**Example:**
+```json
+{
+  "type": "error",
+  "id": "sub-orders-1",
+  "code": "TABLE_NOT_FOUND",
+  "message": "Table 'orders' does not exist"
+}
+```
+
+---
+
+#### `pong`
+
+Liveness reply to a client `ping`.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"pong"` |
+
+---
+
+#### `snapshot`
+
+Initial snapshot of a subscription's current data. Sent immediately after a successful `subscribe` (when `resume_from` is not provided or points to before the current snapshot).
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"snapshot"` |
+| `id` | string | Subscription ID this snapshot belongs to. |
+| `rows` | object[] | Current rows matching the subscription filter. Each element is a row object (`{ columnName: value, ... }`). |
+| `version` | number | Global sequence version at which this snapshot was taken. Store this value and pass it as `resume_from` on reconnect to avoid re-receiving the full snapshot. |
+
+**Example:**
+```json
+{
+  "type": "snapshot",
+  "id": "sub-orders-1",
+  "rows": [
+    {"id": 1, "status": "active", "total": 150.00},
+    {"id": 2, "status": "active", "total": 99.99}
+  ],
+  "version": 100040
+}
+```
+
+---
+
+#### `change`
+
+Incremental row change on an active subscription. Sent whenever a row matching the subscription filter is inserted, updated, or deleted.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"change"` |
+| `id` | string | Subscription ID this change belongs to. |
+| `op` | string | Operation: `"insert"`, `"update"`, or `"delete"`. |
+| `row` | object? | New row values. Present for `"insert"` and `"update"`. Null for `"delete"`. |
+| `prev` | object? | Previous row values before update. Present for `"update"` only. |
+| `key` | object? | Primary key of the affected row. Present for `"delete"`. |
+| `version` | number | Global sequence version of this change. |
+
+**Example — insert:**
+```json
+{
+  "type": "change",
+  "id": "sub-orders-1",
+  "op": "insert",
+  "row": {"id": 3, "status": "active", "total": 200.00},
+  "version": 100041
+}
+```
+
+**Example — update:**
+```json
+{
+  "type": "change",
+  "id": "sub-orders-1",
+  "op": "update",
+  "row":  {"id": 1, "status": "shipped", "total": 150.00},
+  "prev": {"id": 1, "status": "active",  "total": 150.00},
+  "version": 100042
+}
+```
+
+**Example — delete:**
+```json
+{
+  "type": "change",
+  "id": "sub-orders-1",
+  "op": "delete",
+  "key": {"id": 2},
+  "version": 100043
+}
+```
+
+---
+
+#### `unsubscribed`
+
+Confirms a subscription has been cancelled.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"unsubscribed"` |
+| `id` | string | Subscription ID that was cancelled. |
+
+**Example:**
+```json
+{"type": "unsubscribed", "id": "sub-orders-1"}
+```
+
+---
+
+#### `stream_ready`
+
+Confirms a write stream is open and ready to receive rows.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"stream_ready"` |
+| `id` | string | Stream ID that is ready. |
+
+**Example:**
+```json
+{"type": "stream_ready", "id": "stream-metrics-1"}
+```
+
+---
+
+#### `stream_ack`
+
+Acknowledges durable receipt of rows through the given sequence number. May include per-row rejection details.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"stream_ack"` |
+| `id` | string | Stream ID. |
+| `through` | number | All rows in batches with `seq ≤ through` have been durably written. |
+| `errors` | array? | Per-row rejection details. Null or absent when all rows were accepted. |
+
+**Per-row error:**
+
+| Field | Type | Description |
+|---|---|---|
+| `index` | number | 0-based row index within the rejected batch. |
+| `code` | string | Error code. |
+| `message` | string | Human-readable description. |
+
+**Example — all rows accepted:**
+```json
+{"type": "stream_ack", "id": "stream-metrics-1", "through": 3}
+```
+
+**Example — partial rejection:**
+```json
+{
+  "type": "stream_ack",
+  "id": "stream-metrics-1",
+  "through": 3,
+  "errors": [
+    {"index": 1, "code": "INVALID_VALUE", "message": "Column 'value': expected Double, got String"}
+  ]
+}
+```
+
+---
+
+#### `stream_closed`
+
+Confirms a write stream has been closed.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"stream_closed"` |
+| `id` | string | Stream ID that was closed. |
+
+**Example:**
+```json
+{"type": "stream_closed", "id": "stream-metrics-1"}
+```
+
+---
+
+### WebSocket Session Lifecycle
+
+**Subscription lifecycle:**
+```
+Client                                  Server
+  ──── auth ──────────────────────────►
+  ◄─── auth_ok ────────────────────────
+  ──── subscribe (id="sub1") ──────────►
+  ◄─── snapshot (id="sub1") ─────────── (current rows)
+  ◄─── change   (id="sub1", op=insert)  (as rows change)
+  ◄─── change   (id="sub1", op=update)
+  ──── unsubscribe (id="sub1") ────────►
+  ◄─── unsubscribed (id="sub1") ────────
+```
+
+**Write stream lifecycle:**
+```
+Client                                  Server
+  ──── stream_open (id="s1") ──────────►
+  ◄─── stream_ready (id="s1") ─────────
+  ──── stream_rows (id="s1", seq=1) ───►
+  ◄─── stream_ack  (id="s1", through=1)
+  ──── stream_rows (id="s1", seq=2) ───►
+  ──── stream_rows (id="s1", seq=3) ───►
+  ◄─── stream_ack  (id="s1", through=3)
+  ──── stream_close (id="s1") ─────────►
+  ◄─── stream_closed (id="s1") ─────────
+```
+
+---
+
+## Bulk Load API
+
+The Bulk Load API provides high-throughput batch data ingestion with durability guarantees, idempotency, and optional replication barriers. It uses a begin/append/commit pattern over HTTP.
+
+All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is NDJSON (`application/x-ndjson`); all other bodies are JSON.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/databases/{db}/bulk-load:begin` | Begin a new session. Returns `jobId`. |
+| `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (NDJSON body). |
+| `POST` | `/api/databases/{db}/bulk-load/{jobId}:commit` | Commit the session. |
+| `GET` | `/api/databases/{db}/bulk-load/{jobId}:status` | Get session status and progress. |
+| `GET` | `/api/databases/{db}/bulk-load:list` | List all sessions for this database. |
+| `POST` | `/api/databases/{db}/bulk-load/{jobId}:force-abort` | Operator abort. |
+
+---
+
+### `POST :begin`
+
+Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all subsequent requests must reference.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `database` | string | Yes | Database name (must match `{db}` in path). |
+| `tables` | string[] | Yes | Tables this load writes to. Index 0 is the primary table. Single-element array for single-table loads. When more than one table is listed, each row in `:append` calls must carry a `"_table"` discriminator field naming its destination. Empty array is rejected (400). |
+| `options` | object? | No | Load options (see below). |
+| `idempotencyKey` | string? | No | Client-supplied key. If the same key is received within the server's idempotency window (default 10 min) while the prior job is still in-flight, the same `jobId` is returned without re-acquiring the lock. |
+
+**Load options:**
+
+| Field | Type | Default | Allowed values | Description |
+|---|---|---|---|---|
+| `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
+| `pkUniquenessOverride` | string? | null | `"strict"`, `"recent"`, `"bestEffort"`, null | Override primary-key uniqueness enforcement for this load. Null = use table default. |
+| `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
+| `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
+| `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
+| `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
+
+**Response body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `jobId` | string | Server-assigned job identifier. Include in all subsequent requests for this load. |
+| `tables` | string[] | Echo of the requested tables. |
+| `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
+| `maxRowsPerAppend` | number | Maximum rows allowed per single `:append` call. Clients must chunk larger payloads. |
+| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count). |
+
+**Example:**
+```
+POST /api/databases/my_db/bulk-load:begin
+Content-Type: application/json
+
+{
+  "database": "my_db",
+  "tables": ["events"],
+  "options": {"replicationMode": "logShipSegments"},
+  "idempotencyKey": "load-2026-05-22-batch-001"
+}
+
+200 OK
+{
+  "jobId": "blj_abc123",
+  "tables": ["events"],
+  "acquiredAtUtc": "2026-05-22T09:00:00Z",
+  "maxRowsPerAppend": 50000,
+  "resumedFromDurableCursor": null
+}
+```
+
+---
+
+### `POST {jobId}:append`
+
+Append a chunk of rows to an in-flight session.
+
+**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line).
+
+When the session was begun with more than one table, each row must include a `"_table"` field naming its destination. The `"_table"` field is stripped before inserting.
+
+**Example (single table):**
+```
+POST /api/databases/my_db/bulk-load/blj_abc123:append
+Content-Type: application/x-ndjson
+
+{"sensor_id": 1, "value": 98.6, "recorded_at": "2026-05-22T09:00:01Z"}
+{"sensor_id": 2, "value": 72.1, "recorded_at": "2026-05-22T09:00:01Z"}
+```
+
+**Example (multi-table, `"_table"` discriminator required):**
+```
+{"_table": "events",     "id": 1, "type": "click"}
+{"_table": "event_meta", "event_id": 1, "browser": "Chrome"}
+```
+
+**Response body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `rowsAppended` | number | Rows accepted in **this** append call. Not necessarily durable yet. |
+| `rowsAppendedToBuffer` | number | Cumulative rows accepted into the session buffer since `:begin`. Not necessarily durable (lost on server crash before sealing). |
+| `rowsDurablyCommitted` | number | Cumulative rows in sealed segments with commit markers that have been fsync'd to WAL. Use this as the upstream offset for resume on reconnect. |
+| `acceptedAtUtc` | string | ISO 8601 UTC timestamp. |
+| `segmentsSealedSoFar` | number | Segments sealed across all tables in this job so far. |
+
+**Errors:**
+
+| Code | Status | When |
+|---|---|---|
+| `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
+| `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
+| `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `"_table"`. |
+| `BULK_LOAD_CURSOR_MISMATCH` | 409 | Client resumed from an incorrect cursor (sent rows below `rowsDurablyCommitted`). |
+
+---
+
+### `POST {jobId}:commit`
+
+Commit the session. All sealed segments become queryable.
+
+**Request body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `database` | string | Yes | — | Database name. |
+| `jobId` | string | Yes | — | Job identifier (also in the path). |
+| `waitForDeferredWork` | bool | No | `false` | If `true`, the response is held until all post-processing (PK index rebuild, CSC mirror, RaBitQ encodings) completes. |
+| `writeConcern` | string? | No | `"acknowledged"` | Replication barrier. Allowed: `"acknowledged"`, `"majority"`, `"all"`. |
+| `writeConcernTimeoutMs` | number? | No | `300000` (5 min) | Max wait for the write-concern barrier. On timeout, returns 200 OK with `writeConcernTimedOut: true`. The data is durable; replicas catch up at their own pace. |
+
+**Response body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `jobId` | string | Echo of job ID. |
+| `tables` | string[] | Tables involved in the load. |
+| `rowsLoaded` | number | Total rows durably committed across all tables. |
+| `perTableRowCounts` | object | Per-table row counts (`{ tableName: count }`). Always present. |
+| `segmentsCreated` | number | Total segments created. |
+| `committedAtUtc` | string | ISO 8601 UTC commit timestamp. |
+| `deferredWorkCompleted` | boolean | Whether deferred work completed before this response was sent. |
+| `walPosition` | number | WAL position of the closing `BulkLoadCommitted` frame. Replicas that have applied this position have the complete load. |
+| `writeConcernRequested` | string | Echo of `writeConcern` from request. |
+| `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
+| `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
+| `progress` | object? | Present only when `waitForDeferredWork: true`. Fields: `ivfAssignmentsCompleted`, `ivfAssignmentsTotal`, `raBitQEncodingsCompleted`, `raBitQEncodingsTotal`, `cscMirrorsCompleted`, `cscMirrorsTotal`, `pkIndexRebuildCompleted`, `pkIndexRebuildTotal`. |
+
+---
+
+### `GET {jobId}:status`
+
+Get current session state and progress.
+
+**Response body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `jobId` | string | Job identifier. |
+| `tables` | string[] | Tables being loaded. |
+| `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`. |
+| `rowsAppendedToBuffer` | number | Rows in buffer (not yet durable). |
+| `rowsDurablyCommitted` | number | Durably committed rows. |
+| `segmentsSealed` | number | Segments sealed so far. |
+| `startedAtUtc` | string | ISO 8601 session start time. |
+| `lastUpdatedUtc` | string | ISO 8601 last state update time. |
+| `progress` | object? | Deferred work progress. Same structure as in commit response. Null if no deferred work is in progress. |
+| `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
+| `error` | string? | Human-readable error message. Set when `state = "failed"`. |
+| `errorCode` | string? | Error code when `state = "failed"`. |
+
+---
+
+### `GET :list`
+
+List all sessions for this database.
+
+**Response body:**
+
+| Field | Type | Description |
+|---|---|---|
+| `database` | string | Database name. |
+| `jobs` | array | Array of status objects (same structure as `:status` response). |
+| `snapshotUtc` | string | UTC timestamp of this snapshot. |
+
+---
+
+### `POST {jobId}:force-abort`
+
+Operator abort of an in-flight session. Releases table locks and records the abort reason in the WAL.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `database` | string? | No | Database name (may also be in path). |
+| `jobId` | string? | No | Job identifier (may also be in path). |
+| `reason` | string | Yes | Operator-supplied reason, recorded in the WAL frame. |
+
+**Response:** `200 OK` (no body).
+
+**Errors:**
+
+| Code | Status | When |
+|---|---|---|
+| `BULK_LOAD_JOB_NOT_FOUND` | 404 | Job not found. |
+| `ALREADY_TERMINAL` | 409 | Job is already in a terminal state (`completed`, `aborted`, `failed`). |
 
 ---
 
@@ -1813,3 +2585,4 @@ The following are not part of v1 but may be added in future versions:
 | 1.1 | 2026-02-05 | Enhanced TableSummary (rowCount, createdAt, lastModifiedAt, sizeBytes), schema introspection endpoint, relationships endpoint, TypeScript generation endpoint, reference metadata in columns |
 | 1.2 | 2026-02-06 | Data mutation endpoints: insert (POST), update (PATCH), delete (DELETE) for /api/tables/{name}/rows |
 | 1.3 | 2026-03-19 | Comprehensive authentication section: credential types, auth enforcement flow, X-User-Token, server and app auth endpoint reference |
+| 2.0 | 2026-05-22 | WebSocket streaming protocol documented; Bulk Load API documented; `crossPartitionAccess`, `joins`, WhereClause `groups`; write concern on mutation messages; Known Limitations updated; Future Extensions corrected |
