@@ -191,6 +191,60 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 To add a single role without dropping existing roles, first `GET` current roles, merge client-side, then `PUT` the merged list.
 `POST .../admin/users/{id}/roles` is not supported and returns `405 Method Not Allowed`.
 
+**`GET .../admin/users/{id}/roles`** — Returns current role assignments for the user.
+
+```json
+{
+  "roles": [
+    { "roleName": "derive_admin", "scope": null },
+    { "roleName": "db_reader",    "scope": "analytics" }
+  ]
+}
+```
+
+`scope` is `null` for globally assigned roles (the common case), or an explicit string for scoped assignments.
+
+**`GET .../admin/roles`** — Returns all roles defined for the database.
+
+```json
+{
+  "roles": [
+    {
+      "id":          "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "name":        "derive_admin",
+      "description": null,
+      "isSystem":    false,
+      "createdAt":   "2026-01-15T10:30:00Z",
+      "permissions": [
+        { "resourceType": "table", "resourceName": "*", "actions": "read" }
+      ]
+    }
+  ]
+}
+```
+
+**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name.
+
+```json
+{
+  "grants": [
+    {
+      "id":           "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "userId":       "...",
+      "dimension":    "client",
+      "partitionKey": "123",
+      "accessLevel":  "read",
+      "grantedBy":    null,
+      "validFrom":    null,
+      "validTo":      null,
+      "createdAt":    "2026-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+> **All list responses are wrapped objects, never bare arrays.** Every `GET` list endpoint returns `{ "<resource>": [...] }` or `{ "<resource>": [...], "totalCount": N }`. Deserializing a list response as a plain array will throw a `JsonException`.
+
 ### ADRA Admin Endpoints
 
 All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
@@ -355,7 +409,7 @@ All auth events are logged to the `_audit_log` table: sign-up, sign-in, sign-out
 
 ## 24. Validating Aouda JWTs in Your Backend
 
-Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any JWT validation library can verify Aouda-issued tokens **with zero custom code** — the same way you would configure Auth0, Keycloak, or Supabase.
+Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any JWT validation library can verify Aouda-issued tokens with no manual key management — the same way you would configure Auth0, Keycloak, or Supabase. **One important difference:** the discovery document path is non-standard (see the note under Discovery Endpoints below). You must set `MetadataAddress` explicitly in any library that builds the discovery URL from an authority base.
 
 > **Gateway / reverse proxy deployments** — In production, Aouda is often not exposed directly to the internet. It runs behind an API gateway or reverse proxy (nginx, Kong, ASP.NET Core gateway, etc.) that forwards requests to the internal Aouda server. In these deployments, consuming services point at the **gateway's public URL**, not the internal Aouda address.
 >
@@ -372,6 +426,11 @@ Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any
 
 Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database.
 
+> **Non-standard discovery path — read before using `AddJwtBearer`.**
+> The OIDC discovery document is served at `…/auth/.well-known/openid-configuration`, which is one path segment deeper than the OIDC convention of `{issuer}/.well-known/openid-configuration`. Because the `issuer` is `{base_url}/api/databases/{db}`, any library that auto-constructs the metadata URL from `Authority` alone will try the wrong path and get a 404, causing JWT validation to fail on every request.
+>
+> **Always set `MetadataAddress` explicitly** (see the code examples below). Do not rely on automatic URL derivation from `Authority`.
+
 ### JWT Claims
 
 | Claim | Value |
@@ -382,20 +441,97 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 | `email` | user email |
 | `iat` | issued-at timestamp |
 | `exp` | expiry timestamp |
-| `db_roles` | JSON-encoded role map (if roles are assigned) |
+| `db_roles` | JSON-encoded role map (see below — not a native JSON object) |
+
+### The `db_roles` Claim
+
+The `db_roles` claim value is a **JSON-encoded string** embedded inside the JWT — not an inline JSON object. JWT libraries surface it as a plain string; you must parse it explicitly.
+
+The decoded string contains a `Dictionary<string, string[]>` keyed by **scope**:
+
+| Key | When used |
+|-----|-----------|
+| Auth database name (e.g. `"_auth"`) | Roles assigned to the user **without** an explicit scope (the default). The key is the auth database name — it is environment-specific and **must not be hardcoded**. |
+| Explicit scope string (e.g. `"derive"`) | Roles assigned with an explicit scope via the admin `PUT .../users/{id}/roles` endpoint. |
+| `"*"` | Roles assigned with a wildcard scope. |
+
+**Wire format example** (database named `_auth`, role `derive_admin` assigned with no scope):
+
+```json
+{
+  "db_roles": "{\"_auth\":[\"derive_admin\"]}"
+}
+```
+
+The `"_auth"` key is the auth database name, not the application database name. If your auth database is named `auth`, the key is `"auth"`. Check the name you used when running `aouda dev --auth` or when creating the auth database.
+
+**Reading roles — C\#:**
+
+```csharp
+// Flatten across all scopes to check whether the user has a role anywhere.
+bool HasRole(ClaimsPrincipal user, string roleName)
+{
+    var raw = user.FindFirstValue("db_roles");
+    if (string.IsNullOrEmpty(raw)) return false;
+    try
+    {
+        var map = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(raw);
+        return map?.Values.SelectMany(v => v)
+                   .Any(r => string.Equals(r, roleName, StringComparison.OrdinalIgnoreCase))
+               ?? false;
+    }
+    catch (JsonException) { return false; }
+}
+```
+
+To check a role in a **specific scope** (e.g. only if assigned for scope `"derive"`):
+
+```csharp
+if (map.TryGetValue("derive", out var scopedRoles) && scopedRoles.Contains("derive_admin"))
+    // ...
+```
+
+**Reading roles — TypeScript / JavaScript:**
+
+```typescript
+function hasRole(dbRolesClaimValue: string | undefined, roleName: string): boolean {
+  if (!dbRolesClaimValue) return false;
+  try {
+    const map: Record<string, string[]> = JSON.parse(dbRolesClaimValue);
+    return Object.values(map).flat().some(r => r === roleName);
+  } catch { return false; }
+}
+```
+
+**Common mistakes:**
+
+| Mistake | Why it fails |
+|---------|-------------|
+| `dbRoles?.derive` — hardcoded key | The key is the auth database name (e.g. `"_auth"`), not the application name. |
+| Treating `db_roles` as a JSON object | JWT libraries deliver it as a string. Calling `.keys()` on it gives character indices, not scope keys. |
+| Checking only under the auth DB key | Scoped roles use a different key. Iterate all values for a flat role check. |
 
 ---
 
 ### ASP.NET Core
 
-Use `AddJwtBearer` with the OIDC `Authority`. The middleware auto-discovers the JWKS and validates signatures, issuer, and expiry — no manual key management.
+Use `AddJwtBearer` with the OIDC `Authority` and `MetadataAddress`. The middleware fetches the JWKS and validates signatures, issuer, and expiry.
+
+> **`MetadataAddress` is required.** Aouda's discovery document is at `{authority}/auth/.well-known/openid-configuration`, not the conventional `{authority}/.well-known/openid-configuration`. If you set only `Authority`, ASP.NET Core constructs the wrong URL, the JWKS fetch fails silently at startup, and every request returns 401. Always provide `MetadataAddress` explicitly.
 
 ```csharp
 builder.Services.AddAuthentication().AddJwtBearer(options =>
 {
-    // Point at the Aouda OIDC discovery document for your database.
-    options.Authority = "https://your-aouda-server.com/api/databases/mydb";
-    options.Audience  = "mydb_auth";   // the auth database name
+    var aoudaBase = "https://your-aouda-server.com";
+    var db        = "mydb";  // the application database name
+    var issuer    = $"{aoudaBase}/api/databases/{db}";
+
+    // Required: discovery path has an extra /auth/ segment — auto-derivation from Authority is wrong.
+    options.MetadataAddress = $"{issuer}/auth/.well-known/openid-configuration";
+
+    // Authority is still used for issuer validation in incoming tokens.
+    options.Authority = issuer;
+    options.Audience  = "mydb_auth";  // the auth database name
 
     // If your Aouda server uses HTTP (local dev only):
     // options.RequireHttpsMetadata = false;
@@ -764,11 +900,16 @@ Your application reads Aouda Auth configuration from `appsettings.json` / `appse
 **In your application's `Program.cs`:**
 
 ```csharp
-// JWT validation — one option auto-configures everything via OIDC Discovery
+// JWT validation — uses OIDC Discovery to fetch the JWKS automatically.
+// MetadataAddress is required: Aouda's discovery path has a non-standard /auth/ segment.
 builder.Services.AddAuthentication()
     .AddJwtBearer(options =>
     {
-        options.Authority            = builder.Configuration["AoudaAuth:Authority"]!;
+        var authority = builder.Configuration["AoudaAuth:Authority"]!;
+
+        // Required — do NOT rely only on Authority; the discovery URL won't be derived correctly.
+        options.MetadataAddress      = $"{authority}/auth/.well-known/openid-configuration";
+        options.Authority            = authority;
         options.Audience             = builder.Configuration["AoudaAuth:Audience"] ?? "_auth";
         options.RequireHttpsMetadata = false; // dev only — remove for production
     });
