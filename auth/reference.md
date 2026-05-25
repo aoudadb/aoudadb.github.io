@@ -117,6 +117,52 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/me` | GET | User JWT | Get current user profile |
 | `.../auth/me` | PATCH | User JWT | Update user metadata |
 | `.../auth/password` | PUT | User JWT | Change password |
+| `.../auth/request-password-reset` | POST | API key (anon or higher) | Request a 6-digit OTP emailed to the user; always returns 200 |
+| `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success |
+| `.../auth/mfa/enroll` | POST | User JWT (any aal) | Enrol a TOTP or phone MFA factor |
+| `.../auth/mfa/challenge` | POST | User JWT (any aal) | Create a challenge for an enrolled factor; sends SMS for phone factors |
+| `.../auth/mfa/verify` | POST | User JWT (aal1 or aal2) | Submit OTP or TOTP code; returns new token pair with `aal2` on success |
+| `.../auth/mfa/factors` | GET | User JWT (any aal) | List enrolled MFA factors |
+| `.../auth/mfa/factors/{id}` | DELETE | User JWT (any aal) | Delete an enrolled MFA factor |
+
+#### Optional Fields in `POST .../auth/signin` Response
+
+The following fields are returned only when they apply. Consumers must handle their absence gracefully.
+
+| Field | Type | When present | Notes |
+|-------|------|-------------|-------|
+| `requiresPasswordChange` | bool | Only when `true` | User must change their password before the app grants full access. User still receives a fully valid `aal1` JWT — the app is responsible for blocking access to protected areas until the password is changed. |
+| `aal` | string | Only when user has enrolled MFA factors | `"aal1"` — password only. The full signin response also includes `mfaRequired` and `mfaFactors` when this field is present. |
+| `mfaRequired` | bool | Only when user has enrolled active MFA factors | `true` — the app should prompt the user to complete an MFA challenge before granting access to sensitive areas. |
+| `mfaFactors` | array | Only when user has enrolled active MFA factors | Short list of enrolled factors: `[{ "id": "...", "type": "totp"\|"phone", "phone": "+44***5678" (masked) }]`. |
+
+> **Consumers must handle missing fields gracefully.** When `requiresPasswordChange` is absent, the user's password status is normal. When `mfaRequired` is absent, the user has no enrolled MFA factors.
+
+Signin response with MFA factors enrolled:
+
+```json
+{
+  "user": { "id": "550e8400-e29b-41d4-a716-446655440000", "email": "alice@example.com" },
+  "accessToken":  "eyJ...",
+  "refreshToken": "eyJ...",
+  "expiresIn":    900,
+  "aal":          "aal1",
+  "mfaRequired":  true,
+  "mfaFactors":   [{ "id": "a1b2c3d4-...", "type": "totp" }]
+}
+```
+
+Signin response for a user with `forcePasswordChange` set:
+
+```json
+{
+  "user": { "id": "550e8400-e29b-41d4-a716-446655440000", "email": "alice@example.com" },
+  "accessToken":          "eyJ...",
+  "refreshToken":         "eyJ...",
+  "expiresIn":            900,
+  "requiresPasswordChange": true
+}
+```
 
 ### Application Auth Admin Endpoints
 
@@ -140,6 +186,9 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/api-keys` | POST | Create custom API key |
 | `.../admin/api-keys/{id}` | DELETE | Revoke API key |
 | `.../admin/regenerate-keys` | POST | Regenerate auto-generated keys |
+| `.../admin/users/{id}/password` | PUT | Admin override of a user's password — no current-password check; optionally set `forcePasswordChange` |
+| `.../admin/users/{id}/invite` | POST | (Re-)send an invite email with OTP to set a password; invalidates previous unused tokens |
+| `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user |
 
 #### Response Bodies
 
@@ -159,7 +208,27 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 }
 ```
 
-**`POST .../admin/users`** — Request: `{ "email": "...", "password"?: "...", "displayName"?: "..." }`. Omit `password` to create an invite-pending account. Returns `201 Created` on success, `409 Conflict` if email already exists.
+**`POST .../admin/users`** — Returns `201 Created` on success, `409 Conflict` if email already exists.
+
+Request fields:
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `email` | string | Yes | |
+| `password` | string? | No | Omit to create an invite-pending account |
+| `displayName` | string? | No | |
+| `forcePasswordChange` | bool? | No | If `true`, user must change password before the app grants full access. Next signin returns `"requiresPasswordChange": true`. |
+| `sendInviteEmail` | bool? | No | If `true`, generates a 6-digit OTP and emails it to the user so they can set their password via `POST .../auth/reset-password`. Independent of `password` — can be combined. |
+
+Three user-creation patterns:
+
+| Pattern | Request | When to use |
+|---------|---------|-------------|
+| **Invite-pending + email invite** (recommended) | `password: null, sendInviteEmail: true` | User sets their own password by OTP. Cannot sign in until they do. Preferred for multi-tenant SaaS onboarding. |
+| **Forced initial password** | `password: "<initial>", forcePasswordChange: true` | User can sign in once but immediately receives `"requiresPasswordChange": true`; app must redirect to change-password page before granting access. Use for batch migrations. |
+| **Direct password set** | `password: "<value>"` (no flags) | User can sign in immediately. No email sent unless you also call `POST .../admin/users/{id}/invite`. Use for internal tooling and test accounts. |
+
+> The `sendInviteEmail` and `forcePasswordChange` flags are independent. Combining both sends an invite email *and* marks the account to require a password change after the OTP flow completes — useful for deliberate forced-reset onboarding.
 
 ```json
 {
@@ -296,6 +365,23 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format | Prompt the user to correct the email field |
 | `AUTH_PASSWORD_TOO_WEAK` | 400 | Password does not meet the minimum policy (default: 8 chars) | Prompt the user to choose a stronger password |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests | Implement exponential backoff |
+
+### Password Reset Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_RESET_TOKEN_INVALID` | 400 | OTP is wrong, email is not registered, or no valid reset token exists | Show a generic "Invalid or expired code" message; do not indicate whether the email exists |
+| `AUTH_RESET_TOKEN_EXPIRED` | 400 | OTP was correct but the 15-minute window has passed | Ask the user to request a new reset code |
+| `AUTH_RESET_TOKEN_EXHAUSTED` | 400 | Five consecutive wrong OTP attempts on the same token; token is now permanently invalid | Ask the user to request a new reset code |
+
+### MFA Errors
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_MFA_FACTOR_NOT_FOUND` | 404 | MFA factor ID does not exist or belongs to another user | Verify the `factorId`; re-fetch factor list via `GET .../auth/mfa/factors` |
+| `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user | Show "Invalid code"; prompt user to try again or re-request a challenge |
+| `AUTH_MFA_CHALLENGE_EXPIRED` | 400 | Challenge window has passed (10 minutes for both TOTP and phone) | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
+| `AUTH_MFA_CHALLENGE_EXHAUSTED` | 400 | Five consecutive wrong codes on the same challenge; challenge is permanently invalid | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
 
 ### Authorization Errors
 
@@ -442,6 +528,43 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 | `iat` | issued-at timestamp |
 | `exp` | expiry timestamp |
 | `db_roles` | JSON-encoded role map (see below — not a native JSON object) |
+| `aal` | Authentication Assurance Level: `"aal1"` (password-only signin) or `"aal2"` (MFA-verified). Present on all tokens minted by Aouda AppAuth. |
+
+### 24.1 — The `aal` Claim: Enforcing MFA Gates
+
+`aal1` means the user authenticated with password only. `aal2` means the user completed a successful MFA challenge after signin. A user with enrolled MFA factors will always receive `aal1` at signin; they must call `POST .../auth/mfa/challenge` then `POST .../auth/mfa/verify` to receive an `aal2` token.
+
+**MFA gate enforcement — ASP.NET Core (C#):**
+
+```csharp
+// Require aal2 for a sensitive endpoint (e.g. exporting all customer data)
+app.MapGet("/api/sensitive-export", (ClaimsPrincipal user) =>
+{
+    var aal = user.FindFirstValue("aal");
+    if (!string.Equals(aal, "aal2", StringComparison.Ordinal))
+        return Results.Json(new { error = "MFA_REQUIRED" }, statusCode: 403);
+
+    // ... handle sensitive operation
+    return Results.Ok();
+}).RequireAuthorization();
+```
+
+**MFA gate enforcement — TypeScript / Node.js (jose):**
+
+```typescript
+async function requireAal2(req: Request, res: Response, next: NextFunction) {
+  const payload = await verifyAoudaToken(req.headers.authorization?.replace("Bearer ", "") ?? "");
+  if (payload["aal"] !== "aal2") {
+    return res.status(403).json({ error: "MFA_REQUIRED" });
+  }
+  next();
+}
+
+// Apply to sensitive routes:
+router.get("/sensitive-export", requireAal2, handleSensitiveExport);
+```
+
+> **Do not store the `aal` claim in the database.** The `aal` claim is valid only for the lifetime of the access token (15 minutes). Do not cache it as a user property — always read it from the JWT on each request. `aal2` tokens are short-lived by design.
 
 ### The `db_roles` Claim
 

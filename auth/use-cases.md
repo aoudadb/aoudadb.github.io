@@ -285,3 +285,267 @@ curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/r
 | `db_writer` | Read, write, and delete data in all tables |
 | `db_reader` | Read-only access to all tables |
 | `anonymous` | No data access (can call auth endpoints only). Customizable by admins. |
+
+---
+
+## 19. Use Case: Admin-Managed User Onboarding
+
+Admin-created users bypass the self-service `/signup` flow. Use admin user creation when you need to provision accounts programmatically — for example, during team onboarding, batch migrations, or multi-tenant SaaS provisioning where you control who can create accounts.
+
+### Pattern 1 — Invite-Pending + Email Invite (Recommended)
+
+Create the account without a password and send the user an email with a 6-digit OTP. The user visits your password-setup page, enters the OTP, and calls `POST .../auth/reset-password` to set their password.
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users \
+  -H "Authorization: Bearer <service-role-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email":           "alice@example.com",
+    "displayName":     "Alice Smith",
+    "sendInviteEmail": true
+  }'
+# → 201 { "id": "550e8400-e29b-41d4-a716-446655440000", ..., "passwordSet": false }
+```
+
+The user cannot sign in until they complete the OTP flow via `POST .../auth/reset-password`. This is the preferred pattern for multi-tenant SaaS onboarding — the user owns their password from day one.
+
+### Pattern 2 — Forced Initial Password
+
+Create the account with an initial password and require the user to change it on first sign-in.
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users \
+  -H "Authorization: Bearer <service-role-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email":               "bob@example.com",
+    "password":            "TempPass789!",
+    "forcePasswordChange": true
+  }'
+# → 201 { "id": "550e8400-e29b-41d4-a716-446655440001", ..., "passwordSet": true }
+```
+
+On first sign-in, the response includes `"requiresPasswordChange": true`:
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/signin \
+  -H "Authorization: Bearer <anon-or-service-key>" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "bob@example.com", "password": "TempPass789!" }'
+```
+
+```json
+{
+  "user":                   { "id": "550e8400-e29b-41d4-a716-446655440001", "email": "bob@example.com" },
+  "accessToken":            "eyJ...",
+  "refreshToken":           "eyJ...",
+  "expiresIn":              900,
+  "requiresPasswordChange": true
+}
+```
+
+The user receives a valid `aal1` JWT but the app must redirect them to a change-password page and block access to protected areas until they change their password. Use this pattern for batch migrations. After a successful password change, subsequent signins no longer include `requiresPasswordChange`.
+
+### Pattern 3 — Direct Password Set (Admin Override)
+
+Call `PUT /admin/users/{id}/password` to set or override a user's password at any time — no current-password check is performed. All prior sessions and refresh tokens are revoked immediately.
+
+```bash
+curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/password \
+  -H "Authorization: Bearer <service-role-key>" \
+  -H "Content-Type: application/json" \
+  -d '{ "password": "NewSecure456!" }'
+# → 204 No Content
+```
+
+This endpoint is also useful after creating an invite-pending account (`password: null`) when you want to set the password programmatically rather than sending an email.
+
+### Resending Invite / Resending OTP
+
+If the user did not receive the invite email, or the OTP expired, resend a fresh one:
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/invite \
+  -H "Authorization: Bearer <service-role-key>" \
+  -H "Content-Type: application/json"
+# → 200 { "ok": true }
+```
+
+The previous unused OTP is invalidated and a new one is emailed to the user.
+
+---
+
+## 20. Use Case: Self-Service Password Reset
+
+The password reset flow covers two scenarios: a user who forgot their password, and an invite-pending user setting their password for the first time after receiving an invite email. Both cases use the same two endpoints.
+
+### Step 1 — User Requests a Reset
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/request-password-reset \
+  -H "Authorization: Bearer <anon-or-service-key>" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "alice@example.com" }'
+# → 200 { "ok": true }  (always — does not reveal whether email exists)
+```
+
+A 6-digit OTP is emailed to the user. The endpoint always returns `200` regardless of whether the email address is registered — this prevents user enumeration by a third party.
+
+### Step 2 — User Submits OTP + New Password
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/reset-password \
+  -H "Authorization: Bearer <anon-or-service-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email":       "alice@example.com",
+    "otp":         "482391",
+    "newPassword": "NewSecure456!"
+  }'
+```
+
+On success, returns a full token pair — the user is signed in immediately:
+
+```json
+{
+  "user":         { "id": "550e8400-e29b-41d4-a716-446655440000", "email": "alice@example.com" },
+  "accessToken":  "eyJ...",
+  "refreshToken": "eyJ...",
+  "expiresIn":    900
+}
+```
+
+**OTP security notes:**
+
+- The OTP is 6 digits and expires in 15 minutes.
+- After 5 consecutive wrong attempts, the token is permanently invalidated — the user must request a new one.
+- Use the error codes `AUTH_RESET_TOKEN_INVALID`, `AUTH_RESET_TOKEN_EXPIRED`, and `AUTH_RESET_TOKEN_EXHAUSTED` to show appropriate UI copy (see §22).
+
+**Invite-pending first-time password set:** The same `POST .../auth/reset-password` endpoint works identically for invite-pending users setting their password for the first time. The OTP was generated when `sendInviteEmail: true` was passed at user creation (or `POST .../admin/users/{id}/invite` was called). After a successful reset, the user can sign in normally and `requiresPasswordChange` is absent from the signin response.
+
+---
+
+## 21. Use Case: Two-Factor Authentication (MFA)
+
+MFA adds a second verification step after password signin. Aouda supports TOTP (e.g. Google Authenticator, Authy) and SMS phone OTP. After a successful MFA verify the user receives an `aal2` JWT; apps can enforce `aal2` on sensitive endpoints (see §24.1).
+
+### 21.1 — Enrolling TOTP (Authenticator App)
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/mfa/enroll \
+  -H "Authorization: Bearer <user-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "totp" }'
+```
+
+```json
+{
+  "factorId":      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "type":          "totp",
+  "totpUri":       "otpauth://totp/myapp:alice%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=myapp",
+  "secret":        "JBSWY3DPEHPK3PXP",
+  "recoveryCodes": [
+    "A1B2C3D4E5F6", "G7H8I9J0K1L2", "M3N4O5P6Q7R8",
+    "S9T0U1V2W3X4", "Y5Z6A7B8C9D0", "E1F2G3H4I5J6",
+    "K7L8M9N0O1P2", "Q3R4S5T6U7V8"
+  ]
+}
+```
+
+> **Save recovery codes now.** They are shown only once. Any one code can substitute for a TOTP code if you lose access to your authenticator app.
+
+Scan `totpUri` with any TOTP app (Google Authenticator, Authy, 1Password, etc.) to add the account. The factor is in `pending` status until the first successful verify.
+
+### 21.2 — Enrolling a Phone Factor
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/mfa/enroll \
+  -H "Authorization: Bearer <user-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "phone", "phone": "+447700900123" }'
+```
+
+```json
+{ "factorId": "b2c3d4e5-f6a7-8901-bcde-f23456789012", "type": "phone", "phone": "+44***0123" }
+```
+
+The phone factor is active immediately — no verify step is needed at enrolment.
+
+### 21.3 — The MFA Sign-In Flow (Challenge → Verify)
+
+After a user with enrolled MFA signs in, the signin response includes `"mfaRequired": true`. The app must then initiate a challenge and prompt the user for their code.
+
+**Step 1 — Create challenge:**
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/mfa/challenge \
+  -H "Authorization: Bearer <user-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "factorId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }'
+```
+
+```json
+{ "challengeId": "c3d4e5f6-a7b8-9012-cdef-345678901234", "type": "totp", "expiresAt": "2026-05-25T17:37:00Z" }
+```
+
+For phone factors, the OTP is sent by SMS at this point.
+
+**Step 2 — Verify code (TOTP):**
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/mfa/verify \
+  -H "Authorization: Bearer <user-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "challengeId": "c3d4e5f6-a7b8-9012-cdef-345678901234", "code": "123456" }'
+```
+
+Success — **new token pair with `aal2`**:
+
+```json
+{
+  "user":         { "id": "550e8400-e29b-41d4-a716-446655440000", "email": "alice@example.com" },
+  "accessToken":  "eyJ...",
+  "refreshToken": "eyJ...",
+  "expiresIn":    900,
+  "aal":          "aal2"
+}
+```
+
+Discard the old `aal1` tokens and use the new pair for all subsequent requests.
+
+**Step 2 variant — Verify SMS OTP (phone factor):** same endpoint and same request body; the OTP was sent by SMS when you created the challenge.
+
+**Step 2 variant — Use a recovery code:** same endpoint; pass one of the 8 recovery codes as `"code"` instead of a TOTP code. The code is consumed and cannot be reused.
+
+### 21.4 — Enforcing MFA Gates in Your Backend
+
+See §24.1 for the `aal` enforcement code examples (C# and TypeScript).
+
+> The `aal2` token is a standard JWT — validate it the same way as any Aouda JWT. The only difference is that `aal` is `"aal2"`. Do not implement a separate validation path; simply read the `aal` claim after standard signature validation.
+
+### 21.5 — Managing Enrolled Factors
+
+```bash
+# List factors
+curl http://localhost:5433/api/databases/myapp/auth/mfa/factors \
+  -H "Authorization: Bearer <user-access-token>"
+# → { "factors": [{ "id": "a1b2c3d4-...", "type": "totp", "status": "active", "createdAt": "2026-05-25T10:00:00Z" }] }
+
+# Delete a factor
+curl -X DELETE http://localhost:5433/api/databases/myapp/auth/mfa/factors/a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+  -H "Authorization: Bearer <user-access-token>"
+# → 200 { "ok": true }
+```
+
+### 21.6 — Admin Enrolling a Phone Factor on Behalf of a User
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/mfa/enroll \
+  -H "Authorization: Bearer <service-role-key>" \
+  -H "Content-Type: application/json" \
+  -d '{ "type": "phone", "phone": "+447700900123" }'
+# → 200 { "factorId": "d4e5f6a7-b8c9-0123-def0-456789012345", "type": "phone" }
+```
+
+Use case: pre-enrol a phone factor during a migration or onboarding flow where the admin knows the user's phone number. The user's next signin will return `"mfaRequired": true` and they will be prompted to verify via SMS.
