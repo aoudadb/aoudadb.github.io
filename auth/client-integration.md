@@ -6,7 +6,9 @@ parent: "Auth and Authorization"
 
 # Auth Client Integration
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
+>
+> **Notifications:** Password reset, invite email, and MFA SMS are configured on the **Aouda server** (`Aouda:Auth:Email`, `Aouda:Auth:Sms`), not in client SDK options. See [Email, SMS & Notifications](notifications.md).
 
 ---
 

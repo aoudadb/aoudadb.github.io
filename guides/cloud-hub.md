@@ -29,7 +29,7 @@ This document describes how Aouda is deployed, distributed, and managed at the i
 
 | I want to... | Go to |
 |---|---|
-| Run Aouda locally for development | §3 Server CLI — `aouda dev` |
+| Run Aouda locally for development | §3 Server CLI — `aouda start` |
 | Run Aouda in Docker | §4 Docker |
 | Deploy a production cluster | §5 Kubernetes Helm Chart |
 | Manage servers across a team | §6 Aouda Hub |
@@ -512,7 +512,7 @@ Default policy allows `https://hub.aouda.dev` and `http://localhost:3000`. Overr
 | Scenario | What Happens |
 |----------|-------------|
 | `docker run aouda/server` | Single-node server, port 5000, data at `/data`, no auth, CORS allows Hub + localhost |
-| `aouda dev` | In-memory, schema inference, no auth, fast startup |
+| `aouda start` (temp data dir) | Ephemeral data path, schema inference, auth via API |
 | `aouda start` | Persistent storage in current directory, port 5000 |
 | Hub unreachable | Servers continue operating normally, Studio direct-mode works |
 | No backup schedule | No scheduled backups; manual trigger via API/Studio available |
@@ -525,7 +525,7 @@ Default policy allows `https://hub.aouda.dev` and `http://localhost:3000`. Overr
 
 | Capability | Aouda | Traditional |
 |------------|-------|-------------|
-| Single binary | `aouda start` / `aouda dev` in one binary | Separate CLI tools, agents, config generators |
+| Single binary | `aouda start` in one binary | Separate CLI tools, agents, config generators |
 | Self-hosting Hub | Hub uses Aouda as its own database | Separate management database required |
 | Browser-direct | Studio connects directly to servers; Hub never proxies data | Management plane often proxies all traffic |
 | Zero-config cluster | Docker Compose or Helm, automatic replication bootstrap | Manual replica set initialization required |

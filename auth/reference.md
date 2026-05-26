@@ -17,19 +17,20 @@ One of Aouda's key qualities is that AI agents can build and test complete appli
 ### Level 0: Just a Database (Zero Auth)
 
 ```bash
-aouda dev --port 5433 --database myapp
+aouda start --port 5433 --data-dir ./data
+# Create database via API or appsettings — see setup.md
 
 # Agent uses it immediately — zero setup
 curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
   -d '{ "rows": [{ "id": 1, "customer": "Acme", "total": 249.99 }] }'
 ```
 
-### Level 1: Database with Auth (One Command)
+### Level 1: Database with Auth (API setup)
 
 ```bash
-aouda dev --port 5433 --database myapp --auth
-# → Anon key:         mk_anon_a1b2c3...
-# → Service role key: mk_svc_x7y8z9...
+aouda start --port 5433 --data-dir ./data
+# Bootstrap server admin, then POST /api/databases with auth enabled — see setup.md §7
+# Response includes: anonKey (mk_anon_...), serviceRoleKey (mk_svc_...)
 
 # Agent captures keys and tests the complete flow:
 
@@ -72,9 +73,9 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
 ### Aouda as SaaS-Auth for AI Agent Apps
 
 ```bash
-# Agent starts Aouda with auth
-aouda dev --port 5433 --database myapp --auth
-# Captures: ANON_KEY, SERVICE_KEY
+# Agent starts Aouda and enables auth on a database
+aouda start --port 5433 --data-dir ./data
+# Captures: ANON_KEY, SERVICE_KEY from POST /api/databases response
 
 # Agent generates application code:
 #   const db = createAoudaClient({
@@ -103,6 +104,8 @@ Zero external dependencies, zero cloud signups, zero configuration files.
 ---
 
 ## 21. API Reference
+
+> **OTP delivery:** Password reset, invite emails, and MFA SMS are sent by the **Aouda server** when notification providers are configured. See [Email, SMS & Notifications](notifications.md). Your consumer app only calls the HTTP endpoints below.
 
 ### Application Auth Endpoints
 
@@ -218,7 +221,7 @@ Request fields:
 | `password` | string? | No | Omit to create an invite-pending account |
 | `displayName` | string? | No | |
 | `forcePasswordChange` | bool? | No | If `true`, user must change password before the app grants full access. Next signin returns `"requiresPasswordChange": true`. |
-| `sendInviteEmail` | bool? | No | If `true`, generates a 6-digit OTP and emails it to the user so they can set their password via `POST .../auth/reset-password`. Independent of `password` — can be combined. |
+| `sendInviteEmail` | bool? | No | If `true`, generates a 6-digit OTP and emails it to the user so they can set their password via `POST .../auth/reset-password`. Requires SendGrid (or configured email provider) on the server — see [notifications.md](notifications.md). Independent of `password` — can be combined. |
 
 Three user-creation patterns:
 
@@ -586,7 +589,7 @@ The decoded string contains a `Dictionary<string, string[]>` keyed by **scope**:
 }
 ```
 
-The `"_auth"` key is the auth database name, not the application database name. If your auth database is named `auth`, the key is `"auth"`. Check the name you used when running `aouda dev --auth` or when creating the auth database.
+The `"_auth"` key is the auth database name, not the application database name. If your auth database is named `auth`, the key is `"auth"`. Check the name returned when you created the auth database (see [setup.md](setup.md) §7).
 
 **Reading roles — C\#:**
 
@@ -766,7 +769,7 @@ def verify_token(token: str) -> dict:
 
 ## 25. Testing Applications That Use Aouda Auth
 
-Application Auth is implemented in the **Aouda HTTP server** — OIDC discovery, JWKS, signup, signin, and JWT issuance are not available through `Aouda.Embedded`. That means **integration tests** that exercise real auth flows need either a running server (`aouda dev`) or an **in-process** server inside the test process.
+Application Auth is implemented in the **Aouda HTTP server** — OIDC discovery, JWKS, signup, signin, and JWT issuance are not available through `Aouda.Embedded`. That means **integration tests** that exercise real auth flows need either a running server (`aouda start`) or an **in-process** server inside the test process (for example `Aouda.Testing` / `DevServerHost` in tests).
 
 The **`Aouda.Testing`** NuGet package starts a full Aouda server backed by ASP.NET Core `TestHost` (no real ports, no external process). It exposes API keys, OIDC authority URLs, and fast engine-direct helpers (`CreateUserAsync`, `SignInAsync`) for test setup. See the full guide: **[Getting-Started-Testing.md](Getting-Started-Testing.md)** ([ADR 0024](../decisions/0024-testing-package.md)).
 
@@ -878,6 +881,8 @@ In Aouda, the traditional tradeoff between JWT-embedded claims (fast, stale) and
 
 This section is for developers building an application that uses Aouda Auth — not for working on Aouda itself. It covers everything you need to get from zero to a fully running local environment where you can develop and debug your application alongside a real Aouda auth server.
 
+> **CLI note:** The shipped global tool command is **`aouda start`** (foreground server). Older docs referred to `aouda dev`; that subcommand is not exposed in the current CLI. Use `aouda start` with `--port` and `--data-dir`, enable auth via the HTTP API, and configure email/SMS in `appsettings.json` — see [notifications.md](notifications.md).
+
 ---
 
 ### 27.1 Install the Aouda CLI
@@ -888,11 +893,11 @@ Aouda ships as a **.NET Global Tool**. Install it once on your developer machine
 dotnet tool install --global Aouda.Cli
 ```
 
-After installation, the `aouda` command is available in any terminal, any directory, any project:
+After installation, the `aouda` command is available in any terminal:
 
 ```powershell
 aouda --version
-aouda dev --help
+aouda start --help
 ```
 
 **Updating:**
@@ -905,97 +910,98 @@ dotnet tool update --global Aouda.Cli
 dotnet tool uninstall --global Aouda.Cli
 ```
 
-> If `aouda` is not recognised after install, close and reopen your terminal. The dotnet tools path (`%USERPROFILE%\.dotnet\tools` on Windows) needs to be in `PATH`. This is configured automatically by the .NET installer; a fresh terminal picks it up.
+> If `aouda` is not recognised after install, close and reopen your terminal. The dotnet tools path (`%USERPROFILE%\.dotnet\tools` on Windows) needs to be in `PATH`.
 
 #### Installing from a Local .nupkg (Pre-NuGet-Release)
 
-If Aouda has not yet been published to NuGet.org, install from a local package file:
-
 ```powershell
-# Install from a folder containing the .nupkg
 dotnet tool install --global Aouda.Cli --add-source C:\path\to\aouda\nupkg
 
-# Or run directly from source (no install needed — good for active development)
-dotnet run --project C:\path\to\aouda\src\Aouda.Cli -- dev --port 5433 --database myapp --auth
+# Or run from source:
+dotnet run --project C:\path\to\aouda\src\Aouda.Cli -- start --port 5433 --data-dir C:\dev\aouda-data\derive
 ```
 
 ---
 
-### 27.2 Choose a Persistent Data Directory
+### 27.2 Server directory, appsettings, and persistent data
 
-When you run `aouda dev` without `--data`, the server is **ephemeral** — all data, including the generated API keys, is lost when the process stops. For development you almost always want persistent mode so your keys and any seeded data survive restarts.
-
-**Choose a directory outside your application repo** — this prevents accidentally committing Aouda data and keeps it stable across `git clean`, branch switches, and repo reclones.
-
-Recommended locations:
+Create a **server working directory** outside your application repo (binary segment files accumulate here):
 
 ```
 Windows:   C:\Users\<you>\AppData\Local\aouda\<app-name>
-           C:\dev\aouda-data\<app-name>
-
 macOS:     ~/.local/share/aouda/<app-name>
-           ~/dev/aouda-data/<app-name>
-
 Linux:     ~/.local/share/aouda/<app-name>
 ```
 
-Example:
-```powershell
-aouda dev --port 5433 --database derive --auth --data C:\Users\kimbo\AppData\Local\aouda\derive
+`appsettings.json` in that directory (used when you `cd` there and run `aouda start`):
+
+```json
+{
+  "Aouda": {
+    "DataPath": "./data",
+    "Port": 5433,
+    "Auth": {
+      "Email": {
+        "Provider": "sendgrid",
+        "SendGridApiKey": "SG.xxx",
+        "FromAddress": "noreply@yourdomain.com",
+        "FromName": "Derive"
+      }
+    }
+  }
+}
 ```
 
-> **Do NOT use** a directory inside your application repo (e.g. `.\local-data\aouda`). This directory will accumulate binary segment files. Even with a `.gitignore` entry it creates noise and breaks `git clean -fdx` used by CI scripts.
+Start the server:
+
+```powershell
+cd C:\Users\you\AppData\Local\aouda\derive
+aouda start --port 5433 --data-dir .\data
+```
+
+CLI flags override config: `--port`, `--data-dir` (alias `--data-path`, `-d`), `--bind`, memory limits, etc.
+
+> **Do NOT** put the data directory inside your application git repo.
+
+**Password reset / invite emails:** Configure `Aouda:Auth:Email` as above. Without SendGrid, reset requests return `200` but no OTP is delivered. Full detail: [notifications.md](notifications.md).
 
 ---
 
-### 27.3 First Run — Capture Your API Keys
+### 27.3 Enable application auth and capture API keys
 
-On the **first run** with a new `--data` directory, Aouda generates API keys and prints them to stdout once:
+`aouda start` does not print anon/service keys automatically. Create an auth-enabled database via the HTTP API after bootstrapping a **server admin** (first run):
 
-```
-Aouda Dev Server
-  URL:       http://localhost:5433
-  Database:  derive
-  Mode:      persistent (C:\Users\kimbo\AppData\Local\aouda\derive)
-  Schema:    schema-on-write enabled
+```bash
+# One-time server admin (if no users exist)
+curl -X POST http://localhost:5433/api/auth/setup \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@local.dev", "password": "AdminPass123!" }'
 
-Database: derive (auth enabled)
-  Auth database:    _auth
-  Anon key:         mk_anon_a1b2c3d4e5f6...
-  Service role key: mk_svc_x7y8z9e0f1a2...
+# Sign in → SERVER_JWT
+curl -X POST http://localhost:5433/api/auth/signin \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "admin@local.dev", "password": "AdminPass123!" }'
 
-Quick start:
-  # Sign up a user (anon key)
-  curl -H "Authorization: Bearer mk_anon_a1b2c3d4e5f6..." \
-    -X POST http://localhost:5433/api/databases/derive/auth/signup \
-    -d '{ "email": "user@example.com", "password": "Pass123!" }'
-
-Press Ctrl+C to stop.
+# Create app database with auth (standalone auth DB example)
+curl -X POST http://localhost:5433/api/databases \
+  -H "Authorization: Bearer <SERVER_JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "derive", "kind": "auth" }'
 ```
 
-**Copy the `Service role key` (`mk_svc_...`) now.** This is the only time the full key is shown. Store it as described in §27.4 below.
+The response includes `auth.keys.anonKey` and `auth.keys.serviceRoleKey` — **copy both immediately** (shown once). See [setup.md](setup.md) §7 for linked-database patterns.
 
-On every subsequent run with the same `--data` path, the keys already exist and only their prefix is shown:
+If keys are lost later:
 
-```
-Database: derive (auth enabled)
-  Auth database:    _auth
-  Keys were already created earlier and cannot be re-displayed.
-  Anon key prefix:  mk_anon_a1b2...
-  Service prefix:   mk_svc_x7y8...
-  Regenerate keys:  POST /api/databases/derive/auth/admin/regenerate-keys
-```
-
-If you lose the key, regenerate it:
 ```powershell
 curl -X POST http://localhost:5433/api/databases/derive/auth/admin/regenerate-keys `
-  -H "Authorization: Bearer mk_svc_x7y8..." `
+  -H "Authorization: Bearer mk_svc_..." `
   -H "Content-Type: application/json"
 ```
 
 ---
 
-### 27.4 Store Keys in appsettings.Development.json
+### 27.4 Store keys in appsettings.Development.json
 
 Your application reads Aouda Auth configuration from `appsettings.json` / `appsettings.Development.json`. The recommended structure separates the OIDC Authority (for JWT validation) from the client connection details (for the Aouda client):
 
@@ -1007,6 +1013,7 @@ Your application reads Aouda Auth configuration from `appsettings.json` / `appse
     "Audience":     "_auth",
     "ServerUrl":    "http://localhost:5433",
     "DatabaseName": "derive",
+    "AnonKey":      "mk_anon_a1b2c3d4e5f6...",
     "ServiceKey":   "mk_svc_x7y8z9e0f1a2..."
   }
 }
@@ -1017,8 +1024,9 @@ Your application reads Aouda Auth configuration from `appsettings.json` / `appse
 | `Authority` | Base URL for OIDC Discovery — used by `options.Authority` in `AddJwtBearer` | Constructed from server URL + database name |
 | `Audience` | JWT `aud` claim — always the auth database name | Always `_auth` (unless you named it differently) |
 | `ServerUrl` | Aouda server base URL — used to construct the `AoudaClient` | Your server address |
-| `DatabaseName` | Which database the `AoudaClient` connects to | The name you passed to `aouda dev --database` |
-| `ServiceKey` | The `mk_svc_...` key — grants full database access (backend only) | Printed on first run of `aouda dev --auth` |
+| `DatabaseName` | Which database the `AoudaClient` connects to | The `name` from `POST /api/databases` (e.g. `derive`) |
+| `AnonKey` | `mk_anon_...` — public auth endpoints (signup, signin, password reset) | From create-database or regenerate-keys response |
+| `ServiceKey` | `mk_svc_...` — admin auth endpoints (backend only) | Same response |
 
 **In your application's `Program.cs`:**
 
@@ -1066,12 +1074,13 @@ appsettings.Development.template.json   ← checked in, shows structure with pla
     "Audience":     "_auth",
     "ServerUrl":    "http://localhost:5433",
     "DatabaseName": "derive",
-    "ServiceKey":   "REPLACE_WITH_MK_SVC_KEY_FROM_AOUDA_DEV"
+    "AnonKey":      "REPLACE_WITH_MK_ANON_KEY",
+    "ServiceKey":   "REPLACE_WITH_MK_SVC_KEY"
   }
 }
 ```
 
-New developers copy this to `appsettings.Development.json` and replace the placeholder after running `aouda dev --auth` for the first time.
+New developers copy this to `appsettings.Development.json` and replace placeholders after creating the auth-enabled database (§27.3).
 
 ---
 
@@ -1082,8 +1091,9 @@ Once set up, the daily workflow is two processes side by side.
 #### Option A — Two Terminals (Simplest)
 
 ```
-Terminal 1 — Aouda:
-  aouda dev --port 5433 --database derive --auth --data C:\Users\kimbo\AppData\Local\aouda\derive
+Terminal 1 — Aouda (server directory with appsettings.json):
+  cd C:\Users\you\AppData\Local\aouda\derive
+  aouda start --port 5433 --data-dir .\data
 
 Terminal 2 — Your application (F5 in IDE, or):
   dotnet run --project src/Derive.Api
@@ -1102,15 +1112,16 @@ Add to `.vscode/tasks.json`:
     {
       "label": "start-aouda",
       "type": "shell",
-      "command": "aouda dev --port 5433 --database derive --auth --data ${env:USERPROFILE}/AppData/Local/aouda/derive",
+      "command": "aouda start --port 5433 --data-dir ${env:USERPROFILE}/AppData/Local/aouda/derive/data",
+      "options": { "cwd": "${env:USERPROFILE}/AppData/Local/aouda/derive" },
       "isBackground": true,
       "presentation": { "reveal": "always", "panel": "dedicated", "group": "aouda" },
       "problemMatcher": {
         "pattern": { "regexp": "." },
         "background": {
           "activeOnStart": true,
-          "beginsPattern":  "Aouda Dev Server",
-          "endsPattern":    "Press Ctrl\\+C to stop"
+          "beginsPattern":  "Now listening on",
+          "endsPattern":    "Application started"
         }
       }
     }
@@ -1165,7 +1176,7 @@ For the Aouda process itself, use a pre-build event or a simple `start-aouda.ps1
 ```powershell
 # start-aouda.ps1  — run this once before starting VS
 Start-Process powershell -ArgumentList `
-  "-NoExit -Command aouda dev --port 5433 --database derive --auth --data $env:USERPROFILE\AppData\Local\aouda\derive"
+  "-NoExit -Command cd $env:USERPROFILE\AppData\Local\aouda\derive; aouda start --port 5433 --data-dir .\data"
 ```
 
 #### Option D — .NET Aspire (Future-Proof)
@@ -1176,11 +1187,11 @@ If your solution adopts .NET Aspire, the AppHost project becomes the single F5 l
 // AppHost/Program.cs
 var builder = DistributedApplication.CreateBuilder(args);
 
+var aoudaData = Path.Combine(Environment.GetFolderPath(
+    Environment.SpecialFolder.LocalApplicationData), "aouda", "derive");
 var aouda = builder.AddExecutable(
-    "aouda", "aouda", ".",
-    "dev", "--port", "5433", "--database", "derive", "--auth",
-    "--data", Path.Combine(Environment.GetFolderPath(
-        Environment.SpecialFolder.LocalApplicationData), "aouda", "derive"))
+    "aouda", "aouda", aoudaData,
+    "start", "--port", "5433", "--data-dir", Path.Combine(aoudaData, "data"))
     .WithHttpEndpoint(port: 5433, name: "http");
 
 builder.AddProject<Projects.Derive_Api>("derive-api")
@@ -1243,17 +1254,15 @@ Add this to your project's `README.md` or `docs/dev/Getting-Started.md`:
   (or: `dotnet tool install --global Aouda.Cli --add-source \\shared-drive\aouda-tools`)
 
 ### First-time setup
-1. Start Aouda dev server:
-   ```
-   aouda dev --port 5433 --database derive --auth --data %USERPROFILE%\AppData\Local\aouda\derive
-   ```
-2. Copy the printed `Service role key` (`mk_svc_...`)
-3. Copy `appsettings.Development.template.json` → `appsettings.Development.json`
-4. Replace `REPLACE_WITH_MK_SVC_KEY_FROM_AOUDA_DEV` with your key
-5. Leave the Aouda terminal running; start the application
+1. Create server directory with `appsettings.json` (see auth/reference.md §27.2)
+2. `aouda start --port 5433 --data-dir %USERPROFILE%\AppData\Local\aouda\derive\data`
+3. `POST /api/auth/setup` then create auth DB — copy `mk_anon_` and `mk_svc_` from response
+4. Configure SendGrid on server if testing password reset (auth/notifications.md)
+5. Copy `appsettings.Development.template.json` → `appsettings.Development.json` in your app
+6. Paste keys; start your application
 
 ### Daily workflow
-- Terminal 1: `aouda dev --port 5433 --database derive --auth --data %USERPROFILE%\AppData\Local\aouda\derive`
+- Terminal 1: `aouda start` from server directory
 - Terminal 2: F5 (or `dotnet run`)
 ```
 
@@ -1265,11 +1274,14 @@ Add this to your project's `README.md` or `docs/dev/Getting-Started.md`:
 Close and reopen your terminal. The dotnet tools directory (`%USERPROFILE%\.dotnet\tools`) was added to PATH by the .NET installer but the current session hasn't reloaded it.
 
 **Port 5433 already in use**
-Another process (often a previous `aouda dev` left running, or a local PostgreSQL instance) has the port. Either kill the existing process or use a different port:
+Another process (often a previous `aouda start`, or PostgreSQL on 5433) holds the port. Use `aouda stop` or a different port:
 ```powershell
-aouda dev --port 5434 --database derive --auth --data ...
+aouda start --port 5434 --data-dir ...
 # Update AoudaAuth:Authority and AoudaAuth:ServerUrl in appsettings.Development.json to match
 ```
+
+**Password reset returns 200 but no email arrives**
+Email provider not configured on the **Aouda server**. See [notifications.md](notifications.md). Log shows `NullEmailService: password reset email not sent`.
 
 **`AoudaAuth:ServiceKey is not configured` error in application**
 The application is starting before `appsettings.Development.json` has been populated. Check that:
@@ -1298,14 +1310,16 @@ Also verify that `AoudaAuth:Authority` in `appsettings.Development.json` exactly
 **Data directory grows over time**
 Aouda stores WAL segments and column files in the data directory. For development this is normal and manageable. If it grows large (gigabytes), the safest cleanup is:
 ```powershell
-# Stop aouda dev first, then:
-Remove-Item -Recurse -Force C:\Users\kimbo\AppData\Local\aouda\derive
-# Next run will recreate everything — you will need to capture keys again
+# Stop aouda start first, then:
+Remove-Item -Recurse -Force C:\Users\you\AppData\Local\aouda\derive
+# Next run will recreate everything — bootstrap admin and capture keys again
 ```
 
 ---
 
 ## See Also
+
+- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, server configuration for OTP delivery
 
 - **[Getting Started](Getting-Started.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
 - **[ADR 0023: Authentication and Authorization](../decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC

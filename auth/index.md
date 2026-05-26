@@ -17,6 +17,13 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Gett
 
 ## Start Here
 
+**User guides (this site):**
+
+- [Setup & flows](setup.md) — enable auth, API keys, signup/signin
+- [Email, SMS & notifications](notifications.md) — SendGrid, GatewayAPI, password reset / MFA OTP
+- [Use cases](use-cases.md) — onboarding, password reset, MFA
+- [Reference](reference.md) — endpoints, errors, local developer setup (§27)
+
 If your question is "How do I use auth in Aouda right now?", start with:
 - `2.3 Defaults and zero-config behavior`
 - `2.10 Configuration and settings reference`
@@ -64,7 +71,8 @@ Scope boundaries:
 | Full capability completeness and edges | `2.6 Capability coverage matrix` |
 | Mental model for two-layer auth and ADRA | `2.7 Core concepts and mental model` |
 | Runtime implementation path | `2.8 How Aouda implements it` |
-| Every config knob and where set | `2.10 Configuration and settings reference` |
+| Every config knob and where set | `2.10 Configuration and settings reference`, [notifications.md](notifications.md) (email/SMS) |
+| Password reset / invite / MFA OTP delivery | [notifications.md](notifications.md) |
 | API/SDK coverage and missing surfaces | `2.11 API and CLI coverage reference` |
 | Operational checks and incident handling | `2.13 Operations and observability`, `2.14 Troubleshooting by symptom` |
 | Explicit undone work | `2.18 Known gaps and undone work` |
@@ -202,7 +210,7 @@ If you enable auth and keep defaults:
 
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
-| P12 | `P12-Authentication-Authorization-Tasks.md`, two-layer reports (S1/S2/S4), auth model and cleanup reports | Core auth engine, server/app auth split, API key gate, default anon/service key generation, app auth endpoints, .NET/TS client auth wiring, `aouda dev --auth` flow | Later fine-grained authorization model (ADRA deepening) deferred to P14 | `docs/BACKLOG.md` |
+| P12 | `P12-Authentication-Authorization-Tasks.md`, two-layer reports (S1/S2/S4), auth model and cleanup reports | Core auth engine, server/app auth split, API key gate, default anon/service key generation, app auth endpoints, .NET/TS client auth wiring, `aouda start` + API auth setup | Later fine-grained authorization model (ADRA deepening) deferred to P14 | `docs/BACKLOG.md` |
 | P14 | `P14-ADRA-Tasks.md`, S1/S3/S4/S5/S6/S7 reports | Auth DB permission schema additions, ADRA resolution layer and cache, enhanced PLS (`auth-db-pls`), RLS (`auth-db-rls`), TypeScript ADRA wrappers, auth guide rewrite | Broader cross-SDK parity and future resolver extensions | `docs/BACKLOG.md` |
 
 ## 2.6 Capability coverage matrix
@@ -365,7 +373,9 @@ Primary evidence:
 | Dynamic authorization freshness | JWT claim refresh latency often minutes+ | ADRA auth-DB resolution + permission-version invalidation | Fast permission propagation without full re-login |
 | Multi-partition authorization | Often custom logic outside DB | `auth-db-pls` dimension grants with fan-out enforcement | Native multi-tenant/multi-region permission routing |
 | Row-level constraints | Heavy policy engines or per-row external lookups | In-memory resolver rules injected into query predicates | Fine-grained control with low latency cost |
-| AI-agent onboarding | Multi-step auth setup friction | `aouda dev --auth`, generated anon/service keys, explicit error hints | Faster "auth-on" path for generated apps and tooling |
+| AI-agent onboarding | Multi-step auth setup friction | `aouda start` + API database create, generated anon/service keys, explicit error hints | Faster "auth-on" path for generated apps and tooling |
+| Password reset / invite OTP delivery | External email service required per app | Server-level SendGrid integration (`Aouda:Auth:Email`) | One provider config for all app auth DBs on the server |
+| MFA phone OTP | External SMS per app | Server-level GatewayAPI integration (`Aouda:Auth:Sms`) | Same as email — shared infrastructure |
 
 ## 2.10 Configuration and settings reference (complete surface)
 
@@ -373,6 +383,13 @@ Primary evidence:
 |---|---|---|---|---|---|
 | `Aouda:Auth:RootUser:Email` | string? | `null` | valid email | `appsettings.json` / env | Optional root bootstrap user email |
 | `Aouda:Auth:RootUser:Password` | string? | `null` | non-empty string | `appsettings.json` / env | Plaintext bootstrap only; remove after first setup |
+| `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid` enables SendGrid; otherwise null (no send) | `appsettings.json` / `Aouda__Auth__Email__*` env | Password reset + invite emails; see [notifications.md](notifications.md) |
+| `Aouda:Auth:Email:SendGridApiKey` | string? | `null` | SendGrid API key | same | Bearer token for `api.sendgrid.com` |
+| `Aouda:Auth:Email:FromAddress` | string? | `null` | verified sender email | same | Required for delivery |
+| `Aouda:Auth:Email:FromName` | string? | `"Aouda"` | display name | same | From header display name |
+| `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi` enables GatewayAPI; otherwise null | `appsettings.json` / `Aouda__Auth__Sms__*` env | MFA phone OTP only; see [notifications.md](notifications.md) |
+| `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI token | same | `Authorization: Token` header |
+| `Aouda:Auth:Sms:Sender` | string? | `"Aouda"` | sender label | same | Shown on SMS |
 | `Aouda:BaseUrl` | string? | `null` | URL | server config | Used for app auth issuer/discovery URL construction |
 | `AuthenticationMiddlewareOptions.ValidationMode` | enum | `Hybrid` | `SignatureOnly`, `Hybrid`, `Stateful` | middleware options | Token validation strictness |
 | `TokenOptions.AccessTokenLifetime` | timespan | `15m` | positive timespan | auth engine service config | Access token expiry window |
@@ -503,7 +520,7 @@ When to use:
 - starting a new local app and you want auth enabled with minimum setup.
 
 Steps:
-1. Start dev server with auth-enabled path (`aouda dev --auth`).
+1. Start server (`aouda start`), create auth-enabled database via API, configure email if testing password reset ([notifications.md](notifications.md)).
 2. Confirm generated auth summary includes auth DB and anon/service key hints.
 3. Use anon key to call `POST /api/databases/{db}/auth/signup`.
 4. Sign in and store returned tokens in client.

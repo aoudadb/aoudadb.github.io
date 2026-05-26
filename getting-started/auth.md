@@ -21,12 +21,13 @@ parent: "Getting Started"
 
 **Detailed guides (separate pages):**
 
-- **[Architecture Patterns & Deployment](Auth-Architecture.md)** — Four deployment patterns (backend-mediated, direct-to-database, standalone auth, hybrid) and six deployment scenarios
-- **[Setup & User Flows](Auth-Setup-And-Flows.md)** — Enabling auth on a database, signup/signin/signout flows, token lifecycle and refresh
-- **[Client Integration](Auth-Client-Integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context
-- **[Use Cases & User Management](Auth-Use-Cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management
-- **[Data Authorization: Three Modes](Auth-Data-Authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS, reference use cases
-- **[Reference](Auth-Reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
+- **[Architecture Patterns & Deployment](architecture.md)** — Four deployment patterns (backend-mediated, direct-to-database, standalone auth, hybrid) and six deployment scenarios
+- **[Setup & User Flows](setup.md)** — Enabling auth on a database, signup/signin/signout flows, token lifecycle and refresh
+- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, and server config for password reset and MFA OTP delivery
+- **[Client Integration](client-integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context
+- **[Use Cases & User Management](use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
+- **[Data Authorization: Three Modes](authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS, reference use cases
+- **[Reference](reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
 
 ---
 

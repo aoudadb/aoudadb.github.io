@@ -282,12 +282,12 @@ Aouda supports many different deployment configurations. This section maps each 
 | Scenario | Server Auth | App Auth | API Keys | How to Set Up |
 |----------|:-----------:|:--------:|:--------:|---------------|
 | **Embedded mode** (in-process) | No | No | N/A | `AoudaEmbedded.OpenDatabaseAsync()` |
-| **Dev server** (prototyping) | No | No | N/A | `aouda dev --database myapp` |
-| **Dev server with auth** (testing auth flows) | No | Yes | `mk_anon_`, `mk_svc_` | `aouda dev --database myapp --auth` |
+| **Local server** (prototyping) | Optional | No | N/A | `aouda start`; create DB via API or appsettings |
+| **Local server with app auth** (testing auth flows) | Optional | Yes | `mk_anon_`, `mk_svc_` | `aouda start` + `POST /api/databases` with `auth.enabled` — see [setup.md](setup.md) |
 | **Production — cache/internal** | Optional | No | `mk_srv_` if server auth | Create DB without `auth.enabled` |
 | **Production — server auth only** | Yes | No | `mk_srv_` | Bootstrap admin, create DB, create server API keys |
 | **Production — full stack** | Yes | Yes | `mk_srv_`, `mk_anon_`, `mk_svc_` | Bootstrap admin, create DB with `auth.enabled` |
-| **AI agent development** | No | Optional | Auto-generated | `aouda dev --auth` or create DB via API |
+| **AI agent development** | Optional | Optional | From create-database response | `aouda start` + create auth-enabled DB via API |
 
 ### Scenario 1: Embedded Mode (Zero Auth)
 
@@ -300,12 +300,13 @@ await db.GetTable("orders").InsertAsync(new { id = 1, total = 99.99 });
 
 **Auth status:** Not applicable. Your process owns the database directly.
 
-### Scenario 2: Dev Server Without Auth (Prototyping)
+### Scenario 2: Local Server Without App Auth (Prototyping)
 
-Quick-start development server for testing data operations. No credentials needed.
+Start Aouda and create a database without `auth.enabled`. Good for prototyping data models and queries.
 
 ```bash
-aouda dev --port 5433 --database myapp
+aouda start --port 5433 --data-dir ./data
+# Create database via POST /api/databases (with server admin JWT if server auth is bootstrapped)
 ```
 
 ```bash
@@ -313,17 +314,18 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
   -d '{ "rows": [{ "id": 1, "total": 99.99 }] }'
 ```
 
-**Auth status:** Completely open. Good for prototyping data models and queries.
+**Auth status:** No application auth. Protect with server auth in production.
 
-### Scenario 3: Dev Server With Auth (Testing Auth Flows)
-
-Development server with auth enabled. Prints API keys on startup for immediate use.
+### Scenario 3: Local Server With App Auth (Testing Auth Flows)
 
 ```bash
-aouda dev --port 5433 --database myapp --auth
+aouda start --port 5433 --data-dir ./data
+# POST /api/databases with auth enabled — response includes mk_anon_ / mk_svc_ keys (once)
 ```
 
-**Auth status:** App auth enabled. Server auth skipped (dev mode convenience). API keys printed to stdout for AI agents and developers to capture.
+Configure [email/SMS on the server](notifications.md) when testing password reset or phone MFA.
+
+**Auth status:** App auth enabled. API keys come from the create-database response, not from CLI stdout.
 
 ### Scenario 4: Production — Internal/Cache Database
 
@@ -379,17 +381,17 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
 
 AI agents need zero-friction database setup. Aouda provides multiple friction levels:
 
-**Level 0 — Just a database (zero auth):**
+**Level 0 — Just a database (zero app auth):**
 ```bash
-aouda dev --database myapp
-# Agent starts using it immediately — zero setup
+aouda start --data-dir ./data
+# Create DB via API — agent uses data endpoints immediately
 ```
 
-**Level 1 — Database with auth (test auth flows):**
+**Level 1 — Database with app auth:**
 ```bash
-aouda dev --database myapp --auth
-# One command → auth-enabled DB + printed keys
-# Agent captures keys from stdout and tests the full flow
+aouda start --data-dir ./data
+# POST /api/databases with auth → capture anon/service keys from JSON response
+# For password reset testing, configure SendGrid on server (notifications.md)
 ```
 
 **Level 2 — Full production simulation:**

@@ -421,7 +421,7 @@ No authentication is configured. All endpoints are open. Best for rapid prototyp
 aouda start --port 5433 --data-dir ./data
 ```
 
-Then create an auth database and link your app database explicitly (see [Getting-Started-Auth.md](Getting-Started-Auth.md)).
+Then create an auth database and link your app database explicitly (see [Authentication Setup](auth.md)). For password reset and invite emails, configure SendGrid on the server ([Email, SMS & Notifications](../auth/notifications.md)).
 
 **3. Server Auth only — securing multi-database access**
 

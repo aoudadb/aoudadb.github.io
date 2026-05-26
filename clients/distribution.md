@@ -103,7 +103,7 @@ Distribution and licensing in Aouda are product behavior, not packaging trivia.
 If you do nothing except install artifacts:
 
 - `Aouda.Embedded` defaults to ephemeral temp-path operation when `DataPath` is not set.
-- `aouda dev` defaults to:
+- `aouda start` is the shipped CLI server entry point (`aouda dev` was planned but is not exposed in the current CLI; use `aouda start` with `--port` and `--data-dir`). Typical local defaults when using appsettings:
   - `--port 5433`
   - `--database default`
   - ephemeral data path (temp folder, deleted on shutdown)
@@ -115,10 +115,10 @@ If you do nothing except install artifacts:
 |---|---|---|
 | `Aouda.Embedded` data location | Temp directory when `DataPath` null | Zero-setup embedded trial path; data lost after dispose |
 | `Aouda.Embedded` WAL | `EnableWal = true` in embedded options | Durable writes when using persistent path |
-| `aouda dev --port` | `5433` | Predictable local URL (`http://localhost:5433`) |
-| `aouda dev --database` | `"default"` | Usable immediately without DB creation commands |
-| `aouda dev --data` | Omitted | Ephemeral dev server mode |
-| `aouda dev --auth` | `false` | Faster local startup, no auto auth provisioning |
+| `aouda start --port` | `5433` (from config) | Predictable local URL (`http://localhost:5433`) |
+| Database name | from API / config | Create via `POST /api/databases` or appsettings `Databases` |
+| `aouda start --data-dir` | `./data` typical | Persistent server data |
+| App auth | via HTTP API | Enable with `auth.enabled` on create-database; keys in response |
 | `Aouda.Abstractions` package version | `0.1.0` (current csproj) | Stable explicit package identity while pre-1.0 |
 | `@aouda/client` license | `MIT` | No extra licensing friction for npm consumption |
 
@@ -327,10 +327,9 @@ This section includes both runtime distribution settings and package/build metad
 | `AOUDA_DATA_PATH` | string | unset | path | env vars (embedded) | Drives embedded persistence path for no-args open |
 | `AOUDA_DATABASE` | string | `"default"` logical fallback | non-empty | env vars (embedded + CLI schema flows) | DB naming overlay |
 | `AOUDA_SERVER` / `AOUDA_URL` | string | unset | URL | CLI schema flows | Used by schema command context |
-| `aouda dev --port` | int | `5433` | valid port | CLI args | Dev server listen port |
-| `aouda dev --data` | string? | null | path | CLI args | Null => ephemeral temp path |
-| `aouda dev --database` | string | `"default"` | non-empty | CLI args | DB to initialize in dev host |
-| `aouda dev --auth` | bool | `false` | true/false | CLI args | Enables app-auth bootstrap/summary output |
+| `aouda start --port` | int | `5433` | valid port | CLI args | Server listen port |
+| `aouda start --data-dir` | string? | from config | path | CLI args | Persistent data directory |
+| App auth | HTTP | — | create-database API | Not CLI | `mk_anon_` / `mk_svc_` in response |
 | npm `license` | string | `"MIT"` | SPDX | `aouda-client-ts/package.json` | Package-level legal declaration |
 | npm `engines.node` | string | `>=20` | semver range | `aouda-client-ts/package.json` | Distribution runtime constraint |
 
@@ -408,7 +407,7 @@ Common mistake: expecting embedded in-process mode from TypeScript package (curr
 ```bash
 # Install and run CLI tool
 dotnet tool install -g Aouda.Cli
-aouda dev --port 5433 --database default --data "./data"
+aouda start --port 5433 --data-dir "./data"
 ```
 
 ```http
@@ -426,7 +425,7 @@ Common mistake: assuming schema commands can run without server/database context
 | Install embedded package | NuGet (`Aouda.Embedded`) + `AoudaEmbedded` | N/A | N/A | Implemented | In-process only |
 | Install remote .NET client | NuGet (`Aouda.Client`) + `AoudaClient` | N/A | N/A | Implemented | Depends on server URL availability |
 | Install TS client package | N/A | npm `@aouda/client` + `createAoudaClient` | N/A | Implemented | Node 20+ |
-| Start local dev server | `aouda` tool command path from .NET ecosystem | via process execution | Server HTTP endpoints | Implemented | `aouda dev` |
+| Start local server | `aouda` tool command path from .NET ecosystem | via process execution | Server HTTP endpoints | Implemented | `aouda start` |
 | In-process test server package | `Aouda.Testing` (`AoudaTestServer`) | N/A | Test-hosted HTTP | Implemented | MIT tool package |
 | Unified auto client mode selection | No stable public API in current snapshot | N/A | N/A | Missing | Reports mention prior work, symbols absent now |
 
@@ -448,7 +447,7 @@ When to use:
 
 Steps:
 1. Install CLI tool: `dotnet tool install -g Aouda.Cli`
-2. Start server: `aouda dev --port 5433 --database default --data "./data"`
+2. Start server: `aouda start --port 5433 --data-dir "./data"`
 3. Run either .NET `AoudaClient` or TS `createAoudaClient` against `http://localhost:5433`.
 
 Expected result checks:
@@ -479,7 +478,7 @@ When to use:
 - You need development-time app-auth keys from startup.
 
 Steps:
-1. Run: `aouda dev --database myapp --auth`
+1. Run: `aouda start`; create auth-enabled database via API (see auth/setup.md)
 2. Capture printed key guidance from startup output.
 3. Use keys in client auth options or HTTP headers.
 4. Execute signup/signin or protected route checks.
@@ -530,7 +529,7 @@ Suggested tuning sequence:
 
 | Question | Practical answer |
 |---|---|
-| How do I quickly validate local runtime distribution? | Start `aouda dev` and check `GET /health` |
+| How do I quickly validate local runtime distribution? | Start `aouda start` and check `GET /health` |
 | Where do I verify legal metadata first? | `*.csproj` package license fields + root license files |
 | Why does client package feel "too heavy"? | `Aouda.Abstractions` currently embeds engine DLLs; tracked by BL-032 |
 
@@ -539,7 +538,7 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `aouda` command not found | CLI tool not installed or tool path not on `PATH` | Install/update `Aouda.Cli` tool and verify global tools path |
-| `aouda dev` starts but data disappears | Running without `--data` (ephemeral mode) | Set explicit persistent `--data` path |
+| Data disappears after stop | No persistent `--data-dir` | Set explicit `--data-dir` path |
 | NuGet pack license warning/error | Mismatch between `PackageLicense*` and packaged file path | Verify `PackageLicenseFile` and packed file existence |
 | Local package consume fails missing dependencies | Feed missing transitive package or payload assumptions incorrect | Ensure required packages are in same feed; inspect nupkg contents |
 | Expecting unified auto client API but symbol missing | Code snapshot lacks `CreateClient` surface | Use explicit `AoudaEmbedded` / `AoudaClient` paths; track follow-up |
@@ -584,7 +583,7 @@ _Updated 2026-04-08 after P14/P16 completion._
 - ~~BL-032~~ — ✅ **Resolved (P14)**: extracted `Aouda.Schema.Contract` assembly; `Aouda.Abstractions` package no longer ships engine DLLs.
 - ~~BL-033~~ — ✅ **Resolved (P14)**: embedded persistent-path re-open verified via `EmbeddedPersistenceTests`; shutdown flush in `CompactionWorker`.
 - ~~No Docker image distribution~~ — ✅ **Resolved (P16)**: official `Dockerfile` (Alpine-based), `docker-compose.yml` (single node + Studio), `docker-compose.cluster.yml` (3-node cluster + witness + Studio). See `docs/dev/Functionality-Cloud-And-Hub.md` §4.
-- ~~No CLI distribution~~ — ✅ **Resolved (P16)**: `aouda start`, `aouda dev`, `aouda version` subcommand CLI layer. See `docs/dev/Functionality-Cloud-And-Hub.md` §3.
+- ~~No CLI distribution~~ — ✅ **Resolved (P16)**: `aouda start`, `aouda stop`, schema/database subcommands. See `guides/cloud-hub.md` §3.
 - ~~No Kubernetes deployment~~ — ✅ **Resolved (P16)**: Helm chart (`charts/aouda-cluster/`) with StatefulSet, headless Service, PVCs, ConfigMap. Studio and witness optional. See `docs/dev/Functionality-Cloud-And-Hub.md` §5.
 - ~~Cloud/distribution phase intent from ADR 0022 partially unimplemented~~ — ✅ **Partially resolved (P16)**: Hub control plane with cloud project/cluster lifecycle, K8s operator reconciling `AoudaCluster` CRD objects. Billing/payment deferred.
 - ~~TypeScript client SDK packaging~~ — ✅ **Resolved (P16 Epic H)**: `@aouda/client` now has full feature parity including aggregates, extended operators, materialized queries, columnar output, admin APIs, and MCP tools. See `docs/dev/Functionality-TypeScript-Client.md`.

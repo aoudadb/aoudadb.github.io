@@ -41,7 +41,7 @@ The AI-native usage model exists to make Aouda practical for agent-driven softwa
 - evolve to stricter authorization without changing every app path.
 
 User outcomes:
-- Fast "first successful request" for local agents (`aouda dev`, schema-on-write, simple HTTP/SDK paths).
+- Fast "first successful request" for local agents (`aouda start`, schema-on-write, simple HTTP/SDK paths).
 - Explicit connection and identity model for AI-generated apps (API key gate + user JWT).
 - Strong authorization modes (`jwt-claim`, `auth-db-pls`, `auth-db-rls`) that can be introduced incrementally.
 - Predictable error contracts (`error`, `message`, `suggestion`, `requestId`) suitable for retry/fix loops.
@@ -118,15 +118,9 @@ Scope boundaries:
 
 If you do nothing beyond starting local dev:
 
-- `aouda dev` starts with:
-  - port `5433`,
-  - database `default`,
-  - ephemeral mode when `DataPath` is omitted,
-  - schema inference enabled.
-- `aouda dev --auth` keeps the same defaults and additionally:
-  - ensures app auth is enabled,
-  - links/creates app auth DB,
-  - prints generated `anon` and `service_role` keys on first creation.
+- `aouda start` runs the foreground server (configure via `appsettings.json` or `--port`, `--data-dir`).
+- App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. Response includes `anonKey` and `serviceRoleKey` (shown once).
+- Password reset and invite emails require **SendGrid on the server** (`Aouda:Auth:Email`) — see [auth/notifications.md](../auth/notifications.md).
 - HTTP database creation with `{ "auth": { "enabled": true } }`:
   - links to existing single app auth DB, or
   - auto-creates default app auth DB if none exists, or
@@ -151,7 +145,7 @@ If you do nothing beyond starting local dev:
 ### Available now
 
 - Agent-friendly local bootstrap:
-  - `aouda dev` and `aouda dev --auth` with parseable key output and quick-start hints.
+  - `aouda start` with HTTP database + auth setup; keys from create-database response.
 - Auto-generated connection keys on auth-enabled DB creation:
   - `anon` and `service_role` keys returned once.
 - Two-layer auth runtime:
@@ -183,7 +177,7 @@ If you do nothing beyond starting local dev:
 
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
-| P12 | `P12-TwoLayerAuth-Tasks.md`, S1/S2/S4 reports | Two-layer auth model, API key gate, `X-User-Token`, generated app auth keys, `aouda dev --auth` UX, auth docs/protocol updates | MCP auth tools and richer AI error payload fields were tracked but not delivered as first-class runtime surfaces | `docs/BACKLOG.md` |
+| P12 | `P12-TwoLayerAuth-Tasks.md`, S1/S2/S4 reports | Two-layer auth model, API key gate, `X-User-Token`, generated app auth keys, `aouda start` + API auth setup, auth docs/protocol updates | MCP auth tools and richer AI error payload fields were tracked but not delivered as first-class runtime surfaces | `docs/BACKLOG.md` |
 | P14 | `P14-ADRA-Tasks.md`, S6/S7 task docs, ADR 0025 | ADRA table auth modes, dynamic grant/resolver model, TS client wrappers for partition grants + RLS resolvers, usage guidance updates | Wider SDK helper parity and extended enterprise identity scenarios remain future work | `docs/BACKLOG.md` |
 | ADR track (non-shipped intent) | ADR 0017 + ADR 0022 | Product direction for AI-native interface and distribution model | MCP server package, NL query, cloud ephemeral workflow not shipped in current codebase | `docs/BACKLOG.md` |
 
@@ -232,7 +226,7 @@ Invariants:
 
 High-level runtime path:
 
-1. Bootstrap: `aouda dev` (or HTTP DB create) starts DB and optional auth linkage.
+1. Bootstrap: `aouda start` (or HTTP DB create) starts DB and optional auth linkage.
 2. Connection: client sends bearer (API key or JWT) to middleware.
 3. Middleware:
    - determines scope (`ServerAuth`, `AppAuth`, `AppAdmin`, `Data`),
@@ -257,7 +251,7 @@ Implementation anchors:
 
 ### Walk-through A: Local agent bootstrap with auth
 
-1. Agent runs `aouda dev --auth`.
+1. Agent runs `aouda start`, creates auth-enabled DB via API, captures keys.
 2. `DevServerHost.RunAsync()` starts app and calls `EnsureAppAuthEnabledAsync(...)`.
 3. Host resolves/creates app auth DB and links app DB.
 4. If keys are newly generated, host prints `Anon key` and `Service role key`; if not, prints key prefixes + regeneration hint.
@@ -306,7 +300,7 @@ Primary evidence:
 
 | Capability question | Typical systems | Aouda approach | User impact |
 |---|---|---|---|
-| How quickly can an agent start a real DB? | Multi-step infra/bootstrap | `aouda dev` with default DB and schema inference | Faster first successful action |
+| How quickly can an agent start a real DB? | Multi-step infra/bootstrap | `aouda start` + HTTP DB create and schema inference | Faster first successful action |
 | How do auth defaults work for generated apps? | Inconsistent app-specific patterns | Built-in two-layer auth + generated anon/service keys | Lower security misconfiguration risk |
 | Can service backends keep user-context enforcement? | Often custom proxy logic | Native service key + `X-User-Token` flow | Easier secure backend mediation |
 | Can authorization evolve beyond fixed JWT claims? | Usually requires external policy service | ADRA (`auth-db-pls` + `auth-db-rls`) in-engine | Dynamic permissions without fat JWTs |
@@ -316,10 +310,10 @@ Primary evidence:
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `DevServerOptions.Port` | int | `5433` | positive | CLI `aouda dev` | Local dev endpoint |
-| `DevServerOptions.DataPath` | string? | `null` | path or null | CLI `aouda dev --data` | `null` => ephemeral |
-| `DevServerOptions.DatabaseName` | string | `default` | non-empty | CLI `aouda dev --database` | Auto-created DB |
-| `DevServerOptions.EnableAuth` | bool | `false` | `true/false` | CLI `aouda dev --auth` | Enables app-auth bootstrap and key guidance |
+| `Aouda:Port` | int | from appsettings | positive | CLI `--port` / config | Local server listen port |
+| `Aouda:DataPath` | string | `./data` typical | path | CLI `--data-dir` / config | Persistent data directory |
+| `Aouda:Auth:Email:*` | — | null | SendGrid settings | server appsettings / env | Password reset + invite OTP email |
+| `Aouda:Auth:Sms:*` | — | null | GatewayAPI settings | server appsettings / env | MFA phone OTP SMS |
 | `TokenOptions.AccessTokenLifetime` | timespan | `15m` | positive | Auth engine options | Access JWT lifetime |
 | `TokenOptions.RefreshTokenLifetime` | timespan | `30d` | positive | Auth engine options | Refresh token lifetime |
 | `TokenOptions.Issuer` | string | `"aouda"` | non-empty | Auth engine options | JWT issuer |
@@ -336,7 +330,7 @@ Primary evidence:
 
 Precedence and operational notes:
 - Host config precedence is standard server binding (`appsettings`/env/CLI).
-- `aouda dev --auth` is dynamic at dev startup; key generation occurs when linking app auth DB.
+- App auth keys are returned when creating or linking an auth-enabled database via HTTP.
 - Token validation mode changes are startup/middleware configuration behavior.
 - Auth route/admin policy changes are runtime dynamic.
 - Safety-gated behavior:
@@ -428,7 +422,7 @@ Common mistake: calling app auth endpoints with JWT bearer only and no API key a
 
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Start local AI-friendly dev server | `aouda dev` CLI | `aouda dev` CLI | local HTTP service | Implemented | `--auth` prints setup guidance |
+| Start local server | `aouda start` CLI | `aouda start` CLI | local HTTP service | Implemented | Auth via POST /api/databases |
 | Create DB with auth and generated keys | HTTP call from .NET/transport | HTTP call from TS/transport | `POST /api/databases` with `auth.enabled` | Implemented | Returns keys only at creation/link time |
 | App auth sign-up/sign-in/refresh/me/password | `.NET` auth client | `client.auth.*` | `/api/databases/{db}/auth/*` | Implemented | Two-layer flow |
 | Service key user-context forwarding | `UserToken` option | `userToken` option | `X-User-Token` header | Implemented | Effective only for service-level API keys |
@@ -456,7 +450,7 @@ When to use:
 - agent needs a working local database immediately.
 
 Steps:
-1. Run `aouda dev --auth`.
+1. Run `aouda start`; create auth DB via API; configure SendGrid if testing password reset.
 2. Capture `Anon key` from startup output.
 3. Call app signup/signin via `/api/databases/{db}/auth/*`.
 4. Create table and insert/query data via HTTP or SDK.
@@ -541,7 +535,7 @@ Recommended tuning sequence:
 | Fan-out query returns too few rows | Missing partition grants for dimension | Add grants for missing partition keys |
 | Write denied on granted partition | Grant is `read` level only | Promote to `write`/`admin` access level |
 | RLS seems not applied | Table mode/resolver binding mismatch | Verify `authMode` and `rlsResolverName` on table |
-| No keys shown on repeated `aouda dev --auth` run | Keys already existed and are one-time display | Use regenerate endpoint or existing prefixes to locate keys |
+| No full keys in create-database response | Keys already existed and are one-time display | Use `POST .../auth/admin/regenerate-keys` |
 
 ## 2.15 Verification ledger
 
@@ -569,7 +563,7 @@ Last verification date (UTC): `2026-04-01`.
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| No end-to-end agent flow test chaining CLI output -> signup -> ADRA grant -> scoped query in one script | Cross-surface regressions can hide between suites | Add scenario test that parses `aouda dev --auth` output and executes full bootstrap flow | High |
+| No end-to-end agent flow test chaining API key capture -> signup -> ADRA grant -> scoped query in one script | Cross-surface regressions can hide between suites | Add scenario test that creates auth DB via API and executes full bootstrap flow | High |
 | Limited explicit tests for error payload contract stability as an AI interface | Agents rely on stable fields for remediation loops | Add contract tests for `error/message/suggestion/requestId` across auth failure types | High |
 | No tests for future MCP compatibility adapters | Migration to MCP surface risks drift | Add adapter-contract tests once MCP layer exists | Medium |
 | No dedicated test asserting absence/presence of `mcpTool`/`docs` fields by version | Prevents accidental undocumented contract changes | Add explicit payload schema version tests | Medium |

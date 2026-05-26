@@ -2,13 +2,13 @@
 
 > Aouda is a columnar database engine for .NET with a TypeScript client SDK (`@aouda/client`).
 > Dual deployment: embedded (in-process, no server needed) or server (standalone HTTP server).
-> Schema-on-write by default. Zero index management. AI-native bootstrap with `aouda dev`.
+> Schema-on-write by default. Zero index management. Local server via `aouda start`.
 > Two-layer auth model: server auth (who can connect) + application auth (your app's end users).
 
 ## Quick orientation
 
 - Install CLI: `dotnet tool install -g Aouda.Cli`
-- Start dev server: `aouda dev` (port 5433, database "default", schema-on-write)
+- Start server: `aouda start` (default port from appsettings, often 5433; use `--port` and `--data-dir`)
 - Install .NET client: `dotnet add package Aouda.Client`
 - Install TypeScript client: `npm install @aouda/client`
 - Docker: `docker run -p 5000:5000 -v aouda-data:/data aouda/server`
@@ -32,8 +32,9 @@
 - [Setup and Flows](https://aoudadb.github.io/auth/setup/): Signup, signin, token lifecycle, practical setup sequences
 - [Client Integration](https://aoudadb.github.io/auth/client-integration/): .NET and TypeScript integration patterns
 - [Data Authorization](https://aoudadb.github.io/auth/authorization/): ADRA modes — jwt-claim, auth-db-pls, auth-db-rls
-- [Use Cases](https://aoudadb.github.io/auth/use-cases/): Common implementation patterns and applied scenarios
-- [Auth Reference](https://aoudadb.github.io/auth/reference/): API endpoints, error codes, operational notes
+- [Use Cases](https://aoudadb.github.io/auth/use-cases/): Common implementation patterns, password reset, MFA
+- [Email, SMS & Notifications](https://aoudadb.github.io/auth/notifications/): SendGrid, GatewayAPI, OTP delivery configuration
+- [Auth Reference](https://aoudadb.github.io/auth/reference/): API endpoints, error codes, local developer setup
 
 ## Core Guides
 

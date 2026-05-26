@@ -38,15 +38,15 @@ If your question is "What is implemented vs missing?", jump to:
 Aouda treats developer testing flow as product surface, not only internal engineering process.
 
 - User problem solved:
-  - Run realistic integration tests with Aouda Auth in `dotnet test` without managing a separate `aouda dev` process.
-  - Keep local developer setup low-friction (embedded mode, `aouda dev`, schema tooling, TypeScript/.NET SDK test flows).
+  - Run realistic integration tests with Aouda Auth in `dotnet test` without managing a separate `aouda start` process.
+  - Keep local developer setup low-friction (embedded mode, `aouda start`, schema tooling, TypeScript/.NET SDK test flows).
   - Provide repeatable stress and benchmark infrastructure for server-level confidence.
 - Operational outcomes:
   - Cleaner consumer-app CI pipelines.
   - Better parity between local test behavior and real Aouda server behavior.
   - Stronger regression signal through dedicated harness scenarios and benchmark baselines.
 - Scope boundaries:
-  - This domain covers testing package (`Aouda.Testing`), test harness (`aouda-test`), developer entry flows (`aouda dev`, SDK/client test ergonomics), and known testing gaps.
+  - This domain covers testing package (`Aouda.Testing`), test harness (`aouda-test`), developer entry flows (`aouda start`, SDK/client test ergonomics), and known testing gaps.
   - It does not claim that all durability/replication scenario dependencies are fully available in server API surfaces today.
 
 ## 2.2 Discovery and navigation map
@@ -310,10 +310,10 @@ Key implementation anchors:
 | `AoudaTestServerOptions.Port` | `int` | `5433` | int | .NET test code | Informational in TestServer mode |
 | `AoudaTestServerOptions.ConfigureServices` | `Action<IServiceCollection>?` | `null` | callback or null | .NET test code | Allows service overrides in tests |
 | `AoudaTestServerOptions.CorsAllowedOrigins` | `IReadOnlyList<string>?` | `null` | list of origin strings or null | .NET test code | Null disables CORS policy injection; set to allow cross-origin requests in test scenarios (e.g. `["http://localhost:3000"]`) |
-| `aouda dev --port` | int | `5433` | positive int | CLI | Kestrel/TestServer parity option |
-| `aouda dev --data` | string? | `null` | path or null | CLI | Null => ephemeral dev mode |
-| `aouda dev --database` | string | `default` | string | CLI | Initial dev DB |
-| `aouda dev --auth` | bool | `false` | flag | CLI | Enables app auth bootstrap in dev DB |
+| `aouda start --port` | int | `5433` | positive int | CLI | Kestrel/TestServer parity option |
+| `aouda start --data` | string? | `null` | path or null | CLI | Null => ephemeral dev mode |
+| `aouda start --database` | string | `default` | string | CLI | Initial dev DB |
+| App auth setup | HTTP API | — | `POST /api/databases` with `auth.enabled` | Not a CLI flag | Keys returned in create-database response |
 | `aouda-test --scenario` | string | `all` | category/filter | CLI | `all`, `correctness`, `benchmark`, etc. |
 | `aouda-test --duration` | int | `300` | positive int | CLI | Max scenario duration seconds |
 | `aouda-test --concurrency` | int | `10` | positive int | CLI | Client parallelism |
@@ -421,7 +421,7 @@ Common mistake: not accounting for setup mode; non-setup routes can return `SETU
 | Get service/anon keys for auth-enabled test DB | `ServiceKey`, `AnonKey` | Missing | N/A | Implemented (.NET only) | Works after `EnableAuth: true` |
 | Create test users and JWTs quickly | `CreateUserAsync`, `SignInAsync`, `CreateUserHttpClientAsync` | Missing | Equivalent HTTP exists but slower for setup | Implemented (.NET helper path) | Engine-direct helper strategy |
 | xUnit/NUnit/MSTest fixture helpers | `AoudaTestFixture`, `AoudaNUnitFixture`, `AoudaMSTestFixture` | Missing | N/A | Implemented (.NET only) | TS has normal Vitest patterns, no Aouda-specific fixture package |
-| Local server dev workflow | `aouda dev` CLI (.NET tool) | Consumes resulting server | Server endpoints exposed | Implemented | Supports `--auth` shortcut |
+| Local server dev workflow | `aouda start` CLI (.NET tool) | Consumes resulting server | Server endpoints exposed | Implemented | Supports `--auth` shortcut |
 | Stress/benchmark scenario orchestration | `aouda-test` CLI | No direct TS equivalent harness | Uses Aouda HTTP APIs | Implemented (.NET harness) | TS parity not shipped |
 | Client-side admin/schema testing APIs | `Aouda.Client` + .NET tests | `@aouda/client` APIs + Vitest tests | Underlying server endpoints | Implemented | Good transport/unit test coverage in TS repo |
 
@@ -429,7 +429,7 @@ Common mistake: not accounting for setup mode; non-setup routes can return `SETU
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| TypeScript in-process integration server lifecycle | No TS package equivalent to `Aouda.Testing` | Run `aouda dev` externally in test scripts or call .NET helper harness | Not yet tracked as dedicated task ID | High |
+| TypeScript in-process integration server lifecycle | No TS package equivalent to `Aouda.Testing` | Run `aouda start` externally in test scripts or call .NET helper harness | Not yet tracked as dedicated task ID | High |
 | Unified cross-language fixture abstraction | No language-neutral fixture contract package | Per-language custom setup | Future DX tasks (not yet formalized) | Medium |
 | Public disposable test-server orchestration endpoint | No HTTP API for creating isolated test hosts | In-process .NET composition only | Not currently planned in ADR 0024 | Low/Medium |
 | Some harness scenario dependencies (backup/replication workflows) | Server endpoints/features absent for complete scenario assertions | Skip/conditional handling in scenarios | `docs/BACKLOG.md` BL-023, BL-024 | Medium |
@@ -455,14 +455,14 @@ Expected result checks:
 - `ServiceKey("myapp")` starts with `mk_svc_`.
 - `CreateUserHttpClientAsync(...).GetAsync("/api/databases/myapp/auth/me")` returns `200`.
 
-### Scenario 2: Developer local workflow (`aouda dev` + SDKs)
+### Scenario 2: Developer local workflow (`aouda start` + SDKs)
 
 When to use:
 - Daily app development requiring a persistent local Aouda server.
 
 Steps:
 1. Start local dev server:
-   - `aouda dev --port 5433 --database myapp --data <persistent-path>`
+   - `aouda start --port 5433 --database myapp --data <persistent-path>`
 2. Optionally enable auth in dev:
    - add `--auth` and capture printed keys.
 3. Run .NET or TypeScript app with configured URL and credentials.
@@ -531,7 +531,7 @@ Suggested tuning sequence:
 | OIDC discovery check fails | Wrong authority path assumption | Use `{OidcAuthority}/auth/.well-known/openid-configuration` |
 | `aouda-test` exits `2` | Infrastructure/startup error | Validate server path/port/data dir, then rerun with `--verbose` |
 | Benchmark compare fails unexpectedly | Baseline stale or different machine profile | Rebaseline intentionally and keep environment consistent |
-| TS tests cannot spin in-process Aouda server | No TS equivalent of `Aouda.Testing` | Use external `aouda dev` in test lifecycle or .NET bridge harness |
+| TS tests cannot spin in-process Aouda server | No TS equivalent of `Aouda.Testing` | Use external `aouda start` in test lifecycle or .NET bridge harness |
 
 ## 2.15 Verification ledger
 
@@ -560,7 +560,7 @@ Last verification date (UTC): `2026-04-01` (package tests); supplementary source
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| No TypeScript equivalent integration helper for in-process Aouda server | Limits parity for TS-first apps; extra CI friction | Create TS test utility package or documented harness script wrapper around `aouda dev` with auto lifecycle | High |
+| No TypeScript equivalent integration helper for in-process Aouda server | Limits parity for TS-first apps; extra CI friction | Create TS test utility package or documented harness script wrapper around `aouda start` with auto lifecycle | High |
 | Harness suite currently sensitive to setup-mode state in branch validation runs | Can hide true regressions behind infra/auth gating noise | Add explicit setup-mode fixture bootstrap in harness tests and dedicated guard test asserting non-setup mode before scenario run | High |
 | No explicit cross-SDK end-to-end test using same live server fixture (.NET + TS) | Protocol parity drift can go unnoticed | Add CI scenario: start server once, run targeted .NET and TS API smoke tests against same DB | Medium |
 | Fixture adapter surface lacks direct compile-time xUnit interface implementation in base package | New users can misread pattern and misconfigure fixtures | Add analyzer/doc test that enforces "derived fixture must implement `IAsyncLifetime`" with sample package template | Medium |

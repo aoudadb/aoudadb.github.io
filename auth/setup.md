@@ -123,7 +123,24 @@ This revokes the old auto-generated keys and creates new ones.
 
 ---
 
-## 8. End User Flows: Signup, Signin, Signout
+## 8. Email, SMS, and OTP Notifications
+
+Password reset, invite emails, and phone MFA require **server-side** notification providers. Your consumer application does not send these messages itself — it calls Aouda auth endpoints; Aouda delivers OTPs when configured.
+
+| Flow | Channel | Server configuration |
+|------|---------|----------------------|
+| Forgot password (`request-password-reset`) | Email | `Aouda:Auth:Email:Provider = sendgrid` + SendGrid API key |
+| Invite / first-time password (`sendInviteEmail`, `POST .../invite`) | Email | Same as above |
+| MFA phone challenge | SMS | `Aouda:Auth:Sms:Provider = gatewayapi` + GatewayAPI token |
+| MFA TOTP (authenticator app) | — | No notification provider needed |
+
+Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. Configure SendGrid before testing customer password reset end-to-end.
+
+**Full guide:** [Email, SMS & Notifications](notifications.md) — settings reference, Docker/env examples, SendGrid/GatewayAPI checklists, troubleshooting.
+
+---
+
+## 9. End User Flows: Signup, Signin, Signout
 
 All Application Auth endpoints are scoped by database:
 
@@ -187,7 +204,7 @@ Revokes the session and invalidates the refresh token.
 
 ---
 
-## 9. Token Lifecycle: Access Tokens and Refresh Tokens
+## 10. Token Lifecycle: Access Tokens and Refresh Tokens
 
 ### How Tokens Work
 

@@ -10,11 +10,12 @@ This is the minimal path for an AI agent to get a working Aouda database, connec
 
 ---
 
-## Option A — Dev server (fastest, local)
+## Option A — Local server (fastest, local)
 
 ```bash
-# Start server with defaults: port 5433, database "default", schema-on-write
-aouda dev
+# From a directory with appsettings.json (DataPath, Port) or pass flags:
+aouda start --port 5433 --data-dir ./data
+# Create database via POST /api/databases if not auto-created from config
 ```
 
 Connect with TypeScript:
@@ -88,14 +89,14 @@ Use embedded mode for:
 
 ---
 
-## Option C — Dev server with auth (for user-facing apps)
+## Option C — Local server with app auth (for user-facing apps)
 
 ```bash
-# Start with app auth enabled — prints anon and service_role keys on first run
-aouda dev --auth
+aouda start --port 5433 --data-dir ./data
+# Bootstrap server admin, then POST /api/databases with auth enabled — see auth/setup.md
 ```
 
-Capture the `Anon key` from startup output, then:
+Capture `anonKey` and `serviceRoleKey` from the create-database JSON response, then:
 
 ```typescript
 const client = createAoudaClient({
@@ -137,7 +138,8 @@ Use `error` for programmatic retry/fix logic. Use `suggestion` to generate the c
 
 | Capability | Status |
 |---|---|
-| `aouda dev` one-command bootstrap | Available |
+| `aouda start` local server bootstrap | Available |
+| Password reset / invite email (SendGrid on server) | Available — configure `Aouda:Auth:Email` — see [auth/notifications.md](../auth/notifications.md) |
 | Schema-on-write (no DDL needed) | Available |
 | Structured errors with `suggestion` field | Available |
 | Two-layer auth with generated API keys | Available |
