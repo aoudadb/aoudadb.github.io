@@ -480,7 +480,9 @@ The phone factor is active immediately — no verify step is needed at enrolment
 
 ### 21.3 — The MFA Sign-In Flow (Challenge → Verify)
 
-After a user with enrolled MFA signs in, the signin response includes `"mfaRequired": true`. The app must then initiate a challenge and prompt the user for their code.
+After a user with enrolled MFA signs in, the signin response includes `"mfaRequired": true` **and `"mfaFactors": [...]`**. The app must then initiate a challenge and prompt the user for their code.
+
+> **Use the `factorId` from the sign-in response directly.** The sign-in response already includes `mfaFactors` — do not make a separate `GET .../auth/mfa/factors` call just to get the factor ID. That call requires the same credentials and is an unnecessary round-trip. Only call `GET /mfa/factors` for factor management UIs (list/delete enrolled factors) outside of a sign-in flow.
 
 **Step 1 — Create challenge:**
 
@@ -524,6 +526,10 @@ Discard the old `aal1` tokens and use the new pair for all subsequent requests.
 
 **Step 2 variant — Use a recovery code:** same endpoint; pass one of the 8 recovery codes as `"code"` instead of a TOTP code. The code is consumed and cannot be reused.
 
+> **`Authorization: Bearer <user-access-token>`** is the session JWT returned by `POST .../auth/signin`. It is **not** the API key. Pass the full JWT string — the one beginning with `eyJ...` that was returned in `accessToken`. The MFA endpoints identify the user from this JWT.
+>
+> **If you receive `AUTH_API_KEY_REQUIRED`:** this means your request is arriving without a valid API key. For direct browser-to-Aouda calls this should not happen if you pass the sign-in `accessToken`. The most common cause in backend/BFF code is using a raw `HttpClient` that sends only a service-key header without the user JWT, or a client construction that omits the session token. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints) for the correct pattern when MFA is called from a backend service on behalf of a browser session.
+
 ### 21.4 — Enforcing MFA Gates in Your Backend
 
 See §24.1 for the `aal` enforcement code examples (C# and TypeScript).
@@ -533,7 +539,8 @@ See §24.1 for the `aal` enforcement code examples (C# and TypeScript).
 ### 21.5 — Managing Enrolled Factors
 
 ```bash
-# List factors
+# List factors — use for factor management UIs, NOT during a sign-in flow
+# (the sign-in response already includes mfaFactors — no need to call this endpoint after signin)
 curl http://localhost:5433/api/databases/myapp/auth/mfa/factors \
   -H "Authorization: Bearer <user-access-token>"
 # → { "factors": [{ "id": "a1b2c3d4-...", "type": "totp", "status": "active", "createdAt": "2026-05-25T10:00:00Z" }] }

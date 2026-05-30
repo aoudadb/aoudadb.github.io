@@ -9,6 +9,8 @@ parent: "Auth and Authorization"
 > Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 >
 > **Notifications:** Password reset, invite email, and MFA SMS are configured on the **Aouda server** (`Aouda:Auth:Email`, `Aouda:Auth:Sms`), not in client SDK options. See [Email, SMS & Notifications](notifications.md).
+>
+> **BFF / gateway pattern:** If your backend proxies auth operations on behalf of browser users, see [§14 — BFF / Gateway Proxying Auth Endpoints](#14-bff--gateway-proxying-auth-endpoints). Auth and data endpoints use different header conventions — mixing them is the most common integration mistake.
 
 ---
 
@@ -324,3 +326,112 @@ curl -X POST http://localhost:5433/api/databases/myapp/query \
   -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
 # Returns only orders in the user's partition
 ```
+
+---
+
+## 14. BFF / Gateway Proxying Auth Endpoints
+
+When your application has a backend-for-frontend (BFF) or API gateway that sits between the browser and Aouda, the auth routing rules are different for **data endpoints** vs **auth endpoints**.
+
+### The Two Patterns
+
+| Operation | Correct pattern |
+|-----------|----------------|
+| **Data queries / mutations** | BFF uses service key (`mk_svc_`) + `X-User-Token: <userJwt>` — BFF authenticates itself, user context enforced via header |
+| **Auth endpoints** (signin, me, signout, MFA) | BFF **forwards the user JWT directly** as `Authorization: Bearer <userJwt>` — the user's session is the primary credential |
+
+> **Key rule:** `X-User-Token` is only processed when the primary credential is a service-level key (`mk_svc_` or `mk_srv_`). For auth endpoints, the server expects the user JWT as the primary `Authorization` credential. Sending `Authorization: Bearer mk_svc_...` + `X-User-Token: <userJwt>` to an auth endpoint will authenticate you as the service key, not as the user — which is wrong for `me`, `signout`, and `mfa/*`.
+
+### What to Do in a BFF
+
+```
+┌─────────────┐      ┌─────────────────────┐      ┌────────────────┐
+│  Browser     │      │  Your BFF            │      │  Aouda         │
+│              │      │                      │      │                │
+│  signin ──  ─┼─────►│  POST /login          │      │                │
+│              │      │  Use mk_anon_ key  ──┼─────►│  auth/signin   │
+│              │      │  ← aal1 JWT          │◄─────┤                │
+│  ← JWT    ◄──┼──────┤  forward to browser  │      │                │
+│              │      │                      │      │                │
+│  mfa/challenge──────┼─►POST /mfa-challenge │      │                │
+│  with aal1 JWT│     │  forward user JWT ──┼─────►│  auth/mfa/     │
+│              │◄─────┼─ forward response    │◄─────┤  challenge     │
+│              │      │                      │      │                │
+│  data query ─┼─────►│  GET /api/orders     │      │                │
+│  with aal2   │      │  mk_svc_ +          ─┼─────►│  query         │
+│  JWT         │      │  X-User-Token: jwt   │◄─────┤                │
+└─────────────┘      └─────────────────────┘      └────────────────┘
+```
+
+#### BFF sign-in endpoint (C# example)
+
+```csharp
+// BFF: POST /login — proxies to Aouda signin
+app.MapPost("/login", async (HttpContext ctx, HttpClient aoudaHttp) =>
+{
+    var body = await ctx.Request.ReadFromJsonAsync<SigninRequest>();
+
+    // Use anon key for signin — same as a direct browser call
+    var request = new HttpRequestMessage(HttpMethod.Post,
+        "http://localhost:5433/api/databases/myapp/auth/signin");
+    request.Headers.Authorization =
+        new AuthenticationHeaderValue("Bearer", _anonKey);
+    request.Content = JsonContent.Create(body);
+
+    var response = await aoudaHttp.SendAsync(request);
+    var json = await response.Content.ReadAsStringAsync();
+
+    // Forward the raw response (including accessToken, mfaRequired, mfaFactors) to the browser
+    ctx.Response.StatusCode = (int)response.StatusCode;
+    ctx.Response.ContentType = "application/json";
+    await ctx.Response.WriteAsync(json);
+});
+```
+
+#### BFF MFA challenge endpoint (C# example)
+
+```csharp
+// BFF: POST /mfa/challenge — forwards user JWT to Aouda
+app.MapPost("/mfa/challenge", async (HttpContext ctx, HttpClient aoudaHttp) =>
+{
+    // The browser passes its aal1 JWT in Authorization
+    var userJwt = ctx.Request.Headers.Authorization.ToString()
+        .Replace("Bearer ", "", StringComparison.OrdinalIgnoreCase);
+
+    var body = await ctx.Request.ReadFromJsonAsync<MfaChallengeRequest>();
+
+    var request = new HttpRequestMessage(HttpMethod.Post,
+        "http://localhost:5433/api/databases/myapp/auth/mfa/challenge");
+
+    // Forward the user JWT directly — do NOT replace it with the service key
+    request.Headers.Authorization =
+        new AuthenticationHeaderValue("Bearer", userJwt);
+    request.Content = JsonContent.Create(body);
+
+    var response = await aoudaHttp.SendAsync(request);
+    var json = await response.Content.ReadAsStringAsync();
+
+    ctx.Response.StatusCode = (int)response.StatusCode;
+    ctx.Response.ContentType = "application/json";
+    await ctx.Response.WriteAsync(json);
+});
+```
+
+#### Common mistakes
+
+| Mistake | What happens | Fix |
+|---------|-------------|-----|
+| Send `Authorization: Bearer mk_svc_...` to `/auth/mfa/challenge` | Server authenticates as the service account, not the user — MFA factor lookup fails or returns wrong user | Forward the user JWT instead |
+| Send `Authorization: Bearer mk_svc_...` + `X-User-Token: <userJwt>` to `/auth/mfa/challenge` | `X-User-Token` is ignored for auth endpoints; request fails as service account identity | Forward user JWT in Authorization directly |
+| Use raw `HttpClient` with only the user JWT in Authorization for MFA | Works as intended for direct browser-to-Aouda calls, but may fail if the BFF constructs requests incorrectly | Verify the JWT is the sign-in `accessToken`, not an API key |
+| Call `GET /mfa/factors` after sign-in to get the `factorId` | Unnecessary extra round-trip | Use `mfaFactors` from the sign-in response directly |
+
+### Choosing the Right Client Mode (AoudaClient SDK)
+
+For BFF code that proxies auth operations, prefer calling Aouda's HTTP endpoints directly over constructing an `AoudaClient` for each user session — the SDK's `AppAuthOptions` does not support a combination of API key + pre-obtained user token simultaneously.
+
+| Scenario | Approach |
+|----------|---------|
+| Proxy signin/signout/me/mfa from browser → Aouda | Forward HTTP requests with user JWT in Authorization |
+| Backend data queries scoped to user | Use `AoudaClient` with `AppAuthOptions { ApiKey = serviceKey, UserToken = userJwt }` |
+| Backend admin operations | Use `AoudaClient` with `AppAuthOptions { ApiKey = serviceKey }` |

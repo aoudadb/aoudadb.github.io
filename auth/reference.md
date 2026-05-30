@@ -122,11 +122,13 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/password` | PUT | User JWT | Change password |
 | `.../auth/request-password-reset` | POST | API key (anon or higher) | Request a 6-digit OTP emailed to the user; always returns 200 |
 | `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success |
-| `.../auth/mfa/enroll` | POST | User JWT (any aal) | Enrol a TOTP or phone MFA factor |
-| `.../auth/mfa/challenge` | POST | User JWT (any aal) | Create a challenge for an enrolled factor; sends SMS for phone factors |
-| `.../auth/mfa/verify` | POST | User JWT (aal1 or aal2) | Submit OTP or TOTP code; returns new token pair with `aal2` on success |
-| `.../auth/mfa/factors` | GET | User JWT (any aal) | List enrolled MFA factors |
-| `.../auth/mfa/factors/{id}` | DELETE | User JWT (any aal) | Delete an enrolled MFA factor |
+| `.../auth/mfa/enroll` | POST | User JWT | Enrol a TOTP or phone MFA factor |
+| `.../auth/mfa/challenge` | POST | User JWT | Create a challenge for an enrolled factor; sends SMS for phone factors |
+| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success |
+| `.../auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
+| `.../auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
+
+> **MFA endpoints require a user JWT** — the access token returned from sign-in. Send `Authorization: Bearer <accessToken>` directly; no API key is required or expected. If you are building a BFF that proxies MFA requests, forward the user JWT unchanged in `Authorization` — do not replace it with your service key. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints).
 
 #### Optional Fields in `POST .../auth/signin` Response
 
@@ -137,9 +139,11 @@ The following fields are returned only when they apply. Consumers must handle th
 | `requiresPasswordChange` | bool | Only when `true` | User must change their password before the app grants full access. User still receives a fully valid `aal1` JWT — the app is responsible for blocking access to protected areas until the password is changed. |
 | `aal` | string | Only when user has enrolled MFA factors | `"aal1"` — password only. The full signin response also includes `mfaRequired` and `mfaFactors` when this field is present. |
 | `mfaRequired` | bool | Only when user has enrolled active MFA factors | `true` — the app should prompt the user to complete an MFA challenge before granting access to sensitive areas. |
-| `mfaFactors` | array | Only when user has enrolled active MFA factors | Short list of enrolled factors: `[{ "id": "...", "type": "totp"\|"phone", "phone": "+44***5678" (masked) }]`. |
+| `mfaFactors` | array | Only when user has enrolled active MFA factors | Short list of enrolled factors: `[{ "id": "...", "type": "totp"\|"phone", "phone": "+44***5678" (masked) }]`. **Use this list directly** — do not make a separate `GET .../auth/mfa/factors` call if `mfaFactors` is already present here. |
 
 > **Consumers must handle missing fields gracefully.** When `requiresPasswordChange` is absent, the user's password status is normal. When `mfaRequired` is absent, the user has no enrolled MFA factors.
+>
+> **Do not call `GET .../auth/mfa/factors` after sign-in when `mfaFactors` is already present in the sign-in response.** The sign-in response is the canonical source — making an extra factors request is unnecessary and wastes a round-trip. The only time you need `GET .../auth/mfa/factors` is for factor management UIs (list/delete enrolled factors) outside of a sign-in flow.
 
 Signin response with MFA factors enrolled:
 
@@ -351,7 +355,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature | Discard token; force re-sign-in |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
 | `AUTH_TOKEN_REVOKED` | 401 | Token was revoked (session signed out) | Redirect to sign-in |
-| `AUTH_API_KEY_REQUIRED` | 401 | App auth endpoint called without an API key | Include `Authorization: Bearer mk_anon_...` for app auth routes |
+| `AUTH_API_KEY_REQUIRED` | 401 | Public app-auth endpoint called without an API key | Include `Authorization: Bearer mk_anon_...` for public app-auth entry points (`signup`, `signin`, `refresh`). Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) require a user JWT instead — if you receive this error on those routes, your request is using a plain JWT on a public-only path, or you are hitting an older server version. |
 | `AUTH_API_KEY_INVALID` | 401 | API key is invalid, revoked, or expired | Regenerate via the admin regenerate-keys endpoint |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected) | Redirect to sign-in; entire token family is invalidated |
 | `UNAUTHORIZED` | 401 | Unrecognised path when server auth is configured (deny-by-default) | Ensure request targets a valid path with a valid credential |
