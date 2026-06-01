@@ -534,7 +534,7 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 | `email` | user email |
 | `iat` | issued-at timestamp |
 | `exp` | expiry timestamp |
-| `db_roles` | JSON-encoded role map (see below — not a native JSON object) |
+| `db_roles` | Native JSON object — role map keyed by scope (see below) |
 | `aal` | Authentication Assurance Level: `"aal1"` (password-only signin) or `"aal2"` (MFA-verified). Present on all tokens minted by Aouda AppAuth. |
 
 ### 24.1 — The `aal` Claim: Enforcing MFA Gates
@@ -575,33 +575,61 @@ router.get("/sensitive-export", requireAal2, handleSensitiveExport);
 
 ### The `db_roles` Claim
 
-The `db_roles` claim value is a **JSON-encoded string** embedded inside the JWT — not an inline JSON object. JWT libraries surface it as a plain string; you must parse it explicitly.
+The `db_roles` claim is a **native JWT JSON object** — not a double-encoded string.
+JWT libraries surface it as a typed object; no `JSON.parse()` call is needed.
 
-The decoded string contains a `Dictionary<string, string[]>` keyed by **scope**:
+The object is a map keyed by **scope**, with each value being an **array of role name strings**
+(always an array, even for a single role):
 
 | Key | When used |
 |-----|-----------|
 | Auth database name (e.g. `"_auth"`) | Roles assigned to the user **without** an explicit scope (the default). The key is the auth database name — it is environment-specific and **must not be hardcoded**. |
 | Explicit scope string (e.g. `"derive"`) | Roles assigned with an explicit scope via the admin `PUT .../users/{id}/roles` endpoint. |
-| `"*"` | Roles assigned with a wildcard scope. |
+| `"*"` | Roles assigned with a wildcard scope (applies to all databases). |
 
-**Wire format example** (database named `_auth`, role `derive_admin` assigned with no scope):
+**Canonical wire format** (database named `_auth`, role `derive_admin` assigned without scope;
+role `app_derive_connect` assigned with explicit scope `"derive"`):
 
 ```json
 {
-  "db_roles": "{\"_auth\":[\"derive_admin\"]}"
+  "db_roles": {
+    "_auth": ["derive_admin"],
+    "derive": ["app_derive_connect"]
+  }
 }
 ```
 
-The `"_auth"` key is the auth database name, not the application database name. If your auth database is named `auth`, the key is `"auth"`. Check the name returned when you created the auth database (see [setup.md](setup.md) §7).
+The `"_auth"` key is the **auth database name**, not the application database name. If your auth database is named `auth`, the key is `"auth"`. Check the name returned when you created the auth database (see [setup.md](setup.md) §7).
 
-**Reading roles — C\#:**
+> Roles are always arrays. If a user has one role in a scope, the value is still `["role_name"]`.
+
+**Reading roles — TypeScript / JavaScript:**
+
+```typescript
+// db_roles is a native object — no JSON.parse() needed.
+interface DbRoles { [scope: string]: string[] }
+
+function hasRole(payload: { db_roles?: DbRoles }, roleName: string): boolean {
+  if (!payload.db_roles) return false;
+  return Object.values(payload.db_roles).flat().some(r => r === roleName);
+}
+
+// Check a role in a specific scope:
+function hasRoleInScope(payload: { db_roles?: DbRoles }, scope: string, roleName: string): boolean {
+  return payload.db_roles?.[scope]?.includes(roleName) ?? false;
+}
+```
+
+**Reading roles — C\# (via `ClaimsPrincipal`):**
+
+When ASP.NET Core JWT Bearer middleware validates an Aouda token, it converts the native
+JWT object claim to a JSON string stored in `Claim.Value`. Read it with `FindFirstValue` and
+deserialize — no double-parsing required:
 
 ```csharp
-// Flatten across all scopes to check whether the user has a role anywhere.
 bool HasRole(ClaimsPrincipal user, string roleName)
 {
-    var raw = user.FindFirstValue("db_roles");
+    var raw = user.FindFirstValue("db_roles"); // JSON string of the object
     if (string.IsNullOrEmpty(raw)) return false;
     try
     {
@@ -614,31 +642,20 @@ bool HasRole(ClaimsPrincipal user, string roleName)
 }
 ```
 
-To check a role in a **specific scope** (e.g. only if assigned for scope `"derive"`):
+To check a role in a **specific scope**:
 
 ```csharp
-if (map.TryGetValue("derive", out var scopedRoles) && scopedRoles.Contains("derive_admin"))
+if (map.TryGetValue("derive", out var scopedRoles) && scopedRoles.Contains("app_derive_connect"))
     // ...
-```
-
-**Reading roles — TypeScript / JavaScript:**
-
-```typescript
-function hasRole(dbRolesClaimValue: string | undefined, roleName: string): boolean {
-  if (!dbRolesClaimValue) return false;
-  try {
-    const map: Record<string, string[]> = JSON.parse(dbRolesClaimValue);
-    return Object.values(map).flat().some(r => r === roleName);
-  } catch { return false; }
-}
 ```
 
 **Common mistakes:**
 
 | Mistake | Why it fails |
 |---------|-------------|
-| `dbRoles?.derive` — hardcoded key | The key is the auth database name (e.g. `"_auth"`), not the application name. |
-| Treating `db_roles` as a JSON object | JWT libraries deliver it as a string. Calling `.keys()` on it gives character indices, not scope keys. |
+| `dbRoles?.derive` — hardcoded scope key | The null-scope key is the auth database name (e.g. `"_auth"`). Use an explicit scope (`PUT .../users/{id}/roles` with `"scope": "derive"`) to get a predictable key like `"derive"`. |
+| Calling `JSON.parse(dbRoles)` | `db_roles` is already a native JSON object in the JWT — no extra parsing needed. Calling `JSON.parse()` on an object throws or returns unexpected results. |
+| Expecting a string value per scope | Values are always arrays (`string[]`), even for a single role. |
 | Checking only under the auth DB key | Scoped roles use a different key. Iterate all values for a flat role check. |
 
 ---
@@ -692,7 +709,8 @@ async function verifyAoudaToken(token) {
         issuer:   'https://your-aouda-server.com/api/databases/mydb',
         audience: 'mydb_auth',
     });
-    return payload; // { sub, email, iat, exp, db_roles, ... }
+    // payload.db_roles is a native object: { "_auth": ["db_admin"], "derive": ["app_derive_connect"] }
+    return payload;
 }
 ```
 

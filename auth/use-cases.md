@@ -528,7 +528,19 @@ Discard the old `aal1` tokens and use the new pair for all subsequent requests.
 
 > **`Authorization: Bearer <user-access-token>`** is the session JWT returned by `POST .../auth/signin`. It is **not** the API key. Pass the full JWT string — the one beginning with `eyJ...` that was returned in `accessToken`. The MFA endpoints identify the user from this JWT.
 >
-> **If you receive `AUTH_API_KEY_REQUIRED`:** this means your request is arriving without a valid API key. For direct browser-to-Aouda calls this should not happen if you pass the sign-in `accessToken`. The most common cause in backend/BFF code is using a raw `HttpClient` that sends only a service-key header without the user JWT, or a client construction that omits the session token. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints) for the correct pattern when MFA is called from a backend service on behalf of a browser session.
+> **Route behavior:** post-sign-in routes (`/auth/me`, `/auth/signout`, `/auth/mfa/*`, `PUT /auth/password`) are user-JWT routes. If these calls fail with 401 after a successful signin, inspect the `Authorization` header first — the request is usually sending an API key (`mk_*`) or no bearer instead of the signin `accessToken`.
+
+### 21.3.1 — MFA 401 Troubleshooting (Challenge/Verify)
+
+Use this checklist when `POST .../auth/mfa/challenge` or `POST .../auth/mfa/verify` returns 401:
+
+| Symptom | Typical Cause | Fix |
+|---------|---------------|-----|
+| 401 on `/auth/mfa/challenge` immediately after a successful signin | `Authorization` header still contains `mk_anon_...` or `mk_svc_...` (API key), not the user JWT from signin | Send `Authorization: Bearer <signin accessToken>` |
+| 401 with `AUTH_TOKEN_MISSING` | No `Authorization` header reached Aouda (proxy/BFF dropped it) | Forward `Authorization` unchanged from browser/BFF to Aouda |
+| 401 with `AUTH_TOKEN_INVALID` | Wrong token type or malformed token (service key, stale token, copied value with missing characters) | Use the raw `accessToken` string from signin response (`eyJ...`) |
+| 401 only in BFF flow, direct browser call works | BFF replaced user JWT with service key for auth endpoints | For auth endpoints, forward user JWT directly; reserve `mk_svc_ + X-User-Token` for data endpoints only |
+| Intermittent 401 after delay | Access token expired before challenge/verify call | Refresh or re-signin, then retry challenge/verify with a fresh JWT |
 
 ### 21.4 — Enforcing MFA Gates in Your Backend
 

@@ -212,9 +212,9 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `aouda-server` |
-| `aud` | `aouda` |
-| `db_roles` | `{ "myapp": ["db_writer"], "analytics": ["db_reader"] }` |
+| `iss` | `{base_url}/api/auth` |
+| `aud` | Server auth database name (e.g. `"_serverauth"`) |
+| `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_writer"], "analytics": ["db_reader"] }`. Read directly as an object; no `JSON.parse()` needed. |
 | `is_admin` | `true` for server admins (implicit `db_admin` on all databases) |
 | `iat`, `exp` | Issued-at and expiry timestamps |
 
@@ -268,10 +268,11 @@ Content-Type: application/json
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `aouda-app` |
-| `aud` | Database name (e.g. `myapp`) |
+| `iss` | `{base_url}/api/databases/{db}` |
+| `aud` | Auth database name (e.g. `"_auth"`) |
+| `aal` | Authentication assurance level: `"aal1"` (password only) or `"aal2"` (MFA verified) |
 | `tenant_id` | Tenant ID for PLS partition scoping |
-| `db_roles` | `{ "myapp": ["db_reader"] }` |
+| `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_reader"] }`. Values are always arrays. Scope key for unscoped roles is the auth DB name (e.g. `"_auth"`). |
 | `permissions` | Fine-grained table permissions (if custom role) |
 | `iat`, `exp` | Issued-at and expiry timestamps |
 
