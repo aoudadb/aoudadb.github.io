@@ -50,6 +50,7 @@
 - [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): Partition keys, tenant isolation
 - [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling
 - [Materialized Queries](https://aoudadb.github.io/guides/materialized/): Materialized query definitions, refresh, Studio browser
+- [Market Data and Stock Quotes](https://aoudadb.github.io/guides/market-data/): Quote schema, OHLC candle MQs, partitioning, PLS, cross-partition analytics
 - [Storage and Persistence](https://aoudadb.github.io/guides/storage/): Columnar storage model, segment lifecycle, WAL
 - [Cloud and Hub](https://aoudadb.github.io/guides/cloud-hub/): Hub backend, cloud control plane, Kubernetes operator
 - [Studio](https://aoudadb.github.io/guides/studio/): Web management console — data explorer, cluster ops, backup UI
