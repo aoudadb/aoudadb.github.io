@@ -414,7 +414,68 @@ This is a storage optimization, not required for correctness. See engine catalog
 
 ---
 
-## 9. References
+## 9. Bulk-loading historical data
+
+When you use `bulk-load`, rows bypass incremental MQ maintenance by design.  
+After the load commits, trigger or await a materialized-query refresh before reading candle tables.
+
+### Recommended flow
+
+1. Bulk-load historical `quotes` rows.
+2. Wait for MQ refresh completion (automatic when not skipped, or explicit refresh call).
+3. Query `candles_bid_*` tables.
+
+### HTTP
+
+```http
+POST /api/databases/finance/materialized-queries/candles_bid_1h:refresh
+Content-Type: application/json
+
+{ "await": true }
+```
+
+Use `{ "await": false }` to schedule and continue immediately.
+
+### .NET client
+
+```csharp
+var handle = await client.BulkLoadAsync("quotes", rows, new BulkLoadOptions
+{
+    // Default is Auto (refresh after commit). Set Skip for multi-step pipelines.
+    PostLoadMqBehavior = ClientPostLoadMqBehavior.Auto
+});
+
+// Optional explicit refresh (useful when PostLoadMqBehavior=Skip)
+await client.MaterializedQueries.RefreshAsync("candles_bid_1h", awaitCompletion: true);
+```
+
+### TypeScript client
+
+```typescript
+await client.bulkLoad("quotes", rows, {
+  // default: "auto"
+  postLoadMqBehavior: "auto",
+});
+
+await client.materializedQueries.refresh("candles_bid_1h", { await: true });
+```
+
+### CLI
+
+```bash
+# default: auto refresh after bulk-load commit
+aouda table bulk-load quotes --file ./quotes-history.jsonl
+
+# skip refresh now, refresh explicitly later
+aouda table bulk-load quotes --file ./quotes-history.jsonl --skip-mq-refresh
+aouda mq refresh candles_bid_1h --await
+```
+
+Use `--skip-mq-refresh` when you intentionally load multiple related tables first and refresh once at the end.
+
+---
+
+## 10. References
 
 - MarketData-Gaps implementation: `TruncateToMinute`, FIRST/LAST aggregates, derived MQ group-by, TS cross-partition toggle
 - ADRs: [0014 time-series clustering](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0014-time-series-clustering-optimization.md), [0015 materialized queries](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0015-materialized-queries.md), [0009 partitioning](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0009-partitioning-multitenancy.md)
