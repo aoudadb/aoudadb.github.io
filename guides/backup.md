@@ -656,6 +656,40 @@ _Updated 2026-05-18 after P24-B completion._
 - `aouda backup create/list/restore` CLI subcommands (wrapping REST APIs) not yet implemented.
 - Integration test: trigger → insert → S3 restore → query round-trip (deferred from P24-B).
 
+## 2.20 HRA and mutable-tier table backup contract
+
+_Added 2026-06-07 (MemTiering S12 — closes Gap C)._
+
+### What is covered
+
+An **exact backup** captures a point-in-time snapshot of every `DiskBacked` table that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
+
+- **Never-sealing mutable-tier tables** (those with `MemoryIntent = Mutable` that never exceed the seal threshold) are **fully covered** by an exact backup. Their data lives entirely in HRA, and a `.hra` snapshot file is written for each such table at the backup checkpoint.
+- **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism.
+- `BackupFileType.HraSnapshot` manifest entries identify these files; they are content-addressed (SHA-256 + CRC-32) and deduplicated between incremental backup runs.
+
+### What is exempt
+
+- **`MemoryOnly` tables** produce no HRA snapshot. By design (ADR 0034), they write nothing to disk and lose their data on shutdown. They are invisible to backup and intentionally so.
+
+### Exact restore
+
+After blobs are downloaded, `RestoreEngine` writes a synthetic `clean_shutdown.marker` with `WalHeadPosition = 0` referencing the restored `.hra` files. When the engine opens the restored directory, `TryGracefulOpenAsync` detects the marker (both the marker's WAL head and the actual WAL head are 0 on a fresh restore) and loads the snapshots into HRA. The `.hra` files are consumed and deleted during open.
+
+### PITR restore
+
+For PITR restores (`TargetTime` set), the HRA snapshot represents the state at the backup WAL position — before the target time. `RestoreEngine` **deletes** the restored `.hra` files before WAL replay begins. WAL replay (`HraTransactionManager.RecoverAsync`) then drives HRA state at the target time from the `HraRowBatch` frames in the WAL. No `clean_shutdown.marker` is written.
+
+### Implementation reference
+
+| Component | Role |
+|---|---|
+| `IHraSnapshotProvider` / `CompactionWorker` | Writes `.hra` snapshots at backup checkpoint; cleans them up afterward |
+| `BackupEngine` | Calls `WriteBackupSnapshotsAsync` before WAL position is recorded; deletes snapshots in finally block |
+| `BackupManifestBuilder` | Includes explicit `HraBackupSnapshotRef` entries as `HraSnapshot` manifest entries; does **not** scan the filesystem for stray `.hra` files |
+| `RestoreEngine` | Exact restore: writes synthetic `clean_shutdown.marker`. PITR restore: deletes `.hra` files. |
+| `AoudaEngine.TryGracefulOpenAsync` | Loads `.hra` snapshots on graceful-open path (unchanged; WAL head = 0 on fresh restore satisfies existing check) |
+
 ## 2.19 References
 
 - `docs/dev/Functionality-Document-Template.md`
