@@ -23,7 +23,7 @@ parent: "Getting Started"
 
 - **[Architecture Patterns & Deployment](architecture.md)** — Four deployment patterns (backend-mediated, direct-to-database, standalone auth, hybrid) and six deployment scenarios
 - **[Setup & User Flows](setup.md)** — Enabling auth on a database, signup/signin/signout flows, token lifecycle and refresh
-- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, and server config for password reset and MFA OTP delivery
+- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, **console provider** (local OTP testing), and server config for password reset and MFA OTP delivery
 - **[Client Integration](client-integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context, **BFF/gateway proxying auth endpoints**
 - **[Use Cases & User Management](use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
 - **[Data Authorization: Three Modes](authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS, reference use cases

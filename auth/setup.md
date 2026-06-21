@@ -129,14 +129,14 @@ Password reset, invite emails, and phone MFA require **server-side** notificatio
 
 | Flow | Channel | Server configuration |
 |------|---------|----------------------|
-| Forgot password (`request-password-reset`) | Email | `Aouda:Auth:Email:Provider = sendgrid` + SendGrid API key |
+| Forgot password (`request-password-reset`) | Email | `Aouda:Auth:Email:Provider = sendgrid` + `ApiKey`, **or** `console` for local testing |
 | Invite / first-time password (`sendInviteEmail`, `POST .../invite`) | Email | Same as above |
-| MFA phone challenge | SMS | `Aouda:Auth:Sms:Provider = gatewayapi` + GatewayAPI token |
+| MFA phone challenge | SMS | `Aouda:Auth:Sms:Provider = gatewayapi` + GatewayAPI token, **or** `console` for local testing |
 | MFA TOTP (authenticator app) | — | No notification provider needed |
 
-Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. Configure SendGrid before testing customer password reset end-to-end.
+Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. For local end-to-end testing without SendGrid/GatewayAPI credentials, set `Provider` to **`console`** — OTPs appear in server stdout (see [notifications.md §5](notifications.md#5-console-provider-local-development--testing)).
 
-**Full guide:** [Email, SMS & Notifications](notifications.md) — settings reference, Docker/env examples, SendGrid/GatewayAPI checklists, troubleshooting.
+**Full guide:** [Email, SMS & Notifications](notifications.md) — settings reference, Docker/env examples, SendGrid/GatewayAPI/console providers, troubleshooting.
 
 ---
 

@@ -225,7 +225,7 @@ Request fields:
 | `password` | string? | No | Omit to create an invite-pending account |
 | `displayName` | string? | No | |
 | `forcePasswordChange` | bool? | No | If `true`, user must change password before the app grants full access. Next signin returns `"requiresPasswordChange": true`. |
-| `sendInviteEmail` | bool? | No | If `true`, generates a 6-digit OTP and emails it to the user so they can set their password via `POST .../auth/reset-password`. Requires SendGrid (or configured email provider) on the server — see [notifications.md](notifications.md). Independent of `password` — can be combined. |
+| `sendInviteEmail` | bool? | No | If `true`, generates a 6-digit OTP and emails it to the user so they can set their password via `POST .../auth/reset-password`. Requires a configured email provider on the server (`sendgrid` or `console`) — see [notifications.md](notifications.md). Independent of `password` — can be combined. |
 
 Three user-creation patterns:
 
@@ -964,15 +964,17 @@ Linux:     ~/.local/share/aouda/<app-name>
     "Port": 5433,
     "Auth": {
       "Email": {
-        "Provider": "sendgrid",
-        "SendGridApiKey": "SG.xxx",
-        "FromAddress": "noreply@yourdomain.com",
-        "FromName": "Derive"
+        "Provider": "console",
+        "FromName": "Derive Dev",
+        "InviteUrl": "http://localhost:3000/set-password",
+        "PasswordResetUrl": "http://localhost:3000/reset-password"
       }
     }
   }
 }
 ```
+
+For production delivery, use `"Provider": "sendgrid"` with `ApiKey` and `FromAddress` instead of `console`.
 
 Start the server:
 
@@ -985,7 +987,7 @@ CLI flags override config: `--port`, `--data-dir` (alias `--data-path`, `-d`), `
 
 > **Do NOT** put the data directory inside your application git repo.
 
-**Password reset / invite emails:** Configure `Aouda:Auth:Email` as above. Without SendGrid, reset requests return `200` but no OTP is delivered. Full detail: [notifications.md](notifications.md).
+**Password reset / invite emails:** Configure `Aouda:Auth:Email` as above. Use `Provider: console` for local testing (OTP in server logs); use `sendgrid` for real delivery. Without any provider, reset requests return `200` but no OTP is delivered. Full detail: [notifications.md](notifications.md).
 
 ---
 
@@ -1279,7 +1281,7 @@ Add this to your project's `README.md` or `docs/dev/Getting-Started.md`:
 1. Create server directory with `appsettings.json` (see auth/reference.md §27.2)
 2. `aouda start --port 5433 --data-dir %USERPROFILE%\AppData\Local\aouda\derive\data`
 3. `POST /api/auth/setup` then create auth DB — copy `mk_anon_` and `mk_svc_` from response
-4. Configure SendGrid on server if testing password reset (auth/notifications.md)
+4. Configure email on server if testing password reset — `console` for local dev or `sendgrid` for production ([auth/notifications.md](notifications.md))
 5. Copy `appsettings.Development.template.json` → `appsettings.Development.json` in your app
 6. Paste keys; start your application
 
@@ -1303,7 +1305,7 @@ aouda start --port 5434 --data-dir ...
 ```
 
 **Password reset returns 200 but no email arrives**
-Email provider not configured on the **Aouda server**. See [notifications.md](notifications.md). Log shows `NullEmailService: password reset email not sent`.
+Email provider not configured on the **Aouda server**, or null provider active (OTP not logged). Set `Aouda:Auth:Email:Provider` to `console` for local testing or `sendgrid` for production — see [notifications.md](notifications.md). Log shows `NullEmailService: password reset email not sent`.
 
 **`AoudaAuth:ServiceKey is not configured` error in application**
 The application is starting before `appsettings.Development.json` has been populated. Check that:
@@ -1341,7 +1343,7 @@ Remove-Item -Recurse -Force C:\Users\you\AppData\Local\aouda\derive
 
 ## See Also
 
-- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, server configuration for OTP delivery
+- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, **console provider**, server configuration for OTP delivery
 
 - **[Getting Started](Getting-Started.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
 - **[ADR 0023: Authentication and Authorization](../decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC

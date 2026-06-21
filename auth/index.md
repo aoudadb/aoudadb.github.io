@@ -20,7 +20,7 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Gett
 **User guides (this site):**
 
 - [Setup & flows](setup.md) — enable auth, API keys, signup/signin
-- [Email, SMS & notifications](notifications.md) — SendGrid, GatewayAPI, password reset / MFA OTP
+- [Email, SMS & notifications](notifications.md) — SendGrid, GatewayAPI, **console provider**, password reset / MFA OTP
 - [Use cases](use-cases.md) — onboarding, password reset, MFA
 - [Reference](reference.md) — endpoints, errors, local developer setup (§27)
 
@@ -374,7 +374,7 @@ Primary evidence:
 | Multi-partition authorization | Often custom logic outside DB | `auth-db-pls` dimension grants with fan-out enforcement | Native multi-tenant/multi-region permission routing |
 | Row-level constraints | Heavy policy engines or per-row external lookups | In-memory resolver rules injected into query predicates | Fine-grained control with low latency cost |
 | AI-agent onboarding | Multi-step auth setup friction | `aouda start` + API database create, generated anon/service keys, explicit error hints | Faster "auth-on" path for generated apps and tooling |
-| Password reset / invite OTP delivery | External email service required per app | Server-level SendGrid integration (`Aouda:Auth:Email`) | One provider config for all app auth DBs on the server |
+| Password reset / invite OTP delivery | External email service required per app | Server-level SendGrid or **console** provider (`Aouda:Auth:Email`) | One provider config for all app auth DBs on the server |
 | MFA phone OTP | External SMS per app | Server-level GatewayAPI integration (`Aouda:Auth:Sms`) | Same as email — shared infrastructure |
 
 ## 2.10 Configuration and settings reference (complete surface)
@@ -383,11 +383,11 @@ Primary evidence:
 |---|---|---|---|---|---|
 | `Aouda:Auth:RootUser:Email` | string? | `null` | valid email | `appsettings.json` / env | Optional root bootstrap user email |
 | `Aouda:Auth:RootUser:Password` | string? | `null` | non-empty string | `appsettings.json` / env | Plaintext bootstrap only; remove after first setup |
-| `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid` enables SendGrid; otherwise null (no send) | `appsettings.json` / `Aouda__Auth__Email__*` env | Password reset + invite emails; see [notifications.md](notifications.md) |
-| `Aouda:Auth:Email:SendGridApiKey` | string? | `null` | SendGrid API key | same | Bearer token for `api.sendgrid.com` |
+| `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid`, `console`, or other → null (no send) | `appsettings.json` / `Aouda__Auth__Email__*` env | Password reset + invite emails; `console` logs OTP for dev/testing — see [notifications.md](notifications.md) |
+| `Aouda:Auth:Email:ApiKey` | string? | `null` | Provider API key (SendGrid when `Provider=sendgrid`) | same | Bearer token for `api.sendgrid.com` |
 | `Aouda:Auth:Email:FromAddress` | string? | `null` | verified sender email | same | Required for delivery |
 | `Aouda:Auth:Email:FromName` | string? | `"Aouda"` | display name | same | From header display name |
-| `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi` enables GatewayAPI; otherwise null | `appsettings.json` / `Aouda__Auth__Sms__*` env | MFA phone OTP only; see [notifications.md](notifications.md) |
+| `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi`, `console`, or other → null | `appsettings.json` / `Aouda__Auth__Sms__*` env | MFA phone OTP only; `console` logs OTP for dev/testing — see [notifications.md](notifications.md) |
 | `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI token | same | `Authorization: Token` header |
 | `Aouda:Auth:Sms:Sender` | string? | `"Aouda"` | sender label | same | Shown on SMS |
 | `Aouda:BaseUrl` | string? | `null` | URL | server config | Used for app auth issuer/discovery URL construction |

@@ -120,7 +120,7 @@ If you do nothing beyond starting local dev:
 
 - `aouda start` runs the foreground server (configure via `appsettings.json` or `--port`, `--data-dir`).
 - App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. Response includes `anonKey` and `serviceRoleKey` (shown once).
-- Password reset and invite emails require **SendGrid on the server** (`Aouda:Auth:Email`) — see [auth/notifications.md](../auth/notifications.md).
+- Password reset and invite emails require a **configured email provider** on the server (`Aouda:Auth:Email` — `console` for local dev, `sendgrid` for production) — see [auth/notifications.md](../auth/notifications.md).
 - HTTP database creation with `{ "auth": { "enabled": true } }`:
   - links to existing single app auth DB, or
   - auto-creates default app auth DB if none exists, or
@@ -312,7 +312,7 @@ Primary evidence:
 |---|---|---|---|---|---|
 | `Aouda:Port` | int | from appsettings | positive | CLI `--port` / config | Local server listen port |
 | `Aouda:DataPath` | string | `./data` typical | path | CLI `--data-dir` / config | Persistent data directory |
-| `Aouda:Auth:Email:*` | — | null | SendGrid settings | server appsettings / env | Password reset + invite OTP email |
+| `Aouda:Auth:Email:*` | — | null | SendGrid or `console` settings | server appsettings / env | Password reset + invite OTP email |
 | `Aouda:Auth:Sms:*` | — | null | GatewayAPI settings | server appsettings / env | MFA phone OTP SMS |
 | `TokenOptions.AccessTokenLifetime` | timespan | `15m` | positive | Auth engine options | Access JWT lifetime |
 | `TokenOptions.RefreshTokenLifetime` | timespan | `30d` | positive | Auth engine options | Refresh token lifetime |
@@ -450,7 +450,7 @@ When to use:
 - agent needs a working local database immediately.
 
 Steps:
-1. Run `aouda start`; create auth DB via API; configure SendGrid if testing password reset.
+1. Run `aouda start`; create auth DB via API; configure email (`console` or `sendgrid`) if testing password reset.
 2. Capture `Anon key` from startup output.
 3. Call app signup/signin via `/api/databases/{db}/auth/*`.
 4. Create table and insert/query data via HTTP or SDK.

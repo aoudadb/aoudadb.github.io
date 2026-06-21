@@ -294,7 +294,7 @@ Admin-created users bypass the self-service `/signup` flow. Use admin user creat
 
 ### Pattern 1 — Invite-Pending + Email Invite (Recommended)
 
-Requires SendGrid (or configured email provider) on the Aouda server — [notifications.md](notifications.md).
+Requires a configured email provider on the Aouda server (`sendgrid` or `console` for local testing) — [notifications.md](notifications.md).
 
 Create the account without a password and send the user an email with a 6-digit OTP. The user visits your password-setup page, enters the OTP, and calls `POST .../auth/reset-password` to set their password.
 
@@ -382,7 +382,7 @@ The previous unused OTP is invalidated and a new one is emailed to the user.
 
 The password reset flow covers two scenarios: a user who forgot their password, and an invite-pending user setting their password for the first time after receiving an invite email. Both cases use the same two endpoints.
 
-**Prerequisites:** The Aouda server must have **email delivery configured** (SendGrid). Without it, `request-password-reset` returns `200` but no OTP is sent. See [Email, SMS & Notifications](notifications.md). Your app calls these endpoints with the **anon API key** (`mk_anon_...`) on public routes, same as signup/signin.
+**Prerequisites:** The Aouda server must have **email delivery configured** (`sendgrid` for production, or `console` for local testing). Without any provider, `request-password-reset` returns `200` but no OTP is sent. See [Email, SMS & Notifications](notifications.md). Your app calls these endpoints with the **anon API key** (`mk_anon_...`) on public routes, same as signup/signin.
 
 ### Step 1 — User Requests a Reset
 
@@ -434,7 +434,7 @@ On success, returns a full token pair — the user is signed in immediately:
 
 MFA adds a second verification step after password signin. Aouda supports TOTP (e.g. Google Authenticator, Authy) and SMS phone OTP. After a successful MFA verify the user receives an `aal2` JWT; apps can enforce `aal2` on sensitive endpoints (see §24.1).
 
-**SMS prerequisite:** Phone-factor challenges require **GatewayAPI** (or another configured SMS provider) on the Aouda server. TOTP and recovery codes do not. See [Email, SMS & Notifications](notifications.md).
+**SMS prerequisite:** Phone-factor challenges require **GatewayAPI** or the **`console` provider** on the Aouda server. TOTP and recovery codes do not. See [Email, SMS & Notifications](notifications.md).
 
 ### 21.1 — Enrolling TOTP (Authenticator App)
 

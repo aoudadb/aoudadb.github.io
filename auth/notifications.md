@@ -16,15 +16,16 @@ Application Auth uses server-level notification services:
 
 | Service | Used for | Provider when configured | Default (no provider) |
 |---------|----------|--------------------------|------------------------|
-| **Email** (`IEmailService`) | Password reset OTP, invite emails (`sendInviteEmail`) | [SendGrid](#3-email-sendgrid) | `NullEmailService` — logs a warning, **does not send** |
-| **SMS** (`ISmsService`) | MFA phone OTP (`POST .../auth/mfa/challenge` for `type: phone`) | [GatewayAPI](#4-sms-gatewayapi) | `NullSmsService` — logs a warning, **does not send** |
+| **Email** (`IEmailService`) | Password reset OTP, invite emails (`sendInviteEmail`) | [SendGrid](#3-email-sendgrid) or [Console](#5-console-provider-local-development--testing) | `NullEmailService` — logs a warning, **does not send** |
+| **SMS** (`ISmsService`) | MFA phone OTP (`POST .../auth/mfa/challenge` for `type: phone`) | [GatewayAPI](#4-sms-gatewayapi) or [Console](#5-console-provider-local-development--testing) | `NullSmsService` — logs a warning, **does not send** |
 
 **Important:**
 
 - Providers are registered **once per Aouda server process** and shared by all application auth databases on that server.
 - Delivery is **best-effort**: auth endpoints still return success even if SendGrid/GatewayAPI fails; failures are logged as warnings.
-- OTPs are **never** stored in plain text and **never** appear in server logs (only "email not sent" / "SMS not sent" when the null provider is active).
-- There is **no** API to retrieve an OTP after the fact. For real password-reset or MFA testing you must configure a provider (or use admin password override instead).
+- OTPs are **never** stored in plain text. With the default null provider, OTPs **do not** appear in server logs (only "email not sent" / "SMS not sent" warnings).
+- With the **`console` provider** (explicit opt-in for local dev/testing), OTPs and full message content are written to server stdout via structured logging — see [§5](#5-console-provider-local-development--testing).
+- There is **no** HTTP API to retrieve an OTP after the fact. For testing without SendGrid/GatewayAPI, use the `console` provider or an admin password override.
 
 **What needs which channel:**
 
@@ -55,7 +56,7 @@ Place `appsettings.json` in the directory from which you run `aouda start` (or p
     "Auth": {
       "Email": {
         "Provider": "sendgrid",
-        "SendGridApiKey": "SG.xxxxxxxxxxxx",
+        "ApiKey": "SG.xxxxxxxxxxxx",
         "FromAddress": "noreply@yourdomain.com",
         "FromName": "Your App",
         "InviteUrl": "https://app.yourdomain.com/set-password",
@@ -71,7 +72,35 @@ Place `appsettings.json` in the directory from which you run `aouda start` (or p
 }
 ```
 
-Omit `Email` or set `Provider` to anything other than `sendgrid` to use the null email provider. Omit `Sms` or set `Provider` to anything other than `gatewayapi` to use the null SMS provider.
+**Local testing without SendGrid or GatewayAPI** — set `Provider` to `console` for email and/or SMS. OTPs appear in the server console (see [§5](#5-console-provider-local-development--testing)):
+
+```json
+{
+  "Aouda": {
+    "DataPath": "./data",
+    "Port": 5433,
+    "Auth": {
+      "Email": {
+        "Provider": "console",
+        "FromName": "Aouda Dev",
+        "InviteUrl": "http://localhost:3000/set-password",
+        "PasswordResetUrl": "http://localhost:3000/reset-password"
+      },
+      "Sms": {
+        "Provider": "console"
+      }
+    }
+  }
+}
+```
+
+Provider selection (case-insensitive):
+
+| `Provider` value | Email | SMS |
+|------------------|-------|-----|
+| `sendgrid` / `gatewayapi` | SendGrid HTTP delivery | GatewayAPI HTTP delivery |
+| `console` | Logs OTP + message to stdout | Logs OTP + message to stdout |
+| absent or any other value | Null provider (no OTP in logs) | Null provider (no OTP in logs) |
 
 `InviteUrl` and `PasswordResetUrl` are optional but strongly recommended — without them the email contains only a bare OTP code with no link to your app. See [§3.4](#34-set-password-deep-link-app-url-configuration).
 
@@ -81,13 +110,13 @@ ASP.NET Core nested configuration uses `__` (double underscore):
 
 | Setting | Environment variable example |
 |---------|------------------------------|
-| Email provider | `Aouda__Auth__Email__Provider=sendgrid` |
-| SendGrid API key | `Aouda__Auth__Email__SendGridApiKey=SG.xxx` |
+| Email provider | `Aouda__Auth__Email__Provider=sendgrid` or `=console` |
+| Email API key | `Aouda__Auth__Email__ApiKey=SG.xxx` |
 | From address | `Aouda__Auth__Email__FromAddress=noreply@example.com` |
 | From display name | `Aouda__Auth__Email__FromName=My App` |
 | Invite deep-link URL | `Aouda__Auth__Email__InviteUrl=https://app.example.com/set-password` |
 | Password-reset deep-link URL | `Aouda__Auth__Email__PasswordResetUrl=https://app.example.com/set-password` |
-| SMS provider | `Aouda__Auth__Sms__Provider=gatewayapi` |
+| SMS provider | `Aouda__Auth__Sms__Provider=gatewayapi` or `=console` |
 | GatewayAPI token | `Aouda__Auth__Sms__ApiKey=...` |
 | SMS sender label | `Aouda__Auth__Sms__Sender=MyApp` |
 
@@ -98,7 +127,7 @@ ASP.NET Core nested configuration uses `__` (double underscore):
 ```bash
 docker run -p 5433:5433 -v aouda-data:/data \
   -e Aouda__Auth__Email__Provider=sendgrid \
-  -e Aouda__Auth__Email__SendGridApiKey=SG.xxx \
+  -e Aouda__Auth__Email__ApiKey=SG.xxx \
   -e Aouda__Auth__Email__FromAddress=noreply@yourdomain.com \
   -e "Aouda__Auth__Email__FromName=Your App" \
   -e Aouda__Auth__Email__InviteUrl=https://app.yourdomain.com/set-password \
@@ -115,14 +144,14 @@ Restart the server after changing notification configuration.
 
 | Setting | Type | Default | Valid values | Notes |
 |---------|------|---------|--------------|-------|
-| `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid` (case-insensitive) enables SendGrid; any other value → null provider | Server-wide |
-| `Aouda:Auth:Email:SendGridApiKey` | string? | `null` | SendGrid API key with Mail Send permission | Bearer token on `https://api.sendgrid.com` |
+| `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid`, `console`, or other → null provider | Server-wide; `console` logs OTP to stdout (dev/testing only) |
+| `Aouda:Auth:Email:ApiKey` | string? | `null` | Provider API key (SendGrid Mail Send key when `Provider=sendgrid`) | Bearer token on `https://api.sendgrid.com`; not used when `Provider=console` |
 | `Aouda:Auth:Email:FromAddress` | string? | `null` | Verified sender in SendGrid | Required for real delivery |
 | `Aouda:Auth:Email:FromName` | string? | `"Aouda"` | Display name in From header and email body | |
 | `Aouda:Auth:Email:InviteUrl` | string? | `null` | Full URL of your app's set-password page | When set, invite email includes a clickable link; see §3.4 |
 | `Aouda:Auth:Email:PasswordResetUrl` | string? | `null` (falls back to `InviteUrl`) | Full URL of your app's reset-password page | Defaults to `InviteUrl` when not set; see §3.4 |
-| `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi` (case-insensitive) enables GatewayAPI; any other value → null provider | Server-wide |
-| `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI API token | Sent as `Authorization: Token <key>` |
+| `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi`, `console`, or other → null provider | Server-wide; `console` logs OTP to stdout (dev/testing only) |
+| `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI API token | Sent as `Authorization: Token <key>`; not used when `Provider=console` |
 | `Aouda:Auth:Sms:Sender` | string? | `"Aouda"` | Alphanumeric sender id shown to recipient | GatewayAPI account must allow sender |
 
 Related server auth bootstrap (unrelated to app-user email/SMS):
@@ -175,21 +204,27 @@ Both flows use the same 6-digit OTP and `POST .../auth/reset-password` to comple
 ### 3.2 SendGrid setup checklist
 
 1. Create a SendGrid account and verify your sender domain or single sender.
-2. Create an API key with **Mail Send** (restricted key is fine).
+2. Create an API key with **Mail Send** (restricted key is fine) and set `Aouda:Auth:Email:ApiKey`.
 3. Set `FromAddress` to a verified sender.
-4. Configure `appsettings.json` or environment variables (§2), including `InviteUrl` and `PasswordResetUrl`.
+4. Configure `appsettings.json` or environment variables (§2), including `ApiKey`, `InviteUrl`, and `PasswordResetUrl`.
 5. Restart Aouda (`aouda start`).
 6. Trigger a reset for a **registered** user and check SendGrid activity; check Aouda logs for `SendGridEmailService: non-2xx` warnings.
 
 ### 3.3 Local development without SendGrid
 
-With no provider (default), `request-password-reset` still returns `200 { "ok": true }` but **no email is sent**. Log line:
+**Option A — Console provider (recommended for local auth testing)**
+
+Set `Aouda:Auth:Email:Provider` to `console`. After `request-password-reset` or an admin invite, read the OTP from the server stdout — log lines are prefixed with `[Aouda Auth — Console Email]`. See [§5](#5-console-provider-local-development--testing).
+
+**Option B — Null provider (default)**
+
+With no provider configured, `request-password-reset` still returns `200 { "ok": true }` but **no email is sent** and the OTP is **not** logged. Log line:
 
 ```text
 NullEmailService: password reset email not sent to 'user@example.com' (no email provider configured). Configure Aouda:Auth:Email:Provider=sendgrid to enable email delivery.
 ```
 
-You cannot complete the customer reset flow without either SendGrid or an admin override (`PUT .../admin/users/{id}/password`). This is intentional (anti-enumeration and security).
+You cannot complete the customer reset flow without SendGrid, the `console` provider, or an admin override (`PUT .../admin/users/{id}/password`). The null default is intentional (anti-enumeration and security).
 
 ### 3.4 Set-password deep link (app URL configuration)
 
@@ -269,22 +304,108 @@ Phone numbers must be **E.164** at enrolment (for example `+447911123456`).
 
 ### 4.3 Local development without SMS
 
-TOTP MFA does not require SMS. For phone MFA, without GatewayAPI you will see:
+**Option A — Console provider (recommended for phone MFA testing)**
+
+Set `Aouda:Auth:Sms:Provider` to `console`. After `POST .../auth/mfa/challenge`, read the OTP from server stdout — lines prefixed with `[Aouda Auth — Console SMS]`. See [§5](#5-console-provider-local-development--testing).
+
+**Option B — Null provider (default)**
+
+TOTP MFA does not require SMS. For phone MFA without GatewayAPI or console, you will see:
 
 ```text
 NullSmsService: OTP SMS not sent to '+44...' (no SMS provider configured).
 ```
 
-The challenge is still created; verification will fail unless you use TOTP or recovery codes instead.
+The challenge is still created; verification will fail unless you use TOTP, recovery codes, or the `console` provider instead.
 
 ---
 
-## 5. End-to-end local test (password reset)
+## 5. Console provider (local development & testing)
 
-Prerequisites: Aouda CLI, SendGrid credentials, an auth-enabled database with API keys. Full local server setup is in [Reference §27](reference.md#27-local-developer-setup-for-consumer-applications).
+When `Aouda:Auth:Email:Provider` or `Aouda:Auth:Sms:Provider` is `console`, Aouda writes the same message content that SendGrid or GatewayAPI would deliver — **including the OTP** — to the server log at **Information** level. No HTTP calls are made.
+
+This follows the same pattern as Laravel's `log` mail driver and Supabase local auth capture: explicit opt-in for dev environments, separate from the secure null default.
+
+### 5.1 When to use
+
+| Scenario | Use `console`? |
+|----------|----------------|
+| Local password-reset / invite flow testing | Yes — email `Provider: console` |
+| Local phone MFA testing | Yes — SMS `Provider: console` |
+| CI integration tests against a real Aouda server | Yes — read OTP from test runner logs |
+| Production / staging with real users | **No** — use `sendgrid` / `gatewayapi` |
+
+If `ASPNETCORE_ENVIRONMENT=Production` and a console provider is configured, Aouda logs a startup warning. Console is not blocked, but real delivery providers are strongly recommended for production.
+
+### 5.2 Configuration
+
+Email and SMS console providers are independent — you can enable one or both:
+
+```json
+{
+  "Aouda": {
+    "Auth": {
+      "Email": {
+        "Provider": "console",
+        "FromName": "Aouda Dev",
+        "InviteUrl": "http://localhost:3000/set-password",
+        "PasswordResetUrl": "http://localhost:3000/reset-password"
+      },
+      "Sms": {
+        "Provider": "console"
+      }
+    }
+  }
+}
+```
+
+`InviteUrl` and `PasswordResetUrl` work the same as with SendGrid — the console log includes the full deep link when configured.
+
+Works with all server startup paths: `aouda start`, Docker, `aouda dev server`, and embedded ASP.NET hosts that call `AddAoudaServer(configuration)`.
+
+### 5.3 Log output format
+
+**Email (password reset):**
+
+```text
+info: Aouda.Engine.Auth.Notifications.ConsoleEmailService[0]
+      [Aouda Auth — Console Email] password reset | To: alice@example.com | Subject: Reset your Aouda Dev password
+      You requested a password reset for your Aouda Dev account.
+
+      Reset your password here:
+      http://localhost:3000/reset-password?otp=482391&email=alice%40example.com
+
+      If the link does not open, visit the page and enter this code:
+      482391
+      ...
+```
+
+**SMS (MFA phone challenge):**
+
+```text
+info: Aouda.Engine.Auth.Notifications.ConsoleSmsService[0]
+      [Aouda Auth — Console SMS] To: +447911123456 | Your Aouda verification code is: 987654. Expires in 10 minutes.
+```
+
+Search server output for `[Aouda Auth — Console Email]` or `[Aouda Auth — Console SMS]` to find codes quickly.
+
+### 5.4 Provider comparison
+
+| Provider | OTP in logs? | HTTP delivery? | Requires credentials? |
+|----------|:------------:|:--------------:|:---------------------:|
+| *(null / default)* | No | No | No |
+| `console` | **Yes** | No | No |
+| `sendgrid` / `gatewayapi` | No | Yes | Yes |
+
+---
+
+## 6. End-to-end local test (password reset)
+
+Prerequisites: Aouda CLI, an auth-enabled database with API keys. For OTP delivery use either SendGrid (production-like) or the **`console` provider** (no external credentials). Full local server setup is in [Reference §27](reference.md#27-local-developer-setup-for-consumer-applications).
 
 ```powershell
-# 1. Server directory with appsettings.json (§2.1, including InviteUrl / PasswordResetUrl)
+# 1. Server directory with appsettings.json (§2.1)
+#    For local testing without SendGrid, use Provider: "console" (§5)
 cd C:\dev\aouda-derive
 aouda start --port 5433 --data-dir .\data
 
@@ -297,26 +418,26 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signup `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com", "password": "SecurePass123!" }'
 
-# 5. Request reset (email must be configured)
+# 5. Request reset (email must be configured — sendgrid or console)
 curl -X POST http://localhost:5433/api/databases/myapp/auth/request-password-reset `
   -H "Authorization: Bearer mk_anon_..." `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com" }'
 
-# 6. Read OTP from email link or body, then reset
+# 6. Read OTP from email (SendGrid) or server console (console provider), then reset
 curl -X POST http://localhost:5433/api/databases/myapp/auth/reset-password `
   -H "Authorization: Bearer mk_anon_..." `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com", "otp": "482391", "newPassword": "NewSecure456!" }'
 ```
 
-With `PasswordResetUrl` configured, the email will contain a link like
+With `PasswordResetUrl` configured, the email (or console log) will contain a link like
 `https://app.yourdomain.com/set-password?otp=482391&email=alice%40example.com`.
 Your consumer application's page reads these query params to pre-fill the form (see §3.4).
 
 ---
 
-## 6. Consumer application configuration
+## 7. Consumer application configuration
 
 Notification keys belong in **Aouda's** server config, not in your app's `appsettings.Development.json`.
 
@@ -348,16 +469,19 @@ Use the **anon** key for `request-password-reset` and `reset-password` from brow
 
 ---
 
-## 7. Troubleshooting
+## 8. Troubleshooting
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `200` on request-reset but no email | Null email provider or SendGrid failure | Check logs for `NullEmailService` or `SendGridEmailService`; verify §3.2 |
+| `200` on request-reset but no email | Null email provider or SendGrid failure | Check logs for `NullEmailService` or `SendGridEmailService`; set `Provider: console` for local testing (§5) or verify SendGrid (§3.2) |
+| `200` on request-reset but cannot find OTP | Null provider active (OTP not logged) | Set `Aouda:Auth:Email:Provider=console` and restart; search logs for `[Aouda Auth — Console Email]` |
 | Email arrives but contains only a bare code, no link | `InviteUrl` / `PasswordResetUrl` not configured | Add both keys to Aouda server config (§3.4) |
 | Reset always returns `AUTH_RESET_TOKEN_INVALID` | Wrong OTP, unregistered email, expired token, or exhausted attempts (5 wrong tries) | Request new code; confirm user exists in auth DB |
-| Invite email not sent | `sendInviteEmail` not set or email not configured | Admin create with `"sendInviteEmail": true`; configure SendGrid |
-| MFA challenge created but no SMS | Null SMS provider | Configure GatewayAPI (§4) or use TOTP |
+| Invite email not sent | `sendInviteEmail` not set or email not configured | Admin create with `"sendInviteEmail": true`; configure SendGrid or `console` |
+| MFA challenge created but no SMS | Null SMS provider | Configure GatewayAPI (§4), `console` (§5), or use TOTP |
+| MFA challenge created but OTP not visible | Null SMS provider (OTP not logged) | Set `Aouda:Auth:Sms:Provider=console`; search logs for `[Aouda Auth — Console SMS]` |
 | SendGrid 403 in logs | Unverified `FromAddress` | Verify sender in SendGrid dashboard |
+| Console provider warning at startup | `console` configured while `ASPNETCORE_ENVIRONMENT=Production` | Expected; switch to `sendgrid`/`gatewayapi` for production |
 | Config ignored after edit | Server not restarted | Restart `aouda start` or container |
 
 ---

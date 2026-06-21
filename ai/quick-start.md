@@ -139,7 +139,7 @@ Use `error` for programmatic retry/fix logic. Use `suggestion` to generate the c
 | Capability | Status |
 |---|---|
 | `aouda start` local server bootstrap | Available |
-| Password reset / invite email (SendGrid on server) | Available — configure `Aouda:Auth:Email` — see [auth/notifications.md](../auth/notifications.md) |
+| Password reset / invite email (server email provider) | Available — configure `Aouda:Auth:Email` (`console` or `sendgrid`) — see [auth/notifications.md](../auth/notifications.md) |
 | Schema-on-write (no DDL needed) | Available |
 | Structured errors with `suggestion` field | Available |
 | Two-layer auth with generated API keys | Available |

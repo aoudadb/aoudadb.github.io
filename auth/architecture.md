@@ -323,7 +323,7 @@ aouda start --port 5433 --data-dir ./data
 # POST /api/databases with auth enabled — response includes mk_anon_ / mk_svc_ keys (once)
 ```
 
-Configure [email/SMS on the server](notifications.md) when testing password reset or phone MFA.
+Configure [email/SMS on the server](notifications.md) when testing password reset or phone MFA. Use `Provider: console` locally when you do not have SendGrid/GatewayAPI credentials.
 
 **Auth status:** App auth enabled. API keys come from the create-database response, not from CLI stdout.
 
@@ -391,7 +391,7 @@ aouda start --data-dir ./data
 ```bash
 aouda start --data-dir ./data
 # POST /api/databases with auth → capture anon/service keys from JSON response
-# For password reset testing, configure SendGrid on server (notifications.md)
+# For password reset testing, configure email on server — console or sendgrid (notifications.md)
 ```
 
 **Level 2 — Full production simulation:**
