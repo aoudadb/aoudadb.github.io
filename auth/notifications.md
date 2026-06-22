@@ -176,7 +176,7 @@ Email content depends on whether `InviteUrl` / `PasswordResetUrl` are configured
 | Flow | Trigger | Subject | Body |
 |------|---------|---------|------|
 | Password reset | `POST .../auth/request-password-reset` | `Reset your {FromName} password` | Link to reset page + manual-entry code + 15-minute expiry note |
-| Invite | `POST .../admin/users` with `sendInviteEmail: true`, or `POST .../admin/users/{id}/invite` | `You've been invited to {FromName}` | Link to set-password page + manual-entry code + 15-minute expiry note |
+| Invite | `POST .../admin/users` without `password` (auto), `sendInviteEmail: true`, or `POST .../admin/users/{id}/invite` | `You've been invited to {FromName}` | Link to set-password page + manual-entry code + 15-minute expiry note |
 
 Example invite email body:
 
@@ -322,7 +322,7 @@ The challenge is still created; verification will fail unless you use TOTP, reco
 
 ## 5. Console provider (local development & testing)
 
-When `Aouda:Auth:Email:Provider` or `Aouda:Auth:Sms:Provider` is `console`, Aouda writes the same message content that SendGrid or GatewayAPI would deliver — **including the OTP** — to the server log at **Information** level. No HTTP calls are made.
+When `Aouda:Auth:Email:Provider` or `Aouda:Auth:Sms:Provider` is `console`, Aouda writes the same message content that SendGrid or GatewayAPI would deliver — **including the OTP** — to the server log at **Warning** level (visible even when default logging is Warning). No HTTP calls are made.
 
 This follows the same pattern as Laravel's `log` mail driver and Supabase local auth capture: explicit opt-in for dev environments, separate from the secure null default.
 

@@ -231,7 +231,7 @@ Three user-creation patterns:
 
 | Pattern | Request | When to use |
 |---------|---------|-------------|
-| **Invite-pending + email invite** (recommended) | `password: null, sendInviteEmail: true` | User sets their own password by OTP. Cannot sign in until they do. Preferred for multi-tenant SaaS onboarding. |
+| **Invite-pending + email invite** (recommended) | `password` omitted (invite-pending); invite email sent automatically | User sets their own password by OTP. Cannot sign in until they do. Preferred for multi-tenant SaaS onboarding. Set `sendInviteEmail: false` to skip the email. |
 | **Forced initial password** | `password: "<initial>", forcePasswordChange: true` | User can sign in once but immediately receives `"requiresPasswordChange": true`; app must redirect to change-password page before granting access. Use for batch migrations. |
 | **Direct password set** | `password: "<value>"` (no flags) | User can sign in immediately. No email sent unless you also call `POST .../admin/users/{id}/invite`. Use for internal tooling and test accounts. |
 

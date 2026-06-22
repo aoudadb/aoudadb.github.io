@@ -426,7 +426,7 @@ On success, returns a full token pair — the user is signed in immediately:
 - After 5 consecutive wrong attempts, the token is permanently invalidated — the user must request a new one.
 - Use the error codes `AUTH_RESET_TOKEN_INVALID`, `AUTH_RESET_TOKEN_EXPIRED`, and `AUTH_RESET_TOKEN_EXHAUSTED` to show appropriate UI copy (see §22).
 
-**Invite-pending first-time password set:** The same `POST .../auth/reset-password` endpoint works identically for invite-pending users setting their password for the first time. The OTP was generated when `sendInviteEmail: true` was passed at user creation (or `POST .../admin/users/{id}/invite` was called). After a successful reset, the user can sign in normally and `requiresPasswordChange` is absent from the signin response.
+**Invite-pending first-time password set:** The same `POST .../auth/reset-password` endpoint works identically for invite-pending users setting their password for the first time. The OTP is generated when a user is created without a password (invite email sent automatically), when `sendInviteEmail: true` is passed at user creation, or when `POST .../admin/users/{id}/invite` is called. After a successful reset, the user can sign in normally and `requiresPasswordChange` is absent from the signin response.
 
 ---
 
