@@ -139,3 +139,37 @@ Aouda’s codebase is now mature, modular, and internally consistent — forming
 ### 2025-11-15 — P3 roadmap updated to include hot/cold docs and original P3 tasks
 - Updated Phase P3 in `ROADMAP.md` to explicitly reference hot/cold ADR, developer guide, and P3 task breakdown.
 - Preserved original P3 performance/IO tasks (async IO, adaptive compaction, cache layer, parallel execution) under a new Epic C in the P3 section.
+
+---
+
+## ✅ P34 — Studio Distribution and Server Access (Completed)
+
+**Date:** 2026-06-23  
+**Scope:** First-user distribution milestone — publicly hosted Studio, runtime server connection, interactive installer.
+
+### Highlights
+
+- **Hosted Studio at `studio.aouda.com`** — Next.js app deployed to Vercel; any Chrome/Edge user can open it and connect to any Aouda server without installing anything.
+- **Connect-to-Server dialog** — runtime server URL + API key input in Studio; persisted in `localStorage`; survives page reload; first-run detection auto-opens the dialog on `studio.aouda.com` with no stored URL.
+- **Server switcher** — interactive "Change" button in the top nav (direct mode) opens the Connect dialog at any time.
+- **CORS updated** — default allowed origins changed from `hub.aouda.dev + localhost:3000` to `hub.aouda.dev + studio.aouda.com`. New `AOUDA_STUDIO_ORIGIN` env var appends one extra origin without replacing defaults.
+- **`GET /_studio/config`** — new public endpoint returning `{ "serverUrl": "/", "theme": "system" }`; used by P35+ embedded Studio.
+- **Vercel build compatibility** — `next.config.mjs` conditionally sets `output: "standalone"` only when `NEXT_STANDALONE_OUTPUT=true`; Docker builds set this flag; Vercel builds omit it.
+- **`Aouda.Setup` cross-platform installer** — zero-dependency .NET 8 console app; double-click on Windows, `sudo ./aouda-setup` on Linux; interactive prompts; installs Windows Service or systemd unit; creates Start Menu / `.desktop` shortcut; prints server URL and API key.
+
+### Security model documented
+
+The P34 security model covers: IP allowlisting (same model as PostgreSQL/SQL Server exposure), TLS via reverse proxy (Caddy/nginx/Traefik), API key auth, and the browser compatibility matrix (Chrome/Edge work for localhost; Firefox/Safari blocked by mixed-content policy).
+
+### CORS breaking change for operators
+
+`http://localhost:3000` is no longer in the CORS defaults after P34. Operators who connect local Studio or other local clients must add localhost explicitly via `AOUDA_CORS_ORIGINS` or `AOUDA_STUDIO_ORIGIN`. See [Studio guide §10.5](guides/studio.md#105-cors-configuration) and [Cloud and Hub guide §8](guides/cloud-hub.md#cors).
+
+### Result
+
+Aouda is now distributable to first-time users with zero CLI knowledge:
+- `studio.aouda.com` is accessible to any Chrome/Edge user.
+- `Aouda.Setup.exe` / `aouda-setup` replaces the PowerShell/bash install scripts for interactive installs.
+- The existing scripts remain for CI/CD and automation.
+
+📄 *See also:* `aouda/docs/tasks/P34-COMPLETION.md`

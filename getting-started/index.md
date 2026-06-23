@@ -80,14 +80,32 @@ docker compose up
 - Aouda at `http://localhost:5000`
 - Aouda Studio at `http://localhost:3000`
 
+### 4. Aouda.Setup — interactive installer (Windows + Linux)
+
+No PowerShell or bash knowledge required. Extract the release archive and run:
+
+- **Windows:** double-click `Aouda.Setup.exe`
+- **Linux:** `sudo ./aouda-setup`
+
+Answer five prompts (install mode, port, directories, admin email, password). Setup installs the Windows Service or systemd unit, creates a Start Menu / `.desktop` shortcut, and prints your API key.
+
+See [Aouda.Setup guide](../guides/studio.md#12-aoudasetup-installer) for the full interaction and service registration details.
+
+### 5. Hosted Studio at `studio.aouda.com` (no Studio install needed)
+
+Visit `https://studio.aouda.com` in **Chrome or Edge**. Click **Connect**, enter your server URL (`http://localhost:5000` for local) and API key. The hosted Studio connects directly from your browser.
+
+> **Firefox / Safari:** blocked by mixed-content policy when connecting to HTTP localhost from HTTPS Studio. Use Chrome or Edge. See [Studio guide §10.3](../guides/studio.md#103-browser-compatibility-for-localhost-access).
+
 ### Studio authentication after `aouda init` (important)
 
 If you initialize server auth (for example with `aouda init`) and then open Studio, there is no separate username/password login screen in direct mode.
 
 Use one of these Studio modes:
 
-- **Direct mode** (`NEXT_PUBLIC_HUB_URL` is empty): open Studio, go to **Settings -> Authentication & API Keys**, and paste a **server credential** into **Connection API key**.
-- **Hub mode** (`NEXT_PUBLIC_HUB_URL` is set): sign in on `/login` with your Hub account, then select a registered server and provide server credentials when prompted.
+- **Direct mode (local Docker/npm)** — open Studio, go to **Settings → Authentication & API Keys**, and paste a **server credential** into **Connection API key**.
+- **Hosted Studio (`studio.aouda.com`)** — click the server URL in the top nav (or wait for the first-run Connect dialog), enter your server URL and API key in the **Connect** dialog. Use Chrome or Edge for localhost connections.
+- **Hub mode** (`NEXT_PUBLIC_HUB_URL` is set) — sign in on `/login` with your Hub account, then select a registered server and provide server credentials when prompted.
 
 For direct mode, use a server auth credential (`/api/auth/...`) such as:
 
@@ -129,7 +147,7 @@ For the embedded / in-process path (no server): [Section 3](#3-embedded-mode--in
 13. [Backup and Restore](Getting-Started-Backup.md)
 14. [What's Next](#14-whats-next)
 15. [Contributor / Internal Developer Workflows](Aouda-Developer.md)
-16. [Native Production Hosting (Windows + Linux)](#16-native-production-hosting-windows--linux)
+16. [Native Production Hosting (Windows + Linux)](#16-native-production-hosting-windows--linux) — including Aouda.Setup interactive installer (§16.9)
 
 ---
 
@@ -1891,9 +1909,28 @@ To keep Windows and Linux equally easy, ship:
 
 If you do this, Docker becomes optional instead of required, and native deployment is first-class on both Windows and Linux.
 
-### 16.9 Automated Install Scripts (Windows + Linux)
+### 16.9 Interactive Installer: Aouda.Setup
 
-This repository now includes first-install scripts that automate:
+For first-time installs where the operator prefers a guided experience over running scripts, use **Aouda.Setup** — a zero-dependency .NET 8 console app shipped alongside the server binary in the release archive:
+
+| Platform | Binary | Requires |
+|----------|--------|----------|
+| Windows | `Aouda.Setup.exe` (double-click) | Run as Administrator |
+| Linux | `aouda-setup` | `sudo ./aouda-setup` |
+
+The setup app:
+1. Prompts for install mode (Windows Service / systemd, or manual), port, directories, admin email, and password.
+2. Copies binaries, writes `appsettings.json`.
+3. Bootstraps the first admin (`Aouda.Server create-admin` directly to the data directory).
+4. Registers and starts the OS service.
+5. Creates a Start Menu shortcut (Windows) or `.desktop` shortcut (Linux).
+6. Prints a completion banner with the server URL and API key.
+
+See [Aouda.Setup guide](../guides/studio.md#12-aoudasetup-installer) for the full interactive sequence, manual mode, service registration details, and shortcut paths.
+
+### 16.10 Automated Install Scripts (Windows + Linux)
+
+For CI/CD pipelines and scripted deployments, the non-interactive install scripts are unchanged and remain the preferred tool:
 
 - binary copy and directory setup
 - initial server admin bootstrap (`Aouda.Server create-admin` or `aouda create-admin`)

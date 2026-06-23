@@ -7,8 +7,8 @@ parent: "Guides"
 # Aouda Cloud, Hub, and Deployment
 
 _Domain: Server CLI, Docker, Kubernetes, Aouda Hub, Managed Cloud_
-_Status: MVP Complete (2026-04-08)_
-_Primary Phases: P16_
+_Status: MVP Complete + P34 Distribution (2026-06-23)_
+_Primary Phases: P16, P34_
 _Repos: `aouda` (server), `aouda-hub` (Hub backend), `aouda-studio` (web console)_
 
 ---
@@ -30,10 +30,12 @@ This document describes how Aouda is deployed, distributed, and managed at the i
 | I want to... | Go to |
 |---|---|
 | Run Aouda locally for development | §3 Server CLI — `aouda start` |
+| Install Aouda interactively (no CLI knowledge) | §3.1 Aouda.Setup Installer |
 | Run Aouda in Docker | §4 Docker |
 | Deploy a production cluster | §5 Kubernetes Helm Chart |
 | Manage servers across a team | §6 Aouda Hub |
 | Provision managed clusters | §7 Managed Cloud |
+| Configure CORS for Studio or browser access | §8 Server Admin APIs — CORS |
 
 ---
 
@@ -98,6 +100,25 @@ aouda start --data-dir ./node2 --bind 0.0.0.0:5001 --join 192.168.1.10:5000
 # Join as witness (arbiter)
 aouda start --data-dir ./node3 --bind 0.0.0.0:5002 --join 192.168.1.10:5000 --role witness
 ```
+
+### 3.1 Aouda.Setup Installer
+
+`Aouda.Setup` is a zero-dependency, single-binary console app for first-time interactive installs. It replaces the expert-only PowerShell/bash install scripts (`scripts/install-aouda.ps1` / `install-aouda.sh`) with a double-click experience.
+
+**When to use:**
+- First-time installation by a developer or end user who doesn't want to work with CLI flags
+- Setting up Windows Service or systemd on a new machine interactively
+- Getting a Start Menu / `.desktop` shortcut and a printed API key
+
+**How it works:**
+
+1. Place `Aouda.Setup.exe` (Windows) or `aouda-setup` (Linux) alongside `Aouda.Server.exe` / `Aouda.Server` in the release archive.
+2. Double-click or run `./aouda-setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
+3. Setup copies binaries, writes `appsettings.json`, bootstraps the admin, registers the OS service, creates a shortcut, and prints a completion banner with the server URL and API key.
+
+See the [Studio guide §12](studio.md#12-aoudasetup-installer) for the full interactive prompt sequence, completion banner, service registration details, and manual/on-demand mode.
+
+**Existing scripts are preserved:** `scripts/install-aouda.ps1` and `scripts/install-aouda.sh` are unchanged and remain the tool of choice for CI/CD pipelines and scripted deployments.
 
 ---
 
@@ -503,7 +524,37 @@ await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *
 
 ### CORS
 
-Default policy allows `https://hub.aouda.dev` and `http://localhost:3000`. Override via `AOUDA_CORS_ORIGINS` environment variable.
+**Default allowed origins (nothing configured):** `https://hub.aouda.dev` and `https://studio.aouda.com`.
+
+`http://localhost:3000` is **no longer** in the defaults as of P34. Localhost must be added explicitly.
+
+| Configuration | Behavior |
+|---|---|
+| Nothing set | Allows `https://hub.aouda.dev` + `https://studio.aouda.com` |
+| `AOUDA_CORS_ORIGINS=...` | **Replaces** all defaults — must include every origin needed |
+| `AOUDA_STUDIO_ORIGIN=http://localhost:3000` | **Appends** one origin to defaults without replacing them |
+
+**Adding localhost to defaults (local Studio dev):**
+
+```bash
+# Option A: append via AOUDA_STUDIO_ORIGIN (keeps studio.aouda.com + hub.aouda.dev in defaults)
+AOUDA_STUDIO_ORIGIN=http://localhost:3000
+
+# Option B: full override via AOUDA_CORS_ORIGINS (must list every origin)
+AOUDA_CORS_ORIGINS=https://studio.aouda.com,https://hub.aouda.dev,http://localhost:3000
+```
+
+**appsettings.json example (full override):**
+
+```json
+{
+  "Aouda": {
+    "CorsOrigins": "https://studio.aouda.com,https://hub.aouda.dev,http://localhost:3000,http://127.0.0.1:3000"
+  }
+}
+```
+
+**Important pitfall:** If `AOUDA_CORS_ORIGINS` / `Aouda:CorsOrigins` is set and omits `https://studio.aouda.com`, browsers at the hosted Studio (`studio.aouda.com`) cannot call your server — CORS preflight fails. Always include every browser origin you need in the override list.
 
 ---
 
@@ -511,7 +562,7 @@ Default policy allows `https://hub.aouda.dev` and `http://localhost:3000`. Overr
 
 | Scenario | What Happens |
 |----------|-------------|
-| `docker run aouda/server` | Single-node server, port 5000, data at `/data`, no auth, CORS allows Hub + localhost |
+| `docker run aouda/server` | Single-node server, port 5000, data at `/data`, no auth, CORS allows Hub + `studio.aouda.com` (not localhost) |
 | `aouda start` (temp data dir) | Ephemeral data path, schema inference, auth via API |
 | `aouda start` | Persistent storage in current directory, port 5000 |
 | Hub unreachable | Servers continue operating normally, Studio direct-mode works |
@@ -541,6 +592,7 @@ Default policy allows `https://hub.aouda.dev` and `http://localhost:3000`. Overr
 | P16 Epic B | Hub backend, auth, orgs, server registry, Studio Hub integration, Docker images, deployment | `aouda-hub/docs/tasks/P16-SB1-Hub-Backend-And-Auth.md` through `P16-SB5-Deploy-Hub-And-License-Tracking.md`; `aouda-studio/docs/tasks/P16-SB3-Studio-Hub-Integration.md`, `P16-SB4-Studio-Docker-Config-Offline.md` |
 | P16 Epic E | Helm chart, probes, Studio Helm, K8s docs, witness in Helm | `docs/tasks/P16/P16-SE1-Helm-Chart-And-Probes.md`, `P16-SE2-Helm-Studio-Docs-And-Witness.md` |
 | P16 Epic F | Control plane, CRD, operator, K8s provisioner | `aouda-hub/docs/tasks/P16-SF1-Control-Plane-Service.md`, `P16-SF2-CRD-And-Operator.md`, `P16-SF3-Provider-Studio-Backup-And-Upgrade.md` |
+| P34 | CORS updated (`studio.aouda.com` in defaults, localhost removed), `AOUDA_STUDIO_ORIGIN` config key, `GET /_studio/config` endpoint, Aouda.Setup cross-platform installer, Vercel deploy config | `aouda/docs/tasks/P34/P34-COMPLETION.md` |
 
 ---
 
@@ -548,7 +600,10 @@ Default policy allows `https://hub.aouda.dev` and `http://localhost:3000`. Overr
 
 | Item | When to Implement |
 |------|-------------------|
-| Windows installer / MSI | When Windows-native deployment demand exists |
+| Embedded Studio in server binary | P35+ — air-gapped / offline; Firefox localhost support |
+| Windows MSI / NSIS installer | When Windows-native distribution demand exists (P34 ships `.exe` console app) |
+| macOS `.app` bundle / launchd support | When macOS-native install demand exists |
+| Auto-update / in-place upgrade of installed server | Version management TBD |
 | Billing/payment integration | When commercial offering launches |
 | Multi-cloud provider interface beyond K8s | When non-K8s deployment targets emerge |
 | S3/Azure/GCS backup providers (full implementation) | Seam exists; implement when cloud storage integration needed |

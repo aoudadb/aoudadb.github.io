@@ -7,8 +7,8 @@ parent: "Guides"
 # Aouda Studio — Web Management Console
 
 _Domain: Studio UI features, data explorer, cluster management, admin operations_
-_Status: MVP Complete (2026-04-08)_
-_Primary Phases: P5, P6, P9, P12, P16_
+_Status: MVP Complete + Distribution (2026-06-23)_
+_Primary Phases: P5, P6, P9, P12, P16, P34_
 _Repo: `aouda-studio` (Next.js / React)_
 
 ---
@@ -30,13 +30,16 @@ Aouda Studio is the web management console for Aouda. It provides:
 
 | I want to... | Go to |
 |---|---|
+| Access Studio instantly (no install) | §10 Hosted Studio at `studio.aouda.com` |
+| Connect to a server from Studio | §10.1 Connect-to-Server Dialog |
 | Browse and query table data | §3 Data Explorer |
 | Run join or aggregate queries | §4 Query Worksheet |
 | Manage cluster nodes | §6 Cluster Management |
 | View backups and restore | §7 Backup Management |
 | Manage branches | §5 Branches |
 | Connect Studio to servers | §9 Hub Integration |
-| Deploy Studio | §10 Deployment |
+| Deploy Studio (self-hosted / Docker) | §11 Deployment |
+| Install Aouda interactively (Aouda.Setup) | §12 Aouda.Setup Installer |
 
 ---
 
@@ -292,7 +295,115 @@ Top bar component that:
 
 ---
 
-## 10) Deployment
+## 10) Hosted Studio at `studio.aouda.com`
+
+`https://studio.aouda.com` is the publicly-hosted deployment of Aouda Studio on Vercel. It requires no installation — open it in Chrome or Edge and connect to any Aouda server running anywhere.
+
+### 10.1 Connect-to-Server Dialog
+
+The first time you visit `studio.aouda.com`, a **Connect to Server** dialog opens automatically. Enter the URL of your Aouda server and, if the server has authentication enabled, your API key.
+
+| Field | Description |
+|-------|-------------|
+| Server URL | Full URL of the Aouda server, e.g. `http://localhost:5000` or `https://my-server.example.com` |
+| API key | Server API key (`mk_srv_...`) — leave blank for unauthenticated servers |
+| Remember key | Checked by default — persists the URL and key in browser `localStorage` |
+
+Once connected, the server URL appears in the top navigation bar. Click it at any time to open the Connect dialog again and switch to a different server.
+
+The chosen server URL and API key survive page reloads (stored in `localStorage`). They can be cleared by opening the dialog and connecting with no values, or by clearing browser storage.
+
+### 10.2 Server URL Resolution Priority
+
+When Studio initializes, the server URL is resolved in this order:
+
+1. `localStorage` (set by the Connect dialog — highest priority)
+2. `window.__AOUDA_STUDIO_CONFIG__.defaultServer` (runtime config from `/_studio/config`)
+3. `NEXT_PUBLIC_AOUDA_URL` build-time env var
+4. Hard-coded fallback: `http://localhost:5000`
+
+This means the Connect dialog always overrides any build-time or runtime default.
+
+### 10.3 Browser Compatibility for `localhost` Access
+
+When using `studio.aouda.com` (HTTPS) to connect to `http://localhost:5000` (HTTP), browsers have different mixed-content policies:
+
+| Browser | Works? | Notes |
+|---------|--------|-------|
+| **Chrome / Edge** | ✅ Yes | Special localhost exception for mixed content — works out of the box |
+| **Firefox** | ❌ No (default) | Blocks HTTP requests from HTTPS pages; toggle `security.mixed_content.block_active_content` to override |
+| **Safari** | ❌ No | Same block as Firefox |
+
+**Recommendation:** Use Chrome or Edge for local development with `studio.aouda.com`. For Firefox/Safari localhost support, see P35+ Embedded Studio (served from the same origin, no mixed-content issue).
+
+### 10.4 Security Model for Remote Server Access
+
+When exposing an Aouda server over the network (to reach it from `studio.aouda.com`), use a layered approach:
+
+**Layer 1 — Network: IP Allowlisting (recommended first line of defence)**
+
+Restrict which IPs can reach the Aouda port. Since `studio.aouda.com` sends requests *from your browser* (not from Vercel), the source IP is your own home/office IP — the same one you would allowlist for SSH or PostgreSQL.
+
+```bash
+# Linux (ufw)
+ufw allow from <your-ip> to any port 5000
+
+# Windows Defender Firewall — inbound rule, port 5000, source = your IP
+# Cloud — AWS Security Group / Azure NSG / GCP Firewall: source = your IP
+```
+
+**Layer 2 — Transport: TLS via Reverse Proxy**
+
+Aouda.Server speaks plain HTTP. For remote access, put it behind a TLS-terminating reverse proxy:
+
+- **Caddy** (simplest — automatic Let's Encrypt): `reverse_proxy localhost:5000`
+- **nginx / Traefik**: standard proxy configs
+
+Aouda does not manage TLS certificates. The reverse proxy is the TLS boundary.
+
+**Layer 3 — Application: API Key Authentication**
+
+All API endpoints require authentication when server auth is configured. Use a server API key (`mk_srv_...`) with the Connect dialog.
+
+**Layer 4 — Optional: VPN / Zero-Trust**
+
+For high-security environments, expose Aouda only inside a VPN (Tailscale, WireGuard, etc.) — `studio.aouda.com` works identically through a VPN tunnel.
+
+### 10.5 CORS Configuration
+
+Aouda.Server must allow `https://studio.aouda.com` as a browser origin. The defaults already include it:
+
+| Config state | Allowed browser origins |
+|---|---|
+| Nothing set (defaults) | `https://hub.aouda.dev`, `https://studio.aouda.com`, plus optional `AOUDA_STUDIO_ORIGIN` |
+| `AOUDA_CORS_ORIGINS` set | **Only** the comma-separated list — defaults NOT merged in |
+| `AOUDA_STUDIO_ORIGIN` set (no `CorsOrigins`) | Defaults **plus** the custom origin appended |
+
+**Important pitfall:** If you set `AOUDA_CORS_ORIGINS` and omit `https://studio.aouda.com`, browsers at `studio.aouda.com` cannot call your server (CORS preflight fails).
+
+```bash
+# Correct: include all origins you need
+AOUDA_CORS_ORIGINS=https://studio.aouda.com,https://hub.aouda.dev,http://localhost:3000
+
+# Alternative: add one extra origin without replacing defaults
+AOUDA_STUDIO_ORIGIN=http://localhost:3000
+```
+
+For local development with a custom Studio port, use `AOUDA_STUDIO_ORIGIN` to keep `studio.aouda.com` in the defaults while adding localhost.
+
+### 10.6 `GET /_studio/config` Endpoint
+
+A public (no auth required) endpoint returns static bootstrap metadata:
+
+```json
+{ "serverUrl": "/", "theme": "system" }
+```
+
+This is used by the future embedded Studio (P35+) to configure itself when served from the same origin as the server. In P34 it establishes the routing and public-route plumbing. It is always safe to expose; it reveals no data or configuration beyond the JSON above.
+
+---
+
+## 11) Deployment
 
 ### Docker
 
@@ -312,6 +423,23 @@ Included in Aouda server's `docker-compose.yml` and `docker-compose.cluster.yml`
 
 Enable in Helm chart: `studio.enabled=true`. Auto-configured to connect to the Aouda headless service.
 
+### Vercel (studio.aouda.com)
+
+The `aouda-studio` repository is configured for Vercel deployment:
+
+- `vercel.json` configures the install command to resolve `@aouda/client` from npm (not from the local `file:` path used in development).
+- `NEXT_STANDALONE_OUTPUT` is not set on Vercel (uses Vercel's Next.js runtime instead of standalone Docker output).
+- No `NEXT_PUBLIC_AOUDA_URL` is set on Vercel — users connect at runtime via the Connect dialog.
+
+Environment variables for the Vercel project:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AOUDA_CLIENT_PACKAGE` | Optional | npm version of `@aouda/client` to use (default: `latest`) |
+| `NEXT_PUBLIC_HUB_URL` | No | Leave empty for direct mode at `studio.aouda.com` |
+
+Manual ops required once per deployment: create the Vercel project, attach the `studio.aouda.com` custom domain, and set `AOUDA_CLIENT_PACKAGE` if pinning a version.
+
 ### Local Config File
 
 `aouda-studio.config.json` provides server connections when Hub is unavailable:
@@ -325,7 +453,131 @@ Enable in Helm chart: `studio.enabled=true`. Auto-configured to connect to the A
 
 ---
 
-## 11) Admin Features
+## 12) Aouda.Setup Installer
+
+`Aouda.Setup` is a zero-dependency .NET 8 console app (published as a single self-contained binary) that replaces the manual PowerShell/bash install scripts with an interactive, double-click experience.
+
+### When to Use Aouda.Setup vs. Install Scripts
+
+| Scenario | Use |
+|----------|-----|
+| First-time install by a developer or end user | `Aouda.Setup.exe` / `aouda-setup` |
+| CI/CD automation, scripted deploy pipelines | `scripts/install-aouda.ps1` / `install-aouda.sh` (unchanged) |
+| Container / Kubernetes deployment | Docker / Helm (no install script needed) |
+
+### Interactive Prompt Sequence
+
+Double-click `Aouda.Setup.exe` (Windows) or run `./aouda-setup` (Linux). The app walks you through five prompts with sensible defaults:
+
+```
+Welcome to Aouda Setup
+======================
+Install mode:
+  [1] Windows Service / systemd (recommended — starts automatically with OS)
+  [2] Manual / on-demand (run with: Aouda.Server start)
+> 1
+
+Port [5000]:
+> 
+
+Install directory [C:\Program Files\Aouda]:
+> 
+
+Data directory [C:\ProgramData\Aouda]:
+> 
+
+Admin email:
+> admin@example.com
+
+Admin password (input hidden):
+> 
+```
+
+Press Enter to accept defaults. The setup app then:
+1. Copies binaries to the install directory
+2. Writes `appsettings.json` with `DataPath` and `Port`
+3. Bootstraps the first admin account (`Aouda.Server create-admin`)
+4. Registers and starts the Windows Service (or systemd unit on Linux)
+5. Creates Start Menu shortcut (Windows) or `.desktop` shortcut (Linux)
+6. Prints the completion banner
+
+### Completion Banner
+
+```
+=============================================
+Aouda is running!
+
+Server URL : http://localhost:5000
+Studio     : http://localhost:5000  (future embedded mode)
+Cloud      : https://studio.aouda.com → connect to http://localhost:5000
+API key    : aouda_sk_xxxxxxxxxxxx
+
+Recommended browser for localhost: Chrome or Edge
+Store your API key in a secret manager now.
+=============================================
+```
+
+The API key is a long-lived server admin key (`mk_srv_...`). Copy it to a secret manager immediately — it is not stored anywhere after the banner is dismissed.
+
+### Service Registration Details
+
+**Windows (Windows Service via `sc.exe`):**
+- Service name: `Aouda`
+- Start type: automatic
+- Binary path: `"C:\Program Files\Aouda\Aouda.Server.exe" --contentRoot "C:\ProgramData\Aouda"`
+- If the service already exists, `sc.exe config` updates the binary path before starting
+
+**Linux (systemd):**
+- Unit file: `/etc/systemd/system/aouda.service`
+- `WorkingDirectory`: install directory
+- `ExecStart`: `/opt/aouda/Aouda.Server --contentRoot /etc/aouda`
+- `User=aouda`, `Group=aouda`
+- Data/log directories created with correct ownership (`chown -R aouda:aouda`)
+- `systemctl daemon-reload && systemctl enable aouda && systemctl restart aouda`
+
+Requires elevation: run as Administrator on Windows, `sudo` on Linux.
+
+### Shortcut Details
+
+| Platform | Shortcut location | Target URL |
+|----------|-------------------|------------|
+| Windows | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Aouda Studio.url` | `http://localhost:<port>` |
+| Linux | `~/.local/share/applications/aouda.desktop` | `xdg-open http://localhost:<port>` |
+
+The shortcut points to the **local server URL** (not `studio.aouda.com`). In direct-mode Docker or future embedded Studio, the same URL serves Studio. For the hosted Studio, visit `studio.aouda.com` and use the Connect dialog.
+
+### Manual / On-Demand Install Mode
+
+If you select mode `[2]` (manual), `Aouda.Setup` skips service registration and instead prints how to start the server manually:
+
+```
+Aouda is ready to start!
+
+To start the server:
+  Windows: "C:\Program Files\Aouda\Aouda.Server.exe" --contentRoot "C:\ProgramData\Aouda"
+  Linux:   /opt/aouda/Aouda.Server --contentRoot /etc/aouda
+
+Server URL : http://localhost:5000
+Cloud      : https://studio.aouda.com → connect to http://localhost:5000
+API key    : aouda_sk_xxxxxxxxxxxx
+```
+
+### Admin Bootstrap Logic
+
+`Aouda.Setup` bootstraps the admin account using this sequence:
+
+1. Invokes `Aouda.Server create-admin --email ... --password ... --data ...` as a subprocess (no HTTP required — writes directly to the data directory).
+2. Waits for `GET /health` to return 200 (up to 30 retries × 2 seconds = 60 seconds).
+3. Calls `POST /api/auth/setup` with email + password. If the server returns 403 `ALREADY_CONFIGURED` (admin already exists), falls back to `POST /api/auth/signin`.
+4. Uses the returned token to call `POST /api/auth/admin/keys` and obtain a server admin API key.
+
+### Existing Install Scripts (Preserved)
+
+`scripts/install-aouda.ps1` (Windows) and `scripts/install-aouda.sh` (Linux) are unchanged. They remain the preferred tool for CI/CD pipelines and scripted deployments where non-interactive, parameter-driven installs are needed.
+
+---
+
+## 13) Admin Features
 
 ### Log Viewer
 
@@ -370,7 +622,7 @@ View, create, and revoke server admin API keys from Studio settings/auth page.
 
 ---
 
-## 12) Technology Stack
+## 14) Technology Stack
 
 | Layer | Technology |
 |-------|-----------|
@@ -387,7 +639,7 @@ View, create, and revoke server admin API keys from Studio settings/auth page.
 
 ---
 
-## 13) Phase Coverage Matrix
+## 15) Phase Coverage Matrix
 
 | Phase | Delivered | Key Task Docs |
 |-------|----------|---------------|
@@ -400,3 +652,4 @@ View, create, and revoke server admin API keys from Studio settings/auth page.
 | P16 Epic D | Log viewer, query worksheet, role-based UI, API key auth, settings, alerts, slow query, PITR, join UI, aggregate UI, branches UI, advanced filters, materialized queries, admin keys | `aouda-studio/docs/tasks/P16-SD1-*` through `P16-SD5-*` |
 | P16 Epic F | Studio cloud integration (projects, clusters) | `aouda-studio/docs/tasks/P16-SF3-*` |
 | P16 Epic G | Natural language cluster operations | `aouda-studio/docs/tasks/P16-SG2-*` |
+|| P34 | Hosted Studio at `studio.aouda.com` (Vercel), Connect-to-Server dialog, localStorage persistence, first-run detection, CORS for `studio.aouda.com`, `/_studio/config` endpoint, `Aouda.Setup` cross-platform installer | `aouda/docs/tasks/P34/StudioDist-*` |
