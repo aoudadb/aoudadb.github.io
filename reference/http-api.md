@@ -232,9 +232,20 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/signout` | POST | API key + user JWT | Revoke session |
 | `/api/databases/{db}/auth/me` | GET | API key + user JWT | Current user profile |
 | `/api/databases/{db}/auth/me` | PATCH | API key + user JWT | Update profile metadata |
-| `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change password |
+| `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
+| `/api/databases/{db}/auth/request-password-reset` | POST | API key (Layer 1) | Request 6-digit OTP emailed to user; always 200 (anti-enumeration) |
+| `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set |
+| `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor |
+| `/api/databases/{db}/auth/mfa/challenge` | POST | User JWT | Create MFA challenge; sends SMS OTP for phone factors |
+| `/api/databases/{db}/auth/mfa/verify` | POST | User JWT | Submit OTP/TOTP/backup code; returns `aal2` token pair on success |
+| `/api/databases/{db}/auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
+| `/api/databases/{db}/auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
 | `/api/databases/{db}/auth/admin/users` | GET | API key (`db_admin`) | List app users |
+| `/api/databases/{db}/auth/admin/users` | POST | API key (`db_admin`) | Create user; supports `sendInviteEmail` + `forcePasswordChange` flags |
 | `/api/databases/{db}/auth/admin/users/{id}` | GET/PATCH | API key (`db_admin`) | Get/update user |
+| `/api/databases/{db}/auth/admin/users/{id}/password` | PUT | API key (`db_admin`) | Admin override of user's password (no current-password check); optional `forcePasswordChange` |
+| `/api/databases/{db}/auth/admin/users/{id}/invite` | POST | API key (`db_admin`) | (Re-)send invite email with OTP; invalidates previous unused tokens |
+| `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user |
 | `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys |
 | `/api/databases/{db}/auth/admin/api-keys/{id}` | DELETE | API key (`db_admin`) | Revoke custom API key |
 
@@ -638,6 +649,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
 | POST | `/{name}/query` | Read | Return materialized rows as JSON objects (see response). |
+| POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). Accepts `?await=true` to wait for completion or `?await=false` for fire-and-forget. Result table is readable with stale data throughout. |
 
 **Create body** (camelCase JSON):
 
@@ -2661,6 +2673,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
 | `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
+| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` | Controls Aggregate MQ rebuild after commit. `"auto"` (default): all Aggregate MQs whose source tables are in this load are automatically rebuilt after `BulkLoadCommitted`. `"skip"`: no MQ rebuild; use for multi-step pipelines where you call `POST .../materialized-queries/{name}:refresh` explicitly. |
 
 **Response body:**
 
@@ -2791,6 +2804,7 @@ Get current session state and progress.
 | `lastUpdatedUtc` | string | ISO 8601 last state update time. |
 | `progress` | object? | Deferred work progress. Same structure as in commit response. Null if no deferred work is in progress. |
 | `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
+| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"error"`. Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent Aggregate MQs. |
 | `error` | string? | Human-readable error message. Set when `state = "failed"`. |
 | `errorCode` | string? | Error code when `state = "failed"`. |
 
@@ -2842,3 +2856,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 1.2 | 2026-02-06 | Data mutation endpoints: insert (POST), update (PATCH), delete (DELETE) for /api/tables/{name}/rows |
 | 1.3 | 2026-03-19 | Comprehensive authentication section: credential types, auth enforcement flow, X-User-Token, server and app auth endpoint reference |
 | 2.0 | 2026-05-22 | WebSocket streaming protocol documented; Bulk Load API documented; `crossPartitionAccess`, `joins`, WhereClause `groups`; write concern on mutation messages; Known Limitations updated; Future Extensions corrected |
+| 2.1 | 2026-06-23 | P27: `setExpr` expression SET, `TRUNCATE`, DELETE `limit`/`orderBy`, `RETURNING`, batch mutations (`/rows/batch`), expression SELECT (`selectExpr`). P28: `TruncateToMinute` partition function. P31: `postLoadMqBehavior` on bulk-load `:begin`; `mqRebuildStatus` in `:status` response; `POST .../materialized-queries/{name}:refresh`. P33: password reset endpoints, MFA enroll/challenge/verify/factors/delete, admin password override, invite resend, `requiresPasswordChange`/`mfaRequired`/`mfaFactors`/`aal` in signin response. |

@@ -1,4 +1,4 @@
----
+﻿---
 title: "Time-series and Clustering"
 nav_order: 11
 parent: "Guides"
@@ -10,8 +10,8 @@ Document status: Approved baseline
 Primary owner: Aouda maintainers
 Last updated: 2026-05-22
 
-Coverage phases: P4, P8
-Primary task folders: `docs/tasks/P4/`, `docs/tasks/P8/`
+Coverage phases: P4, P8, P28
+Primary task folders: `docs/tasks/P4/`, `docs/tasks/P8/`, `docs/tasks/P28/`
 Primary ADRs: `docs/decisions/0014-time-series-clustering-optimization.md`, `docs/decisions/0009-partitioning-multitenancy.md`
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Partitioning-And-Multitenancy.md`, `docs/dev/Functionality-Query-Execution.md`, `docs/dev/Functionality-Schema-Lifecycle.md`
 
@@ -162,7 +162,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 
 - Cluster declaration via `clusterOrder` on create-table columns.
 - Partition functions for key derivation:
-  - `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`.
+  - `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`.
 - Nested partition paths under `partitions/` with shared bucket support.
 - Segment manifest persistence with cluster stats and per-page metadata.
 - Segment-level cluster-stat pruning in query planning (`SegmentPruner`).
@@ -193,6 +193,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 | P4 | Epic G tasks (G.1-G.6) + reports | Cluster declaration, partition functions, nested paths, manifests, segment stats pruning, sort-on-seal, late-arrival delta foundation | Extended API surfacing for many advanced knobs | `docs/BACKLOG.md` (BL-004/005/006/007/008 completion notes) |
 | P4 follow-ups | BL-004/005/005b/006/007/008 reports | Metadata caching tiers, retrospective partitioning framework, full K-way delta merge, query and flush integration for delta paths | Some migration strategy paths remain phase-2 scoped | `docs/BACKLOG.md` BL-005 phase-2 notes |
 | P8 | Declarative schema management tasks | Schema format carries `partitionKey.function` and `clusterColumns`; apply/export/diff paths include these fields | Schema apply still does not set partition options block (storage mode, late-arrival, migration) | `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md` |
+| P28 (S1) | `docs/tasks/P28/` | `TruncateToMinute` partition function (`PartitionFunction = 6`); minute-level time partitioning; TypeScript `partitionFunction` string union extended | None | P28-COMPLETION |
 
 ## 2.6 Capability coverage matrix
 
@@ -200,6 +201,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 |---|---|---|---|---|---|
 | Declare cluster columns (`clusterOrder`) | Yes | No | No | G.1 report + `TableMessages.cs` + cluster integration tests | Consecutive ordering validation enforced |
 | Declare partition key function per key column | Yes | No | No | G.2 report + `PartitionKeyExtractor.cs` + partition function tests | Type compatibility enforced in controller |
+| `TruncateToMinute` partition function | Yes | No | No | P28 S1, `PartitionFunction = 6`, `PartitionKeyExtractor.TruncateToMinute` | Produces `YYYY-MM-DD-HH-mm` partition key; TypeScript union includes `"TruncateToMinute"` |
 | Nested partition directory structure | Yes | No | No | G.3 report + `PartitionRouter.cs` + nested partition tests | Dedicated paths nested under `partitions/` |
 | Segment manifest persistence at seal | Yes | No | No | G.4a report + `SegmentManifest.cs` + serializer tests | Fallback compatibility behavior preserved |
 | Segment-level pruning via cluster stats | Yes | No | No | G.4b report + `SegmentPruner.cs` + storage/query tests | Counter `SegmentsPrunedByClusterStats` updates |
@@ -354,7 +356,7 @@ Primary tests:
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
 | `CreateColumnRequest.clusterOrder` | int? | `null` | `1..N` consecutive | HTTP create-table body | Cluster declaration only |
-| `CreateColumnRequest.partitionFunction` | string? | `null` | `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear` | HTTP create-table body | Must be on partition key columns |
+| `CreateColumnRequest.partitionFunction` | string? | `null` | `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear` | HTTP create-table body | Must be on partition key columns |
 | `CreateTableRequest.partitionStorage` | string? | `Auto` (if partition key present) | `Auto`, `Dedicated`, `Shared` | HTTP create-table body | Maps to `PartitionOptions.StorageMode` |
 | `PartitionOptions.RequirePartitionFilter` | bool | `true` | `true/false` | .NET engine/catalog | No direct HTTP/TS field today |
 | `PartitionOptions.PromotionRowThreshold` | long | `10000000` | `>=0` | .NET engine/catalog | Auto-promotion tuning |

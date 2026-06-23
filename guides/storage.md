@@ -8,11 +8,11 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-06-23
 
-Coverage phases: P3, P4, P6, P11
-Primary task folders: `docs/tasks/P3/`, `docs/tasks/P4/`, `docs/tasks/P6/`, `docs/tasks/P11/`
-Primary ADRs: `docs/decisions/0001-column-per-file.md`, `docs/decisions/0002-json-catalog-persistence.md`, `docs/decisions/0003-write-ahead-log.md`, `docs/decisions/0005-persistence-policies.md`, `docs/decisions/0016-wal-lifecycle-management.md`
+Coverage phases: P3, P4, P6, P11, P30
+Primary task folders: `docs/tasks/P3/`, `docs/tasks/P4/`, `docs/tasks/P6/`, `docs/tasks/P11/`, `docs/tasks/P30/`
+Primary ADRs: `docs/decisions/0001-column-per-file.md`, `docs/decisions/0002-json-catalog-persistence.md`, `docs/decisions/0003-write-ahead-log.md`, `docs/decisions/0005-persistence-policies.md`, `docs/decisions/0016-wal-lifecycle-management.md`, `docs/decisions/0035-temperature-aware-replication-and-backup.md`
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-Schema-Lifecycle.md`
 
 ## Start Here
@@ -184,7 +184,9 @@ If you run server defaults and do not set per-database overrides:
 
 - No first-class public REST backup/restore job endpoints are exposed in server controllers.
 - WAL archive mode has config/validation shape, but full hosted orchestration parity with replication-hosted paths remains partial.
-- Some persistence-policy ADR concepts (`MemoryOnly`, `DiskOnly`, full policy matrix) are not exposed as explicit end-user policy enums in current HTTP/TS surfaces.
+- Some persistence-policy ADR concepts (`DiskOnly`, full policy matrix) are not exposed as explicit end-user policy enums in current HTTP/TS surfaces.
+
+> **Note (P30):** `MemoryOnly` durability mode is now fully enforced end-to-end (P30 S2). `MemoryOnly` tables write nothing to disk — no `.hot`, `.col`, `.hra`, or WAL records. This is no longer a "reserved" surface. See `guides/hot-cold.md §2.4`.
 
 ## 2.5 Phase coverage matrix
 
@@ -194,6 +196,7 @@ If you run server defaults and do not set per-database overrides:
 | P4 | `P4-EpicD-Task1/3/5-*Report.md`, `P4-EpicI-Task2/5-*Report.md` | Backup manifest/hash infra, incremental backup engine, lifecycle retention/GC, WAL archive worker, slot integration | Server-level backup/restore operation surfaces and scheduling are still not comprehensive API workflows | No explicit BL entry dedicated to backup API parity |
 | P6 | `P6-EpicA-Task4-*Report.md`, `P6-EpicA-Task5-*Report.md`, `P6-EpicE-Task1-*Report.md` | Table-name directory storage, per-table WAL/replication controls, per-database replication WAL multiplexing | Per-database checkpoint sync still deferred | Not mapped to explicit BL item in `docs/BACKLOG.md` |
 | P11 | `P11-Fix-WalRoundtripTests-UniqueTempPath-Report.md` | WAL test reliability hardening in persistence test paths | No new feature surface; test stability work only | N/A |
+| P30 | `MemTiering-S12-Backup-HRA-Coverage.md` | Backup now includes HRA snapshot (`.hra`) and mutable keyed tier (`.mkt`) files — **Gap C closed**. Both added to backup manifest and restore path. Full row coverage for all durability modes. | Streaming HRA snapshot (BL-105) deferred | ADR 0035 |
 
 ## 2.6 Capability coverage matrix
 
@@ -209,6 +212,8 @@ If you run server defaults and do not set per-database overrides:
 | Backup manifest + incremental dedup engine | Yes | No | No | P4 EpicD Task1/3 reports, backup engine tests | Engine-level implementation complete |
 | Restore engine + PITR replay from archive | Yes | No | No | `RestoreEngine.cs`, PITR tests/reports | Engine-level implementation complete |
 | Backup lifecycle retention and blob GC | Yes | No | No | Task D5 report, `BackupLifecycleManager.cs` | Dry-run default safety model |
+| HRA snapshot (`.hra`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Closes Gap C — rows written since last shutdown are now backed up |
+| Mutable keyed tier (`.mkt`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Cache/UPSERT tier rows covered in backup and restore |
 | Public REST backup/restore operations | No | No | Yes | Server controllers + TS client surfaces | No dedicated backup/restore endpoints |
 | Per-database checkpoint sync in replication host | No | Yes | No | `ReplicationHostedService.cs` limitation note | Uses first available DB for checkpoint today |
 
@@ -222,6 +227,13 @@ If you run server defaults and do not set per-database overrides:
   - `wal/` for write-ahead durability and replay.
   - `tables/` for table segment files.
   - `materialized/` for materialized definition/state files.
+- **Table segment file types** (P30 additions):
+  - `.col` — cold column segment file (always produced by the demotion path)
+  - `.hot` — immutable hot segment file (produced at flush; P30 hot-first invariant)
+  - `.hra` — HRA snapshot on graceful shutdown; included in backup since P30 (Gap C)
+  - `.mkt` — mutable keyed tier serialisation; included in backup since P30 (Gap C)
+  - `.spr` — sparse PK index for cold segments
+  - `.tombstone` — durable retirement tombstone preventing orphaned cold file resurrection after crash (P30 S11)
 - **Table segment layout**
   - Table path is name-based.
   - Default non-partitioned path uses `data/seg_*`.

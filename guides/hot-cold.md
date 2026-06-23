@@ -8,11 +8,11 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-03-31
+Last updated: 2026-06-23
 
-Coverage phases: P3, P6, P7
-Primary task folders: `docs/tasks/P3/`, `docs/tasks/P6/`, `docs/tasks/P7/`
-Primary ADRs: `docs/decisions/0007-hot-vs-cold-storage.md`, `docs/decisions/0011-memory-prioritization.md`, `docs/decisions/0012-memory-footprint-reduction.md`
+Coverage phases: P3, P6, P7, P30
+Primary task folders: `docs/tasks/P3/`, `docs/tasks/P6/`, `docs/tasks/P7/`, `docs/tasks/P30/`
+Primary ADRs: `docs/decisions/0007-hot-vs-cold-storage.md`, `docs/decisions/0011-memory-prioritization.md`, `docs/decisions/0012-memory-footprint-reduction.md`, `docs/decisions/0034-unified-in-memory-tiering.md`, `docs/decisions/0035-temperature-aware-replication-and-backup.md`
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-RealTime-Streaming.md`, `docs/dev/Functionality-Schema-Lifecycle.md`
 
 ## Start Here
@@ -135,11 +135,19 @@ If you do nothing beyond default server config:
 ### Available now
 
 - Temperature model:
-  - `StorageTemperaturePolicy` (`Auto`, `HotOnly`, `ColdPreferred`)
+  - `StorageTemperaturePolicy` (`Auto`, `HotOnly`, `ColdPreferred`, `Mutable`)
   - `SegmentTemperature` (`Hot`, `Cold`)
+  - `DataDurabilityMode` (`MemoryOnly`, `DiskBacked`) — fully enforced end-to-end (P30)
 - Promotion/demotion lifecycle:
   - Hot->cold demotion pipeline with catalog durability updates and diagnostics.
-  - Cold->hot promotion pipeline with access-triggered and policy-triggered promotion.
+  - Cold->hot promotion pipeline: **two intents** (P30):
+    - `PromoteForQueryAsync` — cold → immutable columnar hot (query path)
+    - `PromoteForUpdateAsync` — cold → mutable keyed tier (update/cache path), with two-phase dissolution for crash safety
+- **Hot-first flush** (P30): Flush produces only an immutable hot segment (`.hot` file). Cold segments come exclusively from the demotion path. Prior to P30 this invariant was violated.
+- **Mutable keyed tier** (P30): `MutableKeyedStore` provides in-place upsert by PK. Dead-row reclamation via lazy tombstone compaction. Bounded memory at keyspace size. Serves `LatestPerKey` and cache/UPSERT workloads.
+- **Representation selector** (P30): `RepresentationSelector` routes incoming write streams by: intent hint (`Mutable` policy) → mutation rate (rolling writes/s) → segment size (below seal floor) → defaults to immutable hot.
+- **Hot segment merge** (P30): `HotSegmentMergeWorker` coalesces small immutable hot segments and compacts mutable-tier tombstones.
+- **Durability gating end-to-end** (P30): `DefaultPageStoreRouter` governs flush/persist path. `MemoryOnly` tables write nothing (no `.hot`, `.col`, `.hra`, WAL). `DiskBacked` tables persist per representation. The old bypass (hardcoded `FilePageStore`) was removed.
 - Query/read correctness over mixed hot/cold:
   - Query paths consult segment temperature and deletion-mask correctness fixes are in place.
 - Management and observability:
@@ -155,9 +163,11 @@ If you do nothing beyond default server config:
 
 From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 
-- Rich memory intent declarations from ADR 0011 (for example `HotRetention`, `HotRowLimit`, `LatestPerKey`, query memory protection).
-- Advanced hot footprint optimizations from ADR 0012 (for example hot encoding strategy tiers as productized table options).
+- Rich memory intent declarations from ADR 0011 (for example `HotRetention`, `HotRowLimit`, query memory protection). **Note: `LatestPerKey` is now served by the mutable keyed tier (P30).**
+- Advanced hot footprint optimizations from ADR 0012 (for example hot encoding strategy tiers as productized table options). **Note: Frame-of-Reference Timestamp and normalized-scale Decimal hot representations are now shipped (P29).**
 - Broader HTTP/SDK management APIs for explicit promote/demote and full residency policy shaping.
+- Dictionary-encoding strings in the mutable tier (ADR 0034 Open Question 2).
+- Cross-tier distributed cache / replication-of-cache semantics.
 
 ### Reserved / not yet wired
 
@@ -174,44 +184,70 @@ These are defined in catalog policy types, but runtime enforcement and protocol/
 | P3 | `P3-HotCold-Implementation-Tasks.md`, Task 4/5/8 reports | Temperature metadata, demotion/promotion pipelines, maintenance worker behavior, management and observability APIs | Advanced heuristics and richer productized memory-intent controls deferred | `docs/BACKLOG.md` (see BL-054 for residency filtering) |
 | P6 | `P6-EpicF-Task1-PerDatabaseMemoryBudgets-Report.md` | Per-database memory budgeting, server memory coordinator, `/api/server/memory`, health integration | Cross-database page-cache sharing and richer per-db metrics labeling deferred | `docs/BACKLOG.md` BL-001 marked complete; future enhancements tracked in later tasks |
 | P7 | `C3-ColdAwareUpdateDelete-Report.md` + correctness reports | Cold-aware mutation correctness hardened via deletion masks across query paths | Further optimization of cold mutation paths may continue separately | No new hot/cold backlog item created by C3 report |
+| P30 | `MemTiering-S1` through `MemTiering-S14`, Bug/Perf reports | Hot-first flush invariant enforced; `MemoryOnly`/`DiskBacked` end-to-end; mutable keyed tier; representation selector; hot segment merge; intent-aware promotion + two-phase dissolution; hot L2; replication Gap A; segment ship; catalog authority Gap B; backup Gap C; retention/durability hardening | Dictionary string encoding in mutable tier; cross-tier replication; mutation-rate hysteresis tuning | ADR 0034, ADR 0035 |
 
 ## 2.6 Capability coverage matrix
 
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
 | Table-level storage temperature (`Auto`/`HotOnly`/`ColdPreferred`) | Yes | No | No | P3 Task 1 report, `Policies.cs`, tables integration tests | Fully available across catalog + protocol + TS client |
+| `Mutable` intent flag on `StorageTemperaturePolicy` | Yes | No | No | P30 S4, `RepresentationSelector.cs` | Routes write streams to mutable keyed tier instead of immutable hot |
+| `MemoryOnly` durability enforcement (writes nothing) | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, storage tests | Fully enforced end-to-end — no `.hot`, `.col`, `.hra`, or WAL written |
+| `DiskBacked` durability enforcement | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs` | Persists per representation; old bypass removed |
+| Hot-first flush invariant | Yes | No | No | P30 S1, `HraCompactor.cs`, flush tests | Flush produces only immutable hot segment; cold segments come from demotion only |
+| Mutable keyed tier (`MutableKeyedStore`) | Yes | No | No | P30 S3, `MutableKeyedStore.cs` | In-place upsert by PK; O(1) point lookup; dead-row reclamation |
+| Representation selector | Yes | No | No | P30 S4, `RepresentationSelector.cs` | Routes by intent → mutation rate → size |
+| Hot segment merge worker | Yes | No | No | P30 S5, `HotSegmentMergeWorker.cs` | Coalesces small hot segments; compacts tombstones |
 | Segment temperature persistence (`Hot`/`Cold`) | Yes | No | No | P3 Task reports, `Policies.cs`, `HotColdMetadataTests` | Preserved through restart semantics |
 | Hot->cold demotion | Yes | No | No | P3 Task 4 report, `SegmentDemoter`, demotion tests | Includes policy-driven demotion and diagnostics |
-| Cold->hot promotion | Yes | No | No | P3 Task 5 report, `SegmentPromoter`, promotion tests | Includes access-triggered promotion path |
-| Maintenance worker policy automation | Yes | No | No | `HotColdMaintenanceWorker.cs`, P3 reports/tests | Auto/HotOnly/ColdPreferred handled |
+| Cold->hot promotion (for query) | Yes | No | No | P3 Task 5 / P30 S6, `SegmentPromoter.PromoteForQueryAsync` | Promotes cold → immutable columnar hot |
+| Cold->mutable tier promotion (for update) | Yes | No | No | P30 S6/S7, `SegmentPromoter.PromoteForUpdateAsync` | Promotes cold → mutable keyed tier; two-phase dissolution for crash safety |
+| Two-phase dissolution (Gap B crash safety) | Yes | No | No | P30 S7/S11, catalog + durable tombstone | Phase 1: dissolving; Phase 2: fsync + retire; tombstone prevents orphan resurrection |
+| Maintenance worker policy automation | Yes | No | No | `HotColdMaintenanceWorker.cs`, P3 reports/tests | Auto/HotOnly/ColdPreferred/Mutable handled |
 | Hot/cold management inspection surface | Yes | No | No | P3 Task 8 report, `HotColdInspector.cs` | Rich .NET surface, no equivalent first-class HTTP endpoints |
 | Per-database memory budget coordination | Yes | No | No | P6 F1 report, `ServerMemoryBudgetManager.cs`, integration tests | Server-level cap + per-db snapshots |
 | Table policy `PinAllInMemory` runtime handling | Yes | No | No | `Policies.cs`, `ResidencyManager.cs`, tests | Implemented in V1 residency manager |
 | Filter-based partial residency (`MemoryFilter`, row cap, target bytes) | No | No | Yes | `Policies.cs` + `ResidencyManagerV1` + BL-054 | Explicitly reserved, not wired end-to-end |
-| Public API for explicit promote/demote operations | No | Yes | No | .NET inspector APIs only | Missing in protocol/HTTP and TS SDK |
+| Public API for explicit promote/demote operations | No | Yes | No | .NET engine APIs only | HTTP/TS SDK surface for explicit promote/demote not yet exposed |
 
 ## 2.7 Core concepts and mental model
 
-- `StorageTemperaturePolicy`:
-  - Table-level intent controlling default residency behavior.
-- `SegmentTemperature`:
-  - Actual per-segment state (`Hot` or `Cold`) used by execution and maintenance.
-- Hot segment:
-  - Raw vectors, lowest decode overhead, higher memory pressure risk.
-- Cold segment:
-  - Encoded/compressed representation, lower memory footprint, decode cost on access.
-- Demotion:
-  - Transition from hot to cold, catalog and storage metadata updated.
-- Promotion:
-  - Transition from cold to hot when policy/access conditions justify.
-- Memory governance layers:
-  - Per-engine `MemoryBudgetManager` + server-level `ServerMemoryBudgetManager`.
+**Two orthogonal axes (P30 / ADR 0034):**
 
-Invariants:
+- **Temperature axis** — controls data representation:
+  - Mutable keyed tier: in-place upsert by PK; serves cache and UPSERT workloads
+  - Immutable hot tier: append-optimised columnar; serves read-heavy workloads
+  - Cold tier: encoded/compressed on disk; demoted from hot
+- **Durability axis** — controls persistence:
+  - `MemoryOnly`: writes nothing to disk; data lives only in the running process
+  - `DiskBacked`: persists per representation (`.hot`, `.col`, `.hra`, WAL)
 
-- Temperature is not inferred only from file type; it is explicit in catalog metadata.
+**Key types:**
+
+- `StorageTemperaturePolicy`: Table-level intent for the temperature axis. Values: `Auto`, `HotOnly`, `ColdPreferred`, `Mutable` (P30).
+- `DataDurabilityMode`: Table-level durability intent. Values: `MemoryOnly`, `DiskBacked`.
+- `SegmentTemperature`: Actual per-segment state (`Hot`, `Cold`) used by execution and maintenance.
+- `MutableKeyedStore`: In-place upsert by PK. Dead-row reclamation via tombstone compaction. Serves `LatestPerKey` and cache workloads.
+- `RepresentationSelector`: Routes incoming write streams to the appropriate tier based on intent → mutation rate → segment size.
+
+**Hot-first flush invariant (P30):**
+- Flush always produces only an immutable `.hot` segment. Cold segments are **never** produced directly at flush — they come exclusively from the demotion path (`SegmentDemoter`). Pre-P30, `HraCompactor` violated this by writing both cold `.col` and hot segments at flush.
+
+**Demotion vs Promotion:**
+- Demotion: hot (immutable) → cold; catalog updated; hot handles unregistered.
+- `PromoteForQueryAsync`: cold → immutable columnar hot (read acceleration).
+- `PromoteForUpdateAsync`: cold → mutable keyed tier (write acceleration); uses two-phase dissolution to prevent double-counting on crash (Gap B).
+
+**Memory governance layers:**
+- Per-engine `MemoryBudgetManager` + server-level `ServerMemoryBudgetManager`.
+
+**Invariants:**
+
+- Temperature is not inferred from file type; it is explicit in catalog metadata.
 - Demotion/promotion are explicit transitions, not implicit process-lifecycle side effects.
-- Reserved residency fields must not be treated as available controls until engine + API support exists.
+- `MemoryOnly` tables produce zero disk writes. No `.hot`, `.col`, `.hra`, or WAL records.
+- WAL records contain only concrete resolved values — never unevaluated expression ASTs.
+- Reserved residency fields (`MemoryFilter`, `MemoryRowCap`, `TargetMemoryBytes`) must not be treated as available controls until engine + API support exists.
 
 ## 2.8 How Aouda implements it
 
@@ -574,6 +610,13 @@ Last verification date (UTC): `2026-03-31`.
 |---|---|---|---|---|
 | Hot->cold demotion lifecycle | `HotToColdDemotionTests.cs` | Pass | Strong | Includes sealed checks, cold manifest rebuild, query fallback, restart semantics |
 | Cold->hot promotion lifecycle | `ColdToHotPromotionTests.cs` | Pass | Strong | Includes access-threshold promotion, idempotency, restart persistence, counters |
+| Hot-first flush output shape + IPageStore routing | `Aouda.Engine.Storage.Tests` (P30 S1) | Pass | Strong | Verifies only `.hot` produced at flush; cold output absent |
+| `MemoryOnly` writes nothing | `Aouda.Engine.Storage.Tests` (P30 S2) | Pass | Strong | No file written for MemoryOnly table |
+| Mutable keyed store in-place upsert + reclaim | `Aouda.Engine.Storage.Tests` (P30 S3) | Pass | Strong | Upsert correctness + dead-row ratio trigger |
+| Representation selector routing | `Aouda.Engine.Storage.Tests` (P30 S4) | Pass | Strong | Intent/rate/size routing decisions |
+| Hot-segment merge coalescing | `Aouda.Engine.Storage.Tests` (P30 S5) | Pass | Strong | Merge worker behavior |
+| Intent-aware promotion + two-phase dissolution | `Aouda.Engine.Storage.Tests` (P30 S6/S7) | Pass | Strong | PromoteForUpdate vs PromoteForQuery; Gap B crash safety |
+| Durable retirement tombstone | `Aouda.Engine.Catalog.Tests` (P30 S11) | Pass | Strong | Orphaned-file prevention |
 | Inspector and maintenance/ops reporting | `HotColdManagementTests.cs` | Pass | Strong | Includes health checks, reports, bulk promote/demote, JSON output, counters |
 | Policy update HTTP path | `TablesIntegrationTests.cs` (`UpdatePolicy_*`) | Pass | Strong | Covers invalid enum, not found, valid update + readback |
 | Server memory endpoint contract | `ServerIntegrationTests.cs` (`ServerMemory_*`) | Pass | Medium/Strong | Covers shape/content-type + DB visibility; limited negative-path assertions |
@@ -597,10 +640,16 @@ Last verification date (UTC): `2026-03-31`.
   - Filter-based partial residency (`MemoryFilter`, `MemoryRowCap`, `TargetMemoryBytes`) is not implemented end-to-end.
   - User impact: no row/filter-level residency intent controls yet; only coarse table policy and budget controls.
 - ADR 0011/0012 proposed surfaces:
-  - Advanced memory-intent and hot-encoding features remain proposed, not shipped as public behavior.
+  - Advanced memory-intent features (e.g. `HotRetention`, `HotRowLimit`, query memory protection) remain proposed, not shipped as public behavior.
+  - **Note:** `LatestPerKey` workloads are now served by the mutable keyed tier (P30). Hot encoding strategy tiers (FOR Timestamp, normalized-scale Decimal) are now shipped (P29).
   - User impact: avoid assuming ADR sample APIs exist in current server/SDK surfaces.
 - API parity gaps:
-  - Promote/demote management is strong in .NET inspector APIs but lacks first-class HTTP/TS mutation routes.
+  - Promote/demote management is strong in .NET engine APIs but lacks first-class HTTP/TS mutation routes. The `PromoteForUpdateAsync` and `PromoteForQueryAsync` APIs are available at the engine level only.
+- Deferred P30 items:
+  - Dictionary-encoding strings in the mutable tier (ADR 0034 Open Question 2).
+  - Cross-tier distributed cache / replication-of-cache semantics (separate ADR needed).
+  - Mutation-rate hysteresis tuning — first working version shipped; calibration deferred.
+  - HRA streaming snapshot (BL-105) — HRA backup coverage shipped (S12); streaming snapshot deferred.
 
 ## 2.19 References
 
@@ -608,6 +657,8 @@ Last verification date (UTC): `2026-03-31`.
   - `docs/decisions/0007-hot-vs-cold-storage.md`
   - `docs/decisions/0011-memory-prioritization.md` (proposed)
   - `docs/decisions/0012-memory-footprint-reduction.md` (proposed)
+  - `docs/decisions/0034-unified-in-memory-tiering.md` (P30 primary ADR)
+  - `docs/decisions/0035-temperature-aware-replication-and-backup.md` (P30 replication/backup invariants)
 - Tasks/reports:
   - `docs/tasks/P3/P3-HotCold-Implementation-Tasks.md`
   - `docs/tasks/P3/P3-Task4-HotToColdDemotion-Report.md`

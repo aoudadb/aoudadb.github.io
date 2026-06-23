@@ -8,11 +8,11 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-05-22
+Last updated: 2026-06-23
 
-Coverage phases: P4, P10, P11
-Primary task folders: `docs/tasks/P4/`, `docs/tasks/P10/`, `docs/tasks/P11/`
-Primary ADRs: `docs/decisions/0015-materialized-queries.md`, `docs/decisions/0020-real-time-streaming.md`
+Coverage phases: P4, P10, P11, P28, P31
+Primary task folders: `docs/tasks/P4/`, `docs/tasks/P10/`, `docs/tasks/P11/`, `docs/tasks/P28/`, `docs/tasks/P31/`
+Primary ADRs: `docs/decisions/0015-materialized-queries.md`, `docs/decisions/0020-real-time-streaming.md`, `docs/decisions/0036-bulk-load-mq-refresh.md`
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Query-Execution.md`, `docs/dev/Functionality-RealTime-Streaming.md`, `docs/dev/Functionality-Storage-And-Persistence.md`
 
 ## Start Here
@@ -191,6 +191,10 @@ If you create a materialized query with standard helpers and no special options:
   - Create/drop/list/status APIs in .NET engine.
 - Implemented query patterns:
   - `LatestPerKey`, `Aggregate`, `Filter`.
+- Aggregate MQ extensions (P28):
+  - `FIRST`/`LAST` aggregate functions with `orderByColumn` + `descending` ordering, enabling OHLC (Open/High/Low/Close) candle patterns.
+  - Derived time-bucket group-by expressions: `{ "column": "time", "function": "TruncateToHour" }` or `"TruncateToMinute"` alongside plain column group-by. Group keys are stored as Int64 epoch milliseconds (allocation-free integer arithmetic).
+  - `AggregateConfig` bumped to v2; v1 (plain string `groupByColumns`) is still parsed transparently — no migration required for existing MQ definitions.
 - Incremental maintenance:
   - Update routing via `MaterializedQuerySubscriptionManager` with `Async` and `Sync` modes.
   - Guard against infinite loops for result-table events.
@@ -203,12 +207,24 @@ If you create a materialized query with standard helpers and no special options:
 - Streaming behavior:
   - Subscribe to MQ results through normal table subscription path.
   - No protocol-level MQ target-kind required.
+- MQ rebuild (P31 / ADR 0036):
+  - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern. The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
+  - Auto-trigger after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), all Aggregate MQs whose source tables were bulk-loaded are automatically rebuilt after `BulkLoadCommitted`. `MemoryOnly` source tables are skipped.
+  - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Error`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
+  - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
+  - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
+  - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
+  - TypeScript client: `client.materializedQueries.refresh(name, { await: true })`.
+  - CLI: `aouda mq refresh <name> [--await]`; `--skip-mq-refresh` flag on `aouda table bulk-load`.
 
 ### Planned / proposed
 
 - Explicit roadmap/backlog items still open:
   - BL-010: JOIN support in materialized queries (depends on BL-009).
   - BL-053: Distinct `MATERIALIZED_QUERY_NOT_READY` subscription error code.
+  - Incremental MQ rebuild (segment-scoped) — P31 implements full rebuild only; incremental deferred.
+  - Cross-MQ dependency ordering (MQ whose source is another MQ result table).
+  - WebSocket/SSE rebuild progress stream — callers currently poll `mqRebuildStatus`.
 - Query API expansion that unblocks richer MQ usage:
   - BL-003: nested AND/OR predicate support in REST query API.
   - BL-009: JOIN exposure in `TableQuery` API.
@@ -231,6 +247,8 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | P4 | R10.4 report | Immediate query visibility for unflushed HRA data | Does not by itself solve post-flush duplicate bug in P11 handoff | `docs/tasks/P11/P11-Fix-R8-MaterializedQueryFlushIntegrationTests-Report.md` |
 | P10 | S10 spec/report intent | Standard table subscription path for MQ result tables | Distinct not-ready error code deferred | `docs/BACKLOG.md` BL-053 |
 | P11 | R8 fix report (handoff) | Honest documentation of unresolved duplicate-row issue; test-relaxation reverted | Engine-side fix still pending | `docs/BACKLOG.md` BL-019 |
+| P28 (S2) | `docs/tasks/P28/MarketData-Gaps-S2-MQ-OHLC-Candles.md` | `FIRST`/`LAST` aggregate functions with `orderByColumn`; derived time-bucket group-by expressions (`TruncateToHour`, `TruncateToMinute`); `AggregateConfig` v2 (backward-compatible); `TimeBucketTruncator` | OHLC quantile/volume aggregates deferred | P28-COMPLETION |
+| P31 (S1+S2) | `docs/tasks/P31/` | `RefreshMaterializedQueryAsync`, shadow-build, auto-trigger after `BulkLoadAsync`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, replica rebuild hook, HTTP refresh endpoint, C# + TS + CLI surfaces | Incremental rebuild; cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
 
 ## 2.6 Capability coverage matrix
 
@@ -248,6 +266,17 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | TopNPerGroup maintainer/runtime | No | No | Yes | Enum + no dedicated maintainer path/tests | Reserved type only |
 | HTTP/TS API for MQ lifecycle management | No | Yes | No | No server controller/TS surface; .NET only | Workaround: create in .NET, query as table |
 | Correct no-duplicate result-table reads after flush | No | Yes | No | P11 R8 handoff report | Known engine bug |
+| `FIRST`/`LAST` aggregate functions with ordering | Yes | No | No | P28 S2, `AggregateMaintainer`, `AggregateConfig.CurrentVersion == 2` | Enables OHLC candle patterns; requires `orderByColumn` + `descending` fields |
+| Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
+| `AggregateConfig` v1 backward compatibility | Yes | No | No | P28 S2, implicit string → `GroupByExpression` conversion | Existing v1 definitions parse without migration |
+| Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
+| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1, `PostLoadMqBehavior.Auto`, `AoudaEngine.BulkLoad.cs` | Triggers for all Aggregate MQs on bulk-loaded source tables; `MemoryOnly` sources skipped |
+| `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Error; awaitable Task |
+| Replica MQ rebuild after bulk-load | Yes | No | No | P31 S1, `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched; factory via `engine.CreateReplicaMqRebuildScheduler()` |
+| HTTP `POST .../materialized-queries/{name}:refresh` | Yes | No | No | P31 S2, `MaterializedQueriesController` | `?await=true` waits; `?await=false` fire-and-forget |
+| C# client `MaterializedQueries.RefreshAsync` | Yes | No | No | P31 S2, `src/Aouda.Client/MaterializedQueriesApi.cs` | `awaitCompletion` parameter |
+| TypeScript `materializedQueries.refresh(name, {await})` | Yes | No | No | P31 S2, `aouda-client-ts/src/materialized.ts` | — |
+| CLI `aouda mq refresh <name> [--await]` | Yes | No | No | P31 S2, `src/Aouda.Cli/Commands/MqCommand.cs` | Also `--skip-mq-refresh` on `aouda table bulk-load` |
 
 ## 2.7 Core concepts and mental model
 
@@ -265,6 +294,12 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
   - `Sync`: apply in commit path.
 - Routing decision:
   - Planner result that says "serve from MQ result table" or "scan base table."
+- `GroupByExpression` (P28):
+  - Either a plain column name (backward-compatible) or a derived time-bucket expression `{ column, function }` where function is `TruncateToHour` or `TruncateToMinute`. Group keys for derived expressions are stored as Int64 epoch milliseconds so candle result tables remain first-class time-series tables (range-queryable, partitionable).
+- `FIRST`/`LAST` aggregate (P28):
+  - Aggregate function that returns the value of `column` at the row with the minimum (`FIRST`/ascending) or maximum (`LAST`/descending) value of `orderByColumn`. The aggregate maintainer tracks the running extreme value of `orderByColumn` alongside each group's aggregate state. This enables OHLC candle patterns: Open = `FIRST(bid, orderBy=time asc)`, Close = `LAST(bid, orderBy=time asc)`.
+- Shadow-build rebuild (P31):
+  - When `RefreshMaterializedQueryAsync` is called, a new maintainer is constructed from scratch and the result table is rebuilt via a full source-table scan. The old result table remains readable (with stale data) throughout. After rebuild, the new maintainer atomically replaces the old one and state transitions to `Ready`. Errors transition to `Error`; the rebuild window is never left as `Rebuilding` on any code path.
 
 Invariants:
 
@@ -273,6 +308,8 @@ Invariants:
   - table create cannot reuse existing MQ name,
   - MQ create cannot reuse existing table name.
 - Auto-routing only applies when a matching MQ is found and is ready; otherwise query falls back.
+- A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
+- `MemoryOnly` source tables are never subject to MQ auto-rebuild after bulk-load.
 
 ## 2.8 How Aouda implements it
 
@@ -372,6 +409,28 @@ Key implementation anchors:
    - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
    - `../aouda-client-ts/tests/streaming/subscription.test.ts`.
 
+### Walk-through E: Full rebuild of an Aggregate MQ (shadow-build)
+
+1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` or auto-triggered after `BulkLoadAsync` with `PostLoadMqBehavior.Auto`.
+2. State transition:
+   - MQ state immediately changes to `Rebuilding`.
+   - The current result table remains readable throughout with stale data.
+3. Shadow build:
+   - A new `MaterializedQueryMaintainer` is constructed from scratch.
+   - A full-table scan of the source populates the new result table.
+4. Atomic swap:
+   - New maintainer atomically replaces the old one.
+   - MQ state transitions to `Ready`.
+5. Error handling:
+   - If the rebuild fails, state transitions to `Error`.
+   - The rebuild window is never left in `Rebuilding` on any code path.
+6. Observability:
+   - `BulkLoadJobHandle.MqRebuildStatus` tracks rebuild state.
+   - `BulkLoadJobHandle.MqRebuildCompleted` task resolves on completion.
+7. Tests:
+   - `BulkLoadMqRefreshTests.cs` (12 tests, `tests/Aouda.Engine.Api.Tests/BulkLoad/`)
+   - `BulkLoadReplicaCoordinatorMqTests.cs` (6 tests)
+
 ## 2.9 Why Aouda is different (differentiators)
 
 | Capability question | Typical systems | Aouda approach | User impact |
@@ -435,6 +494,44 @@ Expected result: MQ is created and eventually `Ready`; default query may route t
 
 Common mistake: assuming `CreateMaterializedQueryAsync` alone builds maintainers for all enum types; only implemented pattern paths are fully functional.
 
+### .NET example (OHLC candle aggregate MQ with time-bucket group-by — P28)
+
+```csharp
+// AggregateConfig v2: derived time-bucket group-by + FIRST/LAST aggregate functions
+var config = new AggregateConfig
+{
+    GroupByColumns = new[]
+    {
+        GroupByExpression.Column("symbol"),
+        GroupByExpression.TimeBucket("time", PartitionFunction.TruncateToHour)
+    },
+    Aggregates = new[]
+    {
+        new AggregateDefinition { Function = AggregateFunction.First, Column = "bid", OrderByColumn = "time", Descending = false },
+        new AggregateDefinition { Function = AggregateFunction.Last,  Column = "bid", OrderByColumn = "time", Descending = false },
+        new AggregateDefinition { Function = AggregateFunction.Min,   Column = "bid" },
+        new AggregateDefinition { Function = AggregateFunction.Max,   Column = "bid" },
+    }
+};
+await engine.CreateAggregateQueryAsync("candles_bid_1h", "quotes", config);
+```
+
+Expected result: each row in `candles_bid_1h` is keyed by `(symbol, time_bucket_hour)` and contains open/close/low/high for that hour. The `time_bucket_hour` group key is an Int64 epoch milliseconds value.
+
+### .NET example (explicit MQ refresh — P31)
+
+```csharp
+// Explicit on-demand rebuild
+await engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct);
+
+// Bulk-load with automatic post-load MQ rebuild (default Auto)
+var handle = await engine.BulkLoadAsync(options, ct);
+await handle.MqRebuildCompleted; // wait for all dependent candle MQs to rebuild
+
+// Check rebuild status
+Console.WriteLine(handle.MqRebuildStatus); // Completed
+```
+
 ### TypeScript example (lifecycle management via `client.materializedQueries`)
 
 The TypeScript management API was shipped in P16 (Epic H, task H.3). Use `client.materializedQueries` to create, drop, list, check status, and query MQ results.
@@ -473,9 +570,14 @@ console.log(result.rows);
 
 // Drop the MQ and its result table
 await client.materializedQueries.drop("latest_order_per_customer");
+
+// Explicit on-demand rebuild (P31)
+await client.materializedQueries.refresh("candles_bid_1h", { await: true });
 ```
 
 Expected result: MQ is created, transitions to `state: 1` (Ready), and the result set is queryable directly or as a normal table.
+
+For the OHLC candle aggregate MQ create pattern, pass `type: 3` (Aggregate) with a v2 `configJson` that includes `groupByColumns` as an array of objects and `aggregates` with `FIRST`/`LAST` entries. See the .NET example above for the full config structure; serialize it to JSON for the `configJson` field.
 
 The `MaterializedQueryType` constant object maps names to their numeric wire values: `{ LatestPerKey: 1, FirstPerKey: 2, Aggregate: 3, Filter: 4, TopNPerGroup: 5 }`. Only `LatestPerKey` (1), `Aggregate` (3), and `Filter` (4) are fully shipped end-to-end. Passing `FirstPerKey` (2) or `TopNPerGroup` (5) creates a definition record but no maintainer is wired.
 
@@ -572,6 +674,29 @@ Expected result: snapshot then changes on the same target name.
 
 Common mistake: expecting a protocol field like `target_kind = materialized_query` (not part of shipped design).
 
+**Trigger an on-demand MQ rebuild (P31):**
+
+```http
+POST /api/databases/appdb/materialized-queries/candles_bid_1h:refresh?await=true
+```
+
+Response (await=true): waits for rebuild to complete.
+Response (await=false): fire-and-forget; poll job status to check `mqRebuildStatus`.
+
+**Bulk-load with automatic MQ refresh control (P31):**
+
+```http
+POST /api/databases/appdb/bulk-load:begin
+Content-Type: application/json
+
+{
+  "table": "quotes",
+  "postLoadMqBehavior": "skip"
+}
+```
+
+The `mqRebuildStatus` field is returned in `GET /api/databases/appdb/bulk-load/{jobId}/status`.
+
 ### A) API coverage matrix
 
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
@@ -584,6 +709,9 @@ Common mistake: expecting a protocol field like `target_kind = materialized_quer
 | Subscribe MQ results | `GetTable(queryName).SubscribeAsync()` pattern in client tests | `client.table(queryName).subscribe(...)` | standard `subscribe` message `target=queryName` | Implemented | No MQ-specific target type |
 | Auto-routing base query to MQ | `TableQuery` matcher + `WithDirectScan()` | Missing explicit control | Not exposed as route flag | Partial | Routing logic is server-side engine behavior |
 | Explain routing decision | `ExplainRoutingAsync(...)` | Missing | Missing | Partial | .NET diagnostic API only |
+| Explicit on-demand MQ rebuild | `engine.RefreshMaterializedQueryAsync(name, ct)` | `client.materializedQueries.refresh(name, {await})` | `POST /api/databases/{db}/materialized-queries/{name}:refresh?await=true/false` | Implemented (P31) | Shadow-build; result readable throughout with stale data |
+| OHLC `FIRST`/`LAST` aggregate | `AggregateConfig` with `AggregateFunction.First/Last` + `OrderByColumn` | `client.materializedQueries.create(spec)` with v2 config JSON | Same `POST /api/databases/{db}/materialized-queries` | Implemented (P28) | `configJson` must use v2 schema (array of `groupByColumns` objects) |
+| Derived time-bucket group-by | `GroupByExpression.TimeBucket(column, function)` | `client.materializedQueries.create(spec)` with v2 config JSON | Same endpoint | Implemented (P28) | `TruncateToHour` / `TruncateToMinute`; keys as Int64 epoch ms |
 
 ### B) Missing API matrix
 
@@ -726,20 +854,26 @@ Last verification date (UTC): `2026-03-31`.
   - User impact: strict correctness expectations for some flush-integration scenarios are not yet met.
 - BL-010 (open, depends BL-009):
   - JOIN-based materialized queries are not supported.
-  - User impact: multi-table precomputation requires manual denormalization or other workarounds.
+  - User impact: multi-table precomputation requires manual denormalized source table or other workarounds.
 - BL-053 (open):
   - No distinct error code for MQ-not-ready subscriptions (`TABLE_NOT_FOUND` is used).
   - User impact: clients cannot distinguish "table missing" vs "MQ exists but not ready" from error code alone.
 - Reserved type support:
   - `FirstPerKey` and `TopNPerGroup` are represented in type enums but not fully shipped as end-to-end capabilities.
-- Surface parity gap:
-  - MQ lifecycle management is currently .NET engine-centric; there is no first-class HTTP/TypeScript management API.
+- Surface parity gap (reduced):
+  - MQ lifecycle management HTTP and TypeScript surfaces were shipped in P16 (Epic H, H.3). The remaining parity gap is `.NET WithDirectScan()` equivalent in TypeScript.
+- P31 deferred items:
+  - Incremental MQ rebuild (segment-scoped): P31 implements full rebuild only; incremental approach is backlogged.
+  - Cross-MQ dependency ordering: rebuilding an MQ whose source is another MQ result table is not handled.
+  - WebSocket/SSE rebuild progress stream: callers currently poll `BulkLoadJobHandle.MqRebuildStatus` or HTTP status endpoint.
+  - `REFRESH CONCURRENTLY` (swap without any stale-read window): post-v1 optimization, not yet scheduled.
 
 ## 2.19 References
 
 - ADRs:
   - `docs/decisions/0015-materialized-queries.md`
   - `docs/decisions/0020-real-time-streaming.md`
+  - `docs/decisions/0036-bulk-load-mq-refresh.md` (P31 shadow-build rebuild)
 - Tasks/reports:
   - `docs/tasks/P4/P4-EpicH-MaterializedQueries-Tasks.md`
   - `docs/tasks/P4/P4-EpicH-Task1-MaterializedQueryInfrastructure-Report.md`
@@ -752,10 +886,18 @@ Last verification date (UTC): `2026-03-31`.
   - `docs/tasks/P4/P4-EpicH-R10.4-QueryUnflushedHraTableData-Report.md`
   - `docs/tasks/P10/P10-S10-MaterializedQuerySubscriptions.md`
   - `docs/tasks/P11/P11-Fix-R8-MaterializedQueryFlushIntegrationTests-Report.md`
+  - `docs/tasks/P28/MarketData-Gaps-S2-MQ-OHLC-Candles.md` (P28 FIRST/LAST + derived group-by)
+  - `docs/tasks/P28-COMPLETION.md`
+  - `docs/tasks/P31/BulkLoad-MQ-Refresh-S1-Engine-Core.md`
+  - `docs/tasks/P31/BulkLoad-MQ-Refresh-S2-HTTP-Clients-Docs.md`
+  - `docs/tasks/P31-COMPLETION.md`
 - Backlog:
   - `docs/BACKLOG.md` (BL-019, BL-009, BL-010, BL-053, BL-003)
 - Code paths:
   - `src/Aouda.Engine.Api/AoudaEngine.cs`
+  - `src/Aouda.Engine.Api/AoudaEngine.MaterializedQuery.cs` (P31 refresh)
+  - `src/Aouda.Engine.Api/AoudaEngine.BulkLoad.cs` (P31 auto-trigger)
+  - `src/Aouda.Engine.Api/BulkLoadJobHandle.cs` (P31 `MqRebuildStatus`)
   - `src/Aouda.Engine.Api/TableQuery.cs`
   - `src/Aouda.Engine.Query/MaterializedQueryMatcher.cs`
   - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryDefinition.cs`
@@ -763,11 +905,17 @@ Last verification date (UTC): `2026-03-31`.
   - `src/Aouda.Engine.Storage/Materialized/MaterializedQueryCatalog.cs`
   - `src/Aouda.Engine.Storage/Materialized/MaterializedQuerySubscriptionManager.cs`
   - `src/Aouda.Engine.Storage/Materialized/MaterializedResultTableManager.cs`
+  - `src/Aouda.Engine.Storage/Materialized/AggregateMaintainer.cs` (P28 FIRST/LAST, time-bucket)
+  - `src/Aouda.Engine.Replication/Replay/BulkLoadReplicaCoordinator.cs` (P31 replica hook)
   - `src/Aouda.Server/Controllers/TablesController.cs`
+  - `src/Aouda.Server/Controllers/MaterializedQueriesController.cs` (P31 refresh endpoint)
+  - `src/Aouda.Client/MaterializedQueriesApi.cs` (P31 C# client refresh)
+  - `src/Aouda.Cli/Commands/MqCommand.cs` (P31 CLI)
   - `src/Aouda.Engine.Diagnostics/Perf.cs`
   - `../aouda-client-ts/src/query-builder.ts`
   - `../aouda-client-ts/src/streaming/subscription.ts`
   - `../aouda-client-ts/src/tables.ts`
+  - `../aouda-client-ts/src/materialized.ts` (P31 TS refresh)
 - Tests:
   - `tests/Aouda.Engine.Api.Tests/MaterializedQueryApiTests.cs`
   - `tests/Aouda.Engine.Api.Tests/LatestPerKeyApiTests.cs`
@@ -776,16 +924,22 @@ Last verification date (UTC): `2026-03-31`.
   - `tests/Aouda.Engine.Api.Tests/MaterializedQueryAutoRoutingTests.cs`
   - `tests/Aouda.Engine.Api.Tests/IncrementalUpdateSubscriptionTests.cs`
   - `tests/Aouda.Engine.Api.Tests/MaterializedQueryFlushIntegrationTests.cs`
+  - `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadMqRefreshTests.cs` (P31 — 12 tests)
+  - `tests/Aouda.Engine.Replication.Tests/BulkLoadReplicaCoordinatorMqTests.cs` (P31 — 6 tests)
   - `tests/Aouda.Engine.Storage.Tests/Materialized/`
   - `tests/Aouda.Engine.Query.Tests/MaterializedQueryMatcherTests.cs`
   - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
   - `../aouda-client-ts/tests/streaming/subscription.test.ts`
+  - `../aouda-client-ts/tests/materialized.test.ts` (P31 — 27 tests)
 
 ## 2.20 What is missing from this document? (meta completeness)
 
-_Updated 2026-04-08 after P16 completion._
+_Updated 2026-06-23 after P28 + P31 completion._
 
-- This document does not include full serialized `ConfigJson` schema examples for every pattern permutation; it documents the callable surfaces and behavior boundaries.
+- This document does not include full serialized `ConfigJson` schema examples for every pattern permutation; it documents the callable surfaces and behavior boundaries. See the `.NET example (OHLC candle aggregate MQ)` in §2.11 for the v2 `AggregateConfig` structure.
 - ~~This document does not claim HTTP/TypeScript lifecycle APIs for MQ management because those surfaces are not shipped.~~ — ✅ **Resolved (P16 Epic H, task H.3)**: TypeScript client now provides `client.materializedQueries.list()`, `.create(spec)`, `.drop(name)`, `.status(name)`, `.query(name, queryOptions)`. Full reference: `docs/dev/Functionality-TypeScript-Client.md` §13. Server-side routes for materialized query endpoints implemented as part of P16 SH2.
 - ~~Studio has no materialized query UI~~ — ✅ **Resolved (P16 Epic D, task D.16)**: Studio materialized queries browser lists queries with freshness status, allows querying results and dropping queries. See `docs/dev/Functionality-Studio.md` §11.
 - This document intentionally keeps the P11 duplicate-row bug visible as unresolved; once fixed, `2.4`, `2.15`, `2.16`, and `2.18` must be updated together.
+- ~~No MQ refresh surface (engine, HTTP, C# client, TypeScript, CLI)~~ — ✅ **Resolved (P31)**: `RefreshMaterializedQueryAsync`, `POST .../materialized-queries/{name}:refresh`, `client.MaterializedQueries.RefreshAsync`, `client.materializedQueries.refresh()`, `aouda mq refresh` all shipped. See §2.11 and §2.8.1 Walk-through E.
+- ~~No OHLC/candle aggregate support~~ — ✅ **Resolved (P28)**: `FIRST`/`LAST` aggregate functions with `orderByColumn`, derived time-bucket group-by, `AggregateConfig` v2. See §2.11 and §2.7.
+- The `2.16 Test coverage matrix` does not yet include P28 and P31 test entries; this is a gap for a future documentation pass.

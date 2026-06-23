@@ -841,7 +841,7 @@ Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `B
 | `column` | `column` | `string` | Yes | Name of the partition key column. Must match a column in `columns`. |
 | `function` | `function` | `string` | No | Partition function to apply to the column value. See valid values below. |
 
-Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`. Omit the `function` field (or use `"None"`) to use the column value as-is for routing.
+Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`. Omit the `function` field (or use `"None"`) to use the column value as-is for routing.
 
 **Common mistake:** Using `"Hash"` as a partition function — this is not a valid schema-file `function` value. Partition hashing for storage routing (XxHash64) is applied internally by the storage engine when `partitionStorage = "Shared"` or `"Auto"`. You do not need to, and cannot, configure it via the schema file.
 
