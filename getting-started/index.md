@@ -829,7 +829,10 @@ for (const row of results.rows) {
 }
 ```
 
-### Update and Delete (Server Mode, TypeScript)
+### Update and Delete
+
+Both `.update()` and `.delete()` require at least one `.where()` condition — the server
+rejects requests with no predicate as a safety guard.
 
 ```typescript
 // Update — requires at least one where clause
@@ -842,6 +845,55 @@ await client.table("orders")
   .where("id", "=", 1)
   .delete();
 ```
+
+```csharp
+// .NET — same safety guard
+await client.Table("orders")
+    .Where("id", "eq", 1)
+    .UpdateAsync(new Dictionary<string, object?> { ["status"] = "shipped" });
+
+await client.Table("orders")
+    .Where("id", "eq", 1)
+    .DeleteAsync();
+```
+
+**Bulk mutation features (P27):** The update and delete surfaces have been extended with:
+
+- **Expression SET** — evaluate server-side expressions without a read round-trip:
+  ```ts
+  await client.table('products')
+    .where('status', '=', 'active')
+    .update({ price: { $mul: 0.9 }, attempts: { $inc: 1 } });
+  ```
+- **TRUNCATE** — clear all rows atomically (requires `Truncate` auth scope):
+  ```ts
+  await client.table('logs').truncate();
+  ```
+- **DELETE with LIMIT** — safe rolling deletes with a `hasMore` loop:
+  ```ts
+  const result = await client.table('auditLog')
+    .where('createdAt', '<', cutoff)
+    .orderBy('createdAt', 'asc')
+    .limit(1000)
+    .delete();
+  // result.hasMore → true if more rows remain
+  ```
+- **RETURNING** — capture which rows were changed in the same response:
+  ```ts
+  const result = await client.table('sessions')
+    .where('expiresAt', '<', new Date())
+    .delete({ returning: ['id', 'userId'] });
+  // result.rows contains the deleted session data
+  ```
+- **Computed columns in SELECT** — server-side column math without storing:
+  ```ts
+  const result = await client.table('products')
+    .selectExpr({ discounted: { $mul: { $col: 'price' }, 0.9 } })
+    .execute();
+  ```
+
+For the full reference, examples, and common patterns, see the
+[Bulk Mutations guide](../guides/bulk-mutations.md).
 
 ### Aggregations (Engine-Level)
 

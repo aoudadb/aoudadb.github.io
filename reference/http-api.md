@@ -1245,11 +1245,266 @@ Delete rows matching a WHERE filter.
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing or empty WHERE clause |
 
+#### `PATCH /api/databases/{db}/tables/{name}/rows` — Extended fields (P27)
+
+The following optional fields extend the standard update request:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `setExpr` | `object?` | Expression-based SET values. Keys are column names; values are expression nodes. Evaluated server-side per row. Can be combined with `set` — literal `set` wins on collision. |
+| `returning` | `string[]?` | List of column names (or `["*"]` for all) to return after update. Returns post-update values in columnar format under `rows`. |
+
+**Expression node format** — each value in `setExpr` is an expression node:
+
+```json
+{ "type": "arithmetic", "op": "+|-|*|/", "left": <node>, "right": <node> }
+{ "type": "colRef", "col": "columnName" }
+{ "type": "literal", "value": <any> }
+{ "type": "coalesce", "args": [<node>, ...] }
+{ "type": "conditional", "when": <predicate>, "then": <node>, "else": <node> }
+```
+
+**Extended response when `returning` is set:**
+
+```json
+{
+  "rowsUpdated": 3,
+  "executionMs": 9,
+  "rows": {
+    "columns": ["id", "status"],
+    "types":   ["Int64", "String"],
+    "data":    [[1, 2, 3], ["shipped", "shipped", "shipped"]],
+    "rowCount": 3
+  }
+}
+```
+
+**Additional errors for extended fields:**
+
+| Code | Status | When |
+|------|--------|------|
+| `COLUMN_NOT_FOUND` | 400 | A `colRef` column name in `setExpr` does not exist in the table schema |
+
+---
+
+#### `DELETE /api/databases/{db}/tables/{name}/rows` — Extended fields (P27)
+
+The following optional fields extend the standard delete request:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `limit` | `number?` | Maximum number of rows to delete. When set, engine selects the bounded row set first. |
+| `orderBy` | `object[]?` | Same format as query `orderBy`. Controls which rows are selected for deletion when `limit` is set. Omitting `orderBy` with a `limit` selects an arbitrary subset and emits a warning. |
+| `returning` | `string[]?` | List of column names (or `["*"]` for all) to return. Returns **pre-delete** values in columnar format under `rows`. |
+
+**Extended request with limit, orderBy, and returning:**
+
+```json
+{
+  "database": "appdb",
+  "where": {
+    "and": [{ "column": "createdAt", "op": "lt", "value": "2026-01-01T00:00:00Z" }]
+  },
+  "orderBy": [{ "column": "createdAt", "descending": false }],
+  "limit": 1000,
+  "returning": ["id", "userId"]
+}
+```
+
+**Extended response:**
+
+```json
+{
+  "rowsDeleted": 1000,
+  "hasMore": true,
+  "executionMs": 18,
+  "rows": {
+    "columns": ["id", "userId"],
+    "types":   ["Int64", "String"],
+    "data":    [[...], [...]],
+    "rowCount": 1000
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rowsDeleted` | number | Number of rows deleted in this call |
+| `hasMore` | boolean | `true` when `limit` was set and more matching rows remain |
+| `executionMs` | number | Server-side execution time |
+| `rows` | columnar? | Pre-delete values when `returning` was specified; null otherwise |
+
+---
+
+#### `POST /api/databases/{db}/tables/{name}/truncate`
+
+Truncate (clear) all rows from a table. Schema is preserved. Requires the `Truncate`
+authorization scope — `db_writer` alone is insufficient.
+
+**Request Body:**
+
+```json
+{
+  "database": "appdb",
+  "writeConcern": "majority"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
+| `writeConcern` | string? | No | Write-concern override. Null/omitted = use default. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "rowsDeleted": 15000,
+  "executionMs": 3
+}
+```
+
+**Errors:**
+
+| Code | Status | When |
+|------|--------|------|
+| `TABLE_NOT_FOUND` | 404 | Table does not exist |
+| `AUTHORIZATION_DENIED` | 403 | Caller lacks the `Truncate` authorization scope |
+
+---
+
+#### `POST /api/databases/{db}/tables/{name}/rows/batch`
+
+Execute multiple update and/or delete operations against the same table in a single request.
+All operations are applied sequentially in the order given and committed in a single WAL
+transaction.
+
+**Request Body:**
+
+```json
+{
+  "database": "appdb",
+  "operations": [
+    {
+      "where": { "and": [{ "column": "status", "op": "eq", "value": "pending" }] },
+      "set":   { "status": "processing" }
+    },
+    {
+      "where": { "and": [{ "column": "status", "op": "eq", "value": "cancelled" }] },
+      "delete": true
+    },
+    {
+      "where": { "and": [{ "column": "attempts", "op": "gte", "value": 5 }] },
+      "setExpr": {
+        "attempts": { "type": "arithmetic", "op": "+", "left": { "type": "colRef", "col": "attempts" }, "right": { "type": "literal", "value": 1 } }
+      }
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
+| `operations` | object[] | Yes | Ordered list of mutation operations |
+| `operations[].where` | object | Yes | WHERE clause for this operation |
+| `operations[].set` | object? | No | Literal SET values (UPDATE operation) |
+| `operations[].setExpr` | object? | No | Expression SET values (UPDATE operation) |
+| `operations[].delete` | bool? | No | `true` for a DELETE operation |
+
+Each operation must specify either (`set` or `setExpr`) or `delete: true`, not both.
+
+**Response:** `200 OK`
+
+```json
+{
+  "operationResults": [
+    { "rowsAffected": 12 },
+    { "rowsAffected": 3 },
+    { "rowsAffected": 2 }
+  ],
+  "executionMs": 18
+}
+```
+
+**Errors:**
+
+| Code | Status | When |
+|------|--------|------|
+| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE |
+
+---
+
+#### `POST /api/databases/{db}/query` — `selectExpr` extension (P27 S7)
+
+The query endpoint accepts an optional `selectExpr` field alongside (or instead of) the
+standard `select` field. Computed columns are evaluated server-side and appended to the
+result — they are never stored.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `selectExpr` | `ComputedColumnDef[]?` | List of computed column definitions. Each entry has `alias` (string) and `expr` (expression node). Max 20 entries. |
+
+**`ComputedColumnDef` format:**
+
+```json
+{
+  "alias": "discountedPrice",
+  "expr": {
+    "type": "arithmetic",
+    "op": "*",
+    "left":  { "type": "colRef", "col": "price" },
+    "right": { "type": "literal", "value": 0.9 }
+  }
+}
+```
+
+**Extended query request:**
+
+```json
+{
+  "database": "shop",
+  "table":    "products",
+  "select":   ["id", "name", "price"],
+  "selectExpr": [
+    {
+      "alias": "discountedPrice",
+      "expr": { "type": "arithmetic", "op": "*", "left": { "type": "colRef", "col": "price" }, "right": { "type": "literal", "value": 0.9 } }
+    }
+  ],
+  "limit": 100
+}
+```
+
+**Response** — computed columns appear at the end of `columns` and `types`:
+
+```json
+{
+  "columns": ["id", "name", "price", "discountedPrice"],
+  "types":   ["Int64", "String", "Decimal", "Unknown"],
+  "data":    [[1], ["Widget"], [99.0], [89.1]],
+  "rowCount": 1,
+  "stats": { "executionMs": 4 }
+}
+```
+
+Computed column result type is always `"Unknown"` in v1 (no static type inference).
+
+**Errors for `selectExpr`:**
+
+| Code | Status | When |
+|------|--------|------|
+| `COLUMN_NOT_FOUND` | 400 | A `colRef` column does not exist in the table schema |
+| `INVALID_REQUEST` | 400 | Empty or null alias, alias collides with a physical column in `select`, duplicate alias, or more than 20 entries |
+
+---
+
 **Common Notes for All Mutation Endpoints:**
 
-- All three endpoints require write permissions (`[RequireWritePermission]` on the server). Requests to non-primary replicas return `WRITE_NOT_ALLOWED` (403) or `NOT_PRIMARY` (421).
-- All three endpoints use `encodeURIComponent()` for the table name in the URL path.
+- All mutation endpoints require write permissions (`[RequireWritePermission]` on the server). Requests to non-primary replicas return `WRITE_NOT_ALLOWED` (403) or `NOT_PRIMARY` (421).
+- All mutation endpoints use `encodeURIComponent()` for the table name in the URL path.
 - Standard error codes (`INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`, etc.) apply as described in the Error Codes section above.
+- For the full user guide with SDK examples and patterns, see [guides/bulk-mutations.md](../guides/bulk-mutations.md).
 
 ---
 

@@ -70,6 +70,27 @@ Filters sync bidirectionally between the visual builder and the query bar text r
 - `LIMIT` / `OFFSET` with page navigation
 - Server-side count via `POST .../query/count` (safe for large tables)
 
+### Bulk Mutation Panel
+
+In the table data view, the **Bulk Mutation** tab provides a guided multi-step flow for
+running WHERE-based updates, deletes, and truncations from the browser:
+
+| Step | What you do |
+|------|-------------|
+| 1. Operation | Choose UPDATE, DELETE, or TRUNCATE |
+| 2. WHERE builder | Build a predicate using the visual filter builder (same as the read query builder) |
+| 3. SET editor (UPDATE) | Per-column literal or expression (`$inc`, `$mul`, `$dec`, `$div`, `$col`, `$ifNull`) |
+| 4. LIMIT (DELETE) | Optional — enables bounded rolling deletes with `hasMore` |
+| 5. RETURNING | Multi-select column checklist for the response payload |
+| 6. Preview | Runs `COUNT(*) WHERE …` and shows how many rows will be affected |
+| 7. Confirm | Confirmation dialog: _"You are about to UPDATE/DELETE N rows. This cannot be undone."_ |
+| 8. Results | Shows `rowsUpdated`/`rowsDeleted`, execution time, and RETURNING rows |
+
+TRUNCATE requires the `Truncate` authorization scope — Studio shows a role-based warning if the
+current credential lacks this scope.
+
+See [Bulk Mutations guide](bulk-mutations.md) for the full API reference.
+
 ### Relationship Navigation
 
 - Foreign key columns are clickable links
@@ -104,6 +125,19 @@ Build multi-table joins visually:
 - GROUP BY column selection
 - Combined with WHERE filters
 - Results as grouped data grid
+
+### Expression SELECT (Computed Columns)
+
+In the Projection section of the Query Worksheet, click **+ Computed column** to add a
+server-side computed column:
+
+1. Enter an alias name.
+2. Select an expression type from the dropdown (arithmetic, coalesce, conditional).
+3. Configure the operands (column references or literal values).
+4. Run the query — computed columns appear as additional columns in the result grid.
+
+Computed columns are evaluated server-side per row; they are not stored. See
+[Bulk Mutations guide §8](bulk-mutations.md#8-expression-select--computed-columns).
 
 ### Free-Form Queries
 

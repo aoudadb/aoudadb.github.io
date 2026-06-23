@@ -1,4 +1,4 @@
----
+﻿---
 title: "Query Execution"
 nav_order: 1
 parent: "Guides"
@@ -109,10 +109,11 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 - Server query endpoint: `POST /api/databases/{db}/query` with protocol validation and typed error payloads.
 - Server count endpoint: `POST /api/databases/{db}/query/count` — same request body shape as `/query` (where/cross-partition); `limit`/`offset`/`orderBy`/`select` ignored for translation; returns `CountResult` with aggregate stats.
 - `columnar` and `rows` output formats, with explicit format validation.
+- **Expression SELECT projections** — `selectExpr` field on `QueryMessage` adds server-side computed columns to query results without storing them (P27 / S7 / BL-080). See `guides/bulk-mutations.md` §8.
 - Fluent query APIs:
-  - Engine-side `TableQuery` (`Where`, `Select`, `Skip`, `Limit`, `OrderBy`, `ThenBy`, aggregates).
-  - .NET remote `RemoteTableQuery` with ordering and cross-partition flag propagation.
-  - TypeScript `TableQuery` with immutable chaining and operator mapping.
+  - Engine-side `TableQuery` (`Where`, `Select`, `SelectExpr`, `Skip`, `Limit`, `OrderBy`, `ThenBy`, aggregates).
+  - .NET remote `RemoteTableQuery` with ordering and cross-partition flag propagation, plus `.SelectExpr()`.
+  - TypeScript `TableQuery` with immutable chaining and operator mapping, plus `.selectExpr()`.
 - Hot/cold query execution through one path:
   - Unflushed HRA visibility via virtual hot segment projection.
   - Cold decode path with row-window contract (`QueryBatch`).
@@ -346,6 +347,14 @@ Notes:
 | Ordering | `.OrderBy().ThenBy()` | `.orderBy().thenBy()` | `orderBy[]` | Implemented | Max 8 order-by columns. |
 | Count convenience | `.CountAsync()` → `/query/count` | `.count()` uses `/query?limit=0` (not the dedicated endpoint) | `POST .../query/count` | Partial | .NET uses dedicated count endpoint; TS adoption is an open follow-up. |
 | Cross-partition query flag | `.WithCrossPartitionAccess()` | No dedicated fluent method in current builder | `crossPartitionAccess` bool | Partial | TS can still send raw request outside builder. |
+|| Expression SELECT (computed columns) | `.SelectExpr((alias, expr), ...)` | `.selectExpr({ alias: expr })` | `selectExpr[]` in query body | Implemented (P27 S7) | Server-computed columns appended to result; result type is `Unknown` in v1. See [Bulk Mutations guide](bulk-mutations.md). |
+|| Literal UPDATE | `.UpdateAsync(dict)` | `.update(values)` | `PATCH .../rows` | Implemented | Requires at least one WHERE predicate. See [Bulk Mutations guide](bulk-mutations.md). |
+|| Expression SET UPDATE | `.UpdateAsync(setBuilder)` | `.update({ col: { \$inc: 1 } })` | `PATCH .../rows` (`setExpr`) | Implemented (P27 S1) | Server-side expression evaluation; WAL stores concrete resolved values. |
+|| DELETE with WHERE | `.DeleteAsync()` | `.delete()` | `DELETE .../rows` | Implemented | Requires at least one WHERE predicate. |
+|| DELETE with LIMIT | `.DeleteAsync()` + `.Limit()` | `.delete()` + `.limit()` | `DELETE .../rows` (`limit`, `orderBy`) | Implemented (P27 S2) | Returns `hasMore` sentinel; pair with `orderBy` for deterministic rolling deletes. |
+|| TRUNCATE | `.TruncateAsync()` | `.truncate()` | `POST .../truncate` | Implemented (P27 S2) | Requires `Truncate` auth scope; crash-safe. |
+|| RETURNING on UPDATE/DELETE | `.UpdateAsync(..., returning:[...])` | `.update(v, { returning:[...] })` | `returning` field on PATCH/DELETE | Implemented (P27 S3) | UPDATE returns post-update; DELETE returns pre-delete values. |
+|| Batch mutation | `.BatchAsync([...])` | `.batch([...])` | `POST .../rows/batch` | Implemented (P27 S4) | Multiple operations, single WAL commit. |
 
 ### B) Missing API matrix
 
