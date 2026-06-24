@@ -454,7 +454,7 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "M
 
 | Setting | Type | Default | Env var / CLI | Notes |
 |---|---|---|---|---|
-| `Aouda:DataPath` | `string` | `"./data"` | `AOUDA_DATAPATH` / `--data-path` | Root data directory; created if absent |
+| `Aouda:DataPath` | `string` | `"./data"` | `AOUDA_DATAPATH` or `AOUDA_DATA_PATH` / `--data-path` | Root data directory; `AOUDA_DATA_PATH` is a Docker/K8s alias |
 | `Aouda:Port` | `int` | `5000` | `AOUDA_PORT` / `--port` | Must be 1–65535 |
 | `Aouda:Bind` | `string` | `null` | `AOUDA_BIND` / `--bind` | Override Kestrel binding (e.g., `0.0.0.0:5000`); P16 |
 | `Aouda:EnableHttp2` | `bool` | `true` | `AOUDA_ENABLEHTTP2` | HTTP/1.1 + HTTP/2 simultaneous |
@@ -841,7 +841,7 @@ curl -s http://localhost:5000/api/databases
 | Database stays in `Creating` state after restart | Process crashed during `CreateDatabaseAsync` | Delete partial directory and retry `POST /api/databases`; or call admin cleanup |
 | High memory pressure on one database | Tables fully loaded in hot tier | Add `Aouda:Databases:{db}:MaxMemoryBytes` cap; review table `StoragePolicy` |
 | Write concern timeouts on insert | Replica ACK slower than `WriteConcernTimeoutMs` | Increase timeout or switch `OnWriteConcernTimeout` to `DegradeAndLog`; check replication lag via `/admin/replication/topology` |
-| `AOUDA_*` env vars ignored | Nested section separator missing `__` | Use double-underscore: `AOUDA_MEMORY__MAXTOTALRAMBYTES` not `AOUDA_MEMORY_MAXTOTALRAMBYTES` |
+| `AOUDA_*` env vars ignored | Wrong naming or missing `__` for nested keys | Top-level: `AOUDA_PORT`, `AOUDA_DATAPATH`. Nested: `AOUDA_MEMORY__MAXTOTALRAMBYTES` (double `__`, not single `_`). See [Server configuration](server-configuration.md#21-environment-variable-naming-aouda_) |
 | Flat `/api/query` route returns 404 | P4-era flat routes removed in P6 | Update client to use `/api/databases/{db}/query` with `"database"` field in body |
 
 ---

@@ -82,7 +82,7 @@ This gives fast startup with persistent-across-restarts behavior. For a fully ep
 
 | CLI Flag | Config Key | Environment Variable |
 |----------|-----------|---------------------|
-| `--data-dir` | `Aouda:DataPath` | `AOUDA_DATAPATH` |
+| `--data-dir` | `Aouda:DataPath` | `AOUDA_DATAPATH`, `AOUDA_DATA_PATH` (alias) |
 | `--bind` | `Aouda:Bind` | `AOUDA_BIND` |
 | `--port` | `Aouda:Port` | `AOUDA_PORT` |
 | `--role` | `Aouda:Role` | `AOUDA_ROLE` |
@@ -133,7 +133,7 @@ docker run -p 5000:5000 -v aouda-data:/data aouda/server
 - Base: `mcr.microsoft.com/dotnet/aspnet:8.0-alpine`
 - Exposes port 5000
 - Data volume at `/data`
-- Environment variable `AOUDA_DATA_PATH=/data` set by default
+- Environment variable `AOUDA_DATA_PATH=/data` set by default (alias for `AOUDA_DATAPATH` — see [Server configuration](server-configuration.md#21-environment-variable-naming-aouda_))
 
 ### Studio Image
 

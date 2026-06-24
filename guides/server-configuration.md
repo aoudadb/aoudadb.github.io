@@ -42,17 +42,78 @@ When the server process starts, `AoudaServerOptions` and related host settings a
 4. User secrets                (Development only)
 5. Environment variables       (unprefixed ASP.NET / hosting vars)
 6. Command-line arguments      (generic host args from CreateBuilder)
-7. AOUDA_* environment variables   (Aouda-specific prefix)
+7. AOUDA_* environment variables   (mapped into Aouda: section — see §2.1)
 8. Mapped CLI flags              (--data-path, --port, --bind, --join, …)
 ```
 
-Nested keys use `__` in environment variables, for example:
+**Practical rule:** for production service installs, bootstrap values come from the **service command line** (layer 8). For Docker/Kubernetes, use **`AOUDA_*` env vars** (layer 7) — see §2.1 for naming rules. For local `dotnet run` / `aouda start` from a dev tree, an optional **`appsettings.json` beside the project** (layers 2–3) is convenient.
+
+Default listen port in **code** is `5000`. **Install tools default to `5433`** to avoid clashing with other local dev servers — that value is passed via `--port` on the registered service, not via a shipped config file.
+
+---
+
+## 2.1) Environment variable naming (`AOUDA_*`)
+
+All server settings exposed through `AoudaServerOptions` can be set with environment variables prefixed **`AOUDA_`**. The server maps them into the `Aouda:` configuration section (same keys as `appsettings.json` and CLI flags).
+
+### Rules
+
+| Rule | Example |
+| --- | --- |
+| **Prefix** | Every server config var starts with `AOUDA_` |
+| **Top-level keys** | Flat name after the prefix — no extra underscores in the property name | `AOUDA_PORT`, `AOUDA_DATAPATH`, `AOUDA_BIND` |
+| **Nested keys** | Use **`__` (double underscore)** between each level | `AOUDA_MEMORY__MAXTOTALRAMBYTES`, `AOUDA_ARCHIVE__DESTINATION` |
+| **Single `_` is not nesting** | `AOUDA_MEMORY_MAXHOTBYTES` does **not** map to `Memory:MaxHotBytes` — use `AOUDA_MEMORY__MAXHOTBYTES` | |
+| **Case** | Names are case-insensitive; values bind case-insensitively | `AOUDA_port=5433` works |
+| **CLI wins** | Env vars override appsettings; CLI flags override env vars | |
+
+### Mapping examples
+
+| Environment variable | Config key | Notes |
+| --- | --- | --- |
+| `AOUDA_PORT` | `Aouda:Port` | |
+| `AOUDA_DATAPATH` | `Aouda:DataPath` | **Canonical** name in server docs |
+| `AOUDA_DATA_PATH` | `Aouda:DataPath` | **Alias** — used by Docker, Kubernetes, and embedded client |
+| `AOUDA_BIND` | `Aouda:Bind` | e.g. `0.0.0.0:5433` |
+| `AOUDA_MEMORY__MAXTOTALRAMBYTES` | `Aouda:Memory:MaxTotalRamBytes` | |
+| `AOUDA_MEMORY__MAXHOTBYTES` | `Aouda:Memory:MaxHotBytes` | |
+| `AOUDA_ARCHIVE__ENABLED` | `Aouda:Archive:Enabled` | |
+| `AOUDA_ARCHIVE__DESTINATION` | `Aouda:Archive:Destination` | |
+| `AOUDA_REPLICASET__NAME` | `Aouda:ReplicaSet:Name` | |
+| `AOUDA_REPLICASET__MEMBERS__0` | `Aouda:ReplicaSet:Members:0` | Array index |
+| `AOUDA_AUTH__EMAIL__PROVIDER` | `Aouda:Auth:Email:Provider` | e.g. `sendgrid`, `console` |
 
 ```bash
-AOUDA_MEMORY__MAXTOTALRAMBYTES=8589934592
+# Docker / Kubernetes — typical bootstrap
+AOUDA_DATA_PATH=/data          # alias; same as AOUDA_DATAPATH
 AOUDA_PORT=5433
-AOUDA_DATAPATH=/var/lib/aouda
+
+# Nested settings — note double underscore between levels
+AOUDA_MEMORY__MAXTOTALRAMBYTES=8589934592
+AOUDA_ARCHIVE__DESTINATION=s3://bucket/backups
 ```
+
+### Variables handled outside `AoudaServerOptions`
+
+Some `AOUDA_*` variables are read by **custom code**, not through the main options binder:
+
+| Variable | Purpose | Read by |
+| --- | --- | --- |
+| `AOUDA_CORS_ORIGINS` | Replace default CORS origin list | `ServerHostRunner` |
+| `AOUDA_STUDIO_ORIGIN` | Append one CORS origin to defaults | `ServerHostRunner` |
+| `AOUDA_SCHEMA_INFERENCE_MODE` | Schema inference mode override | `SchemaOptionsEnvOverlay` |
+
+### Variables for other components (not server config)
+
+These use the `AOUDA_` prefix but are **not** `AoudaServerOptions`:
+
+| Variable | Component |
+| --- | --- |
+| `AOUDA_SERVER`, `AOUDA_URL`, `AOUDA_DATABASE`, `AOUDA_ENVIRONMENT` | `aouda` CLI |
+| `AOUDA_DATA_PATH`, `AOUDA_DATABASE` | Embedded client (`AoudaEmbedded`) — `AOUDA_DATA_PATH` is also accepted by the server as an alias |
+| `AOUDA_HUB_*` | Aouda Hub |
+| `AOUDA_STUDIO_*` | Aouda Studio |
+| `AOUDA_TEST_*` | Integration tests only |
 
 CLI flag mappings include:
 
@@ -63,10 +124,6 @@ CLI flag mappings include:
 | `--bind` | `Aouda:Bind` |
 | `--join` | `Aouda:Join` |
 | `--max-memory` / `-m` | `Aouda:Memory:MaxTotalRamBytes` |
-
-**Practical rule:** for production service installs, bootstrap values come from the **service command line** (layer 8). For Docker/Kubernetes, prefer **`AOUDA_*` env vars** (layer 7). For local `dotnet run` / `aouda start` from a dev tree, an optional **`appsettings.json` beside the project** (layers 2–3) is convenient.
-
-Default listen port in **code** is `5000`. **Install tools default to `5433`** to avoid clashing with other local dev servers — that value is passed via `--port` on the registered service, not via a shipped config file.
 
 ---
 
