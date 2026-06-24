@@ -449,9 +449,9 @@ For development environments that mirror production server auth (without app aut
 
 > **Internal/source workflows:** If you are developing Aouda itself (running from `src/`, local tool packaging, IDE task wiring, AppHost setup), use [Aouda-Developer.md](Aouda-Developer.md). This user guide intentionally stays product-facing.
 
-#### Option B: Configuration File
+#### Option B: Configuration File (local development)
 
-Create an `appsettings.json`:
+For local development, you may place an optional `appsettings.json` in the directory from which you run `aouda start`. **Release installs and Setup do not use this file** — they pass `--data-path` and `--port` on the service command line instead. See [Server configuration](../guides/server-configuration.md).
 
 ```json
 {
@@ -472,6 +472,8 @@ Run Aouda from the directory containing this config:
 ```bash
 aouda start
 ```
+
+CLI flags and `AOUDA_*` environment variables override values in this file.
 
 #### Option C: Hosting in Your Own ASP.NET Application
 
@@ -1232,9 +1234,9 @@ Response:
 
 Setup mode automatically disables after the first admin is created.
 
-#### Option B: Configuration File
+#### Option B: Configuration File (local development / advanced ops)
 
-In `appsettings.json`, configure the root user under `Aouda:Auth:RootUser`:
+For local development or advanced operator setups, you may set the root user in an optional `appsettings.json` under `Aouda:Auth:RootUser`. Production installs via Setup use `create-admin` instead. Precedence: see [Server configuration](../guides/server-configuration.md).
 
 ```json
 {
@@ -1586,7 +1588,7 @@ curl -X POST http://localhost:5433/api/databases \
 curl http://localhost:5433/api/databases
 ```
 
-Or configure them in `appsettings.json`:
+Or declare them in an optional `appsettings.json` for local dev (API-created databases are the usual path in production):
 
 ```json
 {
@@ -1600,6 +1602,8 @@ Or configure them in `appsettings.json`:
   }
 }
 ```
+
+See [Server configuration](../guides/server-configuration.md) for when this file applies vs service CLI flags.
 
 Databases are stored in separate directories under the data path:
 
@@ -1763,17 +1767,17 @@ Choose framework-dependent or self-contained artifacts depending on your runtime
 Use explicit directories so upgrades are predictable and data survives binary replacement:
 
 - **Windows**
-  - Binary: `C:\Program Files\Aouda\`
-  - Config: `C:\ProgramData\Aouda\appsettings.json`
-  - Data: `C:\ProgramData\Aouda\data\`
-  - Logs: `C:\ProgramData\Aouda\logs\`
+  - Binary: `C:\Program Files\Aouda\` (or any install path chosen in Setup)
+  - Data: `C:\ProgramData\Aouda\data\` (default; operator may choose another folder)
+  - Bootstrap: Windows Service command line — `--data-path` and `--port` (not a config file)
+  - Logs: console by default; optional operator logging config
 - **Linux**
-  - Binary: `/opt/aouda/`
-  - Config: `/etc/aouda/appsettings.json`
-  - Data: `/var/lib/aouda/`
-  - Logs: `/var/log/aouda/`
+  - Binary: `/opt/aouda/` (or install path from Setup)
+  - Data: `/var/lib/aouda/` (default)
+  - Bootstrap: systemd `ExecStart` flags — `--data-path` and `--port`
+  - Logs: `/var/log/aouda/` (created by install scripts on Linux)
 
-Keep data and config outside the binary folder.
+Keep **data** outside the binary folder. See [Server configuration](../guides/server-configuration.md) for precedence and restart behavior.
 
 ### 16.4 Production Install Flow (with Server Auth)
 
@@ -1920,9 +1924,9 @@ For first-time installs where the operator prefers a guided experience over runn
 
 The setup app:
 1. Prompts for install mode (Windows Service / systemd, or manual), port, directories, admin email, and password.
-2. Copies binaries, writes `appsettings.json`.
-3. Bootstraps the first admin (`Aouda.Server create-admin` directly to the data directory).
-4. Registers and starts the OS service.
+2. Copies binaries to the install directory (no `appsettings.json`).
+3. Registers the OS service with `--data-path` and `--port` on the command line.
+4. Bootstraps the first admin (`Aouda.Server create-admin` directly to the data directory).
 5. Creates a Start Menu shortcut (Windows) or `.desktop` shortcut (Linux).
 6. Prints a completion banner with the server URL and API key.
 

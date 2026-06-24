@@ -13,7 +13,7 @@ This is the minimal path for an AI agent to get a working Aouda database, connec
 ## Option A — Local server (fastest, local)
 
 ```bash
-# From a directory with appsettings.json (DataPath, Port) or pass flags:
+# Pass flags directly (recommended) or use an optional appsettings.json in the working directory:
 aouda start --port 5433 --data-dir ./data
 # Create database via POST /api/databases if not auto-created from config
 ```

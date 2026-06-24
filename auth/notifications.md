@@ -44,9 +44,9 @@ See [Use Case: Self-Service Password Reset](use-cases.md#20-use-case-self-servic
 
 All settings live under the `Aouda:Auth` configuration section. They apply to `aouda start`, Docker, and embedded ASP.NET hosts that call `AddAoudaServer(configuration)`.
 
-### 2.1 appsettings.json (recommended for local development)
+### 2.1 Optional appsettings.json (local development)
 
-Place `appsettings.json` in the directory from which you run `aouda start` (or pass `--config` via the host's standard ASP.NET configuration if you embed the server).
+For local development, place `appsettings.json` in the directory from which you run `aouda start`. **Release installs and Setup do not require this file** — use `AOUDA_*` environment variables on the service or container instead. Precedence: [Server configuration](../guides/server-configuration.md).
 
 ```json
 {

@@ -118,7 +118,7 @@ Scope boundaries:
 
 If you do nothing beyond starting local dev:
 
-- `aouda start` runs the foreground server (configure via `appsettings.json` or `--port`, `--data-dir`).
+- `aouda start` runs the foreground server (CLI flags `--port`, `--data-dir` override optional local `appsettings.json` — see [Server configuration](../guides/server-configuration.md)).
 - App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. Response includes `anonKey` and `serviceRoleKey` (shown once).
 - Password reset and invite emails require a **configured email provider** on the server (`Aouda:Auth:Email` — `console` for local dev, `sendgrid` for production) — see [auth/notifications.md](../auth/notifications.md).
 - HTTP database creation with `{ "auth": { "enabled": true } }`:
@@ -310,10 +310,10 @@ Primary evidence:
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `Aouda:Port` | int | from appsettings | positive | CLI `--port` / config | Local server listen port |
-| `Aouda:DataPath` | string | `./data` typical | path | CLI `--data-dir` / config | Persistent data directory |
-| `Aouda:Auth:Email:*` | — | null | SendGrid or `console` settings | server appsettings / env | Password reset + invite OTP email |
-| `Aouda:Auth:Sms:*` | — | null | GatewayAPI settings | server appsettings / env | MFA phone OTP SMS |
+| `Aouda:Port` | int | `5000` (code); `5433` typical install | positive | CLI `--port` / `AOUDA_PORT` / optional appsettings | CLI wins |
+| `Aouda:DataPath` | string | `./data` | path | CLI `--data-dir` / `AOUDA_DATAPATH` / optional appsettings | CLI wins |
+| `Aouda:Auth:Email:*` | — | null | SendGrid or `console` settings | `AOUDA_*` env / optional server appsettings | Password reset + invite OTP email |
+| `Aouda:Auth:Sms:*` | — | null | GatewayAPI settings | `AOUDA_*` env / optional server appsettings | MFA phone OTP SMS |
 | `TokenOptions.AccessTokenLifetime` | timespan | `15m` | positive | Auth engine options | Access JWT lifetime |
 | `TokenOptions.RefreshTokenLifetime` | timespan | `30d` | positive | Auth engine options | Refresh token lifetime |
 | `TokenOptions.Issuer` | string | `"aouda"` | non-empty | Auth engine options | JWT issuer |
@@ -329,7 +329,7 @@ Primary evidence:
 | Table `rlsResolverName` | string? | `null` | required for `auth-db-rls` | Table create/update payload | ADRA RLS resolver |
 
 Precedence and operational notes:
-- Host config precedence is standard server binding (`appsettings`/env/CLI).
+- Host config precedence: code defaults → optional appsettings → env → `AOUDA_*` → CLI (see [Server configuration](../guides/server-configuration.md)).
 - App auth keys are returned when creating or linking an auth-enabled database via HTTP.
 - Token validation mode changes are startup/middleware configuration behavior.
 - Auth route/admin policy changes are runtime dynamic.

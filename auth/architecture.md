@@ -282,7 +282,7 @@ Aouda supports many different deployment configurations. This section maps each 
 | Scenario | Server Auth | App Auth | API Keys | How to Set Up |
 |----------|:-----------:|:--------:|:--------:|---------------|
 | **Embedded mode** (in-process) | No | No | N/A | `AoudaEmbedded.OpenDatabaseAsync()` |
-| **Local server** (prototyping) | Optional | No | N/A | `aouda start`; create DB via API or appsettings |
+| **Local server** (prototyping) | Optional | No | N/A | `aouda start`; create DB via API (or declare in optional startup config) |
 | **Local server with app auth** (testing auth flows) | Optional | Yes | `mk_anon_`, `mk_svc_` | `aouda start` + `POST /api/databases` with `auth.enabled` — see [setup.md](setup.md) |
 | **Production — cache/internal** | Optional | No | `mk_srv_` if server auth | Create DB without `auth.enabled` |
 | **Production — server auth only** | Yes | No | `mk_srv_` | Bootstrap admin, create DB, create server API keys |

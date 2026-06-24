@@ -363,6 +363,9 @@ Key implementation anchors:
 
 ## 2.10 Configuration and settings reference (complete surface)
 
+{: .note }
+**Precedence and restart:** [Server configuration](server-configuration.md). Keys below bind at **startup** from code defaults, optional `appsettings.json`, `AOUDA_*` env vars, or CLI flags (CLI wins). After API cluster join, `{DataPath}/cluster-state.json` overrides static `Aouda:ReplicaSet` on restart.
+
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
 | `Aouda:ReplicaSet:Name` | string | `""` | non-empty for cluster mode | appsettings/env | Empty/null means standalone |

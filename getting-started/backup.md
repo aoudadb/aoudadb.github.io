@@ -27,7 +27,9 @@ The same model works for both local and S3 destinations — only the destination
 
 ## Quick start: local backup
 
-Enable archiving in `appsettings.json`:
+For local development, enable archiving in an optional `appsettings.json` or via environment variables (`AOUDA_ARCHIVE__ENABLED`, `AOUDA_ARCHIVE__DESTINATION`, …). Production installs typically use Studio, `/admin/config`, or env vars — see [Server configuration](../guides/server-configuration.md).
+
+`appsettings.json` example (local dev):
 
 ```json
 {

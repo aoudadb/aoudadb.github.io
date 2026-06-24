@@ -391,25 +391,28 @@ Primary tests:
 
 ## 2.10 Configuration and settings reference (complete surface)
 
+{: .note }
+**Precedence and restart:** [Server configuration](server-configuration.md). Startup keys bind from code defaults, optional `appsettings.json`, `AOUDA_*` env, or CLI (CLI highest). Release installs use service `--data-path` / `--port` only.
+
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `Aouda:DataPath` | string | `./data` | non-empty path | `appsettings`, env, CLI | Server root path |
-| `Aouda:Port` | int | `5000` | 1..65535 | `appsettings`, env, CLI | HTTP port |
-| `Aouda:Databases:{db}:EnableWal` | bool | `true` | true/false | `appsettings` | DB-level WAL switch |
-| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `appsettings` | DB replication participation |
-| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | `appsettings` | Default table policy |
-| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | `appsettings` | Per-db memory cap |
-| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`,`Majority`,`All` | `appsettings` | ACK semantics |
-| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | >=100 | `appsettings` | Timeout for higher write concerns |
-| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | `appsettings` | Timeout policy |
+| `Aouda:DataPath` | string | `./data` | non-empty path | startup config | Server root path |
+| `Aouda:Port` | int | `5000` | 1..65535 | startup config | HTTP port |
+| `Aouda:Databases:{db}:EnableWal` | bool | `true` | true/false | startup config | DB-level WAL switch |
+| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | DB replication participation |
+| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | startup config | Default table policy |
+| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
+| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`,`Majority`,`All` | startup config | ACK semantics |
+| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | >=100 | startup config | Timeout for higher write concerns |
+| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | startup config | Timeout policy |
 | `CreateDatabaseRequest.enableWal` | bool | `true` | true/false | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |
 | `CreateDatabaseRequest.maxMemoryBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional |
-| `Archive.Enabled` | bool | `false` | true/false | `appsettings` | Standalone archive mode gate |
-| `Archive.Destination` | string | empty | URI/path | `appsettings` | Required when archive enabled |
-| `Archive.CheckpointIntervalHours` | int | `24` | >=1 | `appsettings` | Archive/checkpoint cadence |
-| `Archive.WalRetentionDays` | int | `7` | >=1 | `appsettings` | Archive retention window |
+| `Archive.Enabled` | bool | `false` | true/false | startup config | Standalone archive mode gate |
+| `Archive.Destination` | string | empty | URI/path | startup config | Required when archive enabled |
+| `Archive.CheckpointIntervalHours` | int | `24` | >=1 | startup config | Archive/checkpoint cadence |
+| `Archive.WalRetentionDays` | int | `7` | >=1 | startup config | Archive retention window |
 | `BackupOptions.Parallelism` | int | engine default | >=1 | .NET engine call | Backup engine only, not server API config |
 | `RestoreOptions.Parallelism` | int | engine default | >=1 | .NET engine call | Restore engine only |
 | `RestoreOptions.TargetTime` | datetime? | null | any valid timestamp | .NET engine call | Enables PITR flow |
@@ -522,11 +525,10 @@ When to use:
 - New single-node deployment where you want standard durability defaults.
 
 Steps:
-1. Keep default `appsettings.json` for `Aouda`.
-2. Start server with default data path.
-3. Create a database using `POST /api/databases` (or `client.databases.create`).
-4. Create one table and insert sample data.
-5. Restart server and query table again.
+1. Start server with `aouda start --data-dir ./data --port 5433` (or optional local `appsettings.json` — see [Server configuration](server-configuration.md)).
+2. Create a database using `POST /api/databases` (or `client.databases.create`).
+3. Create one table and insert sample data.
+4. Restart server and query table again.
 
 Expected result checks:
 - Data and schema survive restart.

@@ -381,13 +381,16 @@ Primary proving tests:
 
 ## 2.10 Configuration and settings reference (complete surface)
 
+{: .note }
+**Precedence and restart:** [Server configuration](server-configuration.md). Memory limits can also be changed at runtime via `PATCH /admin/config` (in-memory until restart unless set in startup config).
+
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `Aouda:Memory:MaxTotalRamBytes` | long | `2147483648` | `>= 1048576` | `appsettings.json`, env, CLI | Server max RAM envelope |
-| `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | `appsettings.json`, env, CLI | `0` means 70% of total |
-| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | `appsettings.json`, env, CLI | `0` means 20% of total |
-| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or positive | `appsettings.json` | Per-database cap when set |
-| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | `appsettings.json` | Default for new tables in that DB |
+| `Aouda:Memory:MaxTotalRamBytes` | long | `2147483648` | `>= 1048576` | startup config | Server max RAM envelope |
+| `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 70% of total |
+| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 20% of total |
+| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or positive | startup config | Per-database cap when set |
+| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
 | `UpdatePolicyRequest.storageTemperature` | string | none (required) | `Auto`, `HotOnly`, `ColdPreferred` | HTTP update-policy body | Per-table policy update |
 | `ResidencyPolicy.PinAllInMemory` | bool | `false` | `true/false` | Catalog/.NET policy surfaces | Implemented behavior in `ResidencyManagerV1` |
@@ -506,7 +509,7 @@ When to use:
 - New environment where you want safe default behavior first.
 
 Steps:
-1. Keep `Aouda:Memory` at defaults in `appsettings.json`.
+1. Use default `Aouda:Memory` code defaults, or set limits via env/CLI/optional appsettings — see [Server configuration](server-configuration.md).
 2. Create table without explicit policy.
 3. Insert workload and run representative reads.
 4. Query `/api/server/memory`.

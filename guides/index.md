@@ -83,6 +83,7 @@ Use this mapping as the baseline when planning doc updates:
 | ADRA/RLS/PLS and auth deepening | P14 | `docs/dev/Functionality-Auth-And-Authorization.md`, `docs/dev/Functionality-AI-Native-Usage.md` |
 | Schema lifecycle and evolution patterns | Cross-phase (notably P3/P4/P7/P12/P14) | `docs/dev/Functionality-Schema-Lifecycle.md` |
 | Server CLI, Docker, Kubernetes, cloud, Hub | P16 | `docs/dev/Functionality-Cloud-And-Hub.md` |
+| **Server configuration** (precedence, install bootstrap, restart) | P34 / P4 | `guides/server-configuration.md` |
 | Studio management console | P5, P6, P9, P12, P16 | `docs/dev/Functionality-Studio.md` |
 | TypeScript client SDK (`@aouda/client`) | P5, P10, P12, P14, P15, P16 | `docs/dev/Functionality-TypeScript-Client.md` |
 
@@ -182,6 +183,7 @@ This section tracks the per-domain documents and maturity level.
 | AI-native usage model | `docs/dev/Functionality-AI-Native-Usage.md` | Approved baseline — updated P14 (Extend mode, WhereClause groups), P16 (MCP cluster tools) |
 | Testing and developer experience | `docs/dev/Functionality-Testing-And-DX.md` | Approved baseline |
 | Distribution and licensing | `docs/dev/Functionality-Distribution-And-Licensing.md` | Approved baseline — updated P16 (CLI, Docker, Helm, K8s operator) |
+| **Server configuration** (precedence, install, persistence) | `guides/server-configuration.md` | **Published** — canonical operator reference |
 | Cloud, Hub, and deployment | `docs/dev/Functionality-Cloud-And-Hub.md` | **New** — P16 (Hub backend, cloud control plane, K8s operator, Docker) |
 | Studio management console | `docs/dev/Functionality-Studio.md` | **New** — P5/P6/P9/P12/P16 (data explorer, cluster ops, Hub integration) |
 | TypeScript client SDK | `docs/dev/Functionality-TypeScript-Client.md` | **New** — P5/P10/P12/P15/P16 (query builder, joins, aggregates, admin APIs, MCP tools) |

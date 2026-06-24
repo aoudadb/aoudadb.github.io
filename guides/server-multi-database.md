@@ -517,7 +517,14 @@ These can be declared in config to provision databases at startup or to set defa
 
 ### Configuration source priority (lowest → highest)
 
-`defaults → appsettings.json → appsettings.{Env}.json → AOUDA_* env vars → CLI args`
+See **[Server configuration](server-configuration.md)** for the full model (install bootstrap, restart behavior, and data-directory persistence).
+
+Startup binding for `AoudaServerOptions`:
+
+`code defaults → appsettings.json (optional) → appsettings.{Env}.json → environment variables → AOUDA_* env vars → CLI flags (--data-path, --port, …)`
+
+{: .important }
+**Release installs do not ship `appsettings.json`.** `Aouda.Setup` and `install-aouda.ps1` pass `--data-path` and `--port` on the Windows Service / systemd command line instead.
 
 Nested sections use `__` separator in env vars: `AOUDA_MEMORY__MAXTOTALRAMBYTES`.
 

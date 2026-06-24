@@ -292,7 +292,7 @@ Key anchors:
 
 | Surface | Key | Default | Effect |
 |---|---|---|---|
-| `appsettings` | `Aouda:Schema:InferenceMode` | `On` | Controls inference-only behavior (`Off` or `On`) |
+| startup config | `Aouda:Schema:InferenceMode` | `On` | Controls inference-only behavior (`Off` or `On`) |
 | Env var | `AOUDA_SCHEMA_INFERENCE_MODE` | unset | Overrides server inference mode |
 
 ### B) CLI context resolution

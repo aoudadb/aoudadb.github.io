@@ -406,7 +406,7 @@ Primary evidence:
 
 Precedence and operational notes:
 
-- Server config precedence follows standard `appsettings` + env + CLI binding in host setup.
+- Server config precedence: **code defaults → optional appsettings → env vars → `AOUDA_*` → CLI flags** (highest). Release installs use service CLI flags only — see [Server configuration](../guides/server-configuration.md).
 - Root user bootstrap is startup-time behavior; treat config updates as restart-required.
 - Auth/admin endpoint changes (users, roles, grants, resolvers) are dynamic at runtime.
 - Safety-gated behavior:

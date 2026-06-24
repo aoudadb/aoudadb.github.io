@@ -216,7 +216,7 @@ The server binds `AoudaServerOptions` from `Aouda` config and activates archive 
 - `builder.Services.AddAoudaServer(builder.Configuration)`
 - `builder.Services.AddOptions<AoudaServerOptions>().Bind(builder.Configuration.GetSection("Aouda"))`
 
-#### Example A: standalone server with archive mode enabled (`appsettings.json`)
+#### Example A: standalone server with archive mode enabled (startup config — optional `appsettings.json` or `AOUDA_ARCHIVE__*` env vars)
 
 ```json
 {
@@ -281,7 +281,7 @@ Credentials are resolved from the standard AWS chain (environment variables, `~/
 
 `ForcePathStyle: true` is required for MinIO and LocalStack.
 
-#### Example D: replica set backup node archive wiring (`appsettings.json`)
+#### Example D: replica set backup node archive wiring (startup config)
 
 ```json
 {
@@ -489,7 +489,7 @@ console.log(summary.lastBackupHoursAgo);
 When using Aouda in server mode with the admin API:
 
 ```bash
-# One-time: configure archive destination in appsettings.json (see §2.10)
+# One-time: configure archive destination via env vars, optional appsettings, or Studio (see §2.10 and [Server configuration](server-configuration.md))
 # Then trigger a backup via API
 curl -s -X POST http://localhost:5000/admin/backup/trigger \
      -H "Content-Type: application/json" \

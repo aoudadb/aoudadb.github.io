@@ -477,13 +477,13 @@ Install mode:
   [2] Manual / on-demand (run with: Aouda.Server start)
 > 1
 
-Port [5000]:
+Port [5433]:
 > 
 
 Install directory [C:\Program Files\Aouda]:
 > 
 
-Data directory [C:\ProgramData\Aouda]:
+Data directory [C:\ProgramData\Aouda\data]:
 > 
 
 Admin email:
@@ -494,12 +494,13 @@ Admin password (input hidden):
 ```
 
 Press Enter to accept defaults. The setup app then:
-1. Copies binaries to the install directory
-2. Writes `appsettings.json` with `DataPath` and `Port`
-3. Bootstraps the first admin account (`Aouda.Server create-admin`)
-4. Registers and starts the Windows Service (or systemd unit on Linux)
-5. Creates Start Menu shortcut (Windows) or `.desktop` shortcut (Linux)
-6. Prints the completion banner
+1. Copies binaries to the install directory (skips any `appsettings*.json` in the release zip)
+2. Bootstraps the first admin account (`Aouda.Server create-admin` into the data directory)
+3. Registers and starts the Windows Service (or systemd unit) with `--data-path` and `--port` on the command line
+4. Creates Start Menu shortcut (Windows) or `.desktop` shortcut (Linux)
+5. Prints the completion banner
+
+No `appsettings.json` is created. End users do not need to know about ASP.NET configuration files. See [Server configuration](server-configuration.md).
 
 ### Completion Banner
 
@@ -507,9 +508,9 @@ Press Enter to accept defaults. The setup app then:
 =============================================
 Aouda is running!
 
-Server URL : http://localhost:5000
-Studio     : http://localhost:5000  (future embedded mode)
-Cloud      : https://studio.aouda.com → connect to http://localhost:5000
+Server URL : http://localhost:5433
+Studio     : http://localhost:5433  (future embedded mode)
+Cloud      : https://studio.aouda.com → connect to http://localhost:5433
 API key    : aouda_sk_xxxxxxxxxxxx
 
 Recommended browser for localhost: Chrome or Edge
@@ -524,13 +525,13 @@ The API key is a long-lived server admin key (`mk_srv_...`). Copy it to a secret
 **Windows (Windows Service via `sc.exe`):**
 - Service name: `Aouda`
 - Start type: automatic
-- Binary path: `"C:\Program Files\Aouda\Aouda.Server.exe" --contentRoot "C:\ProgramData\Aouda"`
+- Binary path: `"C:\Program Files\Aouda\Aouda.Server.exe" --data-path "C:\ProgramData\Aouda\data" --port 5433`
 - If the service already exists, `sc.exe config` updates the binary path before starting
 
 **Linux (systemd):**
 - Unit file: `/etc/systemd/system/aouda.service`
 - `WorkingDirectory`: install directory
-- `ExecStart`: `/opt/aouda/Aouda.Server --contentRoot /etc/aouda`
+- `ExecStart`: `/opt/aouda/Aouda.Server --data-path /var/lib/aouda --port 5433`
 - `User=aouda`, `Group=aouda`
 - Data/log directories created with correct ownership (`chown -R aouda:aouda`)
 - `systemctl daemon-reload && systemctl enable aouda && systemctl restart aouda`
@@ -551,15 +552,14 @@ The shortcut points to the **local server URL** (not `studio.aouda.com`). In dir
 If you select mode `[2]` (manual), `Aouda.Setup` skips service registration and instead prints how to start the server manually:
 
 ```
-Aouda is ready to start!
+Aouda installed (manual / on-demand mode).
 
 To start the server:
-  Windows: "C:\Program Files\Aouda\Aouda.Server.exe" --contentRoot "C:\ProgramData\Aouda"
-  Linux:   /opt/aouda/Aouda.Server --contentRoot /etc/aouda
+  Windows: "C:\Program Files\Aouda\Aouda.Server.exe" --data-path "C:\ProgramData\Aouda\data" --port 5433
+  Linux:   /opt/aouda/Aouda.Server --data-path /var/lib/aouda --port 5433
 
-Server URL : http://localhost:5000
-Cloud      : https://studio.aouda.com → connect to http://localhost:5000
-API key    : aouda_sk_xxxxxxxxxxxx
+Server URL : http://localhost:5433  (once running)
+Cloud      : https://studio.aouda.com → connect to http://localhost:5433
 ```
 
 ### Admin Bootstrap Logic

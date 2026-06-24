@@ -368,6 +368,9 @@ Core modules:
 
 ## 2.10 Configuration and settings reference (complete surface)
 
+{: .note }
+**Precedence:** [Server configuration](server-configuration.md) — startup config (code defaults, optional appsettings, `AOUDA_*`, CLI).
+
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
 | `CreateColumnRequest.partitionKeyOrder` | int? | `null` | positive ordinal | table create payload | Declares column as partition key and order in composite key |
@@ -386,13 +389,13 @@ Core modules:
 | `MigrationOptions.MaxIoBandwidthPercent` | int | `15` | positive | migration config | Background migration IO pressure cap |
 | `MigrationOptions.MaxParallelism` | int | `2` | positive | migration config | Marked phase-2 only |
 | `MigrationOptions.BlockingTimeout` | `TimeSpan` | `1h` | positive | migration config | Marked phase-2 only |
-| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | `appsettings.json` | Per-db memory cap |
-| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | `appsettings.json` | Default table temperature in DB |
-| `Aouda:Databases:{db}:EnableWal` | bool | `true` | `true/false` | `appsettings.json` | Per-db WAL default |
-| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `appsettings.json` | Per-db replication mode |
-| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`, `Majority`, `All` | `appsettings.json` | Per-db write concern |
-| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | positive | `appsettings.json` | Per-db write concern timeout |
-| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | `appsettings.json` | Per-db timeout behavior |
+| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
+| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default table temperature in DB |
+| `Aouda:Databases:{db}:EnableWal` | bool | `true` | `true/false` | startup config | Per-db WAL default |
+| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | Per-db replication mode |
+| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`, `Majority`, `All` | startup config | Per-db write concern |
+| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | positive | startup config | Per-db write concern timeout |
+| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | startup config | Per-db timeout behavior |
 | `CreateDatabaseRequest.enableWal` | bool | `true` | `true/false` | create-db API | DB create-time operational setting |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | create-db API | DB create-time operational setting |
 | `CreateDatabaseRequest.maxMemoryBytes` | long? | `null` | null or non-negative | create-db API | DB create-time memory cap |

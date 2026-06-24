@@ -945,7 +945,7 @@ dotnet run --project C:\path\to\aouda\src\Aouda.Cli -- start --port 5433 --data-
 
 ---
 
-### 27.2 Server directory, appsettings, and persistent data
+### 27.2 Local server directory and persistent data
 
 Create a **server working directory** outside your application repo (binary segment files accumulate here):
 
@@ -955,7 +955,9 @@ macOS:     ~/.local/share/aouda/<app-name>
 Linux:     ~/.local/share/aouda/<app-name>
 ```
 
-`appsettings.json` in that directory (used when you `cd` there and run `aouda start`):
+For local development you may add an **optional** `appsettings.json` in that directory, or pass everything via CLI flags (recommended). **Production Windows/Linux installs via Setup do not use appsettings** — see [Server configuration](../guides/server-configuration.md).
+
+Example optional `appsettings.json` (auth email provider for local testing):
 
 ```json
 {
@@ -983,7 +985,7 @@ cd C:\Users\you\AppData\Local\aouda\derive
 aouda start --port 5433 --data-dir .\data
 ```
 
-CLI flags override config: `--port`, `--data-dir` (alias `--data-path`, `-d`), `--bind`, memory limits, etc.
+CLI flags override config file values: `--port`, `--data-dir` (alias `--data-path`, `-d`), `--bind`, memory limits, etc. **Precedence:** CLI and `AOUDA_*` env vars win over `appsettings.json`.
 
 > **Do NOT** put the data directory inside your application git repo.
 

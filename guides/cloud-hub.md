@@ -114,9 +114,9 @@ aouda start --data-dir ./node3 --bind 0.0.0.0:5002 --join 192.168.1.10:5000 --ro
 
 1. Place `Aouda.Setup.exe` (Windows) or `aouda-setup` (Linux) alongside `Aouda.Server.exe` / `Aouda.Server` in the release archive.
 2. Double-click or run `./aouda-setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
-3. Setup copies binaries, writes `appsettings.json`, bootstraps the admin, registers the OS service, creates a shortcut, and prints a completion banner with the server URL and API key.
+3. Setup copies binaries, registers the OS service with `--data-path` and `--port`, bootstraps the admin, creates a shortcut, and prints a completion banner with the server URL and API key.
 
-See the [Studio guide §12](studio.md#12-aoudasetup-installer) for the full interactive prompt sequence, completion banner, service registration details, and manual/on-demand mode.
+See the [Studio guide §12](studio.md#12-aoudasetup-installer) and [Server configuration](server-configuration.md) for the full interactive prompt sequence, service registration details, and configuration precedence.
 
 **Existing scripts are preserved:** `scripts/install-aouda.ps1` and `scripts/install-aouda.sh` are unchanged and remain the tool of choice for CI/CD pipelines and scripted deployments.
 
@@ -544,7 +544,9 @@ AOUDA_STUDIO_ORIGIN=http://localhost:3000
 AOUDA_CORS_ORIGINS=https://studio.aouda.com,https://hub.aouda.dev,http://localhost:3000
 ```
 
-**appsettings.json example (full override):**
+**Optional appsettings.json example (local dev — prefer env vars in production):**
+
+See [Server configuration](server-configuration.md) for precedence vs `AOUDA_CORS_ORIGINS`.
 
 ```json
 {

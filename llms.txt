@@ -8,7 +8,7 @@
 ## Quick orientation
 
 - Install CLI: `dotnet tool install -g Aouda.Cli`
-- Start server: `aouda start` (default port from appsettings, often 5433; use `--port` and `--data-dir`)
+- Start server: `aouda start` (code default port `5000`; install scripts use `5433` — override with `--port` and `--data-dir`)
 - Install .NET client: `dotnet add package Aouda.Client`
 - Install TypeScript client: `npm install @aouda/client`
 - Docker: `docker run -p 5000:5000 -v aouda-data:/data aouda/server`
@@ -59,6 +59,7 @@
 - [Graph and Vector](https://aoudadb.github.io/guides/graph-vector/)
 - [Primary Key Indexing and Memory](https://aoudadb.github.io/guides/pk-indexing/)
 - [Server and Multi-Database](https://aoudadb.github.io/guides/server-multi-database/)
+- [Server configuration](https://aoudadb.github.io/guides/server-configuration/): Precedence (Setup, env, CLI, appsettings), restart behavior, data-dir persistence
 
 ## Deployment
 
