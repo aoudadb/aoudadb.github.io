@@ -29,7 +29,7 @@ Update this table when shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
-| Current dev | `1` | `≥ 0.0.1` | `≥ 0.1.0` | `≥ 0.0.1` | Initial npm publish of `@aouda/client`; Studio pins exact client version in `package.json` |
+| Current dev | `1` | `≥ 0.0.1` (`0.0.3`+ for hosted Studio → localhost) | `≥ 0.1.0` | `≥ 0.0.1` | Studio on `studio.aouda.com` needs `@aouda/client` ≥ `0.0.3` for Chrome Local Network Access to localhost |
 
 ### Reading the matrix
 
