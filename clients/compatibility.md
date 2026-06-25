@@ -1,0 +1,62 @@
+---
+title: "SDK Compatibility"
+nav_order: 3
+parent: "Clients"
+---
+
+# SDK Compatibility Matrix
+
+Aouda ships multiple artifacts from separate repositories. They do **not** share a single version number. Use this matrix to pick compatible combinations.
+
+---
+
+## Versioning model
+
+| Artifact | Package / image | Repo | Version scheme |
+|----------|-----------------|------|----------------|
+| Aouda server | `aouda/server` (Docker), `Aouda.Server` (binary) | `aouda` | Release train (not npm SemVer) |
+| TypeScript client | `@aouda/client` (npm) | `aouda-client-ts` | SemVer |
+| .NET client | `Aouda.Client` (NuGet) | `aouda` | SemVer |
+| Studio | `aouda/studio` (Docker), hosted app | `aouda-studio` | App version |
+
+**Release order** when APIs change: server → SDKs → Studio → docs.
+
+---
+
+## Compatibility matrix
+
+Update this table when shipping breaking server, client, or Studio changes.
+
+| Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
+|------------------|---------------|-----------------|------------------------|------------------|-------|
+| Current dev | `1` | `≥ 0.0.1` | `≥ 0.1.0` | `≥ 0.0.1` | Initial npm publish of `@aouda/client`; Studio pins exact client version in `package.json` |
+
+### Reading the matrix
+
+- **Wire protocol** — HTTP header `X-Aouda-Protocol-Version`. Server and clients must agree on supported protocol versions.
+- **`@aouda/client`** — Minimum npm version for a server generation. Studio may pin a specific patch (see `aouda-studio/package.json`).
+- **`Aouda.Client`** — NuGet version for .NET apps and Hub; tracks API parity with the TS client but versions independently.
+- **Studio** — Requires a server reachable at runtime; build-time dependency is only `@aouda/client`.
+
+---
+
+## Pre-1.0 guidance
+
+While `@aouda/client` is `0.x`:
+
+- Pin **exact** versions in production (`"0.0.1"`, not `"^0.0.1"`).
+- Expect minor client bumps to add API; breaking changes are possible before `1.0.0`.
+- Regenerate TypeScript schema types after server schema changes: `npx @aouda/client generate`.
+
+---
+
+## Release documentation
+
+| Topic | Location |
+|-------|----------|
+| **Cross-repo bump procedure (agents)** | Shared docs repo: `Cross-Repo-Release-And-Version-Bump.md` (`D:\GitHub\docs\` or `C:\Data\GitHub\docs\`) |
+| npm Changesets + publish | [aouda-client-ts `docs/dev/Release-Process.md`](https://github.com/aouda/aouda-client-ts/blob/main/docs/dev/Release-Process.md) |
+| Studio pin + local link | [aouda-studio `docs/dev/Dependency-Policy.md`](https://github.com/aouda/aouda-studio/blob/main/docs/dev/Dependency-Policy.md) |
+| TypeScript client API | [TypeScript Client](./typescript.md) |
+
+Dependency bumps are **manual**. Agents follow the cross-repo release doc after each `@aouda/client` publish.

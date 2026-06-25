@@ -16,3 +16,5 @@ Aouda provides official clients for .NET and TypeScript, plus a raw HTTP/REST AP
 | **HTTP/REST** | Built into every Aouda server | Any language, direct API calls |
 
 The .NET and TypeScript clients expose matching APIs where practical. See [Getting Started](../getting-started/) for connection and first-query examples across all three.
+
+For version compatibility across server, SDKs, and Studio, see [SDK Compatibility](./compatibility.md).
