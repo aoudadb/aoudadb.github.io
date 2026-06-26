@@ -461,6 +461,85 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 
 ## Endpoints
 
+### Database Catalog API
+
+#### `GET /api/databases`
+
+Lists databases visible to the caller.
+
+**Query Parameters:**
+
+| Param | Values | Description |
+|-------|--------|-------------|
+| `include` | _(omitted)_ | **Default.** Returns only operator-facing databases (`isInternal == false`). Hides internal infrastructure databases such as `_serverauth` and `_settings`. |
+| `include` | `internal` | Returns **all** databases including internal infrastructure databases. Used by the Admin → Databases management view. |
+
+**Response body** (`200 OK`):
+
+```json
+{
+  "databases": [
+    {
+      "name": "myapp",
+      "state": "Active",
+      "createdAt": "2026-06-26T10:00:00.0000000Z",
+      "options": {
+        "maxMemoryBytes": null,
+        "defaultTemperature": "Auto",
+        "enableWal": true,
+        "replicationMode": "Replicate"
+      },
+      "isInternal": false,
+      "isAuthDatabase": false,
+      "authDatabaseKind": "none"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Response metadata fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `isInternal` | `boolean` | `true` for Aouda-owned infrastructure databases (`_serverauth`, `_settings`). These are hidden from the default list and must not be used as data-explorer targets. |
+| `isAuthDatabase` | `boolean` | `true` if this database contains auth system tables (`_users`, `_roles`, etc.). Application auth databases (`_auth`, `auth`, …) have `isInternal: false` and remain browsable in the data explorer. |
+| `authDatabaseKind` | `"none"` \| `"server"` \| `"application"` | Identifies the auth role. `"server"` means this is the server-level admin auth database (managed via `/api/auth/admin/...`). `"application"` means this is an end-user auth database. `"none"` for regular data databases. |
+
+**Internal database definition:**
+
+Aouda-owned infrastructure storage that is not an operator or application data target. Managed via dedicated admin APIs (`/api/auth/admin/...`, `/admin/config`, `/admin/notifications`), not the data-explorer dropdown.
+
+| Database name | `isInternal` | `isAuthDatabase` | `authDatabaseKind` | Admin surface |
+|---------------|:-----------:|:-----------------:|:-----------------:|---------------|
+| `_serverauth` | `true` | `true` | `"server"` | `/api/auth/admin/...` |
+| `_settings` | `true` | `false` | `"none"` | `/admin/config`, `/admin/cluster`, `/admin/notifications` |
+| `myapp` (data) | `false` | `false` | `"none"` | Data explorer |
+| `auth` (app auth) | `false` | `true` | `"application"` | Data explorer (tables) |
+
+**Filtering rule:**
+
+```
+Default list: include iff isInternal == false
+?include=internal: include all (no filter)
+```
+
+**Breaking change note:** Clients that previously listed `_serverauth` or `_settings` from the default `GET /api/databases` response will no longer see them. Use `?include=internal` to retrieve the full catalog.
+
+---
+
+#### `GET /api/databases/{name}`
+
+Direct lookup of a specific database by name. Always returns the database if it exists, regardless of `isInternal`. Requires server credentials (`mk_srv_...`).
+
+---
+
+#### `POST /api/databases`
+
+Creates a new operator-facing database. The `isInternal` flag cannot be set by clients — it is always `false` for user-created databases. Internal databases are only created by Aouda bootstrap services.
+
+---
+
 ### Query Endpoint
 
 #### `POST /api/databases/{db}/query`
@@ -2857,3 +2936,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 1.3 | 2026-03-19 | Comprehensive authentication section: credential types, auth enforcement flow, X-User-Token, server and app auth endpoint reference |
 | 2.0 | 2026-05-22 | WebSocket streaming protocol documented; Bulk Load API documented; `crossPartitionAccess`, `joins`, WhereClause `groups`; write concern on mutation messages; Known Limitations updated; Future Extensions corrected |
 | 2.1 | 2026-06-23 | P27: `setExpr` expression SET, `TRUNCATE`, DELETE `limit`/`orderBy`, `RETURNING`, batch mutations (`/rows/batch`), expression SELECT (`selectExpr`). P28: `TruncateToMinute` partition function. P31: `postLoadMqBehavior` on bulk-load `:begin`; `mqRebuildStatus` in `:status` response; `POST .../materialized-queries/{name}:refresh`. P33: password reset endpoints, MFA enroll/challenge/verify/factors/delete, admin password override, invite resend, `requiresPasswordChange`/`mfaRequired`/`mfaFactors`/`aal` in signin response. |
+| 2.2 | 2026-06-26 | **P17 (breaking):** `GET /api/databases` default response now excludes internal infrastructure databases (`_serverauth`, `_settings`). Use `?include=internal` to retrieve the full catalog. All database responses now include `isInternal` (bool), `isAuthDatabase` (bool), and `authDatabaseKind` (`"none"` \| `"server"` \| `"application"`) metadata fields. Application auth databases (`isInternal: false`) remain in the default list. |
