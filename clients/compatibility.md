@@ -29,7 +29,7 @@ Update this table when shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
-| Current dev | `1` | `≥ 0.0.1` (`0.0.3`+ for hosted Studio → localhost) | `≥ 0.1.0` | `≥ 0.0.1` | Studio on `studio.aouda.com` needs `@aouda/client` ≥ `0.0.3` for Chrome Local Network Access to localhost |
+| Current dev | `1` | `≥ 0.0.1` (`0.0.3`+ LNA; `0.1.0`+ P17 database catalog) | `≥ 0.1.0` | `≥ 0.0.2` | P17: internal DB filtering + catalog metadata — Studio `0.0.2` pins `@aouda/client` `0.1.0`. Hosted Studio → localhost needs client `≥ 0.0.3`. |
 
 ### Reading the matrix
 
@@ -45,7 +45,7 @@ Update this table when shipping breaking server, client, or Studio changes.
 While `@aouda/client` is `0.x`:
 
 - Pin **exact** versions in production (`"0.0.1"`, not `"^0.0.1"`).
-- Expect minor client bumps to add API; breaking changes are possible before `1.0.0`.
+- Prefer **patch** releases for additive API while on the `0.0.x` line (`0.0.3` → `0.0.4`). A Changesets **minor** bump advances the middle digit (`0.0.3` → `0.1.0`).
 - Regenerate TypeScript schema types after server schema changes: `npx @aouda/client generate`.
 
 ---

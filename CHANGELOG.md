@@ -173,3 +173,38 @@ Aouda is now distributable to first-time users with zero CLI knowledge:
 - The existing scripts remain for CI/CD and automation.
 
 📄 *See also:* `aouda/docs/tasks/P34-COMPLETION.md`
+
+---
+
+## ✅ P17 — Internal Database Catalog & Studio Routing (Completed)
+
+**Date:** 2026-06-26  
+**Scope:** Hide internal infrastructure databases from the default catalog; fix Studio server-auth routing after fresh install.
+
+### Server
+
+- Added `IsInternal` to persisted `DatabaseOptions`; `_serverauth` and `_settings` are created with `IsInternal = true`.
+- **Breaking:** default `GET /api/databases` returns operator-facing databases only (`IsInternal == false`). Use `?include=internal` for the full catalog.
+- Response metadata on all database list/get/create paths: `isInternal`, `isAuthDatabase`, `authDatabaseKind` (`"none"` | `"server"` | `"application"`).
+- Application auth databases remain in the default list for table inspection.
+
+### `@aouda/client` `0.1.0`
+
+- `DatabaseInfo` extended with catalog metadata fields.
+- `databases.list({ includeInternal?: boolean })` appends `?include=internal` when true.
+
+### Studio `0.0.2`
+
+- Server auth admin (Settings → Auth, Admin → Connections) always uses `/api/auth/admin/...`.
+- Database selector excludes internal DBs; empty state when none are listable.
+- Admin → Databases shows internal rows with badges via `includeInternal: true`.
+- Removed `_auth` / `_serverauth` routing sentinels.
+
+### Compatibility
+
+| Artifact | Minimum version |
+|----------|-----------------|
+| `@aouda/client` | `0.1.0` |
+| Studio | `0.0.2` |
+
+📄 *See also:* `aouda/docs/tasks/P17/P17-Auth-Database-Catalog-And-Studio-Routing.md`, [HTTP API § Database Catalog](reference/http-api.md), [SDK compatibility](clients/compatibility.md)
