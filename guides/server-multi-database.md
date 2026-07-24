@@ -281,7 +281,7 @@ DELETE /api/databases/{db}
 - A single `AoudaEngine` instance is always registered as a DI singleton per hosted service invocation; in multi-database mode, `DatabaseManager` is the singleton and engines are per-database.
 - `AoudaHostedService.StartAsync` completes before the first request is served.
 - `StopAsync` calls `DisposeAsync` on all engines, flushing WAL and in-flight transactions for graceful shutdown.
-- Dropping a database removes the engine and registry metadata; directory cleanup is best-effort.
+- Dropping a database performs a fast foreground switch (remove engine from routing, persist `Dropping` state) and returns `204` immediately; all cleanup (engine dispose, directory delete with exponential-backoff retry, registry completion) runs in a background `PendingOpsWorker` job that is persisted to `pending_jobs.json` and automatically resumes after a server restart or crash.
 
 ---
 
@@ -306,6 +306,10 @@ Process start
         → reads databases.json via DatabaseRegistryStore
         → calls AoudaEngine.OpenAsync for each Active database
         → registers each engine with ServerMemoryBudgetManager
+      PendingOpsWorker.StartAsync
+        → prunes Done/Failed jobs from pending_jobs.json
+        → re-enqueues any Running/Interrupted jobs (crash recovery)
+        → starts background processing loop (Channel-based)
   → Kestrel begins accepting requests
   → Middleware pipeline:
       ProtocolVersionMiddleware
@@ -316,6 +320,9 @@ Process start
       RequestTimeouts (30 s)
       Controllers (database-aware routing)
   → StopAsync
+      PendingOpsWorker.StopAsync
+        → drains in-flight job (waits for current handler to complete or cancels)
+        → marks interrupted jobs as Interrupted in pending_jobs.json
       DatabaseManager.DisposeAsync
         → AoudaEngine.DisposeAsync for each engine (WAL flush + cleanup)
 ```
@@ -326,6 +333,9 @@ Process start
 |---|---|---|
 | `AoudaHostedService` | `src/Aouda.Server/Startup/AoudaHostedService.cs` | Single-engine mode (pre-P6); opens one engine at startup |
 | `DatabaseManager` | `src/Aouda.Engine.Api/DatabaseManager.cs` | Multi-database orchestrator; lock-free engine lookup, serialized lifecycle |
+| `PendingOpsWorker` | `src/Aouda.Engine.Api/Jobs/PendingOpsWorker.cs` | Channel-based persistent job queue; dispatches to `IPendingJobHandler`; startup crash recovery; exponential-backoff retry |
+| `DropDatabaseJobHandler` | `src/Aouda.Engine.Api/Jobs/DropDatabaseJobHandler.cs` | First `IPendingJobHandler`; three-phase drop (engine dispose → directory delete → registry complete) |
+| `PendingJobStore` | `src/Aouda.Engine.Storage/Jobs/PendingJobStore.cs` | JSON persistence for `PendingJobRecord`s; atomic write; survives crashes |
 | `DatabaseRegistry` | `src/Aouda.Engine.Storage/Registry/DatabaseRegistry.cs` | In-memory registry state with read-lock |
 | `DatabaseRegistryStore` | `src/Aouda.Engine.Storage/Registry/DatabaseRegistryStore.cs` | Serializes registry to/from `databases.json` with atomic writes |
 | `ServerMemoryBudgetManager` | `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs` | Coordinates per-engine budgets; exposes `GetServerUsage()` |
@@ -377,7 +387,41 @@ POST /api/databases
 **Observability:** `Perf.DatabasesCreated` counter incremented; structured log at `Information`.
 **Tests:** `tests/Aouda.Engine.Api.Tests/DatabaseManagerTests.cs`, `tests/Aouda.Server.Tests/DatabasesIntegrationTests.cs`.
 
-### Walk-through 2: Database-scoped query routing
+### Walk-through 2: Database drop
+
+```
+DELETE /api/databases/{db}
+  → middleware chain (protocol, correlation, rate limit, timeout)
+  → DatabasesController.DropDatabase(db, ct)
+      → DatabaseManager.DropDatabaseAsync(db)
+          → _lifecycleLock.WaitAsync()        // serialize create/drop
+          → verify engine is in Active state  // → 404 if not found, 204 idempotent if already Dropping
+          → remove engine from _engines[db]   // no more queries routed to this engine
+          → unregister from _serverBudgetManager
+          → collect branch engines (snapshots, replicas)
+          → DatabaseRegistry.MarkForDropAsync(db)  // persist Dropping state (atomic write)
+          → _lifecycleLock.Release()          // ← lock released here; 204 about to return
+          → PendingOpsWorker.EnqueueAsync(    // persisted to pending_jobs.json BEFORE return
+              "DropDatabase",
+              '{"name":"<db>"}',
+              inMemoryContext: (engine, branchEngines))
+      → return 204 No Content
+  → background: PendingOpsWorker dequeues + dispatches to DropDatabaseJobHandler
+      Phase 1 (if inMemoryContext not null):  engine.DropDisposeAsync()
+                                               // skips HRA snapshot; WAL/data discarded
+                                               // branch engines also disposed
+      Phase 2 (retry loop):  Directory.Delete(recursive) — 1s→2s→…→30s cap
+      Phase 3 (retry loop):  DatabaseRegistry.CompleteDropAsync(db)
+                                               // removes Dropping entry; atomic write
+```
+
+**State mutations:** engine removed from routing immediately (foreground); directory and registry entry removed later (background).  
+**Crash safety:** `pending_jobs.json` is written atomically before `204` is returned. On restart, `PendingOpsWorker.StartAsync` loads `Running`/`Interrupted` jobs and re-executes them; phase 1 (engine dispose) is skipped on the recovery path since the engine is no longer in memory.  
+**Idempotency:** Re-issuing `DELETE` while a drop is in progress returns `204` (idempotent, no second job enqueued).  
+**Observability:** `Perf.DatabasesDropped` counter; structured log at `Information` per phase; `Error`-level log if retry eventually fails.  
+**Tests:** `tests/Aouda.Engine.Api.Tests/DatabaseManagerTests.cs` (BL-127 ACs 1–14); `tests/Aouda.Engine.Api.Tests/Jobs/PendingOpsWorkerTests.cs` (BL-129 ACs S2-1–S2-8).
+
+### Walk-through 3: Database-scoped query routing
 
 ```
 POST /api/databases/{db}/query
@@ -397,7 +441,7 @@ POST /api/databases/{db}/query
 **Observability:** `DatabaseMetricsTracker.RecordQuery(db, ms, rowsReturned)` called; `Perf.QueryTotal` incremented; `aouda.query` OTel span.
 **Tests:** `tests/Aouda.Server.Tests/MultiDatabaseIntegrationTests.cs`, `tests/Aouda.Server.Tests/QueryIntegrationTests.cs`.
 
-### Walk-through 3: Graceful shutdown
+### Walk-through 4: Graceful shutdown
 
 ```
 POST /api/server/shutdown  (must originate from loopback)

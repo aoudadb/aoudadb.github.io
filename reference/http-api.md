@@ -540,7 +540,41 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 
 ---
 
-### Query Endpoint
+#### `DELETE /api/databases/{db}`
+
+Drops a database. Returns `204 No Content` immediately after the foreground switch.
+
+**How it works (async, crash-safe):**
+
+The endpoint performs a fast foreground switch, then returns `204`. All cleanup happens in the background via the persistent job queue:
+
+1. **Foreground (synchronous, completes before 204):**
+   - Verifies the database is in `Active` state (→ `404` if not found).
+   - Removes the engine from query routing.
+   - Persists `Dropping` state in `databases.json` (atomic write).
+   - Writes a `DropDatabase` job record to `pending_jobs.json` (atomic write, crash-safe).
+   - Returns `204 No Content`.
+
+2. **Background (asynchronous, via `PendingOpsWorker` + `DropDatabaseJobHandler`):**
+   - Phase 1: Engine `DropDisposeAsync` — drains WAL, disposes engine and branch engines; skips HRA snapshot (data is discarded, not persisted).
+   - Phase 2: Directory delete — `Directory.Delete(path, recursive)` with exponential-backoff retry (1 s → 2 s → … → 30 s cap).
+   - Phase 3: Registry completion — removes the database from `databases.json` entirely.
+
+**Crash safety:** the job record in `pending_jobs.json` is written before `204` is returned. On any restart, `PendingOpsWorker.StartAsync` loads all `Running`/`Interrupted` jobs and re-executes them. On the recovery path, engine dispose (Phase 1) is skipped because the engine is no longer in memory; the worker proceeds directly to directory delete and registry completion.
+
+**Idempotency:** Re-issuing `DELETE` while a drop is already in progress returns `204` without enqueuing a second job.
+
+**Error responses:**
+
+| Status | Code | Condition |
+|--------|------|-----------|
+| `404` | `DATABASE_NOT_FOUND` | Database does not exist or is already dropped |
+| `401` | `UNAUTHORIZED` | Missing or invalid credentials |
+| `403` | `FORBIDDEN` | Caller lacks permission to drop databases |
+
+---
+
+
 
 #### `POST /api/databases/{db}/query`
 
