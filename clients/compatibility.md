@@ -29,7 +29,8 @@ Update this table when shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
-| Current dev | `1` | `≥ 0.0.1` (`0.0.3`+ LNA; `0.1.0`+ P17 database catalog) | `≥ 0.1.0` | `≥ 0.0.2` | P17: internal DB filtering + catalog metadata — Studio `0.0.2` pins `@aouda/client` `0.1.0`. Hosted Studio → localhost needs client `≥ 0.0.3`. |
+| `0.1.3` | `1` | `≥ 0.1.6` (BL-126 `columnsAltered`; residency filter fields still HTTP-raw) | `≥ 0.1.3` | `≥ 0.0.13` | Patch train: BL-091 residency HTTP, BL-126 autoIncrement toggle, async durable DB drop, partition routing, freeze/abort correctness. |
+| `0.1.2` / earlier | `1` | `≥ 0.0.1` (`0.0.3`+ LNA; `0.1.0`+ P17 database catalog) | `≥ 0.1.0` | `≥ 0.0.2` | P17: internal DB filtering + catalog metadata — Studio `0.0.2` pins `@aouda/client` `0.1.0`. Hosted Studio → localhost needs client `≥ 0.0.3`. |
 
 ### Reading the matrix
 
