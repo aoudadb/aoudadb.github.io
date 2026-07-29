@@ -147,6 +147,7 @@ If you do not configure schema management explicitly:
   - query-time defaults for missing historical values,
   - cold-page aligned backfill support for new columns.
 - Branch lifecycle with schema diff/merge and copy-on-write segment sharing (server-side branch endpoints and engine support).
+- **`autoIncrement` toggle on existing columns** — the `UpdateColumnAutoIncrement` change type enables toggling `autoIncrement` on or off for any existing integer-type column via the declarative schema apply path or the Studio "Toggle AutoId" action. The counter recovers from the column's MAX existing value on first insert after enabling. Available via `POST /schema/apply`, Studio UI, and (Studio-internal) schema export→patch→apply pattern. Tracked in BL-126.
 
 ### Planned / proposed
 
@@ -185,6 +186,7 @@ If you do not configure schema management explicitly:
 | C# client declarative wrappers | Yes | No | No | `ISchemaOperations.cs`, `SchemaOperations.cs` | Diff/apply/export/history available |
 | Add-column no-rewrite semantics | Yes | No | No | ADR 0018, P7 fix2 report | Query-time defaults and alignment |
 | Cold aligned backfill on add-column | Yes | No | No | P7 fix2 report, storage tests | Prevents cross-column alignment bugs |
+| autoIncrement toggle on existing columns (`UpdateColumnAutoIncrement`) | Yes | No | No | BL-126, `AutoIncrementService.cs`, `SchemaDiffEngine.cs` | Integer columns only; counter resets from MAX on first insert after enable |
 | Server seed endpoint | Yes | No | No | `SchemaController.cs` | Endpoint exists |
 | .NET CLI seed command | No | Yes | No | `Program.cs` + `RunSeedStub` | Stubbed, intentionally not wired |
 | Branch create/list/get/delete/diff/merge APIs | Yes | No | No | `BranchController.cs`, F.2/F.3 reports | Includes conflict handling |
@@ -727,6 +729,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `UpdatePartitionLevelSecurity` | No | The `partitionLevelSecurity` flag on the table changed. |
 | `UpdateAuthorizationOptions` | No | One or more of `authMode`, `permissionDimension`, or `rlsResolverName` changed. |
 | `UpdateSettings` | No | The database-level `settings.durability` changed. |
+| `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing column changed between desired and actual. Only produced for integer column types (`Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`). Counted in `DiffSummary.ColumnsAltered`. |
 | `DropColumn` | **Yes** | A column exists in actual but not in desired. Skipped unless `AllowDestructive = true`. |
 | `DropTable` | **Yes** | A table exists in actual but not in desired. Skipped unless `AllowDestructive = true`. |
 
@@ -740,11 +743,12 @@ Operations that produce warnings (not changes):
 |---|---|---|
 | Column `type` | `"Column type change from '...' to '...' is not supported."` | Drop column, re-create with new type. |
 | Column `primaryKey` | `"Primary key change ... is not supported."` | Drop table, re-create. |
-| Column `autoIncrement` | `"AutoIncrement change ... is not supported."` | Drop column, re-create. |
 | Column `nullable` | `"Nullable change ... is not supported."` | Drop column, re-create. |
 | Column `references` | `"References change ... is not supported."` | Drop column, re-create. |
 | Table `partitionKey` | `"Partition key change on table '...' is not supported."` | Drop table, re-create. |
 | Table `clusterColumns` | `"Cluster columns change on table '...' is not supported."` | Drop table, re-create. |
+
+> **Note:** Changing `autoIncrement` on an existing integer column is **no longer a warning** — it now generates an `UpdateColumnAutoIncrement` change that the apply engine executes directly. Non-integer columns (`String`, `Double`, etc.) with `autoIncrement: true` in the desired schema will still produce a warning because the server rejects non-integer auto-increment columns.
 
 Always inspect `SchemaDiffResult.Warnings` after a diff, especially before significant schema migrations. Warnings indicate intent/reality gaps that the apply pass will silently skip.
 
@@ -775,6 +779,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `TablesDropped` | Count of `DropTable` changes |
 | `ColumnsAdded` | Count of `AddColumn` changes |
 | `ColumnsDropped` | Count of `DropColumn` changes |
+| `ColumnsAltered` | Count of `UpdateColumnAutoIncrement` changes (and future column-level alteration types). Optional — `0` on servers that do not yet support this field. |
 | `PoliciesUpdated` | Count of `UpdatePolicy` changes |
 | `DurabilitiesUpdated` | Count of `UpdateDurability` changes |
 | `OptionsUpdated` | Count of `UpdatePartitionLevelSecurity` + `UpdateAuthorizationOptions` changes |
@@ -954,6 +959,53 @@ Expected result:
 Expected result:
 - No accidental data-loss during mixed-version deployments.
 
+### Scenario 5: Enable autoIncrement on an existing integer column
+
+**Context:** You have a `customers` table where `id` was inserted manually. You want the server to manage auto-increment from now on without dropping and re-creating the column.
+
+**Constraint:** Only integer types (`Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`) may have `autoIncrement: true`. The server enforces this; the Studio UI additionally hides the toggle for non-integer columns.
+
+**Via schema file:**
+
+1. In your `aouda.schema.json`, change the column from:
+   ```json
+   "id": { "type": "Int64", "primaryKey": 1 }
+   ```
+   to:
+   ```json
+   "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }
+   ```
+2. Diff to verify the plan:
+   ```bash
+   dotnet aouda schema diff --server http://localhost:5433 --database commerce
+   # Output: 1 column altered (UpdateColumnAutoIncrement: customers.id)
+   ```
+3. Apply (no `--allow-destructive` needed — this change is safe):
+   ```bash
+   dotnet aouda schema apply --server http://localhost:5433 --database commerce
+   ```
+
+**Via Studio UI:**
+
+1. Open the table schema view for `customers`.
+2. In the **Columns** table, click the `⋮` (actions menu) on the `id` row.
+3. Click **Toggle AutoId**. The dialog shows the direction: "Manual → Auto".
+4. Read the warning: "The counter will recover from the MAX existing value in this column on first insert."
+5. Click **Apply**.
+
+**Counter recovery behavior:**
+
+The auto-increment counter does **not** start at 1. On first server-managed insert after enabling, `AutoIncrementService` reads the MAX existing value in the column and resumes from `MAX + 1`. This means existing manually-inserted IDs are never overwritten.
+
+**Disabling autoIncrement:**
+
+Set `autoIncrement: false` in the schema file and apply, or use the Studio toggle (direction will show "Auto → Manual"). After disabling, inserts must supply an explicit value for the column.
+
+Expected result:
+- `DiffSummary.ColumnsAltered === 1` in the apply response.
+- Future inserts without an explicit `id` value use the server-managed counter.
+- The `isAutoIncrement` badge appears on the column in Studio.
+
 ### Scenario 4: Branch-based schema experiment
 
 1. Create branch in database.
@@ -1006,6 +1058,7 @@ Expected result:
 | Destructive guard defaults to opt-in behavior | Code | `SchemaApplyEngine.cs`, `SchemaCommandHandler.cs` |
 | Add-column no-rewrite + alignment behavior is implemented | ADR + report + tests | ADR 0018, `BL025-Fix2-AddColumnColdBackfill-Report.md`, `ColdColumnBackfillTests.cs` |
 | Branch schema lifecycle and COW sharing are implemented | Task reports + tests | F.2/F.3/F.4 reports, branch test suites |
+| `UpdateColumnAutoIncrement` toggle is a first-class schema change | Code + tests | `AutoIncrementService.cs`, `SchemaDiffEngine.cs`, `SchemaDiffEngineTests.cs`, `AutoIncrementServiceTests.cs`, BL-126 |
 
 ---
 
@@ -1013,8 +1066,9 @@ Expected result:
 
 | Area | Tests | Coverage depth |
 |---|---|---|
-| Schema diff engine | `SchemaDiffEngineTests.cs` | change classification, summary, comparison behavior |
+| Schema diff engine | `SchemaDiffEngineTests.cs` | change classification, summary, comparison behavior, `UpdateColumnAutoIncrement` detection |
 | Schema apply engine | `SchemaApplyEngineTests.cs` | destructive handling, dry-run, execution outcomes |
+| AutoIncrement toggle | `AutoIncrementServiceTests.cs` | counter invalidation on toggle, integer-type enforcement |
 | Schema REST endpoints | `SchemaControllerIntegrationTests.cs` | 200/400/404 paths, apply/history behavior |
 | C# schema API client | `SchemaApiTests.cs` | endpoint path mapping and response contracts |
 | CLI schema command handling | `SchemaCommandHandlerTests.cs` | command behavior, exit semantics, output modes |
@@ -1039,6 +1093,9 @@ Expected result:
 - .NET CLI `schema seed` remains stubbed while server `schema/seed` endpoint exists.
 - C# high-level schema interface does not yet include seed and branch convenience wrappers.
 - Some phase planning documents still contain stale "in progress" language despite completed reports; this document follows code/tests and completion reports as authority.
+- WAL record for `UpdateColumnAutoIncrement` is not yet written (deferred from BL-126); the toggle is durable through the catalog but not replayed from WAL on recovery.
+- IDENTITY seed configuration (starting value for the auto-increment counter) is not yet exposed; the counter always starts from `MAX(column) + 1` on first use.
+- The TypeScript `SchemaChange.type` field is `string`, not a typed union; a union type for known change types is a separate polish task.
 
 ---
 

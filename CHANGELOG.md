@@ -208,3 +208,50 @@ Aouda is now distributable to first-time users with zero CLI knowledge:
 | Studio | `0.0.2` |
 
 📄 *See also:* `aouda/docs/tasks/P17/P17-Auth-Database-Catalog-And-Studio-Routing.md`, [HTTP API § Database Catalog](reference/http-api.md), [SDK compatibility](clients/compatibility.md)
+
+---
+
+## ✅ BL-126 + BL-126b — autoIncrement Toggle (Completed)
+
+**Date:** 2026-07-29  
+**Scope:** First-class support for toggling `autoIncrement` on and off for existing integer columns, surfaced through the engine, server, TypeScript client SDK, and Studio UI.
+
+### Server / Engine (BL-126)
+
+- New `SchemaChangeType.UpdateColumnAutoIncrement` — the diff engine now produces a proper change (not a warning) when the desired schema sets `autoIncrement: true/false` on an existing integer column.
+- `AutoIncrementService.InvalidateCounter` — the apply engine calls this after each toggle; on the next server-managed insert, the counter recovers from `MAX(column) + 1` instead of starting at 1.
+- Only integer types (`Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`) are eligible. The diff engine produces a warning for non-integer types rather than a change.
+- `DiffSummary.ColumnsAltered` — new field counting `UpdateColumnAutoIncrement` (and future column-level alterations). Optional; older server responses omit it.
+- `CatalogApi.SetColumnAutoIncrementAsync` — new catalog-level API wired into the apply engine.
+- **Breaking (docs only):** the warning `"AutoIncrement change ... is not supported."` no longer appears for integer columns. Non-integer column autoIncrement changes still warn.
+
+### `@aouda/client` `0.1.6` (BL-126b)
+
+- `DiffSummary.columnsAltered?: number` — new optional field on the TypeScript `DiffSummary` interface. Undefined when the server does not return it (backward-compatible).
+- `SchemaChange.type` remains `string` — the value `"UpdateColumnAutoIncrement"` passes through automatically; no breaking change.
+
+### Studio `0.0.13` (BL-126b)
+
+- **Toggle AutoId action** — "Toggle AutoId" appears in the column actions menu for integer-type columns. Clicking it opens the Toggle AutoId dialog.
+- **Toggle AutoId dialog** — shows direction (Manual → Auto or Auto → Manual), table and column names, and a warning about counter recovery on the Manual → Auto path.
+- **Schema Diff View improvements** — `UpdateColumnAutoIncrement` changes render in blue with the label "Toggle auto-increment" (not the raw type string); summary line includes `N column(s) altered` when `columnsAltered > 0`.
+- `@aouda/client` dependency bumped from `0.1.5` to `0.1.6`.
+
+### Counter recovery detail
+
+When you enable autoIncrement on a column that already contains data, the engine sets the counter to `MAX(existing values) + 1` on first use. This prevents conflicts with existing manually-inserted IDs. If the table is empty, the counter starts at 1.
+
+### Known limitations (deferred)
+
+- WAL record for `UpdateColumnAutoIncrement` is not written — the toggle is durable through the catalog but not replayed from WAL on crash recovery. Tracked as a known gap.
+- IDENTITY seed configuration (custom starting value) is not yet exposed.
+- `SchemaChange.type` is `string`, not a typed union. A union type is a separate backlog item.
+
+### Compatibility
+
+| Artifact | Minimum version |
+|----------|-----------------|
+| `@aouda/client` | `0.1.6` (for `DiffSummary.columnsAltered`) — `0.1.5` still works, field is absent |
+| Studio | `0.0.13` (for Toggle AutoId UI) |
+
+📄 *See also:* [Schema Lifecycle guide §2.11](guides/schema.md), [Studio guide §5.5](guides/studio.md), [TypeScript client §8](clients/typescript.md), `aouda/docs/tasks/BL/BL-126-AutoIncrement-Toggle.md`, `aouda/docs/tasks/BL/BL-126b-AutoIncrement-Toggle-Client-And-Studio.md`

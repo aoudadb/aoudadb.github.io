@@ -397,6 +397,134 @@ await client.tables.dropColumn('users', 'phoneNumber');
 await client.tables.deleteTable('users');
 ```
 
+### Declarative Schema Operations
+
+`client.schema` provides the full diff / apply / export / history surface for declarative schema management:
+
+```typescript
+// Export the current live schema as a plain JSON document
+const exported: Record<string, unknown> = await client.schema.export();
+
+// Compute a diff between the live catalog and a desired schema document
+const diff = await client.schema.diff(desiredSchemaDoc);
+// diff.changes: SchemaChange[]
+// diff.summary: DiffSummary
+// diff.warnings: SchemaChangeWarning[]  ← unsupported modifications (type changes, PK changes, etc.)
+
+// Apply a desired schema document (returns apply result + optional historyId)
+const result = await client.schema.apply(desiredSchemaDoc);
+// result.result.summary.applied, .skipped, .failed
+// result.historyId
+
+// Apply with options
+const result = await client.schema.apply(desiredSchemaDoc, {
+  allowDestructive: true,  // allow DropColumn / DropTable
+  dryRun: true,            // plan only, do not execute
+});
+
+// Schema history (newest first)
+const history = await client.schema.history({ limit: 20, offset: 0 });
+```
+
+#### `DiffSummary` — shape and field reference
+
+`DiffSummary` is returned inside `SchemaDiffResult.summary`:
+
+```typescript
+interface DiffSummary {
+  totalChanges: number;          // safeChanges + destructiveChanges
+  safeChanges: number;           // non-destructive changes
+  destructiveChanges: number;    // DropColumn + DropTable
+  tablesCreated: number;         // CreateTable count
+  tablesDropped: number;         // DropTable count
+  columnsAdded: number;          // AddColumn count
+  columnsDropped: number;        // DropColumn count
+  columnsAltered?: number;       // UpdateColumnAutoIncrement count (optional — undefined on older servers)
+  policiesUpdated: number;       // UpdatePolicy count
+  durabilitiesUpdated: number;   // UpdateDurability count
+  settingsUpdated: number;       // UpdateSettings count
+}
+```
+
+`columnsAltered` is optional because older servers do not return it. Always guard with `?? 0` when displaying counts:
+
+```typescript
+const altered = diff.summary.columnsAltered ?? 0;
+if (altered > 0) {
+  console.log(`${altered} column(s) altered`);
+}
+```
+
+#### `SchemaChange` — shape
+
+Each entry in `diff.changes` is a `SchemaChange`:
+
+```typescript
+interface SchemaChange {
+  type: string;             // e.g. "AddColumn", "DropColumn", "UpdateColumnAutoIncrement"
+  tableName?: string | null;
+  columnName?: string | null;
+  isDestructive: boolean;
+  details: string;          // human-readable description
+  before?: unknown;         // previous value (where applicable)
+  after?: unknown;          // new value (where applicable)
+}
+```
+
+Known `type` values: `AddColumn`, `DropColumn`, `CreateTable`, `DropTable`, `UpdatePolicy`, `UpdateDurability`, `UpdatePartitionLevelSecurity`, `UpdateAuthorizationOptions`, `UpdateSettings`, `UpdateColumnAutoIncrement`. The field is `string` (not a union) — forward-compatibility is guaranteed.
+
+#### `SchemaChangeWarning` — unsupported modifications
+
+Warnings are returned alongside changes for modifications the engine cannot execute:
+
+```typescript
+interface SchemaChangeWarning {
+  code?: string;
+  message?: string;
+}
+```
+
+Always inspect `diff.warnings` before applying. Warnings are never applied — they require manual intervention (typically drop and re-create). See [Schema Lifecycle guide §2.11](../guides/schema.md) for the full warning reference.
+
+#### Enabling / disabling autoIncrement on an existing column
+
+The recommended pattern is export → patch → apply:
+
+```typescript
+// Get the current live schema
+const exported = await client.schema.export();
+
+// Locate the column and flip its autoIncrement flag
+const tables = exported['tables'] as Record<string, unknown>;
+const table = tables['orders'] as Record<string, unknown>;
+const columns = table['columns'] as Array<Record<string, unknown>>;
+
+const patched = {
+  ...exported,
+  tables: {
+    ...tables,
+    orders: {
+      ...table,
+      columns: columns.map(col =>
+        col['name'] === 'id'
+          ? { ...col, autoIncrement: true }   // or false to disable
+          : col
+      ),
+    },
+  },
+};
+
+// Apply — no allowDestructive needed (this is a safe change)
+const result = await client.schema.apply(patched);
+console.log('ColumnsAltered:', result.result.summary);
+```
+
+**Column eligibility:** only integer types (`Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`). The server rejects the change for other types. The diff engine produces `UpdateColumnAutoIncrement` changes only for eligible types.
+
+**Counter recovery:** when you enable auto-increment on a column that already has data, the server counter initializes to `MAX(existing values) + 1` on first use. Existing values are not overwritten.
+
+**Schema document field name:** the JSON field inside a column entry is `autoIncrement` (not `isAutoIncrement`). The TypeScript `ColumnSchema.isAutoIncrement` is the read-side field name returned by the table schema endpoint; the schema document uses `autoIncrement` for apply/export. This is a known naming asymmetry.
+
 ### Type Generation CLI
 
 ```bash
@@ -715,3 +843,4 @@ const columnar = await client.table('events')
 | P16 H.5 | Schema seed CLI | `npx @aouda/client schema seed` |
 | P16 H.6 | Admin API coverage (cluster, backup, config, node) | `client.admin.cluster.*`, `client.admin.backup.*`, etc. |
 | P16 G.1–G.4 | MCP cluster tools + docs | `createAoudaClusterMcpToolSet()` |
+| BL-126b (0.1.6) | `DiffSummary.columnsAltered` field; `UpdateColumnAutoIncrement` schema change type surfaced in diffs | `diff.summary.columnsAltered` |

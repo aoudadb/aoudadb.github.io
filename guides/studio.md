@@ -36,6 +36,8 @@ Aouda Studio is the web management console for Aouda. It provides:
 | Run join or aggregate queries | §4 Query Worksheet |
 | Manage cluster nodes | §6 Cluster Management |
 | View backups and restore | §7 Backup Management |
+| Manage table schemas and columns | §5.5 Schema Management |
+| Toggle auto-increment on a column | §5.5 Toggle AutoId |
 | Manage branches | §5 Branches |
 | Connect Studio to servers | §9 Hub Integration |
 | Deploy Studio (self-hosted / Docker) | §11 Deployment |
@@ -161,6 +163,133 @@ Full branch management interface:
 | Merge | Merge dialog with conflict indication |
 | Branch-scoped query | Select branch context, then use data explorer normally |
 | Branch-scoped insert | Insert data on a specific branch |
+
+---
+
+## 5.5) Schema Management
+
+Studio's schema management surface lets you inspect and evolve table schemas entirely from the browser — no CLI or schema file required.
+
+### Accessing the Schema View
+
+Navigate to a table, then open the **Schema** tab. The schema view has three panels:
+
+1. **Columns table** — all columns with type, nullability, key role, reference, and auto-increment status.
+2. **Storage Policy** — per-table temperature policy (`Auto`, `HotOnly`, `ColdPreferred`).
+3. **Auth Options** — authorization mode, partition-level security flag.
+
+### The Columns Table
+
+Each row in the columns table shows:
+
+| Column | Description |
+|--------|-------------|
+| **Name** | Column name |
+| **Type** | Aouda data type (e.g. `Int64`, `String`, `Timestamp`) |
+| **Nullable** | Yes / No |
+| **Key** | `PK (1)` for primary key with ordinal, `Partition`, `Cluster`, or `—` |
+| **Reference** | Foreign key target in `→ table.column` format, or `—` |
+| **Auto-increment** | `Yes` badge when `isAutoIncrement = true`, otherwise `—` |
+| **Actions** | Per-row menu (see below) — shown only when the schema view is editable |
+
+### Column Actions Menu
+
+Click the `⋮` icon on any column row to open the actions dropdown. Available actions depend on the column:
+
+| Action | Availability | What it does |
+|--------|-------------|--------------|
+| **Rename** | All columns | Opens a dialog to enter a new column name and apply it via the schema engine |
+| **Toggle AutoId** | Integer columns only (`Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`) | Toggles `autoIncrement` on or off — see below |
+| **Delete** | All columns | Opens a confirmation dialog and drops the column (destructive — cannot be undone) |
+
+### Toggle AutoId — Enabling or Disabling Auto-Increment
+
+The **Toggle AutoId** action changes the `autoIncrement` flag on an existing integer column. This avoids the "drop column and re-create" pattern that was previously required.
+
+**How it works internally:**
+
+Studio uses the schema export → patch → apply pattern:
+1. Exports the full current schema document.
+2. Flips `autoIncrement: true/false` on the target column in the document.
+3. Calls `POST /api/databases/{db}/schema/apply` with the patched document (no `allowDestructive` flag — this change is never destructive).
+
+**The Toggle AutoId dialog:**
+
+When you click **Toggle AutoId**, a confirmation dialog opens showing:
+
+- The target column and table names.
+- The direction of the change:
+  - **Manual → Auto** — the server will manage future inserts for this column.
+  - **Auto → Manual** — you must supply explicit values for this column going forward.
+- A yellow warning note when enabling auto-increment: _"The counter will recover from the MAX existing value in this column on first insert."_ This means the counter does not start at 1 — it starts at `MAX(existing values) + 1`, so manually-inserted IDs are never overwritten.
+
+Click **Apply** to confirm, or **Cancel** to close without any change.
+
+**After a successful toggle:**
+
+- The **Auto-increment** column in the columns table updates immediately (the `Yes` badge appears or disappears).
+- Studio invalidates and refetches the schema from the server so the displayed state is always current.
+
+**Errors:**
+
+If the apply fails (e.g. the server rejects a non-integer column, or the server has `WRITE_NOT_ALLOWED`), the error message appears inside the dialog. The dialog stays open so you can read the error and decide how to proceed. Your schema is never left in a partial or corrupted state — the apply is atomic.
+
+**What columns are eligible?**
+
+Only columns whose type is one of: `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`. The "Toggle AutoId" menu item does not appear for `String`, `Double`, `Timestamp`, `Decimal`, `Guid`, or any other non-integer type. The server enforces the same constraint as an additional guard.
+
+### Adding a Column
+
+Click **Add column** above the columns table to open the Add Column dialog. Fill in:
+- Column name
+- Type (dropdown)
+- Nullable flag
+- Optional: primary key order, auto-increment, references
+
+### Renaming a Column
+
+Click `⋮` → **Rename** on the column row. Enter the new name and click Rename. The server applies the rename via the catalog.
+
+### Deleting a Column
+
+Click `⋮` → **Delete** on the column row. Confirm by typing the column name in the confirmation dialog. **This operation is permanent and cannot be undone.** All data in that column is lost.
+
+### Table-Level Actions
+
+Above the columns table, three table-level action buttons are available:
+
+| Button | What it does |
+|--------|-------------|
+| **Add column** | Open the Add Column dialog |
+| **Rename table** | Rename the table across the catalog |
+| **Delete table** | Drop the table and all its data (confirmation required) |
+| **Generate Types** | Generate TypeScript type definitions from the current schema |
+| **Ask AI** | Open the AI schema assistant (requires an AI API key in Studio preferences) |
+
+### Storage Policy
+
+The Storage Policy card shows the current `storageTemperature` for the table:
+
+| Value | Meaning |
+|-------|---------|
+| `Auto` | Engine decides hot vs. cold based on access recency and memory budget |
+| `HotOnly` | Segments always stay in memory |
+| `ColdPreferred` | Segments move to disk as soon as possible |
+
+Change the value in the dropdown and click **Save** to apply the policy change. This calls `POST /api/databases/{db}/tables/{table}/policy` directly (imperative DDL, not via the declarative schema apply path).
+
+### Schema Diff View (Migrations Page)
+
+When you apply a schema change from the **Migrations** tab (Settings → Schema → Migrations), Studio shows a **Schema Diff View** before applying. Each planned change is color-coded:
+
+| Color | Meaning |
+|-------|---------|
+| Green | Additive — safe change (e.g. `Add column`, `Add table`) |
+| Red | Destructive — requires `allowDestructive` opt-in (e.g. `Drop column`, `Drop table`) |
+| Blue | Alteration — safe column-level modification (e.g. `Toggle auto-increment`) |
+| Muted grey | Other safe change (e.g. `Update policy`, `Update durability`) |
+
+When the diff includes `UpdateColumnAutoIncrement` changes, the summary line shows `N column(s) altered` alongside the total change count.
 
 ---
 
