@@ -295,6 +295,7 @@ Validation and invariants:
   - `InsertMessage.WriteConcern`
   - `UpdateMessage.WriteConcern`
   - `DeleteMessage.WriteConcern`
+- Protocol insert requests also include optional `InsertMessage.IdentityInsert` (BL-130): when `true`, client-supplied autoIncrement values are stored as-is and the runtime counter floor advances after a successful insert. Bulk-load uses the same idea as job-scoped `BulkLoadOptions.IdentityInsert` (BL-131). See [HTTP API](../reference/http-api.md) and [Getting Started](../getting-started/index.md).
 - Server enforces parsed/validated values and applies timeout behavior policies.
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)

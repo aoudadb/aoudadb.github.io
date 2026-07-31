@@ -6,13 +6,13 @@ parent: "Guides"
 
 # Aouda Functionality: Schema Lifecycle and Evolution
 
-Document status: Approved baseline  
-Primary owner: Aouda maintainers  
+Document status: Approved baseline
+Primary owner: Aouda maintainers
 Last updated: 2026-05-22
 
-Coverage phases: P4, P7, P8, P14  
-Primary task folders: `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P8/`, `docs/tasks/P14/`  
-Primary ADRs: `docs/decisions/0018-alter-add-column-no-backfill.md`, `docs/decisions/0019-declarative-schema-management.md`, `docs/decisions/0025-adra-auth-db-resolved-authorization.md`  
+Coverage phases: P4, P7, P8, P14
+Primary task folders: `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P8/`, `docs/tasks/P14/`
+Primary ADRs: `docs/decisions/0018-alter-add-column-no-backfill.md`, `docs/decisions/0019-declarative-schema-management.md`, `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-RealTime-Streaming.md`
 
 ## Start Here
@@ -148,6 +148,7 @@ If you do not configure schema management explicitly:
   - cold-page aligned backfill support for new columns.
 - Branch lifecycle with schema diff/merge and copy-on-write segment sharing (server-side branch endpoints and engine support).
 - **`autoIncrement` toggle on existing columns** — the `UpdateColumnAutoIncrement` change type enables toggling `autoIncrement` on or off for any existing integer-type column via the declarative schema apply path or the Studio "Toggle AutoId" action. The counter recovers from the column's MAX existing value on first insert after enabling. Available via `POST /schema/apply`, Studio UI, and (Studio-internal) schema export→patch→apply pattern. Tracked in BL-126.
+- **Identity-insert (request-scoped / job-scoped)** — supply explicit IDs on an `autoIncrement` column **without** flipping the schema flag. Ordinary insert: `identityInsert: true` on `POST …/rows` (BL-130). Large ingest: `options.identityInsert: true` on bulk-load `:begin` (BL-131). Complementary to BL-126 (toggle = permanent Auto↔Manual; identity-insert = one request/job). See [Getting Started](../getting-started/index.md), [HTTP API](../reference/http-api.md), [Bulk Load](../guides/bulk-load.md).
 
 ### Planned / proposed
 
@@ -187,6 +188,7 @@ If you do not configure schema management explicitly:
 | Add-column no-rewrite semantics | Yes | No | No | ADR 0018, P7 fix2 report | Query-time defaults and alignment |
 | Cold aligned backfill on add-column | Yes | No | No | P7 fix2 report, storage tests | Prevents cross-column alignment bugs |
 | autoIncrement toggle on existing columns (`UpdateColumnAutoIncrement`) | Yes | No | No | BL-126, `AutoIncrementService.cs`, `SchemaDiffEngine.cs` | Integer columns only; counter resets from MAX on first insert after enable |
+| Identity-insert (ordinary insert + bulk-load) | Yes | No | No | BL-130, BL-131 — see HTTP API / Bulk Load / Getting Started | Request/job-scoped; does not flip schema `autoIncrement`; Studio UI out of scope |
 | Server seed endpoint | Yes | No | No | `SchemaController.cs` | Endpoint exists |
 | .NET CLI seed command | No | Yes | No | `Program.cs` + `RunSeedStub` | Stubbed, intentionally not wired |
 | Branch create/list/get/delete/diff/merge APIs | Yes | No | No | `BranchController.cs`, F.2/F.3 reports | Includes conflict handling |
@@ -586,7 +588,7 @@ Changes from v2:
 
 #### Environment overlays (complete)
 
-Base filename (checked in as current desired state): `aouda.schema.json`  
+Base filename (checked in as current desired state): `aouda.schema.json`
 Overlay examples:
 
 `aouda.schema.staging.json`:
@@ -1006,6 +1008,39 @@ Expected result:
 - Future inserts without an explicit `id` value use the server-managed counter.
 - The `isAutoIncrement` badge appears on the column in Studio.
 
+**When not to use the toggle:** for one-shot seed/reseed of reserved IDs while keeping the column autoIncrement, use **identity-insert** instead (`identityInsert: true` on insert or bulk-load) — see Scenario 6.
+
+### Scenario 6: Seed reserved IDs without disabling autoIncrement
+
+**Context:** `orders.id` is `autoIncrement: true`. You need to load historical rows with their original IDs (including `0`) and then continue generating new IDs above the seeded max — without flipping the column to Manual.
+
+**Ordinary insert (small batches):**
+
+```http
+POST /api/databases/commerce/tables/orders/rows
+Content-Type: application/json
+
+{
+  "database": "commerce",
+  "table": "orders",
+  "identityInsert": true,
+  "rows": [
+    { "id": 1000, "status": "seeded" },
+    { "id": 0, "status": "literal-zero" }
+  ]
+}
+```
+
+**Bulk-load (large jobs):** set `options.identityInsert: true` on `:begin` and include every autoIncrement column on every NDJSON row. The counter advances only after a successful commit.
+
+**Contrast with Scenario 5:**
+| Approach | Schema change? | Counter bump | Best for |
+|----------|----------------|--------------|----------|
+| Identity-insert (BL-130/131) | No | After successful insert/commit to `max(inserted)` | Temporary seed/reseed |
+| Toggle Auto→Manual (BL-126) | Yes | N/A (column no longer auto-generates) | Permanent manual ID ownership |
+
+**Not the same as IDENTITY seed configuration:** custom *starting* counter values (seed/increment knobs) remain unimplemented (ADR 0013 — runtime MAX only). Identity-insert supplies *row values*; it does not configure a persistent seed.
+
 ### Scenario 4: Branch-based schema experiment
 
 1. Create branch in database.
@@ -1094,7 +1129,7 @@ Expected result:
 - C# high-level schema interface does not yet include seed and branch convenience wrappers.
 - Some phase planning documents still contain stale "in progress" language despite completed reports; this document follows code/tests and completion reports as authority.
 - WAL record for `UpdateColumnAutoIncrement` is not yet written (deferred from BL-126); the toggle is durable through the catalog but not replayed from WAL on recovery.
-- IDENTITY seed configuration (starting value for the auto-increment counter) is not yet exposed; the counter always starts from `MAX(column) + 1` on first use.
+- IDENTITY seed configuration (starting value / increment knobs for the auto-increment counter) is not yet exposed; the counter always recovers from `MAX(column) + 1` on first use (ADR 0013). **Supplying explicit IDs** without a schema flip is available via identity-insert (BL-130 ordinary insert; BL-131 bulk-load) — do not confuse that with IDENTITY seed configuration.
 - The TypeScript `SchemaChange.type` field is `string`, not a typed union; a union type for known change types is a separate polish task.
 
 ---

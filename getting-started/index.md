@@ -980,6 +980,60 @@ Use both together for the common surrogate-key pattern. You can have a primary k
 
 `[AutoIncrement]` behaves identically in both embedded mode and server mode — there are no naming conventions or implicit rules in either path.
 
+### Seeding explicit IDs (identity-insert)
+
+Sometimes you need to insert **client-chosen** values into an `autoIncrement` column (reserved ranges, reseed from another system, literal `0`) **without** flipping the column to manual via schema apply (BL-126). Use request-scoped **identity-insert**:
+
+| Mode | When to use |
+|------|-------------|
+| Normal insert (`identityInsert` omitted/`false`) | Everyday writes. `0` / omitted means “please generate”. Explicit non-zero without the flag is stored but does **not** advance the counter. |
+| Identity-insert (`identityInsert: true`) | Seed / reserved IDs. Every autoIncrement column required and non-null; `0` is a real stored value; after success the counter becomes `max(inserted)`. |
+| Schema toggle (BL-126) | Permanently switch the column between Auto and Manual for all future writes. |
+| Bulk-load `options.identityInsert` (BL-131) | Same semantics as identity-insert for large P20 begin/append/commit jobs — see [Bulk Load guide](../guides/bulk-load.md). |
+
+```csharp
+// C# / Embedded — Bond equivalent: isAutoIncrementDisabled: true
+await table.InsertAsync(
+    new Dictionary<string, object?> { ["Id"] = 1000L, ["Name"] = "Seeded" },
+    identityInsert: true);
+
+// Next normal insert gets 1001
+await table.InsertAsync(new Dictionary<string, object?> { ["Id"] = 0L, ["Name"] = "Auto" });
+```
+
+```typescript
+await client.table("orders").insert(
+  { id: 1000, status: "seeded" },
+  { identityInsert: true }
+);
+
+await client.table("orders").insertMany(
+  [
+    { id: 0, status: "literal-zero" },
+    { id: 500, status: "reserved" },
+  ],
+  { identityInsert: true }
+);
+// Next auto-generated id is max(0, 500) + 1 = 501
+```
+
+```http
+POST /api/databases/mydb/tables/orders/rows
+Content-Type: application/json
+
+{
+  "database": "mydb",
+  "table": "orders",
+  "identityInsert": true,
+  "rows": [{ "id": 1000, "status": "seeded" }]
+}
+```
+
+Rules of thumb:
+- Prefer identity-insert over temporarily disabling `autoIncrement` for one-shot seeds.
+- Prefer [bulk-load identity-insert](../guides/bulk-load.md) when the seed is large enough for the P20 protocol.
+- Studio does not expose an identity-insert UI — use the API/SDK (BL-130/131 Non-Scope).
+
 ### Explicit Schema Definition
 
 For production use, you often want explicit control over data types, primary keys, partition keys, and auto-increment:
@@ -1991,6 +2045,8 @@ sudo ./scripts/install-aouda.sh \
 | Get table | `db.GetTable("t")` | `client.GetTable("t")` | `client.table("t")` |
 | Insert dict | `.InsertAsync(dict)` | `.InsertAsync(dict)` | `.insert({...})` |
 | Insert typed | `.InsertAsync(obj)` | `.InsertAsync(obj)` | `.insert({...})` |
+| Identity-insert | `.InsertAsync(..., identityInsert: true)` | `.InsertAsync(..., identityInsert: true)` | `.insert(row, { identityInsert: true })` |
+| Bulk-load identity-insert | `BulkLoadOptions { IdentityInsert = true }` | same | `.bulkLoad(rows, { identityInsert: true })` |
 | Query | `.Where(...).ToListAsync()` | `.Where(...).ToListAsync()` | `.where(...).execute()` |
 | List tables | `db.Schema.ListTablesAsync()` | `client.Schema.ListTablesAsync()` | `client.tables.list()` |
 | Dispose | `await db.DisposeAsync()` | `await client.DisposeAsync()` | `await client.disconnect()` |

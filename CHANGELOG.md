@@ -5,17 +5,17 @@ nav_order: 9
 
 # Aouda Changelog
 
-This changelog follows the **P-series roadmap (P0–P4)** and records major architectural and feature-level progress.  
+This changelog follows the **P-series roadmap (P0–P4)** and records major architectural and feature-level progress.
 It is intended for internal developers to track system evolution and understand where each subsystem was introduced.
 
-Each phase corresponds to a major functional checkpoint.  
+Each phase corresponds to a major functional checkpoint.
 Minor patch releases and experimental branches are recorded inline under their respective phases.
 
 ---
 
 ## ✅ P0 — Core Bootstrap (Completed)
 
-**Date:** 2025-Q1  
+**Date:** 2025-Q1
 **Scope:** Engine foundations, encoding, and columnar persistence.
 
 ### Highlights
@@ -40,7 +40,7 @@ Aouda became capable of ingesting, encoding, and reading columnar pages fully in
 
 ## ✅ P1 — Durability & Recovery (Completed)
 
-**Date:** 2025-Q3  
+**Date:** 2025-Q3
 **Scope:** Write-ahead logging, hybrid row buffering, compaction, and crash recovery.
 
 ### Highlights
@@ -61,7 +61,7 @@ Aouda now provides full **durable write semantics** — all data survives proces
 
 ## 🧩 P2 — Query Layer & Transactions (In Progress)
 
-**Date:** Planned 2025-Q4  
+**Date:** Planned 2025-Q4
 **Scope:** Predicate engine, indexing, and atomic mini-transaction model.
 
 ### Planned Additions
@@ -77,7 +77,7 @@ Aouda now provides full **durable write semantics** — all data survives proces
 
 ## 🧩 P3 — Performance & IO Optimization (Planned)
 
-**Date:** 2026-Q1  
+**Date:** 2026-Q1
 **Scope:** Async I/O, adaptive compaction, caching, and performance profiling.
 
 ### Planned Additions
@@ -90,7 +90,7 @@ Aouda now provides full **durable write semantics** — all data survives proces
 
 ## 🧩 P4 — Integration & Distributed Extensions (Planned)
 
-**Date:** 2026-Q2  
+**Date:** 2026-Q2
 **Scope:** API surface, replication, and distributed query capabilities.
 
 ### Planned Additions
@@ -126,7 +126,7 @@ Aouda now provides full **durable write semantics** — all data survives proces
 
 ## Summary
 
-The changelog now aligns 1:1 with the roadmap and architecture documents.  
+The changelog now aligns 1:1 with the roadmap and architecture documents.
 Each future P-phase will append a self-contained section following this structure, ensuring consistency between documentation and implementation.
 
 Aouda’s codebase is now mature, modular, and internally consistent — forming the foundation for higher-level analytical and transactional functionality in P2 and beyond.
@@ -144,7 +144,7 @@ Aouda’s codebase is now mature, modular, and internally consistent — forming
 
 ## ✅ P34 — Studio Distribution and Server Access (Completed)
 
-**Date:** 2026-06-23  
+**Date:** 2026-06-23
 **Scope:** First-user distribution milestone — publicly hosted Studio, runtime server connection, interactive installer.
 
 ### Highlights
@@ -178,7 +178,7 @@ Aouda is now distributable to first-time users with zero CLI knowledge:
 
 ## ✅ P17 — Internal Database Catalog & Studio Routing (Completed)
 
-**Date:** 2026-06-26  
+**Date:** 2026-06-26
 **Scope:** Hide internal infrastructure databases from the default catalog; fix Studio server-auth routing after fresh install.
 
 ### Server
@@ -213,7 +213,7 @@ Aouda is now distributable to first-time users with zero CLI knowledge:
 
 ## ✅ BL-126 + BL-126b — autoIncrement Toggle (Completed)
 
-**Date:** 2026-07-29  
+**Date:** 2026-07-29
 **Scope:** First-class support for toggling `autoIncrement` on and off for existing integer columns, surfaced through the engine, server, TypeScript client SDK, and Studio UI.
 
 ### Server / Engine (BL-126)
@@ -255,3 +255,49 @@ When you enable autoIncrement on a column that already contains data, the engine
 | Studio | `0.0.13` (for Toggle AutoId UI) |
 
 📄 *See also:* [Schema Lifecycle guide §2.11](guides/schema.md), [Studio guide §5.5](guides/studio.md), [TypeScript client §8](clients/typescript.md), `aouda/docs/tasks/BL/BL-126-AutoIncrement-Toggle.md`, `aouda/docs/tasks/BL/BL-126b-AutoIncrement-Toggle-Client-And-Studio.md`
+
+---
+
+## ✅ BL-130 + BL-131 — Identity-insert (Completed)
+
+**Date:** 2026-07-30 / 2026-07-31
+**Scope:** Request-scoped (ordinary insert) and job-scoped (P20 bulk-load) identity-insert so clients can supply explicit values on `autoIncrement` columns — including literal `0` — without flipping catalog `autoIncrement` (BL-126). After a successful insert or bulk-load commit, the runtime counter advances to `max(inserted)` via `EnsureMinimumValue`. Equivalent to Bond `isAutoIncrementDisabled: true`.
+
+### Ordinary insert (BL-130)
+
+- Wire: optional `identityInsert` on `InsertMessage` / `POST …/tables/{name}/rows`.
+- Engine: skip allocation; validate every autoIncrement column present/non-null; bump counter only after successful commit.
+- C# / Embedded: `InsertAsync(..., identityInsert: true)` (single + batch).
+- `@aouda/client`: `insert` / `insertMany` second-arg options `{ identityInsert?: boolean }`.
+- Default path unchanged: without the flag, `0` still means auto-generate; explicit non-zero without the flag does not bump the counter.
+
+### Bulk-load (BL-131)
+
+- Wire: optional `options.identityInsert` on `POST …/bulk-load:begin`.
+- Engine: stream wrap in `AoudaEngine.BulkLoadAsync`; `EnsureMinimumValue` only after successful `RunAsync` (abort/fail does not bump).
+- C# / Embedded: `BulkLoadOptions.IdentityInsert`.
+- `@aouda/client`: `bulkLoad(..., { identityInsert: true })`.
+- Default bulk-load path unchanged (coerce-to-0 / no allocation / no counter bump from bulk-load alone).
+
+### Contrast with BL-126
+
+| Feature | Schema change? | Scope | Use when |
+|---------|----------------|-------|----------|
+| Identity-insert | No | One request or one bulk-load job | Seed/reseed reserved IDs |
+| Toggle AutoId | Yes | All future writes | Permanently switch Auto ↔ Manual |
+
+### Known limitations
+
+- Studio has no identity-insert UI (API/SDK only).
+- IDENTITY seed/increment configuration knobs remain unimplemented (ADR 0013).
+- `@aouda/client` npm changeset/version bump for bulk-load options may ship on a separate client PR — confirm published version before depending on `bulkLoad({ identityInsert: true })` in production.
+
+### Compatibility
+
+| Artifact | Notes |
+|----------|-------|
+| Server / wire | Unreleased entry in `aouda/docs/CHANGELOG.md` — ships with next server train |
+| C# `Aouda.Client` / Embedded | Co-release with server |
+| `@aouda/client` | Patch proposed after maintainer confirmation (`0.1.6` → `0.1.7`) |
+
+📄 *See also:* [HTTP API — insert & bulk-load](reference/http-api.md), [Bulk Load guide § Scenario 4](guides/bulk-load.md), [Getting Started — Seeding explicit IDs](getting-started/index.md), [TypeScript client §7](clients/typescript.md), [Schema Lifecycle § Scenario 6](guides/schema.md), `aouda/docs/tasks/BL/BL-130-Identity-Insert.md`, `aouda/docs/tasks/BL/BL-131-Identity-Insert-BulkLoad.md`

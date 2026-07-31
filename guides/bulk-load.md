@@ -22,7 +22,7 @@ Related functionality docs: `docs/dev/Functionality-Write-Path-Durability.md`, `
 If your question is "How do I bulk load data safely with commit semantics?", start with:
 - `2.7` (mental model and invariants)
 - `2.11` (`.NET` + HTTP + CLI surfaces)
-- `2.12` (single-table and multi-table playbooks)
+- `2.12` (single-table, multi-table, and identity-insert seed playbooks)
 
 If your question is "What is implemented vs incomplete?", jump to:
 - `2.4` (availability status)
@@ -109,6 +109,7 @@ Scope boundaries:
 | Cluster `Aouda:BulkLoad:ForceLogShipBulkLoad` | `false` | When true, non-log-ship replication modes are rejected. |
 | Client `AppendBatchSize` | `50000` | Client sends up to 50K rows per append, then honors server lower cap if returned. |
 | Client `WriteConcern` | `Acknowledged` | Maps to server `acknowledged` commit concern request. |
+| Engine / client `IdentityInsert` | `false` | Default bulk-load path does **not** allocate autoIncrement IDs and does **not** bump the counter. Set `true` for seed/reseed with explicit IDs (including `0`); counter advances only after successful commit. |
 
 ---
 
@@ -141,6 +142,11 @@ Scope boundaries:
   - `aouda bulk-load`
 - **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036):**
   - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) triggers MQ rebuild after `BulkLoadCommitted`; `Skip` preserves old behavior.
+- **Identity-insert on bulk-load (BL-131):**
+  - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
+  - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
+  - Default path unchanged (coerce missing/null autoIncrement values to `0`; no allocation; no counter bump from bulk-load alone).
+  - Ordinary insert identity-insert is documented in [HTTP API insert](../reference/http-api.md) and [Getting Started](../getting-started/index.md) (BL-130).
   - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Error`).
   - `BulkLoadJobHandle.MqRebuildCompleted`: `Task` that resolves when all dependent MQ rebuilds finish.
   - Replica coordinator: `MqRebuildScheduler` delegate triggers rebuild after all segments fetched.
@@ -206,6 +212,7 @@ Scope boundaries:
 | Materialized Query auto-rebuild after bulk-load | Yes | No | No | P31 ADR 0036, `BulkLoadJobHandle.MqRebuildStatus`, `AoudaEngine.MaterializedQuery.cs` | Default `Auto` mode; `Skip` available for multi-step pipelines. |
 | Explicit on-demand MQ refresh | Yes | No | No | P31 `RefreshMaterializedQueryAsync`, `POST .../materialized-queries/{name}:refresh` | Shadow-build; result table readable throughout with stale data. |
 | Replica MQ rebuild after bulk-load | Yes | No | No | P31 `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched on replica. |
+| Identity-insert (`IdentityInsert`) | Yes | No | No | BL-131, `AoudaEngine.BulkLoadAsync`, `BulkLoadOptionsDto.IdentityInsert` | Job-scoped; counter bump only after successful commit; Studio UI out of scope. |
 
 ---
 
@@ -301,6 +308,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.PrincipalId` | `Guid` | `Guid.Empty` | valid guid | Engine/API | Stamped into bulk-load WAL frames. |
 | `BulkLoadOptions.LockAcquisitionTimeout` | `TimeSpan` | `30s` | positive duration | Engine/API | Lock wait bound. |
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |
+| `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
 | `Aouda:BulkLoad:SessionRetentionMinutes` | int | `10` | `>=1` | Server config | Retention for terminal sessions. |
 | `Aouda:BulkLoad:IdempotencyWindowMinutes` | int | `10` | `>=1` | Server config | Idempotency key window. |
@@ -350,13 +358,30 @@ var handle = await client.BulkLoadAsync(
         ReplicationMode = BulkLoadReplicationMode.LogShipSegments
     },
     ct);
+
+// Seed reserved autoIncrement IDs (BL-131) — Bond isAutoIncrementDisabled: true
+var seedHandle = await client.BulkLoadAsync(
+    "orders",
+    seedRows, // each row must include every autoIncrement column (0 is a real value)
+    new BulkLoadOptions
+    {
+        IdentityInsert = true,
+        IdempotencyKey = "orders-reseed-2026-07-31",
+        ForceSingleNodeReplicationBypass = true
+    },
+    ct);
 ```
 
 ```typescript
-// TypeScript surface is reported by P20 completion docs (verify in aouda-client-ts when needed)
+// TypeScript surface (aouda-client-ts)
 await client.table("orders").bulkLoad(rows, {
   idempotencyKey: "orders-2026-05-19-b1"
 });
+
+await client.table("orders").bulkLoad(
+  [{ id: 1000, status: "seeded" }, { id: 0, status: "literal-zero" }],
+  { identityInsert: true, idempotencyKey: "orders-reseed-2026-07-31" }
+);
 ```
 
 ```http
@@ -366,9 +391,10 @@ Content-Type: application/json
 {
   "database": "main",
   "tables": ["orders"],
-  "idempotencyKey": "orders-2026-05-19-b1",
+  "idempotencyKey": "orders-reseed-2026-07-31",
   "options": {
-    "replicationMode": "logShipSegments"
+    "replicationMode": "logShipSegments",
+    "identityInsert": true
   }
 }
 ```
@@ -377,6 +403,8 @@ Common mistakes:
 - Sending rows above `MaxRowsPerAppend` in one append call.
 - Omitting `_table` discriminator for multi-table append rows.
 - Reusing idempotency keys across different databases.
+- Using `identityInsert: true` without supplying every autoIncrement column on every row (including literal `0` when you mean zero).
+- Expecting a failed/aborted identity-insert job to advance the autoIncrement counter (it does not).
 
 ---
 
@@ -422,6 +450,23 @@ Steps:
 Expected checks:
 - Force-abort returns `{ jobId, aborted: true }`.
 - Further append/commit attempts for that job are rejected by state checks.
+
+### Scenario 4: Seed reserved autoIncrement IDs (identity-insert)
+
+When to use: large seed/reseed/ingestion where you must preserve upstream IDs (including `0`) and keep the table's `autoIncrement` schema flag on. Prefer this over flipping the column to manual (BL-126) for a one-shot load.
+
+Steps:
+1. `POST .../bulk-load:begin` with `options: { "identityInsert": true }` (or C#/TS `IdentityInsert` / `identityInsert: true`).
+2. Append NDJSON rows that include every autoIncrement column on every row.
+3. Commit successfully — only then does the server call `EnsureMinimumValue` to `max(inserted)` per column.
+4. Verify a subsequent ordinary insert with `id: 0` returns `max + 1`.
+
+Expected checks:
+- Missing/`null` autoIncrement column fails the job; counter unchanged.
+- Abort or stream failure before successful commit does **not** bump the counter.
+- Multi-table jobs track maxes per destination table (`_table` discriminator).
+
+See also: ordinary multi-row insert `identityInsert` in [HTTP API](../reference/http-api.md) (BL-130) when the dataset fits a single `POST …/rows` request.
 
 ---
 

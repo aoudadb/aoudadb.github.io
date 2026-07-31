@@ -238,6 +238,8 @@ If the apply fails (e.g. the server rejects a non-integer column, or the server 
 
 Only columns whose type is one of: `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`. The "Toggle AutoId" menu item does not appear for `String`, `Double`, `Timestamp`, `Decimal`, `Guid`, or any other non-integer type. The server enforces the same constraint as an additional guard.
 
+**Identity-insert is API/SDK-only:** Studio does not expose a per-insert or bulk-load `identityInsert` control. To seed reserved IDs while keeping `autoIncrement` enabled, use the HTTP API, C# / Embedded clients, or `@aouda/client` (see [Getting Started — Seeding explicit IDs](../getting-started/index.md) and [Bulk Load Scenario 4](../guides/bulk-load.md)). Toggle AutoId remains the UI for permanently switching Auto ↔ Manual.
+
 ### Adding a Column
 
 Click **Add column** above the columns table to open the Add Column dialog. Fill in:
@@ -607,19 +609,19 @@ Install mode:
 > 1
 
 Port [5433]:
-> 
+>
 
 Install directory [C:\Program Files\Aouda]:
-> 
+>
 
 Data directory [C:\ProgramData\Aouda\data]:
-> 
+>
 
 Admin email:
 > admin@example.com
 
 Admin password (input hidden):
-> 
+>
 ```
 
 Press Enter to accept defaults. The setup app then:

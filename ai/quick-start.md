@@ -141,6 +141,7 @@ Use `error` for programmatic retry/fix logic. Use `suggestion` to generate the c
 | `aouda start` local server bootstrap | Available |
 | Password reset / invite email (server email provider) | Available — configure `Aouda:Auth:Email` (`console` or `sendgrid`) — see [auth/notifications.md](../auth/notifications.md) |
 | Schema-on-write (no DDL needed) | Available |
+| Identity-insert (`identityInsert: true` on insert / bulk-load) | Available — seed reserved autoIncrement IDs without schema flip; see [Getting Started](../getting-started/index.md) |
 | Structured errors with `suggestion` field | Available |
 | Two-layer auth with generated API keys | Available |
 | MCP cluster tools in `@aouda/client` | Available |
@@ -153,7 +154,8 @@ For full capability details see [AI Agents](index.md).
 
 ## Key links
 
-- [Full Getting Started guide](../getting-started/) — embedded mode, server mode, schema, auth
+- [Full Getting Started guide](../getting-started/) — embedded mode, server mode, schema, auth, identity-insert
+- [Bulk Load](../guides/bulk-load/) — high-throughput ingest + `options.identityInsert`
 - [Auth for AI agents](index.md#212-scenario-playbooks) — bootstrap, service key, ADRA grant flows
 - [HTTP API reference](../reference/http-api/) — all endpoints
 - [TypeScript client](../clients/typescript/) — full SDK reference

@@ -337,12 +337,42 @@ await client.table('users').insert({
   active: true,
 });
 
-// Bulk insert
+// Bulk insert (ordinary multi-row — not P20 bulk-load)
 await client.table('events').insertMany([
   { type: 'click', timestamp: new Date() },
   { type: 'view', timestamp: new Date() },
 ]);
 ```
+
+#### Identity-insert (explicit autoIncrement IDs)
+
+Use `{ identityInsert: true }` when you must supply IDs on an `autoIncrement` column without flipping schema (Bond `isAutoIncrementDisabled: true`). Every autoIncrement column must be present and non-null; literal `0` is stored as-is; after success the runtime counter advances to `max(inserted)`.
+
+```typescript
+await client.table('orders').insert(
+  { id: 1000, status: 'seeded' },
+  { identityInsert: true }
+);
+
+await client.table('orders').insertMany(
+  [
+    { id: 0, status: 'literal-zero' },
+    { id: 500, status: 'reserved' },
+  ],
+  { identityInsert: true }
+);
+```
+
+For large ingest, use P20 bulk-load with the same flag:
+
+```typescript
+await client.table('orders').bulkLoad(rows, {
+  identityInsert: true,
+  idempotencyKey: 'orders-reseed-2026-07-31',
+});
+```
+
+See also: [Getting Started — Seeding explicit IDs](../getting-started/index.md), [HTTP API insert / bulk-load options](../reference/http-api.md), [Bulk Load guide § Scenario 4](../guides/bulk-load.md), [Schema — autoIncrement toggle vs identity-insert](../guides/schema.md).
 
 ### Update
 

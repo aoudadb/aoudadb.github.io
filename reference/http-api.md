@@ -1210,15 +1210,18 @@ Insert one or more rows into a table.
     { "status": "pending", "price": 100.50 },
     { "status": "shipped", "price": 200.00 }
   ],
-  "writeConcern": "majority"
+  "writeConcern": "majority",
+  "identityInsert": false
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
+| `table` | string | Yes | Table name (should match URL path `{name}`) |
 | `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
+| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior (`0` / omitted means auto-generate; explicit non-zero without the flag does **not** bump the counter). |
 
 **Response:** `200 OK`
 
@@ -1244,8 +1247,28 @@ Insert one or more rows into a table.
 |-------|------|-------------|
 | `rowsInserted` | number | Number of rows successfully inserted |
 | `executionMs` | number | Server-side execution time in milliseconds |
-| `generatedValues` | object? | Generated values for auto-increment columns. Keys are row indices (as strings), values are objects mapping column names to generated values. Only present when auto-increment columns exist. |
+| `generatedValues` | object? | Generated values for auto-increment columns. Keys are row indices (as strings), values are objects mapping column names to generated values. Only present when the server allocated IDs. Absent or empty for that row/column under `identityInsert: true` (client-supplied values are stored as-is). |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"` (no replication wait). See `WriteConcernStatus` below. |
+
+**Identity-insert (`identityInsert: true`):**
+
+```json
+{
+  "database": "mydb",
+  "table": "orders",
+  "identityInsert": true,
+  "rows": [
+    { "id": 1000, "status": "seeded" },
+    { "id": 0, "status": "zero-is-literal" }
+  ]
+}
+```
+
+- Stores client-supplied autoIncrement values as-is (including literal `0` — does **not** mean “please generate”).
+- Requires every autoIncrement column on every row; missing or `null` → `400` / clear error; no partial insert.
+- After success, the next normal insert with `id: 0` (or omitted) receives `max(inserted) + 1`.
+- Does **not** flip catalog `autoIncrement` (use schema apply / Studio Toggle AutoId for that — BL-126).
+- For large seed/reseed jobs, prefer bulk-load `options.identityInsert` (see [Bulk Load API](#bulk-load-api)).
 
 **`WriteConcernStatus` object:**
 
@@ -1262,7 +1285,7 @@ Insert one or more rows into a table.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, or schema mismatch |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, or `identityInsert: true` with a missing/`null` autoIncrement column |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
@@ -2787,6 +2810,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
 | `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
 | `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` | Controls Aggregate MQ rebuild after commit. `"auto"` (default): all Aggregate MQs whose source tables are in this load are automatically rebuilt after `BulkLoadCommitted`. `"skip"`: no MQ rebuild; use for multi-step pipelines where you call `POST .../materialized-queries/{name}:refresh` explicitly. |
+| `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 
 **Response body:**
 
@@ -2970,4 +2994,5 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 1.3 | 2026-03-19 | Comprehensive authentication section: credential types, auth enforcement flow, X-User-Token, server and app auth endpoint reference |
 | 2.0 | 2026-05-22 | WebSocket streaming protocol documented; Bulk Load API documented; `crossPartitionAccess`, `joins`, WhereClause `groups`; write concern on mutation messages; Known Limitations updated; Future Extensions corrected |
 | 2.1 | 2026-06-23 | P27: `setExpr` expression SET, `TRUNCATE`, DELETE `limit`/`orderBy`, `RETURNING`, batch mutations (`/rows/batch`), expression SELECT (`selectExpr`). P28: `TruncateToMinute` partition function. P31: `postLoadMqBehavior` on bulk-load `:begin`; `mqRebuildStatus` in `:status` response; `POST .../materialized-queries/{name}:refresh`. P33: password reset endpoints, MFA enroll/challenge/verify/factors/delete, admin password override, invite resend, `requiresPasswordChange`/`mfaRequired`/`mfaFactors`/`aal` in signin response. |
+| 2.2 | 2026-07-31 | BL-130: `identityInsert` on `POST …/tables/{name}/rows`. BL-131: `options.identityInsert` on bulk-load `:begin` (commit-only counter floor). |
 | 2.2 | 2026-06-26 | **P17 (breaking):** `GET /api/databases` default response now excludes internal infrastructure databases (`_serverauth`, `_settings`). Use `?include=internal` to retrieve the full catalog. All database responses now include `isInternal` (bool), `isAuthDatabase` (bool), and `authDatabaseKind` (`"none"` \| `"server"` \| `"application"`) metadata fields. Application auth databases (`isInternal: false`) remain in the default list. |
