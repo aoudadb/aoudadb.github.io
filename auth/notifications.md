@@ -214,14 +214,14 @@ Both flows use the same 6-digit OTP and `POST .../auth/reset-password` to comple
 
 **Option A — Console provider (recommended for local auth testing)**
 
-Set `Aouda:Auth:Email:Provider` to `console`. After `request-password-reset` or an admin invite, read the OTP from the server stdout — log lines are prefixed with `[Aouda Auth — Console Email]`. See [§5](#5-console-provider-local-development--testing).
+Set `Aouda:Auth:Email:Provider` to `console`. After `request-password-reset` or an admin invite, read the OTP from server stdout (or Event Viewer under a Windows Service — [§5.4](#54-windows-service--event-viewer)). Log lines are prefixed with `[Aouda Auth — Console Email]`. See [§5](#5-console-provider-local-development--testing).
 
 **Option B — Null provider (default)**
 
 With no provider configured, `request-password-reset` still returns `200 { "ok": true }` but **no email is sent** and the OTP is **not** logged. Log line:
 
 ```text
-NullEmailService: password reset email not sent to 'user@example.com' (no email provider configured). Configure Aouda:Auth:Email:Provider=sendgrid to enable email delivery.
+NullEmailService: password reset email not sent to 'user@example.com' (no email provider configured). Configure Aouda:Auth:Email:Provider=sendgrid for delivery, or Provider=console to log OTP locally (e.g. Event Viewer under Windows Service).
 ```
 
 You cannot complete the customer reset flow without SendGrid, the `console` provider, or an admin override (`PUT .../admin/users/{id}/password`). The null default is intentional (anti-enumeration and security).
@@ -389,7 +389,34 @@ info: Aouda.Engine.Auth.Notifications.ConsoleSmsService[0]
 
 Search server output for `[Aouda Auth — Console Email]` or `[Aouda Auth — Console SMS]` to find codes quickly.
 
-### 5.4 Provider comparison
+### 5.4 Windows Service / Event Viewer
+
+When Aouda runs as a **Windows Service**, there is no interactive console. Warning-level logs (including console-provider OTP lines) still appear in **Event Viewer → Windows Logs → Application** under the Aouda / .NET Runtime source — the same place you already see `NullEmailService` warnings when no provider is configured.
+
+**Enable console for a local service install** (elevated PowerShell; Machine-level so the service process sees the variables; restart required):
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("AOUDA_AUTH__EMAIL__PROVIDER", "console", "Machine")
+[System.Environment]::SetEnvironmentVariable("AOUDA_AUTH__EMAIL__FROMNAME", "Aouda Dev", "Machine")
+[System.Environment]::SetEnvironmentVariable("AOUDA_AUTH__SMS__PROVIDER", "console", "Machine")
+# Optional deep links for your app:
+# [System.Environment]::SetEnvironmentVariable("AOUDA_AUTH__EMAIL__INVITEURL", "http://localhost:3000/set-password", "Machine")
+# [System.Environment]::SetEnvironmentVariable("AOUDA_AUTH__EMAIL__PASSWORDRESETURL", "http://localhost:3000/reset-password", "Machine")
+
+Restart-Service Aouda
+```
+
+Prefer `AOUDA_AUTH__EMAIL__PROVIDER` / `AOUDA_AUTH__SMS__PROVIDER` (see [Server configuration](../guides/server-configuration.md)). `Aouda__Auth__Email__Provider=console` also works via ASP.NET Core’s default environment mapping.
+
+**Constraints:**
+
+- Studio / `PUT /admin/notifications/*` **cannot** set `Provider: console` (API rejects it). Use env vars or `appsettings` only.
+- A SendGrid/GatewayAPI row stored in `_settings` **overrides** env until you Clear it in Studio → Notification Providers, or `DELETE /admin/notifications/email` (and SMS twin).
+- After invite, password-reset, or MFA challenge, search Event Viewer for `[Aouda Auth — Console Email]` or `[Aouda Auth — Console SMS]`. Category should be `ConsoleEmailService` / `ConsoleSmsService`, not `NullEmailService`.
+
+Longer-term inbox UX (Studio capture outbox, SMTP → Mailpit) is tracked as backlog **BL-132**.
+
+### 5.5 Provider comparison
 
 | Provider | OTP in logs? | HTTP delivery? | Requires credentials? |
 |----------|:------------:|:--------------:|:---------------------:|
@@ -473,13 +500,14 @@ Use the **anon** key for `request-password-reset` and `reset-password` from brow
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `200` on request-reset but no email | Null email provider or SendGrid failure | Check logs for `NullEmailService` or `SendGridEmailService`; set `Provider: console` for local testing (§5) or verify SendGrid (§3.2) |
-| `200` on request-reset but cannot find OTP | Null provider active (OTP not logged) | Set `Aouda:Auth:Email:Provider=console` and restart; search logs for `[Aouda Auth — Console Email]` |
+| `200` on request-reset but no email | Null email provider or SendGrid failure | Check logs for `NullEmailService` or `SendGridEmailService`; set `Provider: console` for local testing (§5 / §5.4) or verify SendGrid (§3.2) |
+| `200` on request-reset but cannot find OTP | Null provider active (OTP not logged) | Set `AOUDA_AUTH__EMAIL__PROVIDER=console` (or `Aouda:Auth:Email:Provider=console`) and restart; search logs / Event Viewer for `[Aouda Auth — Console Email]` (§5.4) |
+| Still `NullEmailService` after setting console env | DB notification settings override env | Clear Studio Notification Providers or `DELETE /admin/notifications/email`; restart service (§5.4) |
 | Email arrives but contains only a bare code, no link | `InviteUrl` / `PasswordResetUrl` not configured | Add both keys to Aouda server config (§3.4) |
 | Reset always returns `AUTH_RESET_TOKEN_INVALID` | Wrong OTP, unregistered email, expired token, or exhausted attempts (5 wrong tries) | Request new code; confirm user exists in auth DB |
 | Invite email not sent | `sendInviteEmail` not set or email not configured | Admin create with `"sendInviteEmail": true`; configure SendGrid or `console` |
 | MFA challenge created but no SMS | Null SMS provider | Configure GatewayAPI (§4), `console` (§5), or use TOTP |
-| MFA challenge created but OTP not visible | Null SMS provider (OTP not logged) | Set `Aouda:Auth:Sms:Provider=console`; search logs for `[Aouda Auth — Console SMS]` |
+| MFA challenge created but OTP not visible | Null SMS provider (OTP not logged) | Set `AOUDA_AUTH__SMS__PROVIDER=console`; search logs / Event Viewer for `[Aouda Auth — Console SMS]` (§5.4) |
 | SendGrid 403 in logs | Unverified `FromAddress` | Verify sender in SendGrid dashboard |
 | Console provider warning at startup | `console` configured while `ASPNETCORE_ENVIRONMENT=Production` | Expected; switch to `sendgrid`/`gatewayapi` for production |
 | Config ignored after edit | Server not restarted | Restart `aouda start` or container |
