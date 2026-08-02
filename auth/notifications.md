@@ -16,16 +16,17 @@ Application Auth uses server-level notification services:
 
 | Service | Used for | Provider when configured | Default (no provider) |
 |---------|----------|--------------------------|------------------------|
-| **Email** (`IEmailService`) | Password reset OTP, invite emails (`sendInviteEmail`) | [SendGrid](#3-email-sendgrid) or [Console](#5-console-provider-local-development--testing) | `NullEmailService` — logs a warning, **does not send** |
-| **SMS** (`ISmsService`) | MFA phone OTP (`POST .../auth/mfa/challenge` for `type: phone`) | [GatewayAPI](#4-sms-gatewayapi) or [Console](#5-console-provider-local-development--testing) | `NullSmsService` — logs a warning, **does not send** |
+| **Email** (`IEmailService`) | Password reset OTP, invite emails (`sendInviteEmail`) | [SendGrid](#3-email-sendgrid), [Capture](#5-capture-provider-local-outbox--studio) (recommended local), or [Console](#6-console-provider-cli--event-viewer-interim) | `NullEmailService` — logs a warning, **does not send** |
+| **SMS** (`ISmsService`) | MFA phone OTP (`POST .../auth/mfa/challenge` for `type: phone`) | [GatewayAPI](#4-sms-gatewayapi), [Capture](#5-capture-provider-local-outbox--studio) (recommended local), or [Console](#6-console-provider-cli--event-viewer-interim) | `NullSmsService` — logs a warning, **does not send** |
 
 **Important:**
 
 - Providers are registered **once per Aouda server process** and shared by all application auth databases on that server.
 - Delivery is **best-effort**: auth endpoints still return success even if SendGrid/GatewayAPI fails; failures are logged as warnings.
-- OTPs are **never** stored in plain text. With the default null provider, OTPs **do not** appear in server logs (only "email not sent" / "SMS not sent" warnings).
-- With the **`console` provider** (explicit opt-in for local dev/testing), OTPs and full message content are written to server stdout via structured logging — see [§5](#5-console-provider-local-development--testing).
-- There is **no** HTTP API to retrieve an OTP after the fact. For testing without SendGrid/GatewayAPI, use the `console` provider or an admin password override.
+- OTPs are **never** stored in plain text on disk. With the default null provider, OTPs **do not** appear in server logs (only "email not sent" / "SMS not sent" warnings).
+- With the **`capture` provider** (Studio/API-settable, recommended for Windows Service / local Studio testing), OTPs are written to a bounded **in-memory outbox** and Warning logs — retrieve via Studio or `GET /admin/notifications/outbox`. See [§5](#5-capture-provider-local-outbox--studio).
+- With the **`console` provider** (env-only interim for CLI/CI/Event Viewer), OTPs and full message content are written to server stdout — see [§6](#6-console-provider-cli--event-viewer-interim).
+- Admin password override (`PUT .../admin/users/{id}/password`) remains available for bootstrap without OTP.
 
 **What needs which channel:**
 
@@ -72,7 +73,7 @@ For local development, place `appsettings.json` in the directory from which you 
 }
 ```
 
-**Local testing without SendGrid or GatewayAPI** — set `Provider` to `console` for email and/or SMS. OTPs appear in the server console (see [§5](#5-console-provider-local-development--testing)):
+**Local testing without SendGrid or GatewayAPI** — prefer `Provider: capture` for Studio / Windows Service (see [§5](#5-capture-provider-local-outbox--studio)). Use `console` for CLI/CI log scraping (see [§6](#6-console-provider-cli--event-viewer-interim)):
 
 ```json
 {
@@ -81,13 +82,13 @@ For local development, place `appsettings.json` in the directory from which you 
     "Port": 5433,
     "Auth": {
       "Email": {
-        "Provider": "console",
+        "Provider": "capture",
         "FromName": "Aouda Dev",
         "InviteUrl": "http://localhost:3000/set-password",
         "PasswordResetUrl": "http://localhost:3000/reset-password"
       },
       "Sms": {
-        "Provider": "console"
+        "Provider": "capture"
       }
     }
   }
@@ -99,7 +100,8 @@ Provider selection (case-insensitive):
 | `Provider` value | Email | SMS |
 |------------------|-------|-----|
 | `sendgrid` / `gatewayapi` | SendGrid HTTP delivery | GatewayAPI HTTP delivery |
-| `console` | Logs OTP + message to stdout | Logs OTP + message to stdout |
+| `capture` | In-memory outbox + Warning log (Studio/API-settable) | In-memory outbox + Warning log (Studio/API-settable) |
+| `console` | Logs OTP + message to stdout (env-only) | Logs OTP + message to stdout (env-only) |
 | absent or any other value | Null provider (no OTP in logs) | Null provider (no OTP in logs) |
 
 `InviteUrl` and `PasswordResetUrl` are optional but strongly recommended — without them the email contains only a bare OTP code with no link to your app. See [§3.4](#34-set-password-deep-link-app-url-configuration).
@@ -144,14 +146,14 @@ Restart the server after changing notification configuration.
 
 | Setting | Type | Default | Valid values | Notes |
 |---------|------|---------|--------------|-------|
-| `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid`, `console`, or other → null provider | Server-wide; `console` logs OTP to stdout (dev/testing only) |
-| `Aouda:Auth:Email:ApiKey` | string? | `null` | Provider API key (SendGrid Mail Send key when `Provider=sendgrid`) | Bearer token on `https://api.sendgrid.com`; not used when `Provider=console` |
+| `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid`, `capture`, `console`, or other → null provider | Server-wide; `capture` is recommended for local Studio / Windows Service |
+| `Aouda:Auth:Email:ApiKey` | string? | `null` | Provider API key (SendGrid Mail Send key when `Provider=sendgrid`) | Bearer token on `https://api.sendgrid.com`; not used when `Provider=console` or `capture` |
 | `Aouda:Auth:Email:FromAddress` | string? | `null` | Verified sender in SendGrid | Required for real delivery |
 | `Aouda:Auth:Email:FromName` | string? | `"Aouda"` | Display name in From header and email body | |
 | `Aouda:Auth:Email:InviteUrl` | string? | `null` | Full URL of your app's set-password page | When set, invite email includes a clickable link; see §3.4 |
 | `Aouda:Auth:Email:PasswordResetUrl` | string? | `null` (falls back to `InviteUrl`) | Full URL of your app's reset-password page | Defaults to `InviteUrl` when not set; see §3.4 |
-| `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi`, `console`, or other → null provider | Server-wide; `console` logs OTP to stdout (dev/testing only) |
-| `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI API token | Sent as `Authorization: Token <key>`; not used when `Provider=console` |
+| `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi`, `capture`, `console`, or other → null provider | Server-wide; `capture` is recommended for local Studio / Windows Service |
+| `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI API token | Sent as `Authorization: Token <key>`; not used when `Provider=console` or `capture` |
 | `Aouda:Auth:Sms:Sender` | string? | `"Aouda"` | Alphanumeric sender id shown to recipient | GatewayAPI account must allow sender |
 
 Related server auth bootstrap (unrelated to app-user email/SMS):
@@ -212,11 +214,15 @@ Both flows use the same 6-digit OTP and `POST .../auth/reset-password` to comple
 
 ### 3.3 Local development without SendGrid
 
-**Option A — Console provider (recommended for local auth testing)**
+**Option A — Capture provider (recommended for Studio / Windows Service)**
 
-Set `Aouda:Auth:Email:Provider` to `console`. After `request-password-reset` or an admin invite, read the OTP from server stdout (or Event Viewer under a Windows Service — [§5.4](#54-windows-service--event-viewer)). Log lines are prefixed with `[Aouda Auth — Console Email]`. See [§5](#5-console-provider-local-development--testing).
+Set email provider to `capture` in Studio → Notification Providers, or `Aouda:Auth:Email:Provider=capture`. After `request-password-reset` or an admin invite, copy the OTP from the Studio outbox panel or `GET /admin/notifications/outbox`. See [§5](#5-capture-provider-local-outbox--studio).
 
-**Option B — Null provider (default)**
+**Option B — Console provider (CLI / Event Viewer interim)**
+
+Set `Aouda:Auth:Email:Provider` to `console`. After `request-password-reset` or an admin invite, read the OTP from server stdout (or Event Viewer under a Windows Service — [§6.4](#64-windows-service--event-viewer)). Log lines are prefixed with `[Aouda Auth — Console Email]`. See [§6](#6-console-provider-cli--event-viewer-interim).
+
+**Option C — Null provider (default)**
 
 With no provider configured, `request-password-reset` still returns `200 { "ok": true }` but **no email is sent** and the OTP is **not** logged. Log line:
 
@@ -224,7 +230,7 @@ With no provider configured, `request-password-reset` still returns `200 { "ok":
 NullEmailService: password reset email not sent to 'user@example.com' (no email provider configured). Configure Aouda:Auth:Email:Provider=sendgrid for delivery, or Provider=console to log OTP locally (e.g. Event Viewer under Windows Service).
 ```
 
-You cannot complete the customer reset flow without SendGrid, the `console` provider, or an admin override (`PUT .../admin/users/{id}/password`). The null default is intentional (anti-enumeration and security).
+You cannot complete the customer reset flow without SendGrid, `capture`, `console`, or an admin override (`PUT .../admin/users/{id}/password`). The null default is intentional (anti-enumeration and security).
 
 ### 3.4 Set-password deep link (app URL configuration)
 
@@ -304,40 +310,122 @@ Phone numbers must be **E.164** at enrolment (for example `+447911123456`).
 
 ### 4.3 Local development without SMS
 
-**Option A — Console provider (recommended for phone MFA testing)**
+**Option A — Capture provider (recommended)**
 
-Set `Aouda:Auth:Sms:Provider` to `console`. After `POST .../auth/mfa/challenge`, read the OTP from server stdout — lines prefixed with `[Aouda Auth — Console SMS]`. See [§5](#5-console-provider-local-development--testing).
+Set SMS provider to `capture` in Studio or env. After `POST .../auth/mfa/challenge`, copy the OTP from the Studio outbox or `GET /admin/notifications/outbox?channel=sms`. See [§5](#5-capture-provider-local-outbox--studio).
 
-**Option B — Null provider (default)**
+**Option B — Console provider (CLI / Event Viewer interim)**
 
-TOTP MFA does not require SMS. For phone MFA without GatewayAPI or console, you will see:
+Set `Aouda:Auth:Sms:Provider` to `console`. After `POST .../auth/mfa/challenge`, read the OTP from server stdout — lines prefixed with `[Aouda Auth — Console SMS]`. See [§6](#6-console-provider-cli--event-viewer-interim).
+
+**Option C — Null provider (default)**
+
+TOTP MFA does not require SMS. For phone MFA without GatewayAPI, capture, or console, you will see:
 
 ```text
 NullSmsService: OTP SMS not sent to '+44...' (no SMS provider configured).
 ```
 
-The challenge is still created; verification will fail unless you use TOTP, recovery codes, or the `console` provider instead.
+The challenge is still created; verification will fail unless you use TOTP, recovery codes, capture, or console instead.
 
 ---
 
-## 5. Console provider (local development & testing)
+## 5. Capture provider (local outbox + Studio)
+
+When `Aouda:Auth:Email:Provider` or `Aouda:Auth:Sms:Provider` is `capture` (or you select **Capture (local outbox)** in Studio → Notification Providers), Aouda writes the same message content that SendGrid or GatewayAPI would deliver — **including the OTP** — into a bounded **in-memory outbox** and Warning logs. No HTTP calls are made. Restart clears the outbox (intentional — OTPs are never persisted to disk or `_settings`).
+
+This matches the Firebase Auth emulator pattern (`oobCodes` / `verificationCodes`): structured OTP retrieval for automation and operators, without running a separate mail server.
+
+### 5.1 When to use
+
+| Scenario | Use `capture`? |
+|----------|----------------|
+| Local Windows Service + Studio invite / reset / phone MFA | **Yes** — recommended |
+| Multi-customer local testing without Event Viewer | **Yes** |
+| CI that can call admin HTTP | Yes — `GET /admin/notifications/outbox` |
+| Shared production with real users | **No** — use `sendgrid` / `gatewayapi` |
+| Headless CLI/CI that only scrapes stdout | Prefer `console` ([§6](#6-console-provider-cli--event-viewer-interim)) |
+
+Local Windows Service installs often run with `ASPNETCORE_ENVIRONMENT=Production`. Capture is **not** hard-blocked in Production. Instead:
+
+- **Env** `Provider=capture` → one-time startup Warning (parity with console).
+- **Studio / PUT API** in Production → require `acknowledgeDevCapture: true` (Studio shows a confirmation modal).
+
+### 5.2 Configuration
+
+**Studio (recommended):** Settings → Notification Providers → select **Capture (local outbox)** for email and/or SMS → confirm the acknowledgment dialog → Save. The outbox panel appears on the same page (polls every ~2.5s).
+
+**Env / appsettings:**
+
+```json
+{
+  "Aouda": {
+    "Auth": {
+      "Email": {
+        "Provider": "capture",
+        "FromName": "Aouda Dev",
+        "InviteUrl": "http://localhost:3000/set-password",
+        "PasswordResetUrl": "http://localhost:3000/reset-password"
+      },
+      "Sms": {
+        "Provider": "capture"
+      }
+    }
+  }
+}
+```
+
+No API key or from-address is required for capture. `InviteUrl` / `PasswordResetUrl` still populate deep links in captured email bodies.
+
+### 5.3 Outbox API
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/admin/notifications/outbox?channel=&limit=` | Newest first; `channel` = `email` \| `sms` |
+| `DELETE` | `/admin/notifications/outbox` | Clears all entries |
+
+Each entry includes `id`, `channel`, `kind` (`password_reset` \| `invite` \| `mfa_otp` \| `test`), `to`, `subject` (email), `body`, `otp`, `createdAtUtc`.
+
+Production PUT example:
+
+```json
+PUT /admin/notifications/email
+{ "provider": "capture", "fromName": "Aouda Dev", "acknowledgeDevCapture": true }
+```
+
+Without `acknowledgeDevCapture: true` on a Production host, the server returns **400**.
+
+### 5.4 Provider comparison
+
+| Provider | OTP in outbox? | OTP in logs? | HTTP delivery? | Studio-settable? |
+|----------|:--------------:|:------------:|:--------------:|:----------------:|
+| *(null / default)* | No | No | No | — |
+| `capture` | **Yes** | Yes (Warning) | No | **Yes** (Production ack) |
+| `console` | No | **Yes** | No | No (env-only) |
+| `sendgrid` / `gatewayapi` | No | No | Yes | Yes |
+
+SMTP → Mailpit for HTML rendering fidelity is a separate follow-up (**BL-133**); it does not solve SMS.
+
+---
+
+## 6. Console provider (CLI / Event Viewer interim)
 
 When `Aouda:Auth:Email:Provider` or `Aouda:Auth:Sms:Provider` is `console`, Aouda writes the same message content that SendGrid or GatewayAPI would deliver — **including the OTP** — to the server log at **Warning** level (visible even when default logging is Warning). No HTTP calls are made.
 
 This follows the same pattern as Laravel's `log` mail driver and Supabase local auth capture: explicit opt-in for dev environments, separate from the secure null default.
 
-### 5.1 When to use
+### 6.1 When to use
 
 | Scenario | Use `console`? |
 |----------|----------------|
-| Local password-reset / invite flow testing | Yes — email `Provider: console` |
-| Local phone MFA testing | Yes — SMS `Provider: console` |
-| CI integration tests against a real Aouda server | Yes — read OTP from test runner logs |
+| Headless CLI / CI that scrapes stdout | Yes — email/SMS `Provider: console` |
+| Local password-reset when Studio outbox is unavailable | Yes |
+| Windows Service without Studio (Event Viewer only) | Yes — or prefer `capture` + Studio ([§5](#5-capture-provider-local-outbox--studio)) |
 | Production / staging with real users | **No** — use `sendgrid` / `gatewayapi` |
 
-If `ASPNETCORE_ENVIRONMENT=Production` and a console provider is configured, Aouda logs a startup warning. Console is not blocked, but real delivery providers are strongly recommended for production.
+If `ASPNETCORE_ENVIRONMENT=Production` and a console provider is configured, Aouda logs a startup warning. Console is not blocked, but real delivery providers are strongly recommended for production. Prefer **`capture`** when you have Studio access.
 
-### 5.2 Configuration
+### 6.2 Configuration
 
 Email and SMS console providers are independent — you can enable one or both:
 
@@ -363,7 +451,7 @@ Email and SMS console providers are independent — you can enable one or both:
 
 Works with all server startup paths: `aouda start`, Docker, `aouda dev server`, and embedded ASP.NET hosts that call `AddAoudaServer(configuration)`.
 
-### 5.3 Log output format
+### 6.3 Log output format
 
 **Email (password reset):**
 
@@ -389,9 +477,11 @@ info: Aouda.Engine.Auth.Notifications.ConsoleSmsService[0]
 
 Search server output for `[Aouda Auth — Console Email]` or `[Aouda Auth — Console SMS]` to find codes quickly.
 
-### 5.4 Windows Service / Event Viewer
+### 6.4 Windows Service / Event Viewer
 
 When Aouda runs as a **Windows Service**, there is no interactive console. Warning-level logs (including console-provider OTP lines) still appear in **Event Viewer → Windows Logs → Application** under the Aouda / .NET Runtime source — the same place you already see `NullEmailService` warnings when no provider is configured.
+
+For Studio-visible OTP capture on a Windows Service, prefer **`capture`** ([§5](#5-capture-provider-local-outbox--studio)) over Event Viewer scraping.
 
 **Enable console for a local service install** (elevated PowerShell; Machine-level so the service process sees the variables; restart required):
 
@@ -410,29 +500,21 @@ Prefer `AOUDA_AUTH__EMAIL__PROVIDER` / `AOUDA_AUTH__SMS__PROVIDER` (see [Server 
 
 **Constraints:**
 
-- Studio / `PUT /admin/notifications/*` **cannot** set `Provider: console` (API rejects it). Use env vars or `appsettings` only.
-- A SendGrid/GatewayAPI row stored in `_settings` **overrides** env until you Clear it in Studio → Notification Providers, or `DELETE /admin/notifications/email` (and SMS twin).
+- Studio / `PUT /admin/notifications/*` **cannot** set `Provider: console` (API rejects it). Use env vars or `appsettings` only. Use **`capture`** when you need Studio/API configuration.
+- A SendGrid/GatewayAPI/capture row stored in `_settings` **overrides** env until you Clear it in Studio → Notification Providers, or `DELETE /admin/notifications/email` (and SMS twin).
 - After invite, password-reset, or MFA challenge, search Event Viewer for `[Aouda Auth — Console Email]` or `[Aouda Auth — Console SMS]`. Category should be `ConsoleEmailService` / `ConsoleSmsService`, not `NullEmailService`.
 
-Longer-term inbox UX (Studio capture outbox, SMTP → Mailpit) is tracked as backlog **BL-132**.
-
-### 5.5 Provider comparison
-
-| Provider | OTP in logs? | HTTP delivery? | Requires credentials? |
-|----------|:------------:|:--------------:|:---------------------:|
-| *(null / default)* | No | No | No |
-| `console` | **Yes** | No | No |
-| `sendgrid` / `gatewayapi` | No | Yes | Yes |
+SMTP → Mailpit for HTML rendering fidelity is tracked as backlog **BL-133** (email only; does not solve SMS).
 
 ---
 
-## 6. End-to-end local test (password reset)
+## 7. End-to-end local test (password reset)
 
-Prerequisites: Aouda CLI, an auth-enabled database with API keys. For OTP delivery use either SendGrid (production-like) or the **`console` provider** (no external credentials). Full local server setup is in [Reference §27](reference.md#27-local-developer-setup-for-consumer-applications).
+Prerequisites: Aouda CLI, an auth-enabled database with API keys. For OTP delivery use SendGrid (production-like), **`capture`** (Studio outbox), or **`console`** (stdout). Full local server setup is in [Reference §27](reference.md#27-local-developer-setup-for-consumer-applications).
 
 ```powershell
 # 1. Server directory with appsettings.json (§2.1)
-#    For local testing without SendGrid, use Provider: "console" (§5)
+#    For local testing without SendGrid, use Provider: "capture" (§5) or "console" (§6)
 cd C:\dev\aouda-derive
 aouda start --port 5433 --data-dir .\data
 
@@ -445,13 +527,14 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signup `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com", "password": "SecurePass123!" }'
 
-# 5. Request reset (email must be configured — sendgrid or console)
+# 5. Request reset (email must be configured — sendgrid, capture, or console)
 curl -X POST http://localhost:5433/api/databases/myapp/auth/request-password-reset `
   -H "Authorization: Bearer mk_anon_..." `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com" }'
 
-# 6. Read OTP from email (SendGrid) or server console (console provider), then reset
+# 6. Read OTP from email (SendGrid), Studio outbox / GET /admin/notifications/outbox (capture),
+#    or server console (console provider), then reset
 curl -X POST http://localhost:5433/api/databases/myapp/auth/reset-password `
   -H "Authorization: Bearer mk_anon_..." `
   -H "Content-Type: application/json" `
@@ -464,7 +547,7 @@ Your consumer application's page reads these query params to pre-fill the form (
 
 ---
 
-## 7. Consumer application configuration
+## 8. Consumer application configuration
 
 Notification keys belong in **Aouda's** server config, not in your app's `appsettings.Development.json`.
 
@@ -496,7 +579,7 @@ Use the **anon** key for `request-password-reset` and `reset-password` from brow
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
