@@ -90,11 +90,13 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
 - **Validate**: Use `schema validate` in CI — it exits 0 if the server matches the file, 1 if there is drift.
 
-### Diff warnings: unsupported changes
+### Diff warnings vs applyable column changes
 
-Some schema changes cannot be executed by the apply engine — for example, changing a column's type, changing `primaryKey`, `autoIncrement`, or `nullable` on an existing column, or changing partition keys or cluster columns. The diff engine reports these as **warnings** (not changes). Warnings appear in the diff output but are never applied; they always require manual intervention such as dropping and re-creating the column or table.
+**Column evolution (P36):** changing a column's `type`, `nullable`, `primaryKey`, `references`, `encoder`, `default`, `description`, rename, or reorder is now an applyable **change** (not a warning). Safe type widening (e.g. `Int32` → `Int64`) is an instant metadata flip with read-time coercion; lossy conversions validate all values first, then flip and rewrite column files in the background (`GET …/jobs`).
 
-Always inspect warnings before applying. A warning means the diff cannot close the gap between your desired schema and the running catalog automatically:
+**Still warnings only:** changing table `partitionKey` or `clusterColumns` (and Vector/MdVector type changes). Those require dropping and re-creating the table (or a future migration phase).
+
+Always inspect warnings before applying — a warning means the diff cannot close that gap automatically:
 
 ```bash
 # View warnings in human-readable diff output
@@ -104,9 +106,7 @@ dotnet aouda schema diff --server http://localhost:5433 --database myapp
 dotnet aouda schema diff --server http://localhost:5433 --database myapp --json
 ```
 
-Example warning: `Column type change from 'Int32' to 'Int64' is not supported. Drop and re-create the column manually.`
-
-See the [Schema Lifecycle guide](schema.md) for a full list of operations that produce warnings vs. changes.
+See the [Schema Lifecycle guide](schema.md) §2.6 / §2.11 for the full capability and change-type matrices.
 
 That’s it. Your schema is now in code, and you can run diff/apply in CI/CD. See [Schema CI/CD Guide](Schema-CI-CD-Guide.md) for GitHub Actions and automation.
 
