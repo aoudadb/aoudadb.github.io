@@ -13,6 +13,12 @@ Minor patch releases and experimental branches are recorded inline under their r
 
 ---
 
+## 0.1.6 — 2026-08-13
+
+Server **0.1.6** treats `MaxTotalRamBytes` as a process RSS ceiling (default ~70% of detected RAM), keeps the write-ahead log bounded, and refuses over-budget ingest with HTTP 503 + `Retry-After`. Studio **0.0.16** shows RSS vs governed budget, reclaimable WAL, and quarantined databases. See [Sizing](guides/sizing.md), [Write durability](guides/write-durability.md), and [Compatibility](clients/compatibility.md).
+
+---
+
 ## ✅ P0 — Core Bootstrap (Completed)
 
 **Date:** 2025-Q1

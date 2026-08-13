@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Complete  
 Primary owner: Engineering  
-Last updated: 2026-05-19
+Last updated: 2026-08-13
 
 Coverage phases: P4 (Server & Clients), P6, P7, P16  
 Primary task folders: `docs/tasks/P4-Server-And-Clients-COMPLETION.md`, `docs/tasks/P6-COMPLETION.md`, `docs/tasks/P7-COMPLETION.md`, `docs/tasks/P16-COMPLETION.md`  
@@ -109,7 +109,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Data directory | `./data` | Created if absent |
 | Database registry | `./data/Server/databases.json` | Empty on first run; no databases created automatically |
 | Database layout | `./data/Databases/{name}/…` | Per-db subtree created on first `POST /api/databases` |
-| Memory ceiling | `2 GiB` (`2147483648` bytes) | Shared across all databases |
+| Memory ceiling | ~70% of detected RAM | One process RSS ceiling, shared as **weighted shares** across databases |
 | Hot segment budget | Auto (70% of ceiling) | Allocated from total RAM |
 | Page cache budget | Auto (20% of ceiling) | Allocated from total RAM |
 | Request timeout | `30 000 ms` | Returns HTTP 504 on breach |
@@ -225,7 +225,7 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
 1. **Own zero data logic.** All data operations delegate to `AoudaEngine` via DI. Controllers are thin: no engine construction, no blocking inline async.
 2. **Orchestrate one engine per database.** `DatabaseManager` maintains a `ConcurrentDictionary<string, AoudaEngine>` keyed by database name. Engine lookups (the hot path for request routing) are lock-free `TryGetValue` calls. Lifecycle mutations (create / drop) are serialized by a `SemaphoreSlim(1,1)`.
 3. **Route HTTP by database.** Incoming requests carry a database name — either in the URL path (`/api/databases/{db}/…`) or in the request body (`database` field). A mismatch between path and body returns `400 INVALID_REQUEST`.
-4. **Govern memory across engines.** `ServerMemoryBudgetManager` tracks each engine's memory usage and enforces per-database caps under a server ceiling.
+4. **Govern memory across engines.** `ServerMemoryBudgetManager` tracks each engine's memory usage and assigns **weighted shares of one server budget**. HTTP create still accepts `maxMemoryBytes` as a cap on that computed share.
 
 ### Directory layout
 
@@ -240,7 +240,8 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
       catalog/
         catalog.json          ← table/column definitions (WAL-backed)
       wal/
-        insert.wal            ← write-ahead log for this database
+        wal_000000001.log   ← segmented write-ahead log (not insert.wal)
+        CHECKPOINT          ← crash redo horizon
       tables/
         {tableName}/          ← column files, segment manifests
       materialized/           ← materialized query definitions + data
@@ -464,7 +465,7 @@ POST /api/server/shutdown  (must originate from loopback)
 ### Walk-through 4: Server startup reconcile with pre-configured databases
 
 ```
-Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "MaxMemoryBytes": 1073741824 } } } }
+Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "MaxMemoryShareBytes": 1073741824 } } } }
   → AoudaServerOptions binds DatabaseConfigSection entries
   → AoudaHostedService (or server startup middleware) reads Aouda:Databases
   → foreach entry name in config:
@@ -514,7 +515,7 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "M
 
 | Setting | Type | Default | Env var | Notes |
 |---|---|---|---|---|
-| `Aouda:Memory:MaxTotalRamBytes` | `long` | `2147483648` (2 GiB) | `AOUDA_MEMORY__MAXTOTALRAMBYTES` | Server ceiling; shared across all databases |
+| `Aouda:Memory:MaxTotalRamBytes` | `long` | ~70% of detected RAM | `AOUDA_MEMORY__MAXTOTALRAMBYTES` | Process RSS ceiling; shared as per-database shares |
 | `Aouda:Memory:MaxHotBytes` | `long` | `0` (auto: 70%) | `AOUDA_MEMORY__MAXHOTBYTES` | Hot segment budget; 0 = auto |
 | `Aouda:Memory:MaxPageCacheBytes` | `long` | `0` (auto: 20%) | `AOUDA_MEMORY__MAXPAGECACHEBYTES` | Page cache budget; 0 = auto |
 
@@ -547,7 +548,7 @@ These can be declared in config to provision databases at startup or to set defa
 |---|---|---|---|
 | `Aouda:Databases:<name>:EnableWal` | `bool` | `true` | WAL for this database |
 | `Aouda:Databases:<name>:ReplicationMode` | `string` | `Replicate` | `Replicate` or `DoNotReplicate` |
-| `Aouda:Databases:<name>:MaxMemoryBytes` | `long?` | `null` | Per-database cap (null = shared pool only) |
+| `Aouda:Databases:<name>:MaxMemoryShareBytes` | `long?` | `null` | Optional cap on this database's share of the server budget |
 | `Aouda:Databases:<name>:DefaultTemperature` | `string` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` |
 | `Aouda:Databases:<name>:WriteConcern` | `string` | `One` | `One`, `Majority`, `All` |
 | `Aouda:Databases:<name>:WriteConcernTimeoutMs` | `int` | `5000` | ACK wait timeout (≥ 100 ms) |
@@ -625,7 +626,7 @@ var list = await client.Databases.ListAsync();
 foreach (var db in list.Databases)
     Console.WriteLine($"  {db.Name} ({db.State})");
 
-// Create a database with a dedicated memory cap
+// Create a database with a cap on its share of the server budget (HTTP field name is still maxMemoryBytes)
 var created = await client.Databases.CreateAsync("trading", new CreateDatabaseOptions
 {
     EnableWal = true,
@@ -755,12 +756,12 @@ curl -s -X POST http://localhost:5000/api/databases/app/query \
     "Memory": { "MaxTotalRamBytes": 8589934592 },
     "Databases": {
       "analytics": {
-        "MaxMemoryBytes": 4294967296,
+        "MaxMemoryShareBytes": 4294967296,
         "DefaultTemperature": "ColdPreferred",
         "WriteConcern": "One"
       },
       "trading": {
-        "MaxMemoryBytes": 2147483648,
+        "MaxMemoryShareBytes": 2147483648,
         "DefaultTemperature": "HotOnly",
         "WriteConcern": "Majority",
         "WriteConcernTimeoutMs": 3000,
@@ -787,7 +788,7 @@ curl -s http://localhost:5000/api/server/memory
 ```
 
 **Expected result:** both databases open at startup without manual `POST /api/databases` calls; memory partitioned as declared.  
-**Common mistake:** declaring `MaxMemoryBytes` that exceeds the server `MaxTotalRamBytes` ceiling — server validates at startup.
+**Common mistake:** declaring `MaxMemoryShareBytes` that exceeds the server `MaxTotalRamBytes` ceiling — server validates at startup.
 
 ---
 
@@ -854,7 +855,7 @@ curl -s http://localhost:5000/api/databases
 
 ### Tuning sequence
 
-1. If memory pressure is `High` or `Critical` on a database: increase `Aouda:Databases:{db}:MaxMemoryBytes` via `/admin/config PATCH` or restart with new config.
+1. If memory pressure is `High` or `Critical` on a database: increase `Aouda:Databases:{db}:MaxMemoryShareBytes` via `/admin/config PATCH` or restart with new config.
 2. If `/ready` returns 503 on startup: check `Aouda:Health:StartupDelaySeconds` (default 10 s) and increase if catalog initialization is slow.
 3. If queries are timing out (`504`): increase `Aouda:RequestTimeoutMs` (default 30 000 ms).
 4. If server returns `503 SERVICE_UNAVAILABLE` under load: increase `Aouda:MaxConcurrentRequests` (default 50) and/or `Aouda:RequestQueueLimit` (default 100).
@@ -883,7 +884,7 @@ curl -s http://localhost:5000/api/databases
 | `/ready` returns 503 shortly after start | Startup delay window active | Wait for `StartupDelaySeconds` (default 10 s) before load-balancer routing |
 | `/ready` returns 503 after startup | Catalog or WAL check failing | Call `/health/detailed`; check `catalog` and `wal` component statuses; inspect logs |
 | Database stays in `Creating` state after restart | Process crashed during `CreateDatabaseAsync` | Delete partial directory and retry `POST /api/databases`; or call admin cleanup |
-| High memory pressure on one database | Tables fully loaded in hot tier | Add `Aouda:Databases:{db}:MaxMemoryBytes` cap; review table `StoragePolicy` |
+| High memory pressure on one database | Tables fully loaded in hot tier | Add `Aouda:Databases:{db}:MaxMemoryShareBytes` cap; review table `StoragePolicy` |
 | Write concern timeouts on insert | Replica ACK slower than `WriteConcernTimeoutMs` | Increase timeout or switch `OnWriteConcernTimeout` to `DegradeAndLog`; check replication lag via `/admin/replication/topology` |
 | `AOUDA_*` env vars ignored | Wrong naming or missing `__` for nested keys | Top-level: `AOUDA_PORT`, `AOUDA_DATAPATH`. Nested: `AOUDA_MEMORY__MAXTOTALRAMBYTES` (double `__`, not single `_`). See [Server configuration](server-configuration.md#21-environment-variable-naming-aouda_) |
 | Flat `/api/query` route returns 404 | P4-era flat routes removed in P6 | Update client to use `/api/databases/{db}/query` with `"database"` field in body |

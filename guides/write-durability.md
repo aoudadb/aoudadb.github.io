@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-05-22
+Last updated: 2026-08-13
 
 Coverage phases: P0, P1, P6, P7
 Primary task folders: `docs/tasks/P6/`, `docs/tasks/P7/`
@@ -46,7 +46,6 @@ Aouda durability makes write outcomes explicit instead of implicit.
   - Replication-aware write concern (`One`, `Majority`, `All`) with timeout policy.
   - Table-level and database-level durability policy layering.
 - Non-goals (current implementation):
-  - WAL-backed delete mutations (delete `WalPosition` stays `-1`).
   - Full API surface for per-table durability controls via REST/SDKs.
 
 ## 2.2 Discovery and navigation map
@@ -75,11 +74,11 @@ Aouda durability makes write outcomes explicit instead of implicit.
 ### Source map
 
 - WAL and replay core:
+  - `src/Aouda.Engine.Wal/WalSegmentedLog.cs` (production writer: `{db}/wal/wal_%09d.log`)
   - `src/Aouda.Engine.Wal/WalWriter.cs`
   - `src/Aouda.Engine.Wal/WalFlushQueue.cs`
-  - `src/Aouda.Engine.Wal/WalSegmentWriter.cs`
   - `src/Aouda.Engine.Storage/WalIntegration/WalReplayDriver.cs`
-  - `src/Aouda.Engine.Wal/WalCheckpointManager.cs`
+  - `src/Aouda.Engine.Wal/WalCheckpointControlFile.cs` (`{db}/wal/CHECKPOINT`)
   - `src/Aouda.Engine.Storage/WalIntegration/WalCheckpointer.cs`
 - Engine write-path integration:
   - `src/Aouda.Engine.Api/AoudaEngine.cs`
@@ -119,6 +118,7 @@ When you do not set durability knobs explicitly:
 - WAL:
   - Database default `EnableWal = true` (`DatabaseOptions`).
   - Table-level `Durability.EnableWal` is nullable; null inherits database default.
+  - On disk: segmented `{db}/wal/wal_%09d.log`. Crash recovery fast-forwards from `{db}/wal/CHECKPOINT`. A leftover monolithic `insert.wal` is refused until `aouda wal convert`.
 - Replication mode:
   - Database default `ReplicationMode = Replicate`.
 - Write concern:
@@ -137,9 +137,9 @@ When you do not set durability knobs explicitly:
 
 ### Available now
 
-- Local durability via WAL append path for insert/update.
+- Local durability via WAL append path for insert, update, and delete.
 - WAL replay and crash-safe recovery paths, including torn-tail repair.
-- WAL checkpoints for replay fast-forward.
+- Durable WAL checkpoints (`{db}/wal/CHECKPOINT`) that skip whole segment files below the redo horizon.
 - Streaming replication over WAL frames (multi-database aware protocol versions).
 - Write concern wait pipeline with quorum + timeout policies.
 - Per-database durability configuration via server config + database API.
@@ -154,7 +154,6 @@ When you do not set durability knobs explicitly:
 
 ### Reserved / not yet wired
 
-- WAL-backed delete path (delete currently returns `WalPosition = -1`).
 - Per-database checkpoint synchronization in replication.
 
 ## 2.5 Phase coverage matrix
@@ -170,11 +169,11 @@ When you do not set durability knobs explicitly:
 
 | Capability | Status | Notes |
 |---|---|---|
-| WAL append and fsync path | Implemented | `WalWriter.AppendAsync` and `WalFlushQueue` integrate with engine writes. |
+| WAL append and fsync path | Implemented | Production writer is `WalSegmentedLog` (`wal_%09d.log`). |
 | Insert/update WAL tagging with commit frame | Implemented | `TableAppender` emits begin/append/commit tags. |
-| Delete WAL durability | Missing | Delete path is in-memory tombstoning; `EngineDeleteResult.WalPosition = -1`. |
+| Delete WAL durability | Implemented | Deletes are WAL-backed (BL-054). |
 | Crash recovery via WAL replay | Implemented | `WalReplayDriver` + storage tests/harness scenarios. |
-| Checkpoint-assisted replay | Implemented | `WalCheckpointer` + `WalCheckpointManager`. |
+| Checkpoint-assisted replay | Implemented | `{db}/wal/CHECKPOINT` + skip of whole segments below `redoStartPosition`. |
 | Per-database durability config | Implemented | `DatabaseOptions`, config conversion/validation, create-database API. |
 | Per-table durability model | Implemented (engine/catalog) | Present in `TableDurabilityOptions`; API exposure is incomplete. |
 | Per-write write concern override | Implemented at protocol/server | `Messages.cs` fields + `TablesController` + `WriteConcernService`. |
@@ -198,7 +197,7 @@ When you do not set durability knobs explicitly:
 - Policy inheritance:
   - Durability can be set at db level, optionally overridden at table level, optionally overridden per write.
 - Recovery:
-  - On restart, WAL is replayed and can be fast-forwarded by checkpoints.
+  - On restart, WAL is replayed from `{db}/wal/CHECKPOINT` (`redoStartPosition`); whole `wal_%09d.log` files below that horizon are skipped.
 
 ## 2.8 How Aouda implements it
 
@@ -206,12 +205,12 @@ The write durability path is a composition of engine, WAL, replication, and serv
 
 1. Write operation enters engine path (`AoudaEngine.InsertRowsAsync`, `UpdateRowsAsync`).
 2. `TableAppender` writes begin/page/commit WAL tags when a resolved `WalWriter` exists.
-3. `WalWriter` appends and flushes, updates `Position`, and emits `OnFrameAppended`.
+3. `WalSegmentedLog` appends frames into `wal_%09d.log`, flushes, updates `Position`, and emits `OnFrameAppended`.
 4. Replication broadcaster forwards frames to subscribers (`WalStreamServer`).
 5. Server DML controller receives engine result and registers pending write wait by WAL position.
 6. `WriteConcernService` resolves effective concern (request -> table -> database), computes required ACKs, and awaits `PendingWriteTracker`.
 7. ACKs are consumed from stream client/server protocol and complete pending waiters.
-8. On restart, `WalReplayDriver` rehydrates in-memory state and uses checkpoint metadata to avoid replaying already durable sections.
+8. On restart, `WalReplayDriver` rehydrates in-memory state and starts at `{db}/wal/CHECKPOINT`, skipping whole segment files below the redo horizon.
 
 Design characteristics:
 - The durability coordination boundary is WAL position, not mutation payload.
@@ -244,7 +243,7 @@ Design characteristics:
 1. Process is terminated after durable and non-durable writes are interleaved.
 2. On startup, storage initializes and WAL replay is invoked.
 3. Replay reads segments, validates frames (CRC), trims torn tail if present, and reapplies durable frames.
-4. Checkpoint manager provides last-known replay checkpoint to fast-forward.
+4. `{db}/wal/CHECKPOINT` supplies `redoStartPosition`; segments whose end is at or below that horizon are not opened.
 5. Queries after startup observe replayed state; scenario tests validate expected rows.
 
 ### Walk-through D: Replication ACK path for write concern
@@ -504,7 +503,6 @@ Operational guidance:
 - Add server API integration tests once per-table durability payload is exposed on create/update table endpoints.
 - Add SDK tests for C# and TS mutation write concern arguments once client surface is implemented.
 - Add TS client type tests for `writeConcernStatus` in mutation results.
-- Add delete durability tests once WAL-backed delete path is implemented.
 - Add per-database checkpoint sync tests when replication checkpoint synchronization ships.
 
 ## 2.18 Known gaps and undone work
@@ -512,7 +510,6 @@ Operational guidance:
 - Public REST/SDK surface for table durability controls is incomplete.
 - C# and TypeScript clients do not yet expose per-write write concern arguments.
 - TypeScript client types do not include write concern status in mutation results.
-- Delete operations are not WAL-backed, so delete write concern is effectively non-durable.
 - Backup/restore D.3 scenario remains deferred pending API support.
 - Per-database checkpoint sync in replication is deferred.
 
@@ -529,12 +526,12 @@ Operational guidance:
 - Engine/server code:
   - `src/Aouda.Engine.Api/AoudaEngine.cs`
   - `src/Aouda.Engine.Storage/Ingest/TableAppender.cs`
+  - `src/Aouda.Engine.Wal/WalSegmentedLog.cs`
   - `src/Aouda.Engine.Wal/WalWriter.cs`
   - `src/Aouda.Engine.Wal/WalFlushQueue.cs`
-  - `src/Aouda.Engine.Wal/WalSegmentWriter.cs`
   - `src/Aouda.Engine.Storage/WalIntegration/WalReplayDriver.cs`
   - `src/Aouda.Engine.Storage/WalIntegration/WalCheckpointer.cs`
-  - `src/Aouda.Engine.Wal/WalCheckpointManager.cs`
+  - `src/Aouda.Engine.Wal/WalCheckpointControlFile.cs`
   - `src/Aouda.Engine.Storage/Registry/DatabaseOptions.cs`
   - `src/Aouda.Engine.Catalog/Policies.cs`
   - `src/Aouda.Engine.Core/Replication/WriteConcern.cs`

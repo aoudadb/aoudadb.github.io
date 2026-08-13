@@ -29,6 +29,8 @@ Aouda settings come from several layers. Think of them as separate concerns:
 
 **Install directory vs data directory:** users may copy binaries to any folder (`C:\Program Files\Aouda`, `D:\Apps\Aouda`, `/opt/aouda`, …). That choice does **not** determine where databases live. The **data directory** (chosen at install) holds all persistent engine state.
 
+The default memory budget is a **fraction of detected RAM** (about 70% of host or cgroup memory), not a fixed 2 GiB. You can resize it without a restart from Studio (Settings → Server), `PATCH /admin/config`, or `aouda budget`. Runtime PATCH values do not persist across restart unless you also set env, CLI, or appsettings.
+
 ---
 
 ## 2) Startup binding priority (lowest → highest)

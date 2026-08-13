@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-07-20
+Last updated: 2026-08-13
 
 Coverage phases: P3, P6, P7, P30, BL-091
 Primary task folders: `docs/tasks/P3/`, `docs/tasks/P6/`, `docs/tasks/P7/`, `docs/tasks/P30/`
@@ -129,16 +129,17 @@ If you do nothing beyond default server config:
 - Table temperature policy defaults to `Auto`.
 - New segments start `Hot`.
 - Server memory defaults to:
-  - `MaxTotalRamBytes = 2147483648` (2 GiB)
-  - `MaxHotBytes = 0` (effective 70% of total)
-  - `MaxPageCacheBytes = 0` (effective 20% of total)
-- Budget target defaults to 90% of total RAM when target is unspecified.
+  - `MaxTotalRamBytes` unset → about **70% of detected host or cgroup memory** (an RSS ceiling, not a 2 GiB constant)
+  - `MaxHotBytes = 0` (effective fraction of the governed budget)
+  - `MaxPageCacheBytes = 0` (effective fraction of the governed budget)
+- Budget target defaults to a high fraction of the governed budget when unspecified.
+- Over-budget ingest returns **HTTP 503** (`MEMORY_BUDGET_EXCEEDED`) with `Retry-After`; the process stays up.
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
 | Table `StorageTemperaturePolicy` | `Auto` | Engine can demote/promote segments using maintenance and access signals |
 | Segment temperature on creation | `Hot` | New data is queried on hot path first |
-| `Aouda:Memory:MaxTotalRamBytes` | `2 GiB` | Server-wide memory cap baseline |
+| `Aouda:Memory:MaxTotalRamBytes` | ~70% of detected RAM | Process RSS ceiling (set explicitly to pin a number) |
 | `Aouda:Memory:MaxHotBytes` | `0` | Auto-computes effective hot budget as 70% of max total |
 | `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes effective cache budget as 20% of max total |
 | `MemoryBudgetOptions.TargetRamBytes` | `0` | Effective target is 90% of max total |
@@ -485,7 +486,7 @@ Primary proving tests:
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `Aouda:Memory:MaxTotalRamBytes` | long | `2147483648` | `>= 1048576` | startup config | Server max RAM envelope |
+| `Aouda:Memory:MaxTotalRamBytes` | long | ~70% of detected RAM | `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 70% of total |
 | `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 20% of total |
 | `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or positive | startup config | Per-database cap when set |

@@ -29,6 +29,7 @@ Update this table when shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
+| `0.1.6` | `1` | `≥ 0.1.9` (503 `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` retry; additive RSS/WAL/quarantine metrics types) | `≥ 0.1.6` | `≥ 0.0.16` | Bounded durability: process RSS ceiling, bounded WAL, retryable back-pressure, quarantine inspect. Studio pin `@aouda/client` `0.1.9` after that npm version is published. |
 | `0.1.5` | `1` | `≥ 0.1.8` (P36 `alterColumn` / `reorderColumns` / `jobs` / typed `SchemaChangeType`) | `≥ 0.1.5` | `≥ 0.0.15` | P36 Column Evolution train: ALTER COLUMN HTTP + clients + Studio schema UI. Studio pin `@aouda/client` `0.1.8`. |
 | `0.1.4` | `1` | `≥ 0.1.7` (BL-132 outbox + `acknowledgeDevCapture`; BL-130/131 `identityInsert`) | `≥ 0.1.4` | `≥ 0.0.14` | Patch train: capture notification outbox, identity-insert (row + bulk-load). Studio notifications UI uses outbox via admin HTTP; pin `@aouda/client` `0.1.7`. |
 | `0.1.3` | `1` | `≥ 0.1.6` (BL-126 `columnsAltered`; residency filter fields still HTTP-raw) | `≥ 0.1.3` | `≥ 0.0.13` | Patch train: BL-091 residency HTTP, BL-126 autoIncrement toggle, async durable DB drop, partition routing, freeze/abort correctness. |
