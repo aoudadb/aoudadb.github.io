@@ -147,7 +147,6 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **Unified CLI** — `aouda start`, `aouda stop`, `aouda databases list|get|create|drop`, `aouda version`.
 - **`Aouda.Server.exe` split** — `Aouda.Server.exe start` and `create-admin` only; all operator workflows via `aouda`.
 - **First-run bootstrap** — `GET /api/auth/setup/status`, `aouda init`.
-- **Hot cache client** — `Aouda.Embedded.Hot` (SSE-based local read cache, `GET /api/subscribe/hot`).
 
 ### Planned / Proposed
 
@@ -205,7 +204,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Unified CLI (`aouda start/stop/databases`) | ✅ | | | `src/Aouda.Cli/Commands/`, `src/Aouda.Server/Hosting/ServerHostRunner.cs`, P16 §5.4 | |
 | `Aouda.Server.exe` / `aouda` command split | ✅ | | | `src/Aouda.Server/Cli/CliParser.cs`, P4 §2 #19 | |
 | First-run bootstrap (`GET /api/auth/setup/status`, `aouda init`) | ✅ | | | `src/Aouda.Server/Controllers/SetupController.cs`, `src/Aouda.Cli/Commands/InitCommand.cs` | |
-| `Aouda.Embedded.Hot` hot cache client | ✅ | | | `src/Aouda.Embedded.Hot/`, P4 §2 #14 | |
+| `Aouda.Embedded.Hot` hot cache client | | | ❌ | withdrawn BL-162 (2026-08-13) | Rebuild as named-query materialization (BL-164) |
 | .NET client `client.Databases.ListAsync/CreateAsync` | ✅ | | | `src/Aouda.Client/Databases/AoudaDatabasesApi.cs` | |
 | .NET client `client.Databases.GetAsync / DropAsync` | | | ❌ | P6 §5.2 (HTTP endpoints exist); `AoudaDatabasesApi.cs` has only List + Create | See §2.18 |
 | Admin management API under `/admin/*` (P16) | ✅ | | | `src/Aouda.Server/Controllers/Cluster|Backup|Config|Node|CapabilitiesController.cs`, P16 §5.3 | |
@@ -489,7 +488,6 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "M
 | Management API design | Often requires config files or restarts | All mutations (cluster join, backup schedule, config) go through HTTP APIs; state persists in focused JSON files | Safe to automate with idempotent API calls; no server restart for most changes |
 | Observability granularity | Global metrics or none | Per-database memory + ops metrics alongside global Perf-counter subsystems; per-db health check in `/health/detailed` | Diagnose per-tenant hotspots without shared metrics noise |
 | Shutdown semantics | SIGTERM → hope | `POST /api/server/shutdown` calls `StopApplication()` → WAL flush → clean exit | Durability tests can trigger and verify clean shutdown without `kill -9` |
-| Hot cache tier | Client-side caching independent of server | `Aouda.Embedded.Hot` subscribes via SSE to server hot segments; queries execute locally against a typed in-process replica | Sub-millisecond latency for hot reads without caching logic in app code |
 
 ---
 
@@ -604,7 +602,6 @@ Nested sections use `__` separator in env vars: `AOUDA_MEMORY__MAXTOTALRAMBYTES`
 | Runtime config | — | `GET/PATCH /admin/config[/schema]` | ✅ (P16) | Mutable fields only; `cluster-state.json` |
 | Capabilities discovery | — | `GET /admin/capabilities` | ✅ (P16) | Feature-flags payload |
 | Node info + logs | — | `GET /admin/node[/logs[/stream]]` | ✅ (P16) | SSE for `/stream` |
-| Hot segment SSE subscribe | `new AoudaHotCache(client, opts)` | `GET /api/subscribe/hot` | ✅ | |
 
 ### B) Missing API matrix
 
@@ -1013,6 +1010,5 @@ curl -s http://localhost:5000/api/databases
 ## 2.20 What Is Missing from This Document?
 
 - **`Aouda.Server.exe` vs `aouda` CLI internals** — The exact CLI command surface of `aouda databases get` and `drop` (P16 SA6) is documented at the HTTP layer; the internal CLI command handler (`DatabasesCommandHandler`) is not confirmed at method-level in source materials. No test artifacts for these CLI sub-commands are confirmed.
-- **`Aouda.Embedded.Hot` subscription wiring** — P4 §10 notes that the `GET /api/subscribe/hot` SSE endpoint was scaffolded but hot-data push was not fully wired to the engine registry in P4. Current status in post-P6 code (with per-database hot segment registries) is not confirmed from source materials; see `src/Aouda.Embedded.Hot/` and `src/Aouda.Server/Controllers/SubscriptionController.cs` for current state.
 - **TypeScript multi-database API** — Not verifiable in this repository; described as delivered in P6 and P16 reports in the `aouda-client-ts` sibling repo.
 - **Admin endpoint authentication details** — The `/admin/*` routes require `ServerAuth` scope (P16); the full auth middleware flow is documented in `Functionality-Auth-And-Authorization.md` rather than repeated here.
