@@ -85,7 +85,6 @@ Distribution and licensing in Aouda are product behavior, not packaging trivia.
 - Code/package evidence:
   - `LICENSE`, `LICENSE-MIT`
   - `src/Aouda.Embedded/Aouda.Embedded.csproj`
-  - `src/Aouda.Embedded.Hot/Aouda.Embedded.Hot.csproj`
   - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
   - `src/Aouda.Client/Aouda.Client.csproj`
   - `src/Aouda.Cli/Aouda.Cli.csproj`
@@ -128,11 +127,11 @@ If you do nothing except install artifacts:
 
 - BSL + MIT base files exist at repository root (`LICENSE`, `LICENSE-MIT`).
 - Package-level licensing metadata is wired in current packable projects:
-  - BSL-style package license file usage in `Aouda.Embedded` and `Aouda.Embedded.Hot`.
+  - BSL-style package license file usage in `Aouda.Embedded`.
   - MIT license expression usage in `Aouda.Abstractions`, `Aouda.Client`, `Aouda.Cli`, `Aouda.Testing`.
   - TypeScript package declares `"license": "MIT"`.
 - Multi-artifact distribution paths are implemented:
-  - NuGet packages: `Aouda.Embedded`, `Aouda.Embedded.Hot`, `Aouda.Abstractions`, `Aouda.Client`, `Aouda.Testing`.
+  - NuGet packages: `Aouda.Embedded`, `Aouda.Abstractions`, `Aouda.Client`, `Aouda.Testing`.
   - dotnet global tool: `Aouda.Cli` with `ToolCommandName=aouda`.
   - npm package: `@aouda/client`.
 - Runtime distribution entry points are implemented:
@@ -172,7 +171,7 @@ Implementation drift note:
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
 | Root license artifacts (`LICENSE`, `LICENSE-MIT`) | Yes | No | No | Root license files + P11 C1 report | Canonical legal text exists in-repo |
-| BSL metadata for engine-side distributables | Yes | No | No | `Aouda.Embedded.csproj`, `Aouda.Embedded.Hot.csproj`, `Aouda.Server.csproj` | Uses package license file wiring pattern |
+| BSL metadata for engine-side distributables | Yes | No | No | `Aouda.Embedded.csproj`, `Aouda.Server.csproj` | Uses package license file wiring pattern |
 | MIT metadata for client/tooling packages | Yes | No | No | `Aouda.Abstractions.csproj`, `Aouda.Client.csproj`, `Aouda.Cli.csproj`, `Aouda.Testing.csproj`, `aouda-client-ts/package.json` | Mixed NuGet license expression + npm license field |
 | NuGet package distribution for embedded/server clients | Yes | No | No | csproj `PackageId` + README docs + task reports | Pre-release versioning, packaging operationally present |
 | dotnet global tool distribution (`aouda`) | Yes | No | No | `Aouda.Cli.csproj`, `Program.cs` | `PackAsTool=true`, `ToolCommandName=aouda` |
@@ -186,7 +185,7 @@ Implementation drift note:
 ## 2.7 Core concepts and mental model
 
 - Artifact class:
-  - **Engine-inclusive** package/tool: ships runtime engine behavior (`Aouda.Embedded`, `Aouda.Embedded.Hot`, server-hosted flows).
+  - **Engine-inclusive** package/tool: ships runtime engine behavior (`Aouda.Embedded`, server-hosted flows).
   - **Thin client/tooling** package: API/transport/testing convenience (`Aouda.Abstractions`, `Aouda.Client`, `@aouda/client`, `Aouda.Testing`, `Aouda.Cli`).
 - License posture:
   - **BSL-oriented** for core engine/server surfaces.
@@ -218,7 +217,6 @@ Key implementation anchors:
 
 - Licensing and package metadata:
   - `src/Aouda.Embedded/Aouda.Embedded.csproj`
-  - `src/Aouda.Embedded.Hot/Aouda.Embedded.Hot.csproj`
   - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
   - `src/Aouda.Client/Aouda.Client.csproj`
   - `src/Aouda.Cli/Aouda.Cli.csproj`
@@ -320,7 +318,7 @@ This section includes both runtime distribution settings and package/build metad
 | `PackageId` | string | per project | non-empty | packable `.csproj` | Artifact identity on NuGet |
 | `Version` | string | `0.1.0` (current) | semver-like | packable `.csproj` | Overridable at pack time |
 | `PackageLicenseExpression` | string | varies | SPDX expression | `.csproj` | Used by MIT packages (`Aouda.Abstractions`, `Aouda.Client`, `Aouda.Cli`, `Aouda.Testing`) |
-| `PackageLicenseFile` | string | varies | package-relative file | `.csproj` | Used by BSL-oriented packages (`Aouda.Embedded`, `Aouda.Embedded.Hot`, server metadata) |
+| `PackageLicenseFile` | string | varies | package-relative file | `.csproj` | Used by BSL-oriented packages (`Aouda.Embedded`, server metadata) |
 | `PackageReadmeFile` | string | varies | package-relative file | `.csproj` | Enables NuGet package README |
 | `PackAsTool` | bool | `true` only in CLI | true/false | `Aouda.Cli.csproj` | Marks package as dotnet global tool |
 | `ToolCommandName` | string | `aouda` | command name | `Aouda.Cli.csproj` | Runtime command exposed to users |
@@ -616,7 +614,6 @@ _Updated 2026-04-08 after P14/P16 completion._
 - Code paths:
   - `LICENSE`, `LICENSE-MIT`
   - `src/Aouda.Embedded/Aouda.Embedded.csproj`
-  - `src/Aouda.Embedded.Hot/Aouda.Embedded.Hot.csproj`
   - `src/Aouda.Abstractions/Aouda.Abstractions.csproj`
   - `src/Aouda.Client/Aouda.Client.csproj`
   - `src/Aouda.Cli/Aouda.Cli.csproj`

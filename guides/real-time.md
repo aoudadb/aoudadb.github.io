@@ -123,7 +123,6 @@ Aouda streaming exists to make data movement and data observation first-class pr
   - `tests/Aouda.Client.Tests/Streaming/WriteStreamApiTests.cs`
   - `tests/Aouda.Client.Tests/Streaming/StreamingFallbackLifecycleTests.cs`
   - `tests/Aouda.Client.Tests/Streaming/MaterializedQuerySubscriptionApiTests.cs`
-  - `tests/Aouda.Client.Tests/HotCache/HotCacheTests.cs`
   - `../aouda-client-ts/tests/streaming/websocket-transport.test.ts`
   - `../aouda-client-ts/tests/streaming/subscription.test.ts`
   - `../aouda-client-ts/tests/streaming/write-stream.test.ts`
@@ -188,8 +187,6 @@ If you do nothing:
   - HTTP long-poll fallback server endpoint plus .NET/TypeScript fallback transports.
 - Materialized query streaming:
   - Subscribe via table path to result tables with incremental updates.
-- C# hot cache/live:
-  - Hot cache settings, WebSocket sync, and `Live()` collection pattern.
 
 ### Planned / proposed
 
@@ -203,7 +200,7 @@ Documented intent that is not currently fully productized:
 ### Reserved / not yet wired
 
 - Dedicated error code for "materialized query exists but not yet ready" is not wired as a separate protocol code path (tracked as BL-053 in task report context).
-- Legacy SSE hot-segment endpoint remains present (`SubscriptionController`), but it is not the P10 real-time streaming contract and should be considered legacy/parallel functionality rather than the primary streaming surface.
+- Client-side hot cache / `Live()` / SSE `SubscriptionController` withdrawn (BL-162, 2026-08-13). Local materialization returns on named queries (BL-164).
 
 ## 2.5 Phase coverage matrix
 
@@ -211,7 +208,7 @@ Documented intent that is not currently fully productized:
 |---|---|---|---|---|
 | P10 S1-S5 | `P10-S1-ChangeEventFoundation.md`, `P10-S3-WebSocketInfrastructure.md`, `P10-S4-ADRAFilteredSubscriptions.md`, `P10-S5-ServerSideSubscriptionFilters.md` | Change emitter foundation, WS infra, subscription manager, ADRA filters, user filters, snapshot-first streaming | Full auth-db integration harness breadth still partial in integration form | Deferred auth-db integration scenarios noted in S4 report |
 | P10 S7 | `P10-S7-StreamingWrites.md` | Write stream open/rows/close, insert/upsert, acks, backpressure thresholds, per-row auth rejections | None explicitly listed in S7 report | None |
-| P10 S9-S13 | `P10-S9-CSharpClientStreamingAPI.md`, `P10-S10-MaterializedQuerySubscriptions.md`, `P10-S11-HotCacheAndLiveCollection.md`, `P10-S12-TypeScriptWebSocketTransport.md`, `P10-S13-TypeScriptClientStreamingAPI.md` | .NET and TypeScript streaming APIs, typed subscribe, write streams, MQ subscription behavior, hot cache + Live() | No major functional deferment documented here | BL-053 introduced from S10 context |
+| P10 S9-S13 | `P10-S9-CSharpClientStreamingAPI.md`, `P10-S10-MaterializedQuerySubscriptions.md`, `P10-S11-HotCacheAndLiveCollection.md`, `P10-S12-TypeScriptWebSocketTransport.md`, `P10-S13-TypeScriptClientStreamingAPI.md` | .NET and TypeScript streaming APIs, typed subscribe, write streams, MQ subscription behavior | Hot cache + `Live()` withdrawn BL-162 | BL-053 (S10); BL-162 (S11) |
 | P10 S14 I3/I4 | `P10-S14-I3-MessagePackWireMode.md`, `P10-S14-I4-HttpLongPollFallback.md` | MessagePack negotiation + binary mode; long-poll fallback endpoint and client fallback transport | None called out in I3/I4 reports | None |
 
 ## 2.6 Capability coverage matrix
@@ -229,7 +226,7 @@ Documented intent that is not currently fully productized:
 | TypeScript streaming API surface | Yes | No | No | `query-builder.ts`, streaming modules, S12/S13 tests | Callback + async iteration + write stream |
 | MessagePack streaming wire mode | Yes | No | No | `WireMode.cs`, serializer, WS transports, I3 tests | Long-poll remains JSON-only |
 | HTTP long-poll fallback transport | Yes | No | No | `LongPollStreamController.cs`, client transports, I4 tests | Fallback selected on WS connect failure |
-| Hot cache sync + C# `Live()` collection | Yes | No | No | S11 report + `WebSocketHotCacheSync.cs`/`LiveCollection.cs` | Client-side C# pattern |
+| Hot cache sync + C# `Live()` collection | No | No | Yes | withdrawn BL-162 | Rebuild on named queries (BL-164) |
 | Exactly-once delivery semantics | No | No | Yes | ADR scope and protocol behavior | At-least-once with version dedup model |
 | Cross-database streaming subscription | No | No | Yes | P10 scope notes | One database per streaming connection path |
 
@@ -635,7 +632,6 @@ Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports J
 | Open write stream | `OpenWriteStreamAsync(mode)` | `openWriteStream({ mode })` | `stream_open`, `stream_rows`, `stream_ack`, `stream_close` | Implemented | Insert/upsert supported |
 | MessagePack wire mode | `.NET WireMode.MessagePack` | `streaming.wireMode = "msgpack"` | auth `wire_mode` negotiation | Implemented | Long-poll is JSON-only |
 | Long-poll fallback | `.NET EnableLongPollFallback` | `streaming.enableLongPollFallback` | `/stream/longpoll/connect|send|poll|{id}` | Implemented | Fallback used when WS connect fails |
-| Hot cache live mirror (C#) | `HotCacheSettings` + `Live()` | No equivalent SDK pattern | n/a | Partial | C# only feature pattern today |
 | Embedded streaming support | Not supported (throws) | n/a | n/a | Partial | Server mode only |
 
 ### B) Missing API matrix
@@ -645,7 +641,7 @@ Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports J
 | Exactly-once stream processing contract | No exactly-once mode in server/protocol/SDKs | Use version-based dedup and idempotent reducers | Future architecture decision; not in current P10 scope | Medium |
 | Cross-database subscriptions on single connection | No cross-db subscription targeting in protocol path | Open separate client/connection per database | Future clustering/distribution roadmap work | Medium |
 | Distinct MQ "not ready" error code | No dedicated protocol error; currently generic not-found style | Treat missing/not-ready uniformly and retry after MQ setup | BL-053 from S10 report context | Low/Medium |
-| TS equivalent of C# `Live()` hot collection abstraction | No dedicated TS `Live()` API | Use `subscribe()` and local reducer state in app layer | Future TS client ergonomics task (not in current P10 scope) | Low |
+| TS equivalent of C# `Live()` hot collection abstraction | Withdrawn with C# `Live()` (BL-162) | Use `subscribe()` and local reducer state in app layer | BL-164 named-query materialization | — |
 
 ## 2.12 Scenario playbooks (minimum three)
 
