@@ -84,7 +84,7 @@ Use this mapping as the baseline when planning doc updates:
 | Schema lifecycle and evolution patterns | Cross-phase (notably P3/P4/P7/P12/P14) | `docs/dev/Functionality-Schema-Lifecycle.md` |
 | Server CLI, Docker, Kubernetes, cloud, Hub | P16 | `docs/dev/Functionality-Cloud-And-Hub.md` |
 | **Server configuration** (precedence, install bootstrap, restart) | P34 / P4 | `guides/server-configuration.md` |
-| **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `guides/access-surface.md` |
+| **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `guides/access-surface.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
 | Studio management console | P5, P6, P9, P12, P16 | `docs/dev/Functionality-Studio.md` |
 | TypeScript client SDK (`@aouda/client`) | P5, P10, P12, P14, P15, P16 | `docs/dev/Functionality-TypeScript-Client.md` |
 
@@ -121,7 +121,8 @@ The template for writing functionality docs is now maintained separately:
 
 - `docs/dev/Functionality-Document-Template.md`
 
-That template is intentionally extensive and must be treated as required structure for new docs and rewrites.
+That template is intentionally extensive and is **required for engine-repo `docs/dev/Functionality-*` rewrites** (implementer-facing). It is **not** required for aouda-docs user guides — including the P37 pages (`named-queries`, `direct-client-access`, `division-of-responsibility`, `insert-transforms`, `access-surface`). Those follow §1 and §4 of this file (defaults, availability, honesty, troubleshooting) without the 2.1–2.18 audit skeleton.
+
 It includes:
 
 - research workflow,
@@ -131,7 +132,7 @@ It includes:
 - differentiator framing requirements,
 - completion checklist for publish readiness.
 
-Do not draft new functionality docs directly from this overview without using the template.
+Do not draft new **engine** functionality docs directly from this overview without using the template. User-facing aouda-docs pages do not copy that template.
 
 Additionally, every functionality document must act as an explicit **entry point**:
 

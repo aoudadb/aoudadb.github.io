@@ -449,6 +449,7 @@ All errors return a JSON body with this structure:
 | `NAMED_QUERY_BATCH_MUTATION` | 400 | Batch included a named-mutation hash (read-only envelope) |
 | `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation hash is unknown |
 | `NAMED_MUTATION_BIND_FAILED` | 400 | Named-mutation argument bind failed |
+| `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows`; the call fails closed (no `rowsTruncated`) |
 | `ACCESS_SURFACE_TOO_MANY_IDENTITIES` | 400 | Access-surface diff posted more than 32 fixture identities |
 | `AUTH_IDENTITY_INVALID` | 400 | `aouda.identities.json` / posted identities document failed validation |
 | `SNAPSHOT_TOO_LARGE` | 400 | Subscribe snapshot would exceed `MaxSnapshotRows` (default 100 000) |
@@ -518,6 +519,9 @@ These also appear as WebSocket `error` `code` values where noted.
 |------|-----------|-------------|
 | `NAMED_QUERY_DEPRECATED` | 200 warning | Hash is deprecated; execute/subscribe still succeeds. `warnings[]` includes `hash` and optional `sunsetAt`. |
 | `NAMED_MUTATION_DEPRECATED` | 200 warning | Same for named mutations |
+| `NAMED_MUTATION_UNCAPPED_DELETE` | 400 (schema apply) | Named-mutation delete is missing a numeric `limit` cap |
+| `NAMED_MUTATION_RETURNING_STAR` | 400 (schema apply) | Named-mutation `returning` contains `*` |
+| `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_IDENTITY_PARAM` | 400 (schema apply) | Parameter name collides with an identity-derived value |
@@ -926,14 +930,34 @@ Read-only batch envelope. Every element is evaluated against **one read snapshot
 }
 ```
 
-**Envelope 400** (no `results`):
+**Envelope 400** (no `results`). Same `ProtocolError` shape as other HTTP errors (`code` + `error`):
 
-| Code | When |
-|------|------|
-| `NAMED_QUERY_BATCH_EMPTY` | `queries` missing or empty |
-| `NAMED_QUERY_BATCH_TOO_LARGE` | More than 32 elements |
-| `NAMED_QUERY_BATCH_MUTATION` | Any element hash is a named mutation |
-| `INVALID_FORMAT` | `format` is not `columnar` or `rows` |
+Empty `queries`:
+
+```http
+POST /api/databases/trading/named-queries/batch
+Content-Type: application/json
+
+{ "queries": [] }
+```
+
+```json
+{ "code": "NAMED_QUERY_BATCH_EMPTY", "error": "Named query batch requires a non-empty queries array." }
+```
+
+Over cap (33 hashes):
+
+```json
+{ "code": "NAMED_QUERY_BATCH_TOO_LARGE", "error": "Named query batch exceeds 32 elements." }
+```
+
+A named-mutation hash in `queries`:
+
+```json
+{ "code": "NAMED_QUERY_BATCH_MUTATION", "error": "Named query batch must not include a named-mutation hash." }
+```
+
+`INVALID_FORMAT` when `?format=` is not `columnar` or `rows`.
 
 Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) — that is ad-hoc update/delete on one table.
 
@@ -947,7 +971,7 @@ Named mutations are the write-side mirror: hash-addressed insert/update/delete t
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`).
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429).
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE` and `NAMED_MUTATION_RETURNING_STAR`.
 
 ### Access-surface diff
 
@@ -2513,7 +2537,7 @@ Remaining limitations are tracked in the backlog for future enhancement.
 The following are candidates for future versions:
 
 - Protobuf binary protocol support (MessagePack is already implemented — see [WebSocket Streaming Protocol](#websocket-streaming-protocol) below)
-- Batch HTTP query endpoint (multiple queries in a single request)
+- Ad-hoc (client-composed) multi-query HTTP batch — independent **named** queries already batch via [Named queries](#named-queries) (`POST …/named-queries/batch`, cap 32, one snapshot)
 - GraphQL endpoint
 
 ---

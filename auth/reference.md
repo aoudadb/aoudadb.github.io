@@ -1351,6 +1351,6 @@ Remove-Item -Recurse -Force C:\Users\you\AppData\Local\aouda\derive
 - **[Getting Started](Getting-Started.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
 - **[ADR 0023: Authentication and Authorization](../decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC
 - **[ADR 0025: Auth-DB-Resolved Authorization (ADRA)](../decisions/0025-adra-auth-db-resolved-authorization.md)** — Full ADRA design rationale, auth modes, resolver model, performance analysis
-- **[Wire Protocol](../protocol/WIRE-PROTOCOL.md)** — HTTP API reference including auth headers
+- **[HTTP API](../reference/http-api.md)** — Wire contract including auth headers
 - **[P12 Auth Tasks](../tasks/P12-Authentication-Authorization-Tasks.md)** — P12 implementation history
 - **[P14 ADRA Tasks](../tasks/P14-ADRA-Tasks.md)** — P14 ADRA implementation overview

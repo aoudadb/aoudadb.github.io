@@ -204,10 +204,12 @@ Body is `{ "args": { … } }` only. No `database` field (the path already has it
 ### HTTP
 
 ```bash
+# Data-plane listener (mk_pub_* or application user JWT). Admin :5433 rejects mk_pub_*
+# with AUTH_KEY_LISTENER_MISMATCH.
 curl -s -X POST \
   -H "Authorization: Bearer $MK_PUB_OR_JWT" \
   -H "Content-Type: application/json" \
-  http://localhost:5433/api/databases/trading/named-queries/aaa…64hex…/query?format=columnar \
+  http://localhost:5434/api/databases/trading/named-queries/aaa…64hex…/query?format=columnar \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
@@ -331,10 +333,12 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
 ## Named mutations
 
 ```bash
+# Browser-tier JWT on the data-plane. Service keys that mutate via named artifacts
+# may use either listener; ad-hoc insert still requires admin.
 curl -s -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
-  http://localhost:5433/api/databases/trading/named-mutations/<hash>/execute \
+  http://localhost:5434/api/databases/trading/named-mutations/<hash>/execute \
   -d '{"args":{"id":1,"qty":10}}'
 ```
 

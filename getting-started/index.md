@@ -1773,7 +1773,7 @@ await client.branches.delete("feature-x");
 - **[Testing with Aouda.Testing](Getting-Started-Testing.md)** — In-process integration tests, including Application Auth, xUnit/NUnit/MSTest fixtures, and CI-friendly `dotnet test` workflows.
 - **[Architecture](../ARCHITECTURE.md)** — Deep dive into Aouda's technical design.
 - **[ADR Index](../decisions/)** — All architecture decision records.
-- **[Wire Protocol](../protocol/WIRE-PROTOCOL.md)** — HTTP API reference, including authentication headers and error codes.
+- **[HTTP API](../reference/http-api.md)** — Wire contract, including authentication headers and error codes.
 - **[Aouda Studio](https://github.com/aouda/aouda-studio)** — Web management console.
 
 ---

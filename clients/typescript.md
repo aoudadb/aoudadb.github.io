@@ -42,6 +42,7 @@ _Repo: `aouda-client-ts`_
 | Work with branches | §9 Branches |
 | Stream real-time changes | §10 Streaming |
 | Execute named queries / batch | [Named queries](../guides/named-queries.md) — `client.namedQueries.execute(hash, args)`, `.batch([{ hash, args }])` |
+| Execute named mutations | [Named queries](../guides/named-queries.md#named-mutations) — `client.namedMutations.execute(hash, args)` |
 | Manage cluster via API | §11 Admin APIs |
 | Use MCP tools for AI | §12 MCP Tools |
 

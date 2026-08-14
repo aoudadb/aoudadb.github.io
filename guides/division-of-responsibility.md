@@ -128,6 +128,84 @@ Adopt named queries for (2) and (3), and for the security properties (bounded co
 
 ---
 
+## Defaults
+
+| Setting | Default |
+|---|---|
+| Decision when the test is ambiguous | Stays in a service |
+| Named-query identity | Invoker ADRA (no definer / `runAs`) |
+| Intra-DC hop as the value case | **Not** the argument — see [latency caveat](#honest-caveat-about-latency) |
+| Streaming relay | Retire only on a P37 build (gap, complete snapshots, conflation, `re_auth`) |
+
+---
+
+## Copy-paste: the BFF that becomes a named query
+
+Schema (admin apply) — pin the hash via codegen, then call from the **data-plane**:
+
+```json
+{
+  "namedQueries": {
+    "equityQuoteByTicker": {
+      "table": "EquityQuote",
+      "limit": 1,
+      "select": ["ticker", "bid", "ask"],
+      "where": { "and": [{ "column": "ticker", "op": "eq", "param": "ticker" }] },
+      "params": { "ticker": { "maxLength": 8 } }
+    }
+  }
+}
+```
+
+HTTP (data-plane):
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  http://localhost:5434/api/databases/trading/named-queries/<hash>/query \
+  -d '{"args":{"ticker":"AAPL"}}'
+```
+
+TypeScript:
+
+```typescript
+const quote = await client.namedQueries.execute(equityQuoteByTicker.hash, { ticker: "AAPL" });
+```
+
+C#:
+
+```csharp
+var quote = await client.NamedQueries.ExecuteAsync(
+    EquityQuoteByTicker.Hash,
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" });
+```
+
+The ingest-service deletion (checks + `route`) is the other copy-paste: [Insert-time transforms](insert-transforms.md#worked-example-replace-an-ingest-service).
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| Named query growing `CASE` / loops | Domain logic in the DSL | Stop; put it in a service (or wait for embedded functions) |
+| Ten HTTP named-query calls for one view | Independent panels | Use [batch](named-queries.md#batch-one-snapshot), or compose joins if they share a filter |
+| Ingest worker still exists for empty-ticker / kind routing | Logic is data-shaped | Move to checks + `route` ([transforms](insert-transforms.md)) |
+| ISIN / vendor HTTP inside a derived column | External call | Keep the service; named-mutate the accepted row |
+| Selling “saved 600 µs” to the architecture board | Wrong latency pitch | Use deployment decoupling + round-trip elimination |
+
+---
+
+## Not in this release
+
+- Static admissibility of client-composed queries (D-23).
+- SQL-ish authoring for named queries (D-24).
+- Tier 3 embedded functions (loops, branch trees, outbound HTTP).
+- Named-mutation batching (D-28 is read-only).
+
+---
+
 ## Related
 
 - [Named queries](named-queries.md)

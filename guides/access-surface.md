@@ -114,6 +114,30 @@ Posting identities requires **Admin**. `?access=true` with a raw schema (no iden
 
 Branch diff: `POST /branches/{name}/diff` with `{ "includeAccess": true }`. Studio always sends that.
 
+C# (`Aouda.Client` on the **admin** listener):
+
+```csharp
+var plan = await client.Schema.DiffAsync(
+    desired,
+    access: new AccessSurfaceDiffRequest { Identities = identitiesDocument });
+if (plan.AccessSurface?.HasWidening == true)
+    throw new InvalidOperationException("access surface widened");
+```
+
+TypeScript: `npx @aouda/client schema diff --access` is **not** shipped. Use the HTTP call above or `aouda schema diff --access`.
+
+---
+
+## Defaults
+
+| Setting | Default |
+|---|---|
+| Identities file missing | Warning; public-only (`mk_pub_*`) still runs |
+| Fixture cap | 32 (`ACCESS_SURFACE_TOO_MANY_IDENTITIES`) |
+| `schema diff` without `--access` | Exit 0 on a successful plan (widening is not a CI failure until you opt in) |
+| Incomparable predicates | Reported as `widen` / `incomparable_predicate` (CI fails) |
+| Identities on `aouda.schema.json` | Rejected (`additionalProperties: false`) |
+
 ---
 
 ## Fail-closed containment

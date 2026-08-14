@@ -261,6 +261,32 @@ curl -X POST http://localhost:5433/api/databases/trading/tables/VendorTick/rows 
 
 Assert: `GET`/`query` on `VendorTick` does not contain that row; `EquityQuote` does; one change event on `EquityQuote`.
 
+C# (`Aouda.Client`, admin / service key — this is ingest, not a browser):
+
+```csharp
+await client.GetTable("VendorTick").InsertAsync(
+[
+    new Dictionary<string, object?>
+    {
+        ["kind"] = "quote",
+        ["ticker"] = "AAPL",
+        ["ts"] = "2026-08-14T12:00:00Z",
+        ["volumeRaw"] = 100L,
+    }
+]);
+
+Assert.Equal(0, await client.GetTable("VendorTick").CountAsync());
+Assert.Equal(1, await client.GetTable("EquityQuote").CountAsync());
+```
+
+TypeScript (same contract):
+
+```typescript
+await client.table("VendorTick").insertMany([
+  { kind: "quote", ticker: "AAPL", ts: "2026-08-14T12:00:00Z", volumeRaw: 100 },
+]);
+```
+
 ---
 
 ## Troubleshooting
