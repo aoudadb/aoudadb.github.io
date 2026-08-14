@@ -10,7 +10,7 @@ parent: "Auth and Authorization"
 >
 > **Notifications:** Password reset, invite email, and MFA SMS are configured on the **Aouda server** (`Aouda:Auth:Email`, `Aouda:Auth:Sms`), not in client SDK options. See [Email, SMS & Notifications](notifications.md).
 >
-> **BFF / gateway pattern:** If your backend proxies auth operations on behalf of browser users, see [§14 — BFF / Gateway Proxying Auth Endpoints](#14-bff--gateway-proxying-auth-endpoints). Auth and data endpoints use different header conventions — mixing them is the most common integration mistake.
+> **BFF / gateway pattern:** If your backend proxies auth operations on behalf of browser users, see [§14 — BFF / Gateway Proxying Auth Endpoints](#14-bff--gateway-proxying-auth-endpoints). For **data**, prefer [named queries](../guides/named-queries.md) on the [data-plane listener](../guides/direct-client-access.md) instead of a reshaping gateway. Auth and data endpoints use different header conventions — mixing them is the most common integration mistake.
 
 ---
 
@@ -24,7 +24,7 @@ The .NET client uses two separate options types — one per auth system:
 
 | Property | `AppAuthOptions` | `ServerAuthOptions` |
 |----------|:-:|:-:|
-| `ApiKey` | Yes (`mk_anon_`, `mk_svc_`, custom) | Yes (`mk_srv_`) |
+| `ApiKey` | Yes (`mk_anon_`, `mk_pub_`, `mk_svc_`, custom) | Yes (`mk_srv_`) |
 | `Token` / `RefreshToken` | Yes | Yes |
 | `Email` / `Password` | **Not available** — use `SignInAsync()` | Yes |
 | `UserToken` | Yes (with service keys) | Yes (with `mk_srv_`) |

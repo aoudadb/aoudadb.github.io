@@ -22,6 +22,7 @@ If your question is "How do I manage schema safely right now?":
 - `2.10 Configuration and settings reference`
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
+- **P37:** [Named queries](named-queries.md) (`namedQueries` / `namedMutations` in the schema file), [Insert-time transforms](insert-transforms.md) (`derived`, `checks`, `transforms`, `dataPlaneAccess`), [Access-surface diff](access-surface.md) (`aouda schema diff --access`).
 
 If your question is "What is shipped vs planned?":
 - `2.4 Availability status`

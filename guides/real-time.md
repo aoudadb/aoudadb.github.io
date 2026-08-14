@@ -22,6 +22,7 @@ If your question is "How do I use streaming now?", start with:
 - `2.10 Configuration and settings reference`
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
+- **P37 (current):** [HTTP API WebSocket](../reference/http-api.md#websocket-streaming-protocol) — path is `/api/databases/{db}/ws`; snapshots page then `snapshot_complete`; overflow is a server `gap` (`last_seq`, `discarded`), not client `seq > last + 1`; opt-in `conflate` sets `values_skipped` (distinct from `gap`); `re_auth` keeps subscriptions through token refresh. Browser-tier callers subscribe **by named-query hash**. See [Named queries](named-queries.md#subscribe-by-hash) and [Direct client access](direct-client-access.md).
 
 If your question is "What is implemented vs missing?", jump to:
 - `2.4 Availability status`
@@ -779,14 +780,15 @@ Last verification context date (UTC): `2026-03-31` (from P10 session reports and
 
 ## 2.18 Known gaps and undone work
 
+**Closed in P37 (do not treat as current):** silent `DropOldest` without a wire signal; subscription snapshots silently capped at `DefaultLimit` (1 000) with no truncation flag; client-side gap inference from a per-database sequence (impossible — the server now emits `gap`). Durable subscriber cursors beyond the 60 s / 10 000-event buffer remain ADR 0027 / P25.
+
 - Cross-database subscriptions are not a shipped streaming feature.
   - User impact: multi-database consumers must maintain separate subscriptions/connections per database.
 - Exactly-once semantics are not provided.
   - User impact: applications must implement version-based dedup/idempotent state transitions.
 - Distinct materialized-query "not ready" error code is not yet surfaced as a dedicated protocol contract.
   - User impact: client error handling for MQ-not-ready vs not-found remains coarse.
-- Legacy SSE subscription endpoint remains in server code.
-  - User impact: avoid mixing legacy SSE semantics with P10 streaming expectations.
+- Long-poll fallback still uses a bounded outbox; WebSocket overflow is `gap` then unregister (or `SLOW_CONSUMER` on the send-path HWM).
 
 ## 2.19 References
 

@@ -108,6 +108,7 @@ docker compose up
 | **Zero index management** | Zone maps, bloom filters, and sparse primary indexes maintained automatically |
 | **Dual deployment** | Embedded (in-process, no network) or server (HTTP, multi-client, multi-language) |
 | **Two-layer auth** | Server auth (who can connect) + Application auth (your app's end users) — independent systems |
+| **Named queries** | Server-authored, hash-pinned read/write contracts for browsers; optional data-plane listener; access-surface diff in CI |
 | **AI-native** | `aouda start` starts with defaults; structured errors include a `suggestion` field explaining what to do next; schema inference from POCO types |
 
 ---
@@ -119,6 +120,9 @@ docker compose up
 
 **Using the TypeScript client?**
 → [TypeScript Client](clients/typescript/) — query builder, typed queries, auth, MCP tools
+
+**Exposing Aouda to a browser or SPA?**
+→ [Direct client access](guides/direct-client-access.md) — listeners, `mk_pub_*`, named queries. [Division of responsibility](guides/division-of-responsibility.md) — what belongs in a service.
 
 **Setting up authentication?**
 → [Auth and Authorization](auth/) — two-layer auth model, API keys, JWT, ADRA modes

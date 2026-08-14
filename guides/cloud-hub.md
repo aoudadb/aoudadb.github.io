@@ -318,7 +318,7 @@ Server credentials (API keys, passwords) stored encrypted in Hub, accessible onl
 ### Hub Configuration
 
 Environment variables with `AOUDA_HUB_` prefix:
-- `AOUDA_HUB_AOUDA_URL` — backing Aouda instance URL
+- `AOUDA_HUB_AOUDA_URL` — backing Aouda instance URL (**admin listener**, not the data-plane bind). JWKS works on both; Hub data/admin calls 404 on the data-plane. See [Direct client access](direct-client-access.md#studio-and-hub).
 - `AOUDA_HUB_AOUDA_SERVICE_KEY` — service key for backing Aouda
 - `AOUDA_HUB_K8S_ENABLED` — enable K8s provisioner (default: false)
 

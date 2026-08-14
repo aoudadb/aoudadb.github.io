@@ -242,3 +242,4 @@ The Windows **release publish output does not include** `appsettings.json`. Defa
 - [Deployment](../deployment/) — Docker, Kubernetes, Windows Service
 - [Replication](replication.md) — replica set and archive settings
 - [Backup](backup.md) — archive and scheduled backup configuration
+- [Direct client access](direct-client-access.md) — `Aouda:Listeners:DataPlane:Bind`, per-listener CORS, identity quotas, named-query cost caps

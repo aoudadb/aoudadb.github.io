@@ -158,4 +158,6 @@ For full capability details see [AI Agents](index.md).
 - [Bulk Load](../guides/bulk-load/) — high-throughput ingest + `options.identityInsert`
 - [Auth for AI agents](index.md#212-scenario-playbooks) — bootstrap, service key, ADRA grant flows
 - [HTTP API reference](../reference/http-api/) — all endpoints
+- [Named queries](../guides/named-queries.md) — pin hashes; do not compose ad-hoc queries with `mk_pub_*`
+- [Direct client access](../guides/direct-client-access.md) — data-plane vs admin. PKCE is not shipped.
 - [TypeScript client](../clients/typescript/) — full SDK reference

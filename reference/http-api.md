@@ -52,7 +52,7 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Protocol-Version` | No | Protocol version (default: latest) |
 | `X-Request-Id` | No | Correlation ID (echoed in response) |
 | `X-Read-Preference` | No | Read preference for query routing |
-| `Authorization` | **Required when the target database has auth enabled** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). App auth endpoints (`/api/databases/{db}/auth/signup|signin|refresh`) require at least an API key (`anon` or higher). |
+| `Authorization` | **Required when the target database has auth enabled** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). App auth endpoints (`/api/databases/{db}/auth/signup|signin|refresh`) require at least an API key (`anon`, `pub`, or higher). |
 | `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. |
 
 ## Standard Response Headers
@@ -77,13 +77,53 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 
 | Prefix | Type | System | Description |
 |--------|------|--------|-------------|
-| `mk_anon_` | App anon key | Application Auth | Public/frontend key. PLS enforced, RBAC `anonymous` role. |
-| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS bypassed, full access. |
+| `mk_anon_` | App anon key | Application Auth | Public/frontend key for **auth endpoints only** (signup, signin, refresh, OIDC). Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
+| `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
+| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access. Ad-hoc query is allowed on the **admin** listener. |
 | `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. |
 | `mk_` (other) | Custom app key | Application Auth | Granular custom key created via admin API. |
-| `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. |
+| `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. Application end-user JWTs on the data-plane listener are browser-tier (named artifacts only). Operator JWTs via Studio use the admin listener (ad-hoc allowed). |
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
+
+#### Listeners and profiles
+
+A single Aouda process can expose **two Kestrel listeners**. The profile is a property of the **connection**, not of a request header (headers are forgeable).
+
+| Listener | Bind | Who | Surface |
+|----------|------|-----|---------|
+| **Admin** (default) | `Aouda:Bind` / `Aouda:Port` (today’s single listen) | Studio operators, Hub, trusted services | Full API: ad-hoc query, schema apply, `admin/*`, `_studio/*`, named artifacts |
+| **Data plane** (optional) | `Aouda:Listeners:DataPlane:Bind` (`host:port`) | Application end users, `mk_pub_*` | `{auth, named query, named mutation, subscribe}` only. Everything else is **404**, not 403 — the existence of an admin surface is itself information. |
+
+Data-plane allowlist (deny-by-default):
+
+- `GET /health`, `/ready`, `/startup` (not `/health/detailed`)
+- App auth under `/api/databases/{db}/auth/*` **except** `/auth/admin/*`
+- OIDC / JWKS discovery
+- `POST /api/databases/{db}/named-queries/{hash}/query`
+- `POST /api/databases/{db}/named-queries/batch`
+- `POST /api/databases/{db}/named-mutations/{hash}/execute`
+- WebSocket upgrade `/api/databases/{db}/ws`
+
+Explicit 404s on the data-plane include `admin/*`, `_studio/*`, `POST /api/server/shutdown`, `POST …/schema/apply`, `POST …/query`, tables/MQ/graph/vector/jobs/branches/policy, write-stream, and `GET /api/databases`.
+
+If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin listener, current CORS, no `mk_pub_*` acceptance.
+
+**Credential × listener × surface** (❌ = rejected at the listener or at bind time, never reaching the engine):
+
+| Credential | Listener | Ad-hoc `QueryMessage` | Named query / mutation | ADRA | Admin routes |
+|---|---|---|---|---|---|
+| `mk_pub_*` | Data plane only | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
+| User JWT (application end user) | Data plane | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
+| User JWT (Studio operator) | Admin | ✅ | ✅ | ✅ enforced | ✅ per RBAC |
+| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Audited bypass | Per RBAC on admin |
+| `mk_anon_*` | Data plane (auth endpoints) | ❌ | ❌ | n/a | ❌ — auth endpoints only |
+
+**Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
+
+**Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After`, code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
+
+See [Direct client access](../guides/direct-client-access.md) for configuration, CORS, and Studio/Hub URL rules.
 
 #### Auth Enforcement Rules
 
@@ -93,7 +133,7 @@ The server dispatches to the correct auth handler based on prefix — no configu
 | `/api/auth/signin`, `/api/auth/refresh` | No | None (these produce credentials) |
 | `/api/auth/signout`, `/api/auth/me`, etc. | Yes | Server JWT |
 | `/api/auth/admin/*` | Yes (`db_admin`) | Server JWT or `mk_srv_` with admin role |
-| `/api/databases/{db}/auth/signup\|signin\|refresh` | Yes (Layer 1) | Any app API key (`mk_anon_`, `mk_svc_`, `mk_`, custom) |
+| `/api/databases/{db}/auth/signup\|signin\|refresh` | Yes (Layer 1) | Any app API key (`mk_anon_`, `mk_pub_`, `mk_svc_`, `mk_`, custom) |
 | `/api/databases/{db}/auth/me\|signout\|password` | Yes (Layer 1 + 2) | API key + user JWT in `X-User-Token`, or user JWT directly |
 | `/api/databases/{db}/query\|tables\|rows\|...` | **Only if db has linked auth** | Any valid credential (see below) |
 | `/api/databases/{db}/query\|...` (no auth db) | No | None — open access |
@@ -112,8 +152,9 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
    Present → Continue to step 3
 
 3. Identify credential type by prefix
-   mk_anon_ → Resolve as app anon key → anonymous role, PLS enforced
-   mk_svc_  → Resolve as app service key → full access, PLS bypassed
+   mk_anon_ → Resolve as app anon key → anonymous role; **auth endpoints only**
+   mk_pub_  → Resolve as browser-tier public key → data-plane listener only; named artifacts
+   mk_svc_  → Resolve as app service key → full access, PLS bypassed (audited)
    mk_srv_  → Resolve as server API key → check db_roles claim for this database
    mk_*     → Resolve as custom app key → check permissions
    eyJ*     → Validate JWT signature and claims → extract roles
@@ -400,6 +441,20 @@ All errors return a JSON body with this structure:
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
 | `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter |
+| `NAMED_QUERY_NOT_FOUND` | 404 | Named-query hash is unknown or not a 64-hex SHA-256 |
+| `NAMED_QUERY_BIND_FAILED` | 400 | Argument bind failed (type, constraint, or missing required param) |
+| `NAMED_QUERY_PARAM_REQUIRED` | 400 | A required named-query parameter was omitted |
+| `NAMED_QUERY_BATCH_EMPTY` | 400 | `queries` is missing or empty |
+| `NAMED_QUERY_BATCH_TOO_LARGE` | 400 | Batch exceeds 32 elements (`ProtocolConstants.MaxNamedQueryBatchSize`) |
+| `NAMED_QUERY_BATCH_MUTATION` | 400 | Batch included a named-mutation hash (read-only envelope) |
+| `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation hash is unknown |
+| `NAMED_MUTATION_BIND_FAILED` | 400 | Named-mutation argument bind failed |
+| `ACCESS_SURFACE_TOO_MANY_IDENTITIES` | 400 | Access-surface diff posted more than 32 fixture identities |
+| `AUTH_IDENTITY_INVALID` | 400 | `aouda.identities.json` / posted identities document failed validation |
+| `SNAPSHOT_TOO_LARGE` | 400 | Subscribe snapshot would exceed `MaxSnapshotRows` (default 100 000) |
+| `SNAPSHOT_OVERFLOW` | 400 | Change-event buffer overflowed while paging the snapshot; subscribe fails (not a mid-snapshot `gap`) |
+| `BULK_LOAD_TRANSFORM_INTENT_REQUIRED` | 400 | Bulk load into a table with derived columns, checks, or transforms without `applyTransforms` or `preTransformed` |
+| `BULK_LOAD_TRANSFORM_INTENT_CONFLICT` | 400 | Both transform-intent flags set |
 
 #### Authentication Errors (4xx)
 
@@ -432,6 +487,11 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_PLS_GRANT_NOT_FOUND` | 403 | PLS (auth-db-pls): requested partition is not in the user's grant set |
 | `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` | 403 | PLS: partition is granted but access level is `read`, which does not allow writes |
 | `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | PLS: `Where.Or` predicate shape is incompatible with safe auth-db-pls partition enforcement |
+| `AUTH_KEY_LISTENER_MISMATCH` | 401 | `mk_pub_*` presented on the admin listener (or a key used on a listener that does not accept it) |
+| `IDENTITY_QUOTA_EXCEEDED` | 429 | Data-plane per-identity request quota exceeded. `Retry-After` is set. |
+| `AUTH_GRANT_DIMENSION_CAP` | 400 | Creating a partition grant would exceed 1 000 grants on one dimension |
+| `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Creating a partition grant would exceed 5 000 grants for the principal |
+| `AUTH_RESOLVER_INVALID` | 400 | RLS resolver cannot be persisted (e.g. zero rules — fail-closed) |
 
 #### State Errors (4xx)
 
@@ -449,6 +509,30 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
+
+#### Named-query, streaming, and data-plane errors
+
+These also appear as WebSocket `error` `code` values where noted.
+
+| Code | HTTP / WS | Description |
+|------|-----------|-------------|
+| `NAMED_QUERY_DEPRECATED` | 200 warning | Hash is deprecated; execute/subscribe still succeeds. `warnings[]` includes `hash` and optional `sunsetAt`. |
+| `NAMED_MUTATION_DEPRECATED` | 200 warning | Same for named mutations |
+| `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
+| `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
+| `NAMED_QUERY_IDENTITY_PARAM` | 400 (schema apply) | Parameter name collides with an identity-derived value |
+| `NAMED_QUERY_PROJECTION_REQUIRED` | 400 (schema apply) | Named query omitted `select` / `selectExpr` |
+| `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
+| `NAMED_QUERY_TOO_MANY_JOINS` | 400 (schema apply) | Join count exceeds cap (default 3) |
+| `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `hash` |
+| `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-hash also sent a client `filter` |
+| `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-hash `target` does not match the definition |
+| `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `hash` addresses a named mutation |
+| `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
+| `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
+| `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
+| `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
 
 #### Protocol Errors
 
@@ -748,6 +832,152 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
   }
 }
 ```
+
+---
+
+### Named queries
+
+Named queries are **server-authored, content-hashed `QueryMessage` templates**. Browser-tier callers (`mk_pub_*` and application user JWTs on the data-plane listener) **cannot compose a query** — they send a hash plus arguments. Identity is injected from the validated principal; it is never an argument.
+
+There is **no HTTP route that registers a definition**. Definitions deploy through declarative schema apply (`namedQueries` in `aouda.schema.json`). Clients pin the SHA-256 of the canonical definition (codegen: `npx @aouda/client generate` / `aouda generate`). Names are aliases (`name` → current hash, `name@version` → hash). See [Named queries](../guides/named-queries.md).
+
+Base path: `/api/databases/{db}/named-queries`
+
+The execute and batch bodies are path-scoped. They do **not** require a `database` field (unlike ad-hoc `POST …/query`).
+
+#### `POST /api/databases/{db}/named-queries/{hash}/query`
+
+Execute one named query by content hash (64 hex SHA-256; optional `sha256:` prefix).
+
+**Query parameters:** `format=columnar` (default) or `format=rows`. `readPreference` as on ad-hoc query.
+
+**Request body:**
+
+```json
+{
+  "args": {
+    "ticker": "AAPL"
+  }
+}
+```
+
+`args` may be omitted or `{}` when the definition has no required parameters.
+
+**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`). When the hash is deprecated, `warnings` is present:
+
+```json
+{
+  "columns": ["ticker", "qty"],
+  "types": ["String", "Int64"],
+  "data": [["AAPL", 10]],
+  "rowCount": 1,
+  "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 },
+  "warnings": [
+    { "code": "NAMED_QUERY_DEPRECATED", "hash": "aaa…", "sunsetAt": "2026-12-01T00:00:00Z" }
+  ]
+}
+```
+
+**Errors:**
+
+| Status | Code | When |
+|--------|------|------|
+| 404 | `NAMED_QUERY_NOT_FOUND` | Unknown or malformed hash |
+| 400 | `NAMED_QUERY_BIND_FAILED` / `NAMED_QUERY_PARAM_REQUIRED` | Bind-time type or constraint failure |
+| 404 | `TABLE_NOT_FOUND` | Data-plane browser-tier and a touched table has `dataPlaneAccess: false` |
+| 429 | `IDENTITY_QUOTA_EXCEEDED` | Data-plane quota |
+
+Invoker ADRA always applies (PLS + RLS of the caller). There is no definer / `runAs` field.
+
+#### `POST /api/databases/{db}/named-queries/batch`
+
+Read-only batch envelope. Every element is evaluated against **one read snapshot**. HTTP **200 means the envelope was accepted** — a per-element ADRA deny or bind failure is a positional `{ code, error }` and does **not** fail the other slots.
+
+**Request body:**
+
+```json
+{
+  "queries": [
+    { "hash": "aaa…64 hex…", "args": { "ticker": "AAPL" } },
+    { "hash": "bbb…64 hex…", "args": { "accountId": 42 } }
+  ]
+}
+```
+
+**Cap:** 32 (`MaxNamedQueryBatchSize`). Named-mutation hashes are illegal in this envelope.
+
+**Success (200)** — positional `results` (same length as `queries`):
+
+```json
+{
+  "results": [
+    {
+      "columns": ["ticker", "qty"],
+      "types": ["String", "Int64"],
+      "data": [["AAPL", 10]],
+      "rowCount": 1,
+      "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 }
+    },
+    {
+      "code": "NAMED_QUERY_NOT_FOUND",
+      "error": "Named query 'bbb…' was not found."
+    }
+  ]
+}
+```
+
+**Envelope 400** (no `results`):
+
+| Code | When |
+|------|------|
+| `NAMED_QUERY_BATCH_EMPTY` | `queries` missing or empty |
+| `NAMED_QUERY_BATCH_TOO_LARGE` | More than 32 elements |
+| `NAMED_QUERY_BATCH_MUTATION` | Any element hash is a named mutation |
+| `INVALID_FORMAT` | `format` is not `columnar` or `rows` |
+
+Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) — that is ad-hoc update/delete on one table.
+
+### Named mutations
+
+Named mutations are the write-side mirror: hash-addressed insert/update/delete templates over ADR 0037 expressions. **Invoker rights only.** They are **not** members of the read batch.
+
+#### `POST /api/databases/{db}/named-mutations/{hash}/execute`
+
+**Request body:** `{ "args": { … } }`
+
+**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`).
+
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429).
+
+### Access-surface diff
+
+Schema branch review can report **widening** of what a principal class can read (tables, columns, named-query projections). Computation lives in the engine so CI can gate a merge without Studio. See [Access-surface diff](../guides/access-surface.md).
+
+#### `POST /api/databases/{db}/schema/diff?access=true`
+
+Without `?access=true` the body stays a raw `SchemaDocument` and `accessSurface` is omitted (byte-compatible with earlier clients).
+
+With `?access=true`:
+
+- Raw `SchemaDocument` body → `__public__` / `mk_pub_*` findings only.
+- Wrapper (when identities or resolver overrides are sent):
+
+```json
+{
+  "schema": { "tables": { }, "namedQueries": { } },
+  "identities": { "$schema": "https://aouda.io/identities/v1.json", "identities": [ ] },
+  "resolvers": [ ],
+  "baseResolvers": [ ]
+}
+```
+
+Posting identities requires **Admin**. `?access=true` without identities is **Read**.
+
+**400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`.
+
+#### `POST /api/databases/{db}/branches/{name}/diff`
+
+Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` attaches `accessSurface`. Studio always sends `includeAccess: true`.
 
 ---
 
@@ -2295,9 +2525,13 @@ Aouda provides a full-duplex WebSocket API for real-time table subscriptions and
 ### Endpoint
 
 ```
-ws://{host}/api/ws
-wss://{host}/api/ws   (TLS)
+ws://{host}/api/databases/{db}/ws
+wss://{host}/api/databases/{db}/ws   (TLS)
 ```
+
+The database name is in the **path**. The `auth` message still includes `database` and it must match the path (same rule as HTTP v2).
+
+On the **data-plane** listener this upgrade is allowed; ad-hoc table `subscribe` (no `hash`) returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Write-stream messages return `DATA_PLANE_WRITE_STREAM`.
 
 ### Connection and Wire Modes
 
@@ -2349,17 +2583,31 @@ Authenticate the connection and optionally negotiate wire mode.
 
 #### `subscribe`
 
-Subscribe to a table stream. The server immediately sends a `snapshot` of current matching rows, then streams `change` messages as rows are inserted, updated, or deleted.
+Subscribe to a table stream **or** to a named query (content hash). The server pages a consistent snapshot (`snapshot` pages sharing one `version`, then `snapshot_complete`), then streams `change` messages.
+
+Until `snapshot_complete` arrives, the client **must not** treat accumulated snapshot rows as the full match.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Always `"subscribe"` |
-| `id` | string | Yes | Client-assigned subscription ID. Must be unique per connection. Used to correlate `snapshot`, `change`, and `error` messages. |
-| `target` | string | Yes | Table name to subscribe to. |
-| `filter` | object? | No | Optional filter predicate (same `WhereClause` format as the query endpoint). Only matching rows appear in the snapshot and change stream. |
-| `resume_from` | number? | No | Resume from this global sequence version. When provided, the server replays changes from that point instead of sending a full snapshot. Use the `version` from a prior `snapshot` or `change` message. |
+| `id` | string | Yes | Client-assigned subscription ID. Unique per connection. |
+| `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `hash` is set. |
+| `hash` | string? | Conditional | Named-query content hash (64 hex). **Required on the data-plane listener.** Pins the definition for the subscription lifetime; redeploying the alias does not change an in-flight subscription. |
+| `args` | object? | No | Bind arguments for `hash` subscribe. Same shape as HTTP execute `args`. |
+| `filter` | object? | No | Ad-hoc `WhereClause`. **Illegal** together with `hash` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
+| `resume_from` | number? | No | Resume from this version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. |
+| `conflate` | object? | No | Opt-in keyed conflation. Omitted = every visible event. See below. |
 
-**Example:**
+**`conflate`:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | string[]? | Conditional | Columns that form the conflation key. Default: table primary key. Required when the table has no PK. |
+| `interval_ms` | number | Yes | Flush interval in milliseconds. Valid range 1…60_000. |
+
+Conflation applies only to **value `update` events** where the row was visible both before and after. `insert`, `delete`, enter-scope, and leave-scope **flush** any pending update for that key and are delivered immediately. Conflated `change` messages set `values_skipped` (count of dropped intermediate updates). That marker is **intentional loss** and is not a `gap`.
+
+**Ad-hoc example (admin listener):**
 ```json
 {
   "type": "subscribe",
@@ -2371,7 +2619,37 @@ Subscribe to a table stream. The server immediately sends a `snapshot` of curren
 }
 ```
 
-**Server responds with:** `snapshot` (initial data), then `change` messages as data changes.
+**Named-query example (required on the data-plane):**
+```json
+{
+  "type": "subscribe",
+  "id": "sub-quotes-1",
+  "hash": "aaa…64 hex…",
+  "args": { "ticker": "AAPL" },
+  "conflate": { "key": ["ticker"], "interval_ms": 100 }
+}
+```
+
+**Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
+
+**Limits:** per-connection 32 subscriptions, per-identity 128. Exceed → `SUBSCRIPTION_LIMIT_EXCEEDED`.
+
+---
+
+#### `re_auth`
+
+Re-authenticate an existing WebSocket session with a refreshed JWT (or API key) **without** tearing down subscriptions. Not valid as the first message — the first message remains `auth`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | Yes | Always `"re_auth"` |
+| `token` | string | Yes | Refreshed bearer JWT or API key |
+
+A **failed** `re_auth` still closes the session (fail-closed). A successful refresh does **not** re-snapshot. Without `re_auth`, JWT expiry closes the socket (`AUTH_TOKEN_EXPIRED`) and every browser re-snapshots.
+
+```json
+{ "type": "re_auth", "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
+```
 
 ---
 
@@ -2527,7 +2805,7 @@ Authentication failure. The server closes the connection after sending this mess
 
 #### `heartbeat`
 
-Periodic liveness signal carrying the current global sequence version. Clients can detect change-stream gaps by comparing consecutive `version` values.
+Periodic liveness signal carrying the current **per-database** sequence version. Clients **must not** infer a gap from `heartbeat.version` or from holes in `change.version` — the sequence is shared by all tables on the database, so a subscriber to table A legitimately sees holes from table B. Unintentional loss is a server-emitted `gap` message (below).
 
 | Field | Type | Description |
 |---|---|---|
@@ -2576,14 +2854,14 @@ Liveness reply to a client `ping`.
 
 #### `snapshot`
 
-Initial snapshot of a subscription's current data. Sent immediately after a successful `subscribe` (when `resume_from` is not provided or points to before the current snapshot).
+One page of a subscription's current data. Pages share one pinned `version`. More pages may follow until `snapshot_complete`.
 
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"snapshot"` |
 | `id` | string | Subscription ID this snapshot belongs to. |
-| `rows` | object[] | Current rows matching the subscription filter. Each element is a row object (`{ columnName: value, ... }`). |
-| `version` | number | Global sequence version at which this snapshot was taken. Store this value and pass it as `resume_from` on reconnect to avoid re-receiving the full snapshot. |
+| `rows` | object[] | Rows in this page. May be empty. |
+| `version` | number | Pinned snapshot version. Store this; pass as `resume_from` on reconnect. |
 
 **Example:**
 ```json
@@ -2600,9 +2878,56 @@ Initial snapshot of a subscription's current data. Sent immediately after a succ
 
 ---
 
+#### `snapshot_complete`
+
+Marks the end of the paged snapshot. Clients must not treat accumulated `snapshot` rows as the full match until this arrives. Change events are held until this message; overflow during paging fails the subscribe (`SNAPSHOT_OVERFLOW`), not a mid-snapshot `gap`.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"snapshot_complete"` |
+| `id` | string | Subscription ID |
+| `version` | number | Same pinned version as every preceding `snapshot` page |
+| `row_count` | number | Total rows delivered across all snapshot pages |
+| `warnings` | object[]? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe) |
+
+```json
+{
+  "type": "snapshot_complete",
+  "id": "sub-orders-1",
+  "version": 100040,
+  "row_count": 2
+}
+```
+
+---
+
+#### `gap`
+
+Server-emitted per-subscription overflow signal. The sequence number is **per-database**, so the client cannot infer a gap from `seq > last + 1`. On the first drop after a clean period the server emits exactly one `gap` on the affected subscription and unregisters it. Other subscriptions on the same connection are unaffected.
+
+Feed `last_seq` to a new `subscribe` as `resume_from` (existing three-outcome path). This is **unintentional** loss. Distinguish from `change.values_skipped` (intentional conflation).
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"gap"` |
+| `id` | string | Subscription that overflowed (already unregistered) |
+| `last_seq` | number | Last successfully delivered change version, or the snapshot version if none |
+| `discarded` | number | Events dropped in this clean period |
+
+```json
+{
+  "type": "gap",
+  "id": "sub-orders-1",
+  "last_seq": 100041,
+  "discarded": 17
+}
+```
+
+---
+
 #### `change`
 
-Incremental row change on an active subscription. Sent whenever a row matching the subscription filter is inserted, updated, or deleted.
+Incremental row change on an active subscription. Sent whenever a row matching the subscription filter is inserted, updated, or deleted. Named-query subscriptions project `row` / `prev` to the definition's `select`.
 
 | Field | Type | Description |
 |---|---|---|
@@ -2612,7 +2937,8 @@ Incremental row change on an active subscription. Sent whenever a row matching t
 | `row` | object? | New row values. Present for `"insert"` and `"update"`. Null for `"delete"`. |
 | `prev` | object? | Previous row values before update. Present for `"update"` only. |
 | `key` | object? | Primary key of the affected row. Present for `"delete"`. |
-| `version` | number | Global sequence version of this change. |
+| `version` | number | Per-database sequence version of this change. Do not infer gaps from holes. |
+| `values_skipped` | number? | Present on conflated value updates: count of intermediate updates dropped. **Not** a `gap`. |
 
 **Example — insert:**
 ```json
@@ -2996,3 +3322,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.1 | 2026-06-23 | P27: `setExpr` expression SET, `TRUNCATE`, DELETE `limit`/`orderBy`, `RETURNING`, batch mutations (`/rows/batch`), expression SELECT (`selectExpr`). P28: `TruncateToMinute` partition function. P31: `postLoadMqBehavior` on bulk-load `:begin`; `mqRebuildStatus` in `:status` response; `POST .../materialized-queries/{name}:refresh`. P33: password reset endpoints, MFA enroll/challenge/verify/factors/delete, admin password override, invite resend, `requiresPasswordChange`/`mfaRequired`/`mfaFactors`/`aal` in signin response. |
 | 2.2 | 2026-07-31 | BL-130: `identityInsert` on `POST …/tables/{name}/rows`. BL-131: `options.identityInsert` on bulk-load `:begin` (commit-only counter floor). |
 | 2.2 | 2026-06-26 | **P17 (breaking):** `GET /api/databases` default response now excludes internal infrastructure databases (`_serverauth`, `_settings`). Use `?include=internal` to retrieve the full catalog. All database responses now include `isInternal` (bool), `isAuthDatabase` (bool), and `authDatabaseKind` (`"none"` \| `"server"` \| `"application"`) metadata fields. Application auth databases (`isInternal: false`) remain in the default list. |
+| 2.3 | 2026-08-14 | **P37:** named-query execute + read-only batch (cap 32, one snapshot, positional errors); named-mutation execute; `mk_pub_*` + data-plane listener (404 not 403); WebSocket path `/api/databases/{db}/ws`; `subscribe.hash` / `args` / `conflate`; `snapshot_complete`; server `gap` (`last_seq`, `discarded`); `change.values_skipped`; `re_auth`; access-surface `?access=true`. Additive on the wire. |

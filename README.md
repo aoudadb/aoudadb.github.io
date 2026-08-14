@@ -1,20 +1,24 @@
 # Aouda Docs
 
-This repository contains the public documentation for [Aouda](https://github.com/aoudadb) — a columnar database engine for .NET with a TypeScript client SDK.
+This repository is the **canonical public documentation** for [Aouda](https://github.com/aoudadb) — a columnar database engine for .NET with a TypeScript client SDK.
 
 **Published site:** https://aoudadb.github.io/  
 **AI agent index:** https://aoudadb.github.io/llms.txt
+
+End users and third-party clients have **no other internet source of truth** besides this site, the live HTTP API, and the published SDKs (`@aouda/client`, `Aouda.Client`). Engine-repo `docs/dev/` and ADRs are **implementer-facing**. When docs and code disagree, **code and tests win** and this site must be updated.
+
+The wire contract is [reference/http-api.md](reference/http-api.md). Do not resurrect a `WIRE-PROTOCOL.md` in any Aouda repository.
 
 ## Structure
 
 ```
 getting-started/   Main onboarding guides — embedded, server, auth, testing, backup
-guides/            Deep functionality guides — query, schema, hot/cold, streaming, replication, etc.
+guides/            Deep functionality guides — query, schema, named queries, streaming, …
 auth/              Auth and authorization — architecture, setup, client integration, ADRA, reference
 clients/           Client SDKs — TypeScript, .NET, distribution
 deployment/        Deployment — Kubernetes, Helm, Docker, Windows Service, systemd
 ai/                AI agent usage — bootstrap flows, auth patterns, MCP tools
-reference/         HTTP API reference, wire protocol, type reference
+reference/         HTTP API reference, type reference
 ```
 
 ## For AI agents
@@ -22,11 +26,11 @@ reference/         HTTP API reference, wire protocol, type reference
 Read `llms.txt` at the root of the published site for a structured index of all documentation:
 https://aoudadb.github.io/llms.txt
 
+Browser-tier apps must use [named queries](guides/named-queries.md) on the [data-plane listener](guides/direct-client-access.md). Do not compose ad-hoc queries with `mk_pub_*`. OAuth authorization-code + PKCE is **not shipped**.
+
 ## Updating docs
 
-The source files in `docs/dev/` of the main Aouda repository are the primary source of truth. When those files are updated, copy the relevant files here and re-add the Jekyll front matter (the `---` block at the top of each file).
-
-The `_setup.ps1` script at the root of this repo automates that copy process.
+Edit markdown **in this repository** with UTF-8-safe tools (not PowerShell `Set-Content`). Match live `Aouda.Protocol` DTOs and controller routes. After HTTP-surface changes, update `reference/http-api.md` in the same change.
 
 ## Local preview
 

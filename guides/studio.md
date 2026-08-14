@@ -444,6 +444,8 @@ Once connected, the server URL appears in the top navigation bar. Click it at an
 
 The chosen server URL and API key survive page reloads (stored in `localStorage`). They can be cleared by opening the dialog and connecting with no values, or by clearing browser storage.
 
+**Always use the admin listener URL.** A data-plane listener returns 404 for `GET /api/databases` and `/_studio/config`. Studio treats that 404 as "this is a data-plane URL" — connect to the admin port instead. See [Direct client access](direct-client-access.md#studio-and-hub).
+
 ### 10.2 Server URL Resolution Priority
 
 When Studio initializes, the server URL is resolved in this order:

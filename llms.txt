@@ -38,6 +38,11 @@
 
 ## Core Guides
 
+- [Named queries and mutations](https://aoudadb.github.io/guides/named-queries/): Hash-pinned BFF contracts, batch envelope, codegen, subscribe-by-hash
+- [Direct client access](https://aoudadb.github.io/guides/direct-client-access/): Admin vs data-plane listeners, `mk_pub_*`, quotas, thin edge. PKCE is not shipped.
+- [Division of responsibility](https://aoudadb.github.io/guides/division-of-responsibility/): What belongs in Aouda vs a service; decision test; latency caveat
+- [Insert-time transforms](https://aoudadb.github.io/guides/insert-transforms/): derived columns, checks, route/tee, bulk-load intent, unique/references
+- [Access-surface diff](https://aoudadb.github.io/guides/access-surface/): `aouda schema diff --access` CI gate on widening
 - [Query Execution](https://aoudadb.github.io/guides/query/): Runtime model, predicates, joins, aggregations, pagination
 - [Schema Lifecycle](https://aoudadb.github.io/guides/schema/): Schema-on-write, explicit schema, evolution, inference modes
 - [Schema Management](https://aoudadb.github.io/guides/schema-management/): Declarative schema, aouda.schema.json, diff and apply
@@ -72,7 +77,7 @@
 
 ## Reference
 
-- [HTTP API Reference](https://aoudadb.github.io/reference/http-api/): Wire protocol, all REST endpoints, request/response shapes
+- [HTTP API Reference](https://aoudadb.github.io/reference/http-api/): Wire protocol, REST + WebSocket. P37: named-query execute/batch, named mutations, `mk_pub_*` / listeners, `snapshot_complete`, `gap`, `re_auth`, `values_skipped`
 - [Timestamp Type](https://aoudadb.github.io/reference/timestamp/): Timestamp semantics, storage, query behavior
 - [Changelog](https://aoudadb.github.io/CHANGELOG/): Version history
 

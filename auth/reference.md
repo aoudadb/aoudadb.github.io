@@ -30,7 +30,8 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
 ```bash
 aouda start --port 5433 --data-dir ./data
 # Bootstrap server admin, then POST /api/databases with auth enabled — see setup.md §7
-# Response includes: anonKey (mk_anon_...), serviceRoleKey (mk_svc_...)
+# Response includes: anonKey (mk_anon_...), publicKey (mk_pub_...), serviceRoleKey (mk_svc_...)
+# mk_pub_* is data-plane only. OAuth code + PKCE is not shipped (BL-043).
 
 # Agent captures keys and tests the complete flow:
 

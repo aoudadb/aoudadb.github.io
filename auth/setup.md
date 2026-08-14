@@ -41,7 +41,9 @@ Response:
 }
 ```
 
-The response includes `anonKey` and `serviceRoleKey` immediately. No second database is created. Auth endpoints are available at `/api/databases/auth/auth/...`.
+The response includes `anonKey` and `serviceRoleKey` immediately. After regenerate/enable you also receive a **`publicKey`** (`mk_pub_*`) for browser-tier callers on the **data-plane** listener. `mk_anon_*` is auth-endpoints-only (signup/signin/refresh). `mk_pub_*` on the admin listener returns `AUTH_KEY_LISTENER_MISMATCH`. See [Direct client access](../guides/direct-client-access.md).
+
+**OAuth authorization-code + PKCE is not shipped** (BL-043). Browser apps use anon/public key + signup/signin/refresh JWT, not a code flow against an IdP.
 
 **Save the API keys immediately.** They are shown only once. Use the regeneration endpoint if they are lost.
 

@@ -51,8 +51,9 @@ Does the table need row-level filtering WITHIN a partition?
         Compound predicates supported: owner_id = ? OR team_id IN (?).
 
 Do you need BOTH partition routing AND row filtering on the same table?
-  YES → Set authMode: auth-db-pls AND rlsResolverName together.
+  YES → Set **authMode: auth-db-pls** AND **rlsResolverName** together.
         PLS routes to granted partitions; RLS filters rows within each partition.
+        The reverse (`auth-db-rls` + `permissionDimension`) is a **schema validation error**.
 ```
 
 ---
@@ -326,7 +327,7 @@ For writes to `auth-db-rls` tables, Aouda evaluates the resolved predicate again
 
 ## 19.6 Combined PLS + RLS
 
-A table can use **both** `auth-db-pls` (for partition routing) and `auth-db-rls` (for within-partition row filtering) simultaneously. Set both `permissionDimension` and `rlsResolverName` on the same table:
+A table can use **both** partition routing and row filtering. The working configuration is **`authMode: auth-db-pls` plus `rlsResolverName`** (and `permissionDimension` for the PLS grants). Setting `auth-db-rls` together with `permissionDimension` is a **schema validation error** (fail-closed).
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/tables \

@@ -14,11 +14,13 @@ This guide describes how to automate Aouda schema management in CI/CD: run **dif
 
 | Trigger | Action | Purpose |
 |--------|--------|--------|
-| **Pull request** | Run `schema diff`, post plan as PR comment | Review schema changes before merge |
+| **Pull request** | Run `schema diff --access`, post plan as PR comment | Review schema **and** access-surface widening before merge |
 | **Merge to main** | Run `schema apply` against **staging** | Keep staging in sync with repo |
 | **Release / tag** | Run `schema apply` against **production** | Deploy schema to prod only on release |
 
-You can implement this with **.NET** (`dotnet aouda`) or **TypeScript** (`npx @aouda/client`). Ready-to-use GitHub Actions workflows are in the repo under `examples/github-actions/`.
+You can implement this with **.NET** (`dotnet aouda`) or **TypeScript** (`npx @aouda/client`). Ready-to-use GitHub Actions workflows are in the engine repo under `examples/github-actions/`.
+
+**Access-surface gate (P37):** `aouda schema diff --access` exits **1** when the branch widens what `mk_pub_*` or a fixture identity can read. Without `--access`, a successful plan still exits 0. The TypeScript CLI does not yet have `--access` — use the .NET tool in CI. Details: [Access-surface diff](access-surface.md). Named queries and mutations belong in `aouda.schema.json` (`namedQueries` / `namedMutations`); identities stay in a **sibling** `aouda.identities.json`.
 
 ---
 
@@ -79,10 +81,12 @@ jobs:
           AOUDA_SERVER: ${{ secrets.AOUDA_STAGING_SERVER }}
           AOUDA_DATABASE: ${{ secrets.AOUDA_DATABASE }}
         run: |
-          PLAN=$(dotnet aouda schema diff 2>&1 || true)
+          PLAN=$(dotnet aouda schema diff --access 2>&1 || true)
           echo "plan<<EOF" >> "$GITHUB_OUTPUT"
           echo "$PLAN"    >> "$GITHUB_OUTPUT"
           echo "EOF"      >> "$GITHUB_OUTPUT"
+        # Exit 1 from --access means hasWidening — fail the job:
+        # run a second step `aouda schema diff --access` without swallowing the exit code.
 
       - name: Post diff as PR comment
         uses: peter-evans/create-or-update-comment@v4

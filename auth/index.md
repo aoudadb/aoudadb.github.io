@@ -20,6 +20,8 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Gett
 **User guides (this site):**
 
 - [Setup & flows](setup.md) — enable auth, API keys, signup/signin
+- [Direct client access](../guides/direct-client-access.md) — `mk_pub_*`, data-plane listener. **OAuth code + PKCE is not shipped.**
+- [Email, SMS & notifications](notifications.md) — SendGrid, GatewayAPI, **console provider**, password reset / MFA OTP
 - [Email, SMS & notifications](notifications.md) — SendGrid, GatewayAPI, **console provider**, password reset / MFA OTP
 - [Use cases](use-cases.md) — onboarding, password reset, MFA
 - [Reference](reference.md) — endpoints, errors, local developer setup (§27)

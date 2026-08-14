@@ -18,6 +18,9 @@ This guide walks through a complete financial market-data workload on Aouda: quo
 - [Partitioning and Multi-tenancy](partitioning.md) — partition filters, cross-partition opt-in, storage modes
 - [Materialized Queries](materialized.md) — MQ lifecycle, incremental maintenance, result-table queries
 - [Auth — Data Authorization](../auth/authorization.md) — `jwt-claim`, `auth-db-pls`, fan-out queries
+- [Named queries](named-queries.md) — browser-tier quote/position views; subscribe + `conflate` for last-price
+- [Insert-time transforms](insert-transforms.md) — replace a quote ingest worker with `route` / derived columns
+- [Division of responsibility](division-of-responsibility.md) — what stays in a workflow service
 
 ---
 

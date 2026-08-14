@@ -41,6 +41,7 @@ _Repo: `aouda-client-ts`_
 | Manage schemas | §8 Schema |
 | Work with branches | §9 Branches |
 | Stream real-time changes | §10 Streaming |
+| Execute named queries / batch | [Named queries](../guides/named-queries.md) — `client.namedQueries.execute(hash, args)`, `.batch([{ hash, args }])` |
 | Manage cluster via API | §11 Admin APIs |
 | Use MCP tools for AI | §12 MCP Tools |
 
@@ -107,7 +108,7 @@ await client.auth.signIn('user@example.com', 'secret');
 - `appAuth` and `serverAuth` are mutually exclusive.
 - Within each, `apiKey` and `token` are mutually exclusive.
 - `refreshToken` requires `token` to also be set.
-- The `apiKey` is a Layer-1 connection key (`mk_anon_`, `mk_svc_`, `mk_srv_`, or custom `mk_`). Call `client.auth.signIn()` to establish Layer-2 user identity.
+- The `apiKey` is a Layer-1 connection key (`mk_anon_`, `mk_pub_`, `mk_svc_`, `mk_srv_`, or custom `mk_`). Call `client.auth.signIn()` to establish Layer-2 user identity. `mk_pub_*` is accepted only on the [data-plane listener](../guides/direct-client-access.md).
 
 **Common mistake:** passing `apiKey` at the top level (no such option exists — it must be nested inside `appAuth` or `serverAuth`).
 

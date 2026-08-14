@@ -8,7 +8,7 @@ has_children: true
 
 This is the comprehensive guide to using Aouda. It covers both deployment models (embedded and server), data operations, schema management, and server authentication. By the end, you will understand how to create databases, insert and query data, and secure your Aouda server.
 
-**This guide does NOT cover the Application Auth Service** (using Aouda as an authentication provider for your app's end users — signup, signin, sessions, JWTs for end users). That is a separate product feature documented in [Getting-Started-Auth.md](Getting-Started-Auth.md).
+**This guide does NOT cover the Application Auth Service** (using Aouda as an authentication provider for your app's end users — signup, signin, sessions, JWTs for end users). That is a separate product feature documented in [Getting-Started-Auth.md](Getting-Started-Auth.md). Ad-hoc insert/query examples below are for **admin and service** callers. Browser-tier apps use [named queries](../guides/named-queries.md) on the [data-plane listener](../guides/direct-client-access.md).
 
 ---
 
