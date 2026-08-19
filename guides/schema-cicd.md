@@ -20,7 +20,7 @@ This guide describes how to automate Aouda schema management in CI/CD: run **dif
 
 You can implement this with **.NET** (`dotnet aouda`) or **TypeScript** (`npx @aouda/client`). Ready-to-use GitHub Actions workflows are in the engine repo under `examples/github-actions/`.
 
-**Access-surface gate (P37):** `aouda schema diff --access` exits **1** when the branch widens what `mk_pub_*` or a fixture identity can read. Without `--access`, a successful plan still exits 0. The TypeScript CLI does not yet have `--access` — use the .NET tool in CI. Details: [Access-surface diff](access-surface.md). Named queries and mutations belong in `aouda.schema.json` (`namedQueries` / `namedMutations`); identities stay in a **sibling** `aouda.identities.json`.
+**Access-surface gate (P37):** `aouda schema diff --access` exits **1** when the branch widens what `mk_pub_*` or a fixture identity can read. Without `--access`, a successful plan still exits 0. The TypeScript CLI does not yet have `--access` — use the .NET tool in CI. Details: [Access-surface diff](access-surface.md). Named queries, named mutations, and materialized queries belong in `aouda.schema.json` (`namedQueries` / `namedMutations` / `materializedQueries`); identities stay in a **sibling** `aouda.identities.json`. Omitting `materializedQueries` does not drop live MQs; a present map (including `{}`) is desired state for the whole MQ set.
 
 ---
 
