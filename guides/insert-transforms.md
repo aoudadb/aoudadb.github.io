@@ -7,7 +7,7 @@ parent: "Guides"
 # Insert-time transforms and constraints
 
 Document status: Complete (P37)  
-Last updated: 2026-08-14
+Last updated: 2026-08-19
 
 Tier 1 transforms are **declarative**. They run on REST insert/update/upsert and on the WebSocket write-stream path. No user code, no loops, no HTTP calls.
 
@@ -51,13 +51,41 @@ The change stream describes **storage**, not the request. Materialized-query mai
 
 `derived` is an expression evaluated at write time. The result is stored and queryable. Expressions reuse the bulk-mutation `SetExprNode` substrate (no second language).
 
-Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). The JSON type discriminator is `"type"`: `literal`, `colRef`, `arithmetic` (`+`, `-`, `*`, `/`), `coalesce`, `conditional`, `param`. There is no `round` op in this release — scale in the client or keep the stored value as-is.
+Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). The JSON type discriminator is `"type"`: `literal`, `colRef`, `arithmetic` (`+`, `-`, `*`, `/`), `coalesce`, `conditional`, `param`, and `call`.
+
+`call` is a closed allowlist (lowercase, case-sensitive). Any null argument yields null — compose with `coalesce` for empty-string. `upper` / `lower` use invariant culture.
+
+| `fn` | Args | Result |
+|---|---|---|
+| `upper` / `lower` / `trim` | 1 | string or null |
+| `concat` | ≥1 | string or null |
+| `substring` | 2 or 3 | string or null (1-based start, optional length) |
+| `round` | 2 | numeric (value, digits ≥ 0), AwayFromZero |
+| `roundTo` | 2 | numeric (value, step > 0) — tick size, AwayFromZero |
+| `cast` | 2 | typed value; second arg is a type-name **literal** (`Int32`, `Int64`, `Double`, `Decimal`, `Float32`, `Byte`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `String`). Float→int truncates toward zero. |
+
+Unknown `fn`, wrong arity, or a `cast` whose second argument is not a type-name literal fails schema apply (`SCHEMA_EXPR_UNKNOWN_FUNCTION`). Timestamp bucket truncate is not in this set.
 
 ```json
 {
   "columns": {
     "id": { "type": "Int64", "primaryKey": 1 },
     "qty": { "type": "Int64" },
+    "rawTicker": { "type": "String" },
+    "ticker": {
+      "type": "String",
+      "derived": {
+        "type": "call",
+        "fn": "upper",
+        "args": [
+          {
+            "type": "call",
+            "fn": "trim",
+            "args": [{ "type": "colRef", "col": "rawTicker" }]
+          }
+        ]
+      }
+    },
     "qtyCopy": {
       "type": "Int64",
       "derived": { "type": "colRef", "col": "qty" }
@@ -156,6 +184,7 @@ This is the operational difference between a transform and the application code 
 | `TRANSFORM_DERIVED_READONLY` | Caller supplied a value for a derived column | 400 |
 | `TRANSFORM_ROUTE_UNMATCHED` | No `route` matched a row | 400 |
 | `TRANSFORM_ROUTE_AMBIGUOUS` | More than one `route` matched a row | 400 |
+| `SCHEMA_EXPR_UNKNOWN_FUNCTION` | Schema apply: unknown `call` `fn`, bad arity, or invalid `cast` type literal | 400 |
 
 The error names the **table and the check or transform**, not the row index. With a 5 000-row batch, "check `price_positive` on `TradeQuote` rejected the row" does not tell you which one.
 

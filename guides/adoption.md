@@ -96,7 +96,7 @@ All of that shipped: paged snapshots terminated by `snapshot_complete`, a server
 
 A worker that drops malformed rows, filters row kinds, normalizes a timestamp, derives a column, and fans rows out to two tables is [`checks` + `derived` + `route`](insert-transforms.md).
 
-It is **not** deletable if it resolves an identifier against another system, quarantines and notifies, or needs a loop. The expression substrate is `literal`, `colRef`, `arithmetic`, `coalesce`, `conditional` — there are **no string functions and no rounding**. Vendor-code mapping, trimming, and rounding stay in your code. Do not encode a lookup table as a `conditional` tree; that is the signal to keep the service.
+It is **not** deletable if it resolves an identifier against another system, quarantines and notifies, or needs a loop. The expression substrate is `literal`, `colRef`, `arithmetic`, `coalesce`, `conditional`, `param`, and `call` (`upper` / `lower` / `trim` / `concat` / `substring` / `round` / `roundTo` / `cast`). Timestamp bucket truncate is not in that set. Do not encode a lookup table as a `conditional` tree; that is the signal to keep the service.
 
 ### 4. The auth proxy — **delete the user-facing half**
 
@@ -239,7 +239,7 @@ Hand this to whoever (or whatever) is writing the plan.
 
 - Typed subscribe-by-hash in `@aouda/client` / `Aouda.Client` (the wire protocol supports it).
 - Materialized queries in `aouda.schema.json`, and MQ create/list in the clients — MQ management stays on admin HTTP.
-- String and rounding functions in derived-column expressions.
+- Timestamp truncate / bucket as a derived `call` function.
 - OAuth 2.0 authorization code + PKCE, and token introspection.
 - Bare internet exposure with no edge.
 - Tier 3 embedded functions (loops, branch trees, outbound calls).
