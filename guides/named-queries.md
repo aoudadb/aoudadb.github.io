@@ -312,6 +312,40 @@ Two sequential single executes under a concurrent writer **may disagree**. The b
 
 On the data-plane, WebSocket `subscribe` **requires** `hash` (and optional `args`). Ad-hoc `target` + `filter` is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
 
+The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** that hash for the connection. Redeploying the alias does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
+
+Live `change` `row` / `prev` contain only the declared projection.
+
+Use the SDK — gap resume, reconnect, `re_auth`, snapshot paging, and conflation stay on the existing transport:
+
+```typescript
+const sub = client.namedQueries.subscribe<ByTickerRow>(
+  namedQueries.byTicker.hash,
+  { ticker: "AAPL" },
+  {
+    conflate: { key: ["ticker"], interval_ms: 100 },
+    onSnapshot: (rows) => { /* current match */ },
+    onChange: (evt) => { /* insert | update | delete */ },
+  }
+);
+// later
+await sub.unsubscribe();
+```
+
+```csharp
+await foreach (var evt in client.NamedQueries.SubscribeAsync(
+    NamedQueries.ByTicker,
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" },
+    new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], 100) },
+    ct))
+{
+    if (evt.IsSnapshot) { /* current match */ }
+    else { /* insert | update | delete */ }
+}
+```
+
+Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_complete`, `gap`, and `re_auth` are in the [HTTP API WebSocket section](../reference/http-api.md#websocket-streaming-protocol) and [Real-time streaming](real-time.md). The wire envelope is unchanged if you must send frames yourself:
+
 ```json
 {
   "type": "subscribe",
@@ -321,12 +355,6 @@ On the data-plane, WebSocket `subscribe` **requires** `hash` (and optional `args
   "conflate": { "key": ["ticker"], "interval_ms": 100 }
 }
 ```
-
-The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** that hash for the connection. Redeploying the alias does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
-
-Live `change` `row` / `prev` contain only the declared projection.
-
-Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_complete`, `gap`, and `re_auth` are in the [HTTP API WebSocket section](../reference/http-api.md#websocket-streaming-protocol) and [Real-time streaming](real-time.md).
 
 ---
 

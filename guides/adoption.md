@@ -122,32 +122,34 @@ The wire protocol and the client SDKs are not at the same level of coverage. Pla
 | Snapshot paging + `snapshot_complete` | ✅ | ✅ handled in the transport | ✅ |
 | `gap` → automatic `resume_from` | ✅ | ✅ handled in the transport | ✅ |
 | `re_auth` on token refresh | ✅ | ✅ handled in the transport | ✅ |
-| **Subscribe by hash (required on the data-plane)** | ✅ | ⚠️ **wire-level only** | ⚠️ **wire-level only** |
+| **Subscribe by hash (required on the data-plane)** | ✅ | ✅ `client.namedQueries.subscribe(hash, args, { conflate })` | ✅ `NamedQueries.SubscribeAsync(hash, args, options)` |
 | `aouda schema diff --access` | ✅ | ❌ not shipped | ✅ (the `aouda` C# CLI) |
 | Materialized-query create / list | ✅ admin HTTP | ❌ | ❌ (`RefreshAsync` only) |
 
-### What "wire-level only" means for subscribe-by-hash
+### Subscribe by hash (data-plane)
 
-On the data-plane, `subscribe` **requires** a `hash`; sending `target` + `filter` returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. The high-level `subscribe()` builders in both SDKs always send `target`, so **they cannot be used against the data-plane listener today**. The message types carry `hash` / `args` / `conflate`, and snapshot paging, `gap` resume and `re_auth` are already handled by the transport — only the entry point is missing.
+On the data-plane, `subscribe` **requires** a `hash`; sending `target` + `filter` returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Use `client.namedQueries.subscribe(hash, args, { conflate })` / `NamedQueries.SubscribeAsync` — not `client.table(t).subscribe`, which still sends `target` (admin table subscribe). Gap resume, snapshot paging, and `re_auth` stay on the existing transport.
 
-Until a typed API ships, a frontend that subscribes on the data-plane sends the frames itself:
-
-```jsonc
-// 1. first frame on wss://data.example.com/api/databases/trading/ws
-{ "type": "auth", "token": "<user JWT>", "database": "trading", "wire_mode": "json" }
-
-// 2. subscribe by pinned hash — conflate is how you avoid delivering every tick
-{ "type": "subscribe", "id": "sub-1", "hash": "<64-hex>",
-  "args": { "tickers": ["AAPL", "MSFT"] },
-  "conflate": { "key": ["ticker"], "interval_ms": 100 } }
-
-// 3. when the access token is refreshed, keep the subscription alive
-{ "type": "re_auth", "token": "<new JWT>" }
+```typescript
+const sub = client.namedQueries.subscribe(namedQueries.byTicker.hash, { ticker: "AAPL" }, {
+  conflate: { key: ["ticker"], interval_ms: 100 },
+  onSnapshot: (rows) => { /* … */ },
+  onChange: (evt) => { /* … */ },
+});
 ```
 
-Server frames to handle: `snapshot` (paged) → `snapshot_complete` → `change`, plus `gap` (feed `last_seq` back as `resume_from`), `heartbeat`, and `error`. Full message reference: [HTTP API — WebSocket streaming](../reference/http-api.md#websocket-streaming-protocol).
+```csharp
+await foreach (var evt in client.NamedQueries.SubscribeAsync(
+    NamedQueries.ByTicker,
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" },
+    new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], 100) },
+    ct))
+{
+    // snapshot then change events
+}
+```
 
-Contain that wrapper in one file with one test, and delete it when the typed API lands. Do **not** let it grow into a second client.
+Full message reference: [HTTP API — WebSocket streaming](../reference/http-api.md#websocket-streaming-protocol). See also [Named queries — Subscribe by hash](named-queries.md#subscribe-by-hash).
 
 ---
 
@@ -237,7 +239,6 @@ Hand this to whoever (or whatever) is writing the plan.
 
 ## Not in this release
 
-- Typed subscribe-by-hash in `@aouda/client` / `Aouda.Client` (the wire protocol supports it).
 - Materialized queries in `aouda.schema.json`, and MQ create/list in the clients — MQ management stays on admin HTTP.
 - String and rounding functions in derived-column expressions.
 - OAuth 2.0 authorization code + PKCE, and token introspection.
