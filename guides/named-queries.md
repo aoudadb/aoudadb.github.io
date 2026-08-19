@@ -328,6 +328,47 @@ Live `change` `row` / `prev` contain only the declared projection.
 
 Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_complete`, `gap`, and `re_auth` are in the [HTTP API WebSocket section](../reference/http-api.md#websocket-streaming-protocol) and [Real-time streaming](real-time.md).
 
+### From the SDKs
+
+Both clients expose this directly — you do not hand-roll the frames. `namedQueries.subscribe` returns the **same** subscription object as table subscribe, so snapshot paging, `gap` → `resume_from`, reconnect, `re_auth`, and `SLOW_CONSUMER` recovery are the paths you already have. Every resend carries the same `hash` + `args`.
+
+```typescript
+import { equityQuotes } from "./generated/named-queries"; // pinned hash + types
+
+const sub = client.namedQueries.subscribe(
+  equityQuotes.hash,
+  { tickers: ["AAPL", "MSFT"] },
+  {
+    conflate: { key: ["ticker"], intervalMs: 100 },
+    onSnapshot: (rows, version) => grid.reset(rows, version),
+    onChange: (event) => grid.apply(event),
+    onError: (error) => console.error(error),
+  }
+);
+
+// Or consume it as an async iterator, then:
+await sub.unsubscribe();
+```
+
+```csharp
+await foreach (var evt in client.NamedQueries.SubscribeAsync(
+    EquityQueries.EquityQuotes.Hash,
+    new Dictionary<string, object?> { ["tickers"] = new[] { "AAPL", "MSFT" } },
+    new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], TimeSpan.FromMilliseconds(100)) },
+    ct))
+{
+    // snapshot pages, then snapshot_complete, then change events
+}
+```
+
+Notes that bite:
+
+- **Pass no `filter`.** The predicate is the definition plus your `args`; there is no client-side filter on a named subscription. `client.table(t).subscribe(…)` still sends `target` and still works on the **admin** listener — it is refused on the data-plane.
+- An empty or whitespace `hash` throws before anything is sent.
+- A deprecated hash still subscribes. It adds `NAMED_QUERY_DEPRECATED` to `snapshot_complete.warnings`, which raises the named-artifact warning sink **once** and still delivers the snapshot.
+- Definitions using `joins`, `selectExpr`, `distinct`, or a non-zero offset are refused with `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of those still works — only the live path is restricted.
+- Codegen emits one binding per query (`{ hash, name }` plus `Args` / `Row`); the same constant feeds `execute` and `subscribe`. There is no generated `subscribeFoo()` wrapper.
+
 ---
 
 ## Named mutations

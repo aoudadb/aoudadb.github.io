@@ -20,7 +20,9 @@ If a hop only normalizes, validates, derives, or routes rows, it belongs here �
 | I want to… | Go to |
 |---|---|
 | Compute a column at write time | [Derived columns](#derived-columns) |
+| Uppercase, trim, concat, round a value | [`call` functions](#call--string-and-rounding-functions) |
 | Reject bad rows | [Checks](#check-constraints) |
+| Know what happens to the batch when one row fails | [Failure semantics](#failure-semantics-the-batch-fails-the-row-does-not-skip) |
 | Send a row to another table | [`route` and `tee`](#route-and-tee) |
 | Bulk-load a transformed table | [Bulk load](#bulk-load-is-loud) |
 | Enforce unique / FK | [Constraints](#unique-and-references) |
@@ -51,7 +53,7 @@ The change stream describes **storage**, not the request. Materialized-query mai
 
 `derived` is an expression evaluated at write time. The result is stored and queryable. Expressions reuse the bulk-mutation `SetExprNode` substrate (no second language).
 
-Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). The JSON type discriminator is `"type"`: `literal`, `colRef`, `arithmetic` (`+`, `-`, `*`, `/`), `coalesce`, `conditional`, `param`. There is no `round` op in this release — scale in the client or keep the stored value as-is.
+Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). The JSON type discriminator is `"type"`: `literal`, `colRef`, `arithmetic` (`+`, `-`, `*`, `/`), `coalesce`, `conditional`, `param`, and `call`.
 
 ```json
 {
@@ -76,6 +78,50 @@ Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). Th
 ```
 
 Apply rejects unknown ops and caller-supplied values for derived columns (`TRANSFORM_DERIVED_READONLY`). Derived columns re-evaluate on update/upsert of their inputs.
+
+### `call` — string and rounding functions
+
+`type: "call"` invokes a function from a **closed allowlist**. Names are lowercase and case-sensitive — `Upper` is unknown, `upper` is the function.
+
+| `fn` | Args | Result |
+|---|---|---|
+| `upper` / `lower` | 1 | Case-folded with **invariant** culture, not the table's `culture` |
+| `trim` | 1 | Leading and trailing whitespace removed |
+| `concat` | 1 or more | Arguments stringified and joined |
+| `substring` | 2 or 3 | `substring(s, start[, length])`. **`start` is 1-based** and must be ≥ 1; `length` must be ≥ 0. A `start` past the end yields `""` rather than an error |
+| `round` | 2 | `round(value, digits)`, `digits` 0–28, **away from zero** (not banker's rounding) |
+| `roundTo` | 2 | `roundTo(value, step)`, `step` > 0, away from zero — this is the one for tick sizes and price increments |
+| `cast` | 2 | `cast(value, "TypeName")`; the type must be a **string literal** |
+
+```json
+{
+  "ticker": {
+    "type": "String",
+    "derived": {
+      "type": "call",
+      "fn": "upper",
+      "args": [{ "type": "call", "fn": "trim", "args": [{ "type": "colRef", "col": "rawTicker" }] }]
+    }
+  },
+  "priceAtTick": {
+    "type": "Decimal",
+    "derived": {
+      "type": "call",
+      "fn": "roundTo",
+      "args": [{ "type": "colRef", "col": "rawPrice" }, { "type": "literal", "value": 0.05 }]
+    }
+  }
+}
+```
+
+Rules worth knowing before you design around it:
+
+- **Null propagates.** If *any* argument evaluates to null, the whole call returns null — it does not throw and does not substitute a default. Wrap in `coalesce` if you want one.
+- `cast` accepts only `Int32`, `Int64`, `Int16`, `Byte`, `UInt16`, `UInt32`, `UInt64`, `Double`, `Float32`, `Decimal`, `String`. **`Timestamp`, `Date`, `Guid`, `Bool`, and vector types are not castable.** Float→integer casts truncate toward zero, and a finite value outside the target range is an error rather than a silent wrap.
+- There is **no timestamp truncation function**. Bucketing a timestamp to a day or an hour is a partition-key function (`TruncateToDay` and friends) or a materialized-query `groupBy` term, not a derived column.
+- Unknown `fn`, wrong arity, or a non-literal `cast` type fails **schema apply** with `SCHEMA_EXPR_UNKNOWN_FUNCTION` — not at insert time. The same validation runs on `namedQueries[].selectExpr` and `namedMutations[].setExpr`.
+
+This is deliberately not a general expression language. It covers normalization — the tidying an ingest hop does — so that hop can be deleted. It does not cover lookups, I/O, or cross-row state; those are still [a service's job](division-of-responsibility.md).
 
 ---
 
@@ -333,6 +379,10 @@ await client.table("VendorTick").insertMany([
 | MQ over source empty after adding `route` | Events follow storage | Query/subscribe the **target**, or use `tee` |
 | Unique violation on upsert | Existing row counted | Upsert excludes the existing PK from the unique check; a **different** row colliding still fails |
 | Slow 100-row ingest | Write amplification | Increase batch size; avoid stacking `tee`s on the hot path |
+| `SCHEMA_EXPR_UNKNOWN_FUNCTION` on apply | Unknown `fn`, wrong arity, or a `cast` type that is not a string literal | Check the [allowlist](#call--string-and-rounding-functions); names are lowercase (`upper`, not `Upper`) |
+| A derived `call` column is unexpectedly null | Any argument was null; calls propagate null | Wrap the argument in `coalesce` |
+| Rounded price is off by one at `.5` | `round` / `roundTo` are away-from-zero, not banker's | Expected; adjust the check or the expectation |
+| Whole batch rejected for one bad row | Transforms are all-or-nothing per batch | [Failure semantics](#failure-semantics-the-batch-fails-the-row-does-not-skip) — split and retry, or add a catch-all route |
 
 ---
 
@@ -341,6 +391,9 @@ await client.table("VendorTick").insertMany([
 - Loops, branch trees, or calls out of process (embedded functions / Tier 3).
 - Transforms that fire on bulk load without an explicit intent flag (deliberately loud).
 - Mixing named mutations into a transform graph.
+- Timestamp truncation as a derived `call` — use a partition-key function or a materialized-query `groupBy` term.
+- `cast` to `Timestamp`, `Date`, `Guid`, `Bool`, or a vector type.
+- A built-in dead-letter queue. Quarantine is a table plus a catch-all `route`.
 
 ---
 

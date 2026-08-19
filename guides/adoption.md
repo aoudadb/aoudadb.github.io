@@ -90,13 +90,13 @@ A service that holds one subscription open against Aouda and re-broadcasts rows 
 
 All of that shipped: paged snapshots terminated by `snapshot_complete`, a server-emitted per-subscription `gap` with `resume_from`, opt-in `conflate` with `values_skipped`, `re_auth`, `SLOW_CONSUMER`, and fan-out that costs O(authorization classes) rather than O(subscribers).
 
-**Verify you are on a build that includes it** (server `0.1.7` or later — [compatibility matrix](../clients/compatibility.md)), then read [SDK coverage](#sdk-coverage-read-this-before-you-plan) and [Capacity](#capacity-what-changes-when-the-relay-is-gone) before you delete anything.
+**Verify you are on a build that includes it** (server `0.1.8` or later — [compatibility matrix](../clients/compatibility.md)), then read [SDK coverage](#sdk-coverage-read-this-before-you-plan) and [Capacity](#capacity-what-changes-when-the-relay-is-gone) before you delete anything.
 
 ### 3. The ingest / normalization service — **shrink, sometimes delete**
 
 A worker that drops malformed rows, filters row kinds, normalizes a timestamp, derives a column, and fans rows out to two tables is [`checks` + `derived` + `route`](insert-transforms.md).
 
-It is **not** deletable if it resolves an identifier against another system, quarantines and notifies, or needs a loop. The expression substrate is `literal`, `colRef`, `arithmetic`, `coalesce`, `conditional` — there are **no string functions and no rounding**. Vendor-code mapping, trimming, and rounding stay in your code. Do not encode a lookup table as a `conditional` tree; that is the signal to keep the service.
+It is **not** deletable if it resolves an identifier against another system, quarantines and notifies, or needs a loop. The expression substrate is `literal`, `colRef`, `arithmetic`, `coalesce`, `conditional`, and a closed `call` allowlist covering case, trim, concat, substring, rounding, and numeric casts — so normalization and tick-size rounding **can** move in, but vendor-code mapping and anything that needs a lookup cannot. Do not encode a lookup table as a `conditional` tree; that is the signal to keep the service.
 
 ### 4. The auth proxy — **delete the user-facing half**
 
@@ -122,32 +122,34 @@ The wire protocol and the client SDKs are not at the same level of coverage. Pla
 | Snapshot paging + `snapshot_complete` | ✅ | ✅ handled in the transport | ✅ |
 | `gap` → automatic `resume_from` | ✅ | ✅ handled in the transport | ✅ |
 | `re_auth` on token refresh | ✅ | ✅ handled in the transport | ✅ |
-| **Subscribe by hash (required on the data-plane)** | ✅ | ⚠️ **wire-level only** | ⚠️ **wire-level only** |
+| **Subscribe by hash (required on the data-plane)** | ✅ | ✅ `client.namedQueries.subscribe(hash, args, { conflate })` | ✅ `client.NamedQueries.SubscribeAsync(hash, args, options)` |
+| Declaring MQs in `aouda.schema.json` | ✅ `materializedQueries` map | ✅ via `schema apply` | ✅ via `schema apply` |
+| String / rounding functions in write-time expressions | ✅ `call` allowlist | ✅ `$upper` … `$cast` in `.update()` | ✅ `SetExpr` builder |
 | `aouda schema diff --access` | ✅ | ❌ not shipped | ✅ (the `aouda` C# CLI) |
-| Materialized-query create / list | ✅ admin HTTP | ❌ | ❌ (`RefreshAsync` only) |
+| Materialized-query create / list **at runtime** | ✅ admin HTTP | ❌ | ❌ (`RefreshAsync` only) |
 
-### What "wire-level only" means for subscribe-by-hash
+Two caveats that still shape a plan:
 
-On the data-plane, `subscribe` **requires** a `hash`; sending `target` + `filter` returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. The high-level `subscribe()` builders in both SDKs always send `target`, so **they cannot be used against the data-plane listener today**. The message types carry `hash` / `args` / `conflate`, and snapshot paging, `gap` resume and `re_auth` are already handled by the transport — only the entry point is missing.
+- **`schema diff --access` is C#-CLI only.** The CI gate that stops accidental access widening needs the `aouda` tool (`dotnet tool install --global Aouda.Cli`). If your pipeline already runs .NET anywhere, this costs one line. If it is a pure Node pipeline, adding .NET to CI is the price of the gate — and it is worth paying.
+- **Runtime MQ management is still .NET-only.** Declaring MQs in the schema file covers provisioning, which is what most applications need. Creating one dynamically at runtime is not something the TypeScript client can do.
 
-Until a typed API ships, a frontend that subscribes on the data-plane sends the frames itself:
+### Subscribing on the data-plane
 
-```jsonc
-// 1. first frame on wss://data.example.com/api/databases/trading/ws
-{ "type": "auth", "token": "<user JWT>", "database": "trading", "wire_mode": "json" }
+`subscribe` on the data-plane **requires** a `hash`; sending `target` + `filter` returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Both SDKs expose this directly, returning the same subscription object as table subscribe — so snapshot paging, `gap` → `resume_from`, reconnect, `re_auth`, and `SLOW_CONSUMER` recovery are the transport paths you already have, and every resend carries the same `hash` + `args`.
 
-// 2. subscribe by pinned hash — conflate is how you avoid delivering every tick
-{ "type": "subscribe", "id": "sub-1", "hash": "<64-hex>",
-  "args": { "tickers": ["AAPL", "MSFT"] },
-  "conflate": { "key": ["ticker"], "interval_ms": 100 } }
-
-// 3. when the access token is refreshed, keep the subscription alive
-{ "type": "re_auth", "token": "<new JWT>" }
+```typescript
+const sub = client.namedQueries.subscribe(
+  equityQuotes.hash,
+  { tickers: ["AAPL", "MSFT"] },
+  {
+    conflate: { key: ["ticker"], intervalMs: 100 },
+    onSnapshot: (rows, version) => grid.reset(rows, version),
+    onChange: (event) => grid.apply(event),
+  }
+);
 ```
 
-Server frames to handle: `snapshot` (paged) → `snapshot_complete` → `change`, plus `gap` (feed `last_seq` back as `resume_from`), `heartbeat`, and `error`. Full message reference: [HTTP API — WebSocket streaming](../reference/http-api.md#websocket-streaming-protocol).
-
-Contain that wrapper in one file with one test, and delete it when the typed API lands. Do **not** let it grow into a second client.
+Do not hand-roll the frames. Full API, including the deprecation-warning path and which definitions are refused live, is in [Named queries — subscribe by hash](named-queries.md#subscribe-by-hash).
 
 ---
 
@@ -187,14 +189,14 @@ Named-query cost is `1 + joinCount`, capped at 3 joins / cost 8. A view that nee
 
 Do these in order. Each step is independently shippable and independently revertible.
 
-1. **Upgrade and verify the build.** Server `0.1.7`+, `@aouda/client` `0.1.11`+, `Aouda.Client` `0.1.7`+ ([compatibility](../clients/compatibility.md)). Check the four deliberate breaks on the trusted surface: `auth-db-rls` + `permissionDimension` is now a schema error, a zero-rule resolver cannot be persisted, grant sets above the caps are rejected at creation, and bulk load into a compute-bearing table requires an explicit intent flag.
-2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Everything after this step depends on it.
+1. **Upgrade and verify the build.** Server `0.1.8`+, `@aouda/client` `0.1.12`+, `Aouda.Client` `0.1.8`+ ([compatibility](../clients/compatibility.md)). Check the four deliberate breaks on the trusted surface: `auth-db-rls` + `permissionDimension` is now a schema error, a zero-rule resolver cannot be persisted, grant sets above the caps are rejected at creation, and bulk load into a compute-bearing table requires an explicit intent flag.
+2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Materialized queries can now be declared here too, but **export before you hand-edit**: a present `materializedQueries` map is desired state and drops anything not listed. Everything after this step depends on it.
 3. **Turn on the data-plane listener** behind your existing edge, on its own hostname. Prove the isolation before you use it: `POST …/query` and `GET /api/databases` must return **404** on the data-plane and work on admin.
 4. **Opt tables in, one at a time.** `dataPlaneAccess` defaults to false. Every table a browser-tier caller touches — including join tables — needs it. **If the table is user-scoped, ship ADRA in the same change** (`authMode`, `rlsResolverName`, `permissionDimension`). A `dataPlaneAccess: true` table with no RLS is readable, through your declared named queries, by every signed-in user. That is right for reference and market data and wrong for anything owned by a user.
 5. **Add the CI gate now, not later.** `aouda schema diff --access` with an `aouda.identities.json` fixture set, failing the build on widening ([access surface](access-surface.md)). Adding it after ten named queries exist means approving ten findings at once.
 6. **Author named queries and switch reads over behind a flag.** Old gateway route and new named query both work. Compare results.
 7. **Move ingest normalization** that passes the [decision test](division-of-responsibility.md#the-test-when-it-is-not-obvious) into `checks` / `derived` / `route`. Expect an error-handling change: a failed check **fails the whole batch**, it does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted **before** you apply it. `route` must also be exhaustive — an unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row left behind on the landing table — so declare a catch-all route to a quarantine table. See [failure semantics](insert-transforms.md#failure-semantics-the-batch-fails-the-row-does-not-skip).
-8. **Move streaming**, subject to [SDK coverage](#sdk-coverage-read-this-before-you-plan) and [capacity](#capacity-what-changes-when-the-relay-is-gone). Build the direct path behind a flag while the relay still runs.
+8. **Move streaming** with `namedQueries.subscribe`, subject to [capacity](#capacity-what-changes-when-the-relay-is-gone) — this is where losing the relay's fan-out shows up. Build the direct path behind a flag while the relay still runs.
 9. **Move browser auth** to direct data-plane calls. Keep service-key flows server-side.
 10. **Delete — in separate commits from the construction.** Never delete a relay and build its replacement in the same change. That is how you find out in production that `conflate` was collapsing something you needed.
 
@@ -204,7 +206,7 @@ Do these in order. Each step is independently shippable and independently revert
 
 Hand this to whoever (or whatever) is writing the plan.
 
-- [ ] Server is `0.1.7`+ and the four trusted-surface breaks have been checked against current usage
+- [ ] Server is `0.1.8`+ and the four trusted-surface breaks have been checked against current usage
 - [ ] `aouda.schema.json` is in git and `schema validate` is clean against every environment
 - [ ] Admin listener is unreachable from outside the private network — probed, not assumed
 - [ ] No `mk_svc_*` appears in any browser-delivered artifact — grepped, not assumed
@@ -224,7 +226,10 @@ Hand this to whoever (or whatever) is writing the plan.
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `NAMED_QUERY_SUBSCRIBE_REQUIRED` from the SDK's `subscribe()` | The high-level builder sends `target`, not `hash` | Use the wire frames — [SDK coverage](#sdk-coverage-read-this-before-you-plan) |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` on the data-plane | You called `client.table(t).subscribe(…)`, which sends `target` | Use `client.namedQueries.subscribe(hash, args)` — [subscribing](#subscribing-on-the-data-plane) |
+| `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | The definition has `joins`, `selectExpr`, `distinct`, or an offset | Only the live path is restricted; HTTP execute still works. Split the view or poll it |
+| Every MQ disappeared after a `schema apply` | `materializedQueries` present but incomplete — the map is desired state | `schema export` first; omit the map entirely to leave MQs unmanaged |
+| `SCHEMA_EXPR_UNKNOWN_FUNCTION` on apply | Unknown `call` `fn`, wrong arity, or non-literal `cast` type | Names are lowercase and the list is closed — [`call` functions](insert-transforms.md#call--string-and-rounding-functions) |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` after deleting a relay | Item-shaped subscriptions × N browsers | Make the named query take a list parameter; one subscription per view |
 | `429 IDENTITY_QUOTA_EXCEEDED` on page load | N independent executes | Use the batch envelope; then size `PermitLimit` from measurement |
 | `404 TABLE_NOT_FOUND` on a table that exists | `dataPlaneAccess: false`, browser-tier, data-plane | Opt in — and check join tables too |
@@ -237,9 +242,10 @@ Hand this to whoever (or whatever) is writing the plan.
 
 ## Not in this release
 
-- Typed subscribe-by-hash in `@aouda/client` / `Aouda.Client` (the wire protocol supports it).
-- Materialized queries in `aouda.schema.json`, and MQ create/list in the clients — MQ management stays on admin HTTP.
-- String and rounding functions in derived-column expressions.
+- `schema diff --access` in the npm CLI — the CI gate needs the C# `aouda` tool.
+- Runtime MQ create/list in either client; declaring them in `aouda.schema.json` covers provisioning.
+- Live subscribe to a named query that uses `joins`, `selectExpr`, `distinct`, or an offset.
+- Timestamp truncation as a derived `call`, and `cast` to `Timestamp` / `Date` / `Guid` / `Bool`.
 - OAuth 2.0 authorization code + PKCE, and token introspection.
 - Bare internet exposure with no edge.
 - Tier 3 embedded functions (loops, branch trees, outbound calls).

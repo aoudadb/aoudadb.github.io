@@ -104,6 +104,24 @@ UPDATE orders SET price = price * 0.9 WHERE status = 'active'
 | `$col` | Copy the value from another column | `{ "$col": "colName" }` |
 | `$ifNull` | Return first non-null value (COALESCE) | `{ "$ifNull": ["$colName", fallback] }` |
 
+#### String and rounding operators
+
+These map onto the same `call` allowlist the schema uses for [derived columns](insert-transforms.md#call--string-and-rounding-functions), so the semantics are identical in both places.
+
+| Operator | Meaning | Example |
+|---|---|---|
+| `$upper` / `$lower` | Case-fold, invariant culture | `{ ticker: { $upper: true } }` |
+| `$trim` | Strip leading/trailing whitespace | `{ ticker: { $trim: true } }` |
+| `$concat` | Join parts (columns and literals) | `{ key: { $concat: [{ $col: "venue" }, "-", { $col: "ticker" }] } }` |
+| `$substring` | `start` (1-based), or `[start, length]` | `{ prefix: { $substring: [1, 3] } }` |
+| `$round` | Round to N decimal places, away from zero | `{ price: { $round: 2 } }` |
+| `$roundTo` | Round to a step — tick sizes | `{ price: { $roundTo: 0.05 } }` |
+| `$cast` | Convert to a named type | `{ qty: { $cast: "Int64" } }` |
+
+`$upper`, `$lower`, and `$trim` take `true` to operate on the column itself. The unary and single-argument forms default to the column being set, so `{ price: { $round: 2 } }` means "round `price` to 2 places".
+
+Null propagates: if any argument is null the result is null. `$cast` accepts only the numeric types plus `String` — not `Timestamp`, `Date`, `Guid`, `Bool`, or vectors. An unknown operator throws client-side before any request is sent.
+
 Operators can be combined with literal values in the same `.update()` call. Literal values
 (unchanged keys) continue to use the existing `set` wire field and are unaffected by the new
 expression path.

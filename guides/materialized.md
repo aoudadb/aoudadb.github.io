@@ -17,6 +17,8 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 
 ## Start Here
 
+> **Declaring MQs in `aouda.schema.json` (new).** Materialized queries can now be declared under a top-level `materializedQueries` map and managed by `schema diff` / `apply` / `export`, instead of only through the .NET helpers or admin HTTP. That is the recommended path for new work — it puts MQ definitions under the same review and CI gate as tables and named queries. Syntax, the three shapes, and the drop-on-omit semantics are in [Schema management](schema-management.md#materialized-queries-in-the-schema-file). Statements below about MQ lifecycle being .NET-only predate this and are being reworked; the runtime behaviour they describe is unchanged.
+
 If you are new to materialized queries, start with:
 - `2.1 Why this functionality exists` (plain-language explanation)
 - `2.1.1 What a materialized query is (in plain language)`

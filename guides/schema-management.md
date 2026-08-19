@@ -86,7 +86,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 ### 3. Verify
 
-- **Diff**: Shows a human-readable plan (add table, add column, etc.). Use it on every PR to review schema changes. Add `--access` to fail the job when the branch **widens** what `mk_pub_*` or `aouda.identities.json` principals can read ([Access-surface diff](access-surface.md)). Named queries live under `namedQueries` in the same file ([Named queries](named-queries.md)).
+- **Diff**: Shows a human-readable plan (add table, add column, etc.). Use it on every PR to review schema changes. Add `--access` to fail the job when the branch **widens** what `mk_pub_*` or `aouda.identities.json` principals can read ([Access-surface diff](access-surface.md)). Named queries live under `namedQueries` in the same file ([Named queries](named-queries.md)), and materialized queries under [`materializedQueries`](#materialized-queries-in-the-schema-file).
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
 - **Validate**: Use `schema validate` in CI — it exits 0 if the server matches the file, 1 if there is drift.
 
@@ -109,6 +109,72 @@ dotnet aouda schema diff --server http://localhost:5433 --database myapp --json
 See the [Schema Lifecycle guide](schema.md) §2.6 / §2.11 for the full capability and change-type matrices.
 
 That’s it. Your schema is now in code, and you can run diff/apply in CI/CD. See [Schema CI/CD Guide](Schema-CI-CD-Guide.md) for GitHub Actions and automation.
+
+---
+
+## Materialized queries in the schema file
+
+Materialized queries are declared under a top-level `materializedQueries` map, keyed by name. The name **is** the identity, and it is also the result table you query.
+
+```json
+{
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "trading",
+  "tables": { },
+  "materializedQueries": {
+    "latest_quote": {
+      "type": "latestPerKey",
+      "sourceTable": "EquityQuote",
+      "groupBy": ["ticker"],
+      "orderBy": "ts",
+      "descending": true,
+      "select": ["ticker", "price", "ts"]
+    },
+    "ohlc_1m": {
+      "type": "aggregate",
+      "sourceTable": "EquityQuote",
+      "groupBy": [
+        "ticker",
+        { "column": "ts", "function": "TruncateToMinute", "outputName": "bucket" }
+      ],
+      "aggregates": [
+        { "function": "first", "sourceColumn": "price", "outputName": "open",  "orderByColumn": "ts" },
+        { "function": "max",   "sourceColumn": "price", "outputName": "high" },
+        { "function": "min",   "sourceColumn": "price", "outputName": "low" },
+        { "function": "last",  "sourceColumn": "price", "outputName": "close", "orderByColumn": "ts" },
+        { "function": "count",                          "outputName": "ticks" }
+      ],
+      "updateMode": "async"
+    }
+  }
+}
+```
+
+Three shapes, discriminated by `type`:
+
+| `type` | Required | Use for |
+|---|---|---|
+| `latestPerKey` | `sourceTable`, `groupBy`, `orderBy` | Current-value tables — latest quote per ticker |
+| `aggregate` | `sourceTable`, `groupBy`, `aggregates` | Rollups — OHLC candles, per-tenant counts |
+| `filter` | `sourceTable`, `predicate` | A maintained subset of a table |
+
+`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All three shapes accept `updateMode` (`async` | `sync`) and `storage.storageTemperature`.
+
+### The map is desired state — and omitting it is not the same as emptying it
+
+This is the one behaviour to get right before you add the map to an existing project:
+
+| In the file | Effect on apply |
+|---|---|
+| `materializedQueries` **omitted** (or null) | Live MQs are left **unmanaged** — nothing is created, changed, or dropped |
+| `"materializedQueries": { … }` | Desired state. Anything live and not listed is **dropped** |
+| `"materializedQueries": {}` | **Drops every MQ** in the database |
+
+So the safe first step on an existing database is `schema export`, which now writes live MQs into the map (an empty catalog exports as `{}`), rather than hand-adding a partial map and discovering the rest were dropped.
+
+**Changing a definition is a replace, and a replace is drop + create.** It therefore requires `--allow-destructive`, and the result table is rebuilt from the source rather than migrated. Renaming an MQ is a drop and a create for the same reason — the name is the identity.
+
+The admin HTTP create endpoint still exists and still works; the schema file is now the recommended path because it puts MQ definitions under the same review, diff, and CI gate as everything else.
 
 ---
 
