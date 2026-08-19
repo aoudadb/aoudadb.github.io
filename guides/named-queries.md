@@ -392,6 +392,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 
 - [Direct client access](direct-client-access.md) — listeners, `mk_pub_*`, quotas
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
+- [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in
 - [Access-surface diff](access-surface.md) — CI gate on widening
 - [HTTP API](../reference/http-api.md)
 - [TypeScript client](../clients/typescript.md)

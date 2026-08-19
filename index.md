@@ -124,6 +124,9 @@ docker compose up
 **Exposing Aouda to a browser or SPA?**
 → [Direct client access](guides/direct-client-access.md) — listeners, `mk_pub_*`, named queries. [Division of responsibility](guides/division-of-responsibility.md) — what belongs in a service.
 
+**Already have an app with services and a BFF in front of Aouda?**
+→ [Adopting Aouda](guides/adoption.md) — target architecture, which hops to delete, migration order, and where the SDKs lag the engine.
+
 **Setting up authentication?**
 → [Auth and Authorization](auth/) — two-layer auth model, API keys, JWT, ADRA modes
 

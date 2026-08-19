@@ -234,23 +234,27 @@ await client.auth.signOut();
 
 ## 12. API Keys and Credential Types
 
-Aouda has **three distinct types** of API keys. Understanding when to use each is critical.
+Aouda has **four** API key types. Understanding when to use each is critical.
 
-### The Three API Key Types
+### The API Key Types
 
 | Key Type | Prefix | Created By | Scope | Stored In | Use Case |
 |----------|--------|-----------|-------|-----------|----------|
 | **Server API key** | `mk_srv_` | Server admin (`/api/auth/admin/api-keys`) | One or more databases | `_serverauth` | Backend services, CI/CD, cross-database access |
-| **App `anon` key** | `mk_anon_` | Auto-generated on `auth.enabled` | One database | `_auth` | Frontend clients, pre-auth access |
+| **App `anon` key** | `mk_anon_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **auth only** — signup, signin, refresh, OIDC |
+| **App `public` key** | `mk_pub_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **data** — named queries, mutations, subscriptions (plus auth) |
 | **App `service_role` key** | `mk_svc_` | Auto-generated on `auth.enabled` | One database | `_auth` | Per-database backend access, admin tools |
 
 Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control.
+
+`mk_pub_` arrived with the data-plane listener in server `0.1.7`. `mk_anon_` is **denied on data routes** — if you are giving a frontend read access, that is `mk_pub_`, on the data-plane, through [named queries](../guides/named-queries.md). Full rules: [Direct client access](../guides/direct-client-access.md).
 
 ### When to Use Which Key
 
 | Need | Best Key | Why |
 |------|----------|-----|
-| Frontend app accessing one database | App `anon` key (`mk_anon_`) | Safe to expose, limited access, PLS enforced |
+| Frontend reading data directly | App `public` key (`mk_pub_`) | Safe to expose; named artifacts only; PLS/RLS enforced; data-plane only |
+| Frontend that only signs users in (data goes through your backend) | App `anon` key (`mk_anon_`) | Safe to expose; auth endpoints only |
 | Backend accessing one database (app auth enabled) | App `service_role` key (`mk_svc_`) | Full access to that database, PLS bypassed |
 | Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases |
 | CI/CD pipeline | Server API key (`mk_srv_`) | Scoped to test databases |
@@ -258,12 +262,13 @@ Additionally, **custom app API keys** (`mk_` prefix) can be created via the admi
 
 ### Comparison: Server Keys vs App Keys
 
-| | Server API Keys (`mk_srv_`) | App API Keys (`mk_anon_`, `mk_svc_`) |
+| | Server API Keys (`mk_srv_`) | App API Keys (`mk_anon_`, `mk_pub_`, `mk_svc_`) |
 |---|---|---|
 | **Created by** | Server admin | Auto-generated when app auth is enabled |
 | **Stored in** | `_serverauth` database | `_auth` database (linked to the app) |
 | **Scope** | One or more databases (via `databaseRoles`) | One specific database |
-| **PLS** | Never enforced (server-level access) | `mk_anon_`: enforced; `mk_svc_`: bypassed |
+| **PLS** | Never enforced (server-level access) | `mk_anon_` / `mk_pub_`: enforced; `mk_svc_`: bypassed |
+| **Listener** | Admin | `mk_pub_`: data-plane only (admin → `AUTH_KEY_LISTENER_MISMATCH`); others: either |
 | **Use case** | Backend services, CI/CD, cross-database | Frontend clients, per-database backend access |
 
 ### Creating Server API Keys

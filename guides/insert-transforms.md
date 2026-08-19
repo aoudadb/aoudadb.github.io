@@ -130,7 +130,41 @@ Named predicates. An empty `WhereClause` is rejected at apply. Failure → typed
 
 All `transforms` on one table must share one `kind`. `A → B → A` fails at **schema apply**, not as a runtime loop on the commit thread.
 
-Insert a `kind=quote` row into `Ingest`: it is stored on `TradeQuote` only; subscribers to `Ingest` do not see it; subscribers to `TradeQuote` see one insert event.
+Insert a `kind=quote` row into `Ingest`: it is stored on `TradeQuote` only; subscribers to `Ingest` do not see it; subscribers to `TradeQuote` see one insert event. `tee` differs: the ingress row **is** stored, and copies go to every matching target.
+
+`route` predicates must be both **disjoint** and **exhaustive**:
+
+| Rows matched by `when` | Result |
+|---|---|
+| Exactly one | Routed to that target |
+| More than one | `TRANSFORM_ROUTE_AMBIGUOUS` |
+| None | `TRANSFORM_ROUTE_UNMATCHED` |
+
+An unmatched row is an **error**, not a fallback — it does not stay on the ingress table. If you want a catch-all, declare it: a last route whose `when` is a condition that always holds, pointing at a quarantine table. `tee` has no such rule; a `tee` that matches nothing simply produces no copy, because the ingress row was stored anyway.
+
+---
+
+## Failure semantics: the batch fails, the row does not skip
+
+This is the operational difference between a transform and the application code it replaces, and it is the thing to design for before you move logic in.
+
+**Transforms are evaluated for the whole batch before anything is written.** The order is derived → checks → route/tee, recursively through hops. The first row that fails any stage throws, and **nothing in the batch is stored** — not the failing row, and not the rows around it. There is no partial success and no per-row skip.
+
+| Error | Raised when | HTTP |
+|---|---|---|
+| `CONSTRAINT_CHECK_VIOLATION` | A check predicate is false for a row | 400 |
+| `TRANSFORM_DERIVED_READONLY` | Caller supplied a value for a derived column | 400 |
+| `TRANSFORM_ROUTE_UNMATCHED` | No `route` matched a row | 400 |
+| `TRANSFORM_ROUTE_AMBIGUOUS` | More than one `route` matched a row | 400 |
+
+The error names the **table and the check or transform**, not the row index. With a 5 000-row batch, "check `price_positive` on `TradeQuote` rejected the row" does not tell you which one.
+
+Two consequences worth planning around:
+
+- **A service that used to filter rows now has a batch that fails.** Code that quietly dropped a malformed tick and carried on becomes an ingest that rejects 5 000 good ticks because of one. Decide deliberately: keep the permissive filter in the producer and use checks as an assertion about data that should never occur, or move the strictness in and accept that the feeder must handle a 400 by splitting and retrying.
+- **Route exhaustiveness is a schema obligation.** A vendor adding a new `kind` value takes ingestion down at the next batch. A declared catch-all route to a quarantine table turns that into rows you can inspect.
+
+There is no dead-letter mechanism inside Aouda. Quarantine is something you build out of an ordinary table plus a catch-all route.
 
 ---
 
@@ -313,6 +347,7 @@ await client.table("VendorTick").insertMany([
 ## Related
 
 - [Division of responsibility](division-of-responsibility.md)
+- [Adopting Aouda](adoption.md) — where moving ingest logic sits in a migration
 - [Bulk load](bulk-load.md)
 - [Bulk mutations](bulk-mutations.md) (expression substrate)
 - [HTTP API](../reference/http-api.md)

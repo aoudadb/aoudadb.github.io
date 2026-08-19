@@ -210,5 +210,6 @@ The ingest-service deletion (checks + `route`) is the other copy-paste: [Insert-
 
 - [Named queries](named-queries.md)
 - [Insert-time transforms](insert-transforms.md)
+- [Adopting Aouda](adoption.md) — applying this to an existing app: target architecture and migration order
 - [Direct client access](direct-client-access.md)
 - [HTTP API](../reference/http-api.md)

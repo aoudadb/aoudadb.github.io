@@ -29,6 +29,7 @@ HTTP shapes: [HTTP API — Access-surface diff](../reference/http-api.md#access-
 | Fail a PR on widening | [CI](#ci-gate) |
 | Understand `__public__` | [What is compared](#what-is-compared) |
 | Test a specific user | [Identities file](#identities-file) |
+| Ask *"what would this user see?"* | [Policy inspect](#policy-inspect) |
 | See why an incomparable predicate fails CI | [Fail-closed containment](#fail-closed-containment) |
 
 ---
@@ -53,23 +54,83 @@ Narrowing (tighter RLS, removed column, `dataPlaneAccess` true→false) is repor
 
 Sibling of `aouda.schema.json` (or `--identities`). Schema `https://aouda.io/identities/v1.json`. **One format** shared with `aouda policy inspect` and TestHarness RLS scenarios.
 
+`identities` is an **object keyed by identity name**, not an array.
+
 ```json
 {
   "$schema": "https://aouda.io/identities/v1.json",
-  "identities": [
-    {
-      "name": "alice",
+  "identities": {
+    "alice": {
       "kind": "user",
-      "claims": { "sub": "alice" },
-      "grants": [{ "dimension": "org", "value": "acme" }]
-    }
-  ]
+      "email": "alice@test.local",
+      "roles": ["db_reader"],
+      "claims": { "tenant_id": "acme" },
+      "grants": [
+        { "dimension": "org", "partitionKey": "acme", "accessLevel": "read" }
+      ]
+    },
+    "svc": { "kind": "service_key" }
+  }
 }
 ```
 
+| Field | Notes |
+|---|---|
+| key | `^[A-Za-z][A-Za-z0-9_.-]*$`. Duplicate keys are `AUTH_IDENTITY_INVALID`. |
+| `kind` | **Required.** `user` or `service_key`. |
+| `userId` | Optional UUID. Omitted → deterministic: SHA-256 of `"aouda.identity:" + name`, first 16 bytes as a GUID. A non-UUID value is `AUTH_IDENTITY_INVALID`. |
+| `claims` | String values only. |
+| `grants` | Each grant needs **all three** of `dimension`, `partitionKey`, `accessLevel` (`read` \| `write` \| `admin`). |
+
 Cap: 32 identities (`ACCESS_SURFACE_TOO_MANY_IDENTITIES`). Invalid document → `AUTH_IDENTITY_INVALID`. Missing file is a **warning**, not a hard error: public-only (`mk_pub_*`) still runs.
 
-Do not add RLS resolver bodies to the schema file. Optional `resolvers` / `baseResolvers` on the HTTP wrapper compare rule-body relaxation; default is the live auth DB (or one shared posted list).
+The file is never applied and never persisted. Do not add RLS resolver bodies to the schema file. Optional `resolvers` / `baseResolvers` on the HTTP wrapper compare rule-body relaxation; default is the live auth DB (or one shared posted list).
+
+---
+
+## Policy inspect
+
+The diff tells you what **changed**. `policy inspect` tells you what an identity can see **right now** — the mechanical answer to *"what would Alice see in this table?"*, which is what makes "ADRA is the floor" a claim you can check instead of a claim you make.
+
+```bash
+aouda policy inspect --identity alice
+aouda policy inspect --identity alice --tables EquityQuote,Position --sample
+```
+
+The identities file is discovered in this order: `--file` → sibling of `aouda.schema.json` → walking up for `aouda.identities.json`.
+
+HTTP:
+
+```bash
+curl -X POST "$AOUDA/api/databases/$DB/policy/inspect" \
+  -H "Authorization: Bearer $ADMIN_OR_SERVICE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "document": { "$schema": "https://aouda.io/identities/v1.json", "identities": { "alice": { "kind": "user" } } },
+    "identityName": "alice",
+    "tables": ["EquityQuote"],
+    "includeSample": true,
+    "sampleLimit": 20
+  }'
+```
+
+You may pass an inline `identity` object instead of `document` + `identityName`. Optional `vectorProbe` (`{ table, column, k }`) and `traverseStart` (`{ table, id, hops }`) check the ANN and edge-traversal paths, which enforce the same predicate as tabular reads.
+
+Per table, the response reports:
+
+| Field | Meaning |
+|---|---|
+| `visibility` | `full` · `filtered` · `none` |
+| `pls` / `rls` | The contributing predicates |
+| `effective` | The conjunction actually injected into reads |
+| `effectiveHash` | SHA-256 of the canonical `WhereClause` — the same hash the diff compares |
+| `sample` / `sampleReason` | Rows the identity would actually get, when `includeSample` is set (`sample_failed` when it could not be produced) |
+
+Errors: `AUTH_IDENTITY_NOT_FOUND`, `AUTH_IDENTITY_INVALID`.
+
+**Credential and listener:** admin listener, with a **service key or an admin JWT**. A `db_reader` JWT gets 403, and the route is 404 on the data-plane — this is an operator and CI tool, not something an application calls.
+
+Run it for one identity per authorization class before you opt a table into the data-plane, and put the output in the migration record.
 
 ---
 
@@ -164,6 +225,8 @@ Branch review renders widenings first (warning), then narrowings. Load `aouda.id
 | Missing identities: warning, still exit 1 | Public-only still caught `dataPlaneAccess` | Expected |
 | `npx @aouda/client schema diff --access` missing | Not shipped | Use `aouda schema diff --access` |
 | Identities in `aouda.schema.json` rejected | `additionalProperties: false` | Keep a sibling file |
+| `AUTH_IDENTITY_INVALID` on a file that looks right | `identities` written as an array, or a grant missing `partitionKey` / `accessLevel` | It is an object keyed by name; grants need all three fields |
+| `policy inspect` returns 404 | Called against the data-plane listener | Use the **admin** URL with a service key or admin JWT |
 
 ---
 
@@ -180,5 +243,6 @@ Branch review renders widenings first (warning), then narrowings. Load `aouda.id
 
 - [Named queries](named-queries.md)
 - [Direct client access](direct-client-access.md)
+- [Adopting Aouda](adoption.md) — where this gate sits in a migration
 - [Schema CI/CD](schema-cicd.md)
 - [HTTP API](../reference/http-api.md)

@@ -222,6 +222,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 
 - [Named queries](named-queries.md)
 - [Division of responsibility](division-of-responsibility.md)
+- [Adopting Aouda](adoption.md) — migrating an existing app onto this model
 - [HTTP API](../reference/http-api.md)
 - [Studio](studio.md)
 - [Cloud and Hub](cloud-hub.md)
