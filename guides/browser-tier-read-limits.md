@@ -83,11 +83,12 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 | `GET` | `/startup` | Startup probe |
 | `GET` | `/api/databases/{db}/auth/.well-known/openid-configuration` | OIDC discovery |
 | `GET` | `/api/databases/{db}/auth/.well-known/jwks.json` | JWKS |
-| `POST` | `/api/databases/{db}/auth/signin` | App auth (any /auth/* except /auth/admin) |
+| `*` | `/api/databases/{db}/auth` | App-auth root; any HTTP method |
+| `*` | `/api/databases/{db}/auth/*` | App auth except /auth/admin and /auth/admin/*; any HTTP method |
 | `POST` | `/api/databases/{db}/named-queries/{hash}/query` | Named-query execute |
 | `POST` | `/api/databases/{db}/named-queries/batch` | Named-query batch |
 | `POST` | `/api/databases/{db}/named-mutations/{hash}/execute` | Named-mutation execute |
-| `GET` | `/api/databases/{db}/ws` | WebSocket (subscribe by hash) |
+| `*` | `/api/databases/{db}/ws` | WebSocket (subscribe by hash); method not checked |
 
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
 
