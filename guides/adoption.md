@@ -88,7 +88,7 @@ Keep the gateway for: cross-service aggregation, anything that calls a third par
 
 A service that holds one subscription open against Aouda and re-broadcasts rows over its own WebSocket/SignalR hub. Before P37 this was correct engineering, because the change stream could drop events silently, snapshots stopped early, and a token refresh tore the subscription down.
 
-All of that shipped: paged snapshots terminated by `snapshot_complete`, a server-emitted per-subscription `gap` with `resume_from`, opt-in `conflate` with `values_skipped`, `re_auth`, `SLOW_CONSUMER`, and fan-out that costs O(authorization classes) rather than O(subscribers).
+All of that shipped: paged snapshots terminated by `snapshot_complete`, a server-emitted per-subscription `gap` with `resume_from`, opt-in `conflate` with `values_skipped` (**value updates only** — a no-op on insert-only streams), `re_auth`, `SLOW_CONSUMER`, and fan-out that costs O(authorization classes) rather than O(subscribers).
 
 **Verify you are on a build that includes it** (server `0.1.8` or later — [compatibility matrix](../clients/compatibility.md)), then read [SDK coverage](#sdk-coverage-read-this-before-you-plan) and [Capacity](#capacity-what-changes-when-the-relay-is-gone) before you delete anything.
 
@@ -149,7 +149,7 @@ const sub = client.namedQueries.subscribe(
 );
 ```
 
-Do not hand-roll the frames. Full API, including the deprecation-warning path and which definitions are refused live, is in [Named queries — subscribe by hash](named-queries.md#subscribe-by-hash).
+Do not hand-roll the frames. Full API, including the deprecation-warning path and which definitions are refused live, is in [Named queries — subscribe by hash](named-queries.md#subscribe-by-hash). `conflate` in this example throttles **value updates**; it does not collapse inserts.
 
 ---
 
@@ -169,7 +169,7 @@ A relay typically holds **one** Aouda subscription per data partition and fans i
 
 The design consequence is concrete: **make subscriptions collection-shaped, not item-shaped.** A named query that takes a list parameter (`{ "column": "ticker", "op": "in", "param": "tickers" }`, constrained with `maxItems`) lets one subscription cover a whole watchlist or grid. A named query that takes a single id, subscribed once per row, will hit 32 on any real dashboard.
 
-Then use `conflate` with a key. Latest-wins on updates, per key, per interval — and `values_skipped` tells the client it happened. Conflation never collapses an insert, a delete, or a row leaving the caller's visibility scope, so it is safe to turn on for a price grid and wrong to rely on for an audit feed.
+Then use `conflate` with a key **on a table that actually emits value updates**. Latest-wins on updates, per key, per interval — and `values_skipped` tells the client it happened. Conflation never collapses an insert, a delete, or a row leaving the caller's visibility scope. On an **insert-only** tick stream it therefore reduces the event rate by zero; last-price belongs on a `latestPerKey` MQ, not on `quotes` plus `conflate`. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
 ### Requests are metered per identity, not per connection
 
@@ -193,7 +193,7 @@ Do these in order. Each step is independently shippable and independently revert
 2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Materialized queries can now be declared here too, but **export before you hand-edit**: a present `materializedQueries` map is desired state and drops anything not listed. Everything after this step depends on it.
 3. **Turn on the data-plane listener** behind your existing edge, on its own hostname. Prove the isolation before you use it: `POST …/query` and `GET /api/databases` must return **404** on the data-plane and work on admin.
 4. **Opt tables in, one at a time.** `dataPlaneAccess` defaults to false. Every table a browser-tier caller touches — including join tables — needs it. **If the table is user-scoped, ship ADRA in the same change** (`authMode`, `rlsResolverName`, `permissionDimension`). A `dataPlaneAccess: true` table with no RLS is readable, through your declared named queries, by every signed-in user. That is right for reference and market data and wrong for anything owned by a user.
-5. **Add the CI gate now, not later.** `aouda schema diff --access` with an `aouda.identities.json` fixture set, failing the build on widening ([access surface](access-surface.md)). Adding it after ten named queries exist means approving ten findings at once.
+5. **Add the CI gate now, not later.** `aouda schema diff --access` (**.NET CLI**) with an `aouda.identities.json` fixture set, failing the build on widening ([access surface](access-surface.md)). `npx @aouda/client schema diff --access` is **not shipped** (BL-176) — use `dotnet tool install --global Aouda.Cli` or `POST …/schema/diff?access=true` on admin. Adding the gate after ten named queries exist means approving ten findings at once.
 6. **Author named queries and switch reads over behind a flag.** Old gateway route and new named query both work. Compare results.
 7. **Move ingest normalization** that passes the [decision test](division-of-responsibility.md#the-test-when-it-is-not-obvious) into `checks` / `derived` / `route`. Expect an error-handling change: a failed check **fails the whole batch**, it does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted **before** you apply it. `route` must also be exhaustive — an unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row left behind on the landing table — so declare a catch-all route to a quarantine table. See [failure semantics](insert-transforms.md#failure-semantics-the-batch-fails-the-row-does-not-skip).
 8. **Move streaming** with `namedQueries.subscribe`, subject to [capacity](#capacity-what-changes-when-the-relay-is-gone) — this is where losing the relay's fan-out shows up. Build the direct path behind a flag while the relay still runs.

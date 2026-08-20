@@ -40,6 +40,7 @@
 
 - [Adopting Aouda in an existing app](https://aoudadb.github.io/guides/adoption/): Target architecture, which hops to delete, SDK coverage gaps, migration order
 - [Named queries and mutations](https://aoudadb.github.io/guides/named-queries/): Hash-pinned BFF contracts, batch envelope, codegen, subscribe-by-hash
+- [What a browser-tier read cannot do](https://aoudadb.github.io/guides/browser-tier-read-limits/): Operators, data-plane allowlist, partition-filter rule, conflation caveat
 - [Direct client access](https://aoudadb.github.io/guides/direct-client-access/): Admin vs data-plane listeners, `mk_pub_*`, quotas, thin edge. PKCE is not shipped.
 - [Division of responsibility](https://aoudadb.github.io/guides/division-of-responsibility/): What belongs in Aouda vs a service; decision test; latency caveat
 - [Insert-time transforms](https://aoudadb.github.io/guides/insert-transforms/): derived columns, checks, route/tee, bulk-load intent, unique/references

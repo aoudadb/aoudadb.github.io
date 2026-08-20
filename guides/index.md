@@ -84,7 +84,7 @@ Use this mapping as the baseline when planning doc updates:
 | Schema lifecycle and evolution patterns | Cross-phase (notably P3/P4/P7/P12/P14) | `docs/dev/Functionality-Schema-Lifecycle.md` |
 | Server CLI, Docker, Kubernetes, cloud, Hub | P16 | `docs/dev/Functionality-Cloud-And-Hub.md` |
 | **Server configuration** (precedence, install bootstrap, restart) | P34 / P4 | `guides/server-configuration.md` |
-| **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `guides/access-surface.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
+| **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `guides/access-surface.md`, `guides/browser-tier-read-limits.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
 | Studio management console | P5, P6, P9, P12, P16 | `docs/dev/Functionality-Studio.md` |
 | TypeScript client SDK (`@aouda/client`) | P5, P10, P12, P14, P15, P16 | `docs/dev/Functionality-TypeScript-Client.md` |
 

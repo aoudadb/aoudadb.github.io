@@ -825,7 +825,7 @@ Sidebar: **ADMIN → Streaming**. Two modes:
 | **Table** | Table name + optional filter (`WhereClause` JSON) | Operator ad-hoc on the admin listener (unchanged) |
 | **Named query** | 64-hex content hash + args JSON + optional conflate | The data-plane subscribe path — same hash as execute |
 
-Hash mode calls `namedQueries.subscribe(hash, args, { conflate })`. It never sends a table name or filter. Optional `sha256:` prefix is stripped. Conflate uses wire field `interval_ms`. The append-only log surfaces `gap`, `values_skipped`, and deprecation on `snapshot_complete` (warning, not a failed subscribe). Gap frames are auto-resumed by the client on a live socket. See [Named queries — Subscribe by hash](named-queries.md#subscribe-by-hash).
+Hash mode calls `namedQueries.subscribe(hash, args, { conflate })`. It never sends a table name or filter. Optional `sha256:` prefix is stripped. Conflate uses wire field `interval_ms` and holds **value updates only** (no-op on insert-only streams). The append-only log surfaces `gap`, `values_skipped`, and deprecation on `snapshot_complete` (warning, not a failed subscribe). Gap frames are auto-resumed by the client on a live socket. See [Named queries — Subscribe by hash](named-queries.md#subscribe-by-hash) and [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
 ### Bulk Load (monitor)
 

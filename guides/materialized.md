@@ -69,7 +69,7 @@ At a high level, Aouda does this:
 3. Aouda stores the result as a normal catalog table (same namespace as other tables).
 4. New writes to the source table emit change events.
 5. The materialized-query maintainer applies only incremental changes to the result table.
-6. Reads query the result table directly, or are auto-routed there when a match exists.
+6. Reads query the result table directly, or are auto-routed there when a match exists. For **aggregate** MQs the public column names are the declared `outputName`s (not `_max_*` / `_first_*_val` state columns).
 
 What is different in Aouda vs many systems:
 - The result is a regular table, not a special hidden object type.

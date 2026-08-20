@@ -6,8 +6,8 @@ parent: "Guides"
 
 # Direct client access and listeners
 
-Document status: Complete (P37)  
-Last updated: 2026-08-14
+Document status: Complete (P37, P40 S03)  
+Last updated: 2026-08-20
 
 Aouda serves **two browser populations with different trust**. The distinction is a property of the **listener** a client connects to — not of a route, an origin header, or a credential negotiated per request.
 
@@ -30,6 +30,7 @@ Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#
 | Connect Studio or Hub | [Studio and Hub](#studio-and-hub) |
 | Put TLS/WAF in front | [Topology](#topology-a-thin-edge) |
 | Sign users in from a browser | [Authentication that exists](#authentication-that-exists) |
+| See what a browser-tier read cannot do | [Browser-tier read limits](browser-tier-read-limits.md) |
 
 ---
 

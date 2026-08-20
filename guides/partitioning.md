@@ -138,7 +138,7 @@ If you create a table/database without tuning partition or multidb options:
   - If partitioned, `PartitionOptions` defaults are active (`StorageMode = Auto`, `RequirePartitionFilter = true`, promotion thresholds enabled, late-arrival defaults set).
 - Query safety:
   - Partition-filter enforcement is on by default for partitioned tables unless explicitly disabled.
-  - Cross-partition reads require explicit opt-in (`crossPartitionAccess` / `.WithCrossPartitionAccess()` in supported clients).
+  - Cross-partition reads require explicit opt-in (`crossPartitionAccess` / `.WithCrossPartitionAccess()` in supported clients). That flag is **admin-tier**. It is not a named-query field and is unreachable from `mk_pub_*` on the data-plane. Browser-tier rule: [partition-filter rule](#partition-filter-rule-p40).
 - Multitenancy:
   - Database-scoped HTTP routes are the default API shape.
   - Database creation defaults to WAL enabled, replication mode `Replicate`, default temperature `Auto`.
@@ -161,6 +161,24 @@ If you create a table/database without tuning partition or multidb options:
 | `PlsCrossPartitionRateLimitOptions.Enabled` | `false` | `true`, `false` | Cross-partition bypass rate limiting is opt-in |
 | `PlsCrossPartitionRateLimitOptions.PermitLimit` | `60` | Positive integer | Effective only when limiter is enabled |
 | `PlsCrossPartitionRateLimitOptions.WindowSeconds` | `60` | Positive integer (seconds) | Effective only when limiter is enabled |
+
+### Partition-filter rule (P40)
+
+On a partitioned table the guard defaults **on**. A query must include `eq` or `in` on **every** partition-key column. `in` lowers to OR-of-equality and satisfies the guard.
+
+| Shape | Guard |
+|---|---|
+| `eq` on every partition key | Passes |
+| `in` on a partition key (single or composite, with `eq`/`in` on the rest) | Passes |
+| Watchlist `Ticker in […] AND Source eq '…'` | Passes — **one** named query |
+| `nin`, range (`gt`/`lt`), `between`, `like` | Fails |
+| Composite **prefix** on a query that reads rows | Fails |
+| Directory-answerable `distinct` (PK columns only, ≥1 key constrained, complete directory, ≤ 10 000 tuples) | Passes without the missing keys |
+
+Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Error `PARTITION_FILTER_REQUIRED` names the **missing** columns and the satisfying operators.
+
+`crossPartitionAccess` is not a named-query field. Browser-tier alternatives: the watchlist `in` shape, auth-db-pls fan-out, or an MQ over the universe. Full page: [What a browser-tier read cannot do](browser-tier-read-limits.md#partition-filter-rule).
+
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -309,7 +327,7 @@ Core modules:
    - Not partitioned -> valid.
    - `RequirePartitionFilter == false` -> valid.
    - `crossPartitionAccess == true` -> valid cross-partition.
-   - Otherwise requires equality filters for all partition key columns.
+   - Otherwise requires equality or `in` filters for all partition key columns (`in` lowers to OR-of-equality). A composite prefix does not satisfy the guard for row-reading queries. Directory-answerable DISTINCT is the bounded exception — see [partition-filter rule](#partition-filter-rule-p40). Test anchors also: `tests/Aouda.Engine.Api.Tests/Query/PartitionFilterRuleTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`.
 4. Failure path throws `PartitionFilterRequiredException`.
 5. Observability: cross-partition executions increment `Perf.CrossPartitionQueries`.
 6. Test anchors: `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`.
@@ -615,7 +633,7 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `400` saying body database must match path database | Route/body mismatch | Ensure request body `database` equals `/api/databases/{db}` segment |
-| Query on partitioned table fails with partition filter required | Missing full partition-key equality filters and no bypass | Add required partition key filters or use explicit cross-partition access where allowed |
+| Query on partitioned table fails with partition filter required | Missing `eq`/`in` on every partition-key column (ranges and prefixes do not count) and no admin bypass | Add `eq`/`in` on the missing keys (named in the error); browser-tier cannot set `crossPartitionAccess`. See [partition-filter rule](#partition-filter-rule-p40) |
 | Cross-partition admin queries suddenly return 429 | Rate limiter enabled and threshold exceeded | Reduce request rate, widen window/permit settings, or retry after suggested delay |
 | Service key writes bypass PLS but no corresponding audit entries | Should not occur after BL-041 | Confirm `_audit_log` contains `service_key_pls_bypass` for the database/table; see integration tests in `PartitionLevelSecurityEnforcementIntegrationTests` |
 | PLS behavior seems odd with nested/grouped filter shapes | `WhereClause.Groups` helper adoption gap | Keep partition conditions in top-level `and`/`or` until BL-044 work lands |

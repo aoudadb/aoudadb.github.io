@@ -91,7 +91,7 @@ A gateway that fans out `GET /positions` then N `GET /quotes/{ticker}` and shape
 | Hide `internalSpread` | Omit it from `select` |
 | Authorize the caller | ADRA underneath (invoker rights) |
 | Ten unrelated dashboard panels | [Named-query batch](named-queries.md#batch-one-snapshot) (one snapshot) |
-| Live last-price at ~10 Hz | Subscribe by hash + `conflate` |
+| Live last-price at ~10 Hz | `latestPerKey` MQ (declarable) + subscribe by hash. `conflate` on an **insert-only** tick table is a no-op — it holds only a value `update` visible before and after. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams) |
 
 ### No — bond-trade import
 

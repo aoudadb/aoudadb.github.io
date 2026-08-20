@@ -814,8 +814,17 @@ For BL-058 troubleshooting, read `CompactionFloorSuppressed` together with adapt
 | Policy update with `memoryFilter` returns `400` | Filter JSON is invalid; column name does not exist in table schema; operator is not in the v1 supported set (`eq`/`ne`/`lt`/`lte`/`gt`/`gte`); `DataType` not supported in v1 (`Int16`, `Timestamp`, `Date`, `Vector`, `MdVector`) | Read the error message — it names the bad column/operator; check table schema and use a supported operator |
 | `memoryRowCap` or `targetMemoryBytes` set to `0` or negative returns `400` | Validation at catalog write time rejects non-positive values | Use a value `> 0`; send `0` on update-policy only if you want to **clear** an existing cap (sentinel convention) |
 | Caps set on `HotOnly` or `ColdPreferred` table appear to do nothing | Fields persist and validate correctly, but enforcement in v1 applies only to `Auto`-policy tables | Switch to `Auto` policy to activate enforcement; file a new BL item if enforcement on other policies is needed (BL-126 tracks this) |
+| Base table `rowCount: 0` after partitioned historical bulk into `ColdPreferred`, while MQs have data | Pre-0.1.5 orphaned `_delta` (BL-146) | Fixed in **0.1.5**. On a pre-fix database run `AoudaEngine.SealOrphanedDeltaSegmentsAsync` — do not change table temperature. See [BL-146](#bl-146--coldpreferred-rowcount-0-after-partitioned-bulk) |
 | Promotions happen but later demotions do not | Policy/budget combination does not force demotion path yet | Verify table policy, budget pressure, and counters; inspect maintenance state |
 | Query behavior differs after cold mutations | Deletion-mask/cold mutation path issue | Validate with C3 regression tests and inspect cold segment deletion mask state |
+
+### BL-146 — ColdPreferred `rowCount: 0` after partitioned bulk
+
+**Fixed in 0.1.5** (2026-08-10). Not an open engine item.
+
+Partitioned historical bulk into a `ColdPreferred` table could leave base rows in an uncatalogued `_delta` (flush gated on `IsVirtualPartitionKey` instead of any `PartitionKeyOrder`). MQs still had data; `rowCount` on the base table was 0.
+
+If a **pre-0.1.5** database still shows that: run `AoudaEngine.SealOrphanedDeltaSegmentsAsync` (repairs headerless pre-fix `_delta` pages and seals them into catalog hot segments). Do **not** change table temperature to mask it. Regression: `Bl146OrphanedDeltaPartitionFlushTests.ColdPreferred_PartitionedHistoricalBulk_BaseTableRowCountMatches`.
 
 ## 2.15 Verification ledger
 

@@ -51,7 +51,7 @@ The change stream describes **storage**, not the request. Materialized-query mai
 
 ## Derived columns
 
-`derived` is an expression evaluated at write time. The result is stored and queryable. Expressions reuse the bulk-mutation `SetExprNode` substrate (no second language).
+`derived` is an expression evaluated at write time. The result is stored and queryable. Expressions reuse the bulk-mutation `SetExprNode` substrate (no second language). Because the value is a physical catalog column, it **is** a legal `orderBy` target — that is the sanctioned computed-sort path until expression `orderBy` exists. See [browser-tier read limits](browser-tier-read-limits.md#no-expression-orderby).
 
 Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). The JSON type discriminator is `"type"`: `literal`, `colRef`, `arithmetic` (`+`, `-`, `*`, `/`), `coalesce`, `conditional`, `param`, and `call`.
 

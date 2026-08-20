@@ -125,6 +125,7 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
     "latest_quote": {
       "type": "latestPerKey",
       "sourceTable": "EquityQuote",
+      "dataPlaneAccess": true,
       "groupBy": ["ticker"],
       "orderBy": "ts",
       "descending": true,
@@ -133,6 +134,7 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
     "ohlc_1m": {
       "type": "aggregate",
       "sourceTable": "EquityQuote",
+      "dataPlaneAccess": true,
       "groupBy": [
         "ticker",
         { "column": "ts", "function": "TruncateToMinute", "outputName": "bucket" }
@@ -158,7 +160,11 @@ Three shapes, discriminated by `type`:
 | `aggregate` | `sourceTable`, `groupBy`, `aggregates` | Rollups — OHLC candles, per-tenant counts |
 | `filter` | `sourceTable`, `predicate` | A maintained subset of a table |
 
-`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All three shapes accept `updateMode` (`async` | `sync`) and `storage.storageTemperature`.
+`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All three shapes accept `updateMode` (`async` | `sync`), `storage.storageTemperature`, and **`dataPlaneAccess`** (default `false`) — set it on the MQ entry so a `mk_pub_*` named query can read the result table without an imperative table-options PATCH.
+
+**Public aggregate columns are the declared `outputName`s** (plus group keys), on every read path — `engine.Table(mq)`, `POST /tables/{mq}/query`, named query, subscribe. Physical state columns (`_count`, `_max_bid`, `_first_open_val`, …) are not selectable. A named query over `ohlc_1m` selects `high` / `open`, not `_max_price`.
+
+`topNPerGroup` and `firstPerKey` are **not implemented**: schema apply rejects them by name; HTTP create returns **501**. Valid declarable types are the three in the table.
 
 ### The map is desired state — and omitting it is not the same as emptying it
 

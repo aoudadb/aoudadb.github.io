@@ -160,7 +160,7 @@ aouda schema diff --access
 
 The engine repo's `examples/github-actions/schema-deploy-dotnet.yml` already passes `--access` on the PR step.
 
-The TypeScript CLI (`npx @aouda/client schema diff --access`) is **not** shipped yet. Use `aouda` (.NET tool) in CI.
+**C# CLI or admin HTTP. The TypeScript CLI `--access` flag is not shipped (BL-176).** `npx @aouda/client schema diff --access` does not exist. JS-only pipelines must still run the gate: `dotnet tool install --global Aouda.Cli` (the aoudadb NuGet feed already has `Aouda.Cli`) or the HTTP call below on the **admin** listener.
 
 HTTP equivalent:
 

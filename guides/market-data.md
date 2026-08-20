@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline  
 Primary owner: Aouda maintainers  
-Last updated: 2026-06-04
+Last updated: 2026-08-20
 
 This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, time-series partitioning, and per-ticker security. It is written for teams building apps like **Derive** (multi-source stock quotes) but applies to any tick stream where you need fast latest reads, interval candles, and tenant-scoped access.
 
@@ -18,7 +18,7 @@ This guide walks through a complete financial market-data workload on Aouda: quo
 - [Partitioning and Multi-tenancy](partitioning.md) — partition filters, cross-partition opt-in, storage modes
 - [Materialized Queries](materialized.md) — MQ lifecycle, incremental maintenance, result-table queries
 - [Auth — Data Authorization](../auth/authorization.md) — `jwt-claim`, `auth-db-pls`, fan-out queries
-- [Named queries](named-queries.md) — browser-tier quote/position views; subscribe + `conflate` for last-price
+- [Named queries](named-queries.md) — browser-tier quote/position views; last-price via a `latestPerKey` MQ + subscribe (`conflate` does not throttle an insert-only tick table — [limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams))
 - [Insert-time transforms](insert-transforms.md) — replace a quote ingest worker with `route` / derived columns
 - [Division of responsibility](division-of-responsibility.md) — what stays in a workflow service
 
@@ -219,7 +219,29 @@ Authorization: Bearer <admin-token>
 
 `type: 3` is Aggregate. Check status with `GET /api/databases/finance/materialized-queries/candles_bid_1h` until `state` is `1` (Ready).
 
-### TypeScript — create and query
+The HTTP and TypeScript `create` calls above are **admin**. For a browser-tier chart, declare the MQ in `aouda.schema.json` with `dataPlaneAccess: true` and read it through a named query selecting **`outputName` columns** (`high`, `open`, `low`, `close`) — not `_max_bid` / `_first_open_val`, and not ad-hoc `POST …/query`.
+
+```json
+"materializedQueries": {
+  "candles_bid_1h": {
+    "type": "aggregate",
+    "sourceTable": "quotes",
+    "dataPlaneAccess": true,
+    "groupBy": [
+      "ticker",
+      { "column": "time", "function": "TruncateToHour", "outputName": "time" }
+    ],
+    "aggregates": [
+      { "function": "max", "sourceColumn": "bid", "outputName": "high" },
+      { "function": "min", "sourceColumn": "bid", "outputName": "low" },
+      { "function": "first", "sourceColumn": "bid", "outputName": "open", "orderByColumn": "time" },
+      { "function": "last", "sourceColumn": "bid", "outputName": "close", "orderByColumn": "time" }
+    ]
+  }
+}
+```
+
+### TypeScript — create and query (admin listener)
 
 ```typescript
 import { createAoudaClient, MaterializedQueryType } from "@aouda/client";
@@ -250,7 +272,7 @@ const rows = await client.table("candles_bid_1h")
   .execute();
 ```
 
-Subscribe to live candle updates via the normal table streaming path: `client.table("candles_bid_1h").subscribe({ ... })`. See [Materialized Queries](materialized.md) §2.12 Scenario 3.
+Subscribe to live candle updates on the **admin** listener via `client.table("candles_bid_1h").subscribe({ ... })`. On the data-plane, subscribe **by named-query hash** over that table. See [Materialized Queries](materialized.md) §2.12 Scenario 3 and [Named queries — subscribe](named-queries.md#subscribe-by-hash).
 
 ### Incremental correctness
 
@@ -278,9 +300,9 @@ await client.table("quotes")
 
 ### Cross-partition analytics (admin / batch)
 
-Partitioned tables **require** full partition-key equality filters by default. For analytics across many tickers or sources, opt in explicitly:
+Partitioned tables **require** `eq` or `in` on **every** partition-key column by default (`in` satisfies the guard — a watchlist is one query). The examples below are **admin listener** only. `crossPartitionAccess` is not a named-query field; a browser-tier caller cannot set it. Browser-tier alternatives: `Ticker in $tickers AND Source eq $source`, auth-db-pls fan-out, or an MQ over the universe. See [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule).
 
-**.NET**
+**.NET (admin / engine API)**
 
 ```csharp
 await client.GetTable("quotes")
@@ -290,7 +312,9 @@ await client.GetTable("quotes")
     .ToListAsync();
 ```
 
-**TypeScript**
+`.Aggregate(...)` is a **fluent engine / admin** API, not a `QueryMessage` field and not available on the data plane. A browser-tier paged list uses a named query with `"count": true` and reads `totalMatches`.
+
+**TypeScript (admin listener)**
 
 ```typescript
 await client.table("quotes")
@@ -318,7 +342,9 @@ Cross-partition access bypasses the partition-filter guard only. **PLS and auth-
 
 ### Querying candle tables
 
-Candle tables are normal catalog tables. Filter by `ticker` and `time` (Int64 bucket):
+Candle tables are normal catalog tables. **Admin** can `POST /api/databases/finance/query` with `table: candles_bid_1h`. A **browser-tier** caller cannot: ad-hoc `/query` is 404 on the data plane. Use a named query over the MQ name, selecting `high` / `open` / `low` / `close` (the declared `outputName`s). The time bucket is **Int64 epoch milliseconds** (start of the UTC hour/day/minute), not a formatted string.
+
+**Admin HTTP:**
 
 ```http
 POST /api/databases/finance/query
@@ -337,6 +363,22 @@ Content-Type: application/json
 ```
 
 Auto-routing: a compatible query against `quotes` may be served from an MQ result table when one matches. Query `candles_bid_1h` directly when you want the pre-aggregated path.
+
+**Browser-tier named query** (schema file; `dataPlaneAccess` already on the MQ):
+
+```json
+"namedQueries": {
+  "candles.byTicker": {
+    "table": "candles_bid_1h",
+    "select": ["ticker", "time", "open", "high", "low", "close"],
+    "where": { "and": [{ "column": "ticker", "op": "eq", "param": "ticker" }] },
+    "orderBy": [{ "column": "time", "descending": false }],
+    "limit": 500,
+    "params": { "ticker": { "required": true, "maxLength": 16 } }
+  }
+}
+```
+
 
 ---
 
@@ -412,8 +454,8 @@ This is a storage optimization, not required for correctness. See engine catalog
 1. Create `quotes` (and optionally `trades`) with `ticker` + `source` partition keys and `time` clustered.
 2. Enable PLS (`jwt-claim` or `auth-db-pls`) before production traffic.
 3. Create Aggregate MQs for `candles_bid_1d`, `candles_bid_1h`, `candles_bid_1m` (and ask/trades variants as needed).
-4. App queries: partition-filtered reads for user-scoped latest quotes; query candle tables for charts.
-5. Admin analytics: `withCrossPartitionAccess()` / `crossPartitionAccess: true` with rate limiting enabled on the server.
+4. App queries: partition-filtered named queries for user-scoped latest quotes (`in` on ticker is enough for that column); named query over candle MQs selecting `outputName` columns for charts.
+5. Admin analytics only: `withCrossPartitionAccess()` / `crossPartitionAccess: true` on the **admin** listener, with rate limiting enabled. Not a browser-tier recipe.
 
 ---
 

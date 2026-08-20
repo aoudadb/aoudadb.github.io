@@ -6,8 +6,8 @@ parent: "Guides"
 
 # Named queries and mutations
 
-Document status: Complete (P37)  
-Last updated: 2026-08-14
+Document status: Complete (P37, P40 S03)  
+Last updated: 2026-08-20
 
 A **named query** is a server-authored, versioned, parameterized query template. The client sends a **content hash** plus arguments. It cannot name tables, columns, or operators. Identity is injected from the validated principal — it is never an argument.
 
@@ -15,7 +15,7 @@ That is the BFF (backend-for-frontend) **minus the deployment unit**. A gateway 
 
 Named **mutations** are the write-side mirror (insert / update / delete templates). They run with **invoker rights only** — there is no `SECURITY DEFINER` / `runAs`.
 
-**Wire contract:** [HTTP API — Named queries](../reference/http-api.md#named-queries).
+**Wire contract:** [HTTP API — Named queries](../reference/http-api.md#named-queries). **Limits:** [What a browser-tier read cannot do](browser-tier-read-limits.md).
 
 ---
 
@@ -28,6 +28,8 @@ Named **mutations** are the write-side mirror (insert / update / delete template
 | Collapse independent reads into one round trip | [Batch](#batch-one-snapshot) |
 | Subscribe to live results | [Subscribe by hash](#subscribe-by-hash) |
 | Pin hashes in CI / codegen | [Pin hashes](#pin-hashes-codegen) |
+| Page with a total ("1–25 of 412") | [Paging, distinct, and count](#paging-distinct-and-count) |
+| See what this surface cannot do | [Browser-tier read limits](browser-tier-read-limits.md) |
 | Decide if this belongs in Aouda at all | [Division of responsibility](division-of-responsibility.md) |
 
 ---
@@ -163,7 +165,7 @@ Notes:
 
 - `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](access-surface.md).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top.
-- `dataPlaneAccess: true` is required for browser-tier callers. It is independent of ADRA: RLS/PLS still filter rows.
+- `dataPlaneAccess: true` is required for browser-tier callers on **every table the definition touches**, including join tables **and** a materialized-query result table. On an MQ, set it on the `materializedQueries` entry (default `false`) — do not PATCH table-options. Independent of ADRA: RLS/PLS still filter rows.
 
 Apply:
 
@@ -192,6 +194,39 @@ aouda generate csharp --file aouda.schema.json
 ```
 
 There is **no** `POST /named-queries/register`. If build-time generation is painful, fix the tooling — do not add runtime registration.
+
+---
+
+## Paging, distinct, and count
+
+These fields exist on the definition. They were missing from this page.
+
+**`limit` / `limitParam`.** Every named query needs a numeric `limit` cap (`NAMED_QUERY_UNCAPPED_LIMIT` at apply). `limitParam` is the **name** of a parameter the caller may send to choose a smaller page size; it does not replace the cap.
+
+**`offset` / `offsetParam`.** Same pattern for offset. `offsetParam` requires a positive offset cap. A non-zero offset (literal or bound param) **disqualifies subscribe** (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). HTTP execute still pages.
+
+```json
+"equity.quotesPage": {
+  "table": "EquityQuote",
+  "select": ["ticker", "bid", "ask", "asOf"],
+  "where": { "and": [{ "column": "ticker", "op": "in", "param": "tickers" }] },
+  "orderBy": [{ "column": "ticker", "descending": false }],
+  "limit": 25,
+  "limitParam": "pageSize",
+  "offset": 10000,
+  "offsetParam": "pageOffset",
+  "count": true,
+  "params": {
+    "tickers": { "required": true, "maxItems": 32 },
+    "pageSize": { "min": 1, "max": 25 },
+    "pageOffset": { "min": 0, "max": 10000 }
+  }
+}
+```
+
+**`count: true`.** The response includes `totalMatches` (HTTP; omitted when the definition has no `count`) so a footer can render "1–25 of 412" from one round trip. Subscribe snapshots set `total_matches` on `snapshot_complete`. Count **ignores** limit/offset. Apply rejects a count whose cost is not bounded (`NAMED_QUERY_COUNT_UNBOUNDED`) — joins, `distinct`, or a partitioned table whose WHERE does not cover every partition key with a **required** `eq`/`in`. `POST …/query/count` stays **404** on the data plane.
+
+**`distinct: true`.** Exists. Subscribe refuses it. When every distinct column is a raw partition key, the predicate touches only partition keys, at least one partition key is constrained by `eq`/`in`, and the partition directory is complete and under 10 000 tuples, the engine answers from directory metadata with **zero segment scan**. `stats.distinctServedFromPartitionMetadata` is `true` on that path (omitted when false). That is the "which sources exist for this ticker?" query. Full rule: [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule).
 
 ---
 
@@ -322,6 +357,8 @@ On the data-plane, WebSocket `subscribe` **requires** `hash` (and optional `args
 }
 ```
 
+`conflate` holds only a value `update` visible before **and** after. On an insert-only tick table it does not reduce the event rate. Last-price: a `latestPerKey` MQ, not `quotes` plus `conflate`. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
+
 The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** that hash for the connection. Redeploying the alias does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
 
 Live `change` `row` / `prev` contain only the declared projection.
@@ -367,6 +404,7 @@ Notes that bite:
 - An empty or whitespace `hash` throws before anything is sent.
 - A deprecated hash still subscribes. It adds `NAMED_QUERY_DEPRECATED` to `snapshot_complete.warnings`, which raises the named-artifact warning sink **once** and still delivers the snapshot.
 - Definitions using `joins`, `selectExpr`, `distinct`, or a non-zero offset are refused with `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of those still works — only the live path is restricted.
+- `conflate` on an insert-only stream is a no-op (see above).
 - Codegen emits one binding per query (`{ hash, name }` plus `Args` / `Row`); the same constant feeds `execute` and `subscribe`. There is no generated `subscribeFoo()` wrapper.
 
 ---
@@ -406,10 +444,11 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Symptom | Cause | Action |
 |---|---|---|
 | `404 NAMED_QUERY_NOT_FOUND` | Hash not deployed, typo, or `sha256:` prefix mishandled | Apply schema; pin the hash from codegen; hashes are 64 hex |
-| `404 TABLE_NOT_FOUND` on a table that exists | Data-plane + browser-tier + `dataPlaneAccess: false` | Set `dataPlaneAccess: true` on every touched table (including joins) |
+| `404 TABLE_NOT_FOUND` on a table that exists | Data-plane + browser-tier + `dataPlaneAccess: false` | Set `dataPlaneAccess: true` on every touched table **and** MQ entry (including joins) |
 | `400 NAMED_QUERY_BIND_FAILED` | Arg type/constraint | Check `params` (`maxLength`, `min`/`max`, `enum`, `maxItems`) |
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |
 | Schema apply `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` | Set a numeric cap (or a constrained `limitParam`) |
+| Schema apply `NAMED_QUERY_COUNT_UNBOUNDED` | `count: true` on a join, `distinct`, or uncovered partition keys | Cover every partition key with required `eq`/`in`, or drop `count` |
 | Schema apply `NAMED_QUERY_COST_EXCEEDED` | Too many joins | Split the query or drop a join (cap default 8 = `1 + joins`) |
 | Batch HTTP 400 `NAMED_QUERY_BATCH_MUTATION` | Mutation hash in `queries` | Mutations have their own execute route |
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
@@ -426,12 +465,14 @@ There is no catalog field, header, or option that runs a named query as someone 
 - Static admissibility of client-composed queries (Firestore-style). Named queries are the browser-tier surface instead.
 - Cross-server named-query sharing through Hub (use a shared schema fragment in git).
 - OAuth 2.0 authorization code + PKCE — [not shipped](direct-client-access.md#authentication-that-exists).
+- Optional predicates (`whenParamPresent`), bounded sort choice, expression `orderBy` — see [browser-tier read limits](browser-tier-read-limits.md). `count` / `totalMatches` **are** shipped (`count: true` on the definition).
 
 ---
 
 ## Related
 
 - [Direct client access](direct-client-access.md) — listeners, `mk_pub_*`, quotas
+- [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in
 - [Access-surface diff](access-surface.md) — CI gate on widening

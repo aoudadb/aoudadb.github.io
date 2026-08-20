@@ -13,4 +13,6 @@ Low-level reference material for the Aouda wire protocol, type system, and error
 | [HTTP API](http-api/) | Full wire protocol — every REST endpoint, request/response shapes, error codes |
 | [Timestamp Type](timestamp/) | Timestamp semantics, storage format, query and comparison behavior |
 
+Browser-tier closed list (guide, not wire): [What a browser-tier read cannot do](../guides/browser-tier-read-limits.md).
+
 For auth-specific error codes and endpoint reference, see [Auth Reference](../auth/reference/).

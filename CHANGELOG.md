@@ -13,6 +13,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **P40 S03 — browser-tier read limits and corrections.** New [What a browser-tier read cannot do](guides/browser-tier-read-limits.md) (operators, `orderBy` types, subscribe refusals, data-plane allowlist generated from the validators). `in` on a partition key documented; `crossPartitionAccess` is not a named-query field; aggregate MQ columns are `outputName`; `offsetParam` / `limitParam` / `distinct` / `count`+`totalMatches` documented; `conflate` caveat on insert-only streams; BL-146 recovery path; BL-176 (`schema diff --access` is C# CLI only).
 - **Studio 0.0.18 (P39).** Operator console catches up to server 0.1.8: named-artifact catalog/test/authoring, insert-time unique/derived/checks/`call`/route/tee, `dataPlaneAccess` + `mk_pub_*` + policy inspect, hash subscribe, schema-file MQ maps (BL-174), identity-insert, bulk-load transform-intent copy. Pin `@aouda/client` **0.1.13**. [Studio](guides/studio.md), [Compatibility](clients/compatibility.md).
 
 ## 0.1.8 — 2026-08-19

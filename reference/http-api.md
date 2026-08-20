@@ -524,6 +524,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
+| `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |
 | `NAMED_QUERY_IDENTITY_PARAM` | 400 (schema apply) | Parameter name collides with an identity-derived value |
 | `NAMED_QUERY_PROJECTION_REQUIRED` | 400 (schema apply) | Named query omitted `select` / `selectExpr` |
 | `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
@@ -841,9 +842,17 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
 
 ### Named queries
 
-Named queries are **server-authored, content-hashed `QueryMessage` templates**. Browser-tier callers (`mk_pub_*` and application user JWTs on the data-plane listener) **cannot compose a query** — they send a hash plus arguments. Identity is injected from the validated principal; it is never an argument.
+Named queries are **server-authored, content-hashed `QueryMessage` templates**. Browser-tier callers (`mk_pub_*` and application user JWTs on the data-plane listener) **cannot compose a query** — they send a hash plus arguments. Identity is injected from the validated principal; it is never an argument. The closed list of what that surface cannot do is [What a browser-tier read cannot do](../guides/browser-tier-read-limits.md).
 
 There is **no HTTP route that registers a definition**. Definitions deploy through declarative schema apply (`namedQueries` in `aouda.schema.json`). Clients pin the SHA-256 of the canonical definition (codegen: `npx @aouda/client generate` / `aouda generate`). Names are aliases (`name` → current hash, `name@version` → hash). See [Named queries](../guides/named-queries.md).
+
+**Definition fields** (in `aouda.schema.json` `namedQueries` map) that this reference previously omitted:
+
+| Field | Notes |
+|---|---|
+| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Directory-answerable PK distinct sets `stats.distinctServedFromPartitionMetadata` (omitted when false). |
+| `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
+| `limitParam` / `offsetParam` | Parameter **names** that bind limit/offset. A numeric `limit` cap is still required; `offsetParam` requires a positive offset cap. Non-zero offset disqualifies subscribe. |
 
 Base path: `/api/databases/{db}/named-queries`
 
@@ -867,7 +876,7 @@ Execute one named query by content hash (64 hex SHA-256; optional `sha256:` pref
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
-**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`). When the hash is deprecated, `warnings` is present:
+**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset). When the hash is deprecated, `warnings` is present:
 
 ```json
 {
@@ -2524,7 +2533,7 @@ Get cluster topology.
 The following features are not yet supported:
 
 1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC.
-2. **Expression-based ORDER BY**: Only column names can be used for ordering, not expressions.
+2. **Expression-based ORDER BY**: Only catalog column names of sortable types can be used for ordering, not expressions or `selectExpr` aliases. The sanctioned workaround is a stored [`derived`](../guides/insert-transforms.md#derived-columns) column. See [browser-tier read limits](../guides/browser-tier-read-limits.md#no-expression-orderby).
 
 **Note — WhereClause nesting:** Earlier versions of this document stated that nested AND/OR was not supported. This is no longer accurate. The `groups` field in `WhereClause` supports up to **5** levels of nesting (`ProtocolConstants.MaxWhereClauseNestingDepth = 5`). Each group is AND'd with the top-level conditions, enabling safe composition of independent filter layers (e.g., partition scope + row scope). See the `groups` field description in the [Query Endpoint](#query-endpoint) section for details.
 
@@ -2629,7 +2638,7 @@ Until `snapshot_complete` arrives, the client **must not** treat accumulated sna
 | `key` | string[]? | Conditional | Columns that form the conflation key. Default: table primary key. Required when the table has no PK. |
 | `interval_ms` | number | Yes | Flush interval in milliseconds. Valid range 1…60_000. |
 
-Conflation applies only to **value `update` events** where the row was visible both before and after. `insert`, `delete`, enter-scope, and leave-scope **flush** any pending update for that key and are delivered immediately. Conflated `change` messages set `values_skipped` (count of dropped intermediate updates). That marker is **intentional loss** and is not a `gap`.
+Conflation applies only to **value `update` events** where the row was visible both before and after. `insert`, `delete`, enter-scope, and leave-scope **flush** any pending update for that key and are delivered immediately. Therefore on an **insert-only** (append-only) stream `conflate` reduces the event rate by zero and `values_skipped` never appears. Conflated `change` messages set `values_skipped` (count of dropped intermediate updates). That marker is **intentional loss** and is not a `gap`. Last-price: a `latestPerKey` MQ, not an insert-only tick table plus `conflate`. See [browser-tier read limits](../guides/browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
 **Ad-hoc example (admin listener):**
 ```json
@@ -2912,6 +2921,7 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 | `id` | string | Subscription ID |
 | `version` | number | Same pinned version as every preceding `snapshot` page |
 | `row_count` | number | Total rows delivered across all snapshot pages |
+| `total_matches` | number? | Present when the named query declared `count: true` — total matching rows, ignoring limit/offset |
 | `warnings` | object[]? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe) |
 
 ```json
