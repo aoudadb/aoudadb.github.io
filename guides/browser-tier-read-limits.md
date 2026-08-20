@@ -25,7 +25,7 @@ Enumerable tables below are generated from the validators that enforce them. If 
 | Know why my watchlist `in` filter is legal | [Partition-filter rule](#partition-filter-rule) |
 | Know why `crossPartitionAccess` is not on a named query | [No cross-partition on the data plane](#no-crosspartitionaccess-on-a-named-query) |
 | Page a list with "1–25 of 412" | [What you can do](#what-you-can-do) (`count` / `totalMatches`) |
-| Sort by a computed value | [Stored `derived` columns](#no-expression-orderby) |
+| Sort by a computed value | [Stored `derived` columns or computed MQ outputs](#no-expression-orderby) |
 | Last-price at ~10 Hz | [Conflation](#conflate-is-a-no-op-on-insert-only-streams) |
 
 ---
@@ -162,11 +162,14 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ## No expression `orderBy`
 
-**Rule.** `orderBy` is catalog column names of sortable types (table above). Sorting runs before computed projection, so a `selectExpr` alias cannot be a sort key. Expression `orderBy` is S07 (spike).
+**Rule.** `orderBy` is catalog column names of sortable types (table above). Sorting runs before computed projection, so a `selectExpr` alias cannot be a sort key. Expression `orderBy` on the read path is not offered: it would forfeit the TopK path and cost O(matched rows) per request.
 
-**Why.** Pipeline order, not a missing function name.
+**Why.** Pipeline order and a persist-time cost bound (`D-20`), not a missing function name.
 
-**Instead:** a stored [`derived`](insert-transforms.md#derived-columns) column — write-time, physically stored, therefore a catalog column and **orderable**. Prefer this for anything you need to ship before S07.
+**Instead:**
+
+- A stored [`derived`](insert-transforms.md#derived-columns) column — write-time, physically stored, therefore a catalog column and **orderable**. Prefer this for sorts on a **base table**.
+- A [`computed` output](materialized.md#top-gainers-by-change-percent) on an **aggregate materialized query** — write-time, physically stored on the result table, therefore orderable with the same TopK gate. Prefer this for rankings like "top gainers by change %".
 
 ---
 

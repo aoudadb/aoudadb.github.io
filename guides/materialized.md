@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-06-23
+Last updated: 2026-08-20
 
 Coverage phases: P4, P10, P11, P28, P31
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P10/`, `docs/tasks/P11/`, `docs/tasks/P28/`, `docs/tasks/P31/`
@@ -519,6 +519,38 @@ await engine.CreateAggregateQueryAsync("candles_bid_1h", "quotes", config);
 ```
 
 Expected result: each row in `candles_bid_1h` is keyed by `(symbol, time_bucket_hour)` and contains open/close/low/high for that hour. The `time_bucket_hour` group key is an Int64 epoch milliseconds value.
+
+### Top gainers by change percent
+
+An aggregate materialized query may declare `computed` columns — physical, always-nullable public columns of the result table whose value is a `ScalarExprNode` over that row's group-by and aggregate `outputName`s. They are maintained at write time, so a table-shaped read can `orderBy` them with the same TopK path as any other column.
+
+```json
+"barsWithChange": {
+  "type": "aggregate",
+  "sourceTable": "trades",
+  "groupBy": [{ "column": "ticker" }, { "column": "ts", "function": "truncateToHour" }],
+  "aggregates": [
+    { "function": "first", "outputName": "open",  "sourceColumn": "price", "orderByColumn": "ts" },
+    { "function": "last",  "outputName": "close", "sourceColumn": "price", "orderByColumn": "ts" }
+  ],
+  "computed": [
+    {
+      "outputName": "changePct",
+      "type": "Double",
+      "expr": {
+        "type": "arithmetic", "op": "/",
+        "left":  { "type": "arithmetic", "op": "-",
+                   "left": { "type": "colRef", "col": "close" },
+                   "right": { "type": "colRef", "col": "open" } },
+        "right": { "type": "colRef", "col": "open" }
+      }
+    }
+  ],
+  "dataPlaneAccess": true
+}
+```
+
+A named query over `barsWithChange` can then `orderBy: [{ "column": "changePct", "descending": true }]` with `limit: 20`. That is a catalog column, not a read-path expression. For sorts on a **base** table, use a stored `derived` column instead.
 
 ### .NET example (explicit MQ refresh — P31)
 
