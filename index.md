@@ -115,8 +115,11 @@ docker compose up
 
 ## Where to start
 
-**Building an application on Aouda?**
-→ [Getting Started](getting-started/) — full guide covering embedded mode, server mode, data operations, schema, and auth
+**Building an application on Aouda? Start here.**
+→ **[How to build apps effortlessly with Aouda](guides/build-apps.md)** — the canonical build path: the tiers you do not have to build, a 10-minute app, the twelve-step sequence, a capability map for whatever feature you have to ship, honest alternatives when the ideal path does not fit, and a contract you can point an AI agent at.
+
+**Just want the engine running and a first row inserted?**
+→ [Getting Started](getting-started/) — embedded mode, server mode, data operations, schema, and auth
 
 **Using the TypeScript client?**
 → [TypeScript Client](clients/typescript/) — query builder, typed queries, auth, MCP tools

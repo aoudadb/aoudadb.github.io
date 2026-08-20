@@ -13,7 +13,7 @@ A **browser-tier** caller is `mk_pub_*` or an end-user JWT on the **data-plane l
 
 Enumerable tables below are generated from the validators that enforce them. If a table and the engine disagree, the engine wins and this page is stale — pinned by `BrowserTierReadLimitsDocsTests`.
 
-**Related:** [Named queries](named-queries.md) · [Direct client access](direct-client-access.md) · [Partitioning](partitioning.md) · [Access-surface diff](access-surface.md)
+**Related:** [How to build apps effortlessly with Aouda](build-apps.md) · [Named queries](named-queries.md) · [Direct client access](direct-client-access.md) · [Partitioning](partitioning.md) · [Access-surface diff](access-surface.md)
 
 ---
 
@@ -182,13 +182,16 @@ A definition using `selectExpr` also cannot be subscribed (table above). HTTP ex
 
 ## `conflate` is a no-op on insert-only streams
 
-**Rule.** Conflation holds only a value `update` visible **before and after**. `insert`, `delete`, enter-scope, and leave-scope flush immediately and are never held (`D-15`). On an append-only tick table, `conflate` reduces the event rate by **zero** and `values_skipped` never fires.
+**Rule.** Default conflation holds only a value `update` visible **before and after**. `insert`, `delete`, enter-scope, and leave-scope flush immediately (`D-15`). On an append-only tick table, default `conflate` (no `collapse_inserts`) reduces the event rate by **zero** and `values_skipped` never fires. The subscribe still registers; `snapshot_complete` includes a `CONFLATE_NOOP` warning when the conflate key is not the table PK.
 
 **Why.** A client that misses an enter- or leave-scope event has a permanently wrong grid. That rule is not relaxed.
 
-**Instead:** declare a `latestPerKey` materialized query (no imperative HTTP create) with `dataPlaneAccess: true`, and subscribe to a named query over that result table. Latest-per-key collapse **on the subscription itself** (insert-collapse) is S04 and is not shipped. Until S04, MQ-upsert `prev` is still null, so a pinned-predicate subscribe over the MQ may also fail to conflate — the MQ is still the right catalog shape.
+**Instead:**
 
-Do not point a 10 Hz last-price grid at an insert-only table plus `conflate` and expect throttling.
+- Set `collapse_inserts: true` on the same `conflate` object. Matching inserts are held latest-wins per declared key; delivered `op` stays `"insert"`; `values_skipped` counts collapsed inserts. Transitions still flush.
+- Or declare a `latestPerKey` materialized query (no imperative HTTP create) with `dataPlaneAccess: true`, and subscribe to a named query over that result table. Upserts carry `prev`, so a pinned-predicate subscribe conflates without `collapse_inserts`.
+
+Do not point a 10 Hz last-price grid at an insert-only table plus default `conflate` and expect throttling.
 
 ---
 

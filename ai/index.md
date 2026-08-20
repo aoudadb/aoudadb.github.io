@@ -17,6 +17,8 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 
 ## Start Here
 
+If your question is "How should an AI agent **build an application** on Aouda?", the answer is one page: **[How to build apps effortlessly with Aouda](../guides/build-apps.md)**, and specifically its [Rules for AI agents](../guides/build-apps.md#rules-for-ai-agents) section — reading order, hard do/never rules, the per-screen decision procedure, the structured error contract, and a self-verification checklist. Point your agent at that URL before it writes any code.
+
 If your question is "How should an AI agent use Aouda today?", start with:
 - `2.3 Defaults and zero-config behavior`
 - `2.11 API and CLI coverage reference`

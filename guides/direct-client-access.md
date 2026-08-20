@@ -25,7 +25,7 @@ Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#
 | I want to… | Go to |
 |---|---|
 | Turn on the data-plane listener | [Configure dual-listen](#configure-dual-listen) |
-| Give a SPA a data credential | [`mk_pub_*`](#mk_pub_-vs-mk_anon_-) |
+| Give a SPA a data credential | [`mk_pub_*`](#mk_pub_-vs-mk_anon_) |
 | Opt a table into browser reads | [`dataPlaneAccess`](#table-opt-in-fail-closed) |
 | Connect Studio or Hub | [Studio and Hub](#studio-and-hub) |
 | Put TLS/WAF in front | [Topology](#topology-a-thin-edge) |
@@ -221,6 +221,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 
 ## Related
 
+- [How to build apps effortlessly with Aouda](build-apps.md) — the full build path this listener model serves
 - [Named queries](named-queries.md)
 - [Division of responsibility](division-of-responsibility.md)
 - [Adopting Aouda](adoption.md) — migrating an existing app onto this model

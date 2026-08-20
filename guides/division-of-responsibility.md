@@ -208,6 +208,7 @@ The ingest-service deletion (checks + `route`) is the other copy-paste: [Insert-
 
 ## Related
 
+- [How to build apps effortlessly with Aouda](build-apps.md) — this test applied across a whole application
 - [Named queries](named-queries.md)
 - [Insert-time transforms](insert-transforms.md)
 - [Adopting Aouda](adoption.md) — applying this to an existing app: target architecture and migration order

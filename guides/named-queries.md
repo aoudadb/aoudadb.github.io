@@ -376,7 +376,7 @@ const sub = client.namedQueries.subscribe(
   equityQuotes.hash,
   { tickers: ["AAPL", "MSFT"] },
   {
-    conflate: { key: ["ticker"], intervalMs: 100 },
+    conflate: { key: ["ticker"], interval_ms: 100 },
     onSnapshot: (rows, version) => grid.reset(rows, version),
     onChange: (event) => grid.apply(event),
     onError: (error) => console.error(error),
@@ -471,6 +471,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 
 ## Related
 
+- [How to build apps effortlessly with Aouda](build-apps.md) — where named queries fit in the whole build path
 - [Direct client access](direct-client-access.md) — listeners, `mk_pub_*`, quotas
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service

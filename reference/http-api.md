@@ -538,6 +538,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
+| `CONFLATE_NOOP` | `snapshot_complete` warning | `conflate` is set without `collapse_inserts` and the key is not the table PK (insert-only no-op). Subscribe still registers. |
 
 #### Protocol Errors
 
@@ -2637,8 +2638,9 @@ Until `snapshot_complete` arrives, the client **must not** treat accumulated sna
 |---|---|---|---|
 | `key` | string[]? | Conditional | Columns that form the conflation key. Default: table primary key. Required when the table has no PK. |
 | `interval_ms` | number | Yes | Flush interval in milliseconds. Valid range 1…60_000. |
+| `collapse_inserts` | bool | No | When true, matching in-scope inserts are held latest-wins per key. Default `false` (omitted on the wire). Delivered `op` stays `"insert"`. |
 
-Conflation applies only to **value `update` events** where the row was visible both before and after. `insert`, `delete`, enter-scope, and leave-scope **flush** any pending update for that key and are delivered immediately. Therefore on an **insert-only** (append-only) stream `conflate` reduces the event rate by zero and `values_skipped` never appears. Conflated `change` messages set `values_skipped` (count of dropped intermediate updates). That marker is **intentional loss** and is not a `gap`. Last-price: a `latestPerKey` MQ, not an insert-only tick table plus `conflate`. See [browser-tier read limits](../guides/browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
+Default `conflate` holds only **value `update` events** where the row was visible both before and after. `insert`, `delete`, enter-scope, and leave-scope **flush** any pending update for that key and are delivered immediately. Therefore on an **insert-only** (append-only) stream default `conflate` reduces the event rate by zero and `values_skipped` never appears. That subscribe still registers; `snapshot_complete` includes a `CONFLATE_NOOP` warning when the conflate key is not the table PK. Set `collapse_inserts: true` to collapse matching inserts. A `latestPerKey` MQ result table (PK = group key) conflates via `prev` on `update` without the flag. Conflated `change` messages set `values_skipped` (count of dropped intermediate value events, including collapsed inserts). That marker is **intentional loss** and is not a `gap`. See [browser-tier read limits](../guides/browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
 **Ad-hoc example (admin listener):**
 ```json
@@ -2922,7 +2924,7 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 | `version` | number | Same pinned version as every preceding `snapshot` page |
 | `row_count` | number | Total rows delivered across all snapshot pages |
 | `total_matches` | number? | Present when the named query declared `count: true` — total matching rows, ignoring limit/offset |
-| `warnings` | object[]? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe) |
+| `warnings` | object[]? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe; `CONFLATE_NOOP` when default `conflate` cannot collapse inserts) |
 
 ```json
 {

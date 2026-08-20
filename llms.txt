@@ -38,6 +38,7 @@
 
 ## Core Guides
 
+- [How to build apps effortlessly with Aouda](https://aoudadb.github.io/guides/build-apps/): **Start here for any application.** The canonical build path — the tiers you do not build, 10-minute app, twelve-step sequence, capability map, alternatives per constraint, agent rules and error contract
 - [Adopting Aouda in an existing app](https://aoudadb.github.io/guides/adoption/): Target architecture, which hops to delete, SDK coverage gaps, migration order
 - [Named queries and mutations](https://aoudadb.github.io/guides/named-queries/): Hash-pinned BFF contracts, batch envelope, codegen, subscribe-by-hash
 - [What a browser-tier read cannot do](https://aoudadb.github.io/guides/browser-tier-read-limits/): Operators, data-plane allowlist, partition-filter rule, conflation caveat

@@ -6,10 +6,12 @@ parent: "Guides"
 
 # Adopting Aouda in an existing application
 
-Document status: Complete (P37)
-Last updated: 2026-08-19
+Document status: Complete (P37, BL-183)  
+Last updated: 2026-08-20
 
 This is the page to read when you already have an application — a frontend, a gateway, some domain services — and you want to know **what the architecture should look like now** and **what you should delete**.
+
+It is the **existing-application branch** of [How to build apps effortlessly with Aouda](build-apps.md), which is the canonical build path. The destination is identical; you arrive at it by deleting rather than by not building. If you have not read that page, start there — then come back here for the parts that only apply when there is already something in production.
 
 [Division of responsibility](division-of-responsibility.md) gives you the principle. [Direct client access](direct-client-access.md) and [Named queries](named-queries.md) give you the mechanisms. This page gives you the **target architecture, the order of operations, and the capacity consequences** — including the places where the engine is ahead of the SDKs and you have to plan around it.
 
@@ -142,7 +144,7 @@ const sub = client.namedQueries.subscribe(
   equityQuotes.hash,
   { tickers: ["AAPL", "MSFT"] },
   {
-    conflate: { key: ["ticker"], intervalMs: 100 },
+    conflate: { key: ["ticker"], interval_ms: 100 },
     onSnapshot: (rows, version) => grid.reset(rows, version),
     onChange: (event) => grid.apply(event),
   }
@@ -254,6 +256,7 @@ Hand this to whoever (or whatever) is writing the plan.
 
 ## Related
 
+- [How to build apps effortlessly with Aouda](build-apps.md) — the canonical build path this page branches from, plus the capability map and the agent contract
 - [Division of responsibility](division-of-responsibility.md) — the decision test
 - [Direct client access](direct-client-access.md) — listeners, keys, quotas, topology
 - [Named queries and mutations](named-queries.md) — authoring, execute, batch, subscribe
