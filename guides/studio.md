@@ -7,8 +7,8 @@ parent: "Guides"
 # Aouda Studio — Web Management Console
 
 _Domain: Studio UI features, data explorer, cluster management, admin operations_
-_Status: MVP Complete + Distribution (2026-06-23)_
-_Primary Phases: P5, P6, P9, P12, P16, P34_
+_Status: Operator parity with server 0.1.8 (P39, Studio 0.0.18 — 2026-08-20)_
+_Primary Phases: P5, P6, P9, P12, P16, P34, P36, P37 (thin), P39_
 _Repo: `aouda-studio` (Next.js / React)_
 
 ---
@@ -17,12 +17,15 @@ _Repo: `aouda-studio` (Next.js / React)_
 
 Aouda Studio is the web management console for Aouda. It provides:
 
-- **Data Explorer** — browse, query, filter, edit, and navigate data
-- **Schema Management** — view/edit tables, columns, ERD diagrams
+- **Data Explorer** — browse, query, filter, edit, and navigate data (admin listener)
+- **Schema Management** — view/edit tables, columns, ERD diagrams, insert-time compute, `dataPlaneAccess`
+- **Named Artifacts** — catalog, hash-pinned test execute/subscribe, structured authoring via schema apply
 - **Cluster Management** — node operations, topology, backup, configuration
-- **Admin Console** — monitoring, logs, alerts, settings
+- **Admin Console** — monitoring, policy inspect, streaming (table + hash), bulk-load job monitor
 - **Hub Integration** — team server management, authentication, multi-server switching
 - **AI Integration** — natural language cluster operations
+
+**Listener.** Studio always connects to the **admin** listener (`GET /api/databases` is the probe). Pointing it at the data-plane listener yields 404, not “no auth”. Studio is an operator client: it does **not** put `mk_pub_*` on the Data Explorer connection. Copy that key from Settings → Auth for browser apps that talk to the data-plane. See [Direct client access](direct-client-access.md).
 
 ---
 
@@ -38,6 +41,12 @@ Aouda Studio is the web management console for Aouda. It provides:
 | View backups and restore | §7 Backup Management |
 | Manage table schemas and columns | §5.5 Schema Management |
 | Toggle auto-increment on a column | §5.5 Toggle AutoId |
+| Author unique / derived / checks / `call` / route / tee | §5.5 Insert-time compute |
+| Catalog and test named queries / mutations | §5.6 Named Artifacts |
+| Opt a table into the data plane (`dataPlaneAccess`) | §5.5 Auth Options |
+| Ask “what would identity X see?” | §13 Policy Inspect |
+| Subscribe by named-query hash | §13 Streaming Explorer |
+| Seed an explicit auto-increment ID on Add Row | §5.5 Identity-insert |
 | Manage branches | §5 Branches |
 | Connect Studio to servers | §9 Hub Integration |
 | Deploy Studio (self-hosted / Docker) | §11 Deployment |
@@ -84,7 +93,7 @@ running WHERE-based updates, deletes, and truncations from the browser:
 |------|-------------|
 | 1. Operation | Choose UPDATE, DELETE, or TRUNCATE |
 | 2. WHERE builder | Build a predicate using the visual filter builder (same as the read query builder) |
-| 3. SET editor (UPDATE) | Per-column literal or expression (`$inc`, `$mul`, `$dec`, `$div`, `$col`, `$ifNull`) |
+| 3. SET editor (UPDATE) | Per-column literal or expression (`$inc`, `$mul`, `$dec`, `$div`, `$col`, `$ifNull`, `$upper`, `$lower`, `$trim`, `$concat`, `$substring`, `$round`, `$roundTo`, `$cast`) |
 | 4. LIMIT (DELETE) | Optional — enables bounded rolling deletes with `hasMore` |
 | 5. RETURNING | Multi-select column checklist for the response payload |
 | 6. Preview | Runs `COUNT(*) WHERE …` and shows how many rows will be affected |
@@ -174,9 +183,10 @@ Studio's schema management surface lets you inspect and evolve table schemas ent
 
 Navigate to a table, then open the **Schema** tab. The schema view has three panels:
 
-1. **Columns table** — all columns with type, nullability, key role, reference, and auto-increment status.
+1. **Columns table** — all columns with type, nullability, key role, reference, auto-increment, unique, and derived.
 2. **Storage Policy** — per-table temperature policy (`Auto`, `HotOnly`, `ColdPreferred`).
-3. **Auth Options** — authorization mode, partition-level security flag.
+3. **Auth Options** — authorization mode, partition-level security, **`dataPlaneAccess`** (default off).
+4. **Checks / route / tee** — write-time predicates and insert routing (see below).
 
 ### The Columns Table
 
@@ -190,6 +200,8 @@ Each row in the columns table shows:
 | **Key** | `PK (1)` for primary key with ordinal, `Partition`, `Cluster`, or `—` |
 | **Reference** | Foreign key target in `→ table.column` format, or `—` |
 | **Auto-increment** | `Yes` badge when `isAutoIncrement = true`, otherwise `—` |
+| **Unique** | Toggle for non-PK, non-auto-increment columns (`unique: true` in `aouda.schema.json`) |
+| **Derived** | Write-time expression; callers must not send a value (`TRANSFORM_DERIVED_READONLY`) |
 | **Actions** | Per-row menu (see below) — shown only when the schema view is editable |
 
 ### Column Actions Menu
@@ -238,7 +250,9 @@ If the apply fails (e.g. the server rejects a non-integer column, or the server 
 
 Only columns whose type is one of: `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Byte`. The "Toggle AutoId" menu item does not appear for `String`, `Double`, `Timestamp`, `Decimal`, `Guid`, or any other non-integer type. The server enforces the same constraint as an additional guard.
 
-**Identity-insert is API/SDK-only:** Studio does not expose a per-insert or bulk-load `identityInsert` control. To seed reserved IDs while keeping `autoIncrement` enabled, use the HTTP API, C# / Embedded clients, or `@aouda/client` (see [Getting Started — Seeding explicit IDs](../getting-started/index.md) and [Bulk Load Scenario 4](../guides/bulk-load.md)). Toggle AutoId remains the UI for permanently switching Auto ↔ Manual.
+**Identity-insert on Add Row:** When the table has at least one auto-increment column, Add Row shows an **identity-insert** checkbox. Unchecked (default) omits the flag; auto-increment columns stay off the form and the client sends the `0` sentinel. Checked: auto-increment columns appear as required numbers; form `"0"` is stored as numeric `0`; the insert is `insert(payload, { identityInsert: true })`. This does **not** flip Toggle AutoId. Derived columns stay omitted. See [Getting Started — Seeding explicit IDs](../getting-started/index.md).
+
+Toggle AutoId remains the UI for permanently switching Auto ↔ Manual on the column.
 
 ### Adding a Column
 
@@ -292,6 +306,47 @@ When you apply a schema change from the **Migrations** tab (Settings → Schema 
 | Muted grey | Other safe change (e.g. `Update policy`, `Update durability`) |
 
 When the diff includes `UpdateColumnAutoIncrement` changes, the summary line shows `N column(s) altered` alongside the total change count.
+
+Named-query / named-mutation / materialized-query changes render as human labels (create / replace / drop). **BL-174:** if the pasted desired JSON **has** a `materializedQueries` key — including `{}` — that map is desired state and **live MQs not listed will be dropped** (empty `{}` drops all; apply requires Allow Destructive). If the key is **omitted** or `null`, live MQs are left unmanaged and Studio does **not** warn-as-drop. The apply wizard always requests access-surface (`?access=true`) and can attach the same identities file as branch review. See [Schema CI/CD](schema-cicd.md) and [Access-surface diff](access-surface.md).
+
+### Auth Options — `dataPlaneAccess`
+
+On the Schema **Auth** card:
+
+- **`dataPlaneAccess`** defaults **off** (fail-closed). When on, browser-tier `mk_pub_*` credentials on the **data-plane listener** may touch this table through named queries/mutations.
+- Studio itself stays on the admin listener and never holds `mk_pub_*` in Data Explorer.
+- User-scoped tables should have RLS or PLS before opt-in. Enabling data-plane access on a user table with no ADRA is a product foot-gun — the UI warns.
+- `auth-db-rls` cannot be combined with `permissionDimension` (schema error). The Auth card does not offer that combo.
+- After regenerate-keys, copy **`mk_pub_*`** (`publicKey`) for data-plane apps only. Anon and service-role keys remain.
+
+Details: [Direct client access](direct-client-access.md).
+
+### Insert-time compute — unique, derived, checks, `call`, route / tee
+
+Persisted through schema **export → patch → apply** (same pipeline as other schema edits). HTTP GET table does not always echo these fields; Studio reads them from `schema.export()`. Contract: [Insert-time transforms](insert-transforms.md).
+
+| Control | Where | Notes |
+|---------|--------|------|
+| **Unique** | Columns table | Not on PK / auto-increment. Duplicates rejected across HRA, hot, and cold. |
+| **Derived** | Columns table → Derived… | `ScalarExprNode` at write time. Add Row leaves the field read-only. Closed `call` allowlist: `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. |
+| **Checks** | Table checks card | Named predicates; first failing row fails the **whole batch**. |
+| **`call` on SET** | Bulk Mutation SET editor + computed columns | Same allowlist. Unknown `fn` cannot be chosen. |
+| **route / tee** | Schema transform card | One kind per table. Mix of route+tee or a cycle fails apply (`SCHEMA_TRANSFORM_CYCLE`). Unmatched route is `TRANSFORM_ROUTE_UNMATCHED` (error, not a silent fallback). Tee copies to matching targets while ingress still stores. |
+
+### 5.6) Named Artifacts
+
+Sidebar: **SCHEMA → Named Artifacts**. Hidden with SCHEMA for Data Owner (correct).
+
+Named queries and named mutations live in `aouda.schema.json`. Identity is the **64-hex content hash**. Aliases are metadata. There is **no** runtime `POST …/register` and **no** execute-by-name.
+
+| Action | What Studio does |
+|--------|------------------|
+| Catalog | Parses `schema.export()` — alias, hash, deprecated, table, projection, cost `1+joinCount` |
+| Test | Hash-only `namedQueries.execute` / `batch` (cap 32) / `namedMutations.execute`. Deprecation is a warning, not a failure. Mutations always run as **invoker** (no definer / `runAs`). |
+| Author | Structured wizard (table, projection, AND where, joins ≤ 3, required limit cap). Identifier positions are dropdowns — parameters cannot name tables, columns, or operators. Persist via export → patch map → diff → apply. |
+| Generate Types | Highlights `export const namedQueries` hashes; the same hash is used for execute **and** subscribe |
+
+SQL-ish authoring (ADR 0040 D-24) is not in Studio. Full contract: [Named queries](named-queries.md).
 
 ---
 
@@ -753,6 +808,31 @@ View, create, and revoke server admin API keys from Studio settings/auth page.
 - Query materialized query results directly
 - Drop materialized queries
 
+This page talks to the **runtime** MQ HTTP API. Schema-file desired state is a different axis: a **present** `materializedQueries` map on apply (including `{}`) drops live MQs that are not listed. See §5.5 Schema Diff View and [Schema CI/CD](schema-cicd.md).
+
+### Policy Inspect
+
+Sidebar: **ADMIN → Policy Inspect** (sensitive-admin). Upload the same identities JSON used in branch review (`aouda.identities.json`). Pick tables, run inspect. The grid shows visibility (full / filtered / none), predicate hash, and an optional bounded sample.
+
+HTTP 400 (`AUTH_IDENTITY_INVALID`, `AUTH_IDENTITY_NOT_FOUND`) **fails closed** — Studio shows the code and message. It does **not** treat an error as “full access”. Studio calls `client.policy.inspect` on the **admin** listener. See [Access-surface diff](access-surface.md#policy-inspect).
+
+### Streaming Explorer
+
+Sidebar: **ADMIN → Streaming**. Two modes:
+
+| Mode | What you send | When to use |
+|------|----------------|-------------|
+| **Table** | Table name + optional filter (`WhereClause` JSON) | Operator ad-hoc on the admin listener (unchanged) |
+| **Named query** | 64-hex content hash + args JSON + optional conflate | The data-plane subscribe path — same hash as execute |
+
+Hash mode calls `namedQueries.subscribe(hash, args, { conflate })`. It never sends a table name or filter. Optional `sha256:` prefix is stripped. Conflate uses wire field `interval_ms`. The append-only log surfaces `gap`, `values_skipped`, and deprecation on `snapshot_complete` (warning, not a failed subscribe). Gap frames are auto-resumed by the client on a live socket. See [Named queries — Subscribe by hash](named-queries.md#subscribe-by-hash).
+
+### Bulk Load (monitor)
+
+Sidebar: **ADMIN → Bulk Load**. This page **lists and can force-abort jobs**. It does **not** upload files or call `:begin`.
+
+Tables with derived columns, checks, or transforms reject `:begin` unless the client that starts the job sets **exactly one** of `applyTransforms` (server applies compute) or `preTransformed` (rows already match the target shape). Both flags → `BULK_LOAD_TRANSFORM_INTENT_CONFLICT`; neither → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. Failed jobs show the code plus that explanation. Set the flag in the SDK or CLI that calls `:begin`. See [Insert-time transforms — Bulk load](insert-transforms.md).
+
 ---
 
 ## 14) Technology Stack
@@ -785,4 +865,7 @@ View, create, and revoke server admin API keys from Studio settings/auth page.
 | P16 Epic D | Log viewer, query worksheet, role-based UI, API key auth, settings, alerts, slow query, PITR, join UI, aggregate UI, branches UI, advanced filters, materialized queries, admin keys | `aouda-studio/docs/tasks/P16-SD1-*` through `P16-SD5-*` |
 | P16 Epic F | Studio cloud integration (projects, clusters) | `aouda-studio/docs/tasks/P16-SF3-*` |
 | P16 Epic G | Natural language cluster operations | `aouda-studio/docs/tasks/P16-SG2-*` |
-|| P34 | Hosted Studio at `studio.aouda.com` (Vercel), Connect-to-Server dialog, localStorage persistence, first-run detection, CORS for `studio.aouda.com`, `/_studio/config` endpoint, `Aouda.Setup` cross-platform installer | `aouda/docs/tasks/P34/StudioDist-*` |
+| P34 | Hosted Studio at `studio.aouda.com` (Vercel), Connect-to-Server dialog, localStorage persistence, first-run detection, CORS for `studio.aouda.com`, `/_studio/config` endpoint, `Aouda.Setup` cross-platform installer | `aouda/docs/tasks/P34/StudioDist-*` |
+| P36 | Column evolution UI (alter type/null/encoder/references, PK, reorder, Toggle AutoId via `alterColumn`) | `aouda-studio/docs/tasks/P36-*` |
+| P37 | Access-surface on branch review; data-plane 404 connect copy | `aouda-studio` P37 slices |
+| P39 | Operator parity: named artifacts, insert-time compute, route/tee, `dataPlaneAccess` / `mk_pub_*` / policy inspect, hash subscribe, schema-file MQ maps, identity-insert, bulk-load intent copy | `aouda-studio/docs/tasks/P39/` |

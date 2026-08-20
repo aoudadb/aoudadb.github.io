@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Studio 0.0.18 (P39).** Operator console catches up to server 0.1.8: named-artifact catalog/test/authoring, insert-time unique/derived/checks/`call`/route/tee, `dataPlaneAccess` + `mk_pub_*` + policy inspect, hash subscribe, schema-file MQ maps (BL-174), identity-insert, bulk-load transform-intent copy. Pin `@aouda/client` **0.1.13**. [Studio](guides/studio.md), [Compatibility](clients/compatibility.md).
+
 ## 0.1.8 — 2026-08-19
 
 **Three adoption gaps closed.** Server **0.1.8**, `@aouda/client` **0.1.12**, `Aouda.Client` **0.1.8**, Studio **0.0.17** (pin unchanged). See [Compatibility](clients/compatibility.md).
