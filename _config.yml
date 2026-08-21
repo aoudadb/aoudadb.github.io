@@ -63,3 +63,4 @@ exclude:
   - "*.gem"
   - "*.gemspec"
   - node_modules
+  - examples/p40-browser-tier

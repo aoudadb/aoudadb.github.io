@@ -1,0 +1,179 @@
+{
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "finance",
+  "tables": {
+    "quotes": {
+      "columns": {
+        "id":     { "type": "Int64",     "primaryKey": 1 },
+        "ticker": { "type": "String" },
+        "source": { "type": "String" },
+        "time":   { "type": "Timestamp" },
+        "bid":    { "type": "Decimal", "nullable": true },
+        "ask":    { "type": "Decimal", "nullable": true }
+      },
+      "partitionKey":  [{ "column": "ticker" }, { "column": "source" }],
+      "clusterColumns": ["time"],
+      "dataPlaneAccess": true
+    },
+    "trades": {
+      "columns": {
+        "id":     { "type": "Int64",   "primaryKey": 1 },
+        "ticker": { "type": "String" },
+        "source": { "type": "String" },
+        "time":   { "type": "Timestamp" },
+        "price":  { "type": "Double" },
+        "size":   { "type": "Int64" }
+      },
+      "partitionKey":  [{ "column": "ticker" }, { "column": "source" }],
+      "clusterColumns": ["time"],
+      "dataPlaneAccess": true
+    },
+    "listings": {
+      "columns": {
+        "ticker":   { "type": "String", "primaryKey": 1 },
+        "currency": { "type": "String" },
+        "sector":   { "type": "String" },
+        "country":  { "type": "String" },
+        "mcap":     { "type": "Int64" }
+      },
+      "dataPlaneAccess": true
+    }
+  },
+  "materializedQueries": {
+    "latest_quote": {
+      "type":        "latestPerKey",
+      "sourceTable": "quotes",
+      "groupBy":     ["ticker", "source"],
+      "orderBy":     "time",
+      "descending":  true,
+      "select":      ["ticker", "source", "bid", "ask", "time"],
+      "updateMode":  "sync",
+      "dataPlaneAccess": true
+    },
+    "candles_bid_1h": {
+      "type":        "aggregate",
+      "sourceTable": "quotes",
+      "groupBy": [
+        { "column": "ticker" },
+        { "column": "time", "function": "TruncateToHour", "outputName": "time" }
+      ],
+      "aggregates": [
+        { "function": "max",   "outputName": "high",  "sourceColumn": "bid" },
+        { "function": "min",   "outputName": "low",   "sourceColumn": "bid" },
+        { "function": "first", "outputName": "open",  "sourceColumn": "bid", "orderByColumn": "time" },
+        { "function": "last",  "outputName": "close", "sourceColumn": "bid", "orderByColumn": "time" }
+      ],
+      "updateMode": "sync",
+      "dataPlaneAccess": true
+    },
+    "bars_with_change": {
+      "type":        "aggregate",
+      "sourceTable": "trades",
+      "groupBy":     [{ "column": "ticker" }],
+      "aggregates": [
+        { "function": "first", "outputName": "open",  "sourceColumn": "price", "orderByColumn": "time" },
+        { "function": "last",  "outputName": "close", "sourceColumn": "price", "orderByColumn": "time" }
+      ],
+      "computed": [
+        {
+          "outputName": "changePct",
+          "type": "Double",
+          "expr": {
+            "type": "arithmetic", "op": "/",
+            "left":  { "type": "arithmetic", "op": "-",
+                       "left":  { "type": "colRef", "col": "close" },
+                       "right": { "type": "colRef", "col": "open" } },
+            "right": { "type": "colRef", "col": "open" }
+          }
+        }
+      ],
+      "updateMode": "sync",
+      "dataPlaneAccess": true
+    }
+  },
+  "namedQueries": {
+    "quotes.watchlist": {
+      "table":  "quotes",
+      "select": ["ticker", "source", "time", "bid", "ask"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "in",  "param": "tickers" },
+          { "column": "source", "op": "eq",  "param": "source"  }
+        ]
+      },
+      "orderBy": [{ "column": "time", "descending": true }],
+      "limit": 100,
+      "count": true,
+      "params": {
+        "tickers": { "required": true, "maxItems": 64 },
+        "source":  { "required": true, "maxLength": 32 }
+      }
+    },
+    "quotes.lastPrice": {
+      "table":  "latest_quote",
+      "select": ["ticker", "source", "bid", "ask", "time"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "in", "param": "tickers" },
+          { "column": "source", "op": "eq", "param": "source"  }
+        ]
+      },
+      "limit": 32,
+      "params": {
+        "tickers": { "required": true, "maxItems": 64 },
+        "source":  { "required": true, "maxLength": 32 }
+      }
+    },
+    "candles.byTicker": {
+      "table":  "candles_bid_1h",
+      "select": ["ticker", "time", "open", "high", "low", "close"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "eq", "param": "ticker" }
+        ]
+      },
+      "orderBy": [{ "column": "time", "descending": false }],
+      "limit": 500,
+      "params": {
+        "ticker": { "required": true, "maxLength": 16 }
+      }
+    },
+    "listings.screener": {
+      "table":  "listings",
+      "select": ["ticker", "currency", "sector", "country", "mcap"],
+      "where": {
+        "and": [
+          { "column": "currency", "op": "in",  "param": "currency",  "whenParamPresent": true },
+          { "column": "sector",   "op": "eq",  "param": "sector",    "whenParamPresent": true },
+          { "column": "mcap",     "op": "gte", "param": "minMcap",   "whenParamPresent": true },
+          { "column": "country",  "op": "eq",  "param": "country",   "whenParamPresent": true }
+        ]
+      },
+      "orderBy": [{ "column": "ticker", "descending": false }],
+      "limit": 25,
+      "limitParam":  "pageSize",
+      "offset": 1000,
+      "offsetParam": "pageOffset",
+      "count": true,
+      "params": {
+        "currency":    { "required": false },
+        "sector":      { "required": false, "maxLength": 64 },
+        "minMcap":     { "required": false },
+        "country":     { "required": false, "maxLength": 8 },
+        "pageSize":    { "required": false, "min": 1, "max": 25 },
+        "pageOffset":  { "required": false, "min": 0, "max": 1000 }
+      }
+    },
+    "gainers.top": {
+      "table":  "bars_with_change",
+      "select": ["ticker", "open", "close", "changePct"],
+      "orderBy": [{ "column": "changePct", "descending": true }],
+      "orderByChoices": [
+        [{ "column": "changePct", "descending": true  }],
+        [{ "column": "ticker",    "descending": false }]
+      ],
+      "limit": 20,
+      "params": {}
+    }
+  }
+}

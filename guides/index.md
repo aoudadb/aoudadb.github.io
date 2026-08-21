@@ -190,7 +190,7 @@ This section tracks the per-domain documents and maturity level.
 | Cloud, Hub, and deployment | `docs/dev/Functionality-Cloud-And-Hub.md` | **New** — P16 (Hub backend, cloud control plane, K8s operator, Docker) |
 | Studio management console | `docs/dev/Functionality-Studio.md` | **New** — P5/P6/P9/P12/P16 (data explorer, cluster ops, Hub integration) |
 | TypeScript client SDK | `docs/dev/Functionality-TypeScript-Client.md` | **New** — P5/P10/P12/P15/P16 (query builder, joins, aggregates, admin APIs, MCP tools) |
-| Market data / stock quotes (use case) | `guides/market-data.md` | **New** — MarketData-Gaps S5 (schema, OHLC MQs, PLS, cross-partition patterns) |
+| Market data / stock quotes (use case) | `guides/market-data.md` | **Rewritten P40 S09** — browser-tier first; `whenParamPresent`, `orderByChoices`, computed MQ ranking, `collapse_inserts`. Fixture: `examples/p40-browser-tier/` |
 | **Building applications on Aouda** (flagship entry point) | `guides/build-apps.md` | **Published** — BL-183; canonical build path, capability map, agent contract. Adoption is its existing-app branch |
 
 ---

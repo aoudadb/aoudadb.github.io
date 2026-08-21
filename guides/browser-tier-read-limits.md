@@ -6,8 +6,8 @@ parent: "Guides"
 
 # What a browser-tier read cannot do
 
-Document status: Complete (P40 S03)  
-Last updated: 2026-08-20
+Document status: Complete (P40 S09)  
+Last updated: 2026-08-21
 
 A **browser-tier** caller is `mk_pub_*` or an end-user JWT on the **data-plane listener**. It cannot compose an ad-hoc `QueryMessage`. It sends a named-query **hash** plus arguments. This page is the list that page should have been: what that surface refuses, why, and what to do instead.
 
@@ -136,7 +136,7 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 **Why.** The hash is reviewable and the cost is boundable only if identifiers are static.
 
-**Instead:** one definition per shape (new hash). Bounded sort choice (pick by index over a declared list) is S06 and is **not** shipped yet.
+**Instead:** one definition per shape (new hash). For bounded sort choice, declare `orderByChoices` in the definition and pass `orderByIndex` in the execute/subscribe request — that **is** shipped (`D-35`).
 
 ---
 
@@ -150,13 +150,26 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ---
 
-## Optional predicates are not conditional yet
+## Optional predicates (`whenParamPresent`)
 
-**Rule.** An omitted optional param becomes `Value = null`. For `eq`/`ne` that is `IS NULL`. For `gt`/`lt`/`in` it **throws**. There is no "match all" sentinel and no `whenParamPresent` (S06).
+**Rule.** A predicate marked `"whenParamPresent": true` is **skipped entirely** when the caller omits that argument. An **unmarked** optional param omission becomes `Value = null` — for `eq`/`ne` that is `IS NULL`; for range/`in` operators it **throws** `NAMED_QUERY_PARAM_REQUIRED`.
 
-**Why.** Existing definitions that use optional params mean IS NULL today. Changing that without a marker would change hashes' meaning.
+**What ships (`D-34`):** `"whenParamPresent": true` on any `and`-clause condition. Multiple conditions in the same `and` can independently carry the marker; omitting any subset is legal. `or`-clause conditions cannot carry the marker (fails apply). A marked condition never counts as partition-key coverage for `count: true` — the table must either be unpartitioned or all required partition predicates must be separately covered by non-marked conditions.
 
-**Instead:** send the full `in` list on every request, or ship one definition per facet combination.
+**Example — four optional facets, one definition:**
+
+```json
+"where": {
+  "and": [
+    { "column": "currency", "op": "in",  "param": "currency", "whenParamPresent": true },
+    { "column": "sector",   "op": "eq",  "param": "sector",   "whenParamPresent": true }
+  ]
+}
+```
+
+Calling with `{}` omits both predicates and returns all rows. Calling with `{ "sector": "Tech" }` applies only the sector filter.
+
+**Instead (legacy):** send the full `in` list on every request, or ship one definition per facet combination — still valid, just more hashes.
 
 ---
 
@@ -229,7 +242,7 @@ Do not point a 10 Hz last-price grid at an insert-only table plus default `confl
 
 ## What you can do
 
-These are true on the current train (P40 S01 / S02 / S05). They were missing from docs, not from the engine.
+These are true on the current train (P40 S01–S09). They were missing from docs, not from the engine.
 
 | Capability | How |
 |---|---|
@@ -240,6 +253,10 @@ These are true on the current train (P40 S01 / S02 / S05). They were missing fro
 | Distinct source list, sub-millisecond | `distinct: true` over partition-key columns meeting the directory-answerable conditions. When it hits, `stats.distinctServedFromPartitionMetadata` is `true` (omitted when false) |
 | Paging | `limit` (required cap) + `limitParam` / `offsetParam` (param names; still need a numeric cap). Non-zero offset **disqualifies subscribe** |
 | "1–25 of 412" | `"count": true` on the definition → `totalMatches` on HTTP (omitted when false) and `total_matches` on `snapshot_complete`. Unbounded count fails apply (`NAMED_QUERY_COUNT_UNBOUNDED`). Ad-hoc `/query/count` stays 404 on the data plane |
+| Optional facets in one definition | `"whenParamPresent": true` on `and`-clause conditions (`D-34`). Omitted arg skips the predicate; unmarked omission throws. `or` conditions cannot carry the marker. |
+| Bounded sort choice | Declare `orderByChoices` in the definition; pass `orderByIndex` (0-based) in execute or subscribe (`D-35`). Expression `orderBy` on arbitrary columns is still not offered (BL-183). |
+| Insert-only stream conflation | `"conflate": { "collapse_inserts": true }` on the subscribe message (`D-32`). Without this flag, default conflate is a no-op on insert-only ticks. |
+| Server-side ranking | `computed` on an `aggregate` MQ — physically stored, orderable as a first-class column (`D-36`). The `derived` alternative works on base tables. |
 
 ---
 

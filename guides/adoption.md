@@ -140,6 +140,7 @@ Two caveats that still shape a plan:
 `subscribe` on the data-plane **requires** a `hash`; sending `target` + `filter` returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Both SDKs expose this directly, returning the same subscription object as table subscribe — so snapshot paging, `gap` → `resume_from`, reconnect, `re_auth`, and `SLOW_CONSUMER` recovery are the transport paths you already have, and every resend carries the same `hash` + `args`.
 
 ```typescript
+// Watchlist — table emits value updates (upsert), conflate works:
 const sub = client.namedQueries.subscribe(
   equityQuotes.hash,
   { tickers: ["AAPL", "MSFT"] },
@@ -149,9 +150,20 @@ const sub = client.namedQueries.subscribe(
     onChange: (event) => grid.apply(event),
   }
 );
+
+// Insert-only tick table — add collapse_inserts to throttle, or use a latestPerKey MQ:
+const lastPrice = client.namedQueries.subscribe(
+  lastPriceHash,
+  { tickers: ["AAPL"], source: "nasdaq" },
+  {
+    conflate: { collapse_inserts: true },
+    onSnapshot: (rows) => grid.reset(rows),
+    onChange: (event) => grid.apply(event),
+  }
+);
 ```
 
-Do not hand-roll the frames. Full API, including the deprecation-warning path and which definitions are refused live, is in [Named queries — subscribe by hash](named-queries.md#subscribe-by-hash). `conflate` in this example throttles **value updates**; it does not collapse inserts.
+Do not hand-roll the frames. Full API, including the deprecation-warning path and which definitions are refused live, is in [Named queries — subscribe by hash](named-queries.md#subscribe-by-hash). `conflate` without `collapse_inserts` throttles only **value updates** — a no-op on insert-only streams. Use `collapse_inserts: true` or a `latestPerKey` named-query subscribe for last-price.
 
 ---
 
@@ -194,7 +206,7 @@ Do these in order. Each step is independently shippable and independently revert
 1. **Upgrade and verify the build.** Server `0.1.8`+, `@aouda/client` `0.1.12`+, `Aouda.Client` `0.1.8`+ ([compatibility](../clients/compatibility.md)). Check the four deliberate breaks on the trusted surface: `auth-db-rls` + `permissionDimension` is now a schema error, a zero-rule resolver cannot be persisted, grant sets above the caps are rejected at creation, and bulk load into a compute-bearing table requires an explicit intent flag.
 2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Materialized queries can now be declared here too, but **export before you hand-edit**: a present `materializedQueries` map is desired state and drops anything not listed. Everything after this step depends on it.
 3. **Turn on the data-plane listener** behind your existing edge, on its own hostname. Prove the isolation before you use it: `POST …/query` and `GET /api/databases` must return **404** on the data-plane and work on admin.
-4. **Opt tables in, one at a time.** `dataPlaneAccess` defaults to false. Every table a browser-tier caller touches — including join tables — needs it. **If the table is user-scoped, ship ADRA in the same change** (`authMode`, `rlsResolverName`, `permissionDimension`). A `dataPlaneAccess: true` table with no RLS is readable, through your declared named queries, by every signed-in user. That is right for reference and market data and wrong for anything owned by a user.
+4. **Opt tables and MQ result tables in, one at a time.** `dataPlaneAccess` defaults to false on both tables **and** materialized-query entries. Every table a browser-tier caller touches — including join tables and MQ result tables — needs it. Set `"dataPlaneAccess": true` on the `materializedQueries` schema entry (not via table-options PATCH). **If the table is user-scoped, ship ADRA in the same change** (`authMode`, `rlsResolverName`, `permissionDimension`). A `dataPlaneAccess: true` table with no RLS is readable, through your declared named queries, by every signed-in user. That is right for reference and market data and wrong for anything owned by a user.
 5. **Add the CI gate now, not later.** `aouda schema diff --access` (**.NET CLI**) with an `aouda.identities.json` fixture set, failing the build on widening ([access surface](access-surface.md)). `npx @aouda/client schema diff --access` is **not shipped** (BL-176) — use `dotnet tool install --global Aouda.Cli` or `POST …/schema/diff?access=true` on admin. Adding the gate after ten named queries exist means approving ten findings at once.
 6. **Author named queries and switch reads over behind a flag.** Old gateway route and new named query both work. Compare results.
 7. **Move ingest normalization** that passes the [decision test](division-of-responsibility.md#the-test-when-it-is-not-obvious) into `checks` / `derived` / `route`. Expect an error-handling change: a failed check **fails the whole batch**, it does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted **before** you apply it. `route` must also be exhaustive — an unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row left behind on the landing table — so declare a catch-all route to a quarantine table. See [failure semantics](insert-transforms.md#failure-semantics-the-batch-fails-the-row-does-not-skip).

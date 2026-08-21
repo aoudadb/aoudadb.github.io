@@ -6,8 +6,8 @@ parent: "Guides"
 
 # Direct client access and listeners
 
-Document status: Complete (P37, P40 S03)  
-Last updated: 2026-08-20
+Document status: Complete (P40 S09)  
+Last updated: 2026-08-21
 
 Aouda serves **two browser populations with different trust**. The distinction is a property of the **listener** a client connects to — not of a route, an origin header, or a credential negotiated per request.
 
@@ -24,9 +24,11 @@ Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#
 
 | I want to… | Go to |
 |---|---|
+| See a complete end-to-end example | [Market-data guide](market-data.md) and `examples/p40-browser-tier/` |
 | Turn on the data-plane listener | [Configure dual-listen](#configure-dual-listen) |
 | Give a SPA a data credential | [`mk_pub_*`](#mk_pub_-vs-mk_anon_) |
 | Opt a table into browser reads | [`dataPlaneAccess`](#table-opt-in-fail-closed) |
+| Opt an MQ result table into browser reads | [`dataPlaneAccess` on MQ entries](#table-opt-in-fail-closed) |
 | Connect Studio or Hub | [Studio and Hub](#studio-and-hub) |
 | Put TLS/WAF in front | [Topology](#topology-a-thin-edge) |
 | Sign users in from a browser | [Authentication that exists](#authentication-that-exists) |
@@ -97,7 +99,21 @@ Do **not** send `X-User-Token` with `mk_pub_*`. That header remains a service-ke
 }
 ```
 
-Default is **false**. Existing catalogs deserialize to false. On the data-plane, for `mk_pub_*` and user JWT, a named query that touches a non-opted-in table (including join tables) returns **404 `TABLE_NOT_FOUND`**. Service keys on the data-plane may execute named artifacts over non-opted-in tables. The admin listener ignores the flag.
+Default is **false** for both tables and **materialized-query entries**. On the data-plane, for `mk_pub_*` and user JWT, a named query that touches a non-opted-in table or MQ result table returns **404 `TABLE_NOT_FOUND`**.
+
+Set `dataPlaneAccess: true` on the `materializedQueries` schema entry — there is no table-options PATCH on the data-plane:
+
+```json
+"materializedQueries": {
+  "latest_quote": {
+    "type": "latestPerKey",
+    "dataPlaneAccess": true,
+    ...
+  }
+}
+```
+
+Service keys on the data-plane may execute named artifacts over non-opted-in tables. The admin listener ignores the flag.
 
 A named query over a non-opted-in table is still **allowed to apply** — operators and services need it. Browser-tier widening of `dataPlaneAccess` false→true is reported by [`aouda schema diff --access`](access-surface.md).
 

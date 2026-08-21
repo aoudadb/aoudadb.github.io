@@ -6,8 +6,8 @@ parent: "Guides"
 
 # Named queries and mutations
 
-Document status: Complete (P37, P40 S03)  
-Last updated: 2026-08-20
+Document status: Complete (P40 S09)  
+Last updated: 2026-08-21
 
 A **named query** is a server-authored, versioned, parameterized query template. The client sends a **content hash** plus arguments. It cannot name tables, columns, or operators. Identity is injected from the validated principal — it is never an argument.
 
@@ -230,6 +230,73 @@ These fields exist on the definition. They were missing from this page.
 
 ---
 
+## Optional predicates (`whenParamPresent`)
+
+Mark a `where` condition with `"whenParamPresent": true` to make it **skip entirely** when the caller omits that argument. Without the marker, an omitted required param throws `NAMED_QUERY_PARAM_REQUIRED`; an omitted optional param becomes `null` (`IS NULL` for `eq`/`ne`; throws for range/`in`).
+
+```json
+"listings.screener": {
+  "table": "listings",
+  "select": ["ticker", "currency", "sector", "mcap"],
+  "where": {
+    "and": [
+      { "column": "currency", "op": "in",  "param": "currency", "whenParamPresent": true },
+      { "column": "sector",   "op": "eq",  "param": "sector",   "whenParamPresent": true },
+      { "column": "mcap",     "op": "gte", "param": "minMcap",  "whenParamPresent": true }
+    ]
+  },
+  "orderBy": [{ "column": "ticker", "descending": false }],
+  "limit": 25, "limitParam": "pageSize",
+  "count": true,
+  "params": {
+    "currency":  { "required": false },
+    "sector":    { "required": false, "maxLength": 64 },
+    "minMcap":   { "required": false },
+    "pageSize":  { "required": false, "min": 1, "max": 25 }
+  }
+}
+```
+
+Calling with `{}` returns all rows (no predicate applied). Calling with `{ "sector": "Tech" }` applies only the sector filter.
+
+Constraints:
+
+- Only valid on `and`-clause conditions. An `or` condition with `whenParamPresent` fails apply.
+- A marked condition **never** counts as partition-key coverage for `count: true`. The table must be unpartitioned, or all required partition predicates must be separately covered by non-marked conditions.
+- Params that control `whenParamPresent` conditions should declare `"required": false` (the engine defaults to `required: true` when the field is absent).
+
+---
+
+## Bounded sort choices (`orderByChoices` / `orderByIndex`)
+
+Declare a list of allowed sort permutations in the definition. The caller picks one by index in the execute or subscribe request.
+
+```json
+"gainers.top": {
+  "table": "bars_with_change",
+  "select": ["ticker", "open", "close", "changePct"],
+  "orderBy": [{ "column": "changePct", "descending": true }],
+  "orderByChoices": [
+    [{ "column": "changePct", "descending": true  }],
+    [{ "column": "ticker",    "descending": false }]
+  ],
+  "limit": 20,
+  "params": {}
+}
+```
+
+**Execute with the second sort (index 1):**
+
+```json
+{ "args": {}, "orderByIndex": 1 }
+```
+
+The engine rejects an index outside `[0, len(orderByChoices) - 1]`. Omitting `orderByIndex` uses the definition's `orderBy` default (index 0). `orderByIndex` works the same way in the batch envelope and in subscribe.
+
+Expression `orderBy` on an arbitrary runtime column is **not** offered (BL-183). Sort keys must be declared at apply time.
+
+---
+
 ## Execute
 
 `POST /api/databases/{db}/named-queries/{hash}/query`
@@ -357,7 +424,13 @@ On the data-plane, WebSocket `subscribe` **requires** `hash` (and optional `args
 }
 ```
 
-`conflate` holds only a value `update` visible before **and** after. On an insert-only tick table it does not reduce the event rate. Last-price: a `latestPerKey` MQ, not `quotes` plus `conflate`. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
+`conflate` holds only a value `update` visible before **and** after. On an insert-only tick table it does **not** reduce the event rate — set `"collapse_inserts": true` in the conflate object to hold latest-wins inserts, or point at a `latestPerKey` MQ instead. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
+
+```json
+{ "type": "subscribe", "id": "lp", "hash": "<lastPrice hash>",
+  "args": { "tickers": ["AAPL"], "source": "nasdaq" },
+  "conflate": { "collapse_inserts": true } }
+```
 
 The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** that hash for the connection. Redeploying the alias does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
 
@@ -465,7 +538,8 @@ There is no catalog field, header, or option that runs a named query as someone 
 - Static admissibility of client-composed queries (Firestore-style). Named queries are the browser-tier surface instead.
 - Cross-server named-query sharing through Hub (use a shared schema fragment in git).
 - OAuth 2.0 authorization code + PKCE — [not shipped](direct-client-access.md#authentication-that-exists).
-- Optional predicates (`whenParamPresent`), bounded sort choice, expression `orderBy` — see [browser-tier read limits](browser-tier-read-limits.md). `count` / `totalMatches` **are** shipped (`count: true` on the definition).
+- Expression `orderBy` on runtime columns (BL-183) — sort keys must be declared in `orderByChoices` at apply time.
+- Cursor paging (BL-182) — use `limitParam` / `offsetParam` for page-by-offset today.
 
 ---
 

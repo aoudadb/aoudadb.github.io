@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **P40 S09 — Market-data guide rewrite and browser-tier conformance fixture.** The [Market data guide](guides/market-data.md) is rewritten around a browser-tier caller using `mk_pub_*`. Published conformance fixture at `examples/p40-browser-tier/` (`aouda.schema.json`, `seed.json`, `expected.json`) demonstrates watchlist subscribe, `latestPerKey` last-price, candle chart via `outputName`, paged screener, and top-gainers ranking — all via `schema/apply` with zero imperative catalog calls.
+- **P40 S04–S08 capabilities added to public docs.** Fields that shipped but were not yet documented:
+  - `collapse_inserts: true` on the subscribe `conflate` object — collapses in-flight inserts latest-wins; required for last-price throttling on insert-only tick tables (`D-32`).
+  - `"whenParamPresent": true` on `and`-clause conditions — predicate is skipped entirely when the caller omits the arg; enables one definition for multi-facet screeners (`D-34`). [Named queries](guides/named-queries.md#optional-predicates-whenparampresent), [browser-tier read limits](guides/browser-tier-read-limits.md#optional-predicates-whenparampresent).
+  - `orderByChoices` on the definition + `orderByIndex` in the request — bounded sort choice; caller picks a declared permutation (`D-35`). [Named queries](guides/named-queries.md#bounded-sort-choices-orderbyChoices--orderbyindex).
+  - `computed` outputs on `aggregate` materialized queries — physically stored, orderable, first-class columns (`D-36`). [Materialized queries](guides/materialized.md).
+  - `dataPlaneAccess: true` on `materializedQueries` schema entries — required for browser reads of MQ result tables; no table-options PATCH (`D-30`).
 - **P40 S03 — browser-tier read limits and corrections.** New [What a browser-tier read cannot do](guides/browser-tier-read-limits.md) (operators, `orderBy` types, subscribe refusals, data-plane allowlist generated from the validators). `in` on a partition key documented; `crossPartitionAccess` is not a named-query field; aggregate MQ columns are `outputName`; `offsetParam` / `limitParam` / `distinct` / `count`+`totalMatches` documented; `conflate` caveat on insert-only streams; BL-146 recovery path; BL-176 (`schema diff --access` is C# CLI only).
 - **Studio 0.0.18 (P39).** Operator console catches up to server 0.1.8: named-artifact catalog/test/authoring, insert-time unique/derived/checks/`call`/route/tee, `dataPlaneAccess` + `mk_pub_*` + policy inspect, hash subscribe, schema-file MQ maps (BL-174), identity-insert, bulk-load transform-intent copy. Pin `@aouda/client` **0.1.13**. [Studio](guides/studio.md), [Compatibility](clients/compatibility.md).
 

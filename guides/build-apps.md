@@ -562,16 +562,16 @@ The showcase, and the table to check your feature list against. If something you
 | I need to build… | Use | Read |
 |---|---|---|
 | A paged table with "1–25 of 412" | Named query with `limit`/`limitParam`, `offsetParam`, `count: true` | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
-| A filter panel with several optional facets | One definition per predicate shape, **or** always send the full `in` list. Conditional predicates (`whenParamPresent`) are **not shipped** | [Optional predicates are not conditional yet](browser-tier-read-limits.md#optional-predicates-are-not-conditional-yet) |
+| A filter panel with several optional facets | One definition with `whenParamPresent: true` on each optional condition — omitting the arg skips the predicate entirely | [Optional predicates](browser-tier-read-limits.md#optional-predicates-whenparampresent) |
 | A filter dropdown of "values that exist" | Named query with `distinct: true` — zero segment scan when the columns are partition keys | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
 | Search-as-you-type over a name | A stored `derived` normalized column plus a prefix/`in` predicate. There is **no full-text search** | [Derived columns](insert-transforms.md#derived-columns) |
-| A sortable grid | One definition per `(column, direction)`. Bounded sort choice and cursor paging are **not shipped** | [Named queries](named-queries.md) |
+| A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbyChoices--orderbyindex) |
 | A live-updating grid or ticker | `namedQueries.subscribe` by hash, collection-shaped, list parameter capped with `maxItems` | [Subscribe by hash](named-queries.md#subscribe-by-hash) |
 | A "latest value per key" board | `latestPerKey` materialized query, subscribed. **Not** the raw table plus `conflate` | [Materialized queries](materialized.md) |
 | A chart over hourly/daily buckets | `aggregate` MQ with `TruncateToHour`, `dataPlaneAccess: true`, read by `outputName` | [Materialized queries](materialized.md) |
 | A dashboard of N independent panels | The batch envelope — up to 32, one snapshot, one permit | [Batch](named-queries.md#batch-one-snapshot) |
 | A detail page joining several tables | One named query with `joins` (≤ 3). All joined tables need `dataPlaneAccess` | [Named queries](named-queries.md) |
-| Ranking by a computed value ("top gainers by %") | A stored `derived` column, which **is** orderable. Expression `orderBy` is **not shipped** | [No expression orderBy](browser-tier-read-limits.md#no-expression-orderby) |
+| Ranking by a computed value ("top gainers by %") | A `computed` output on an `aggregate` MQ — physically stored and orderable. Or a `derived` column on a base table. Expression `orderBy` on runtime columns is **not shipped** (BL-183) | [No expression orderBy](browser-tier-read-limits.md#no-expression-orderby) |
 | A record create/edit/delete form | Named mutations with `set`, `returning`, and capped `limit`; `checks` on the table | [Named mutations](named-queries.md#named-mutations) |
 | Server-side validation nobody can bypass | `checks`, `unique`, `references` — all enforced on write | [Insert-time transforms](insert-transforms.md) |
 | A bulk import or a migration | Bulk load, multi-table atomic, idempotency keys, identity-insert | [Bulk load](bulk-load.md) |
@@ -679,7 +679,7 @@ If you are an AI agent writing an application against Aouda, this section is you
 | State that `conflate` is a no-op on insert-only streams | Recommend `conflate` for a tick feed or event log |
 | Read an aggregate MQ by its `outputName` (`high`, `open`) | Read internal state columns (`_max_bid`, `_first_open_val`) |
 | Run `schema diff --access` and `policy inspect` before declaring done | Widen a `select` without re-running the gate |
-| Say "not shipped" and link the alternative | Invent `whenParamPresent`, cursor paging, expression `orderBy`, `groupBy` on the data plane, `topNPerGroup`, a SQL surface, PKCE, or full-text search |
+| Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, `groupBy` on the data plane, `topNPerGroup`, a SQL surface, PKCE, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, and `computed` MQ outputs **are** shipped — do not list them as absent) |
 
 ### Per-screen decision procedure
 
@@ -820,11 +820,9 @@ Two lists. The first is *not yet*; the second is *not ever*, on purpose.
 
 | Not shipped | Do this instead |
 |---|---|
-| Conditional predicates (`whenParamPresent`) — one definition covering optional facets | One definition per predicate shape, or always send the full `in` list |
-| Bounded sort choice; declared cursor / keyset paging | One definition per `(column, direction)`; `offset` / `offsetParam` for paging |
-| Expression `orderBy`; computed outputs on an aggregate MQ | A stored `derived` column, which **is** orderable |
-| `conflate` collapsing **inserts**; a latest-per-key subscription mode | A `latestPerKey` MQ, subscribed. It is the right catalog shape, but MQ-upsert `prev` is null today, so it does not throttle the event rate either |
-| `topNPerGroup` / `firstPerKey` materialized queries | An `aggregate` MQ you rank, or ranking in a trusted service |
+| Cursor / keyset paging (BL-182) | `offset` / `offsetParam` for page-by-offset today |
+| Expression `orderBy` on runtime columns (BL-183) | A `computed` output on an `aggregate` MQ, or a stored `derived` column — both are physically stored and orderable |
+| `topNPerGroup` / `firstPerKey` materialized queries | An `aggregate` MQ you rank with `orderByChoices`, or ranking in a trusted service |
 | `groupBy` and ad-hoc aggregates on the data plane | An aggregate MQ, read through a named query |
 | Subscribe by hash for definitions using joins, `selectExpr`, or `distinct` | HTTP execute plus polling, or split the view |
 | The failing row index on a rejected batch | The error names the check; pre-validate or quarantine |

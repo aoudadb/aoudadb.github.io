@@ -8,163 +8,515 @@ parent: "Guides"
 
 Document status: Approved baseline  
 Primary owner: Aouda maintainers  
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
-This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, time-series partitioning, and per-ticker security. It is written for teams building apps like **Derive** (multi-source stock quotes) but applies to any tick stream where you need fast latest reads, interval candles, and tenant-scoped access.
+This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, a paged screener, and real-time ranking — all from a **browser-tier caller** holding only a `mk_pub_*` key on the data-plane listener. Every recipe in §§2–8 is executable against the published conformance fixture.
 
-**Related guides (read these for depth):**
+**Related guides:**
 
-- [Time-series and Clustering](time-series.md) — partition functions, `clusterOrder`, sort-on-seal, delta segments
-- [Partitioning and Multi-tenancy](partitioning.md) — partition filters, cross-partition opt-in, storage modes
-- [Materialized Queries](materialized.md) — MQ lifecycle, incremental maintenance, result-table queries
-- [Auth — Data Authorization](../auth/authorization.md) — `jwt-claim`, `auth-db-pls`, fan-out queries
-- [Named queries](named-queries.md) — browser-tier quote/position views; last-price via a `latestPerKey` MQ + subscribe (`conflate` does not throttle an insert-only tick table — [limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams))
+- [Named queries](named-queries.md) — `whenParamPresent`, `orderByChoices`, subscribe by hash
+- [Browser-tier read limits](browser-tier-read-limits.md) — partition-filter rule, what you can and cannot do
+- [Materialized Queries](materialized.md) — MQ lifecycle, `latestPerKey`, `aggregate`, computed outputs
+- [Partitioning and Multi-tenancy](partitioning.md) — partition filters, cross-partition opt-in
 - [Insert-time transforms](insert-transforms.md) — replace a quote ingest worker with `route` / derived columns
 - [Division of responsibility](division-of-responsibility.md) — what stays in a workflow service
 
+**Conformance fixture:** `examples/p40-browser-tier/` in this repo — `aouda.schema.json`, `seed.json`, `expected.json`. Run the fixture against a live engine with `POST .../schema/apply` (see §3). CI exercises it in `P40BrowserTierConformanceTests`.
+
 ---
 
-## 1. Schema design
+## 1. Audience and scope
 
-### Quote ticks: Bid and Ask as columns
+**Browser-tier caller** (this guide's primary audience): a web app or mobile client holding a public `mk_pub_*` key on the data-plane. You can:
 
-Store **Bid** and **Ask** as separate nullable `Decimal` columns on a single quote table. Do **not** use a `price_type` partition key to distinguish bid from ask — that forces two partition trees for the same instrument and complicates candle aggregation.
+- Execute named queries (by hash) and read columnar results.
+- Subscribe to named queries over WebSocket for real-time updates.
+- See only tables / MQ result tables that have `dataPlaneAccess: true` in the schema.
+
+You cannot (data-plane restrictions):
+
+- Call `POST .../query` ad-hoc — 404 on the data-plane.
+- Create tables, MQs, or named queries via HTTP.
+- Use `crossPartitionAccess` — that flag is not a named-query field.
+- Select internal MQ accumulator columns (`_max_bid`, `_first_open_val`, …) — `outputName` aliases are the public surface.
+
+**Admin / operator** paths (ingest servers, Studio, workflow services) are covered in the [Admin appendix](#admin-appendix) at the end of this guide.
+
+---
+
+## 2. One schema file
+
+All tables, materialized queries, and named queries for the market-data fixture live in one declarative file. Apply it once; the engine maintains all MQs automatically.
 
 ```json
 {
-  "name": "quotes",
-  "columns": [
-    { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
-    { "name": "ticker", "type": "String", "partitionKeyOrder": 1 },
-    { "name": "source", "type": "String", "partitionKeyOrder": 2 },
-    { "name": "time", "type": "Timestamp", "clusterOrder": 1 },
-    { "name": "bid", "type": "Decimal", "nullable": true },
-    { "name": "ask", "type": "Decimal", "nullable": true }
-  ],
-  "partitionStorage": "Auto"
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "finance",
+  "tables": {
+    "quotes": {
+      "columns": {
+        "id":     { "type": "Int64",      "primaryKey": 1 },
+        "ticker": { "type": "String" },
+        "source": { "type": "String" },
+        "time":   { "type": "Timestamp" },
+        "bid":    { "type": "Decimal", "nullable": true },
+        "ask":    { "type": "Decimal", "nullable": true }
+      },
+      "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
+      "clusterColumns": ["time"],
+      "dataPlaneAccess": true
+    },
+    "trades": {
+      "columns": {
+        "id":     { "type": "Int64",   "primaryKey": 1 },
+        "ticker": { "type": "String" },
+        "source": { "type": "String" },
+        "time":   { "type": "Timestamp" },
+        "price":  { "type": "Double" },
+        "size":   { "type": "Int64" }
+      },
+      "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
+      "clusterColumns": ["time"],
+      "dataPlaneAccess": true
+    },
+    "listings": {
+      "columns": {
+        "ticker":   { "type": "String", "primaryKey": 1 },
+        "currency": { "type": "String" },
+        "sector":   { "type": "String" },
+        "country":  { "type": "String" },
+        "mcap":     { "type": "Int64" }
+      },
+      "dataPlaneAccess": true
+    }
+  },
+  "materializedQueries": {
+    "latest_quote": {
+      "type":        "latestPerKey",
+      "sourceTable": "quotes",
+      "groupBy":     ["ticker", "source"],
+      "orderBy":     "time",
+      "descending":  true,
+      "select":      ["ticker", "source", "bid", "ask", "time"],
+      "updateMode":  "sync",
+      "dataPlaneAccess": true
+    },
+    "candles_bid_1h": {
+      "type":        "aggregate",
+      "sourceTable": "quotes",
+      "groupBy": [
+        { "column": "ticker" },
+        { "column": "time", "function": "TruncateToHour", "outputName": "time" }
+      ],
+      "aggregates": [
+        { "function": "max",   "outputName": "high",  "sourceColumn": "bid" },
+        { "function": "min",   "outputName": "low",   "sourceColumn": "bid" },
+        { "function": "first", "outputName": "open",  "sourceColumn": "bid", "orderByColumn": "time" },
+        { "function": "last",  "outputName": "close", "sourceColumn": "bid", "orderByColumn": "time" }
+      ],
+      "updateMode": "sync",
+      "dataPlaneAccess": true
+    },
+    "bars_with_change": {
+      "type":        "aggregate",
+      "sourceTable": "trades",
+      "groupBy":     [{ "column": "ticker" }],
+      "aggregates": [
+        { "function": "first", "outputName": "open",  "sourceColumn": "price", "orderByColumn": "time" },
+        { "function": "last",  "outputName": "close", "sourceColumn": "price", "orderByColumn": "time" }
+      ],
+      "computed": [
+        {
+          "outputName": "changePct",
+          "type": "Double",
+          "expr": {
+            "type": "arithmetic", "op": "/",
+            "left":  { "type": "arithmetic", "op": "-",
+                       "left":  { "type": "colRef", "col": "close" },
+                       "right": { "type": "colRef", "col": "open" } },
+            "right": { "type": "colRef", "col": "open" }
+          }
+        }
+      ],
+      "updateMode": "sync",
+      "dataPlaneAccess": true
+    }
+  },
+  "namedQueries": {
+    "quotes.watchlist": {
+      "table":  "quotes",
+      "select": ["ticker", "source", "time", "bid", "ask"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "in",  "param": "tickers" },
+          { "column": "source", "op": "eq",  "param": "source"  }
+        ]
+      },
+      "orderBy": [{ "column": "time", "descending": true }],
+      "limit": 100,
+      "count": true,
+      "params": {
+        "tickers": { "required": true, "maxItems": 64 },
+        "source":  { "required": true, "maxLength": 32 }
+      }
+    },
+    "quotes.lastPrice": {
+      "table":  "latest_quote",
+      "select": ["ticker", "source", "bid", "ask", "time"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "in", "param": "tickers" },
+          { "column": "source", "op": "eq", "param": "source"  }
+        ]
+      },
+      "limit": 32,
+      "params": {
+        "tickers": { "required": true, "maxItems": 64 },
+        "source":  { "required": true, "maxLength": 32 }
+      }
+    },
+    "candles.byTicker": {
+      "table":  "candles_bid_1h",
+      "select": ["ticker", "time", "open", "high", "low", "close"],
+      "where": {
+        "and": [
+          { "column": "ticker", "op": "eq", "param": "ticker" }
+        ]
+      },
+      "orderBy": [{ "column": "time", "descending": false }],
+      "limit": 500,
+      "params": {
+        "ticker": { "required": true, "maxLength": 16 }
+      }
+    },
+    "listings.screener": {
+      "table":  "listings",
+      "select": ["ticker", "currency", "sector", "country", "mcap"],
+      "where": {
+        "and": [
+          { "column": "currency", "op": "in",  "param": "currency",  "whenParamPresent": true },
+          { "column": "sector",   "op": "eq",  "param": "sector",    "whenParamPresent": true },
+          { "column": "mcap",     "op": "gte", "param": "minMcap",   "whenParamPresent": true },
+          { "column": "country",  "op": "eq",  "param": "country",   "whenParamPresent": true }
+        ]
+      },
+      "orderBy": [{ "column": "ticker", "descending": false }],
+      "limit":       25,
+      "limitParam":  "pageSize",
+      "offset":      1000,
+      "offsetParam": "pageOffset",
+      "count": true,
+      "params": {
+        "currency":   { "required": false },
+        "sector":     { "required": false, "maxLength": 64 },
+        "minMcap":    { "required": false },
+        "country":    { "required": false, "maxLength": 8 },
+        "pageSize":   { "required": false, "min": 1, "max": 25 },
+        "pageOffset": { "required": false, "min": 0, "max": 1000 }
+      }
+    },
+    "gainers.top": {
+      "table":  "bars_with_change",
+      "select": ["ticker", "open", "close", "changePct"],
+      "orderBy": [{ "column": "changePct", "descending": true }],
+      "orderByChoices": [
+        [{ "column": "changePct", "descending": true  }],
+        [{ "column": "ticker",    "descending": false }]
+      ],
+      "limit": 20,
+      "params": {}
+    }
+  }
 }
 ```
 
-**Why nullable Decimal?** Feeds often send bid-only or ask-only updates. Nullable columns let you insert partial quotes without sentinel values.
+Key design decisions:
 
-**Why `Timestamp` for time?** Aouda stores timestamps as Int64 epoch milliseconds internally. Clustering and MQ time buckets operate on the same representation.
+- **`bid`/`ask` as columns** — not a `price_type` partition key. One partition tree per `(ticker, source)` pair; simpler candle aggregation.
+- **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
+- **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{hash}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
 
-### Trades table for Last price
+---
 
-**Last** (trade price) comes from a different event stream than bid/ask quotes. Use a separate `trades` table rather than overloading the quote schema:
+## 3. Apply, then ingest
 
-```json
+Schema and data are separate steps. Schema objects enter only via `schema/apply`. Data enters via `POST .../rows`.
+
+### Apply the schema
+
+```http
+POST /api/databases/finance/schema/apply
+Content-Type: application/json
+Authorization: Bearer <service-key>
+
 {
-  "name": "trades",
-  "columns": [
-    { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
-    { "name": "ticker", "type": "String", "partitionKeyOrder": 1 },
-    { "name": "source", "type": "String", "partitionKeyOrder": 2 },
-    { "name": "time", "type": "Timestamp", "clusterOrder": 1 },
-    { "name": "price", "type": "Decimal" },
-    { "name": "size", "type": "Int64" }
+  "schema": { ... },
+  "options": { "allowDestructive": false, "dryRun": false }
+}
+```
+
+One apply creates all three tables, all three MQs, and all five named queries in the right order (MQs at priority 8, named queries at priority 9 — so an NQ over an MQ result table applies in the same request).
+
+### Ingest seed rows
+
+```http
+POST /api/databases/finance/tables/quotes/rows
+Content-Type: application/json
+Authorization: Bearer <service-key>
+
+{
+  "database": "finance",
+  "table": "quotes",
+  "rows": [
+    { "id": 1, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T10:00:00Z", "bid": 150.0, "ask": 150.5 }
   ]
 }
 ```
 
-Build **Last** candles from `trades` with the same Aggregate MQ pattern as bid/ask OHLC (see §4).
+MQs with `updateMode: "sync"` update before each insert returns. For bulk loads, `updateMode: "async"` + an explicit refresh call after the load completes is more efficient (see [§11 — Bulk loading historical data](#bulk-loading-historical-data)).
 
 ---
 
-## 2. Partitioning strategy
+## 4. Watchlist
 
-Composite partition key: **`ticker` + `source`**. Each `(ticker, source)` pair is an independent partition — ideal for PLS (one user sees `AAPL/nasdaq`, another sees `AAPL/oslo_bors`).
-
-### Option A — Ticker + source, cluster by time (recommended default)
-
-- Partition keys: `ticker`, `source`
-- Cluster column: `time` (`clusterOrder: 1`)
-- No partition function on `time`
-
-**Best for:** High-cardinality tick streams where each symbol/source pair gets its own directory tree and range queries on `time` prune segments via cluster metadata.
-
-```
-partitions/
-  AAPL/
-    nasdaq/
-      data/...
-  MSFT/
-    nasdaq/
-      data/...
-```
-
-### Option B — Add `TruncateToDay` on time (third partition key)
-
-Add `time` as partition key order 3 with `partitionFunction: "TruncateToDay"`.
-
-**Best for:** Very large single-ticker histories where day-level directory boundaries help retention, archival, or per-day compaction. Trade-off: more partition directories and you must include the day key (or use cross-partition access) in queries.
+`quotes.watchlist` accepts a list of tickers (`in`) and a required source (`eq`). Both predicates cover the composite partition key — the partition-filter rule is satisfied with one hash and one subscribe.
 
 ```json
 {
-  "name": "time",
-  "type": "Timestamp",
-  "partitionKeyOrder": 3,
-  "partitionFunction": "TruncateToDay",
-  "clusterOrder": 1
+  "args": {
+    "tickers": ["AAPL", "MSFT"],
+    "source": "nasdaq"
+  }
 }
 ```
 
-Partition directory names use human-readable day strings (for example `2026-06-03`). **Do not confuse this with MQ candle bucket values** — candle result tables store buckets as **Int64 epoch milliseconds** (§4).
+**Execute (HTTP):**
 
-| Strategy | Partition keys | When to use |
-|----------|----------------|-------------|
-| **Option A** | `ticker`, `source` | Default; simpler queries; one partition per symbol/source |
-| **Option B** | `ticker`, `source`, `TruncateToDay(time)` | Huge per-symbol history; day-scoped lifecycle ops |
+```http
+POST /api/databases/finance/named-queries/<hash>/query
+Content-Type: application/json
+Authorization: Bearer <mk_pub_key>
 
-See [Partitioning and Multi-tenancy](partitioning.md) for `Auto` / `Dedicated` / `Shared` storage modes and auto-promotion.
-
----
-
-## 3. Time clustering and query pruning
-
-With `clusterOrder` on `time`:
-
-1. **Sort-on-seal** (default) orders rows within segments by `time` at flush — no full-table sort.
-2. **Segment manifests** record min/max `time` per segment.
-3. **Range queries** on `time` skip segments outside the predicate window.
-
-Example — latest quotes for one symbol today (.NET):
-
-```csharp
-var todayStart = DateTimeOffset.UtcNow.Date.ToUnixTimeMilliseconds();
-
-var rows = await client
-    .GetTable("quotes")
-    .Where("ticker", "eq", "AAPL")
-    .Where("source", "eq", "nasdaq")
-    .Where("time", "gte", todayStart)
-    .OrderBy("time", descending: true)
-    .Limit(100)
-    .ToListAsync();
+{ "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" } }
 ```
 
-Always filter on **all partition key columns** unless you explicitly opt into cross-partition access (§5).
+Response includes `totalMatches` (from `count: true`), `columns`, `rowCount`, and columnar `data`.
+
+**Subscribe (WebSocket):**
+
+```json
+{ "type": "subscribe", "id": "wl", "hash": "<hash>",
+  "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" } }
+```
+
+The server sends snapshot rows then a `snapshot_complete` message, followed by incremental `change` events on tick inserts.
+
+{: .note }
+A prefix of the composite partition key is not sufficient. `ticker in ["AAPL"]` alone — without `source eq "nasdaq"` — is refused on the data-plane with a partition-filter error. Both columns must be covered. See [browser-tier read limits — partition filter rule](browser-tier-read-limits.md#partition-filter-rule).
 
 ---
 
-## 4. OHLC candle materialized queries
+## 5. Latest price that throttles
 
-Aouda maintains live candle tables with **Aggregate materialized queries**. Each candle row is keyed by `(ticker, time_bucket)` with **Open / High / Low / Close** computed incrementally as ticks arrive.
+Default `conflate` does not throttle an insert-only tick table. When new ticks are inserted (not upserted), the conflict key is never matched — `CONFLATE_NOOP` on every tick. Two patterns provide real throttling:
 
-### Capabilities used
+### Pattern A — `latestPerKey` MQ + named-query subscribe (recommended)
 
-| Function | MQ aggregate | Candle field |
-|----------|--------------|--------------|
-| `first` | Ordered by `time` | **Open** |
-| `last` | Ordered by `time` | **Close** |
-| `max` | On price column | **High** |
-| `min` | On price column | **Low** |
+Declare a `latestPerKey` MQ over `quotes`. The MQ maintains one row per `(ticker, source)` pair and emits `prev`/`next` on each upsert. Default `conflate` fires on the upsert event (not the raw tick), so the subscriber sees at most one update per new price, regardless of tick rate.
 
-**Derived time buckets:** `groupByColumns` accepts expressions like `{ "column": "time", "function": "truncateToHour" }`. The result table stores the bucket as **`Int64` epoch milliseconds** (start of the UTC hour/day/minute), not a formatted string. This keeps candle tables first-class time-series tables you can range-query and re-partition.
+```json
+"latest_quote": {
+  "type":        "latestPerKey",
+  "sourceTable": "quotes",
+  "groupBy":     ["ticker", "source"],
+  "orderBy":     "time",
+  "descending":  true,
+  "select":      ["ticker", "source", "bid", "ask", "time"],
+  "updateMode":  "sync",
+  "dataPlaneAccess": true
+}
+```
 
-Supported truncation functions for buckets: `truncateToDay`, `truncateToHour`, `truncateToMinute`, plus week/month/year for longer intervals.
+The named query `quotes.lastPrice` reads `latest_quote` by the same partition predicates. Subscribe to it for a conflated real-time price feed. The snapshot columns are public names (`bid`, `ask`, `time`) — not accumulator state names from the MQ internals.
 
-### Hourly bid OHLC (.NET)
+### Pattern B — Insert-only ticks + `collapse_inserts: true`
+
+When you cannot change to an MQ (legacy schema, or you specifically want raw ticks stored), opt in on the subscribe call:
+
+```json
+{
+  "type": "subscribe", "id": "lp", "hash": "<hash>",
+  "args": { "tickers": ["AAPL"], "source": "nasdaq" },
+  "conflate": { "collapse_inserts": true }
+}
+```
+
+With `collapse_inserts: true`, the server collapses multiple in-flight tick inserts into a single notification. Without it, default `conflate` on an insert-only table is a no-op. See [browser-tier read limits — conflate is a no-op on insert-only streams](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
+
+{: .warning }
+Do **not** rely on default `conflate` (no `collapse_inserts`) for last-price on an insert-only tick table. Each tick insert will deliver its own notification.
+
+---
+
+## 6. Candle chart
+
+Query or subscribe to `candles.byTicker` — a named query over the `candles_bid_1h` MQ result table. Columns are the declared `outputName`s (`open`, `high`, `low`, `close`). Internal accumulator names (`_max_bid`, `_first_open_val`) are not selectable and not exposed on the data-plane.
+
+**Execute:**
+
+```http
+POST /api/databases/finance/named-queries/<hash>/query
+Content-Type: application/json
+Authorization: Bearer <mk_pub_key>
+
+{ "args": { "ticker": "AAPL" } }
+```
+
+Response columns: `["ticker", "time", "open", "high", "low", "close"]`. The `time` column contains the UTC **epoch-millisecond** start of each hour bucket — an Int64, not a formatted string. Candles are ordered ascending by time (as defined in the NQ).
+
+{: .important }
+**Ad-hoc `POST .../query` is 404 on the data-plane.** All browser-tier access goes through named-query hashes. Both the MQ (`candles_bid_1h`) and the named query (`candles.byTicker`) must be declared in the schema file; `dataPlaneAccess: true` must appear on the MQ entry, not patched in via table-options HTTP.
+
+### Day and minute intervals
+
+Add separate MQs:
+
+```json
+"candles_bid_1d": {
+  "type": "aggregate",
+  "sourceTable": "quotes",
+  "groupBy": [
+    { "column": "ticker" },
+    { "column": "time", "function": "TruncateToDay", "outputName": "time" }
+  ],
+  "aggregates": [ ... ],
+  "dataPlaneAccess": true
+}
+```
+
+And separate named queries `candles.byTickerDay`, `candles.byTickerMinute`. Same select shape — only the MQ name and truncation function differ.
+
+---
+
+## 7. Paged screener
+
+`listings.screener` demonstrates the full optional-predicate + pagination pattern. It sits on the unpartitioned `listings` table so `count: true` is legal without required partition predicates.
+
+**Four optional facets — one definition:**
+
+```json
+"where": {
+  "and": [
+    { "column": "currency", "op": "in",  "param": "currency",  "whenParamPresent": true },
+    { "column": "sector",   "op": "eq",  "param": "sector",    "whenParamPresent": true },
+    { "column": "mcap",     "op": "gte", "param": "minMcap",   "whenParamPresent": true },
+    { "column": "country",  "op": "eq",  "param": "country",   "whenParamPresent": true }
+  ]
+}
+```
+
+`whenParamPresent: true` means: if the caller omits this arg, skip the predicate entirely. If the arg is supplied, apply it. An **unmarked** (`whenParamPresent` absent) required omission still throws `NAMED_QUERY_PARAM_REQUIRED`. A marked condition never counts as partition-key coverage for `count: true`.
+
+**Execute with no filter (all listings, page 0):**
+
+```json
+{ "args": { "pageOffset": 0 } }
+```
+
+Response: `rowCount: 5`, `totalMatches: 5`.
+
+**Execute with two facets:**
+
+```json
+{ "args": { "currency": ["USD"], "sector": "Tech", "pageOffset": 0 } }
+```
+
+Response: `rowCount: 3`, `totalMatches: 3`.
+
+**Pagination:** `limitParam: "pageSize"` lets the caller override the limit (up to 25). `offsetParam: "pageOffset"` lets the caller skip rows (up to 1000). Always pass `pageOffset` explicitly — the engine defaults to the cap value (1000) when the param is absent, which returns an empty page on a small table.
+
+{: .note }
+`count: true` on a **partitioned** table requires required `eq`/`in` on every partition-key column. A `whenParamPresent` condition never satisfies that requirement. Use an unpartitioned reference table (like `listings`) for optional-facet screeners, or require the partition key in the NQ params.
+
+---
+
+## 8. Top gainers
+
+`gainers.top` selects from `bars_with_change` — an aggregate MQ over `trades` with a `computed` column:
+
+```json
+"computed": [
+  {
+    "outputName": "changePct",
+    "type": "Double",
+    "expr": {
+      "type": "arithmetic", "op": "/",
+      "left":  { "type": "arithmetic", "op": "-",
+                 "left":  { "type": "colRef", "col": "close" },
+                 "right": { "type": "colRef", "col": "open" } },
+      "right": { "type": "colRef", "col": "open" }
+    }
+  }
+]
+```
+
+The default sort is `changePct` descending. A caller can pick an alternative sort using `orderByIndex`:
+
+**Default (changePct desc):**
+
+```json
+{ "args": {} }
+```
+
+**Alternative sort (ticker asc) — `orderByIndex: 1`:**
+
+```json
+{ "args": {}, "orderByIndex": 1 }
+```
+
+`orderByChoices` in the schema declares the allowed sort permutations (0-indexed). `orderByIndex` selects one. The engine rejects an index outside the declared list. Expression `orderBy` (arbitrary column not in `orderByChoices`) is not available on the data-plane (BL-183 — open backlog item).
+
+{: .note }
+The `derived` expression (base-table computed column) is a fallback for ranking on raw tables. `bars_with_change.changePct` uses the physical `computed` path — it is orderable and selectable as a first-class column.
+
+---
+
+## 9. Partition-level security
+
+### Pattern 1 — `jwt-claim` (single ticker per user)
+
+Each user's JWT carries a claim matching the partition key (for example ticker symbol). PLS validates or injects the filter automatically. Ideal for apps where each end user watches one symbol.
+
+See [Auth — jwt-claim mode](../auth/authorization.md#mode-1-jwt-claim-default).
+
+### Pattern 2 — `auth-db-pls` (multi-ticker watchlists)
+
+When a user may access many tickers (watchlist, portfolio), store grants in the auth database. Fan-out: a named-query subscription automatically merges results from all granted tickers. Revoke access on the next request without re-issuing JWTs.
+
+See [Auth — auth-db-pls](../auth/authorization.md#mode-2-auth-db-pls-enhanced-pls) and [Division of responsibility](division-of-responsibility.md).
+
+---
+
+## 10. Browser-tier checklist
+
+| Step | Detail |
+|------|--------|
+| Schema file includes MQs | `materializedQueries` section in `aouda.schema.json` |
+| `dataPlaneAccess: true` on every MQ the browser reads | Set in the schema file, not patched via table-options HTTP |
+| Named queries select `outputName` columns | `open`, `high`, `low`, `close` — not `_max_bid` / `_first_open_val` |
+| No `crossPartitionAccess` in NQ params | Not a named-query field |
+| Watchlist: both partition keys required | `ticker in $tickers` + `source eq $source` (not just ticker) |
+| Last-price: use `latestPerKey` MQ or `collapse_inserts` | Default `conflate` is a no-op on insert-only streams |
+| Screener: `whenParamPresent` on optional facets | Unmarked optional omit throws `NAMED_QUERY_PARAM_REQUIRED` |
+| Apply is the only DDL step | No `POST /tables`, no `POST /materialized-queries`, no table-options PATCH |
+
+---
+
+## Admin appendix
+
+The following patterns require **admin / service-key** access on the admin listener. They are the correct path for ingest services, Studio operators, and CI pipelines — not for browser-tier app code.
+
+### Imperative MQ creation (.NET)
 
 ```csharp
 await engine.CreateAggregateQueryAsync(
@@ -184,25 +536,7 @@ await engine.CreateAggregateQueryAsync(
     });
 ```
 
-After ticks are inserted into `quotes`, query the result table directly:
-
-```csharp
-var candles = await engine.QueryMaterializedAsync("candles_bid_1h");
-```
-
-### Day and minute intervals
-
-Use the same pattern; change only the truncation function:
-
-| Candle table | `function` value |
-|--------------|------------------|
-| Daily | `truncateToDay` |
-| Hourly | `truncateToHour` |
-| Minute | `truncateToMinute` |
-
-Example names: `candles_bid_1d`, `candles_bid_1h`, `candles_bid_1m`. Create separate MQs for **ask** side (`Aggregate.*("ask", ...)`) or run both bid and ask OHLC in one MQ with distinct output names (`bid_open`, `ask_open`, …).
-
-### HTTP — create hourly candle MQ
+### Imperative MQ creation (HTTP)
 
 ```http
 POST /api/databases/finance/materialized-queries
@@ -213,96 +547,11 @@ Authorization: Bearer <admin-token>
   "name": "candles_bid_1h",
   "sourceTable": "quotes",
   "type": 3,
-  "configJson": "{\"version\":2,\"groupByColumns\":[{\"column\":\"ticker\"},{\"column\":\"time\",\"function\":\"truncateToHour\"}],\"aggregates\":[{\"outputName\":\"high\",\"function\":\"max\",\"sourceColumn\":\"bid\"},{\"outputName\":\"low\",\"function\":\"min\",\"sourceColumn\":\"bid\"},{\"outputName\":\"open\",\"function\":\"first\",\"sourceColumn\":\"bid\",\"orderByColumn\":\"time\"},{\"outputName\":\"close\",\"function\":\"last\",\"sourceColumn\":\"bid\",\"orderByColumn\":\"time\"}]}"
+  "configJson": "..."
 }
 ```
 
-`type: 3` is Aggregate. Check status with `GET /api/databases/finance/materialized-queries/candles_bid_1h` until `state` is `1` (Ready).
-
-The HTTP and TypeScript `create` calls above are **admin**. For a browser-tier chart, declare the MQ in `aouda.schema.json` with `dataPlaneAccess: true` and read it through a named query selecting **`outputName` columns** (`high`, `open`, `low`, `close`) — not `_max_bid` / `_first_open_val`, and not ad-hoc `POST …/query`.
-
-```json
-"materializedQueries": {
-  "candles_bid_1h": {
-    "type": "aggregate",
-    "sourceTable": "quotes",
-    "dataPlaneAccess": true,
-    "groupBy": [
-      "ticker",
-      { "column": "time", "function": "TruncateToHour", "outputName": "time" }
-    ],
-    "aggregates": [
-      { "function": "max", "sourceColumn": "bid", "outputName": "high" },
-      { "function": "min", "sourceColumn": "bid", "outputName": "low" },
-      { "function": "first", "sourceColumn": "bid", "outputName": "open", "orderByColumn": "time" },
-      { "function": "last", "sourceColumn": "bid", "outputName": "close", "orderByColumn": "time" }
-    ]
-  }
-}
-```
-
-### TypeScript — create and query (admin listener)
-
-```typescript
-import { createAoudaClient, MaterializedQueryType } from "@aouda/client";
-
-const client = createAoudaClient({ serverUrl: "http://localhost:5433", database: "finance" });
-
-await client.materializedQueries.create({
-  name: "candles_bid_1h",
-  sourceTable: "quotes",
-  type: MaterializedQueryType.Aggregate,
-  config: {
-    version: 2,
-    groupByColumns: [
-      { column: "ticker" },
-      { column: "time", function: "truncateToHour" },
-    ],
-    aggregates: [
-      { outputName: "high", function: "max", sourceColumn: "bid" },
-      { outputName: "low", function: "min", sourceColumn: "bid" },
-      { outputName: "open", function: "first", sourceColumn: "bid", orderByColumn: "time" },
-      { outputName: "close", function: "last", sourceColumn: "bid", orderByColumn: "time" },
-    ],
-  },
-});
-
-const rows = await client.table("candles_bid_1h")
-  .where("ticker", "=", "AAPL")
-  .execute();
-```
-
-Subscribe to live candle updates on the **admin** listener via `client.table("candles_bid_1h").subscribe({ ... })`. On the data-plane, subscribe **by named-query hash** over that table. See [Materialized Queries](materialized.md) §2.12 Scenario 3 and [Named queries — subscribe](named-queries.md#subscribe-by-hash).
-
-### Incremental correctness
-
-When a new tick arrives with an **earlier** timestamp than the current Open, the `first` aggregate updates. `last` updates when a later tick arrives. `min`/`max` follow standard incremental semantics. Result tables use `HotOnly` temperature by default for fast reads.
-
----
-
-## 5. Query patterns
-
-### Latest-day quotes (single partition)
-
-Filter all partition keys plus a time range — the normal safe path:
-
-```typescript
-const startOfDay = Date.UTC(2026, 5, 3); // 2026-06-03 UTC
-
-await client.table("quotes")
-  .where("ticker", "=", "AAPL")
-  .where("source", "=", "nasdaq")
-  .where("time", ">=", startOfDay)
-  .orderBy("time", "desc")
-  .limit(50)
-  .execute();
-```
-
-### Cross-partition analytics (admin / batch)
-
-Partitioned tables **require** `eq` or `in` on **every** partition-key column by default (`in` satisfies the guard — a watchlist is one query). The examples below are **admin listener** only. `crossPartitionAccess` is not a named-query field; a browser-tier caller cannot set it. Browser-tier alternatives: `Ticker in $tickers AND Source eq $source`, auth-db-pls fan-out, or an MQ over the universe. See [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule).
-
-**.NET (admin / engine API)**
+### Cross-partition analytics (.NET — admin)
 
 ```csharp
 await client.GetTable("quotes")
@@ -312,9 +561,7 @@ await client.GetTable("quotes")
     .ToListAsync();
 ```
 
-`.Aggregate(...)` is a **fluent engine / admin** API, not a `QueryMessage` field and not available on the data plane. A browser-tier paged list uses a named query with `"count": true` and reads `totalMatches`.
-
-**TypeScript (admin listener)**
+### Cross-partition analytics (TypeScript — admin listener)
 
 ```typescript
 await client.table("quotes")
@@ -323,32 +570,14 @@ await client.table("quotes")
   .execute();
 ```
 
-**HTTP**
+`.Aggregate(...)` and `.withCrossPartitionAccess()` are admin-listener APIs — not `QueryMessage` fields and not available on the data-plane.
 
-```json
-{
-  "database": "finance",
-  "table": "quotes",
-  "crossPartitionAccess": true,
-  "where": {
-    "and": [
-      { "column": "time", "op": "gte", "value": 1748908800000 }
-    ]
-  }
-}
-```
-
-Cross-partition access bypasses the partition-filter guard only. **PLS and auth-db-pls still restrict which partitions the caller may see.** Use this for authorized admin analytics, not routine app queries.
-
-### Querying candle tables
-
-Candle tables are normal catalog tables. **Admin** can `POST /api/databases/finance/query` with `table: candles_bid_1h`. A **browser-tier** caller cannot: ad-hoc `/query` is 404 on the data plane. Use a named query over the MQ name, selecting `high` / `open` / `low` / `close` (the declared `outputName`s). The time bucket is **Int64 epoch milliseconds** (start of the UTC hour/day/minute), not a formatted string.
-
-**Admin HTTP:**
+### Ad-hoc query on a candle table (admin HTTP)
 
 ```http
 POST /api/databases/finance/query
 Content-Type: application/json
+Authorization: Bearer <admin-token>
 
 {
   "database": "finance",
@@ -356,121 +585,17 @@ Content-Type: application/json
   "where": {
     "and": [
       { "column": "ticker", "op": "eq", "value": "AAPL" },
-      { "column": "time", "op": "gte", "value": 1748959200000 }
+      { "column": "time",   "op": "gte", "value": 1748959200000 }
     ]
   }
 }
 ```
 
-Auto-routing: a compatible query against `quotes` may be served from an MQ result table when one matches. Query `candles_bid_1h` directly when you want the pre-aggregated path.
+### Bulk-loading historical data {#bulk-loading-historical-data}
 
-**Browser-tier named query** (schema file; `dataPlaneAccess` already on the MQ):
+When using bulk-load, rows bypass incremental MQ maintenance by design. Refresh after the load commits.
 
-```json
-"namedQueries": {
-  "candles.byTicker": {
-    "table": "candles_bid_1h",
-    "select": ["ticker", "time", "open", "high", "low", "close"],
-    "where": { "and": [{ "column": "ticker", "op": "eq", "param": "ticker" }] },
-    "orderBy": [{ "column": "time", "descending": false }],
-    "limit": 500,
-    "params": { "ticker": { "required": true, "maxLength": 16 } }
-  }
-}
-```
-
-
----
-
-## 6. Partition-level security
-
-Market-data apps typically isolate users by **ticker** (or by data **source**). Aouda supports two common patterns.
-
-### Pattern 1 — `jwt-claim` (single ticker per user)
-
-Each user's JWT carries a `tenant_id` claim matching the partition key (for example ticker symbol). Enable PLS on the table:
-
-```json
-{
-  "name": "quotes",
-  "partitionLevelSecurity": true,
-  "authMode": "jwt-claim",
-  "columns": [
-    { "name": "ticker", "type": "String", "partitionKeyOrder": 1 }
-  ]
-}
-```
-
-The server injects or validates that queries only touch the user's ticker. Ideal for **Derive**-style apps where each end user watches one symbol.
-
-See [Auth — jwt-claim mode](../auth/authorization.md#193-mode-1-jwt-claim-default).
-
-### Pattern 2 — `auth-db-pls` (multi-ticker watchlists)
-
-When a user may access **many tickers** (watchlist, portfolio), store grants in the auth database and set:
-
-```json
-{
-  "partitionLevelSecurity": true,
-  "authMode": "auth-db-pls",
-  "permissionDimension": "ticker"
-}
-```
-
-Grant partitions via the admin API:
-
-```bash
-curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_alice/partition-grants \
-  -H "Authorization: Bearer <admin-token>" \
-  -d '{ "dimension": "ticker", "partitionKey": "AAPL", "accessLevel": "read" }'
-```
-
-**Fan-out:** A query without a ticker filter automatically merges results from all granted tickers — the primary pattern for multi-symbol dashboards. Revoke access on the next request without re-issuing JWTs.
-
-For composite keys (`ticker` + `source`), use a dimension that matches your partition model or split tables by security boundary. See [Auth — auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) and Use Case 3 (financial platform).
-
----
-
-## 7. Storage layout on disk
-
-### Partition directories
-
-Under `Auto` storage, each `(ticker, source)` partition gets a dedicated path once volume thresholds are met; smaller partitions may share hashed buckets first. Column data lives in **column-per-file** segments under `data/` (ADR 0001).
-
-### String partition keys (ticker)
-
-Ticker values use **`String_Dict`** encoding in column files. Repeating the same ticker string millions of times per partition costs little — dictionary encoding stores one copy of `"AAPL"` per segment.
-
-### Virtual partition key columns (optional optimization)
-
-For partition key columns whose value is **constant within a partition directory** (for example `ticker` under `partitions/AAPL/...`), you may mark the column as a **virtual partition key** at table creation. Aouda skips writing redundant `.col` files and reconstructs the value from the partition path at read time. Old segments with physical column files remain readable.
-
-This is a storage optimization, not required for correctness. See engine catalog flag `isVirtualPartitionKey` on partition key columns (no `partitionFunction` on virtual keys).
-
----
-
-## 8. End-to-end checklist
-
-1. Create `quotes` (and optionally `trades`) with `ticker` + `source` partition keys and `time` clustered.
-2. Enable PLS (`jwt-claim` or `auth-db-pls`) before production traffic.
-3. Create Aggregate MQs for `candles_bid_1d`, `candles_bid_1h`, `candles_bid_1m` (and ask/trades variants as needed).
-4. App queries: partition-filtered named queries for user-scoped latest quotes (`in` on ticker is enough for that column); named query over candle MQs selecting `outputName` columns for charts.
-5. Admin analytics only: `withCrossPartitionAccess()` / `crossPartitionAccess: true` on the **admin** listener, with rate limiting enabled. Not a browser-tier recipe.
-
----
-
-## 9. Bulk-loading historical data
-
-When you use `bulk-load`, rows bypass incremental MQ maintenance by design.  
-After the load commits, trigger or await a materialized-query refresh before reading candle tables.
-
-### Recommended flow
-
-1. Bulk-load historical `quotes` rows.
-2. Wait for MQ refresh completion (automatic when not skipped, or explicit refresh call).
-3. Query `candles_bid_*` tables.
-
-### HTTP
+**HTTP:**
 
 ```http
 POST /api/databases/finance/materialized-queries/candles_bid_1h:refresh
@@ -479,49 +604,28 @@ Content-Type: application/json
 { "await": true }
 ```
 
-Use `{ "await": false }` to schedule and continue immediately.
-
-### .NET client
+**.NET client:**
 
 ```csharp
 var handle = await client.BulkLoadAsync("quotes", rows, new BulkLoadOptions
 {
-    // Default is Auto (refresh after commit). Set Skip for multi-step pipelines.
     PostLoadMqBehavior = ClientPostLoadMqBehavior.Auto
 });
 
-// Optional explicit refresh (useful when PostLoadMqBehavior=Skip)
 await client.MaterializedQueries.RefreshAsync("candles_bid_1h", awaitCompletion: true);
 ```
 
-### TypeScript client
+**TypeScript client:**
 
 ```typescript
-await client.bulkLoad("quotes", rows, {
-  // default: "auto"
-  postLoadMqBehavior: "auto",
-});
-
+await client.bulkLoad("quotes", rows, { postLoadMqBehavior: "auto" });
 await client.materializedQueries.refresh("candles_bid_1h", { await: true });
 ```
 
-### CLI
-
-```bash
-# default: auto refresh after bulk-load commit
-aouda table bulk-load quotes --file ./quotes-history.jsonl
-
-# skip refresh now, refresh explicitly later
-aouda table bulk-load quotes --file ./quotes-history.jsonl --skip-mq-refresh
-aouda mq refresh candles_bid_1h --await
-```
-
-Use `--skip-mq-refresh` when you intentionally load multiple related tables first and refresh once at the end.
-
 ---
 
-## 10. References
+## References
 
-- MarketData-Gaps implementation: `TruncateToMinute`, FIRST/LAST aggregates, derived MQ group-by, TS cross-partition toggle
-- ADRs: [0014 time-series clustering](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0014-time-series-clustering-optimization.md), [0015 materialized queries](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0015-materialized-queries.md), [0009 partitioning](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0009-partitioning-multitenancy.md)
-- Engine tests: `tests/Aouda.Engine.Api.Tests/AggregateApiTests.cs` (`Engine_OhlcCandle_WithDerivedTimeBucket_ProducesCorrectCandles`)
+- Conformance fixture: `examples/p40-browser-tier/` — `aouda.schema.json`, `seed.json`, `expected.json`
+- ADRs: [0040 direct-client-access and trust boundary](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0040-direct-client-access-and-the-trust-boundary.md) (D-3, D-5, D-15, D-20, D-30–D-36), [0015 materialized queries](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0015-materialized-queries.md), [0009 partitioning](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0009-partitioning-multitenancy.md)
+- Engine tests: `tests/Aouda.Server.Tests/P40/P40BrowserTierConformanceTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`

@@ -1,0 +1,84 @@
+{
+  "execute": [
+    {
+      "alias": "quotes.watchlist",
+      "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" },
+      "orderByIndex": null,
+      "columns": ["ticker", "source", "time", "bid", "ask"],
+      "rowCount": 6,
+      "totalMatches": 6,
+      "data": {
+        "ticker": ["AAPL", "AAPL", "MSFT", "MSFT", "AAPL", "AAPL"],
+        "source": ["nasdaq", "nasdaq", "nasdaq", "nasdaq", "nasdaq", "nasdaq"],
+        "bid":    [153.0, 152.0, 300.0, 299.0, 151.0, 150.0]
+      }
+    },
+    {
+      "alias": "listings.screener",
+      "args": { "pageOffset": 0 },
+      "orderByIndex": null,
+      "columns": ["ticker", "currency", "sector", "country", "mcap"],
+      "rowCount": 5,
+      "totalMatches": 5,
+      "data": {
+        "ticker": ["AAPL", "EQNR", "GOOG", "MSFT", "NOVO"]
+      }
+    },
+    {
+      "alias": "listings.screener",
+      "args": { "currency": ["USD"], "sector": "Tech", "pageOffset": 0 },
+      "orderByIndex": null,
+      "columns": ["ticker", "currency", "sector", "country", "mcap"],
+      "rowCount": 3,
+      "totalMatches": 3,
+      "data": {
+        "ticker": ["AAPL", "GOOG", "MSFT"]
+      }
+    },
+    {
+      "alias": "candles.byTicker",
+      "args": { "ticker": "AAPL" },
+      "orderByIndex": null,
+      "columns": ["ticker", "time", "open", "high", "low", "close"],
+      "rowCount": 2,
+      "data": {
+        "ticker": ["AAPL", "AAPL"],
+        "open":   [150.0, 152.0],
+        "high":   [151.0, 153.0],
+        "low":    [148.0, 152.0],
+        "close":  [151.0, 153.0]
+      }
+    },
+    {
+      "alias": "gainers.top",
+      "args": {},
+      "orderByIndex": null,
+      "columns": ["ticker", "open", "close", "changePct"],
+      "rowCount": 3,
+      "data": {
+        "ticker": ["AAPL", "MSFT", "GOOG"]
+      }
+    },
+    {
+      "alias": "gainers.top",
+      "args": {},
+      "orderByIndex": 1,
+      "columns": ["ticker", "open", "close", "changePct"],
+      "rowCount": 3,
+      "data": {
+        "ticker": ["AAPL", "GOOG", "MSFT"]
+      }
+    }
+  ],
+  "subscribe": [
+    {
+      "alias": "quotes.watchlist",
+      "args": { "tickers": ["AAPL"], "source": "nasdaq" }
+    },
+    {
+      "alias": "quotes.lastPrice",
+      "args": { "tickers": ["AAPL"], "source": "nasdaq" },
+      "publicColumns": ["ticker", "source", "bid", "ask", "time"]
+    }
+  ]
+}

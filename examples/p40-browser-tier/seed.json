@@ -1,0 +1,26 @@
+{
+  "quotes": [
+    { "id": 1, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T10:00:00Z", "bid": 150.0, "ask": 150.5 },
+    { "id": 2, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T10:01:00Z", "bid": 151.0, "ask": 151.5 },
+    { "id": 3, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T11:00:00Z", "bid": 152.0, "ask": 152.5 },
+    { "id": 4, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T11:01:00Z", "bid": 153.0, "ask": 153.5 },
+    { "id": 5, "ticker": "MSFT", "source": "nasdaq", "time": "2023-11-15T10:02:00Z", "bid": 299.0, "ask": 299.5 },
+    { "id": 6, "ticker": "MSFT", "source": "nasdaq", "time": "2023-11-15T10:03:00Z", "bid": 300.0, "ask": 300.5 },
+    { "id": 7, "ticker": "AAPL", "source": "oslo",   "time": "2023-11-15T10:00:30Z", "bid": 148.0, "ask": 148.5 }
+  ],
+  "trades": [
+    { "id": 1, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T10:00:00Z", "price": 150.0, "size": 100 },
+    { "id": 2, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T10:01:00Z", "price": 160.0, "size": 200 },
+    { "id": 3, "ticker": "MSFT", "source": "nasdaq", "time": "2023-11-15T10:02:00Z", "price": 300.0, "size":  50 },
+    { "id": 4, "ticker": "MSFT", "source": "nasdaq", "time": "2023-11-15T10:03:00Z", "price": 315.0, "size":  75 },
+    { "id": 5, "ticker": "GOOG", "source": "nasdaq", "time": "2023-11-15T10:04:00Z", "price": 180.0, "size":  30 },
+    { "id": 6, "ticker": "GOOG", "source": "nasdaq", "time": "2023-11-15T10:05:00Z", "price": 176.4, "size":  40 }
+  ],
+  "listings": [
+    { "ticker": "AAPL", "currency": "USD", "sector": "Tech",       "country": "US", "mcap": 3000000 },
+    { "ticker": "MSFT", "currency": "USD", "sector": "Tech",       "country": "US", "mcap": 2500000 },
+    { "ticker": "GOOG", "currency": "USD", "sector": "Tech",       "country": "US", "mcap": 2000000 },
+    { "ticker": "NOVO", "currency": "EUR", "sector": "Healthcare", "country": "NO", "mcap":  500000 },
+    { "ticker": "EQNR", "currency": "EUR", "sector": "Energy",     "country": "NO", "mcap":  100000 }
+  ]
+}
