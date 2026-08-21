@@ -180,13 +180,13 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 | Node | Result |
 |------|--------|
 | `colRef` | That column's catalog type; missing → Unknown |
-| literal | `int` → Int32; `long` → Int64; `float` → Float32; `double` → Double; `decimal` → Decimal; `string` → String; `bool` → Bool. JSON numbers use the same conversion as the evaluator: integer-fit → Int32/Int64, else Decimal then Double |
+| literal | `int`/`short`/`byte` → Int32; `long` and in-range `ulong` → Int64; `float` → Float32; `double` → Double; `decimal` → Decimal; `string` → String; `bool` → Bool. JSON numbers: no fraction and fits Int64 → Int64, otherwise Double |
 | arithmetic | Same widen as insert-time `NumericOp`: any Decimal → Decimal; any Double/Float32 → Double; both integer family → Int64 |
 | coalesce / conditional | Common type of inferable arms; mixed or an uninferable arm → Unknown |
 | `call` | `upper`/`lower`/`trim`/`concat`/`substring` → String; `round`/`roundTo` → Decimal; `cast` → the named type |
 | unbound `param` | Unknown |
 
-A JSON literal such as `0.9` is Decimal, so `price * 0.9` over HTTP is Decimal even when `price` is Double. A C# `double` literal `0.9` stays Double.
+A JSON literal such as `0.9` is Double, so `price * 0.9` over HTTP is Double when `price` is Double. A CLR `decimal` literal stays Decimal.
 
 A definition using `selectExpr` also cannot be subscribed (table above; **BL-170**). HTTP execute still works.
 
