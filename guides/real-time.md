@@ -238,7 +238,9 @@ Documented intent that is not currently fully productized:
 - `change`:
   - Incremental event with operation (`insert`, `update`, `delete`, `upsert`) and monotonic version.
 - `resume_from`:
-  - Client-provided last seen version used to recover after reconnect.
+  - Client-provided last seen **change-event sequence** used to recover after reconnect. Unchanged by P38.
+- `token` (P38):
+  - Optional 42-hex consistency token on `snapshot` / `snapshot_complete` / `change` / heartbeat, **alongside** `version`. Hand it to HTTP `?at_least=` or subscribe `at_least`. Heartbeat `version` is **not** a WAL sequence. See [Freshness](freshness.md).
 - `at-least-once`:
   - Clients may see replayed events; version-based dedup is required for idempotent reducers.
 - Subscription filtering layers:

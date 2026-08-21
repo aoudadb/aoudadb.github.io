@@ -175,6 +175,8 @@ OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. 
 
 Until PKCE exists, the supported browser pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)), or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
 
+The **application** holds the consistency token (cookie or header **you** name). The SDK captures `X-Aouda-Token` in memory and **never** `Set-Cookie`. Recreating the client without a shared store loses read-your-writes. See [Freshness](freshness.md).
+
 ---
 
 ## Worked example: SPA on the data-plane
@@ -241,6 +243,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 
 - [How to build apps effortlessly with Aouda](build-apps.md) — the full build path this listener model serves
 - [Named queries](named-queries.md)
+- [Freshness and replica consistency](freshness.md) — token in the browser; SDK never sets cookies
 - [Division of responsibility](division-of-responsibility.md)
 - [Adopting Aouda](adoption.md) — migrating an existing app onto this model
 - [HTTP API](../reference/http-api.md)

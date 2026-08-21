@@ -41,6 +41,7 @@
 - [How to build apps effortlessly with Aouda](https://aoudadb.github.io/guides/build-apps/): **Start here for any application.** The canonical build path — the tiers you do not build, 10-minute app, twelve-step sequence, capability map, alternatives per constraint, agent rules and error contract
 - [Adopting Aouda in an existing app](https://aoudadb.github.io/guides/adoption/): Target architecture, which hops to delete, SDK coverage gaps, migration order
 - [Named queries and mutations](https://aoudadb.github.io/guides/named-queries/): Hash-pinned BFF contracts, batch envelope, codegen, subscribe-by-hash
+- [Freshness and replica consistency](https://aoudadb.github.io/guides/freshness/): Consistency token (`AtLeast`), named-query alias `freshness`, `GET …/token`, caveats (scale-out store, clock skew, `MaxLagSeconds`, `w:1` failover). Wire: [HTTP API — Consistency tokens](https://aoudadb.github.io/reference/http-api/#consistency-tokens-and-freshness)
 - [What a browser-tier read cannot do](https://aoudadb.github.io/guides/browser-tier-read-limits/): Operators, data-plane allowlist, partition-filter rule, conflation caveat
 - [Direct client access](https://aoudadb.github.io/guides/direct-client-access/): Admin vs data-plane listeners, `mk_pub_*`, quotas, thin edge. PKCE is not shipped.
 - [Division of responsibility](https://aoudadb.github.io/guides/division-of-responsibility/): What belongs in Aouda vs a service; decision test; latency caveat

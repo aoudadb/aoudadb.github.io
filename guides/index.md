@@ -85,6 +85,7 @@ Use this mapping as the baseline when planning doc updates:
 | Server CLI, Docker, Kubernetes, cloud, Hub | P16 | `docs/dev/Functionality-Cloud-And-Hub.md` |
 | **Server configuration** (precedence, install bootstrap, restart) | P34 / P4 | `guides/server-configuration.md` |
 | **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `guides/access-surface.md`, `guides/browser-tier-read-limits.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
+| **Freshness and replica consistency** | P38 | `guides/freshness.md` — token, `AtLeast`, alias `freshness`, caveats; wire in `reference/http-api.md` § Consistency tokens. Same user-guide rules as the P37 cluster |
 | **How to build an application on Aouda** (the flagship entry point) | Cross-phase (P37, P40) | `guides/build-apps.md` — canonical build path for new applications; `guides/adoption.md` is its existing-application branch. Same user-guide rules as the P37 cluster |
 | Studio management console | P5, P6, P9, P12, P16 | `docs/dev/Functionality-Studio.md` |
 | TypeScript client SDK (`@aouda/client`) | P5, P10, P12, P14, P15, P16 | `docs/dev/Functionality-TypeScript-Client.md` |

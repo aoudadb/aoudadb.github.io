@@ -326,6 +326,8 @@ High-level flow:
    - direct result-table query (`engine.TableAsync(queryName)`), or
    - auto-routed base query.
 
+Token-bearing HTTP reads of an MQ wait on the MQ **maintenance watermark**, not the node's WAL position. A fully caught-up replica can still be stale through an MQ that has not incorporated the write (ADR 0042 `D-9`). Status and query JSON `token` is that watermark. See [Freshness](freshness.md#mq-watermark).
+
 Key implementation anchors:
 
 - Definition + status + runtime state:

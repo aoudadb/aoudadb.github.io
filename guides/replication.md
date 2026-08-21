@@ -614,7 +614,7 @@ var rows = await client.GetTable("orders")
 
 Expected result: topology/status calls return admin replication information; query includes read preference header and is accepted only if serving node can satisfy the requested preference.
 
-Common mistake: assuming `ReadPreference.SecondaryWithMaxLag` exists in `Aouda.Protocol.ReadPreference` (the NuGet-facing enum). It does not — `Aouda.Protocol.ReadPreference` has only `Primary`, `PrimaryPreferred`, `Secondary`, `SecondaryPreferred`, `Nearest`, `Hidden`. The value `SecondaryWithMaxLag` exists only in `Aouda.Engine.Replication.ReadPreference` (internal engine type). Passing `"SecondaryWithMaxLag"` as a string to the HTTP `readPreference` parameter is accepted by the engine enum parser, but the lag threshold options are not yet wired at the query endpoint — it behaves as a role-only secondary check.
+Lag budgets (`maxLagBytes` / `maxLagSeconds` / `maxStalenessMs`) and consistency tokens are enforced at **request time**. `SecondaryWithMaxLag` is on the public `Aouda.Protocol.ReadPreference` enum. `MaxLagSeconds` is **measured staleness** (`now(replica) − commitUtcTicks`), not lag-bytes ÷ 1 MB/s. Present `X-Aouda-Token` / `?at_least=` so a regional replica cannot answer before it has seen the caller's write. See [Freshness and replica consistency](freshness.md).
 
 ### TypeScript example
 
@@ -687,7 +687,7 @@ Common mistake: passing invalid writeConcern strings (for example `w:majority`) 
 | TS query read preferences | TS table/query API option for read preference | Use direct HTTP/transport with query/header | Follow-up after P4 E6 | High |
 | SDK write concern options | `.NET`/TS mutation API option for write concern | Use raw HTTP payload with `writeConcern` | Follow-up after P6 E3 | High |
 | `.NET` coverage endpoint wrapper | `AoudaClient.GetReplicationCoverageAsync()` | Call raw transport to `/admin/replication/coverage` | Client enhancement task (not yet created) | Medium |
-| Lag-threshold read preference inputs | Public request shape for `MaxLagBytes`/`MaxLagSeconds` | Not available; `SecondaryWithMaxLag` acts as role-only check today | Follow-up from P6 E2 | Medium |
+| Lag-threshold + token on replica reads | *(shipped P38)* `maxLagBytes` / `maxLagSeconds` / `maxStalenessMs` / `at_least` | Use [Freshness](freshness.md). `MaxLagSeconds` is measured staleness | P38 | — |
 | Slot diagnostics endpoint | `/admin/replication/slots` and per-slot lag metrics | Infer indirectly from logs/counters | P4 I4 follow-up notes | Medium |
 | Specific named-replica targeting | `Specific` read preference + target member input | Route request directly to chosen node URL | ADR 0010 future scope | Medium |
 

@@ -68,6 +68,26 @@ const client = new AoudaClient({
 await client.connect();
 ```
 
+### Consistency token (read-your-writes)
+
+The client captures `X-Aouda-Token` after every data-plane response and presents it on the next request. The default store is **in-memory per instance**. Recreating the client without sharing `consistencyTokenStore` **loses** read-your-writes. Pin a token with `.atLeast(token)`; fetch this node's current token with `getConsistencyToken()`. Full caveats: [Freshness](../guides/freshness.md).
+
+```typescript
+import { AoudaClient, MemoryConsistencyTokenStore } from '@aouda/client';
+
+const store = new MemoryConsistencyTokenStore(); // share across instances / tabs
+const client = new AoudaClient({
+  serverUrl: 'http://localhost:5000',
+  database: 'mydb',
+  consistencyTokenStore: store,
+});
+await client.connect();
+
+await client.table('orders').insert({ id: 1, status: 'open' });
+const rows = await client.table('orders').atLeast(store.get('mydb')!).execute();
+const current = await client.getConsistencyToken();
+```
+
 ### With Authentication
 
 ```typescript

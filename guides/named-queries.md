@@ -73,6 +73,17 @@ The strong arguments:
 | Persist-time cost | `1 + joinCount` | Caps: 3 joins, cost 8 (`NAMED_QUERY_TOO_MANY_JOINS` / `NAMED_QUERY_COST_EXCEEDED`). |
 | Batch size | 32 | Envelope 400 if empty, over cap, or includes a mutation hash. |
 | Runtime registration | **Does not exist** | That is the GraphQL APQ trap. |
+| Bare-hash execute (no `alias`) | Fail-safe freshness | Primary-only + `readYourWrites`. See [Declared freshness](#declared-freshness). |
+
+---
+
+## Declared freshness
+
+Optional `freshness` lives on the **alias**, outside the content hash. Changing it does not break a client pinned to the hash. Two aliases may share one hash with different budgets.
+
+Call sites may **tighten** (`?maxStalenessMs=500` on a 2 s alias). Loosening is 400 `FRESHNESS_LOOSENED`. A branch that loosens a budget is `freshness` / `widen` on `aouda schema diff --access` and fails CI; a tightening is `narrow` and does not.
+
+Pass the alias as `?alias=`, header `X-Aouda-Named-Query-Alias`, or body `alias` (query wins). Bare hash (no alias) is the fail-safe above. Full contract, caveats, and SDK examples: [Freshness and replica consistency](freshness.md).
 
 ---
 
@@ -550,6 +561,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in
-- [Access-surface diff](access-surface.md) — CI gate on widening
+- [Access-surface diff](access-surface.md) — CI gate on widening (including `freshness` loosen)
+- [Freshness and replica consistency](freshness.md) — token, `AtLeast`, alias `freshness`, caveats
 - [HTTP API](../reference/http-api.md)
 - [TypeScript client](../clients/typescript.md)

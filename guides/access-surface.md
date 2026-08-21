@@ -6,8 +6,8 @@ parent: "Guides"
 
 # Access-surface diff
 
-Document status: Complete (P37)  
-Last updated: 2026-08-14
+Document status: Complete (P37; P38 freshness axis)  
+Last updated: 2026-08-21
 
 A schema change can widen what an untrusted credential can read. Aouda **reports that before it merges**.
 
@@ -43,8 +43,9 @@ HTTP shapes: [HTTP API — Access-surface diff](../reference/http-api.md#access-
 | Named-query projection | `select` / `selectExpr` **adds** a column the identity can already see |
 | Named-query added | New alias reachable to that identity |
 | Predicate | Effective filter gets weaker, or hashes differ and containment cannot prove narrowing |
+| Freshness | Named-query alias `freshness` becomes weaker (`reason: freshness`, `widen`). A tightening is `narrow` and does not fail CI. See [Freshness](freshness.md). |
 
-Narrowing (tighter RLS, removed column, `dataPlaneAccess` true→false) is reported but **does not fail CI**.
+Narrowing (tighter RLS, removed column, `dataPlaneAccess` true→false, tighter freshness) is reported but **does not fail CI**.
 
 `service_key` identities are skipped (always full; they cannot widen).
 

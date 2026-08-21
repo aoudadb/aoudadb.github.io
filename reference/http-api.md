@@ -54,6 +54,10 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Protocol-Version` | No | Protocol version (default: latest) |
 | `X-Request-Id` | No | Correlation ID (echoed in response) |
 | `X-Read-Preference` | No | Read preference for query routing |
+| `X-Aouda-Token` | No | Consistency token (`AtLeast`). 42-character lowercase hex. Query `at_least` **wins** when both are sent. Empty value is `TOKEN_MALFORMED`. **Not** the fencing header `X-Aouda-Current-Token`. |
+| `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
+| `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default `fetchPrimary`. |
+| `X-Aouda-Named-Query-Alias` | No | Named-query alias whose declared `freshness` to consume (query `alias` wins, then this header, then body `alias`). |
 | `Authorization` | **Required when the target database has auth enabled** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). App auth endpoints (`/api/databases/{db}/auth/signup|signin|refresh`) require at least an API key (`anon`, `pub`, or higher). |
 | `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. |
 
@@ -68,6 +72,7 @@ All API responses include:
 | `X-Server-Role` | Current role (Primary, Secondary, Hidden, Standalone) |
 | `X-Request-Id` | Echoed from request if provided |
 | `X-Auth-Database` | **On 401 auth errors only (optional).** Legacy/discovery hint. Clients should use the same auth context as the request: server auth → `POST /api/auth/signin`; app auth → `POST /api/databases/{db}/auth/signin`. Omitted when not applicable. |
+| `X-Aouda-Token` | Observed consistency token (42-hex). Set on mutation and read success **and** on `TOKEN_*` errors. Same value as JSON `token`. Distinct from `X-Aouda-Current-Token` (integer fencing token on writes in a replica set). |
 
 ### Authentication and Authorization
 
@@ -386,18 +391,54 @@ GET /api/query?readPreference=Secondary
 
 | Value | Description |
 |-------|-------------|
-| `Primary` | Read from primary only (default) |
+| `Primary` | Read from primary only (**default** — unchanged) |
 | `PrimaryPreferred` | Prefer primary, fall back to secondary |
 | `Secondary` | Read from any secondary (not hidden) |
 | `SecondaryPreferred` | Prefer secondary, fall back to primary |
 | `Nearest` | Read from lowest-latency member |
 | `Hidden` | Explicitly target hidden replica |
+| `SecondaryWithMaxLag` | Secondary that also satisfies the lag budget (`maxLagBytes` / `maxLagSeconds` / `maxStalenessMs`). Enforced at **request time** on the receiving node. |
+
+Lag query parameters (AND-ed when both byte and time bounds are set): `maxLagBytes`, `maxLagSeconds` (measured staleness of the last applied commit-class WAL frame — **not** lag-bytes ÷ 1 MB/s), `maxStalenessMs` (bound as `maxLagSeconds = maxStalenessMs / 1000.0`). `MaxLagBytes` is unchanged. See [Freshness](../guides/freshness.md).
 
 ### Behavior
 
 - **Standalone mode**: Ignores read preference (serves all requests)
-- **Hidden replicas**: Only serve `Hidden` preference, reject all others with `421 Misdirected Request`
+- **Hidden replicas**: Only serve `Hidden` preference, reject all others with `421 Misdirected Request` (`MISDIRECTED_REQUEST`) **before** any freshness wait
 - **Invalid values**: Default to `Primary`
+- **Lag / token gate**: when a consistency token or lag budget is presented, a behind node waits up to `waitMs` then applies `onExceeded`. Role mismatch stays `MISDIRECTED_REQUEST`. Freshness miss on a replica that *can* serve the role is `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`.
+
+---
+
+## Consistency tokens and freshness
+
+User guide: [Freshness and replica consistency](../guides/freshness.md).
+
+The token is an opaque sortable **42-character lowercase hex** string. Semantics are `AtLeast` (lower bound), never point-in-time `AsOf`.
+
+| Mechanism | Details |
+|-----------|---------|
+| Present | Request header `X-Aouda-Token` or query `at_least`. **Query wins.** Empty is `TOKEN_MALFORMED`. |
+| Return | Response header `X-Aouda-Token` and JSON `token` on mutation/read success and on `TOKEN_*` errors |
+| Current | `GET /api/databases/{db}/token` → `{ "database", "token" }` |
+| Wait | `waitMs` / `X-Aouda-Wait-Ms` (default 250, cap 30 000) |
+| Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately |
+| Named-query alias | `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`. Bare hash is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
+| Bulk-load commit | Field is `token`, **not** `walPosition` |
+| Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
+
+Admin replication `walPosition` on `GET /admin/replication/status` is lag observability, not this token.
+
+MQ list/status and `POST …/materialized-queries/{name}/query` stamp `token` as the **maintenance watermark** (`D-9`), not a raw WAL offset. A token-bearing MQ read waits on that watermark.
+
+Query parameter **wins** over the header when both are sent:
+
+```http
+POST /api/databases/appdb/query?at_least=01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa HTTP/1.1
+X-Aouda-Token: 01bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+```
+
+The gate uses the `at_least` value.
 
 ---
 
@@ -500,9 +541,17 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `MISDIRECTED_REQUEST` | 421 | Request sent to wrong server based on read preference |
+| `MISDIRECTED_REQUEST` | 421 | Request sent to wrong server based on **role** (read preference). Distinct from `TOKEN_FETCH_PRIMARY`. |
 | `WRITE_NOT_ALLOWED` | 403 | Write operations not allowed on this server |
 | `NOT_PRIMARY` | 421 | Server is not the primary |
+| `TOKEN_MALFORMED` | 400 | Consistency token undecodable, empty, or wrong version. Error body/header carry the node's observed token. |
+| `TOKEN_FOREIGN_DATABASE` | 400 | Token issued for a different database. Do not retry the same string. |
+| `TOKEN_EPOCH_SUPERSEDED` | 409 | Failover lost the write, or future term. **Never waited.** Do not retry the same token. |
+| `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. |
+| `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
+| `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
+| `FRESHNESS_LOOSENED` | 400 | Call site demanded less freshness than the named-query alias, or a non-`Primary` preference on a fail-safe bare hash. |
+| `NAMED_QUERY_ALIAS_MISMATCH` | 400 | Presented `alias` does not resolve to the path hash. |
 
 #### Server Errors (5xx)
 
@@ -626,6 +675,28 @@ Direct lookup of a specific database by name. Always returns the database if it 
 
 ---
 
+#### `GET /api/databases/{db}/token`
+
+This node's current consistency token for the database (what a subsequent `AtLeast` read would wait for).
+
+**Success (200):**
+
+```http
+HTTP/1.1 200 OK
+X-Aouda-Token: 01a1b2c3d4e5f60708090a0b0c0d0e0f10111213
+```
+
+```json
+{
+  "database": "appdb",
+  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
+}
+```
+
+Unknown database → 404 `DATABASE_NOT_FOUND`. Requires read authorization when the database has auth enabled.
+
+---
+
 #### `POST /api/databases`
 
 Creates a new operator-facing database. The `isInternal` flag cannot be set by clients — it is always `false` for user-created databases. Internal databases are only created by Aouda bootstrap services.
@@ -678,6 +749,11 @@ Execute a query against a table.
 |-------|---------|-------------|
 | `format` | `columnar` | Response format: `columnar` or `rows` |
 | `readPreference` | `Primary` | Read preference (overrides header) |
+| `at_least` | _(omitted)_ | Consistency token. Wins over `X-Aouda-Token`. |
+| `waitMs` | 250 when gate active | Freshness wait; cap 30 000 |
+| `onExceeded` | `fetchPrimary` | `wait` \| `fetchPrimary` \| `fail` |
+| `maxLagBytes` / `maxLagSeconds` / `maxStalenessMs` | unset | Lag budget (time is measured staleness) |
+| `readYourWrites` | _(alias / fail-safe)_ | Call-site tighten only |
 
 **Request Body:**
 
@@ -855,7 +931,7 @@ There is **no HTTP route that registers a definition**. Definitions deploy throu
 |---|---|
 | `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Directory-answerable PK distinct sets `stats.distinctServedFromPartitionMetadata` (omitted when false). |
 | `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
-| `limitParam` / `offsetParam` | Parameter **names** that bind limit/offset. A numeric `limit` cap is still required; `offsetParam` requires a positive offset cap. Non-zero offset disqualifies subscribe. |
+| `freshness` | Out-of-hash object on the **alias**: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Changing it does not change the content hash. |
 
 Base path: `/api/databases/{db}/named-queries`
 
@@ -864,8 +940,6 @@ The execute and batch bodies are path-scoped. They do **not** require a `databas
 #### `POST /api/databases/{db}/named-queries/{hash}/query`
 
 Execute one named query by content hash (64 hex SHA-256; optional `sha256:` prefix).
-
-**Query parameters:** `format=columnar` (default) or `format=rows`. `readPreference` as on ad-hoc query.
 
 **Request body:**
 
@@ -879,7 +953,9 @@ Execute one named query by content hash (64 hex SHA-256; optional `sha256:` pref
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
-**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset). When the hash is deprecated, `warnings` is present:
+**Query parameters:** `format=columnar` (default) or `format=rows`. `readPreference` as on ad-hoc query. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`, `alias` (consumes the alias's declared `freshness`; query wins over `X-Aouda-Named-Query-Alias` and body `alias`). Bare hash (no alias) is fail-safe: primary-only + `readYourWrites`. Loosening is 400 `FRESHNESS_LOOSENED`. Alias/hash mismatch is 400 `NAMED_QUERY_ALIAS_MISMATCH`.
+
+**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset). When the hash is deprecated, `warnings` is present:
 
 ```json
 {
@@ -1051,9 +1127,12 @@ Base path: `/api/databases/{db}/materialized-queries`
     "rowsScanned": 1,
     "rowsReturned": 1,
     "executionMs": 0.42
-  }
+  },
+  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
+
+`token` is the MQ **maintenance watermark** (the source position the MQ has incorporated), not this node's WAL offset. Token-bearing MQ reads wait on that watermark. GET list/status objects include the same field.
 
 ---
 
@@ -2631,7 +2710,11 @@ Until `snapshot_complete` arrives, the client **must not** treat accumulated sna
 | `hash` | string? | Conditional | Named-query content hash (64 hex). **Required on the data-plane listener.** Pins the definition for the subscription lifetime; redeploying the alias does not change an in-flight subscription. |
 | `args` | object? | No | Bind arguments for `hash` subscribe. Same shape as HTTP execute `args`. |
 | `filter` | object? | No | Ad-hoc `WhereClause`. **Illegal** together with `hash` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
-| `resume_from` | number? | No | Resume from this version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. |
+| `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. |
+| `at_least` | string? | No | Consistency-token pin: snapshot at at least this token. Optional `wait_ms` / `on_exceeded` (same values as HTTP). Omitted `at_least` leaves `resume_from` byte-for-byte today's path. |
+| `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |
+| `on_exceeded` | string? | No | `wait` \| `fetchPrimary` \| `fail`. |
+| `alias` | string? | No | Named-query alias whose declared freshness to consume (with `hash`). |
 | `conflate` | object? | No | Opt-in keyed conflation. Omitted = every visible event. See below. |
 
 **`conflate`:**
@@ -2842,16 +2925,17 @@ Authentication failure. The server closes the connection after sending this mess
 
 #### `heartbeat`
 
-Periodic liveness signal carrying the current **per-database** sequence version. Clients **must not** infer a gap from `heartbeat.version` or from holes in `change.version` — the sequence is shared by all tables on the database, so a subscriber to table A legitimately sees holes from table B. Unintentional loss is a server-emitted `gap` message (below).
+Periodic liveness signal carrying the current **per-database change-event sequence** (`version`) and this node's consistency `token`. Clients **must not** infer a gap from `heartbeat.version` or from holes in `change.version` — the sequence is shared by all tables on the database, so a subscriber to table A legitimately sees holes from table B. Unintentional loss is a server-emitted `gap` message (below). `version` is **not** a WAL sequence; freshness for a later HTTP read is `token`.
 
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"heartbeat"` |
-| `version` | number | Current global sequence version (monotonically increasing). |
+| `version` | number | Current change-event sequence (monotonically increasing). |
+| `token` | string? | This node's current C-1 consistency token (42-hex). |
 
 **Example:**
 ```json
-{"type": "heartbeat", "version": 100042}
+{"type": "heartbeat", "version": 100042, "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"}
 ```
 
 ---
@@ -2898,7 +2982,8 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `type` | string | Always `"snapshot"` |
 | `id` | string | Subscription ID this snapshot belongs to. |
 | `rows` | object[] | Rows in this page. May be empty. |
-| `version` | number | Pinned snapshot version. Store this; pass as `resume_from` on reconnect. |
+| `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
+| `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
 
 **Example:**
 ```json
@@ -2927,13 +3012,15 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 | `row_count` | number | Total rows delivered across all snapshot pages |
 | `total_matches` | number? | Present when the named query declared `count: true` — total matching rows, ignoring limit/offset |
 | `warnings` | object[]? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe; `CONFLATE_NOOP` when default `conflate` cannot collapse inserts) |
+| `token` | string? | Same C-1 string as every preceding snapshot page |
 
 ```json
 {
   "type": "snapshot_complete",
   "id": "sub-orders-1",
   "version": 100040,
-  "row_count": 2
+  "row_count": 2,
+  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
 
@@ -2977,6 +3064,7 @@ Incremental row change on an active subscription. Sent whenever a row matching t
 | `key` | object? | Primary key of the affected row. Present for `"delete"`. |
 | `version` | number | Per-database sequence version of this change. Do not infer gaps from holes. |
 | `values_skipped` | number? | Present on conflated value updates: count of intermediate updates dropped. **Not** a `gap`. |
+| `token` | string? | C-1 token of **this event's** WAL position. Hand to HTTP `?at_least=` to be sure the read sees this change. |
 
 **Example — insert:**
 ```json
@@ -3279,7 +3367,7 @@ Commit the session. All sealed segments become queryable.
 | `segmentsCreated` | number | Total segments created. |
 | `committedAtUtc` | string | ISO 8601 UTC commit timestamp. |
 | `deferredWorkCompleted` | boolean | Whether deferred work completed before this response was sent. |
-| `walPosition` | number | WAL position of the closing `BulkLoadCommitted` frame. Replicas that have applied this position have the complete load. |
+| `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load. |
 | `writeConcernRequested` | string | Echo of `writeConcern` from request. |
 | `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
@@ -3361,3 +3449,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.2 | 2026-07-31 | BL-130: `identityInsert` on `POST …/tables/{name}/rows`. BL-131: `options.identityInsert` on bulk-load `:begin` (commit-only counter floor). |
 | 2.2 | 2026-06-26 | **P17 (breaking):** `GET /api/databases` default response now excludes internal infrastructure databases (`_serverauth`, `_settings`). Use `?include=internal` to retrieve the full catalog. All database responses now include `isInternal` (bool), `isAuthDatabase` (bool), and `authDatabaseKind` (`"none"` \| `"server"` \| `"application"`) metadata fields. Application auth databases (`isInternal: false`) remain in the default list. |
 | 2.3 | 2026-08-19 | **P37 / server 0.1.7:** named-query execute + read-only batch (cap 32, one snapshot, positional errors); named-mutation execute; `mk_pub_*` + data-plane listener (404 not 403); WebSocket path `/api/databases/{db}/ws`; `subscribe.hash` / `args` / `conflate`; `snapshot_complete`; server `gap` (`last_seq`, `discarded`); `change.values_skipped`; `re_auth`; access-surface `?access=true`. Additive on the wire. |
+| 2.4 | 2026-08-21 | **P38:** consistency token (`X-Aouda-Token` / `?at_least=` / envelope `token` / `GET …/token`); named-query alias `freshness`; `TOKEN_*` / `FRESHNESS_*` errors; stream `token` alongside `version`; bulk-load commit `walPosition` → `token`. **Breaking:** `MaxLagSeconds` is measured staleness, not lag-bytes ÷ 1 MB/s. Default read preference remains `Primary`. |
