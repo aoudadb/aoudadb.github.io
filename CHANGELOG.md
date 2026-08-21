@@ -7,12 +7,13 @@ nav_order: 9
 
 Public, user-facing release notes. Engine phase status lives in the server
 [CHANGELOG](https://github.com/aoudadb/aouda/blob/main/docs/CHANGELOG.md) and
-[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P37 complete).
+[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P40 complete).
 
 ---
 
 ## Unreleased
 
+- **P40 complete (server 0.1.9).** Browser-tier named queries can carry a product: watchlist subscribe with `in`, throttled last-price (`collapse_inserts` / `latestPerKey` with `prev`), candle chart over `outputName` columns, paged screener with `totalMatches` and `whenParamPresent`, server-side top-gainers via computed MQ output. [Completion report](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P40-COMPLETION.md). Compatible `@aouda/client` **0.1.14**; Studio pin unchanged (**0.0.18** / **0.1.13**). See [Compatibility](clients/compatibility.md).
 - **P40 S09 — Market-data guide rewrite and browser-tier conformance fixture.** The [Market data guide](guides/market-data.md) is rewritten around a browser-tier caller using `mk_pub_*`. Published conformance fixture at `examples/p40-browser-tier/` (`aouda.schema.json`, `seed.json`, `expected.json`) demonstrates watchlist subscribe, `latestPerKey` last-price, candle chart via `outputName`, paged screener, and top-gainers ranking — all via `schema/apply` with zero imperative catalog calls.
 - **P40 S04–S08 capabilities added to public docs.** Fields that shipped but were not yet documented:
   - `collapse_inserts: true` on the subscribe `conflate` object — collapses in-flight inserts latest-wins; required for last-price throttling on insert-only tick tables (`D-32`).

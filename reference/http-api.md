@@ -6,6 +6,8 @@ parent: "Reference"
 
 # Aouda Wire Protocol v2
 
+> **Canonical location.** This file is the public wire / HTTP API reference (formerly multi-repo `WIRE-PROTOCOL.md`). Prefer the client SDKs (`Aouda.Client`, `@aouda/client`) for application code; use this document for endpoint shapes and protocol details. Do not recreate `WIRE-PROTOCOL.md` copies in other Aouda repos.
+
 This document specifies the JSON-based wire protocol for Aouda client-server communication.
 
 ## Overview
