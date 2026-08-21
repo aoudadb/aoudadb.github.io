@@ -661,6 +661,7 @@ If you are an AI agent writing an application against Aouda, this section is you
 6. [Data authorization](../auth/authorization.md) — pick a mode per table.
 7. [HTTP API](../reference/http-api.md) — the wire truth when a field name is in doubt.
 8. [Quick start for AI agents](../ai/quick-start.md) — if you need a database running in one command first.
+9. [Local CLI testing (agents)](../ai/local-cli-testing.md) — throwaway server + traps (`start -h`, data-plane allowlist, CorsOrigins, schema shape) before you burn a session on a wrong port or `POST /query`.
 
 ### Hard rules
 

@@ -27,6 +27,8 @@ dotnet tool install -g Aouda.Cli
 aouda start --port 5433 --data-dir ./aouda-data
 ```
 
+Do **not** pass `-h` / `--help` to `aouda start` — current CLI builds ignore help on that subcommand and start a server on port **5000** with data under `./data`. AI agents that need a disposable probe: [Local CLI testing (agents)](../ai/local-cli-testing.md).
+
 Set `--data-dir` (or `-d` / `--data-path`, same setting) to a stable path so data survives restarts, matches production layout, and is easy to back up. Server starts at `http://localhost:5433`. Create databases explicitly through API or `aouda databases create`.
 
 ```bash

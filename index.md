@@ -137,7 +137,8 @@ docker compose up
 → [Deployment](deployment/) — Kubernetes, Helm, Docker, Windows Service, systemd
 
 **Building with AI agents?**
-→ [AI Agent Quick Start](ai/quick-start/) — minimal bootstrap for agent-driven workflows
+→ [AI Agent Quick Start](ai/quick-start/) — minimal bootstrap for agent-driven workflows  
+→ [Local CLI testing (agents)](ai/local-cli-testing.md) — throwaway server recipe and CLI traps (`start -h`, data-plane allowlist, CorsOrigins)
 
 ---
 

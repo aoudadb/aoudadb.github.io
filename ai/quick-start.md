@@ -18,6 +18,8 @@ aouda start --port 5433 --data-dir ./data
 # Create database via POST /api/databases if not auto-created from config
 ```
 
+**Do not run `aouda start -h` / `--help`.** On current CLI builds, `start` forwards args to the server host; help is ignored and the process boots on port **5000** with data under **`./data`**. For a throwaway probe that must not collide with an existing server, use unused ports, `--data-dir` under the OS temp folder, then `aouda stop -s http://127.0.0.1:<port> --force` — full recipe and schema/data-plane traps: [Local CLI testing (agents)](local-cli-testing.md).
+
 Connect with TypeScript:
 
 ```typescript
@@ -156,6 +158,7 @@ For full capability details see [AI Agents](index.md).
 
 **Next step, once the bootstrap above works:** [How to build apps effortlessly with Aouda](../guides/build-apps.md) — the canonical build path for a real application, including a [Rules for AI agents](../guides/build-apps.md#rules-for-ai-agents) section with the reading order, the hard rules, the per-screen decision procedure, the error contract, and a self-verification checklist. This page gets you a database; that page gets you an application.
 
+- [Local CLI testing (agents)](local-cli-testing.md) — throwaway server recipe + CLI/schema/data-plane traps
 - [Full Getting Started guide](../getting-started/) — embedded mode, server mode, schema, auth, identity-insert
 - [Bulk Load](../guides/bulk-load/) — high-throughput ingest + `options.identityInsert`
 - [Auth for AI agents](index.md#212-scenario-playbooks-minimum-three) — bootstrap, service key, ADRA grant flows

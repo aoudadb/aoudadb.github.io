@@ -77,6 +77,7 @@
 
 - [AI Agent Usage](https://aoudadb.github.io/ai/): AI-native bootstrap, two-layer auth for generated apps, ADRA modes, error contracts
 - [Quick Start for AI Agents](https://aoudadb.github.io/ai/quick-start/): Minimal bootstrap path — dev server, connect, insert, query
+- [Local CLI testing (agents)](https://aoudadb.github.io/ai/local-cli-testing/): Throwaway `aouda start` recipe — unused ports, temp data-dir, pin CLI; traps (`start -h` boots :5000, data-plane hash execute not `/query`, CorsOrigins is one string, schema/where/offset/keys)
 
 ## Reference
 

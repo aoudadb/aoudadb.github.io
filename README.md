@@ -28,6 +28,8 @@ https://aoudadb.github.io/llms.txt
 
 Browser-tier apps must use [named queries](guides/named-queries.md) on the [data-plane listener](guides/direct-client-access.md). Do not compose ad-hoc queries with `mk_pub_*`. OAuth authorization-code + PKCE is **not shipped**.
 
+Agents standing up a throwaway local engine: [Local CLI testing (agents)](ai/local-cli-testing.md) — do not run `aouda start -h`.
+
 ## Updating docs
 
 Edit markdown **in this repository** with UTF-8-safe tools (not PowerShell `Set-Content`). Match live `Aouda.Protocol` DTOs and controller routes. After HTTP-surface changes, update `reference/http-api.md` in the same change.

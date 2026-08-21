@@ -47,14 +47,16 @@ Keep today's `Aouda:Bind` / `Aouda:Port` (or `--port`) as the **admin** listener
     "Listeners": {
       "DataPlane": {
         "Bind": "0.0.0.0:5434",
-        "CorsOrigins": [ "https://app.example.com" ]
+        "CorsOrigins": "https://app.example.com"
       }
     }
   }
 }
 ```
 
-Environment: `Aouda__Listeners__DataPlane__Bind=0.0.0.0:5434`.
+`CorsOrigins` is a **single string** (comma-separated if you need more than one). It is not a JSON array and not an indexed env key — `Aouda__Listeners__DataPlane__CorsOrigins__0=…` can crash Kestrel on 0.1.9.
+
+Environment: `Aouda__Listeners__DataPlane__Bind=0.0.0.0:5434` and `Aouda__Listeners__DataPlane__CorsOrigins=https://app.example.com`.
 
 If `DataPlane:Bind` is **unset**, behaviour equals today: one listener, current CORS, **no** `mk_pub_*` acceptance. The fail-closed table default (`dataPlaneAccess: false`) only affects browser-tier credentials on a data-plane listener that is actually listening.
 

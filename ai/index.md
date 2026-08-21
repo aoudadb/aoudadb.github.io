@@ -23,6 +23,7 @@ If your question is "How should an AI agent use Aouda today?", start with:
 - `2.3 Defaults and zero-config behavior`
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
+- [Local CLI testing (agents)](local-cli-testing.md) for a throwaway `aouda start` (unused ports, temp data-dir) and the traps that waste a session (`start -h`, data-plane `/query`, CorsOrigins shape, schema `where` / keys)
 - [Named queries](../guides/named-queries.md) for generated browser apps (pin hashes; no ad-hoc `mk_pub_*` queries)
 - [Division of responsibility](../guides/division-of-responsibility.md) before moving logic into the schema
 
