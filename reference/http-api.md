@@ -1893,14 +1893,14 @@ result — they are never stored.
 ```json
 {
   "columns": ["id", "name", "price", "discountedPrice"],
-  "types":   ["Int64", "String", "Decimal", "Unknown"],
+  "types":   ["Int64", "String", "Decimal", "Decimal"],
   "data":    [[1], ["Widget"], [99.0], [89.1]],
   "rowCount": 1,
   "stats": { "executionMs": 4 }
 }
 ```
 
-Computed column result type is always `"Unknown"` in v1 (no static type inference).
+Computed column types are inferred where the expression permits (`"Unknown"` otherwise) and are always nullable. See [browser-tier read limits](../guides/browser-tier-read-limits.md#selectexpr-result-types).
 
 **Errors for `selectExpr`:**
 

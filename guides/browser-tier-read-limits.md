@@ -173,13 +173,24 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ---
 
-## `selectExpr` result types are `Unknown`
+## `selectExpr` result types
 
-**Rule.** Computed columns report `"Unknown"`, nullable (S08 will infer where the expression permits).
+**Rule.** Computed columns are always nullable. The query `types` array (and named-query codegen) reports a concrete type when the expression permits, and `"Unknown"` (codegen `"unknown"`) otherwise.
 
-**Instead:** stored `derived` columns, which have a declared type.
+| Node | Result |
+|------|--------|
+| `colRef` | That column's catalog type; missing → Unknown |
+| literal | `int` → Int32; `long` → Int64; `float` → Float32; `double` → Double; `decimal` → Decimal; `string` → String; `bool` → Bool. JSON numbers use the same conversion as the evaluator: integer-fit → Int32/Int64, else Decimal then Double |
+| arithmetic | Same widen as insert-time `NumericOp`: any Decimal → Decimal; any Double/Float32 → Double; both integer family → Int64 |
+| coalesce / conditional | Common type of inferable arms; mixed or an uninferable arm → Unknown |
+| `call` | `upper`/`lower`/`trim`/`concat`/`substring` → String; `round`/`roundTo` → Decimal; `cast` → the named type |
+| unbound `param` | Unknown |
 
-A definition using `selectExpr` also cannot be subscribed (table above). HTTP execute still works.
+A JSON literal such as `0.9` is Decimal, so `price * 0.9` over HTTP is Decimal even when `price` is Double. A C# `double` literal `0.9` stays Double.
+
+A definition using `selectExpr` also cannot be subscribed (table above; **BL-170**). HTTP execute still works.
+
+**Instead** for a stored, orderable typed column: [`derived`](insert-transforms.md#derived-columns) on a base table, or [`computed`](materialized.md#top-gainers-by-change-percent) on an aggregate materialized query.
 
 ---
 

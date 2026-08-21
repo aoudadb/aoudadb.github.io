@@ -776,7 +776,7 @@ Content-Type: application/json
 ```json
 {
   "columns": ["id", "name", "price", "discountedPrice", "tier"],
-  "types":   ["Int64", "String", "Decimal", "Unknown", "Unknown"],
+  "types":   ["Int64", "String", "Decimal", "Decimal", "Unknown"],
   "data":    [[1, 2], ["Widget", "Gadget"], [99.0, 149.0], [89.1, 134.1], ["standard", "premium"]],
   "rowCount": 2,
   "stats": { "executionMs": 5 }
@@ -800,7 +800,7 @@ Content-Type: application/json
 
 | Limitation | Notes |
 |---|---|
-| Result type is `"Unknown"` | No static type inference for computed columns in v1; clients read the runtime type from the value |
+| Uninferable result type is `"Unknown"` | Mixed `coalesce`, unbound `param`, or a missing `colRef`; otherwise the `types` array is concrete. Always nullable. |
 | Maximum 20 `selectExpr` entries per query | Guard against accidental abuse; returns 400 if exceeded |
 | Cannot `ORDER BY` a computed alias | e.g. `.orderBy('discountedPrice')` is not yet supported (deferred) |
 | Not supported in JOIN queries | Expression SELECT applies to single-table queries only (deferred for JOIN paths) |
@@ -987,7 +987,7 @@ await client.branches.delete(`backup-${Date.now()}`);
 | ORDER BY computed column alias | Deferred | `ORDER BY discountedPrice` is not yet wired |
 | Expression SELECT in JOIN queries | Deferred | Computed columns are single-table only |
 | Aggregation over computed columns | Deferred | `SUM(price * 0.9)` is not yet supported |
-| Type inference for computed columns | Deferred | Returns `"Unknown"` for all computed columns in v1 |
+| Type inference for computed columns | Implemented (P40 S08) | Concrete where the expression permits; `"Unknown"` otherwise |
 | Studio batch mutation UI | Deferred | Batch mutations are available over HTTP and SDK only |
 
 ---
@@ -1005,7 +1005,7 @@ await client.branches.delete(`backup-${Date.now()}`);
 | `hasMore: true` loop never terminates | ORDER BY column is not the same column as the WHERE filter | Ensure `orderBy` targets a column with monotonically increasing or decreasing values relative to the predicate; add a time-based cutoff |
 | RETURNING returns unexpected columns | `["*"]` was used and the schema has more columns than expected | Enumerate explicit column names instead of `"*"` |
 | Computed column value is `null` | Division by zero in the expression for that row | Guard with `$ifNull` or check denominator values before querying; this is intentional behavior |
-| Expression SELECT result type shows `"Unknown"` | Expected behavior in v1 | Computed column types are not statically inferred; read the runtime type from the value itself |
+| Expression SELECT result type shows `"Unknown"` | Expression is uninferable (mixed coalesce, unbound param, missing col) | Expected for that expression; inferable expressions report a concrete type (P40 S08) |
 | Batch operation fails partway through | One operation in the batch returned an error | All operations up to (but not including) the failing one may have been applied; the WAL transaction was rolled back for the failing operation only if the error occurred before commit |
 
 ---
