@@ -222,11 +222,11 @@ Do not point a 10 Hz last-price grid at an insert-only table plus default `confl
 
 ---
 
-## `topNPerGroup` / `firstPerKey` are not implemented
+## `topNPerGroup` / `firstPerKey`
 
-**Rule.** Valid declarable MQ types: `latestPerKey`, `aggregate`, `filter`. `firstPerKey` and `topNPerGroup` are rejected at schema apply; HTTP create returns **501**. `TopNPerGroup` has no maintainer.
+**Rule.** Both types are declarable in `materializedQueries` and via HTTP create (204). `firstPerKey` is **MIN of `orderBy`**, not the first row that arrived — use a different order column if you need chronological first-arrival. `topNPerGroup` keeps at most N rows per group (or global top N when `groupBy` is omitted). The source table must have a primary key. The maintainer holds every observed source row in process memory so a demotion can promote `#N+1` without a refresh — point it at a compact per-key table, not a million-row fact table. Query / subscribe the result table by name; the planner does not auto-route Top-N.
 
-**Instead:** `latestPerKey` for current value; `aggregate` for OHLC / rollups.
+**Instead of ranking a full per-group aggregate at read time:** declare `topNPerGroup` so the result table and its subscription are size N (or groups × N).
 
 ---
 

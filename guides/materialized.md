@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-08-20
+Last updated: 2026-08-22
 
 Coverage phases: P4, P10, P11, P28, P31
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P10/`, `docs/tasks/P11/`, `docs/tasks/P28/`, `docs/tasks/P31/`
@@ -17,7 +17,7 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 
 ## Start Here
 
-> **Declaring MQs in `aouda.schema.json` (new).** Materialized queries can now be declared under a top-level `materializedQueries` map and managed by `schema diff` / `apply` / `export`, instead of only through the .NET helpers or admin HTTP. That is the recommended path for new work — it puts MQ definitions under the same review and CI gate as tables and named queries. Syntax, the three shapes, and the drop-on-omit semantics are in [Schema management](schema-management.md#materialized-queries-in-the-schema-file). Statements below about MQ lifecycle being .NET-only predate this and are being reworked; the runtime behaviour they describe is unchanged.
+> **Declaring MQs in `aouda.schema.json` (new).** Materialized queries can now be declared under a top-level `materializedQueries` map and managed by `schema diff` / `apply` / `export`, instead of only through the .NET helpers or admin HTTP. That is the recommended path for new work — it puts MQ definitions under the same review and CI gate as tables and named queries. Syntax, the five shapes (`latestPerKey`, `firstPerKey`, `aggregate`, `filter`, `topNPerGroup`), and the drop-on-omit semantics are in [Schema management](schema-management.md#materialized-queries-in-the-schema-file). Statements below about MQ lifecycle being .NET-only predate this and are being reworked; the runtime behaviour they describe is unchanged.
 
 If you are new to materialized queries, start with:
 - `2.1 Why this functionality exists` (plain-language explanation)
@@ -233,9 +233,7 @@ If you create a materialized query with standard helpers and no special options:
 
 ### Reserved / not yet wired
 
-- MQ types declared in enum but not implemented end-to-end as maintainers:
-  - `FirstPerKey`
-  - `TopNPerGroup`
+- None for MQ pattern types: `FirstPerKey` (MIN of `orderBy`, not arrival order) and `TopNPerGroup` (N rows per group; in-memory working set) are implemented. Query / subscribe the Top-N result table by name — the planner does not auto-route it.
 
 Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list/status) were shipped in P16 Epic H (task H.3) and are no longer reserved. See §2.11 for the API reference.
 
@@ -243,7 +241,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
-| P4 | Epic H tasks/reports (`Task1`, `Task2`, `Task4`, `Task5`, refactor completion) | Core MQ infra, latest/aggregate/filter, table-based storage, incremental updates | FirstPerKey/TopN maintainers and broader API parity not completed | `docs/BACKLOG.md` BL-010, BL-009 |
+| P4 | Epic H tasks/reports (`Task1`, `Task2`, `Task4`, `Task5`, refactor completion) | Core MQ infra, latest/aggregate/filter, table-based storage, incremental updates | FirstPerKey/TopN shipped later as BL-187 | `docs/BACKLOG.md` BL-010, BL-009 |
 | P4 | BL-020 report | Auto-routing matcher + planner integration + route telemetry | No cost-based or JOIN-aware routing | `docs/BACKLOG.md` BL-010 |
 | P4 | BL-021 report | Unified table namespace and bidirectional name-collision checks | N/A (landed) | `docs/BACKLOG.md` BL-021 complete |
 | P4 | R10.4 report | Immediate query visibility for unflushed HRA data | Does not by itself solve post-flush duplicate bug in P11 handoff | `docs/tasks/P11/P11-Fix-R8-MaterializedQueryFlushIntegrationTests-Report.md` |
@@ -264,8 +262,8 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Auto-routing of base queries to MQ | Yes | No | No | BL-020 report, `MaterializedQueryAutoRoutingTests` | Can bypass via `WithDirectScan()` |
 | Unified namespace (MQ name == table name) | Yes | No | No | BL-021 report, `ResultTableName`, table listing behavior | Applies to query and subscription paths |
 | Subscribe to MQ result streams via table API | Yes | No | No | P10-S10, client streaming tests | No special protocol field required |
-| FirstPerKey maintainer/runtime | No | No | Yes | Enum + no dedicated maintainer path/tests | Reserved type only |
-| TopNPerGroup maintainer/runtime | No | No | Yes | Enum + no dedicated maintainer path/tests | Reserved type only |
+| FirstPerKey maintainer/runtime | Yes | No | No | BL-187; `CreateFirstPerKeyAsync`; MIN of `orderBy` | Not chronological first-arrival |
+| TopNPerGroup maintainer/runtime | Yes | No | No | BL-187; `CreateTopNPerGroupAsync`; working set in memory | Query the result table by name; no planner auto-route. Source must have a PK. |
 | HTTP/TS API for MQ lifecycle management | No | Yes | No | No server controller/TS surface; .NET only | Workaround: create in .NET, query as table |
 | Correct no-duplicate result-table reads after flush | No | Yes | No | P11 R8 handoff report | Known engine bug |
 | `FIRST`/`LAST` aggregate functions with ordering | Yes | No | No | P28 S2, `AggregateMaintainer`, `AggregateConfig.CurrentVersion == 2` | Enables OHLC candle patterns; requires `orderByColumn` + `descending` fields |

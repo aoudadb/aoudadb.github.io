@@ -152,19 +152,21 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
 }
 ```
 
-Three shapes, discriminated by `type`:
+Five shapes, discriminated by `type`:
 
 | `type` | Required | Use for |
 |---|---|---|
 | `latestPerKey` | `sourceTable`, `groupBy`, `orderBy` | Current-value tables — latest quote per ticker |
+| `firstPerKey` | `sourceTable`, `groupBy`, `orderBy` | One row per group: **MIN** of `orderBy`, not the first row that arrived. `descending: true` is rejected — use `latestPerKey` |
 | `aggregate` | `sourceTable`, `groupBy`, `aggregates` | Rollups — OHLC candles, per-tenant counts |
 | `filter` | `sourceTable`, `predicate` | A maintained subset of a table |
+| `topNPerGroup` | `sourceTable`, `orderBy`, `n` (`groupBy` optional) | At most **N rows per group** (or global top N when `groupBy` is omitted). Result PK is the source PK |
 
-`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All three shapes accept `updateMode` (`async` | `sync`), `storage.storageTemperature`, and **`dataPlaneAccess`** (default `false`) — set it on the MQ entry so a `mk_pub_*` named query can read the result table without an imperative table-options PATCH.
+`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All five shapes accept `updateMode` (`async` | `sync`), `storage.storageTemperature`, and **`dataPlaneAccess`** (default `false`) — set it on the MQ entry so a `mk_pub_*` named query can read the result table without an imperative table-options PATCH.
 
 **Public aggregate columns are the declared `outputName`s** (plus group keys), on every read path — `engine.Table(mq)`, `POST /tables/{mq}/query`, named query, subscribe. Physical state columns (`_count`, `_max_bid`, `_first_open_val`, …) are not selectable. A named query over `ohlc_1m` selects `high` / `open`, not `_max_price`.
 
-`topNPerGroup` and `firstPerKey` are **not implemented**: schema apply rejects them by name; HTTP create returns **501**. Valid declarable types are the three in the table.
+`firstPerKey` is MIN of the order column (the same maintainer as `latestPerKey` with `descending: false`). It is **not** chronological first-arrival. `topNPerGroup` keeps a working set of every observed source row in process memory so ranks can demote without a refresh; point it at a compact per-key table (`latestPerKey` or `aggregate` result), not a million-row fact table. Query / subscribe the result table by name — the planner does not auto-route Top-N. The source table must have a primary key. Changing `n` or `orderBy` is a Replace (drop+create).
 
 ### The map is desired state — and omitting it is not the same as emptying it
 

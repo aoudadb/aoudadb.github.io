@@ -492,7 +492,7 @@ Three declarable types: `latestPerKey`, `aggregate`, and `filter`. Aggregate fun
 
 Lifecycle, refresh, incremental maintenance, and auto-routing (an ad-hoc query can be answered from a matching MQ without naming it): [Materialized queries](materialized.md).
 
-**Alternatives.** `topNPerGroup` and `firstPerKey` are **not implemented** — apply rejects them by name and HTTP create returns 501. For "top N per group", pre-compute it as an `aggregate` MQ you can rank, or rank in a trusted service. Grouped aggregates on the data plane are deliberately absent: an MQ is the sanctioned mechanism.
+**Leader boards.** Declare `topNPerGroup` (`orderBy` + `n`, optional `groupBy`) so the result table is size N, not universe size. `firstPerKey` is MIN of `orderBy`, not arrival order. Top-N holds every observed source row in maintainer memory — use a compact per-key source. Query the result table by name (no planner auto-route). The source must have a primary key. Grouped aggregates on the data plane remain absent: an MQ is the sanctioned mechanism.
 
 ### Phase 4 — Feed, ship, and run it
 
@@ -680,7 +680,7 @@ If you are an AI agent writing an application against Aouda, this section is you
 | State that `conflate` is a no-op on insert-only streams | Recommend `conflate` for a tick feed or event log |
 | Read an aggregate MQ by its `outputName` (`high`, `open`) | Read internal state columns (`_max_bid`, `_first_open_val`) |
 | Run `schema diff --access` and `policy inspect` before declaring done | Widen a `select` without re-running the gate |
-| Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, `groupBy` on the data plane, `topNPerGroup`, a SQL surface, PKCE, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, and `computed` MQ outputs **are** shipped — do not list them as absent) |
+| Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, `groupBy` on the data plane, a SQL surface, PKCE, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, `computed` MQ outputs, `topNPerGroup`, and `firstPerKey` **are** shipped — do not list them as absent) |
 
 ### Per-screen decision procedure
 
@@ -823,7 +823,7 @@ Two lists. The first is *not yet*; the second is *not ever*, on purpose.
 |---|---|
 | Cursor / keyset paging (BL-182) | `offset` / `offsetParam` for page-by-offset today |
 | Expression `orderBy` on runtime columns (BL-183) | A `computed` output on an `aggregate` MQ, or a stored `derived` column — both are physically stored and orderable |
-| `topNPerGroup` / `firstPerKey` materialized queries | An `aggregate` MQ you rank with `orderByChoices`, or ranking in a trusted service |
+| `topNPerGroup` / `firstPerKey` materialized queries | Shipped — declare them in `materializedQueries` or HTTP create. `firstPerKey` is MIN(`orderBy`), not arrival order. Top-N working set is in-memory; query the result by name |
 | `groupBy` and ad-hoc aggregates on the data plane | An aggregate MQ, read through a named query |
 | Subscribe by hash for definitions using joins, `selectExpr`, or `distinct` | HTTP execute plus polling, or split the view |
 | The failing row index on a rejected batch | The error names the check; pre-validate or quarantine |

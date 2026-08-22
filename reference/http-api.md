@@ -1112,11 +1112,11 @@ Base path: `/api/databases/{db}/materialized-queries`
 |-------|------|----------|-------------|
 | `name` | string | Yes | Unique materialized query name. |
 | `sourceTable` | string | Yes | Base table name. |
-| `type` | number | Yes | `1` LatestPerKey, `2` FirstPerKey (HTTP create not supported), `3` Aggregate, `4` Filter, `5` TopNPerGroup (HTTP create not supported). |
+| `type` | number | Yes | `1` LatestPerKey, `2` FirstPerKey (MIN of `orderBy`, not arrival order), `3` Aggregate, `4` Filter, `5` TopNPerGroup (N rows per group; source must have a PK). |
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
 | `config` | object | Yes* | Alternative: embedded object; server serializes to JSON if `configJson` omitted. |
 
-`configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, or **AggregateConfig** JSON for types `4`, `1`, and `3` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`).
+`configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000).
 
 **Query response** (`POST .../query`):
 
