@@ -166,7 +166,7 @@ Five shapes, discriminated by `type`:
 
 **Public aggregate columns are the declared `outputName`s** (plus group keys), on every read path — `engine.Table(mq)`, `POST /tables/{mq}/query`, named query, subscribe. Physical state columns (`_count`, `_max_bid`, `_first_open_val`, …) are not selectable. A named query over `ohlc_1m` selects `high` / `open`, not `_max_price`.
 
-`firstPerKey` is MIN of the order column (the same maintainer as `latestPerKey` with `descending: false`). It is **not** chronological first-arrival. `topNPerGroup` keeps a working set of every observed source row in process memory so ranks can demote without a refresh; point it at a compact per-key table (`latestPerKey` or `aggregate` result), not a million-row fact table. Query / subscribe the result table by name — the planner does not auto-route Top-N. The source table must have a primary key. Changing `n` or `orderBy` is a Replace (drop+create).
+`firstPerKey` is MIN of the order column (the same maintainer as `latestPerKey` with `descending: false`). It is **not** chronological first-arrival. `topNPerGroup` keeps a working set of every observed source row in process memory so ranks can demote without a refresh; point it at a compact per-key table (`latestPerKey` or `aggregate` result), not a million-row fact table. Result-table commits on that source MQ feed the Top-N maintainer incrementally. Query / subscribe the result table by name — the planner does not auto-route Top-N. The source table must have a primary key. Changing `n` or `orderBy` is a Replace (drop+create).
 
 ### The map is desired state — and omitting it is not the same as emptying it
 
