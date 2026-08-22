@@ -85,9 +85,9 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 | `GET` | `/api/databases/{db}/auth/.well-known/jwks.json` | JWKS |
 | `*` | `/api/databases/{db}/auth` | App-auth root; any HTTP method |
 | `*` | `/api/databases/{db}/auth/*` | App auth except /auth/admin and /auth/admin/*; any HTTP method |
-| `POST` | `/api/databases/{db}/named-queries/{hash}/query` | Named-query execute |
+| `POST` | `/api/databases/{db}/named-queries/{name}/query` | Named-query execute |
 | `POST` | `/api/databases/{db}/named-queries/batch` | Named-query batch |
-| `POST` | `/api/databases/{db}/named-mutations/{hash}/execute` | Named-mutation execute |
+| `POST` | `/api/databases/{db}/named-mutations/{name}/execute` | Named-mutation execute |
 | `*` | `/api/databases/{db}/ws` | WebSocket (subscribe by hash); method not checked |
 
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
