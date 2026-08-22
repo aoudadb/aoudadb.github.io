@@ -23,6 +23,10 @@ Aouda ships multiple artifacts from separate repositories. They do **not** share
 
 ---
 
+## Unreleased
+
+**BL-188 is a breaking wire change (name identity) and is not yet in a numbered train.** HTTP/WS/SDK identity is the unique schema name (`execute(name)`, `batch([{ name }])`, `subscribe(name)`). Historical rows below describe what those trains shipped (including subscribe-by-hash on 0.1.7 / 0.1.8).
+
 ## Compatibility matrix
 
 Update this table when shipping breaking server, client, or Studio changes.

@@ -108,7 +108,7 @@ docker compose up
 | **Zero index management** | Zone maps, bloom filters, and sparse primary indexes maintained automatically |
 | **Dual deployment** | Embedded (in-process, no network) or server (HTTP, multi-client, multi-language) |
 | **Two-layer auth** | Server auth (who can connect) + Application auth (your app's end users) — independent systems |
-| **Named queries** | Server-authored, hash-pinned read/write contracts for browsers; optional data-plane listener; access-surface diff in CI |
+| **Named queries** | Server-authored, name-identified read/write contracts for browsers; optional data-plane listener; access-surface diff in CI |
 | **Freshness** | One consistency token per write; replica reads wait or error instead of returning a stale answer; declared `freshness` on named-query aliases |
 | **AI-native** | `aouda start` starts with defaults; structured errors include a `suggestion` field explaining what to do next; schema inference from POCO types |
 

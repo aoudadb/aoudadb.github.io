@@ -41,9 +41,10 @@ HTTP shapes: [HTTP API — Access-surface diff](../reference/http-api.md#access-
 | `__public__` / `mk_pub_*` | `dataPlaneAccess` false→true, or a named query becomes fully opted-in |
 | Visibility rank | `none → filtered/full` or `filtered → full` for a fixture identity |
 | Named-query projection | `select` / `selectExpr` **adds** a column the identity can already see |
-| Named-query added | New alias reachable to that identity |
+| Named-query added | New name reachable to that identity |
+| Named-query body changed | Same name, different body (`reason: named_query_body_changed`, `widen`) — compensating control for name identity. Coexistence is two names (`V2`). |
 | Predicate | Effective filter gets weaker, or hashes differ and containment cannot prove narrowing |
-| Freshness | Named-query alias `freshness` becomes weaker (`reason: freshness`, `widen`). A tightening is `narrow` and does not fail CI. See [Freshness](freshness.md). |
+| Freshness | Named-query `freshness` becomes weaker (`reason: freshness`, `widen`). A tightening is `narrow` and does not fail CI. See [Freshness](freshness.md). |
 
 Narrowing (tighter RLS, removed column, `dataPlaneAccess` true→false, tighter freshness) is reported but **does not fail CI**.
 

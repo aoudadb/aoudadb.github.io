@@ -19,9 +19,9 @@ Aouda Studio is the web management console for Aouda. It provides:
 
 - **Data Explorer** — browse, query, filter, edit, and navigate data (admin listener)
 - **Schema Management** — view/edit tables, columns, ERD diagrams, insert-time compute, `dataPlaneAccess`
-- **Named Artifacts** — catalog, hash-pinned test execute/subscribe, structured authoring via schema apply
+- **Named Artifacts** — catalog from `schema.export()`, test/subscribe by name, structured authoring via schema apply
 - **Cluster Management** — node operations, topology, backup, configuration
-- **Admin Console** — monitoring, policy inspect, streaming (table + hash), bulk-load job monitor
+- **Admin Console** — monitoring, policy inspect, streaming (table + named query), bulk-load job monitor
 - **Hub Integration** — team server management, authentication, multi-server switching
 - **AI Integration** — natural language cluster operations
 
@@ -45,7 +45,7 @@ Aouda Studio is the web management console for Aouda. It provides:
 | Catalog and test named queries / mutations | §5.6 Named Artifacts |
 | Opt a table into the data plane (`dataPlaneAccess`) | §5.5 Auth Options |
 | Ask “what would identity X see?” | §13 Policy Inspect |
-| Subscribe by named-query hash | §13 Streaming Explorer |
+| Subscribe by named-query name | §13 Streaming Explorer |
 | Seed an explicit auto-increment ID on Add Row | §5.5 Identity-insert |
 | Manage branches | §5 Branches |
 | Connect Studio to servers | §9 Hub Integration |
@@ -337,14 +337,14 @@ Persisted through schema **export → patch → apply** (same pipeline as other 
 
 Sidebar: **SCHEMA → Named Artifacts**. Hidden with SCHEMA for Data Owner (correct).
 
-Named queries and named mutations live in `aouda.schema.json`. Identity is the **64-hex content hash**. Aliases are metadata. There is **no** runtime `POST …/register` and **no** execute-by-name.
+Named queries and named mutations live in `aouda.schema.json`. Identity is the **unique name**. Inventory is `schema.export()` only. There is **no** runtime `POST …/register`. Omitting a name deletes the definition (one Delete).
 
 | Action | What Studio does |
 |--------|------------------|
-| Catalog | Parses `schema.export()` — alias, hash, deprecated, table, projection, cost `1+joinCount` |
-| Test | Hash-only `namedQueries.execute` / `batch` (cap 32) / `namedMutations.execute`. Deprecation is a warning, not a failure. Mutations always run as **invoker** (no definer / `runAs`). |
+| Catalog | `schema.export()` — name, deprecated, table, projection, cost `1+joinCount` |
+| Test | Name-only `namedQueries.execute` / `batch` (cap 32) / `namedMutations.execute`. Deprecation is a warning, not a failure. Mutations always run as **invoker** (no definer / `runAs`). |
 | Author | Structured wizard (table, projection, AND where, joins ≤ 3, required limit cap). Identifier positions are dropdowns — parameters cannot name tables, columns, or operators. Persist via export → patch map → diff → apply. |
-| Generate Types | Highlights `export const namedQueries` hashes; the same hash is used for execute **and** subscribe |
+| Generate Types | Optional Args/Row types. Execute and subscribe use the schema name as a string. |
 
 SQL-ish authoring (ADR 0040 D-24) is not in Studio. Full contract: [Named queries](named-queries.md).
 
@@ -823,9 +823,9 @@ Sidebar: **ADMIN → Streaming**. Two modes:
 | Mode | What you send | When to use |
 |------|----------------|-------------|
 | **Table** | Table name + optional filter (`WhereClause` JSON) | Operator ad-hoc on the admin listener (unchanged) |
-| **Named query** | 64-hex content hash + args JSON + optional conflate | The data-plane subscribe path — same hash as execute |
+| **Named query** | Schema name + args JSON + optional conflate | The data-plane subscribe path — same name as execute |
 
-Hash mode calls `namedQueries.subscribe(hash, args, { conflate })`. It never sends a table name or filter. Optional `sha256:` prefix is stripped. Conflate uses wire field `interval_ms` and holds **value updates only** (no-op on insert-only streams). The append-only log surfaces `gap`, `values_skipped`, and deprecation on `snapshot_complete` (warning, not a failed subscribe). Gap frames are auto-resumed by the client on a live socket. See [Named queries — Subscribe by hash](named-queries.md#subscribe-by-hash) and [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
+Name mode calls `namedQueries.subscribe(name, args, { conflate })`. It never sends a table name or filter. Conflate uses wire field `interval_ms` and holds **value updates only** (no-op on insert-only streams). The append-only log surfaces `gap`, `values_skipped`, and deprecation on `snapshot_complete` (warning, not a failed subscribe). Gap frames are auto-resumed by the client on a live socket. See [Named queries — Subscribe by name](named-queries.md#subscribe-by-name) and [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
 ### Bulk Load (monitor)
 
@@ -868,4 +868,4 @@ Tables with derived columns, checks, or transforms reject `:begin` unless the cl
 | P34 | Hosted Studio at `studio.aouda.com` (Vercel), Connect-to-Server dialog, localStorage persistence, first-run detection, CORS for `studio.aouda.com`, `/_studio/config` endpoint, `Aouda.Setup` cross-platform installer | `aouda/docs/tasks/P34/StudioDist-*` |
 | P36 | Column evolution UI (alter type/null/encoder/references, PK, reorder, Toggle AutoId via `alterColumn`) | `aouda-studio/docs/tasks/P36-*` |
 | P37 | Access-surface on branch review; data-plane 404 connect copy | `aouda-studio` P37 slices |
-| P39 | Operator parity: named artifacts, insert-time compute, route/tee, `dataPlaneAccess` / `mk_pub_*` / policy inspect, hash subscribe, schema-file MQ maps, identity-insert, bulk-load intent copy | `aouda-studio/docs/tasks/P39/` |
+| P39 | Operator parity: named artifacts, insert-time compute, route/tee, `dataPlaneAccess` / `mk_pub_*` / policy inspect, named-query subscribe, schema-file MQ maps, identity-insert, bulk-load intent copy | `aouda-studio/docs/tasks/P39/` |

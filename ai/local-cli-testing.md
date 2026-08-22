@@ -40,9 +40,9 @@ aouda databases create -n auth --kind auth -s http://127.0.0.1:26133 -t <token> 
 
 # 4. Schema: HTTP body { "schema": <doc>, "options": { "allowDestructive": true } }
 #    or `aouda schema apply -s … -d … -f aouda.schema.json`.
-#    Named-query hashes: `aouda generate typescript -f …` (or your project's codegen).
+#    Named-query names: string literals from aouda.schema.json (codegen Args/Row is optional).
 
-# 5. Data-plane reads: POST …/named-queries/{hash}/query — not POST …/query.
+# 5. Data-plane reads: POST …/named-queries/{name}/query — not POST …/query.
 # 6. Stop only this process:
 aouda stop -s http://127.0.0.1:26133 --force
 ```
@@ -59,7 +59,7 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 | `aouda stop` without `-s http://127.0.0.1:<your-port>` | Can target the wrong process / URL |
 | Reuse another store's `mk_svc_` / admin token against a new `--data-dir` | `AUTH_API_KEY_INVALID` — keys belong to that store |
 | Sign in / init against someone else's running server | Wrong admin, wrong data; init is for **this** server's setup mode |
-| `POST /api/databases/{db}/query` on the **data-plane** | **404 by design.** Execute `POST /named-queries/{hash}/query` (or batch). Ad-hoc query is admin-listener only. |
+| `POST /api/databases/{db}/query` on the **data-plane** | **404 by design.** Execute `POST /named-queries/{name}/query` (or batch). Ad-hoc query is admin-listener only. |
 | `partitionKey: 1` (or a bare number) on a column | `INVALID_REQUEST`. Table-level: `"partitionKey": [{"column":"Ticker"},{"column":"Source"}]`, `"clusterColumns": ["Time"]` |
 | Named-query `where` as a JSON **array** | Use an object: `{ "and": [ … ] }` (same for join `on`) |
 | `offsetParam` without a positive `"offset"` cap | Schema apply fails |
@@ -95,7 +95,7 @@ Aouda__Listeners__DataPlane__CorsOrigins=https://app.example.com
 ## Schema and execute reminders
 
 - Apply envelope wraps the document: `{ "schema": { … }, "options": { "allowDestructive": true } }`. A bare table map is not the HTTP body.
-- Browser / data-plane callers execute by **hash** (pin via codegen). See [Named queries](../guides/named-queries.md) and [Direct client access](../guides/direct-client-access.md).
+- Browser / data-plane callers execute by **name** (string literal from the schema). See [Named queries](../guides/named-queries.md) and [Direct client access](../guides/direct-client-access.md).
 - For product-shaped examples (watchlist, `latestPerKey`, candles), see [Market data](../guides/market-data.md) and `examples/p40-browser-tier/`.
 
 ---

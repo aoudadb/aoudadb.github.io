@@ -9,7 +9,7 @@ parent: "Guides"
 Document status: Complete (P38 S07)
 Last updated: 2026-08-21
 
-Aouda issues **one** consistency token on every write, returns it on every read, and accepts it on every read. A node that has not applied that position does not answer — it waits, forwards, or returns a typed error. Freshness is also a **declared** property of a named-query alias, reviewable in `aouda schema diff --access`.
+Aouda issues **one** consistency token on every write, returns it on every read, and accepts it on every read. A node that has not applied that position does not answer — it waits, forwards, or returns a typed error. Freshness is also a **declared** property of a named query, reviewable in `aouda schema diff --access`.
 
 **Wire contract:** [HTTP API — Consistency tokens](../reference/http-api.md#consistency-tokens-and-freshness). **ADR:** [0042](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0042-freshness-and-replica-consistency.md).
 
@@ -23,7 +23,7 @@ This is a **lower bound** (`AtLeast`), not a point-in-time pin. Aouda retains no
 |---|---|
 | Understand the token | [The one token](#the-one-token) |
 | Read from a regional replica without losing my write | [Managed regional replica](#managed-regional-replica) |
-| Declare a per-query staleness budget | [Declared freshness](#declared-freshness-on-the-alias) |
+| Declare a per-query staleness budget | [Declared freshness](#declared-freshness-on-the-named-query) |
 | Carry the token in TypeScript or C# | [SDKs](#sdks) |
 | See what can still go wrong | [Caveats](#caveats) |
 | Map an error code | [Troubleshooting](#troubleshooting) |
@@ -90,9 +90,9 @@ On the **primary** a token that is already covered is a no-op. `Standalone` serv
 
 ---
 
-## Declared freshness on the alias
+## Declared freshness on the named query
 
-The budget lives on the named-query **alias**, outside the content hash. Changing it does not break a client pinned to the hash. Two aliases may share one hash with different budgets (dashboard vs order entry).
+The budget lives on the named query. A name with no `freshness` block is fail-safe: `readYourWrites: true`, primary-only. Changing a budget does not fire `named_query_body_changed` (that finding is for the query body).
 
 ```json
 "namedQueries": {
@@ -114,14 +114,13 @@ The budget lives on the named-query **alias**, outside the content hash. Changin
 
 | Rule | Behaviour |
 |---|---|
-| Bare hash (no `alias`) | Fail-safe: `readYourWrites: true`, primary-only. `X-Read-Preference: Secondary` is 400 `FRESHNESS_LOOSENED` |
-| Call site | May **tighten** (`?maxStalenessMs=500` on a 2 s alias). May **not** loosen (400 `FRESHNESS_LOOSENED`) |
-| `alias` / hash mismatch | 400 `NAMED_QUERY_ALIAS_MISMATCH` |
+| Name with no `freshness` block | Fail-safe: `readYourWrites: true`, primary-only. `X-Read-Preference: Secondary` is 400 `FRESHNESS_LOOSENED` |
+| Call site | May **tighten** (`?maxStalenessMs=500` on a 2 s named query). May **not** loosen (400 `FRESHNESS_LOOSENED`) |
 | `serveStaleAndRevalidate` | Schema-apply and request 400 `FRESHNESS_CONTRACT_INVALID` (no local copy yet) |
 | Omitted `waitMs` | 250. Cap 30 000; over-cap is `FRESHNESS_CONTRACT_INVALID` |
 | Loosen in a branch | `aouda schema diff --access` reports `freshness` / `widen` and exits 1. A tightening is `narrow` and does not fail CI |
 
-Pass the alias as `?alias=`, header `X-Aouda-Named-Query-Alias`, or body `alias` (query wins).
+Freshness is keyed by the path, batch, or subscribe **name**. There is no `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`.
 
 ---
 
@@ -239,9 +238,8 @@ This engine work makes a regional replica *safe*. Hub region-aware scheduling (`
 | 409 `TOKEN_EPOCH_SUPERSEDED` | Failover lost the write, or future term | Do not retry the same token; write again or fetch `GET …/token` |
 | 409 `TOKEN_UNSATISFIED` | Token or budget unmet after `waitMs` (or `onExceeded=fail`) | Retry later, or use `fetchPrimary`, or read the primary |
 | 421 `TOKEN_FETCH_PRIMARY` | Replica declared `fetchPrimary` | Retry against the current primary (`GET /admin/replication/topology`). Distinct from 421 `MISDIRECTED_REQUEST` (wrong **role**) |
-| 400 `FRESHNESS_LOOSENED` | Call site weaker than the alias, or Secondary on a bare hash | Drop the looser param, or pass `alias`, or use Primary |
+| 400 `FRESHNESS_LOOSENED` | Call site weaker than the named query’s declared budget, or Secondary on fail-safe | Drop the looser param, or use Primary |
 | 400 `FRESHNESS_CONTRACT_INVALID` | Unknown `onExceeded`, `waitMs` out of range, `serveStaleAndRevalidate` | Fix the contract. Default wait is 250; cap is 30 000 |
-| 400 `NAMED_QUERY_ALIAS_MISMATCH` | `alias` does not resolve to the path hash | Send the alias that belongs to that hash |
 | Recreated client "forgets" the write | Default in-memory store | Share the store or persist the string ([scale-out](#scale-out--the-default-store-is-not-enough)) |
 | Replica read "about 5 seconds stale" but rows are huge | Old `MaxLagSeconds` was a byte threshold | Re-tune; use `MaxLagBytes` if you meant bytes |
 | MQ read misses a write the node has | MQ maintenance lag | Wait or refresh; the MQ `token` is the watermark |

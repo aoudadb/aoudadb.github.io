@@ -40,7 +40,7 @@
 
 - [How to build apps effortlessly with Aouda](https://aoudadb.github.io/guides/build-apps/): **Start here for any application.** The canonical build path — the tiers you do not build, 10-minute app, twelve-step sequence, capability map, alternatives per constraint, agent rules and error contract
 - [Adopting Aouda in an existing app](https://aoudadb.github.io/guides/adoption/): Target architecture, which hops to delete, SDK coverage gaps, migration order
-- [Named queries and mutations](https://aoudadb.github.io/guides/named-queries/): Hash-pinned BFF contracts, batch envelope, codegen, subscribe-by-hash
+- [Named queries and mutations](https://aoudadb.github.io/guides/named-queries/): Name identity, optional Args/Row types, subscribe-by-name
 - [Freshness and replica consistency](https://aoudadb.github.io/guides/freshness/): Consistency token (`AtLeast`), named-query alias `freshness`, `GET …/token`, caveats (scale-out store, clock skew, `MaxLagSeconds`, `w:1` failover). Wire: [HTTP API — Consistency tokens](https://aoudadb.github.io/reference/http-api/#consistency-tokens-and-freshness)
 - [What a browser-tier read cannot do](https://aoudadb.github.io/guides/browser-tier-read-limits/): Operators, data-plane allowlist, partition-filter rule, conflation caveat
 - [Direct client access](https://aoudadb.github.io/guides/direct-client-access/): Admin vs data-plane listeners, `mk_pub_*`, quotas, thin edge. PKCE is not shipped.
@@ -78,11 +78,11 @@
 
 - [AI Agent Usage](https://aoudadb.github.io/ai/): AI-native bootstrap, two-layer auth for generated apps, ADRA modes, error contracts
 - [Quick Start for AI Agents](https://aoudadb.github.io/ai/quick-start/): Minimal bootstrap path — dev server, connect, insert, query
-- [Local CLI testing (agents)](https://aoudadb.github.io/ai/local-cli-testing/): Throwaway `aouda start` recipe — unused ports, temp data-dir, pin CLI; traps (`start -h` boots :5000, data-plane hash execute not `/query`, CorsOrigins is one string, schema/where/offset/keys)
+- [Local CLI testing (agents)](https://aoudadb.github.io/ai/local-cli-testing/): Throwaway `aouda start` recipe — unused ports, temp data-dir, pin CLI; traps (`start -h` boots :5000, data-plane name execute not `/query`, CorsOrigins is one string, schema/where/offset/keys)
 
 ## Reference
 
-- [HTTP API Reference](https://aoudadb.github.io/reference/http-api/): Wire protocol, REST + WebSocket. P37: named-query execute/batch, named mutations, `mk_pub_*` / listeners, `snapshot_complete`, `gap`, `re_auth`, `values_skipped`
+- [HTTP API Reference](https://aoudadb.github.io/reference/http-api/): Wire protocol, REST + WebSocket. v2.5: named-query name identity. P37: named-query execute/batch, named mutations, `mk_pub_*` / listeners, `snapshot_complete`, `gap`, `re_auth`, `values_skipped`
 - [Timestamp Type](https://aoudadb.github.io/reference/timestamp/): Timestamp semantics, storage, query behavior
 - [Changelog](https://aoudadb.github.io/CHANGELOG/): Version history
 

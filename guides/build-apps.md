@@ -11,7 +11,7 @@ Last updated: 2026-08-20
 
 Most databases give you a place to put rows. To turn that into an application you then build a tier: a read gateway that translates HTTP into queries, a streaming relay that fans changes out to browsers, an auth proxy, an ingest worker that tidies incoming data, a rollup job, and an endpoint whose entire job is to return a total count. None of those hops add trust or make a decision. They exist because the database could not be spoken to safely from where the user is.
 
-Aouda closes that gap. Reads and writes are **server-authored named artifacts** identified by a content hash, so a browser can execute one without being able to compose a query. A separate **data-plane listener** is a different trust boundary at the socket level, not a middleware check. **Identity and row-level authorization live in the database**, so the same predicate protects HTTP, WebSocket, and batch. The **change stream** is complete enough for a browser to hold directly — paged snapshots, an explicit gap signal, resumable, survives a token refresh. The consequence is that the tiers above stop being things you deploy and become things you **declare**, in one file, under code review.
+Aouda closes that gap. Reads and writes are **server-authored named artifacts** identified by a unique name, so a browser can execute one without being able to compose a query. A separate **data-plane listener** is a different trust boundary at the socket level, not a middleware check. **Identity and row-level authorization live in the database**, so the same predicate protects HTTP, WebSocket, and batch. The **change stream** is complete enough for a browser to hold directly — paged snapshots, an explicit gap signal, resumable, survives a token refresh. The consequence is that the tiers above stop being things you deploy and become things you **declare**, in one file, under code review.
 
 This is the page to read before you write any code. It is the canonical build path, it names the alternative for every recommendation — because no two teams have the same constraints — and it is explicit about what Aouda will not do for you.
 
@@ -43,7 +43,7 @@ Each row below is a service you would normally write, deploy, monitor, and versi
 | The hop you would normally deploy | What it actually does | What you declare instead | Read |
 |---|---|---|---|
 | **Read gateway / BFF** — `GET /orders/:id/overview` forwards to a service that builds a query and maps the result back | Nothing. It does not change the data and it does not change the trust: the JWT is Aouda-issued and Aouda validates it | A **named query** in `aouda.schema.json`, identified by the SHA-256 of its canonical form and pinned into your bundle at build time. Adding a field becomes a schema PR that CI can diff for access widening | [Named queries](named-queries.md) |
-| **Streaming relay** — a hub that holds one subscription and re-broadcasts rows over its own WebSocket | Fan-out, and it hides how many subscriptions you really have | **Subscribe by hash** directly from the browser: paged snapshots ending in `snapshot_complete`, a server-emitted `gap` with `resume_from`, `re_auth` on token refresh, and fan-out that costs O(authorization classes) rather than O(subscribers) | [Subscribe by hash](named-queries.md#subscribe-by-hash) · [Real-time](real-time.md) |
+| **Streaming relay** — a hub that holds one subscription and re-broadcasts rows over its own WebSocket | Fan-out, and it hides how many subscriptions you really have | **Subscribe by name** directly from the browser: paged snapshots ending in `snapshot_complete`, a server-emitted `gap` with `resume_from`, `re_auth` on token refresh, and fan-out that costs O(authorization classes) rather than O(subscribers) | [Subscribe by name](named-queries.md#subscribe-by-name) · [Real-time](real-time.md) |
 | **Auth proxy** — forwards sign-in, refresh, `me`, sign-out to the database's auth endpoints | Nothing, for the user-facing half | The data-plane **auth endpoints**, called directly from the browser with `mk_anon_*` or `mk_pub_*`. Keep server-side only what needs a service key | [Auth setup](../auth/setup.md) · [Client integration](../auth/client-integration.md) |
 | **Ingest / normalization worker** — drops malformed rows, trims a string, rounds a price, derives a column, fans rows to two tables | Checks, derived values, and routing — all of which are pure functions of the row | `checks`, `derived`, and `route` / `tee` **on the table**, evaluated at insert time. Keep the worker for anything needing a lookup, a loop, or an outbound call | [Insert-time transforms](insert-transforms.md) |
 | **Rollup / aggregation job** — a cron that recomputes hourly candles or "latest value per key" | Recomputes something the database already watched change | A **materialized query** declared in the same file, maintained incrementally, readable by a browser through a named query | [Materialized queries](materialized.md) |
@@ -136,7 +136,7 @@ aouda schema diff  --file aouda.schema.json   # review before you change anythin
 aouda schema apply --file aouda.schema.json
 ```
 
-### 4. Generate typed clients with the hashes pinned
+### 4. Generate optional Args/Row types
 
 ```bash
 npx @aouda/client generate --server http://localhost:5433 --database tasks --output ./src/generated/aouda.ts
@@ -159,14 +159,14 @@ await client.connect();
 
 await client.auth.signIn("ada@example.com", "correct-horse");
 
-const page = await client.namedQueries.execute(tasksPage.hash, {
+const page = await client.namedQueries.execute("tasks.page", {
   done: false,
   pageSize: 25,
   pageOffset: 0,
 });
 render(page.rows, `1–${page.rows.length} of ${page.totalMatches}`);
 
-await client.namedMutations.execute(tasksSetDone.hash, { id: 42, done: true });
+await client.namedMutations.execute("tasks.setDone", { id: 42, done: true });
 ```
 
 **Backend services written: zero.** There is no read route, no write route, no auth route, and no count route — and the authorization rule is enforced in one place rather than in every caller. When this application grows a workflow, a third-party integration, or anything that needs to call out, *that* is when you write a service, and [the hop test](division-of-responsibility.md#the-test-when-it-is-not-obvious) will tell you.
@@ -309,7 +309,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://admin.internal/api/data
 
 Configuration, the full data-plane allowlist, and the quota surface: [Direct client access](direct-client-access.md). What that listener refuses and why: [What a browser-tier read cannot do](browser-tier-read-limits.md).
 
-**Alternatives.** You do not have to expose a data plane at all. A backend holding `mk_svc_*` can call the same named queries on the admin listener and keep every benefit of step 5 — reviewability, pinned hashes, the access gate, bounded cost — while the browser talks only to your service. That is [Pattern A](../auth/architecture.md#pattern-a-backend-mediated-traditional), and it is a legitimate destination, not a failure. See [Choose your shape](#choose-your-shape).
+**Alternatives.** You do not have to expose a data plane at all. A backend holding `mk_svc_*` can call the same named queries on the admin listener and keep every benefit of step 5 — reviewability, name identity, the access gate, bounded cost — while the browser talks only to your service. That is [Pattern A](../auth/architecture.md#pattern-a-backend-mediated-traditional), and it is a legitimate destination, not a failure. See [Choose your shape](#choose-your-shape).
 
 #### 4. Put identity and authorization inside the database
 
@@ -347,7 +347,7 @@ MFA (TOTP) is available, and password-reset and OTP delivery are configurable th
 
 **What you do.** For each screen, write a definition: the table, an explicit `select`, a capped `limit`, a `where` whose values are parameters, and constraints on those parameters.
 
-**Why here.** The client sends a **hash plus arguments**. It cannot name a table, a column, an operator, or a sort direction — so the set of queries your application can issue is a finite, reviewable list that CI can diff, and whose cost is checked when you apply the schema (`1 + joinCount`, capped at 3 joins).
+**Why here.** The client sends a **name plus arguments**. It cannot name a table, a column, an operator, or a sort direction — so the set of queries your application can issue is a finite, reviewable list that CI can diff, and whose cost is checked when you apply the schema (`1 + joinCount`, capped at 3 joins).
 
 ```json
 "orders.page": {
@@ -384,9 +384,9 @@ The fields that make a real UI possible, each of which is often the reason a tea
 
 ```typescript
 const [summary, recent, alerts] = await client.namedQueries.batch([
-  { hash: ordersSummary.hash, args: { tenantId } },
-  { hash: ordersPage.hash,    args: { tenantId, statuses: ["open"], pageSize: 10 } },
-  { hash: alertsOpen.hash,    args: { tenantId } },
+  { name: "orders.summary", args: { tenantId } },
+  { name: "orders.page",    args: { tenantId, statuses: ["open"], pageSize: 10 } },
+  { name: "alerts.open",    args: { tenantId } },
 ]);
 ```
 
@@ -418,13 +418,13 @@ The expression substrate is deliberately closed: `literal`, `colRef`, `arithmeti
 
 #### 7. Go live: subscribe instead of poll
 
-**What you do.** Replace polling with a subscription by hash, straight from the client.
+**What you do.** Replace polling with a subscription by name, straight from the client.
 
 **Why here.** The change stream is complete enough to trust directly: snapshots are paged and terminated by `snapshot_complete`, a dropped event produces an explicit server-emitted `gap` carrying `resume_from`, a token refresh raises `re_auth` instead of tearing the socket down, and a client that cannot keep up is closed with `SLOW_CONSUMER` rather than being silently starved.
 
 ```typescript
 const sub = client.namedQueries.subscribe(
-  ordersLive.hash,
+  "orders.live",
   { tenantId, statuses: ["open", "picking"] },
   {
     conflate: { key: ["id"], interval_ms: 100 },
@@ -452,7 +452,7 @@ So: **make subscriptions collection-shaped, not item-shaped.** A named query tak
 
 > **Be honest about `conflate`.** It holds only a **value update** to a row that is visible before *and* after. On an **insert-only** stream — a tick feed, an event log, an audit table — it reduces the event rate by **zero**, and `values_skipped` never fires. Conflation never collapses an insert, a delete, or a row leaving your visibility scope, because a client that misses one of those has a permanently wrong grid. For last-value-per-key, model it as a `latestPerKey` materialized query (step 8) and subscribe to that. Be precise about what that buys you: the MQ result table holds one row per key, so the grid stays bounded no matter how many ticks arrive — but MQ upserts do not carry `prev` today, so a subscribe over the MQ does not throttle the **event rate** either. It is the correct catalog shape, not a rate limiter. If you need a hard cap on messages per second right now, that belongs in a service that owns the fan-out. Details and the current caveats: [conflate is a no-op on insert-only streams](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
-**Alternatives, in descending order of preference.** WebSockets blocked by a proxy? The client falls back to **HTTP long-poll** automatically (`streaming.enableLongPollFallback`, on by default). Need to disable streaming entirely? Poll a named query on an interval — you keep pinned hashes, the access gate, and `totalMatches`; you lose latency and you spend more permits. Genuinely need fan-out to more clients than the caps allow, or a wire protocol Aouda does not speak? Keep a relay, and let it hold **one** subscription per authorization class. That is a real answer for a real constraint. Streaming internals, wire modes, and reconnect playbooks: [Real-time streaming](real-time.md).
+**Alternatives, in descending order of preference.** WebSockets blocked by a proxy? The client falls back to **HTTP long-poll** automatically (`streaming.enableLongPollFallback`, on by default). Need to disable streaming entirely? Poll a named query on an interval — you keep name identity, the access gate, and `totalMatches`; you lose latency and you spend more permits. Genuinely need fan-out to more clients than the caps allow, or a wire protocol Aouda does not speak? Keep a relay, and let it hold **one** subscription per authorization class. That is a real answer for a real constraint. Streaming internals, wire modes, and reconnect playbooks: [Real-time streaming](real-time.md).
 
 #### 8. Pre-aggregate what a dashboard needs
 
@@ -516,7 +516,7 @@ Bulk load into a table carrying checks or transforms requires an **explicit inte
 
 #### 10. Make types flow end to end
 
-**What you do.** Generate clients from the schema and let the hashes be pinned at build time.
+**What you do.** Optionally generate Args/Row types from the schema. The identity is a string literal from `aouda.schema.json`.
 
 ```bash
 npx @aouda/client generate --server $AOUDA_URL --database appdb --output ./src/generated/aouda.ts
@@ -524,7 +524,7 @@ aouda generate typescript --file aouda.schema.json --output ./src/generated/aoud
 aouda generate csharp     --file aouda.schema.json --output ./Generated/Queries.cs
 ```
 
-You get the hash, the argument type, and the row type per definition. Editing a definition produces a **new hash**; the old one keeps working until you remove it, and you can stage a migration with `deprecatedAt` / `sunsetAt` — execute still returns 200 plus a `NAMED_QUERY_DEPRECATED` warning, so you can find stale clients before you break them. There is no runtime registration endpoint: if build-time generation is painful in your setup, fix the tooling rather than reaching for one. [Pin hashes (codegen)](named-queries.md#pin-hashes-codegen) · [TypeScript client](../clients/typescript.md) · [SDK compatibility](../clients/compatibility.md).
+You get optional argument and row types per definition. Editing a definition under the same name changes behaviour at apply time — coexistence is two names (`quoteByTicker` + `quoteByTickerV2`). Deprecate with `deprecatedAt` / `sunsetAt`; execute still returns 200 plus a `NAMED_QUERY_DEPRECATED` warning. There is no runtime registration endpoint. A frontend that never runs codegen is fully functional. [Types (optional codegen)](named-queries.md#types-optional-codegen) · [TypeScript client](../clients/typescript.md) · [SDK compatibility](../clients/compatibility.md).
 
 #### 11. Operate it
 
@@ -566,7 +566,7 @@ The showcase, and the table to check your feature list against. If something you
 | A filter dropdown of "values that exist" | Named query with `distinct: true` — zero segment scan when the columns are partition keys | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
 | Search-as-you-type over a name | A stored `derived` normalized column plus a prefix/`in` predicate. There is **no full-text search** | [Derived columns](insert-transforms.md#derived-columns) |
 | A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbyChoices--orderbyindex) |
-| A live-updating grid or ticker | `namedQueries.subscribe` by hash, collection-shaped, list parameter capped with `maxItems` | [Subscribe by hash](named-queries.md#subscribe-by-hash) |
+| A live-updating grid or ticker | `namedQueries.subscribe` by name, collection-shaped, list parameter capped with `maxItems` | [Subscribe by name](named-queries.md#subscribe-by-name) |
 | A "latest value per key" board | `latestPerKey` materialized query, subscribed. **Not** the raw table plus `conflate` | [Materialized queries](materialized.md) |
 | A chart over hourly/daily buckets | `aggregate` MQ with `TruncateToHour`, `dataPlaneAccess: true`, read by `outputName` | [Materialized queries](materialized.md) |
 | A dashboard of N independent panels | The batch envelope — up to 32, one snapshot, one permit | [Batch](named-queries.md#batch-one-snapshot) |
@@ -606,11 +606,11 @@ The path above is the one that removes the most work. It is not the only support
 |---|---|---|---|
 | No WebSockets survive your network path | Keep subscriptions; the client falls back to **HTTP long-poll** automatically | Some latency; more connections | [Real-time](real-time.md) |
 | Streaming is off the table entirely | Poll a named query on an interval | Latency, and permits — measure against the 60/60 s quota | [Direct client access](direct-client-access.md#quotas-and-cost) |
-| No credential may ever reach the browser | **Pattern A**: your backend holds `mk_svc_*` and calls the same named queries | The BFF stays. You keep pinned hashes, the access gate, and bounded cost | [Pattern A](../auth/architecture.md#pattern-a-backend-mediated-traditional) |
+| No credential may ever reach the browser | **Pattern A**: your backend holds `mk_svc_*` and calls the same named queries | The BFF stays. You keep name identity, the access gate, and bounded cost | [Pattern A](../auth/architecture.md#pattern-a-backend-mediated-traditional) |
 | Users must sign in with your corporate IdP | Backend authenticates against the IdP and holds `mk_svc_*`; or use Aouda email/password + MFA | OAuth code + PKCE and token introspection are **not shipped** | [Authentication that exists](direct-client-access.md#authentication-that-exists) |
 | Pure Node/JS CI, cannot add .NET | Call `POST …/schema/diff?access=true` on admin from your existing job | Convenience only — the gate still runs | [BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176) |
 | Your team needs SQL | A trusted service using the fluent query builder; ad-hoc queries on admin | There is **no SQL surface** | [Query execution](query.md) |
-| Native mobile app, not a browser | Identical to the browser path — same data-plane listener, same `mk_pub_*`, same hashes | Nothing | [Direct client access](direct-client-access.md) |
+| Native mobile app, not a browser | Identical to the browser path — same data-plane listener, same `mk_pub_*`, same names | Nothing | [Direct client access](direct-client-access.md) |
 | Edge / serverless functions | Treat them as trusted services with `mk_svc_*`; mind connection lifetime and that subscriptions want a long-lived socket | Streaming from a short-lived function | [Direct client access](direct-client-access.md) |
 | Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and run the access gate | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
 | Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/) |
@@ -670,7 +670,7 @@ If you are an AI agent writing an application against Aouda, this section is you
 | Put every table, query, mutation, and MQ in `aouda.schema.json` | Look for a runtime registration endpoint — there is none, by design |
 | Give every named query an explicit `select` | Use `*`, or select a column the screen does not render |
 | Give every named query a capped `limit` | Rely on a default page size |
-| Import hashes from generated code | Hard-code, guess, or compute a hash |
+| Pass schema names as string literals | Guess a name that is not in `aouda.schema.json` |
 | Set `dataPlaneAccess: true` on **every** table a browser-tier read touches, including join tables and MQ result tables | Assume a table is reachable because it exists — the default is `false`, fail-closed |
 | Ship `authMode` in the same change as `dataPlaneAccess` for any user-scoped table | Leave a user-owned table readable by every signed-in user |
 | Use `mk_pub_*` or `mk_anon_*` in client code | Put `mk_svc_*` / `mk_srv_*` anywhere a browser can reach — grep the bundle, do not assume |
@@ -689,7 +689,7 @@ For each screen or feature, in order:
 1. **Is the data already in a table?** If not, step 1 of the build sequence.
 2. **Can the read be expressed as one definition** — one table plus ≤ 3 joins, an explicit `select`, a capped `limit`, values as parameters? If yes, write a named query. If it needs a groupBy or a rollup, write a materialized query and read *that*. If it needs a lookup, a loop, or an outbound call, it is a service.
 3. **Does the screen need a total?** Add `count: true`. If apply rejects it with `NAMED_QUERY_COUNT_UNBOUNDED`, the definition's cost is not bounded — cover the partition keys or drop the count. Do not add a count endpoint.
-4. **Does it need to update live?** Subscribe by hash, collection-shaped. If the table is insert-only, do not reach for `conflate` — it holds value updates only. Model a `latestPerKey` MQ and subscribe to that: it bounds the grid to one row per key, which is the shape you want, though it does not throttle the event rate today.
+4. **Does it need to update live?** Subscribe by name, collection-shaped. If the table is insert-only, do not reach for `conflate` — it holds value updates only. Model a `latestPerKey` MQ and subscribe to that: it bounds the grid to one row per key, which is the shape you want, though it does not throttle the event rate today.
 5. **Is the data user-scoped?** Set `authMode` and verify with `policy inspect`. Never filter by identity through a parameter — identity is injected from the validated principal and is never an argument.
 6. **Does it write?** Named mutation, with the row rules as `checks` on the table.
 7. **Re-run the gate.** `schema validate`, `schema diff --access`, `policy inspect`.
@@ -711,7 +711,7 @@ Branch on `error`; show `suggestion` to whoever can act on it; log `requestId`. 
 
 | Code | It means | Do |
 |---|---|---|
-| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | You called table subscribe on the data plane | Use `namedQueries.subscribe(hash, args)` |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | You called table subscribe on the data plane | Use `namedQueries.subscribe(name, args)` |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | The definition has joins, `selectExpr`, `distinct`, or an offset | Split the view, or poll it — HTTP execute still works |
 | `TABLE_NOT_FOUND` on a table that exists | `dataPlaneAccess: false`, browser-tier | Opt the table in — and check the join tables |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | Item-shaped subscriptions | Make the definition take a capped list parameter |
@@ -732,7 +732,7 @@ Before reporting the work complete:
 - [ ] Every table any named query touches has `dataPlaneAccess: true`, join tables and MQ result tables included.
 - [ ] Every user-scoped table has an `authMode`, and `policy inspect` was run for one identity per table class.
 - [ ] No `mk_svc_*` / `mk_srv_*` appears in any client-delivered artifact — grepped, not assumed.
-- [ ] No hash is hard-coded; all come from generated code.
+- [ ] Names are string literals from the schema; codegen is optional Args/Row types.
 - [ ] Subscriptions are collection-shaped; the count per connection is well under 32.
 - [ ] Independent panels use the batch envelope.
 - [ ] `conflate` is not used on an insert-only stream, or its no-op is stated where used.
@@ -791,7 +791,7 @@ Before reporting the work complete:
 |---|---|---|
 | `404 TABLE_NOT_FOUND` on a table you can see in Studio | `dataPlaneAccess: false`, browser-tier caller | Opt the table in — and check every join table and MQ result table |
 | `AUTH_KEY_LISTENER_MISMATCH` | `mk_pub_*` sent to the admin listener, or the reverse | `mk_pub_*` → data-plane; `mk_svc_*` → admin |
-| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | `client.table(t).subscribe(...)` sends a target | `client.namedQueries.subscribe(hash, args)` |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | `client.table(t).subscribe(...)` sends a target | `client.namedQueries.subscribe(name, args)` |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | The definition has joins, `selectExpr`, `distinct`, or an offset | Only the live path is restricted; HTTP execute still works. Split the view or poll it |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | Item-shaped subscriptions × N clients | A capped list parameter; one subscription per view |
 | `429 IDENTITY_QUOTA_EXCEEDED` on page load | N independent executes | Batch, honour `Retry-After`, then size `PermitLimit` from measurement |
@@ -825,7 +825,7 @@ Two lists. The first is *not yet*; the second is *not ever*, on purpose.
 | Expression `orderBy` on runtime columns (BL-183) | A `computed` output on an `aggregate` MQ, or a stored `derived` column — both are physically stored and orderable |
 | `topNPerGroup` / `firstPerKey` materialized queries | Shipped — declare them in `materializedQueries` or HTTP create. `firstPerKey` is MIN(`orderBy`), not arrival order. Top-N working set is in-memory; query the result by name |
 | `groupBy` and ad-hoc aggregates on the data plane | An aggregate MQ, read through a named query |
-| Subscribe by hash for definitions using joins, `selectExpr`, or `distinct` | HTTP execute plus polling, or split the view |
+| Subscribe by name for definitions using joins, `selectExpr`, or `distinct` | HTTP execute plus polling, or split the view |
 | The failing row index on a rejected batch | The error names the check; pre-validate or quarantine |
 | OAuth 2.0 authorization code + PKCE; token introspection | Aouda email/password (+ MFA), or a backend holding `mk_svc_*` |
 | Password reset / MFA methods on the client SDKs | The HTTP endpoints exist — call them directly |
@@ -847,7 +847,7 @@ Files and images (use object storage, keep the key in a column). Background jobs
 ## Related
 
 **The mechanisms**
-- [Named queries and mutations](named-queries.md) — authoring, execute, batch, subscribe by hash, codegen
+- [Named queries and mutations](named-queries.md) — authoring, execute, batch, subscribe by name, optional types
 - [Direct client access](direct-client-access.md) — listeners, key types, quotas, thin-edge topology
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — the generated refusal list
 - [Insert-time transforms](insert-transforms.md) — `derived`, `checks`, `route` / `tee`, failure semantics

@@ -6,16 +6,16 @@ parent: "Guides"
 
 # Named queries and mutations
 
-Document status: Complete (P40 S09)  
-Last updated: 2026-08-21
+Document status: Complete (BL-188 S09)  
+Last updated: 2026-08-22
 
-A **named query** is a server-authored, versioned, parameterized query template. The client sends a **content hash** plus arguments. It cannot name tables, columns, or operators. Identity is injected from the validated principal — it is never an argument.
+A **named query** is a server-authored, parameterized query template. The client sends a **name** plus arguments. It cannot name tables, columns, or operators. Identity is injected from the validated principal — it is never an argument.
 
 That is the BFF (backend-for-frontend) **minus the deployment unit**. A gateway that only shapes, filters, projects, and authorizes reads is a catalog entry reviewed like any other schema change.
 
 Named **mutations** are the write-side mirror (insert / update / delete templates). They run with **invoker rights only** — there is no `SECURITY DEFINER` / `runAs`.
 
-**Wire contract:** [HTTP API — Named queries](../reference/http-api.md#named-queries). **Limits:** [What a browser-tier read cannot do](browser-tier-read-limits.md).
+**Wire contract:** [HTTP API — Named queries](../reference/http-api.md#named-queries) (v2.5). **Limits:** [What a browser-tier read cannot do](browser-tier-read-limits.md).
 
 ---
 
@@ -26,11 +26,13 @@ Named **mutations** are the write-side mirror (insert / update / delete template
 | Author a named query in `aouda.schema.json` | [Schema](#schema) |
 | Call it from TypeScript, C#, or curl | [Execute](#execute) |
 | Collapse independent reads into one round trip | [Batch](#batch-one-snapshot) |
-| Subscribe to live results | [Subscribe by hash](#subscribe-by-hash) |
-| Pin hashes in CI / codegen | [Pin hashes](#pin-hashes-codegen) |
+| Subscribe to live results | [Subscribe by name](#subscribe-by-name) |
+| Optional Args/Row types | [Types (optional codegen)](#types-optional-codegen) |
 | Page with a total ("1–25 of 412") | [Paging, distinct, and count](#paging-distinct-and-count) |
 | See what this surface cannot do | [Browser-tier read limits](browser-tier-read-limits.md) |
 | Decide if this belongs in Aouda at all | [Division of responsibility](division-of-responsibility.md) |
+
+<!-- #subscribe-by-hash and #pin-hashes-codegen redirected: subscribe is by name; codegen is optional types. -->
 
 ---
 
@@ -64,26 +66,33 @@ The strong arguments:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Identity of a definition | SHA-256 of canonical form | Immutable. Edit → new hash. Old hash keeps working until explicitly removed. |
-| Names | Aliases (`name`, `name@version`) | Clients **pin hashes**, not names. |
+| Identity of a definition | Unique name in `aouda.schema.json` | `^[A-Za-z][A-Za-z0-9_.]*$`. Same string on the wire, on disk, and in export. |
+| Versioning | Explicit names | `quoteByTicker` and `quoteByTickerV2` are two entries. |
+| Removal | Omit the name | Destructive `RemoveNamedQuery`. There is no `dropNamedQueries`. |
 | `select` / `selectExpr` | **Required** | `*` is refused (`NAMED_QUERY_PROJECTION_STAR`). |
 | `limit` | Must be capped in the definition | Uncapped `$limit` fails schema apply. |
 | Parameter in identifier position | Illegal | Table, column, operator, sort, projection. |
 | Identity as a parameter | Illegal | `NAMED_QUERY_IDENTITY_PARAM` at apply. |
 | Persist-time cost | `1 + joinCount` | Caps: 3 joins, cost 8 (`NAMED_QUERY_TOO_MANY_JOINS` / `NAMED_QUERY_COST_EXCEEDED`). |
-| Batch size | 32 | Envelope 400 if empty, over cap, or includes a mutation hash. |
+| Batch size | 32 | Envelope 400 if empty, over cap, or includes a mutation **name**. |
 | Runtime registration | **Does not exist** | That is the GraphQL APQ trap. |
-| Bare-hash execute (no `alias`) | Fail-safe freshness | Primary-only + `readYourWrites`. See [Declared freshness](#declared-freshness). |
+| Fail-safe freshness | Name has no `freshness` block | Primary-only + `readYourWrites`. See [Declared freshness](#declared-freshness). |
+
+### Trade-away
+
+Editing the body under the same name changes behaviour for every deployed frontend at apply time. That is deliberate — a consumer of "the current version" should get the current version. Coexistence, when you need it, is **two names** (`quoteByTicker` + `quoteByTickerV2`).
+
+The mitigation is not a compatibility shim. It is a **review-time signal**: the access-surface diff reports `named_query_body_changed` (`widen`) when the body under a name changes, plus the `V2` pattern. See [Access-surface diff](access-surface.md).
 
 ---
 
 ## Declared freshness
 
-Optional `freshness` lives on the **alias**, outside the content hash. Changing it does not break a client pinned to the hash. Two aliases may share one hash with different budgets.
+Optional `freshness` lives on the **named query**. Budget-only edits do not fire `named_query_body_changed`. Fail-safe (primary-only + `readYourWrites`) applies when that **name** has no `freshness` block.
 
-Call sites may **tighten** (`?maxStalenessMs=500` on a 2 s alias). Loosening is 400 `FRESHNESS_LOOSENED`. A branch that loosens a budget is `freshness` / `widen` on `aouda schema diff --access` and fails CI; a tightening is `narrow` and does not.
+Call sites may **tighten** (`?maxStalenessMs=500` on a 2 s named query). Loosening is 400 `FRESHNESS_LOOSENED`. A branch that loosens a budget is `freshness` / `widen` on `aouda schema diff --access` and fails CI; a tightening is `narrow` and does not.
 
-Pass the alias as `?alias=`, header `X-Aouda-Named-Query-Alias`, or body `alias` (query wins). Bare hash (no alias) is the fail-safe above. Full contract, caveats, and SDK examples: [Freshness and replica consistency](freshness.md).
+There is no `?alias=` / header / body `alias`. Full contract, caveats, and SDK examples: [Freshness and replica consistency](freshness.md).
 
 ---
 
@@ -184,27 +193,23 @@ Apply:
 aouda schema apply --file aouda.schema.json
 ```
 
-Editing a definition produces a **new hash**. The old hash keeps working until you remove it (branch diff reports removal as breaking). Deprecate with `deprecatedAt` / `sunsetAt`; execute still returns 200 plus `warnings: [{ "code": "NAMED_QUERY_DEPRECATED", "hash": "…", "sunsetAt": "…" }]`.
+Editing a definition **under the same name** changes behaviour for every caller at apply time (see [Trade-away](#trade-away)). Deprecate with `deprecatedAt` / `sunsetAt`; execute still returns 200 plus `warnings: [{ "code": "NAMED_QUERY_DEPRECATED", "name": "…", "sunsetAt": "…" }]`.
 
 ---
 
-## Pin hashes (codegen)
+## Types (optional codegen)
 
-Clients pin hashes generated from the schema at **build time**.
+`npx @aouda/client generate` and `aouda generate` emit `Args` / `Row` types only. They do **not** emit name const maps. A frontend that ignores codegen is fully functional — the identity is a string literal from the schema.
 
-```bash
-# TypeScript — emits hashes + Args/Row types
-npx @aouda/client generate
-
-# From a running server
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:5433/api/databases/trading/schema/typescript
-
-# C#
-aouda generate csharp --file aouda.schema.json
+```ts
+const { rows } = await client.namedQueries.execute("equity.quoteByTicker", { ticker: "AAPL" });
 ```
 
-There is **no** `POST /named-queries/register`. If build-time generation is painful, fix the tooling — do not add runtime registration.
+```csharp
+await client.NamedQueries.ExecuteAsync("equity.quoteByTicker", args);
+```
+
+There is **no** `POST /named-queries/register`. Inventory is `GET …/schema/export`.
 
 ---
 
@@ -310,7 +315,7 @@ Expression `orderBy` on an arbitrary runtime column is **not** offered (BL-183).
 
 ## Execute
 
-`POST /api/databases/{db}/named-queries/{hash}/query`
+`POST /api/databases/{db}/named-queries/{name}/query`
 
 Body is `{ "args": { … } }` only. No `database` field (the path already has it).
 
@@ -322,17 +327,16 @@ Body is `{ "args": { … } }` only. No `database` field (the path already has it
 curl -s -X POST \
   -H "Authorization: Bearer $MK_PUB_OR_JWT" \
   -H "Content-Type: application/json" \
-  http://localhost:5434/api/databases/trading/named-queries/aaa…64hex…/query?format=columnar \
+  http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query?format=columnar \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-Columnar success looks like any other query result. Unknown hash → `404 NAMED_QUERY_NOT_FOUND`. Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
+Columnar success looks like any other query result. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
 
 ### TypeScript (`@aouda/client`)
 
 ```typescript
 import { AoudaClient } from "@aouda/client";
-import { equityQuoteByTicker } from "./generated/named-queries"; // pinned hash + types
 
 const client = new AoudaClient({
   serverUrl: "https://data.example.com", // data-plane listener
@@ -342,7 +346,7 @@ const client = new AoudaClient({
 await client.connect();
 // after user sign-in, attach the user JWT — do not put identity in args
 
-const { rows } = await client.namedQueries.execute(equityQuoteByTicker.hash, {
+const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
   ticker: "AAPL",
 });
 ```
@@ -356,9 +360,11 @@ var client = new AoudaClient("https://data.example.com", "trading")
 };
 
 var result = await client.NamedQueries.ExecuteAsync(
-    EquityQuoteByTicker.Hash,
+    "equity.quoteByTicker",
     new Dictionary<string, object?> { ["ticker"] = "AAPL" });
 ```
+
+Empty or whitespace name throws locally on both SDKs.
 
 On the data-plane, `POST …/query` (ad-hoc) is **404** for every credential. Service keys that need ad-hoc use the admin listener.
 
@@ -368,34 +374,34 @@ On the data-plane, `POST …/query` (ad-hoc) is **404** for every credential. Se
 
 `POST /api/databases/{db}/named-queries/batch`
 
-A dashboard of independent panels should not issue N sequential executes. A batch of N hashes returns N **positional** results from **one** read snapshot. Cap **32**.
+A dashboard of independent panels should not issue N sequential executes. A batch of N **names** returns N **positional** results from **one** read snapshot. Cap **32**.
 
 ```json
 {
   "queries": [
-    { "hash": "<quote hash>", "args": { "ticker": "AAPL" } },
-    { "hash": "<overview hash>", "args": { "accountId": 42 } }
+    { "name": "equity.quoteByTicker", "args": { "ticker": "AAPL" } },
+    { "name": "equity.stockOverview", "args": { "accountId": 42 } }
   ]
 }
 ```
 
-HTTP **200** means the envelope was accepted. A missing hash or a bind/ADRA failure is:
+HTTP **200** means the envelope was accepted. A missing name or a bind/ADRA failure is:
 
 ```json
 {
   "results": [
     { "columns": ["ticker", "bid"], "types": ["String", "Decimal"], "data": [["AAPL", 189.2]], "rowCount": 1 },
-    { "code": "NAMED_QUERY_NOT_FOUND", "error": "Named query 'bbb…' was not found." }
+    { "code": "NAMED_QUERY_NOT_FOUND", "error": "Named query 'equity.unknown' was not found." }
   ]
 }
 ```
 
-Envelope **400** (no `results`): empty array, more than 32 elements, or a **named-mutation** hash (`NAMED_QUERY_BATCH_MUTATION`).
+Envelope **400** (no `results`): empty array, more than 32 elements, or a **named-mutation** name (`NAMED_QUERY_BATCH_MUTATION`).
 
 ```typescript
 const slots = await client.namedQueries.batch([
-  { hash: equityQuoteByTicker.hash, args: { ticker: "AAPL" } },
-  { hash: equityStockOverview.hash, args: { accountId: 42 } },
+  { name: "equity.quoteByTicker", args: { ticker: "AAPL" } },
+  { name: "equity.stockOverview", args: { accountId: 42 } },
 ]);
 
 for (const slot of slots) {
@@ -410,8 +416,8 @@ for (const slot of slots) {
 ```csharp
 var slots = await client.NamedQueries.BatchAsync(new[]
 {
-    new NamedQueryBatchInput(EquityQuoteByTicker.Hash, new Dictionary<string, object?> { ["ticker"] = "AAPL" }),
-    new NamedQueryBatchInput(EquityStockOverview.Hash, new Dictionary<string, object?> { ["accountId"] = 42L }),
+    new NamedQueryBatchInput("equity.quoteByTicker", new Dictionary<string, object?> { ["ticker"] = "AAPL" }),
+    new NamedQueryBatchInput("equity.stockOverview", new Dictionary<string, object?> { ["accountId"] = 42L }),
 });
 ```
 
@@ -421,15 +427,15 @@ Two sequential single executes under a concurrent writer **may disagree**. The b
 
 ---
 
-## Subscribe by hash
+## Subscribe by name
 
-On the data-plane, WebSocket `subscribe` **requires** `hash` (and optional `args`). Ad-hoc `target` + `filter` is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
+On the data-plane, WebSocket `subscribe` **requires** `"name"` (and optional `args`). Ad-hoc `target` + `filter` is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
 
 ```json
 {
   "type": "subscribe",
   "id": "sub-1",
-  "hash": "<quote hash>",
+  "name": "equity.quoteByTicker",
   "args": { "ticker": "AAPL" },
   "conflate": { "key": ["ticker"], "interval_ms": 100 }
 }
@@ -438,12 +444,12 @@ On the data-plane, WebSocket `subscribe` **requires** `hash` (and optional `args
 `conflate` holds only a value `update` visible before **and** after. On an insert-only tick table it does **not** reduce the event rate — set `"collapse_inserts": true` in the conflate object to hold latest-wins inserts, or point at a `latestPerKey` MQ instead. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
 ```json
-{ "type": "subscribe", "id": "lp", "hash": "<lastPrice hash>",
+{ "type": "subscribe", "id": "lp", "name": "quotes.lastPrice",
   "args": { "tickers": ["AAPL"], "source": "nasdaq" },
   "conflate": { "collapse_inserts": true } }
 ```
 
-The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** that hash for the connection. Redeploying the alias does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
+The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** the bound `Where` + `Select` for the connection. Editing the named query does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -451,14 +457,12 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
 
 ### From the SDKs
 
-Both clients expose this directly — you do not hand-roll the frames. `namedQueries.subscribe` returns the **same** subscription object as table subscribe, so snapshot paging, `gap` → `resume_from`, reconnect, `re_auth`, and `SLOW_CONSUMER` recovery are the paths you already have. Every resend carries the same `hash` + `args`.
+Both clients expose this directly — you do not hand-roll the frames. `namedQueries.subscribe` returns the **same** subscription object as table subscribe, so snapshot paging, `gap` → `resume_from`, reconnect, `re_auth`, and `SLOW_CONSUMER` recovery are the paths you already have. Every resend carries the same `name` + `args`.
 
 ```typescript
-import { equityQuotes } from "./generated/named-queries"; // pinned hash + types
-
 const sub = client.namedQueries.subscribe(
-  equityQuotes.hash,
-  { tickers: ["AAPL", "MSFT"] },
+  "equity.quoteByTicker",
+  { ticker: "AAPL" },
   {
     conflate: { key: ["ticker"], interval_ms: 100 },
     onSnapshot: (rows, version) => grid.reset(rows, version),
@@ -467,14 +471,13 @@ const sub = client.namedQueries.subscribe(
   }
 );
 
-// Or consume it as an async iterator, then:
 await sub.unsubscribe();
 ```
 
 ```csharp
 await foreach (var evt in client.NamedQueries.SubscribeAsync(
-    EquityQueries.EquityQuotes.Hash,
-    new Dictionary<string, object?> { ["tickers"] = new[] { "AAPL", "MSFT" } },
+    "equity.quoteByTicker",
+    new Dictionary<string, object?> { ["ticker"] = "AAPL" },
     new SubscribeOptions { Conflate = new ConflateOptions(["ticker"], TimeSpan.FromMilliseconds(100)) },
     ct))
 {
@@ -485,11 +488,10 @@ await foreach (var evt in client.NamedQueries.SubscribeAsync(
 Notes that bite:
 
 - **Pass no `filter`.** The predicate is the definition plus your `args`; there is no client-side filter on a named subscription. `client.table(t).subscribe(…)` still sends `target` and still works on the **admin** listener — it is refused on the data-plane.
-- An empty or whitespace `hash` throws before anything is sent.
-- A deprecated hash still subscribes. It adds `NAMED_QUERY_DEPRECATED` to `snapshot_complete.warnings`, which raises the named-artifact warning sink **once** and still delivers the snapshot.
+- An empty or whitespace name throws before anything is sent.
+- A deprecated name still subscribes. It adds `NAMED_QUERY_DEPRECATED` to `snapshot_complete.warnings`, which raises the named-artifact warning sink **once** and still delivers the snapshot.
 - Definitions using `joins`, `selectExpr`, `distinct`, or a non-zero offset are refused with `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of those still works — only the live path is restricted.
 - `conflate` on an insert-only stream is a no-op (see above).
-- Codegen emits one binding per query (`{ hash, name }` plus `Args` / `Row`); the same constant feeds `execute` and `subscribe`. There is no generated `subscribeFoo()` wrapper.
 
 ---
 
@@ -501,12 +503,12 @@ Notes that bite:
 curl -s -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
-  http://localhost:5434/api/databases/trading/named-mutations/<hash>/execute \
+  http://localhost:5434/api/databases/trading/named-mutations/equity.adjustQty/execute \
   -d '{"args":{"id":1,"qty":10}}'
 ```
 
 ```typescript
-await client.namedMutations.execute(equityAdjustQty.hash, { id: 1, qty: 10 });
+await client.namedMutations.execute("equity.adjustQty", { id: 1, qty: 10 });
 ```
 
 Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `rowsDeleted`) plus optional `RETURNING` rows. Mutations are **not** allowed in the read batch.
@@ -527,16 +529,17 @@ There is no catalog field, header, or option that runs a named query as someone 
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `404 NAMED_QUERY_NOT_FOUND` | Hash not deployed, typo, or `sha256:` prefix mishandled | Apply schema; pin the hash from codegen; hashes are 64 hex |
+| `404 NAMED_QUERY_NOT_FOUND` | Name not deployed or typo | Apply schema; use the schema key as a string literal |
 | `404 TABLE_NOT_FOUND` on a table that exists | Data-plane + browser-tier + `dataPlaneAccess: false` | Set `dataPlaneAccess: true` on every touched table **and** MQ entry (including joins) |
 | `400 NAMED_QUERY_BIND_FAILED` | Arg type/constraint | Check `params` (`maxLength`, `min`/`max`, `enum`, `maxItems`) |
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |
 | Schema apply `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` | Set a numeric cap (or a constrained `limitParam`) |
 | Schema apply `NAMED_QUERY_COUNT_UNBOUNDED` | `count: true` on a join, `distinct`, or uncovered partition keys | Cover every partition key with required `eq`/`in`, or drop `count` |
 | Schema apply `NAMED_QUERY_COST_EXCEEDED` | Too many joins | Split the query or drop a join (cap default 8 = `1 + joins`) |
-| Batch HTTP 400 `NAMED_QUERY_BATCH_MUTATION` | Mutation hash in `queries` | Mutations have their own execute route |
+| Batch HTTP 400 `NAMED_QUERY_BATCH_MUTATION` | Mutation name in `queries` | Mutations have their own execute route |
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
-| `NAMED_QUERY_DEPRECATED` warning | Hash sunset pending | Log it; migrate codegen to the new hash before `sunsetAt` |
+| `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |
 | Data-plane `POST /query` 404 | Listener allowlist | Use named-query execute, or connect the service key to the **admin** listener |
 
 ---
@@ -561,7 +564,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in
-- [Access-surface diff](access-surface.md) — CI gate on widening (including `freshness` loosen)
-- [Freshness and replica consistency](freshness.md) — token, `AtLeast`, alias `freshness`, caveats
+- [Access-surface diff](access-surface.md) — CI gate on widening (including `named_query_body_changed` and `freshness` loosen)
+- [Freshness and replica consistency](freshness.md) — token, `AtLeast`, named-query `freshness`, caveats
 - [HTTP API](../reference/http-api.md)
 - [TypeScript client](../clients/typescript.md)

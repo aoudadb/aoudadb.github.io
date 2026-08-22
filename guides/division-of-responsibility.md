@@ -91,7 +91,7 @@ A gateway that fans out `GET /positions` then N `GET /quotes/{ticker}` and shape
 | Hide `internalSpread` | Omit it from `select` |
 | Authorize the caller | ADRA underneath (invoker rights) |
 | Ten unrelated dashboard panels | [Named-query batch](named-queries.md#batch-one-snapshot) (one snapshot) |
-| Live last-price at ~10 Hz | (a) `latestPerKey` MQ + subscribe by hash — recommended; MQ upserts carry `prev` so default `conflate` works. (b) Insert-only tick table + `"collapse_inserts": true` on the subscribe's `conflate` object. Default `conflate` without `collapse_inserts` is a no-op on insert-only streams. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams) |
+| Live last-price at ~10 Hz | (a) `latestPerKey` MQ + subscribe by name — recommended; MQ upserts carry `prev` so default `conflate` works. (b) Insert-only tick table + `"collapse_inserts": true` on the subscribe's `conflate` object. Default `conflate` without `collapse_inserts` is a no-op on insert-only streams. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams) |
 
 ### No — bond-trade import
 
@@ -122,7 +122,7 @@ The argument is strong for:
 
 1. **Streaming** — 3× bandwidth on every tick plus two serialization passes and two queues, if a relay sits in the middle.
 2. **Deployment coupling** — thousands of lines redeployed for a field addition.
-3. **Round-trip elimination** — composition (one named query with joins) plus the **batch envelope** (independent hashes, one snapshot). Field numbers from pipeline-mode literature (100 statements at 300 ms RTT: 30 s → 0.3 s) are a **client-side** change, not a topology change.
+3. **Round-trip elimination** — composition (one named query with joins) plus the **batch envelope** (independent names, one snapshot). Field numbers from pipeline-mode literature (100 statements at 300 ms RTT: 30 s → 0.3 s) are a **client-side** change, not a topology change.
 
 Adopt named queries for (2) and (3), and for the security properties (bounded cost, projection, reviewable artifact). Use the batch API when a view would otherwise issue N independent named-query HTTP calls.
 
@@ -141,7 +141,7 @@ Adopt named queries for (2) and (3), and for the security properties (bounded co
 
 ## Copy-paste: the BFF that becomes a named query
 
-Schema (admin apply) — pin the hash via codegen, then call from the **data-plane**:
+Schema (admin apply) — then call from the **data-plane**:
 
 ```json
 {
@@ -163,21 +163,21 @@ HTTP (data-plane):
 curl -s -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Content-Type: application/json" \
-  http://localhost:5434/api/databases/trading/named-queries/<hash>/query \
+  http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
 TypeScript:
 
 ```typescript
-const quote = await client.namedQueries.execute(equityQuoteByTicker.hash, { ticker: "AAPL" });
+const quote = await client.namedQueries.execute("equity.quoteByTicker", { ticker: "AAPL" });
 ```
 
 C#:
 
 ```csharp
 var quote = await client.NamedQueries.ExecuteAsync(
-    EquityQuoteByTicker.Hash,
+    "equity.quoteByTicker",
     new Dictionary<string, object?> { ["ticker"] = "AAPL" });
 ```
 

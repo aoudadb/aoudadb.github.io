@@ -9,7 +9,7 @@ parent: "Guides"
 Document status: Complete (P40 S09)  
 Last updated: 2026-08-21
 
-A **browser-tier** caller is `mk_pub_*` or an end-user JWT on the **data-plane listener**. It cannot compose an ad-hoc `QueryMessage`. It sends a named-query **hash** plus arguments. This page is the list that page should have been: what that surface refuses, why, and what to do instead.
+A **browser-tier** caller is `mk_pub_*` or an end-user JWT on the **data-plane listener**. It cannot compose an ad-hoc `QueryMessage`. It sends a named-query **name** plus arguments. This page is the list that page should have been: what that surface refuses, why, and what to do instead.
 
 Enumerable tables below are generated from the validators that enforce them. If a table and the engine disagree, the engine wins and this page is stale — pinned by `BrowserTierReadLimitsDocsTests`.
 
@@ -88,13 +88,13 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 | `POST` | `/api/databases/{db}/named-queries/{name}/query` | Named-query execute |
 | `POST` | `/api/databases/{db}/named-queries/batch` | Named-query batch |
 | `POST` | `/api/databases/{db}/named-mutations/{name}/execute` | Named-mutation execute |
-| `*` | `/api/databases/{db}/ws` | WebSocket (subscribe by hash); method not checked |
+| `*` | `/api/databases/{db}/ws` | WebSocket (subscribe by name); method not checked |
 
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
 
 `orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Bool`, `Guid`, and `Float32` are valid column types and are **not** sortable.
 
-Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of the same hash still works.
+Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of the same name still works.
 
 `POST /api/databases/{db}/query` and `POST /api/databases/{db}/query/count` are **not** on the allowlist. On the data-plane they are **404**.
 
@@ -134,9 +134,9 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 **Rule.** Table, column, operator, sort direction, and function names are fixed at definition time (`D-3`). `{ "op": { "param": "cmp" } }` fails apply (`NAMED_QUERY_IDENTIFIER_PARAM`).
 
-**Why.** The hash is reviewable and the cost is boundable only if identifiers are static.
+**Why.** The name is reviewable and the cost is boundable only if identifiers are static.
 
-**Instead:** one definition per shape (new hash). For bounded sort choice, declare `orderByChoices` in the definition and pass `orderByIndex` in the execute/subscribe request — that **is** shipped (`D-35`).
+**Instead:** one definition per shape (new name). For bounded sort choice, declare `orderByChoices` in the definition and pass `orderByIndex` in the execute/subscribe request — that **is** shipped (`D-35`).
 
 ---
 
@@ -169,7 +169,7 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 Calling with `{}` omits both predicates and returns all rows. Calling with `{ "sector": "Tech" }` applies only the sector filter.
 
-**Instead (legacy):** send the full `in` list on every request, or ship one definition per facet combination — still valid, just more hashes.
+**Instead (legacy):** send the full `in` list on every request, or ship one definition per facet combination — still valid, just more names.
 
 ---
 
@@ -246,7 +246,7 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 
 | Capability | How |
 |---|---|
-| Watchlist `in` on a partition key | `Ticker in $tickers AND Source eq $source` — one hash, one subscribe |
+| Watchlist `in` on a partition key | `Ticker in $tickers AND Source eq $source` — one named query, one subscribe |
 | `latestPerKey` without an imperative create | `materializedQueries` map, `type: "latestPerKey"` |
 | Browser-tier read of an MQ result table | `"dataPlaneAccess": true` on the **MQ entry** (default `false`). No table-options PATCH |
 | Candle columns named `high` / `open` | Aggregate MQ public shape is `outputName` on every read path (`D-31`) |

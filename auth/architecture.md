@@ -80,7 +80,7 @@ app.get("/api/my-orders", async (req, res) => {
 
 Frontend or mobile app talks directly to Aouda — through the **data-plane listener**, using **named queries**. No backend required for reads and simple writes.
 
-> **Changed in P37 (server `0.1.7`).** Earlier versions of this page showed a browser holding `mk_anon_*` and calling `client.table("orders").execute()`. That is no longer the model, and it no longer works: `mk_anon_*` is denied on data routes, and ad-hoc `POST …/query` returns **404** on the data-plane for every credential. Browser-tier callers use `mk_pub_*` and hash-pinned named artifacts. See [Direct client access](../guides/direct-client-access.md).
+> **Changed in P37 (server `0.1.7`).** Earlier versions of this page showed a browser holding `mk_anon_*` and calling `client.table("orders").execute()`. That is no longer the model, and it no longer works: `mk_anon_*` is denied on data routes, and ad-hoc `POST …/query` returns **404** on the data-plane for every credential. Browser-tier callers use `mk_pub_*` and name-identified named artifacts. See [Direct client access](../guides/direct-client-access.md).
 
 ```
 ┌──────────────────┐   TLS/WAF edge    ┌────────────────────────────┐
@@ -96,10 +96,10 @@ Frontend or mobile app talks directly to Aouda — through the **data-plane list
 ```
 
 **How it works:**
-1. Operators author queries in `aouda.schema.json` and `schema apply` them on the **admin** listener. Each definition's identity is the SHA-256 of its canonical form; the frontend pins those hashes at build time via codegen.
+1. Operators author queries in `aouda.schema.json` and `schema apply` them on the **admin** listener. Each definition's identity is its unique name; the frontend calls that string. Codegen of Args/Row types is optional.
 2. Frontend connects to the **data-plane** URL with `mk_pub_*` (data + auth) or `mk_anon_*` (auth only). Both are safe to embed.
 3. User signs up or signs in; the client switches to the user JWT.
-4. Reads go through `namedQueries.execute` / `.batch`, writes through `namedMutations.execute`, live data through `subscribe` **by hash**. PLS and RLS are applied underneath every one of them, with the caller's identity injected — never passed as an argument.
+4. Reads go through `namedQueries.execute` / `.batch`, writes through `namedMutations.execute`, live data through `subscribe` **by name**. PLS and RLS are applied underneath every one of them, with the caller's identity injected — never passed as an argument.
 
 **When to use:** Mobile apps and SPAs where the read shapes are known and reviewable. It is a good default for product frontends; it is not a fit when the client genuinely needs to compose arbitrary queries — that surface stays on the admin listener for operators.
 
@@ -107,7 +107,6 @@ Frontend or mobile app talks directly to Aouda — through the **data-plane list
 
 ```typescript
 import { AoudaClient } from "@aouda/client";
-import { ordersPending } from "./generated/named-queries"; // pinned hash + types
 
 // Frontend: publishable key (safe to expose), data-plane URL
 const client = new AoudaClient({
@@ -121,8 +120,8 @@ await client.connect();
 // User signs in — client stores the JWT internally
 await client.auth.signIn("alice@example.com", "SecurePass123!");
 
-// Reads — hash-pinned named query, PLS/RLS enforced, only alice's rows
-const { rows } = await client.namedQueries.execute(ordersPending.hash, {
+// Reads — named query by name, PLS/RLS enforced, only alice's rows
+const { rows } = await client.namedQueries.execute("orders.pending", {
   status: "pending",
 });
 ```
@@ -280,7 +279,7 @@ Or via `appsettings.json`:
 | Frontend touches Aouda | No | Yes | No | Auth only | No |
 | Listener the client uses | Admin (internal) | **Data-plane** | Admin (internal) | Data-plane (auth) | Admin (internal) |
 | Credential | `mk_svc_` | `mk_pub_` → user JWT | `mk_svc_` | `mk_anon_` → user JWT | `mk_svc_` |
-| Query style | Ad-hoc or named | **Named only** (hash-pinned) | N/A | Named for the client | Ad-hoc or named |
+| Query style | Ad-hoc or named | **Named only** (name identity) | N/A | Named for the client | Ad-hoc or named |
 | PLS sufficient for security | N/A | Must be | N/A | Partially | N/A |
 | Existing data layer | Optional | No | Yes | Optional | Yes (multiple services) |
 | Best for | Most apps | Mobile, SPAs | Legacy apps | Complex apps | Microservices |

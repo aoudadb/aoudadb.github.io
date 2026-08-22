@@ -200,7 +200,7 @@ const session = await client.auth.signIn({
 });
 // attach session.accessToken per client docs
 
-const quote = await client.namedQueries.execute(equityQuoteByTicker.hash, {
+const quote = await client.namedQueries.execute("equity.quoteByTicker", {
   ticker: "AAPL",
 });
 ```
@@ -225,7 +225,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | `TABLE_NOT_FOUND` for a table you created | `dataPlaneAccess` false | Set true; re-apply; check join tables too |
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
-| WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `hash` |
+| WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `name` |
 | WS `DATA_PLANE_WRITE_STREAM` | `stream_open` on data-plane | Ingest from a service key on admin, or HTTP named mutation |
 
 ---

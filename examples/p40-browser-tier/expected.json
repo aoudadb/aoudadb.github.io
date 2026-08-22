@@ -1,7 +1,7 @@
 {
   "execute": [
     {
-      "alias": "quotes.watchlist",
+      "name": "quotes.watchlist",
       "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" },
       "orderByIndex": null,
       "columns": ["ticker", "source", "time", "bid", "ask"],
@@ -14,7 +14,7 @@
       }
     },
     {
-      "alias": "listings.screener",
+      "name": "listings.screener",
       "args": { "pageOffset": 0 },
       "orderByIndex": null,
       "columns": ["ticker", "currency", "sector", "country", "mcap"],
@@ -25,7 +25,7 @@
       }
     },
     {
-      "alias": "listings.screener",
+      "name": "listings.screener",
       "args": { "currency": ["USD"], "sector": "Tech", "pageOffset": 0 },
       "orderByIndex": null,
       "columns": ["ticker", "currency", "sector", "country", "mcap"],
@@ -36,7 +36,7 @@
       }
     },
     {
-      "alias": "candles.byTicker",
+      "name": "candles.byTicker",
       "args": { "ticker": "AAPL" },
       "orderByIndex": null,
       "columns": ["ticker", "time", "open", "high", "low", "close"],
@@ -50,7 +50,7 @@
       }
     },
     {
-      "alias": "gainers.top",
+      "name": "gainers.top",
       "args": {},
       "orderByIndex": null,
       "columns": ["ticker", "open", "close", "changePct"],
@@ -60,7 +60,7 @@
       }
     },
     {
-      "alias": "gainers.top",
+      "name": "gainers.top",
       "args": {},
       "orderByIndex": 1,
       "columns": ["ticker", "open", "close", "changePct"],
@@ -72,11 +72,11 @@
   ],
   "subscribe": [
     {
-      "alias": "quotes.watchlist",
+      "name": "quotes.watchlist",
       "args": { "tickers": ["AAPL"], "source": "nasdaq" }
     },
     {
-      "alias": "quotes.lastPrice",
+      "name": "quotes.lastPrice",
       "args": { "tickers": ["AAPL"], "source": "nasdaq" },
       "publicColumns": ["ticker", "source", "bid", "ask", "time"]
     }

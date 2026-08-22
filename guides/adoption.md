@@ -116,15 +116,15 @@ The wire protocol and the client SDKs are not at the same level of coverage. Pla
 
 | Capability | HTTP / wire | `@aouda/client` | `Aouda.Client` (C#) |
 |---|---|---|---|
-| Named-query execute by hash | ✅ | ✅ `client.namedQueries.execute(hash, args)` | ✅ `client.NamedQueries.ExecuteAsync(hash, args)` |
-| Named-query batch (cap 32) | ✅ | ✅ `client.namedQueries.batch([…])` | ✅ `client.NamedQueries.BatchAsync([…])` |
-| Named-mutation execute by hash | ✅ | ✅ `client.namedMutations.execute(hash, args)` | ✅ `client.NamedMutations.ExecuteAsync(hash, args)` |
-| Codegen of pinned hashes | ✅ `GET …/schema/typescript` | ✅ `npx @aouda/client generate` | ✅ `aouda generate csharp` |
+| Named-query execute by name | ✅ | ✅ `client.namedQueries.execute(name, args)` | ✅ `client.NamedQueries.ExecuteAsync(name, args)` |
+| Named-query batch (cap 32) | ✅ | ✅ `client.namedQueries.batch([{ name, args }])` | ✅ `client.NamedQueries.BatchAsync([…])` |
+| Named-mutation execute by name | ✅ | ✅ `client.namedMutations.execute(name, args)` | ✅ `client.NamedMutations.ExecuteAsync(name, args)` |
+| Optional Args/Row types | ✅ `GET …/schema/typescript` | ✅ `npx @aouda/client generate` | ✅ `aouda generate csharp` |
 | Table subscribe (admin listener) | ✅ | ✅ `client.table(t).subscribe({…})` | ✅ `SubscribeAsync(…)` |
 | Snapshot paging + `snapshot_complete` | ✅ | ✅ handled in the transport | ✅ |
 | `gap` → automatic `resume_from` | ✅ | ✅ handled in the transport | ✅ |
 | `re_auth` on token refresh | ✅ | ✅ handled in the transport | ✅ |
-| **Subscribe by hash (required on the data-plane)** | ✅ | ✅ `client.namedQueries.subscribe(hash, args, { conflate })` | ✅ `client.NamedQueries.SubscribeAsync(hash, args, options)` |
+| **Subscribe by name (required on the data-plane)** | ✅ | ✅ `client.namedQueries.subscribe(name, args, { conflate })` | ✅ `client.NamedQueries.SubscribeAsync(name, args, options)` |
 | Declaring MQs in `aouda.schema.json` | ✅ `materializedQueries` map | ✅ via `schema apply` | ✅ via `schema apply` |
 | String / rounding functions in write-time expressions | ✅ `call` allowlist | ✅ `$upper` … `$cast` in `.update()` | ✅ `SetExpr` builder |
 | `aouda schema diff --access` | ✅ | ❌ not shipped | ✅ (the `aouda` C# CLI) |
@@ -137,12 +137,12 @@ Two caveats that still shape a plan:
 
 ### Subscribing on the data-plane
 
-`subscribe` on the data-plane **requires** a `hash`; sending `target` + `filter` returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Both SDKs expose this directly, returning the same subscription object as table subscribe — so snapshot paging, `gap` → `resume_from`, reconnect, `re_auth`, and `SLOW_CONSUMER` recovery are the transport paths you already have, and every resend carries the same `hash` + `args`.
+`subscribe` on the data-plane **requires** a `name`; sending `target` + `filter` returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Both SDKs expose this directly, returning the same subscription object as table subscribe — so snapshot paging, `gap` → `resume_from`, reconnect, `re_auth`, and `SLOW_CONSUMER` recovery are the transport paths you already have, and every resend carries the same `name` + `args`.
 
 ```typescript
 // Watchlist — table emits value updates (upsert), conflate works:
 const sub = client.namedQueries.subscribe(
-  equityQuotes.hash,
+  "equity.quotes",
   { tickers: ["AAPL", "MSFT"] },
   {
     conflate: { key: ["ticker"], interval_ms: 100 },
@@ -153,7 +153,7 @@ const sub = client.namedQueries.subscribe(
 
 // Insert-only tick table — add collapse_inserts to throttle, or use a latestPerKey MQ:
 const lastPrice = client.namedQueries.subscribe(
-  lastPriceHash,
+  "quotes.lastPrice",
   { tickers: ["AAPL"], source: "nasdaq" },
   {
     conflate: { collapse_inserts: true },
@@ -163,7 +163,7 @@ const lastPrice = client.namedQueries.subscribe(
 );
 ```
 
-Do not hand-roll the frames. Full API, including the deprecation-warning path and which definitions are refused live, is in [Named queries — subscribe by hash](named-queries.md#subscribe-by-hash). `conflate` without `collapse_inserts` throttles only **value updates** — a no-op on insert-only streams. Use `collapse_inserts: true` or a `latestPerKey` named-query subscribe for last-price.
+Do not hand-roll the frames. Full API, including the deprecation-warning path and which definitions are refused live, is in [Named queries — subscribe by name](named-queries.md#subscribe-by-name). `conflate` without `collapse_inserts` throttles only **value updates** — a no-op on insert-only streams. Use `collapse_inserts: true` or a `latestPerKey` named-query subscribe for last-price.
 
 ---
 
@@ -240,7 +240,7 @@ Hand this to whoever (or whatever) is writing the plan.
 
 | Symptom | Cause | Action |
 |---|---|---|
-| `NAMED_QUERY_SUBSCRIBE_REQUIRED` on the data-plane | You called `client.table(t).subscribe(…)`, which sends `target` | Use `client.namedQueries.subscribe(hash, args)` — [subscribing](#subscribing-on-the-data-plane) |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` on the data-plane | You called `client.table(t).subscribe(…)`, which sends `target` | Use `client.namedQueries.subscribe(name, args)` — [subscribing](#subscribing-on-the-data-plane) |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | The definition has `joins`, `selectExpr`, `distinct`, or an offset | Only the live path is restricted; HTTP execute still works. Split the view or poll it |
 | Every MQ disappeared after a `schema apply` | `materializedQueries` present but incomplete — the map is desired state | `schema export` first; omit the map entirely to leave MQs unmanaged |
 | `SCHEMA_EXPR_UNKNOWN_FUNCTION` on apply | Unknown `call` `fn`, wrong arity, or non-literal `cast` type | Names are lowercase and the list is closed — [`call` functions](insert-transforms.md#call--string-and-rounding-functions) |

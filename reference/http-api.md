@@ -57,7 +57,6 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Token` | No | Consistency token (`AtLeast`). 42-character lowercase hex. Query `at_least` **wins** when both are sent. Empty value is `TOKEN_MALFORMED`. **Not** the fencing header `X-Aouda-Current-Token`. |
 | `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
 | `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default `fetchPrimary`. |
-| `X-Aouda-Named-Query-Alias` | No | Named-query alias whose declared `freshness` to consume (query `alias` wins, then this header, then body `alias`). |
 | `Authorization` | **Required when the target database has auth enabled** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). App auth endpoints (`/api/databases/{db}/auth/signup|signin|refresh`) require at least an API key (`anon`, `pub`, or higher). |
 | `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. |
 
@@ -107,9 +106,9 @@ Data-plane allowlist (deny-by-default):
 - `GET /health`, `/ready`, `/startup` (not `/health/detailed`)
 - App auth under `/api/databases/{db}/auth/*` **except** `/auth/admin/*`
 - OIDC / JWKS discovery
-- `POST /api/databases/{db}/named-queries/{hash}/query`
+- `POST /api/databases/{db}/named-queries/{name}/query`
 - `POST /api/databases/{db}/named-queries/batch`
-- `POST /api/databases/{db}/named-mutations/{hash}/execute`
+- `POST /api/databases/{db}/named-mutations/{name}/execute`
 - WebSocket upgrade `/api/databases/{db}/ws`
 
 Explicit 404s on the data-plane include `admin/*`, `_studio/*`, `POST /api/server/shutdown`, `POST …/schema/apply`, `POST …/query`, tables/MQ/graph/vector/jobs/branches/policy, write-stream, and `GET /api/databases`.
@@ -423,7 +422,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Current | `GET /api/databases/{db}/token` → `{ "database", "token" }` |
 | Wait | `waitMs` / `X-Aouda-Wait-Ms` (default 250, cap 30 000) |
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately |
-| Named-query alias | `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`. Bare hash is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
+| Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
 
@@ -484,13 +483,13 @@ All errors return a JSON body with this structure:
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
 | `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter |
-| `NAMED_QUERY_NOT_FOUND` | 404 | Named-query hash is unknown or not a 64-hex SHA-256 |
+| `NAMED_QUERY_NOT_FOUND` | 404 | Named-query name is unknown |
 | `NAMED_QUERY_BIND_FAILED` | 400 | Argument bind failed (type, constraint, or missing required param) |
 | `NAMED_QUERY_PARAM_REQUIRED` | 400 | A required named-query parameter was omitted |
 | `NAMED_QUERY_BATCH_EMPTY` | 400 | `queries` is missing or empty |
 | `NAMED_QUERY_BATCH_TOO_LARGE` | 400 | Batch exceeds 32 elements (`ProtocolConstants.MaxNamedQueryBatchSize`) |
-| `NAMED_QUERY_BATCH_MUTATION` | 400 | Batch included a named-mutation hash (read-only envelope) |
-| `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation hash is unknown |
+| `NAMED_QUERY_BATCH_MUTATION` | 400 | Batch included a named-mutation name (read-only envelope) |
+| `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation name is unknown |
 | `NAMED_MUTATION_BIND_FAILED` | 400 | Named-mutation argument bind failed |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows`; the call fails closed (no `rowsTruncated`) |
 | `ACCESS_SURFACE_TOO_MANY_IDENTITIES` | 400 | Access-surface diff posted more than 32 fixture identities |
@@ -550,8 +549,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. |
 | `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
-| `FRESHNESS_LOOSENED` | 400 | Call site demanded less freshness than the named-query alias, or a non-`Primary` preference on a fail-safe bare hash. |
-| `NAMED_QUERY_ALIAS_MISMATCH` | 400 | Presented `alias` does not resolve to the path hash. |
+| `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
 
 #### Server Errors (5xx)
 
@@ -581,10 +579,10 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
 | `NAMED_QUERY_TOO_MANY_JOINS` | 400 (schema apply) | Join count exceeds cap (default 3) |
 | `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
-| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `hash` |
-| `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-hash also sent a client `filter` |
-| `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-hash `target` does not match the definition |
-| `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `hash` addresses a named mutation |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"` |
+| `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-name also sent a client `filter` |
+| `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
+| `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
@@ -921,9 +919,9 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
 
 ### Named queries
 
-Named queries are **server-authored, content-hashed `QueryMessage` templates**. Browser-tier callers (`mk_pub_*` and application user JWTs on the data-plane listener) **cannot compose a query** — they send a hash plus arguments. Identity is injected from the validated principal; it is never an argument. The closed list of what that surface cannot do is [What a browser-tier read cannot do](../guides/browser-tier-read-limits.md).
+Named queries are **server-authored `QueryMessage` templates** identified by the unique schema name (`^[A-Za-z][A-Za-z0-9_.]*$`). Browser-tier callers (`mk_pub_*` and application user JWTs on the data-plane listener) **cannot compose a query** — they send the name plus arguments. Identity is injected from the validated principal; it is never an argument. The closed list of what that surface cannot do is [What a browser-tier read cannot do](../guides/browser-tier-read-limits.md).
 
-There is **no HTTP route that registers a definition**. Definitions deploy through declarative schema apply (`namedQueries` in `aouda.schema.json`). Clients pin the SHA-256 of the canonical definition (codegen: `npx @aouda/client generate` / `aouda generate`). Names are aliases (`name` → current hash, `name@version` → hash). See [Named queries](../guides/named-queries.md).
+There is **no HTTP route that registers a definition** and **no inventory list** besides `GET …/schema/export` (already name-keyed). Definitions deploy through declarative schema apply (`namedQueries` in `aouda.schema.json`). Clients send the name. Codegen (`npx @aouda/client generate` / `aouda generate`) is **optional** and emits Args/Row types only. See [Named queries](../guides/named-queries.md).
 
 **Definition fields** (in `aouda.schema.json` `namedQueries` map) that this reference previously omitted:
 
@@ -931,15 +929,23 @@ There is **no HTTP route that registers a definition**. Definitions deploy throu
 |---|---|
 | `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Directory-answerable PK distinct sets `stats.distinctServedFromPartitionMetadata` (omitted when false). |
 | `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
-| `freshness` | Out-of-hash object on the **alias**: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Changing it does not change the content hash. |
+| `freshness` | Declared on the named query: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Budget-only edits do not fire `named_query_body_changed`. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). |
+
+There is no `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`. Freshness is keyed by the path, batch, or subscribe **name**.
 
 Base path: `/api/databases/{db}/named-queries`
 
 The execute and batch bodies are path-scoped. They do **not** require a `database` field (unlike ad-hoc `POST …/query`).
 
-#### `POST /api/databases/{db}/named-queries/{hash}/query`
+| Method | Path |
+|--------|------|
+| `POST` | `/api/databases/{db}/named-queries/{name}/query` |
+| `POST` | `/api/databases/{db}/named-queries/batch` with `{ "name", "args" }` |
+| `POST` | `/api/databases/{db}/named-mutations/{name}/execute` |
 
-Execute one named query by content hash (64 hex SHA-256; optional `sha256:` prefix).
+#### `POST /api/databases/{db}/named-queries/{name}/query`
+
+Execute one named query by unique name.
 
 **Request body:**
 
@@ -953,9 +959,9 @@ Execute one named query by content hash (64 hex SHA-256; optional `sha256:` pref
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
-**Query parameters:** `format=columnar` (default) or `format=rows`. `readPreference` as on ad-hoc query. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`, `alias` (consumes the alias's declared `freshness`; query wins over `X-Aouda-Named-Query-Alias` and body `alias`). Bare hash (no alias) is fail-safe: primary-only + `readYourWrites`. Loosening is 400 `FRESHNESS_LOOSENED`. Alias/hash mismatch is 400 `NAMED_QUERY_ALIAS_MISMATCH`.
+**Query parameters:** `format=columnar` (default) or `format=rows`. `readPreference` as on ad-hoc query. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`. The named query’s declared `freshness` is keyed by `{name}`. A name with no `freshness` block is fail-safe: primary-only + `readYourWrites`. Loosening (call site weaker than the declared budget, or non-`Primary` on fail-safe) is 400 `FRESHNESS_LOOSENED`.
 
-**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset). When the hash is deprecated, `warnings` is present:
+**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset). When the name is deprecated, `warnings` is present:
 
 ```json
 {
@@ -965,7 +971,7 @@ Execute one named query by content hash (64 hex SHA-256; optional `sha256:` pref
   "rowCount": 1,
   "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 },
   "warnings": [
-    { "code": "NAMED_QUERY_DEPRECATED", "hash": "aaa…", "sunsetAt": "2026-12-01T00:00:00Z" }
+    { "code": "NAMED_QUERY_DEPRECATED", "name": "equity.quoteByTicker", "sunsetAt": "2026-12-01T00:00:00Z" }
   ]
 }
 ```
@@ -974,7 +980,7 @@ Execute one named query by content hash (64 hex SHA-256; optional `sha256:` pref
 
 | Status | Code | When |
 |--------|------|------|
-| 404 | `NAMED_QUERY_NOT_FOUND` | Unknown or malformed hash |
+| 404 | `NAMED_QUERY_NOT_FOUND` | Unknown name |
 | 400 | `NAMED_QUERY_BIND_FAILED` / `NAMED_QUERY_PARAM_REQUIRED` | Bind-time type or constraint failure |
 | 404 | `TABLE_NOT_FOUND` | Data-plane browser-tier and a touched table has `dataPlaneAccess: false` |
 | 429 | `IDENTITY_QUOTA_EXCEEDED` | Data-plane quota |
@@ -990,13 +996,13 @@ Read-only batch envelope. Every element is evaluated against **one read snapshot
 ```json
 {
   "queries": [
-    { "hash": "aaa…64 hex…", "args": { "ticker": "AAPL" } },
-    { "hash": "bbb…64 hex…", "args": { "accountId": 42 } }
+    { "name": "equity.quoteByTicker", "args": { "ticker": "AAPL" } },
+    { "name": "equity.stockOverview", "args": { "accountId": 42 } }
   ]
 }
 ```
 
-**Cap:** 32 (`MaxNamedQueryBatchSize`). Named-mutation hashes are illegal in this envelope.
+**Cap:** 32 (`MaxNamedQueryBatchSize`). Named-mutation names are illegal in this envelope.
 
 **Success (200)** — positional `results` (same length as `queries`):
 
@@ -1012,7 +1018,7 @@ Read-only batch envelope. Every element is evaluated against **one read snapshot
     },
     {
       "code": "NAMED_QUERY_NOT_FOUND",
-      "error": "Named query 'bbb…' was not found."
+      "error": "Named query 'equity.unknown' was not found."
     }
   ]
 }
@@ -1033,16 +1039,16 @@ Content-Type: application/json
 { "code": "NAMED_QUERY_BATCH_EMPTY", "error": "Named query batch requires a non-empty queries array." }
 ```
 
-Over cap (33 hashes):
+Over cap (33 names):
 
 ```json
 { "code": "NAMED_QUERY_BATCH_TOO_LARGE", "error": "Named query batch exceeds 32 elements." }
 ```
 
-A named-mutation hash in `queries`:
+A named-mutation name in `queries`:
 
 ```json
-{ "code": "NAMED_QUERY_BATCH_MUTATION", "error": "Named query batch must not include a named-mutation hash." }
+{ "code": "NAMED_QUERY_BATCH_MUTATION", "error": "Named query batch must not include a named-mutation name." }
 ```
 
 `INVALID_FORMAT` when `?format=` is not `columnar` or `rows`.
@@ -1051,9 +1057,9 @@ Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) �
 
 ### Named mutations
 
-Named mutations are the write-side mirror: hash-addressed insert/update/delete templates over ADR 0037 expressions. **Invoker rights only.** They are **not** members of the read batch.
+Named mutations are the write-side mirror: name-addressed insert/update/delete templates over ADR 0037 expressions. **Invoker rights only.** They are **not** members of the read batch.
 
-#### `POST /api/databases/{db}/named-mutations/{hash}/execute`
+#### `POST /api/databases/{db}/named-mutations/{name}/execute`
 
 **Request body:** `{ "args": { … } }`
 
@@ -2646,7 +2652,7 @@ wss://{host}/api/databases/{db}/ws   (TLS)
 
 The database name is in the **path**. The `auth` message still includes `database` and it must match the path (same rule as HTTP v2).
 
-On the **data-plane** listener this upgrade is allowed; ad-hoc table `subscribe` (no `hash`) returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Write-stream messages return `DATA_PLANE_WRITE_STREAM`.
+On the **data-plane** listener this upgrade is allowed; ad-hoc table `subscribe` (no `"name"`) returns `NAMED_QUERY_SUBSCRIBE_REQUIRED`. Write-stream messages return `DATA_PLANE_WRITE_STREAM`.
 
 ### Connection and Wire Modes
 
@@ -2698,23 +2704,24 @@ Authenticate the connection and optionally negotiate wire mode.
 
 #### `subscribe`
 
-Subscribe to a table stream **or** to a named query (content hash). The server pages a consistent snapshot (`snapshot` pages sharing one `version`, then `snapshot_complete`), then streams `change` messages.
+Subscribe to a table stream **or** to a named query (unique name). The server pages a consistent snapshot (`snapshot` pages sharing one `version`, then `snapshot_complete`), then streams `change` messages.
 
 Until `snapshot_complete` arrives, the client **must not** treat accumulated snapshot rows as the full match.
+
+The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscription pin is the bound `Where` + `Select`, not an identity string.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Always `"subscribe"` |
 | `id` | string | Yes | Client-assigned subscription ID. Unique per connection. |
-| `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `hash` is set. |
-| `hash` | string? | Conditional | Named-query content hash (64 hex). **Required on the data-plane listener.** Pins the definition for the subscription lifetime; redeploying the alias does not change an in-flight subscription. |
-| `args` | object? | No | Bind arguments for `hash` subscribe. Same shape as HTTP execute `args`. |
-| `filter` | object? | No | Ad-hoc `WhereClause`. **Illegal** together with `hash` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
+| `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `name` is set. |
+| `name` | string? | Conditional | Named-query unique name. **Required on the data-plane listener.** |
+| `args` | object? | No | Bind arguments for `name` subscribe. Same shape as HTTP execute `args`. |
+| `filter` | object? | No | Ad-hoc `WhereClause`. **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
 | `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. |
 | `at_least` | string? | No | Consistency-token pin: snapshot at at least this token. Optional `wait_ms` / `on_exceeded` (same values as HTTP). Omitted `at_least` leaves `resume_from` byte-for-byte today's path. |
 | `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |
 | `on_exceeded` | string? | No | `wait` \| `fetchPrimary` \| `fail`. |
-| `alias` | string? | No | Named-query alias whose declared freshness to consume (with `hash`). |
 | `conflate` | object? | No | Opt-in keyed conflation. Omitted = every visible event. See below. |
 
 **`conflate`:**
@@ -2744,7 +2751,7 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 {
   "type": "subscribe",
   "id": "sub-quotes-1",
-  "hash": "aaa…64 hex…",
+  "name": "equity.quoteByTicker",
   "args": { "ticker": "AAPL" },
   "conflate": { "key": ["ticker"], "interval_ms": 100 }
 }
@@ -3450,3 +3457,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.2 | 2026-06-26 | **P17 (breaking):** `GET /api/databases` default response now excludes internal infrastructure databases (`_serverauth`, `_settings`). Use `?include=internal` to retrieve the full catalog. All database responses now include `isInternal` (bool), `isAuthDatabase` (bool), and `authDatabaseKind` (`"none"` \| `"server"` \| `"application"`) metadata fields. Application auth databases (`isInternal: false`) remain in the default list. |
 | 2.3 | 2026-08-19 | **P37 / server 0.1.7:** named-query execute + read-only batch (cap 32, one snapshot, positional errors); named-mutation execute; `mk_pub_*` + data-plane listener (404 not 403); WebSocket path `/api/databases/{db}/ws`; `subscribe.hash` / `args` / `conflate`; `snapshot_complete`; server `gap` (`last_seq`, `discarded`); `change.values_skipped`; `re_auth`; access-surface `?access=true`. Additive on the wire. |
 | 2.4 | 2026-08-21 | **P38:** consistency token (`X-Aouda-Token` / `?at_least=` / envelope `token` / `GET …/token`); named-query alias `freshness`; `TOKEN_*` / `FRESHNESS_*` errors; stream `token` alongside `version`; bulk-load commit `walPosition` → `token`. **Breaking:** `MaxLagSeconds` is measured staleness, not lag-bytes ÷ 1 MB/s. Default read preference remains `Primary`. |
+| 2.5 | 2026-08-22 | **BL-188:** named-query identity is the unique schema name. **Breaking:** `{name}` routes and batch/subscribe/warning `"name"`; alias surface (`?alias=`, `X-Aouda-Named-Query-Alias`, body `alias`) and `NAMED_QUERY_ALIAS_MISMATCH` retired; omitting a name deletes the definition; codegen is types-only (optional Args/Row). Historical 2.3 / 2.4 shipped content-hash identity. |

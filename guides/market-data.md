@@ -14,7 +14,7 @@ This guide walks through a complete financial market-data workload on Aouda: quo
 
 **Related guides:**
 
-- [Named queries](named-queries.md) — `whenParamPresent`, `orderByChoices`, subscribe by hash
+- [Named queries](named-queries.md) — `whenParamPresent`, `orderByChoices`, subscribe by name
 - [Browser-tier read limits](browser-tier-read-limits.md) — partition-filter rule, what you can and cannot do
 - [Materialized Queries](materialized.md) — MQ lifecycle, `latestPerKey`, `aggregate`, computed outputs
 - [Partitioning and Multi-tenancy](partitioning.md) — partition filters, cross-partition opt-in
@@ -29,7 +29,7 @@ This guide walks through a complete financial market-data workload on Aouda: quo
 
 **Browser-tier caller** (this guide's primary audience): a web app or mobile client holding a public `mk_pub_*` key on the data-plane. You can:
 
-- Execute named queries (by hash) and read columnar results.
+- Execute named queries (by name) and read columnar results.
 - Subscribe to named queries over WebSocket for real-time updates.
 - See only tables / MQ result tables that have `dataPlaneAccess: true` in the schema.
 
@@ -234,7 +234,7 @@ Key design decisions:
 
 - **`bid`/`ask` as columns** — not a `price_type` partition key. One partition tree per `(ticker, source)` pair; simpler candle aggregation.
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
-- **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{hash}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
+- **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{name}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
 
 ---
 
@@ -279,7 +279,7 @@ MQs with `updateMode: "sync"` update before each insert returns. For bulk loads,
 
 ## 4. Watchlist
 
-`quotes.watchlist` accepts a list of tickers (`in`) and a required source (`eq`). Both predicates cover the composite partition key — the partition-filter rule is satisfied with one hash and one subscribe.
+`quotes.watchlist` accepts a list of tickers (`in`) and a required source (`eq`). Both predicates cover the composite partition key — the partition-filter rule is satisfied with one named query and one subscribe.
 
 ```json
 {
@@ -293,7 +293,7 @@ MQs with `updateMode: "sync"` update before each insert returns. For bulk loads,
 **Execute (HTTP):**
 
 ```http
-POST /api/databases/finance/named-queries/<hash>/query
+POST /api/databases/finance/named-queries/quotes.watchlist/query
 Content-Type: application/json
 Authorization: Bearer <mk_pub_key>
 
@@ -305,7 +305,7 @@ Response includes `totalMatches` (from `count: true`), `columns`, `rowCount`, an
 **Subscribe (WebSocket):**
 
 ```json
-{ "type": "subscribe", "id": "wl", "hash": "<hash>",
+{ "type": "subscribe", "id": "wl", "name": "quotes.watchlist",
   "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" } }
 ```
 
@@ -345,7 +345,7 @@ When you cannot change to an MQ (legacy schema, or you specifically want raw tic
 
 ```json
 {
-  "type": "subscribe", "id": "lp", "hash": "<hash>",
+  "type": "subscribe", "id": "lp", "name": "quotes.lastPrice",
   "args": { "tickers": ["AAPL"], "source": "nasdaq" },
   "conflate": { "collapse_inserts": true }
 }
@@ -365,7 +365,7 @@ Query or subscribe to `candles.byTicker` — a named query over the `candles_bid
 **Execute:**
 
 ```http
-POST /api/databases/finance/named-queries/<hash>/query
+POST /api/databases/finance/named-queries/candles.byTicker/query
 Content-Type: application/json
 Authorization: Bearer <mk_pub_key>
 
@@ -375,7 +375,7 @@ Authorization: Bearer <mk_pub_key>
 Response columns: `["ticker", "time", "open", "high", "low", "close"]`. The `time` column contains the UTC **epoch-millisecond** start of each hour bucket — an Int64, not a formatted string. Candles are ordered ascending by time (as defined in the NQ).
 
 {: .important }
-**Ad-hoc `POST .../query` is 404 on the data-plane.** All browser-tier access goes through named-query hashes. Both the MQ (`candles_bid_1h`) and the named query (`candles.byTicker`) must be declared in the schema file; `dataPlaneAccess: true` must appear on the MQ entry, not patched in via table-options HTTP.
+**Ad-hoc `POST .../query` is 404 on the data-plane.** All browser-tier access goes through named-query names. Both the MQ (`candles_bid_1h`) and the named query (`candles.byTicker`) must be declared in the schema file; `dataPlaneAccess: true` must appear on the MQ entry, not patched in via table-options HTTP.
 
 ### Day and minute intervals
 
