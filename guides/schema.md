@@ -868,7 +868,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | WAL and replication settings for this table. |
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
-| `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. |
+| `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. `auth-db-pls` implies partition-level security even when `partitionLevelSecurity` is omitted; a partition key is required. |
 | `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. |
 | `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Used with `"auth-db-rls"` mode. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
