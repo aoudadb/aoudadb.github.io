@@ -23,16 +23,13 @@ Aouda ships multiple artifacts from separate repositories. They do **not** share
 
 ---
 
-## Unreleased
-
-**BL-188 is a breaking wire change (name identity) and is not yet in a numbered train.** HTTP/WS/SDK identity is the unique schema name (`execute(name)`, `batch([{ name }])`, `subscribe(name)`). Historical rows below describe what those trains shipped (including subscribe-by-hash on 0.1.7 / 0.1.8).
-
 ## Compatibility matrix
 
 Update this table when shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
+| `0.1.10` | `1` | `≥ 0.1.15` (name identity; consistency token store; stream `token`) | `≥ 0.1.10` | `≥ 0.0.20` | BL-188 name-only named queries/mutations (breaking wire); BL-187 `firstPerKey` / `topNPerGroup`; P38 freshness (`AtLeast`, `TOKEN_*` / `FRESHNESS_*`, bulk-load `token`). Studio **0.0.20** pins `@aouda/client` **0.1.15** and drops hash UI. |
 | `0.1.9` | `1` | `≥ 0.1.14` (`totalMatches`; `orderByIndex` / `whenParamPresent` / `orderByChoices` / `count`; `collapse_inserts`) | `≥ 0.1.9` | `≥ 0.0.19` | P40 data-plane completeness: MQ `dataPlaneAccess` + `outputName` vocabulary (`D-31` break); named-query count / optional predicates / bounded sort; conflation that conflates; computed MQ ranking; row-index diagnostics. Studio **0.0.19** pins `@aouda/client` **0.1.14**. |
 | `0.1.8` | `1` | `≥ 0.1.12` (`namedQueries.subscribe`; `$upper`…`$cast` call operators) | `≥ 0.1.8` | `≥ 0.0.18` | BL-173 typed subscribe-by-hash; BL-174 `materializedQueries` in `aouda.schema.json`; BL-175 `call` string/rounding functions; BL-171/172 bulk-load Timestamp ISO-8601 and NULL validity. Studio **0.0.18** (P39) pins `@aouda/client` **0.1.13** and calls subscribe-by-hash, named-artifact execute, policy inspect, and schema-file MQ maps. |
 | `0.1.7` | `1` | `≥ 0.1.11` (named-query execute/batch/mutate; snapshot paging / `gap` resume; `re_auth`; conflate) | `≥ 0.1.7` | `≥ 0.0.17` | P37 Direct Client Access: fail-closed ADRA, named queries, data-plane listener + `mk_pub_*`, access-surface diff. Studio pin `@aouda/client` `0.1.11` after that npm version is published. Breaking: ADRA fail-closed configs, bulk-load transform intent flags, `Live()` / `HotCacheSettings` removed (BL-162). |
