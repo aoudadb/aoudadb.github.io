@@ -187,6 +187,46 @@ Notes:
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top.
 - `dataPlaneAccess: true` is required for browser-tier callers on **every table the definition touches**, including join tables **and** a materialized-query result table. On an MQ, set it on the `materializedQueries` entry (default `false`) — do not PATCH table-options. Independent of ADRA: RLS/PLS still filter rows.
 
+### Legal `where` operators
+
+The `op` of a condition is an **identifier**, fixed in the definition. It is never a parameter —
+`{ "op": { "param": "cmp" } }` fails apply with `NAMED_QUERY_IDENTIFIER_PARAM`. These are the values it
+may take; anything else is refused at `schema/apply` with `INVALID_OPERATOR`, so a definition that could
+not execute is never stored.
+
+| `op` | Meaning | `param` / `value` shape |
+|------|---------|--------------------------|
+| `eq` | Equal | Scalar. A **null** bound value means IS NULL. |
+| `ne` | Not equal | Scalar. A **null** bound value means IS NOT NULL. |
+| `gt` / `gte` / `lt` / `lte` | Ordering comparison | Scalar. A null bound value throws `NAMED_QUERY_PARAM_REQUIRED`. |
+| `in` / `nin` | Membership | Array, non-empty; bounded by `maxItems`. |
+| `like` | SQL `LIKE` pattern, **String columns only** | String pattern, bounded by `maxLength`. Null throws `NAMED_QUERY_PARAM_REQUIRED`. |
+
+`isNull`, `isNotNull`, and `between` are **not** wire operators — they are spellings the SDKs desugar for
+you (`eq null`, `ne null`, and `gte` + `lte`). Write those encodings directly in a definition.
+
+**`like` semantics.** `%` matches any sequence of characters including none; `_` matches exactly one;
+`\` escapes `%`, `_`, or `\`. Matching is **ordinal and case-sensitive** — the same collation as `eq` on a
+String column — so upper- or lower-case both sides yourself if you need a case-insensitive search. A null
+column value never matches, not even `"%"`. A malformed pattern (a trailing lone `\`, or an escape of
+anything else) is a `400`. A `like` condition on a non-String column is refused at apply. `like` does
+**not** satisfy the [partition-filter rule](browser-tier-read-limits.md), and it is a scan — there is no
+index acceleration for patterns.
+
+The caller supplies the pattern, so wrap it on the way in and strip user-supplied wildcards if the search
+box should not expose them:
+
+```json
+{ "column": "searchText", "op": "like", "param": "keywords", "whenParamPresent": true }
+```
+
+```ts
+// The caller decides the pattern shape; the definition fixes the column and the operator.
+await client.namedQueries.execute("equity.stocks.screener", {
+  keywords: `%${userInput.replace(/[%_\\]/g, "")}%`,
+});
+```
+
 Apply:
 
 ```bash

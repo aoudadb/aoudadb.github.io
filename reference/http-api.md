@@ -821,14 +821,31 @@ Execute a query against a table.
 | `lte` | Less than or equal | `1000.0` |
 | `in` | Value in array | `["admin", "owner"]` |
 | `nin` | Value not in array | `["deleted", "archived"]` |
-| `like` | SQL LIKE pattern | `"A%"` |
+| `like` | SQL LIKE pattern, **String columns only** | `"A%"`, `"%acme%"`, `"%985"` |
+
+**`like` semantics:**
+
+- `%` matches any sequence of characters, including none. `_` matches exactly one character.
+- `\` escapes `%`, `_`, or `\` itself. A pattern that ends in a lone `\`, or escapes anything else, is
+  rejected with `INVALID_REQUEST` (400) rather than treated as a literal.
+- Matching is **ordinal and case-sensitive**, the same as `eq` on a String column. There is no
+  case-insensitive form; upper- or lower-case both the column and the pattern if you need one.
+- A **null** column value never matches — not even `"%"` — following SQL's `NULL LIKE x` is unknown.
+- The value is a *pattern*, not a comparand: a `like` condition against a non-String column is rejected
+  (`INVALID_REQUEST`, 400), and a named query that declares one is rejected at `schema/apply` with
+  `INVALID_OPERATOR`.
+- `like` does **not** satisfy the [partition-filter rule](../guides/browser-tier-read-limits.md), even for
+  a pure prefix pattern.
+- There is no index acceleration: a `like` predicate is a scan of the column.
 
 Encoding conventions:
 - `isNull` — encode as `{ "op": "eq", "value": null }`
 - `isNotNull` — encode as `{ "op": "ne", "value": null }`
 - `between` — encode as two conditions: `{ "op": "gte", "value": lower }` + `{ "op": "lte", "value": upper }`
 
-Unknown operator strings return `INVALID_OPERATOR` (400).
+Unknown operator strings return `INVALID_OPERATOR` (400). The same set applies to ad-hoc `/query` and to
+`op` values inside a named-query definition; `schema/apply` rejects an unknown operator rather than
+storing a definition that could never execute.
 
 **Order By Clause:**
 

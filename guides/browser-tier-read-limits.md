@@ -48,6 +48,7 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 | `lte` |
 | `in` |
 | `nin` |
+| `like` |
 
 ### `orderBy` targets (sortable catalog column types)
 
@@ -106,7 +107,7 @@ Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of t
 
 **Watchlist.** `Ticker in [~30 tickers] AND Source eq 'nasdaq'` is **one** named query / **one** subscription when `Ticker` and `Source` are the partition keys. The 32-per-connection cap is not an entitlement problem for that shape.
 
-**Does not satisfy the guard:** `nin`, ranges (`gt` / `lt` / `gte` / `lte`), `between` (which is `gte ∧ lte`), `like` (not a wire operator). A **prefix** of a composite key on a query that **reads rows** is refused — there is no prefix exception for scans.
+**Does not satisfy the guard:** `nin`, ranges (`gt` / `lt` / `gte` / `lte`), `between` (which is `gte ∧ lte`), and `like` — including a pure prefix pattern such as `Ticker like 'EQN%'`, which looks prunable but is not: the guard is an access gate, and a pattern is not an enumeration of key values. A **prefix** of a composite key on a query that **reads rows** is refused — there is no prefix exception for scans.
 
 **Directory-answerable DISTINCT** (the bounded exception): projection and predicate on partition-key columns only, at least one partition key constrained by `eq`/`in`, a complete partition directory (no `data/` residue, no `_shared/` bucket), and at most 10 000 tuples. That is the path for "which sources exist for this ticker?" It reads **no** row data. If the directory is incomplete or over cap, the result is `PARTITION_FILTER_REQUIRED` — the engine does not fall through to a scan.
 
