@@ -7,7 +7,7 @@ parent: "Guides"
 # Insert-time transforms and constraints
 
 Document status: Complete (P37)  
-Last updated: 2026-08-14
+Last updated: 2026-08-19
 
 Tier 1 transforms are **declarative**. They run on REST insert/update/upsert and on the WebSocket write-stream path. No user code, no loops, no HTTP calls.
 
@@ -60,6 +60,21 @@ Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). Th
   "columns": {
     "id": { "type": "Int64", "primaryKey": 1 },
     "qty": { "type": "Int64" },
+    "rawTicker": { "type": "String" },
+    "ticker": {
+      "type": "String",
+      "derived": {
+        "type": "call",
+        "fn": "upper",
+        "args": [
+          {
+            "type": "call",
+            "fn": "trim",
+            "args": [{ "type": "colRef", "col": "rawTicker" }]
+          }
+        ]
+      }
+    },
     "qtyCopy": {
       "type": "Int64",
       "derived": { "type": "colRef", "col": "qty" }
@@ -202,6 +217,7 @@ This is the operational difference between a transform and the application code 
 | `TRANSFORM_DERIVED_READONLY` | Caller supplied a value for a derived column | 400 |
 | `TRANSFORM_ROUTE_UNMATCHED` | No `route` matched a row | 400 |
 | `TRANSFORM_ROUTE_AMBIGUOUS` | More than one `route` matched a row | 400 |
+| `SCHEMA_EXPR_UNKNOWN_FUNCTION` | Schema apply: unknown `call` `fn`, bad arity, or invalid `cast` type literal | 400 |
 
 The error names the **table and the check or transform**, not the row index. With a 5 000-row batch, "check `price_positive` on `TradeQuote` rejected the row" does not tell you which one.
 
