@@ -199,6 +199,27 @@ const count = await client.table('users')
 
 Multiple `.where()` calls are combined with AND at the top level.
 
+`in`, `notIn`, and `like` are wire operators the engine evaluates. `isNull`, `isNotNull`, and `between`
+are client-side spellings the builder desugars before the request leaves the process — `eq null`,
+`ne null`, and `gte` + `lte` respectively.
+
+**`like`** takes a SQL `LIKE` pattern and works on **String columns only**:
+
+- `%` matches any sequence of characters including none; `_` matches exactly one.
+- `\` escapes `%`, `_`, or `\` itself. A pattern ending in a lone `\`, or escaping anything else, is a
+  `400` — it is never reinterpreted as a literal.
+- Matching is **ordinal and case-sensitive**, the same as `=` on a String column. Upper- or lower-case
+  both the column and the pattern if you need a case-insensitive search.
+- A null column value never matches, not even `'%'`.
+- Strip user-supplied wildcards before wrapping, or a search box lets callers write their own patterns:
+
+```ts
+const safe = userInput.replace(/[%_\\]/g, '');
+const { rows } = await client.table('instruments').where('searchText', 'like', `%${safe}%`).toList();
+```
+
+`like` does not satisfy the partition-filter rule and is not index-accelerated — it scans the column.
+
 ### Nested Groups (OR inside AND)
 
 Use `whereGroup(fn)` with a `WhereGroupBuilder` for nested boolean logic. Inside the group, `where()` ANDs predicates and `orWhere()` ORs them:
