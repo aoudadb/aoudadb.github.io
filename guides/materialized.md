@@ -469,6 +469,30 @@ Configuration precedence and operational notes:
 - Deprecated/reserved:
   - No public "deprecated" MQ settings currently; reserved types (`FirstPerKey`, `TopNPerGroup`) are not fully wired.
 
+### Declare in `aouda.schema.json`
+
+Materialized queries of types `latestPerKey`, `aggregate`, and `filter` can be declared next to tables in `aouda.schema.json` under `materializedQueries`. Identity is the **name** (the result table is that name). `schema diff` / `apply` / `export` treat a present map as desired state:
+
+- Omit `materializedQueries` to leave live MQs unmanaged (including ones created over HTTP).
+- `"materializedQueries": {}` drops every MQ (requires `--allow-destructive`).
+- Changing a definition at the same name is a destructive **replace** (drop then create).
+
+Admin HTTP `POST /api/databases/{db}/materialized-queries` remains; schema apply of a present map will drop HTTP-created names that are not listed.
+
+```json
+"materializedQueries": {
+  "latest_quote": {
+    "type": "latestPerKey",
+    "sourceTable": "EquityQuote",
+    "groupBy": ["ticker"],
+    "orderBy": "eventTime",
+    "descending": true
+  }
+}
+```
+
+See [Schema Management](schema-management.md).
+
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
 ### .NET example (create + query + status + routing control)
@@ -738,6 +762,7 @@ The `mqRebuildStatus` field is returned in `GET /api/databases/appdb/bulk-load/{
 | Create latest-per-key MQ | `CreateLatestPerKeyAsync(...)` | `client.materializedQueries.create(spec)` with `type: 1` | `POST /api/databases/{db}/materialized-queries` | Implemented | TS and HTTP management surfaces shipped in P16 |
 | Create aggregate MQ | `CreateAggregateQueryAsync(...)` | `client.materializedQueries.create(spec)` with `type: 3` | Same endpoint | Implemented | TS and HTTP shipped in P16 |
 | Create filter MQ | `CreateFilterQueryAsync(...)` | `client.materializedQueries.create(spec)` with `type: 4` | Same endpoint | Implemented | TS and HTTP shipped in P16 |
+| Declare MQs in schema file | `schema apply` of `materializedQueries` | `npx @aouda/client schema apply` (raw JSON) | `POST /schema/diff` and `/schema/apply` | Implemented (BL-174) | Name identity; omit map = unmanaged; `{}` drops all; replace is drop+create |
 | Generic create/drop/list/status | `CreateMaterializedQueryAsync`, `DropMaterializedQueryAsync`, `ListMaterializedQueriesAsync`, `GetMaterializedQueryStatusAsync` | `client.materializedQueries.create/drop/list/status` | `GET/POST/DELETE /api/databases/{db}/materialized-queries[/{name}]` | Implemented | Full TS + HTTP surface shipped in P16 |
 | Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute()` or `client.materializedQueries.query(name)` | `POST /api/databases/{db}/query` or `POST /api/databases/{db}/materialized-queries/{name}/query` | Implemented | Two paths: normal table query or dedicated MQ query endpoint |
 | Subscribe MQ results | `GetTable(queryName).SubscribeAsync()` pattern in client tests | `client.table(queryName).subscribe(...)` | standard `subscribe` message `target=queryName` | Implemented | No MQ-specific target type |
