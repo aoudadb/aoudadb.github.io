@@ -186,6 +186,8 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}/enable` | POST | Enable user |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
 | `.../admin/users/{id}/roles` | PUT | Replace user's role assignments |
+| `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
+| `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key |
 | `.../admin/roles` | GET | List roles |
 | `.../admin/roles` | POST | Create custom role |
 | `.../admin/roles/{id}` | PATCH | Update role |
@@ -281,6 +283,8 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 `scope` is `null` for globally assigned roles (the common case), or an explicit string for scoped assignments.
 
+**`GET`/`PUT .../admin/users/{id}/claims`** — Custom claims minted onto access tokens (and refresh). `PUT` is a full replacement: `{ "claims": { "tenant_id": "acme" } }`. `{}` clears. Invalid keys return `AUTH_CLAIM_INVALID`. Users cannot set claims on `PATCH /auth/me`.
+
 **`GET .../admin/roles`** — Returns all roles defined for the database.
 
 ```json
@@ -338,7 +342,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/rls-resolvers` | POST | Create a resolver with rules (returns 201) |
+| `.../admin/rls-resolvers` | POST | Create a resolver with `rules` and optional `writeCheckRules` (returns 201). `valueConfig` is a string. Value sources: `UserId`, `Literal`, `PartitionGrant` |
 | `.../admin/rls-resolvers` | GET | List resolvers; optional `?targetTable=` filter |
 | `.../admin/rls-resolvers/{id}` | GET | Get resolver with full rules list |
 | `.../admin/rls-resolvers/{id}` | PATCH | Update resolver description and/or replace rules |
@@ -434,6 +438,7 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 | `AUTH_RESOLVER_NOT_FOUND` | 404 | Resolver ID not found | Verify the `resolverId` in the request |
 | `AUTH_RESOLVER_NAME_CONFLICT` | 409 | A resolver with the same name already exists for the target table | Choose a unique resolver name |
 | `AUTH_RESOLVER_INVALID` | 400 | Resolver request has missing or invalid fields | Check that `name`, `targetTable`, and `resolverType` are present |
+| `AUTH_CLAIM_INVALID` | 400 | Custom claim key is blank or invalid | Use a non-empty claim name; `PUT …/users/{id}/claims` |
 
 ### Handle by Error Code
 
@@ -895,7 +900,7 @@ In Aouda, the traditional tradeoff between JWT-embedded claims (fast, stale) and
 | Policy location | In the database as SQL objects | In auth DB (`_rls_resolvers` table) |
 | Manage policies | SQL migrations or Supabase dashboard | Admin API (`PATCH /rls-resolvers/{id}`) |
 | Test policies | Run SQL queries with `set local role` | Unit test resolver evaluation against mock auth DB |
-| Admin bypass | `set local role service_role` | `role-check` rule with `effect: "allow-all"` |
+| Admin bypass | `set local role service_role` | `PartitionGrant` with `{"role":"…","effect":"allow-all"}` |
 | Compound predicates | Full SQL `OR`/`AND` | Composite resolver with `combinator: OR/AND` |
 
 ---

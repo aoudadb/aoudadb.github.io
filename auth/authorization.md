@@ -18,7 +18,7 @@ Aouda supports three table-level authorization modes, each suited to a different
 
 | Mode | Partition routing | Row filtering | JWT requires | Auth DB queried |
 |------|------------------|---------------|:---:|:---:|
-| `jwt-claim` | Single partition from JWT `tenant_id` claim | No row filtering | `tenant_id` claim | No |
+| `jwt-claim` | Single partition from the bound claim (`plsClaimBinding`, default `tenant_id`) | No row filtering | Bound claim, or `sub` when binding is `subject` | No |
 | `auth-db-pls` | All partitions granted in auth DB for the configured dimension | No row filtering (unless combined with RLS) | Identity only | Session cache (hot path) |
 | `auth-db-rls` | No partition routing (uses existing PLS or jwt-claim) | Predicate from auth DB resolver injected as WHERE clause | Identity only | Session cache (hot path) |
 
@@ -80,7 +80,14 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
   }'
 ```
 
-When a signed-in user queries `orders`, the middleware reads `tenant_id` from the JWT and routes all queries to that single partition. One user, one partition.
+When a signed-in user queries `orders`, the middleware reads the **bound claim** from the JWT and routes all queries to that single partition. One user, one partition.
+
+The default binding is `claim:tenant_id` (omit `plsClaimBinding` — same as today). Aouda's own sign-in JWT does **not** mint `tenant_id` unless an admin set it. Two ways to make `jwt-claim` work with built-in auth:
+
+- **`plsClaimBinding: "subject"`** on the table — bind to JWT `sub` (`ClaimTypes.NameIdentifier`). Use this when the partition column is the user id.
+- **Per-user custom claims** — `GET`/`PUT /api/databases/{db}/auth/admin/users/{id}/claims`. Keys become JWT claims at mint and refresh. Use this for a shared tenant id (`tenant_id: "acme"`) that is not the user id. Callers cannot set claims on `PATCH /auth/me`.
+
+Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` / identity-source parse). Valid: `subject`, `claim:<name>`.
 
 | Credential | PLS Behavior |
 |------------|-------------|
@@ -213,7 +220,9 @@ Aouda RLS does **not** evaluate policies per-row at query time. Instead, it reso
 
 ### 19.5.1 Setup: Define a Resolver
 
-First, create an RLS resolver in the auth DB that defines the filter rule:
+Resolvers are **admin API only** — they are not part of `schema apply`. Create them with `POST /api/databases/{db}/auth/admin/rls-resolvers` (service key or `db_admin`). `resolverType` is required on POST and stored; evaluation **ignores** it. Use `"ColumnMatch"`.
+
+`valueConfig` on the wire is a **string**. Value sources are the code names (`UserId`, `Literal`, `PartitionGrant`). Older docs that said `auth-db-lookup` / `auth-db-grants` / `role-check` named things that were never in the evaluator.
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers \
@@ -223,22 +232,22 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
     "name": "sales_access",
     "description": "Restricts sales rows to records owned by or shared with the user",
     "targetTable": "sales",
-    "resolverType": "composite",
+    "resolverType": "ColumnMatch",
     "rules": [
       {
-        "ruleOrder": 1,
+        "ruleOrder": 0,
         "columnName": "owner_id",
-        "operator": "eq",
-        "valueSource": "auth-db-lookup",
-        "valueConfig": { "field": "user_id" },
-        "combinator": "OR"
+        "operator": "Eq",
+        "valueSource": "UserId",
+        "valueConfig": "{}",
+        "combinator": "Or"
       },
       {
-        "ruleOrder": 2,
+        "ruleOrder": 1,
         "columnName": "team_id",
-        "operator": "in",
-        "valueSource": "auth-db-grants",
-        "valueConfig": { "dimension": "team" },
+        "operator": "In",
+        "valueSource": "PartitionGrant",
+        "valueConfig": "{\"dimension\":\"team\"}",
         "combinator": null
       }
     ]
@@ -246,6 +255,8 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 ```
 
 This resolver produces the compound predicate: `owner_id = '<userId>' OR team_id IN ('<team1>', '<team2>', ...)`.
+
+**Literal comparison is a string.** A Bool column does **not** match Literal `"true"` (`true.ToString()` is `"True"`). Prefer a String column (`"true"` / `"false"`), as in the [write-side fixture](../examples/p43-write-side/).
 
 ### 19.5.2 Setup: Create the RLS Table
 
@@ -272,7 +283,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
 
 ### 19.5.3 Admin Pass-Through
 
-A resolver rule with `valueSource: "role-check"` grants full access to users holding a specific role — the resolver returns no predicate (`null`), and the query runs unfiltered within the partition:
+A `PartitionGrant` rule whose `valueConfig` JSON string has `"role"` and `"effect":"allow-all"` grants full access when the user holds that role — the resolver returns no predicate (`null`), and the query runs unfiltered within the partition. There is no `role-check` operator or value source.
 
 ```bash
 # Update resolver to add admin pass-through as the first rule
@@ -283,45 +294,49 @@ curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers
     "rules": [
       {
         "ruleOrder": 0,
-        "columnName": null,
-        "operator": "role-check",
-        "valueSource": "role-check",
-        "valueConfig": { "role": "company_admin", "effect": "allow-all" },
+        "columnName": "id",
+        "operator": "Eq",
+        "valueSource": "PartitionGrant",
+        "valueConfig": "{\"role\":\"company_admin\",\"effect\":\"allow-all\"}",
         "combinator": null
       },
       {
         "ruleOrder": 1,
         "columnName": "owner_id",
-        "operator": "eq",
-        "valueSource": "auth-db-lookup",
-        "valueConfig": { "field": "user_id" },
-        "combinator": "OR"
+        "operator": "Eq",
+        "valueSource": "UserId",
+        "valueConfig": "{}",
+        "combinator": "Or"
       },
       {
         "ruleOrder": 2,
         "columnName": "team_id",
-        "operator": "in",
-        "valueSource": "auth-db-grants",
-        "valueConfig": { "dimension": "team" },
+        "operator": "In",
+        "valueSource": "PartitionGrant",
+        "valueConfig": "{\"dimension\":\"team\"}",
         "combinator": null
       }
     ]
   }'
 ```
 
-When a `company_admin` user queries `sales`, the resolver sees the matching role-check rule first and returns `null` — no predicate is injected, and the user sees all rows in the partition. Non-admin users hit the compound predicate path.
+When a `company_admin` user queries `sales`, the resolver sees the matching pass-through rule first and returns `null` — no predicate is injected, and the user sees all rows in the partition. Non-admin users hit the compound predicate path.
 
 ### 19.5.4 Write-Path Validation
 
-For writes to `auth-db-rls` tables, Aouda evaluates the resolved predicate against the new or updated row. If the row would not be visible to the user, the write is rejected.
+For writes to `auth-db-rls` tables, Aouda evaluates a **write-check** predicate against the new or updated row. If the row would not be visible under that predicate, the write is rejected.
 
-| Write Operation | Predicate matches row? | Result |
+**Write-check replaces the read predicate** when `writeCheckRules` is present on the resolver. Absent `writeCheckRules` ⇒ write-check = the read rules (today's behavior). To require both membership and identity, put both rules in `writeCheckRules` — do not assume they are ANDed automatically.
+
+The [write-side fixture](../examples/p43-write-side/) uses a SenderId-only write-check so a user can insert a stamped message into a private room they cannot **read**.
+
+| Write Operation | Write-check matches row? | Result |
 |---|:---:|:---:|
-| INSERT | Yes | ✅ Allowed |
-| INSERT | No | ❌ 403 |
-| UPDATE → visible row | Yes | ✅ Allowed |
-| UPDATE → invisible row | No | ❌ 403 |
-| Admin (null predicate) | N/A | ✅ Always allowed |
+| INSERT | Yes | Allowed |
+| INSERT | No | 403 |
+| UPDATE → visible row | Yes | Allowed |
+| UPDATE → invisible row | No | 403 |
+| Admin (null predicate) | N/A | Always allowed |
 
 ---
 
@@ -356,6 +371,8 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
 2. Fan-out routes the query to all granted partition groups.
 3. RLS resolves the `portfolio_access` predicate and injects it as a WHERE clause into each partition sub-query.
 4. Results are filtered and merged.
+
+PLS and RLS are **conjunctive** (AND). There is no cross-layer OR.
 
 ---
 
@@ -461,39 +478,35 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
     "name": "my_resolver",
     "description": "Filters rows by owner",
     "targetTable": "records",
-    "resolverType": "column-equality",
+    "resolverType": "ColumnMatch",
     "rules": [
       {
-        "ruleOrder": 1,
+        "ruleOrder": 0,
         "columnName": "owner_id",
-        "operator": "eq",
-        "valueSource": "auth-db-lookup",
-        "valueConfig": { "field": "user_id" },
+        "operator": "Eq",
+        "valueSource": "UserId",
+        "valueConfig": "{}",
         "combinator": null
       }
     ]
   }'
 ```
 
-**Resolver types:**
+`resolverType` is required on create and stored; evaluation ignores it. Use `"ColumnMatch"`.
 
-| Type | Description |
-|------|-------------|
-| `column-equality` | Single column equality: `col = value` |
-| `column-in-set` | Column IN a set: `col IN (v1, v2, ...)` |
-| `auth-db-lookup` | Query auth DB field and produce equality predicate |
-| `composite` | Multiple rules combined with AND/OR combinators |
+**Value sources (code names — these are the only ones `Evaluate` understands):**
 
-**Value sources:**
+| Value Source | `valueConfig` (string) | Description |
+|---|---|---|
+| `UserId` | `"{}"` (ignored) | Authenticated user's id |
+| `Literal` | the comparison **string** (not an object) | Static value. Bool columns do not match `"true"` — use String |
+| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm |
+| `PartitionGrant` (pass-through) | `{"role":"<name>","effect":"allow-all"}` | If the user has the role, resolver returns null (full access) |
+| `Claim` | any | Deny sentinel (not implemented — BL-315). Do not use |
 
-| Value Source | Description |
-|---|---|
-| `literal` | Hardcoded value in `valueConfig` |
-| `auth-db-grants` | User's granted partition keys for a dimension |
-| `auth-db-lookup` | A field from the user's auth DB record (e.g. `user_id`) |
-| `role-check` | Admin pass-through: if user has the role, return null predicate |
+**Combinators:** `And` or `Or` on rule N — how N joins with N+1. Last rule has `combinator: null`. Default if omitted is `And`.
 
-**Combinators:** `AND` or `OR` — how this rule combines with the next rule in a composite resolver. The last rule in a list has `combinator: null`.
+**`writeCheckRules`:** optional second rule list. Present ⇒ write-check **replaces** read. Absent ⇒ write-check = read.
 
 ### List Resolvers
 
@@ -526,11 +539,11 @@ curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers
     "description": "Updated description",
     "rules": [
       {
-        "ruleOrder": 1,
+        "ruleOrder": 0,
         "columnName": "owner_id",
-        "operator": "eq",
-        "valueSource": "auth-db-lookup",
-        "valueConfig": { "field": "user_id" },
+        "operator": "Eq",
+        "valueSource": "UserId",
+        "valueConfig": "{}",
         "combinator": null
       }
     ]
@@ -547,6 +560,16 @@ curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/rls-resolver
 # 204 No Content on success
 # 404 AUTH_RESOLVER_NOT_FOUND if resolver does not exist
 ```
+
+### Worked example — public OR member + identity stamp
+
+Published fixture (byte-identical in the engine tree): [`examples/p43-write-side/`](../examples/p43-write-side/). Schema apply creates tables; [`auth-setup.json`](../examples/p43-write-side/auth-setup.json) is **admin HTTP** (users, roles, resolvers, grants) — proof that resolvers are not schema apply.
+
+- `rooms` — `auth-db-rls`: `id In PartitionGrant{room_membership} Or IsPublic Eq Literal true`. Alice has zero grants and still sees the public room. `IsPublic` is **String**.
+- `messages` — read membership; `writeCheckRules` is `SenderId Eq UserId` only. Alice can insert a stamped row into a private room she cannot read.
+- `notes` — `plsClaimBinding: "subject"` + `"derived": { "identity": "subject" }` on `UserId`.
+
+Use a user JWT on the **admin listener**. RLS/PLS need a principal; do not put these tables on `mk_pub_*` / data-plane.
 
 ---
 
@@ -604,29 +627,30 @@ curl -X POST http://localhost:5433/api/databases/crm/auth/admin/rls-resolvers \
   -d '{
     "name": "sales_access",
     "targetTable": "sales",
-    "resolverType": "composite",
+    "resolverType": "ColumnMatch",
     "rules": [
       {
         "ruleOrder": 0,
-        "operator": "role-check",
-        "valueSource": "role-check",
-        "valueConfig": { "role": "company_admin", "effect": "allow-all" },
+        "columnName": "id",
+        "operator": "Eq",
+        "valueSource": "PartitionGrant",
+        "valueConfig": "{\"role\":\"company_admin\",\"effect\":\"allow-all\"}",
         "combinator": null
       },
       {
         "ruleOrder": 1,
         "columnName": "owner_id",
-        "operator": "eq",
-        "valueSource": "auth-db-lookup",
-        "valueConfig": { "field": "user_id" },
-        "combinator": "OR"
+        "operator": "Eq",
+        "valueSource": "UserId",
+        "valueConfig": "{}",
+        "combinator": "Or"
       },
       {
         "ruleOrder": 2,
         "columnName": "team_id",
-        "operator": "in",
-        "valueSource": "auth-db-grants",
-        "valueConfig": { "dimension": "team" },
+        "operator": "In",
+        "valueSource": "PartitionGrant",
+        "valueConfig": "{\"dimension\":\"team\"}",
         "combinator": null
       }
     ]

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://aouda.io/schema/v1.json",
+  "database": "chat",
+  "tables": {
+    "rooms": {
+      "columns": {
+        "id": { "type": "String", "primaryKey": 1 },
+        "name": { "type": "String" },
+        "IsPublic": { "type": "String" }
+      },
+      "authMode": "auth-db-rls",
+      "rlsResolverName": "rooms_visibility"
+    },
+    "messages": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1 },
+        "room_id": { "type": "String" },
+        "SenderId": { "type": "String", "derived": { "identity": "subject" } },
+        "body": { "type": "String" }
+      },
+      "authMode": "auth-db-rls",
+      "rlsResolverName": "messages_access"
+    },
+    "notes": {
+      "columns": {
+        "id": { "type": "Int64", "primaryKey": 1 },
+        "UserId": { "type": "String", "derived": { "identity": "subject" } },
+        "body": { "type": "String" }
+      },
+      "partitionKey": [{ "column": "UserId" }],
+      "partitionLevelSecurity": true,
+      "authMode": "jwt-claim",
+      "plsClaimBinding": "subject"
+    }
+  }
+}

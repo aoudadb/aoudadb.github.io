@@ -1,0 +1,14 @@
+{
+  "aliceRooms": { "ids": ["room-public"] },
+  "bobRooms": { "ids": ["room-public", "room-private"] },
+  "aliceMessagesBefore": { "rowCount": 0 },
+  "bobMessagesBefore": { "rowCount": 1 },
+  "aliceStampPrivate": { "status": 200 },
+  "aliceSupplySender": { "status": 400, "code": "TRANSFORM_DERIVED_READONLY" },
+  "bobStampPrivate": { "status": 200 },
+  "aliceNote": { "status": 200 },
+  "aliceMessagesAfter": { "rowCount": 0 },
+  "bobMessagesAfter": { "rowCount": 3 },
+  "aliceNotes": { "rowCount": 1 },
+  "bobNotes": { "rowCount": 0 }
+}
