@@ -333,7 +333,7 @@ Either can be used alone, together, or not at all — [Auth and Authorization](.
 | `auth-db-rls` | The filter is a row predicate rather than a partition — "rows I own", "rows my team owns" | A named resolver with rules |
 | `auth-db-pls` + `rlsResolverName` | Both: partition isolation *and* a row predicate inside it | Both of the above |
 
-Worked setups for all of them, including admin pass-through and write-path validation: [Data authorization](../auth/authorization.md).
+Worked setups for all of them, including admin pass-through, write-check (read vs write predicates), identity stamp, and `plsClaimBinding`: [Data authorization](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](../examples/p43-write-side/) — stamp the principal into the row and gate writes with `writeCheckRules`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
 
 > **The one mistake that matters.** A table with `dataPlaneAccess: true` and **no** authorization mode is readable — through your declared named queries — by **every signed-in user**. That is exactly right for reference data, price lists, and public catalogues. It is a data breach for anything owned by a user. Ship `authMode` in the *same change* that sets `dataPlaneAccess`, never in a follow-up, and confirm it with `aouda policy inspect` against a real identity per table class.
 
@@ -690,7 +690,7 @@ For each screen or feature, in order:
 2. **Can the read be expressed as one definition** — one table plus ≤ 3 joins, an explicit `select`, a capped `limit`, values as parameters? If yes, write a named query. If it needs a groupBy or a rollup, write a materialized query and read *that*. If it needs a lookup, a loop, or an outbound call, it is a service.
 3. **Does the screen need a total?** Add `count: true`. If apply rejects it with `NAMED_QUERY_COUNT_UNBOUNDED`, the definition's cost is not bounded — cover the partition keys or drop the count. Do not add a count endpoint.
 4. **Does it need to update live?** Subscribe by name, collection-shaped. If the table is insert-only, do not reach for `conflate` — it holds value updates only. Model a `latestPerKey` MQ and subscribe to that: it bounds the grid to one row per key, which is the shape you want, though it does not throttle the event rate today.
-5. **Is the data user-scoped?** Set `authMode` and verify with `policy inspect`. Never filter by identity through a parameter — identity is injected from the validated principal and is never an argument.
+5. **Is the data user-scoped?** Set `authMode` and verify with `policy inspect`. Never filter by identity through a parameter — identity is injected from the validated principal and is never an argument. Stamp it with `"derived": { "identity": "subject" }` and, when read scope and write scope differ, `writeCheckRules`.
 6. **Does it write?** Named mutation, with the row rules as `checks` on the table.
 7. **Re-run the gate.** `schema validate`, `schema diff --access`, `policy inspect`.
 

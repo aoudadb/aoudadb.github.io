@@ -94,6 +94,19 @@ Expressions are `ScalarExprNode` (same substrate as bulk-mutation `setExpr`). Th
 
 Apply rejects unknown ops and caller-supplied values for derived columns (`TRANSFORM_DERIVED_READONLY`). Derived columns re-evaluate on update/upsert of their inputs.
 
+### Identity stamp (`{ "identity": "subject" }`)
+
+`derived` is either a `ScalarExprNode` **or** `{ "identity": "subject" }` — a sibling, not `type: "identity"`. The engine stamps the validated principal (`ClaimTypes.NameIdentifier` / JWT `sub`) on insert/upsert/bulk-load `applyTransforms`.
+
+| Caller | Omits the column | Supplies the column |
+|---|---|---|
+| User JWT | Stamped as that user | `TRANSFORM_DERIVED_READONLY` (400) |
+| Service key | `IDENTITY_STAMP_REQUIRED` (400) | Stored as supplied |
+
+Unknown sources (`claim:…` on a derived identity column that is not bindable, or a misspelled source) fail apply or write with `IDENTITY_SOURCE_UNRESOLVABLE` / `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE`. Identity in `update` `set` / `setExpr` is not supported.
+
+Worked schema: [write-side fixture](../examples/p43-write-side/aouda.schema.json). Authorization for that stamp: [Data authorization](../auth/authorization.md#worked-example--public-or-member--identity-stamp).
+
 ### `call` — string and rounding functions
 
 `type: "call"` invokes a function from a **closed allowlist**. Names are lowercase and case-sensitive — `Upper` is unknown, `upper` is the function.

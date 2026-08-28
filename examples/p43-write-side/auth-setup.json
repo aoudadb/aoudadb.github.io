@@ -1,0 +1,64 @@
+{
+  "users": [
+    { "email": "alice@test.local", "password": "AlicePass1!", "role": "db_writer" },
+    { "email": "bob@test.local", "password": "BobPass1!", "role": "db_writer" }
+  ],
+  "resolvers": [
+    {
+      "name": "rooms_visibility",
+      "targetTable": "rooms",
+      "resolverType": "ColumnMatch",
+      "rules": [
+        {
+          "ruleOrder": 0,
+          "columnName": "id",
+          "operator": "In",
+          "valueSource": "PartitionGrant",
+          "valueConfig": "{\"dimension\":\"room_membership\"}",
+          "combinator": "Or"
+        },
+        {
+          "ruleOrder": 1,
+          "columnName": "IsPublic",
+          "operator": "Eq",
+          "valueSource": "Literal",
+          "valueConfig": "true",
+          "combinator": null
+        }
+      ]
+    },
+    {
+      "name": "messages_access",
+      "targetTable": "messages",
+      "resolverType": "ColumnMatch",
+      "rules": [
+        {
+          "ruleOrder": 0,
+          "columnName": "room_id",
+          "operator": "In",
+          "valueSource": "PartitionGrant",
+          "valueConfig": "{\"dimension\":\"room_membership\"}",
+          "combinator": null
+        }
+      ],
+      "writeCheckRules": [
+        {
+          "ruleOrder": 0,
+          "columnName": "SenderId",
+          "operator": "Eq",
+          "valueSource": "UserId",
+          "valueConfig": "{}",
+          "combinator": null
+        }
+      ]
+    }
+  ],
+  "grants": [
+    {
+      "email": "bob@test.local",
+      "dimension": "room_membership",
+      "partitionKey": "room-private",
+      "accessLevel": "write"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "rooms": [
+    { "id": "room-public", "name": "Lobby", "IsPublic": "true" },
+    { "id": "room-private", "name": "Staff", "IsPublic": "false" }
+  ],
+  "messages": [
+    { "id": 1, "room_id": "room-private", "SenderId": "$bob", "body": "seeded" }
+  ]
+}

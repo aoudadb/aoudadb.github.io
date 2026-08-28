@@ -535,6 +535,11 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_GRANT_DIMENSION_CAP` | 400 | Creating a partition grant would exceed 1 000 grants on one dimension |
 | `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Creating a partition grant would exceed 5 000 grants for the principal |
 | `AUTH_RESOLVER_INVALID` | 400 | RLS resolver cannot be persisted (e.g. zero rules — fail-closed) |
+| `AUTH_CLAIM_INVALID` | 400 | Custom user claim key is blank or invalid |
+| `IDENTITY_SOURCE_UNRESOLVABLE` | 400 | Identity derived source could not be resolved from the principal |
+| `IDENTITY_STAMP_REQUIRED` | 400 | Service role omitted a required identity-stamped column |
+| `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | `plsClaimBinding` / identity source is not a bindable spelling (`subject` or `claim:<name>`) |
+| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including identity stamp) |
 
 #### State Errors (4xx)
 

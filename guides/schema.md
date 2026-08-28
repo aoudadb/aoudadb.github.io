@@ -870,7 +870,8 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
 | `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. `auth-db-pls` implies partition-level security even when `partitionLevelSecurity` is omitted; a partition key is required. |
 | `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. |
-| `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Used with `"auth-db-rls"` mode. |
+| `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Used with `"auth-db-rls"` mode. The resolver itself is created via the admin API, not schema apply. |
+| `plsClaimBinding` | `plsClaimBinding` | `string` | `claim:tenant_id` | jwt-claim PLS source. `"subject"` or `"claim:<name>"`. Omit keeps `tenant_id`. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
 
 #### ColumnDefinition (entry in `columns`)
@@ -885,6 +886,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `encoder` | `encoder` | `string` | None | Optional `EncoderPreference` name (e.g. `String_Dict`). Omit = Auto. |
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
+| `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
 
