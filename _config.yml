@@ -63,5 +63,6 @@ exclude:
   - "*.gem"
   - "*.gemspec"
   - node_modules
+  - dev
   - examples/p40-browser-tier
   - examples/p43-write-side

@@ -29,6 +29,7 @@ Update this table when shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
+| `0.1.14` | `1` | `≥ 0.1.16` (`DatabaseAuthInfo`; P43 `derived.identity` / `plsClaimBinding`; BL-180 MQ schema fields; BL-185 `rowErrors`) | `≥ 0.1.14` | `≥ 0.0.21` | **P42** catalog directory + lazy residency default (forward-only formats 2→3→4; no downgrade). **P43** identity stamp, PLS claim binding, write-check, claims at mint. Catalog GET/list `auth.enabled` / `auth.database` (HTTP API v2.6). P41 ingest remainder. Studio **0.0.21** pins `@aouda/client` **0.1.16** after npm. |
 | `0.1.10` | `1` | `≥ 0.1.15` (name identity; consistency token store; stream `token`) | `≥ 0.1.10` | `≥ 0.0.20` | BL-188 name-only named queries/mutations (breaking wire); BL-187 `firstPerKey` / `topNPerGroup`; P38 freshness (`AtLeast`, `TOKEN_*` / `FRESHNESS_*`, bulk-load `token`). Studio **0.0.20** pins `@aouda/client` **0.1.15** and drops hash UI. |
 | `0.1.9` | `1` | `≥ 0.1.14` (`totalMatches`; `orderByIndex` / `whenParamPresent` / `orderByChoices` / `count`; `collapse_inserts`) | `≥ 0.1.9` | `≥ 0.0.19` | P40 data-plane completeness: MQ `dataPlaneAccess` + `outputName` vocabulary (`D-31` break); named-query count / optional predicates / bounded sort; conflation that conflates; computed MQ ranking; row-index diagnostics. Studio **0.0.19** pins `@aouda/client` **0.1.14**. |
 | `0.1.8` | `1` | `≥ 0.1.12` (`namedQueries.subscribe`; `$upper`…`$cast` call operators) | `≥ 0.1.8` | `≥ 0.0.18` | BL-173 typed subscribe-by-hash; BL-174 `materializedQueries` in `aouda.schema.json`; BL-175 `call` string/rounding functions; BL-171/172 bulk-load Timestamp ISO-8601 and NULL validity. Studio **0.0.18** (P39) pins `@aouda/client` **0.1.13** and calls subscribe-by-hash, named-artifact execute, policy inspect, and schema-file MQ maps. |
@@ -62,7 +63,7 @@ While `@aouda/client` is `0.x`:
 
 | Topic | Location |
 |-------|----------|
-| **Cross-repo bump procedure (agents)** | Shared docs repo: `Cross-Repo-Release-And-Version-Bump.md` (`D:\GitHub\docs\` or `C:\Data\GitHub\docs\`) |
+| **Cross-repo bump procedure (agents)** | Shared docs repo: `Cross-Repo-Release-And-Version-Bump.md` (chain map). **This repo:** [`dev/Release-And-Version-Bump.md`](../dev/Release-And-Version-Bump.md). Server: `aouda/docs/dev/Release-And-Version-Bump.md`. |
 | npm Changesets + publish | [aouda-client-ts `docs/dev/Release-Process.md`](https://github.com/aouda/aouda-client-ts/blob/main/docs/dev/Release-Process.md) |
 | Studio pin + local link | [aouda-studio `docs/dev/Dependency-Policy.md`](https://github.com/aouda/aouda-studio/blob/main/docs/dev/Dependency-Policy.md) |
 | TypeScript client API | [TypeScript Client](./typescript.md) |
