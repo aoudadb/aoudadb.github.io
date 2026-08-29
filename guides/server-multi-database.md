@@ -829,8 +829,9 @@ curl -s http://localhost:5000/api/databases
 
 | Question | Endpoint | Practical answer |
 |---|---|---|
-| Is the server alive? | `GET /health` | Always 200 if process is running |
-| Is the server ready for traffic? | `GET /ready` | 503 if catalog or WAL check fails |
+| Is the server alive? | `GET /health` | Always 200 if process is running. Not a signal that databases are `Active`. |
+| Is the server ready for traffic? | `GET /ready` | 503 if catalog or WAL check fails. Does not fail for one DB `Dropping`. |
+| Is this database serving? | `GET /api/databases/{name}` | 200 + `state=Active` before schema apply. 404 if missing or `Dropping`. |
 | Which databases are under memory pressure? | `GET /api/server/memory` | Check `pressure` field per database |
 | What is query throughput and latency per database? | `GET /api/server/metrics` | `queryCount`, `queryMs`, `rowsReturned` per db |
 | Global Perf counters (query, storage, WAL, bloom) | `GET /api/admin/metrics` | 12 subsystems; sparkline via `history` |

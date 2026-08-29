@@ -635,7 +635,11 @@ Lists databases visible to the caller.
       },
       "isInternal": false,
       "isAuthDatabase": false,
-      "authDatabaseKind": "none"
+      "authDatabaseKind": "none",
+      "auth": {
+        "enabled": false,
+        "database": null
+      }
     }
   ],
   "count": 1
@@ -648,7 +652,10 @@ Lists databases visible to the caller.
 |-------|------|-------------|
 | `isInternal` | `boolean` | `true` for Aouda-owned infrastructure databases (`_serverauth`, `_settings`). These are hidden from the default list and must not be used as data-explorer targets. |
 | `isAuthDatabase` | `boolean` | `true` if this database contains auth system tables (`_users`, `_roles`, etc.). Application auth databases (`_auth`, `auth`, …) have `isInternal: false` and remain browsable in the data explorer. |
-| `authDatabaseKind` | `"none"` \| `"server"` \| `"application"` | Identifies the auth role. `"server"` means this is the server-level admin auth database (managed via `/api/auth/admin/...`). `"application"` means this is an end-user auth database. `"none"` for regular data databases. |
+| `authDatabaseKind` | `"none"` \| `"server"` \| `"application"` | Identifies whether **this** database is an auth store. `"server"` is the server-level admin auth database (`/api/auth/admin/...`). `"application"` is an end-user auth database. `"none"` for regular data databases — this does **not** mean the data DB is unlinked. |
+| `auth.enabled` | `boolean` | `true` when this database is linked to an auth database. Always present on list/get/create. |
+| `auth.database` | `string` \| `null` | Linked auth database name, or `null` when unlinked. |
+| `auth.keys` | object \| omitted | `anonKey` / `serviceRoleKey` / `publicKey` — **create and regenerate only**. GET and list omit `keys` and never re-emit `mk_*`. |
 
 **Internal database definition:**
 
@@ -674,7 +681,43 @@ Default list: include iff isInternal == false
 
 #### `GET /api/databases/{name}`
 
-Direct lookup of a specific database by name. Always returns the database if it exists, regardless of `isInternal`. Requires server credentials (`mk_srv_...`).
+Direct lookup of a specific database by name. Returns the database if it exists and is still serving, regardless of `isInternal`. Requires server credentials (`mk_srv_...`).
+
+**Metadata-only.** Capture `mk_*` keys from `POST /api/databases` (or regenerate). GET never re-emits keys. `auth` is always an object — `auth.enabled: false` means unlinked; do not treat a missing or null `auth` as the signal (older servers omitted it).
+
+**Success (200):**
+
+```json
+{
+  "name": "myapp",
+  "state": "Active",
+  "createdAt": "2026-06-26T10:00:00.0000000Z",
+  "options": {
+    "maxMemoryBytes": null,
+    "defaultTemperature": "Auto",
+    "enableWal": true,
+    "replicationMode": "Replicate"
+  },
+  "auth": {
+    "enabled": true,
+    "database": "auth"
+  },
+  "isInternal": false,
+  "isAuthDatabase": false,
+  "authDatabaseKind": "none"
+}
+```
+
+`authDatabaseKind: "none"` on this payload is expected for a **data** database. Linkage is `auth.enabled` / `auth.database`.
+
+**Waiting for a database to be usable:** poll this endpoint until **200** and `state=Active` (or use `/ready` for process readiness, then this for the named DB). Do not wait on `GET /health`.
+
+**Error responses:**
+
+| Status | Code | Condition |
+|--------|------|-----------|
+| `404` | `DATABASE_NOT_FOUND` | Unknown name, already dropped, or `Dropping` (engine already unrouted). You cannot poll `state` on a dropping name — 404 means it is gone from serving. List may still show `Dropping` until background cleanup finishes. |
+| `401` | `UNAUTHORIZED` | Missing or invalid credentials |
 
 ---
 
@@ -703,6 +746,56 @@ Unknown database → 404 `DATABASE_NOT_FOUND`. Requires read authorization when 
 #### `POST /api/databases`
 
 Creates a new operator-facing database. The `isInternal` flag cannot be set by clients — it is always `false` for user-created databases. Internal databases are only created by Aouda bootstrap services.
+
+**Request body:**
+
+```json
+{
+  "name": "myapp",
+  "enableWal": true,
+  "replicationMode": "Replicate",
+  "maxMemoryBytes": null,
+  "defaultTemperature": "Auto",
+  "dataDurability": "DiskBacked",
+  "kind": "data",
+  "auth": { "enabled": true }
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `name` | string | Yes | Database name. |
+| `enableWal` | bool | No | Default `true`. |
+| `replicationMode` | string | No | `Replicate` (default) or `DoNotReplicate`. |
+| `maxMemoryBytes` | number \| null | No | Per-database memory cap. |
+| `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
+| `dataDurability` | string | No | `DiskBacked` (default) or `MemoryOnly`. |
+| `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database. Mutually exclusive with `auth`. |
+| `auth.enabled` | bool | No | Shorthand: link to the single existing auth database (400 if none or more than one). |
+| `auth.database` | string | No | Link to (or create) a named auth database. |
+
+**Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them.
+
+```json
+{
+  "name": "myapp",
+  "state": "Active",
+  "auth": {
+    "enabled": true,
+    "database": "auth",
+    "keys": {
+      "anonKey": "mk_anon_...",
+      "serviceRoleKey": "mk_svc_...",
+      "publicKey": "mk_pub_..."
+    }
+  },
+  "isInternal": false,
+  "isAuthDatabase": false,
+  "authDatabaseKind": "none"
+}
+```
+
+Poll `GET /api/databases/{name}` until `state=Active` before schema apply.
 
 ---
 
@@ -2048,7 +2141,9 @@ Service information.
 
 #### `GET /health`
 
-Basic liveness probe.
+Liveness probe. **Always 200** if the process is running. Fast. Use as a Kubernetes `livenessProbe`.
+
+This is **not** “ready for schema apply or traffic”. A database can be `Dropping` or `Creating` while `/health` returns 200.
 
 **Response:**
 
@@ -2057,6 +2152,24 @@ Basic liveness probe.
   "status": "healthy"
 }
 ```
+
+#### `GET /ready`
+
+Readiness probe. 200 when `DatabaseManager` is initialized and **critical** components (catalog, WAL) are healthy. 503 otherwise (body includes `ready: false` and `reason`).
+
+`/ready` does **not** fail because an operator database is `Creating` or `Dropping` — that would take the whole node out of a load balancer for a long drop. Per-database readiness is `GET /api/databases/{name}` (`state=Active`) and `/health/detailed`.
+
+Use as a Kubernetes `readinessProbe`.
+
+#### `GET /startup`
+
+Startup probe. 200 when bootstrap is complete (`DatabaseManager` initialized). 503 while still starting. Use as a Kubernetes `startupProbe`; once it returns 200, switch to liveness + readiness.
+
+#### `GET /health/detailed`
+
+Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane).
+
+**Operator wait (create / schema apply):** wait for `GET /ready` 200 **and** `GET /api/databases/{name}` 200 with `state=Active`. After `DELETE`, GET `{name}` 404 means the database is gone from serving.
 
 ---
 
@@ -3480,3 +3593,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.3 | 2026-08-19 | **P37 / server 0.1.7:** named-query execute + read-only batch (cap 32, one snapshot, positional errors); named-mutation execute; `mk_pub_*` + data-plane listener (404 not 403); WebSocket path `/api/databases/{db}/ws`; `subscribe.hash` / `args` / `conflate`; `snapshot_complete`; server `gap` (`last_seq`, `discarded`); `change.values_skipped`; `re_auth`; access-surface `?access=true`. Additive on the wire. |
 | 2.4 | 2026-08-21 | **P38:** consistency token (`X-Aouda-Token` / `?at_least=` / envelope `token` / `GET …/token`); named-query alias `freshness`; `TOKEN_*` / `FRESHNESS_*` errors; stream `token` alongside `version`; bulk-load commit `walPosition` → `token`. **Breaking:** `MaxLagSeconds` is measured staleness, not lag-bytes ÷ 1 MB/s. Default read preference remains `Primary`. |
 | 2.5 | 2026-08-22 | **BL-188:** named-query identity is the unique schema name. **Breaking:** `{name}` routes and batch/subscribe/warning `"name"`; alias surface (`?alias=`, `X-Aouda-Named-Query-Alias`, body `alias`) and `NAMED_QUERY_ALIAS_MISMATCH` retired; omitting a name deletes the definition; codegen is types-only (optional Args/Row). Historical 2.3 / 2.4 shipped content-hash identity. |
+| 2.6 | 2026-08-29 | **Catalog GET/list auth linkage:** `auth.enabled` / `auth.database` on every database response (never `mk_*` on GET). GET `{name}` documented as metadata-only; 404 while `Dropping`. Health probe split (`/health` liveness vs `/ready` / GET `state=Active`). Create-role `permissions` optional; 400 `INVALID_REQUEST` with `suggestion`. |

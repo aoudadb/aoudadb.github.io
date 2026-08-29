@@ -98,8 +98,11 @@ kubectl port-forward svc/aouda-aouda-cluster-studio 3000:3000 -n aouda
 ```
 
 Then browse:
-- Aouda health: `http://localhost:5000/health`
+- Aouda liveness: `http://localhost:5000/health` (process alive; not “ready for schema apply”)
+- Aouda readiness: `http://localhost:5000/ready`
 - Studio: `http://localhost:3000`
+
+Chart probes: `livenessProbe` → `/health`, `readinessProbe` → `/ready`, `startupProbe` → `/startup`. Wait for `GET /api/databases/{name}` `state=Active` before applying schema.
 
 ## Chart Validation (No Cluster Required)
 

@@ -286,6 +286,11 @@ curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
   -d '{ "name": "myapp", "auth": { "enabled": true } }'
 
+# Capture keys from this 201 body. GET /api/databases/myapp is metadata-only:
+# it returns auth.enabled / auth.database, never mk_*. authDatabaseKind "none"
+# on a data DB does not mean unlinked. Wait until GET returns state=Active
+# before schema apply — do not wait on GET /health.
+
 # 5. Test: sign up a user using the anon key
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signup \
   -H "Authorization: Bearer mk_anon_..." \

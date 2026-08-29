@@ -755,7 +755,7 @@ Cloud      : https://studio.aouda.com → connect to http://localhost:5433
 `Aouda.Setup` bootstraps the admin account using this sequence:
 
 1. Invokes `Aouda.Server create-admin --email ... --password ... --data ...` as a subprocess (no HTTP required — writes directly to the data directory).
-2. Waits for `GET /health` to return 200 (up to 30 retries × 2 seconds = 60 seconds).
+2. Waits for `GET /health` to return 200 (up to 30 retries × 2 seconds = 60 seconds). That only proves the process is alive; wait for `GET /ready` (and `GET /api/databases/{name}` `state=Active`) before schema apply.
 3. Calls `POST /api/auth/setup` with email + password. If the server returns 403 `ALREADY_CONFIGURED` (admin already exists), falls back to `POST /api/auth/signin`.
 4. Uses the returned token to call `POST /api/auth/admin/keys` and obtain a server admin API key.
 

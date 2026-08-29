@@ -250,11 +250,12 @@ curl http://localhost:5433/api/databases/myapp/auth/admin/roles \
 # Create custom role
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/roles \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{
     "name": "order_processor",
     "permissions": [
-      { "resourceType": "table", "resourceName": "orders", "actions": ["read", "write"] },
-      { "resourceType": "table", "resourceName": "products", "actions": ["read"] }
+      { "resourceType": "table", "resourceName": "orders", "actions": "read,write" },
+      { "resourceType": "table", "resourceName": "products", "actions": "read" }
     ]
   }'
 

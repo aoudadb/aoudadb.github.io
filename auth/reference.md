@@ -304,6 +304,29 @@ To add a single role without dropping existing roles, first `GET` current roles,
 }
 ```
 
+`actions` is a **comma-separated string** (`"read"`, `"read,write"`), not a JSON array.
+
+**`POST .../admin/roles`** — Create a custom role. Returns `201 Created`.
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `name` | string | **Yes** | Unique role name. |
+| `description` | string | No | |
+| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (default `"table"`), `resourceName` (default `"*"`), `actions` (**string**, e.g. `"read"` or `"read,write"`). |
+
+```json
+{
+  "name": "order_processor",
+  "description": "Read/write orders",
+  "permissions": [
+    { "resourceType": "table", "resourceName": "orders", "actions": "read,write" },
+    { "resourceType": "table", "resourceName": "products", "actions": "read" }
+  ]
+}
+```
+
+**400 `INVALID_REQUEST`:** missing `name`, duplicate name, or malformed JSON. Body is `{ "error", "message", "suggestion", "requestId" }` — log it. `permissions` is not required.
+
 **`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name.
 
 ```json

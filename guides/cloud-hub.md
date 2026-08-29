@@ -245,8 +245,10 @@ Creates Studio Deployment + Service. Auto-configured `AOUDA_STUDIO_DEFAULT_SERVE
 | Probe | Path | Purpose |
 |-------|------|---------|
 | Startup | `/startup` | 200 when initialization complete, 503 during startup |
-| Liveness | `/health` | 200 when process is running |
-| Readiness | `/ready` | 200 when engine is accepting queries |
+| Liveness | `/health` | 200 when the process is running. Not “ready for traffic or schema apply”. |
+| Readiness | `/ready` | 200 when catalog + WAL are healthy. Does not fail for a `Creating`/`Dropping` operator DB. |
+| Per-database | `GET /api/databases/{name}` | 200 + `state=Active` before schema apply. 404 while `Dropping`. |
+| Detailed | `/health/detailed` | Per-component and per-database `state` (admin listener) |
 
 ### Key `values.yaml` Settings
 
