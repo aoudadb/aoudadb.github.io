@@ -2268,6 +2268,11 @@ List all backups at the configured destination, ordered newest-first.
 
 Restore from the backup with the given ID. The server engine is stopped, restored, and restarted — this is a blocking operation.
 
+**Exact restore only — no point-in-time recovery (PITR) over HTTP.** The request body accepts no
+target time and none exists anywhere else on this surface; restoring reproduces the backup's exact
+state. PITR is not implemented in this release at any layer, not only HTTP — see
+[Backup and restore](../guides/backup.md#24-availability-status).
+
 **No request body.**
 
 **Response** (`200 OK`):
