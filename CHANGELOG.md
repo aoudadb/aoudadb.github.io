@@ -14,6 +14,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 ## Unreleased
 
 **Corrected:** [Backup and restore](guides/backup.md), [Getting started: backup](getting-started/backup.md), [Storage and persistence](guides/storage.md), and seven other pages overstated point-in-time recovery (PITR) as implemented. It is not: the WAL archive worker (`WalArchiveWorker`) is never started by any shipped host, no server or client API accepts a restore target time, and the local-WAL replay path does not apply production WAL correctly. Exact backup/restore is unaffected and works as documented. [Storage](guides/storage.md#28-how-aouda-implements-it) gains the WAL physical-layout, position-model, and retention-cycle explanation these docs never had, separated from the archive-cycle description that does not apply in production. Tracked as BL-186 in the engine repository; ratified to ship (ADR 0044).
+- **Data-plane named-query non-disclosure (BL-319 S03).** Unsigned or unentitled execute / batch / named-mutation execute / named-query subscribe on the data-plane listener returns `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — so callers cannot enumerate artifacts via 401 vs 404. Admin listener keeps 401/403. [HTTP API](reference/http-api.md#how-data-endpoint-auth-works), [Named queries](guides/named-queries.md), [Direct client access](guides/direct-client-access.md).
 
 ## 0.1.14 — 2026-08-29
 

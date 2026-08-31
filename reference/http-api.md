@@ -155,6 +155,10 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
 
 2. Read Authorization header
    Missing → 401 AUTH_TOKEN_MISSING
+     Exception (data-plane listener only): listed named-query execute / batch /
+     named-mutation execute → 404 NAMED_QUERY_NOT_FOUND / NAMED_MUTATION_NOT_FOUND
+     (same ProtocolError as an unknown name; not AuthErrorPayload). Admin listener
+     keeps 401. Invalid/expired/revoked credentials stay 401 on both listeners.
    Present → Continue to step 3
 
 3. Identify credential type by prefix
@@ -174,6 +178,10 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
    Role has required operation (read/write/delete/admin) → Proceed
    Role lacks permission → 403 INSUFFICIENT_PERMISSIONS
    No role for this database → 403 AUTHORIZATION_DENIED
+     Exception (data-plane listener only): listed named-artifact execute / batch
+     maps unentitled (including mk_anon_*) to 404 NAMED_QUERY_NOT_FOUND /
+     NAMED_MUTATION_NOT_FOUND so names are not enumerable via 403 vs 404.
+     Admin listener keeps 403. Hidden tables stay 404 TABLE_NOT_FOUND.
 ```
 
 #### X-User-Token Header
@@ -483,13 +491,13 @@ All errors return a JSON body with this structure:
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
 | `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter |
-| `NAMED_QUERY_NOT_FOUND` | 404 | Named-query name is unknown |
+| `NAMED_QUERY_NOT_FOUND` | 404 | Named-query name is unknown. On the **data-plane listener**, unsigned or unentitled execute / batch / subscribe of a listed named query also uses this code (same `ProtocolError` envelope as unknown). Admin listener keeps 401/403 for those callers. |
 | `NAMED_QUERY_BIND_FAILED` | 400 | Argument bind failed (type, constraint, or missing required param) |
 | `NAMED_QUERY_PARAM_REQUIRED` | 400 | A required named-query parameter was omitted |
 | `NAMED_QUERY_BATCH_EMPTY` | 400 | `queries` is missing or empty |
 | `NAMED_QUERY_BATCH_TOO_LARGE` | 400 | Batch exceeds 32 elements (`ProtocolConstants.MaxNamedQueryBatchSize`) |
 | `NAMED_QUERY_BATCH_MUTATION` | 400 | Batch included a named-mutation name (read-only envelope) |
-| `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation name is unknown |
+| `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation name is unknown. On the **data-plane listener**, unsigned or unentitled execute also uses this code. Admin listener keeps 401/403. |
 | `NAMED_MUTATION_BIND_FAILED` | 400 | Named-mutation argument bind failed |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows`; the call fails closed (no `rowsTruncated`) |
 | `ACCESS_SURFACE_TOO_MANY_IDENTITIES` | 400 | Access-surface diff posted more than 32 fixture identities |
@@ -505,7 +513,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `AUTH_TOKEN_MISSING` | 401 | Missing or empty `Authorization: Bearer` header |
+| `AUTH_TOKEN_MISSING` | 401 | Missing or empty `Authorization: Bearer` header. Exception: data-plane listed named-artifact execute / batch is 404 `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` instead (admin listener still 401). |
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`) |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
@@ -1095,7 +1103,7 @@ Execute one named query by unique name.
 
 | Status | Code | When |
 |--------|------|------|
-| 404 | `NAMED_QUERY_NOT_FOUND` | Unknown name |
+| 404 | `NAMED_QUERY_NOT_FOUND` | Unknown name. Data-plane unsigned / unentitled (including `mk_anon_*`) also 404 with this code — not 401/403. Admin listener: missing token 401, unentitled 403. |
 | 400 | `NAMED_QUERY_BIND_FAILED` / `NAMED_QUERY_PARAM_REQUIRED` | Bind-time type or constraint failure |
 | 404 | `TABLE_NOT_FOUND` | Data-plane browser-tier and a touched table has `dataPlaneAccess: false` |
 | 429 | `IDENTITY_QUOTA_EXCEEDED` | Data-plane quota |
@@ -1166,6 +1174,8 @@ A named-mutation name in `queries`:
 { "code": "NAMED_QUERY_BATCH_MUTATION", "error": "Named query batch must not include a named-mutation name." }
 ```
 
+On the **data-plane listener**, unsigned or unentitled batch is **request-level 404** `NAMED_QUERY_NOT_FOUND` (not HTTP 200 with positional slots). Entitled callers still get HTTP 200 with positional `NAMED_QUERY_NOT_FOUND` for unknown names. The admin listener keeps 401/403 for unsigned/unentitled batch.
+
 `INVALID_FORMAT` when `?format=` is not `columnar` or `rows`.
 
 Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) — that is ad-hoc update/delete on one table.
@@ -1180,7 +1190,7 @@ Named mutations are the write-side mirror: name-addressed insert/update/delete t
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`).
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE` and `NAMED_MUTATION_RETURNING_STAR`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE` and `NAMED_MUTATION_RETURNING_STAR`.
 
 ### Access-surface diff
 
@@ -1225,7 +1235,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
 | POST | `/{name}/query` | Read | Return materialized rows as JSON objects (see response). |
-| POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). Accepts `?await=true` to wait for completion or `?await=false` for fire-and-forget. Result table is readable with stale data throughout. |
+| POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (default 30s): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. |
 
 **Create body** (camelCase JSON):
 
