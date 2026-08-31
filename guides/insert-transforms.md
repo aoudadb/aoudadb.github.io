@@ -157,11 +157,13 @@ This is deliberately not a general expression language. It covers normalization 
 
 Named predicates. An empty `WhereClause` is rejected at apply. Failure → typed error; the row is not stored.
 
+Check `op` values are the **row-evaluator** set only: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`. That is smaller than the wire set used by `POST /query` and named-query execute (`in`, `nin`, `like`). Apply refuses `in` / `nin` / `like` on a check (`not supported here`) — encode membership as `or` of `eq`. The operator is `ne`, not `neq`.
+
 ```json
 {
   "checks": {
     "ticker_present": {
-      "and": [{ "column": "ticker", "op": "neq", "value": "" }]
+      "and": [{ "column": "ticker", "op": "ne", "value": "" }]
     }
   }
 }
@@ -408,7 +410,8 @@ await client.table("VendorTick").insertMany([
 | MQ over source empty after adding `route` | Events follow storage | Query/subscribe the **target**, or use `tee` |
 | Unique violation on upsert | Existing row counted | Upsert excludes the existing PK from the unique check; a **different** row colliding still fails |
 | Slow 100-row ingest | Write amplification | Increase batch size; avoid stacking `tee`s on the hot path |
-| `SCHEMA_EXPR_UNKNOWN_FUNCTION` on apply | Unknown `fn`, wrong arity, or a `cast` type that is not a string literal | Check the [allowlist](#call--string-and-rounding-functions); names are lowercase (`upper`, not `Upper`) |
+| `SCHEMA_EXPR_UNKNOWN_FUNCTION` on apply | Unknown `fn`, wrong arity, or a `cast` type that is not a string literal | Check the [allowlist](#call--string-and-rounding-functions); names are lowercase (`upper`, not `Upper`). There is no `toLower` / `toUpper` — use `lower` / `upper`. The apply error names those when you send the C# spellings |
+| Check apply refuses `in` / `like` | Checks use the row-evaluator operators, not the wire set | Encode membership as `or` of `eq`; keep `like` on named-query execute, not on a check |
 | A derived `call` column is unexpectedly null | Any argument was null; calls propagate null | Wrap the argument in `coalesce` |
 | Rounded price is off by one at `.5` | `round` / `roundTo` are away-from-zero, not banker's | Expected; adjust the check or the expectation |
 | Whole batch rejected for one bad row | Transforms are all-or-nothing per batch | [Failure semantics](#failure-semantics-the-batch-fails-the-row-does-not-skip) — split and retry, or add a catch-all route |

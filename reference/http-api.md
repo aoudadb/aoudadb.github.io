@@ -925,8 +925,8 @@ Execute a query against a table.
 | `gte` | Greater than or equal | `18` |
 | `lt` | Less than | `65` |
 | `lte` | Less than or equal | `1000.0` |
-| `in` | Value in array | `["admin", "owner"]` |
-| `nin` | Value not in array | `["deleted", "archived"]` |
+| `in` | Value in array (empty array is **400**) | `["admin", "owner"]` |
+| `nin` | Value not in array (empty array is **400**) | `["deleted", "archived"]` |
 | `like` | SQL LIKE pattern, **String columns only** | `"A%"`, `"%acme%"`, `"%985"` |
 
 **`like` semantics:**
@@ -948,6 +948,7 @@ Encoding conventions:
 - `isNull` — encode as `{ "op": "eq", "value": null }`
 - `isNotNull` — encode as `{ "op": "ne", "value": null }`
 - `between` — encode as two conditions: `{ "op": "gte", "value": lower }` + `{ "op": "lte", "value": upper }`
+- Empty `in` / `nin` — **400** `INVALID_REQUEST` with `IN/NIN requires at least one value`. There is no empty-match 200.
 
 Unknown operator strings return `INVALID_OPERATOR` (400). The same set applies to ad-hoc `/query` and to
 `op` values inside a named-query definition; `schema/apply` rejects an unknown operator rather than
