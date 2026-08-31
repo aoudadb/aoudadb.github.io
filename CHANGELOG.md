@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Data-plane named-query non-disclosure (BL-319 S03).** Unsigned or unentitled execute / batch / named-mutation execute / named-query subscribe on the data-plane listener returns `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — so callers cannot enumerate artifacts via 401 vs 404. Admin listener keeps 401/403. [HTTP API](reference/http-api.md#how-data-endpoint-auth-works), [Named queries](guides/named-queries.md), [Direct client access](guides/direct-client-access.md).
+
 ## 0.1.14 — 2026-08-29
 
 **P41 ingest remainder, P42 metadata at scale, P43 write-side authorization.** Server **0.1.14**, `@aouda/client` **0.1.16**, `Aouda.Client` **0.1.14**, Studio **0.0.21** (pin `@aouda/client` **0.1.16** after npm). See [Compatibility](clients/compatibility.md).

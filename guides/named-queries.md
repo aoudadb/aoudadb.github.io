@@ -371,7 +371,7 @@ curl -s -X POST \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-Columnar success looks like any other query result. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
+Columnar success looks like any other query result. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. On the **data-plane listener**, a missing token or an unentitled caller (`mk_anon_*`, user JWT without `db_reader`) is the **same** 404 — not 401/403 — so names are not enumerable. The **admin listener** still returns 401 (`AUTH_TOKEN_MISSING`) / 403 (`AUTHORIZATION_DENIED`). Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
 
 ### TypeScript (`@aouda/client`)
 
@@ -604,6 +604,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Symptom | Cause | Action |
 |---|---|---|
 | `404 NAMED_QUERY_NOT_FOUND` | Name not deployed or typo | Apply schema; use the schema key as a string literal |
+| Data-plane execute 404 (no 401/403) | Missing token or `mk_anon_*` / unentitled JWT on a listed named-query route | Expected on the data-plane. Use `mk_pub_*`, an entitled user JWT, or a service key. Admin listener still 401/403. |
 | `404 TABLE_NOT_FOUND` on a table that exists | Data-plane + browser-tier + `dataPlaneAccess: false` | Set `dataPlaneAccess: true` on every touched table **and** MQ entry (including joins) |
 | `400 NAMED_QUERY_BIND_FAILED` | Arg type/constraint | Check `params` (`maxLength`, `min`/`max`, `enum`, `maxItems`) |
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |
