@@ -17,7 +17,7 @@ Pin the CLI to the version your project expects (example below uses **0.1.9**). 
 ## Working recipe
 
 ```powershell
-# 1. Match the pin. Do NOT pass -h / --help to `start` — see traps below.
+# 1. Match the pin. `aouda start -h` / `--help` print flags and do not bind.
 dotnet tool uninstall -g Aouda.Cli -ErrorAction SilentlyContinue
 dotnet tool install -g Aouda.Cli --version 0.1.9
 aouda --version   # expect Aouda 0.1.9 (or your pin)
@@ -55,7 +55,8 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 
 | Action | What happens |
 |--------|----------------|
-| `aouda start -h` / `aouda start --help` | **`start` bypasses System.CommandLine.** Help is not shown. The process boots with code defaults (**port `5000`**, data under **`./data` relative to cwd** — often a git checkout). Use `aouda --help` or `aouda start` docs instead. |
+| `aouda start -h` / `aouda start --help` | Print start help (flags such as `--port`, `--data-dir`) and **do not** bind a port or create `./data`. |
+| `aouda stop` without Bearer | HTTP `stop` is **401**. Kill the recorded PID with `aouda stop -s http://127.0.0.1:<port> --force`. Do not expect unauthenticated HTTP shutdown. |
 | `aouda stop` without `-s http://127.0.0.1:<your-port>` | Can target the wrong process / URL |
 | Reuse another store's `mk_svc_` / admin token against a new `--data-dir` | `AUTH_API_KEY_INVALID` — keys belong to that store |
 | Sign in / init against someone else's running server | Wrong admin, wrong data; init is for **this** server's setup mode |
