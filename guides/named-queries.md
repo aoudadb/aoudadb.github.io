@@ -259,7 +259,7 @@ These fields exist on the definition. They were missing from this page.
 
 **`limit` / `limitParam`.** Every named query needs a numeric `limit` cap (`NAMED_QUERY_UNCAPPED_LIMIT` at apply). `limitParam` is the **name** of a parameter the caller may send to choose a smaller page size; it does not replace the cap.
 
-**`offset` / `offsetParam`.** Same pattern for offset. `offsetParam` requires a positive offset cap. A non-zero offset (literal or bound param) **disqualifies subscribe** (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). HTTP execute still pages.
+**`offset` / `offsetParam`.** Same pattern for the **max-skip cap**. `offsetParam` requires a positive offset cap at apply. When the caller **omits** `offsetParam` (or sends JSON/CLR null), bind skip is **0** (first page) — not the cap. A present argument is clamped to `[0, offset]`; over-cap is `NAMED_QUERY_BIND_FAILED`. A non-zero offset (literal or bound param) **disqualifies subscribe** (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). HTTP execute still pages. Omitted `limitParam` still uses the cap as the page size.
 
 ```json
 "equity.quotesPage": {

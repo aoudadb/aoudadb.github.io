@@ -377,7 +377,7 @@ MFA (TOTP) is available, and password-reset and OTP delivery are configurable th
 The fields that make a real UI possible, each of which is often the reason a team keeps a BFF:
 
 - **`count: true`** → `totalMatches` on the same response, so a footer renders "1–25 of 412" in one round trip. Count ignores limit/offset. Apply **rejects** a count whose cost is not bounded (`NAMED_QUERY_COUNT_UNBOUNDED`) rather than quietly allowing a full scan.
-- **`limit` / `limitParam`, `offset` / `offsetParam`** — the cap is mandatory; the param lets the caller choose a *smaller* page. A non-zero offset disqualifies subscribe but HTTP paging still works.
+- **`limit` / `limitParam`, `offset` / `offsetParam`** — the cap is mandatory; `limitParam` lets the caller choose a *smaller* page; omitted `offsetParam` binds skip **0** (the cap is max skip, not the default). A non-zero offset disqualifies subscribe but HTTP paging still works.
 - **`distinct: true`** — and when every distinct column is a raw partition key and the predicate touches only partition keys, it is answered **from partition-directory metadata with zero segment scan**. That is your "which values exist for this key?" filter dropdown, sub-millisecond.
 - **`joins`** — up to three, so a detail page is one request instead of a waterfall.
 - **The batch envelope** — up to **32** named queries in one request, from **one read snapshot**, costing **one** rate-limit permit. A dashboard's ten independent panels cannot disagree with each other, and burn one permit instead of ten.

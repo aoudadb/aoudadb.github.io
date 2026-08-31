@@ -780,7 +780,19 @@ var results = await db.GetTable("orders")
     .ToListAsync();
 ```
 
-Supported predicates: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`. Note: `ne` (not `neq`) is the not-equal operator. Using `ne` with `null` as value translates to `IS NOT NULL`.
+Supported predicates: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`. Note: `ne` (not `neq`) is the not-equal operator. Using `ne` with `null` as value translates to `IS NOT NULL`. Empty `in` / `nin` arrays are rejected (`IN/NIN requires at least one value` — HTTP 400 on the server; the C# client throws before sending). `like` is ordinal and case-sensitive.
+
+```csharp
+// String-op form (Embedded and Aouda.Client)
+var byIds = await db.GetTable("orders")
+    .Where("Id", "in", new[] { 1, 2, 3 })
+    .ToListAsync();
+
+// Fluent In / Nin (Aouda.Client RemoteColumnRef and Embedded ColumnRef)
+var clientRows = await client.GetTable("orders")
+    .Where(r => r.Col("Id").In(1, 2, 3))
+    .ToListAsync();
+```
 
 ### Common Data Operation Errors
 
@@ -832,6 +844,8 @@ var filtered = await engine.Table("orders")
               & r.Col("notes").IsNull())
     .ToListAsync();
 ```
+
+Empty `In(...)` / `in` arrays throw `ArgumentException` (`IN/NIN requires at least one value`) rather than matching nothing.
 
 ### TypeScript Queries
 

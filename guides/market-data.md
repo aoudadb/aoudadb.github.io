@@ -433,7 +433,7 @@ Response: `rowCount: 5`, `totalMatches: 5`.
 
 Response: `rowCount: 3`, `totalMatches: 3`.
 
-**Pagination:** `limitParam: "pageSize"` lets the caller override the limit (up to 25). `offsetParam: "pageOffset"` lets the caller skip rows (up to 1000). Always pass `pageOffset` explicitly — the engine defaults to the cap value (1000) when the param is absent, which returns an empty page on a small table.
+**Pagination:** `limitParam: "pageSize"` lets the caller override the limit (up to 25). `offsetParam: "pageOffset"` lets the caller skip rows (up to 1000). Omitting `pageOffset` (or sending null) binds skip **0** — first page. You do not have to send `0` to avoid an empty page; the cap is a maximum skip, not the default.
 
 {: .note }
 `count: true` on a **partitioned** table requires required `eq`/`in` on every partition-key column. A `whenParamPresent` condition never satisfies that requirement. Use an unpartitioned reference table (like `listings`) for optional-facet screeners, or require the partition key in the NQ params.
