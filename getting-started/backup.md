@@ -45,7 +45,12 @@ For local development, enable archiving in an optional `appsettings.json` or via
 }
 ```
 
-That is all that is needed for local backup. The server starts the archive worker automatically when `Enabled = true`.
+That is all that is needed for local backup. **`Enabled = true` does not start a WAL archive
+worker** — nothing in the current release constructs one, so no WAL segment is ever uploaded to
+`Destination` regardless of this setting. `CheckpointIntervalHours` and `WalRetentionDays` are
+validated but not consumed by anything today. Exact backup/restore works independently of this
+setting; point-in-time restore does not work in this release — see
+[Backup and Restore](../guides/backup.md#24-availability-status).
 
 ---
 
@@ -210,9 +215,13 @@ if (restoreResult is RestoreBackupResult.Success s)
     Console.WriteLine($"Restored {s.Response.FilesRestored} files in {s.Response.DurationSeconds:F1}s");
 ```
 
-> **Note on PITR:** Point-in-time restore requires replaying WAL records after loading a backup. The WAL
-> replay path is handled by the Aouda engine internally when the WAL retention window covers the target
-> time. Configure `WalRetentionDays` in `appsettings.json` to control how far back the WAL is kept.
+> **Note on PITR: not implemented in this release.** Point-in-time restore requires replaying WAL
+> records after loading a backup, but the WAL archive worker that would keep archived WAL around
+> for replay is never started, no server or client API accepts a restore target time, and the
+> local-WAL replay path does not apply real production WAL frames correctly. `WalRetentionDays`
+> is validated but has no effect on anything today. Track BL-186 (this repo's engine tracker) and
+> [ADR 0044](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0044-recoverable-restore-and-point-in-time-recovery.md)
+> for the plan to ship it. Exact restore (below) is unaffected and works today.
 
 ---
 
@@ -303,7 +312,7 @@ The test suite creates a fresh bucket per test run, exercises the full `IArchive
 | `NoSuchBucket` | Bucket does not exist | Create the bucket first; Aouda does not create buckets automatically |
 | Timeout connecting to MinIO | Wrong `ServiceUrl` or container not running | Check `ServiceUrl` and `ForcePathStyle: true` |
 | Restore hash mismatch | Corrupted blob in S3 | Run `RestoreEngine.VerifyBackupAsync`; re-run backup to upload a fresh set |
-| `PitrWindowException` | Target time outside the WAL retention window | Choose a target within `WalRetentionDays` or extend retention |
+| `PitrWindowException` | PITR is not implemented in this release (see the note above) — this is the *best*-case failure; more commonly no archive exists at all because the archive worker never runs | Not currently resolvable; track BL-186 |
 | `NotSupportedException` for `azure://` or `gcs://` | Azure/GCS not yet implemented | Use `s3://` or a local path |
 
 ---

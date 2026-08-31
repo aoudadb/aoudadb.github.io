@@ -535,7 +535,7 @@ You are running a database now, so the operational surface matters. Every one of
 | What stays in RAM | Per-table temperature, hot retention, demotion/promotion | [Hot/cold storage](hot-cold.md) |
 | Not being killed by the OOM killer | Process RSS ceiling, admission back-pressure (503 + `Retry-After`), runtime `budget set` | [Sizing memory and WAL](sizing.md) |
 | Surviving a crash | Segmented WAL, checkpoints, write concern, budgeted recovery | [Write path durability](write-durability.md) |
-| Getting data back | Incremental backups, PITR, retention, S3-compatible targets | [Backup and restore](backup.md) |
+| Getting data back | Incremental backups, exact restore, retention, S3-compatible targets — point-in-time recovery is not implemented yet | [Backup and restore](backup.md) |
 | Surviving a node | WAL-stream replication, witness, failover, read preference | [Replication and clustering](replication.md) |
 | Many apps, one server | Multi-database, isolation, async drop, quarantine | [Server and multi-database](server-multi-database.md) |
 | Knowing what it is doing | Prometheus metrics, health/ready probes, structured logs, query stats | [Server configuration](server-configuration.md) |

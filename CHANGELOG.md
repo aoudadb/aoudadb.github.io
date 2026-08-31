@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+**Corrected:** [Backup and restore](guides/backup.md), [Getting started: backup](getting-started/backup.md), [Storage and persistence](guides/storage.md), and seven other pages overstated point-in-time recovery (PITR) as implemented. It is not: the WAL archive worker (`WalArchiveWorker`) is never started by any shipped host, no server or client API accepts a restore target time, and the local-WAL replay path does not apply production WAL correctly. Exact backup/restore is unaffected and works as documented. [Storage](guides/storage.md#28-how-aouda-implements-it) gains the WAL physical-layout, position-model, and retention-cycle explanation these docs never had, separated from the archive-cycle description that does not apply in production. Tracked as BL-186 in the engine repository; ratified to ship (ADR 0044).
+
 ## 0.1.14 — 2026-08-29
 
 **P41 ingest remainder, P42 metadata at scale, P43 write-side authorization.** Server **0.1.14**, `@aouda/client` **0.1.16**, `Aouda.Client` **0.1.14**, Studio **0.0.21** (pin `@aouda/client` **0.1.16** after npm). See [Compatibility](clients/compatibility.md).
