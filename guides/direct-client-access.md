@@ -70,13 +70,15 @@ The profile is tagged on the **Kestrel connection**. There is no request header 
 
 Allowed: `/health` `/ready` `/startup`, app-auth except `/auth/admin/*`, OIDC/JWKS, named-query execute + batch, named-mutation execute, `/api/databases/{db}/ws`.
 
+Listed named-artifact routes still **do not enumerate names**. On the data-plane, unsigned, `mk_anon_*`, and other unentitled callers get **404** `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — not 401 vs 404. Unlisted paths stay empty 404 (D-11). The admin listener keeps 401/403 so operators can tell missing token from denied. Invalid credentials stay 401 on both listeners.
+
 ---
 
 ## `mk_pub_*` vs `mk_anon_*`
 
 | Prefix | May call | Listener |
 |---|---|---|
-| `mk_anon_` | Signup, signin, refresh, OIDC only | Data-plane (auth). **Denied on data routes.** Keep it that way. |
+| `mk_anon_` | Signup, signin, refresh, OIDC only | Data-plane (auth). **Denied on data routes** (404 `NAMED_QUERY_NOT_FOUND` on listed named-artifact execute, not 403). Keep it that way. |
 | `mk_pub_` | Named query / mutation / subscribe (plus auth) | **Data-plane only.** On admin → `401 AUTH_KEY_LISTENER_MISMATCH`. |
 | `mk_svc_` | Full data + admin (per RBAC) | Either; **ad-hoc query only on admin** (data-plane `/query` is 404 for everyone). |
 | User JWT (end user) | Same as `mk_pub_*` | Data-plane |
@@ -225,6 +227,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | `TABLE_NOT_FOUND` for a table you created | `dataPlaneAccess` false | Set true; re-apply; check join tables too |
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
+| Data-plane named-query 404 with no token | Listed-route non-disclosure | Expected. Admin listener still 401. Use `mk_pub_*` or an entitled JWT. |
 | WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `name` |
 | WS `DATA_PLANE_WRITE_STREAM` | `stream_open` on data-plane | Ingest from a service key on admin, or HTTP named mutation |
 
