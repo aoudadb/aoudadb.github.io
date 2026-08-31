@@ -1235,7 +1235,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
 | POST | `/{name}/query` | Read | Return materialized rows as JSON objects (see response). |
-| POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). Accepts `?await=true` to wait for completion or `?await=false` for fire-and-forget. Result table is readable with stale data throughout. |
+| POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (default 30s): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. |
 
 **Create body** (camelCase JSON):
 
