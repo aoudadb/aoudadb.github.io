@@ -13,9 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-**Corrected:** [Backup and restore](guides/backup.md), [Getting started: backup](getting-started/backup.md), [Storage and persistence](guides/storage.md), and seven other pages overstated point-in-time recovery (PITR) as implemented. It is not: the WAL archive worker (`WalArchiveWorker`) is never started by any shipped host, no server or client API accepts a restore target time, and the local-WAL replay path does not apply production WAL correctly. Exact backup/restore is unaffected and works as documented. [Storage](guides/storage.md#28-how-aouda-implements-it) gains the WAL physical-layout, position-model, and retention-cycle explanation these docs never had, separated from the archive-cycle description that does not apply in production. Tracked as BL-186 in the engine repository; ratified to ship (ADR 0044).
-- **Data-plane named-query non-disclosure (BL-319 S03).** Unsigned or unentitled execute / batch / named-mutation execute / named-query subscribe on the data-plane listener returns `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — so callers cannot enumerate artifacts via 401 vs 404. Admin listener keeps 401/403. [HTTP API](reference/http-api.md#how-data-endpoint-auth-works), [Named queries](guides/named-queries.md), [Direct client access](guides/direct-client-access.md).
-- **Pilot docs honesty (BL-319 S05).** Omitted named-query `offsetParam` binds skip **0** (not the cap); check operators are `eq`/`ne`/`gt`/`gte`/`lt`/`lte` (`ne` not `neq`; `in`/`like` refused at apply); empty `in`/`nin` is 400; `toLower`/`toUpper` are not functions (`lower`/`upper`); C# fluent `Col("Id").In(1, 2, 3)`. [Named queries](guides/named-queries.md), [Market data](guides/market-data.md), [Insert-time transforms](guides/insert-transforms.md), [HTTP API](reference/http-api.md), [Getting started](getting-started/index.md).
+## 0.1.15 — 2026-09-01
+
+**BL-319 Derive pilot gap close + BL-312 + BL-186 progress (mid-stream).** Server **0.1.15**, `Aouda.Client` **0.1.15**, `@aouda/client` **0.1.16** (unchanged), Studio **0.0.21**. See [Compatibility](clients/compatibility.md).
+
+- **Derive pilot fixes (BL-319).** C# fluent `In`/`Nin`; omitted named-query `offsetParam` binds skip **0**; data-plane named-query / named-mutation execute returns `404` (not existence-leaking 401/403); App Auth GET user/roles no longer 500 on empty roles; CLI `start -h` does not boot; MQ `:refresh?await=true` can return 200; creator `db_admin` on new data DBs. [Named queries](guides/named-queries.md), [HTTP API](reference/http-api.md), [Direct client access](guides/direct-client-access.md).
+- **Sealed-segment backups (BL-312).** Backups now capture `segment.manifest`; restored cold/sealed data returns rows again.
+- **Backup / restore / archive (BL-186 partial).** Exact restore re-bases WAL + catalog; backup WAL position is per-database; archive positions are byte offsets and `WalArchiveWorker` runs when archive is configured; restore divergence handshake (v4). **PITR over HTTP/SDK is still not shipped** — no restore target-time API yet. [Backup and restore](guides/backup.md), [Storage](guides/storage.md).
 
 ## 0.1.14 — 2026-08-29
 
