@@ -2256,7 +2256,8 @@ List all backups at the configured destination, ordered newest-first.
       "totalBytes": 104857600,
       "newBytes": 10485760,
       "fileCount": 150,
-      "newFileCount": 15
+      "newFileCount": 15,
+      "pitrEligible": true
     }
   ],
   "warning": null
@@ -2265,18 +2266,45 @@ List all backups at the configured destination, ordered newest-first.
 
 `warning` is non-null when no destination is configured or when the destination is unavailable.
 
+`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0. Position `0` means *unknown* (ADR 0044 D-2) — that backup is exact-restore-only.
+
 #### `POST /admin/backup/restore/{id}`
 
-Restore from the backup with the given ID. The server engine is stopped, restored, and restarted — this is a blocking operation.
+Restore from the backup with the given ID. The server engine is stopped, restored, and restarted — this is a blocking, server-wide operation.
 
-**Exact restore only — no point-in-time recovery (PITR) over HTTP.** The request body accepts no
-target time and none exists anywhere else on this surface; restoring reproduces the backup's exact
-state. PITR is not implemented in this release at any layer, not only HTTP — see
-[Backup and restore](../guides/backup.md#24-availability-status).
+An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). An absent or empty body is an **exact restore** of that backup: the response omits `targetTime` and `pitr`.
 
-**No request body.**
+**Request body** (optional):
+```json
+{
+  "targetTime": "2026-01-28T14:32:00Z"
+}
+```
 
-**Response** (`200 OK`):
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `targetTime` | string? (ISO-8601) | null | Restore to the last transaction whose commit time is `<=` this instant. Null = exact restore. Compared in UTC. |
+
+#### `POST /admin/backup/restore`
+
+Same operation, with both fields in the body. Omitting `backupId` while supplying `targetTime` selects the newest backup run whose `createdUtc` is at or before that time.
+
+**Request body**:
+```json
+{
+  "backupId": "backup-2026-01-28-143000",
+  "targetTime": "2026-01-28T14:32:00Z"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `backupId` | string? | null | Backup to restore. Null with a `targetTime` selects the newest run at or before that time. |
+| `targetTime` | string? (ISO-8601) | null | Point-in-time target. Null with a `backupId` is an exact restore. |
+
+At least one of `backupId` or `targetTime` is required.
+
+**Response** (`200 OK`) — exact restore (`targetTime` / `pitr` omitted):
 ```json
 {
   "backupId": "backup-2026-01-28-143000",
@@ -2288,12 +2316,39 @@ state. PITR is not implemented in this release at any layer, not only HTTP — s
 }
 ```
 
+**Response** (`200 OK`) — point-in-time restore:
+```json
+{
+  "backupId": "backup-2026-01-28-143000",
+  "restoredUtc": "2026-01-28T15:00:00Z",
+  "filesRestored": 150,
+  "bytesDownloaded": 104857600,
+  "integrityVerified": true,
+  "durationSeconds": 8.12,
+  "targetTime": "2026-01-28T14:32:00Z",
+  "pitr": [
+    {
+      "database": "sales",
+      "replayed": true,
+      "transactionsReplayed": 4,
+      "rowsReplayed": 120,
+      "lastAppliedCommitUtc": "2026-01-28T14:31:58Z",
+      "stoppedAtTarget": true
+    }
+  ]
+}
+```
+
+PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6). `lastAppliedCommitUtc` is that commit, in UTC.
+
 **Errors:**
 
 | Status | When |
 |--------|------|
-| 404 Not Found | Backup ID does not exist at the destination |
+| 400 Bad Request | Neither field supplied; `targetTime` is in the future; `targetTime` is at or before the backup's `createdUtc`; or the backup recorded WAL position `0` (unknown — exact-restore-only, ADR 0044 D-2) |
+| 404 Not Found | Backup ID does not exist at the destination, or no backup run exists at or before `targetTime` |
 | 409 Conflict | A backup operation is already in progress |
+| 500 Internal Server Error | Point-in-time staging or replay failed. The body names the database and the error. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. |
 | 503 Service Unavailable | Engine not initialized |
 
 #### `GET /admin/backup/schedule`
