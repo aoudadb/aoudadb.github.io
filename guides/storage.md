@@ -144,8 +144,8 @@ If you run server defaults and do not set per-database overrides:
 | `DatabaseConfigSection.WriteConcernTimeoutMs` | `5000` | 5s timeout for stronger concerns |
 | `DatabaseConfigSection.OnWriteConcernTimeout` | `DegradeAndLog` | Timeout degrades instead of hard fail by default |
 | `ArchiveConfig.Enabled` | `false` | No standalone WAL archive worker by default |
-| `ArchiveConfig.CheckpointIntervalHours` | `24` | Daily checkpoint cadence when archive enabled |
-| `ArchiveConfig.WalRetentionDays` | `7` | 7-day archive retention target when enabled |
+| `ArchiveConfig.WalRetentionDays` | `7` | 7-day archive retention when enabled (not the local PITR window) |
+| `ArchiveConfig.RequireArchiveBeforeDelete` | `false` | Local WAL may prune without waiting for archive unless set |
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -166,33 +166,27 @@ If you run server defaults and do not set per-database overrides:
   - Hot segment persistence/reload and fallback behavior are implemented (P3 Task 7 + fix).
 - WAL lifecycle safety:
   - Slot-based retention boundary model (system/replication/backup/archive slots) implemented.
-    `system` and `backup` slots are live in production; the `archive` slot is part of the same
-    model but is never created, because nothing starts the worker that would create it (below).
-  - Retention worker infrastructure implemented and running. **Archive worker infrastructure exists
-    in code but is never started** — see `2.8.1` Walk-through D and
+    All four slot types are live when the corresponding consumer exists (archive slot when
+    `Archive.Enabled` + destination).
+  - Retention worker infrastructure implemented and running. **Archive worker runs** when archive
+    is configured — see `2.8.1` Walk-through D and
     [Backup and restore §2.4](backup.md#24-availability-status).
 - Backup/restore engines:
-  - `BackupEngine`, `RestoreEngine`, and `BackupLifecycleManager` implemented and tested in storage layer, for **exact** restore.
-  - **Point-in-time recovery (PITR) is not implemented.** A PITR code path exists in `RestoreEngine`
-    / `WalReplayEngine`, but it cannot execute correctly in any deployment: the archive worker it
-    depends on never runs, no API surface accepts a restore target time, and the local-WAL replay
-    path applies a WAL frame type production stopped writing. Tracked as BL-186 (this repo's
-    engine tracker); ratified to ship — see
-    [ADR 0044](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0044-recoverable-restore-and-point-in-time-recovery.md).
+  - `BackupEngine`, `RestoreEngine`, and `BackupLifecycleManager` implemented and tested, for **exact** restore and **PITR**.
+  - **Point-in-time recovery (PITR) is implemented.** Replay is the crash-recovery path, at
+    transaction-commit granularity, reachable over HTTP and both SDKs. The local window is a
+    write-volume bound (`MaxSlotWalKeepBytes`), not a duration. See
+    [Backup and restore §2.4](backup.md#24-availability-status).
 
 ### Planned / proposed
 
-- Full managed backup operations as primary server/admin API workflows:
-  - Architecture is present in engine/storage, but API-host integration is comparatively thin.
 - Broader cloud destination operationalization:
-  - Archive destination abstraction exists; production hardening for specific providers is task-driven.
+  - Archive destination abstraction exists; Azure/GCS still throw `NotSupportedException`.
 - Per-database checkpoint synchronization in replication:
   - Current replication hosted service explicitly documents first-database checkpoint limitation.
 
 ### Reserved / not yet wired
 
-- No first-class public REST backup/restore job endpoints are exposed in server controllers.
-- WAL archive mode has config/validation shape, but full hosted orchestration parity with replication-hosted paths remains partial.
 - Some persistence-policy ADR concepts (`DiskOnly`, full policy matrix) are not exposed as explicit end-user policy enums in current HTTP/TS surfaces.
 
 > **Note (P30):** `MemoryOnly` durability mode is now fully enforced end-to-end (P30 S2). `MemoryOnly` tables write nothing to disk — no `.hot`, `.col`, `.hra`, or WAL records. This is no longer a "reserved" surface. See `guides/hot-cold.md §2.4`.
@@ -202,7 +196,7 @@ If you run server defaults and do not set per-database overrides:
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
 | P3 | `P3-Task7-HotSegmentPersistence-Report.md`, `P3-BugFix-HotSegmentPersistence-AllDataTypes-Report.md` | Hot segment file persistence, restart survival semantics, integrity checks, all core data types for hot persistence | Further file-format enhancements (for example mmap/compression tiers) out of scope | No dedicated open backlog item from these reports |
-| P4 | `P4-EpicD-Task1/3/5-*Report.md`, `P4-EpicI-Task2/5-*Report.md` | Backup manifest/hash infra, incremental backup engine, lifecycle retention/GC, slot integration; a WAL archive worker class was also written | Server-level backup/restore operation surfaces and scheduling are still not comprehensive API workflows. **The WAL archive worker is never started by any host** — see `2.4` and BL-186 | BL-186 (this repo's engine tracker) |
+| P4 | `P4-EpicD-Task1/3/5-*Report.md`, `P4-EpicI-Task2/5-*Report.md` | Backup manifest/hash infra, incremental backup engine, lifecycle retention/GC, slot integration; WAL archive worker class | Server HTTP backup/restore later shipped in P16; worker started in BL-186 S05 | BL-186 (closed) |
 | P6 | `P6-EpicA-Task4-*Report.md`, `P6-EpicA-Task5-*Report.md`, `P6-EpicE-Task1-*Report.md` | Table-name directory storage, per-table WAL/replication controls, per-database replication WAL multiplexing | Per-database checkpoint sync still deferred | Not mapped to explicit BL item in `docs/BACKLOG.md` |
 | P11 | `P11-Fix-WalRoundtripTests-UniqueTempPath-Report.md` | WAL test reliability hardening in persistence test paths | No new feature surface; test stability work only | N/A |
 | P30 | `MemTiering-S12-Backup-HRA-Coverage.md` | Backup now includes HRA snapshot (`.hra`) and mutable keyed tier (`.mkt`) files — **Gap C closed**. Both added to backup manifest and restore path. Full row coverage for all durability modes. | Streaming HRA snapshot (BL-105) deferred | ADR 0035 |
@@ -217,14 +211,14 @@ If you run server defaults and do not set per-database overrides:
 | Per-table WAL enable/disable overrides | Yes | No | No | P6 Task5 report, `AoudaEngine` durability resolution | Table override cannot enable WAL if DB WAL off |
 | Per-database WAL replication framing | Yes | No | No | P6 EpicE Task1 report, replication streaming code | v2 frame model with DB tagging |
 | Hot segment file persistence and restart hot-load | Yes | No | No | P3 Task7 report + bugfix report, hot persistence tests | Type-complete persistence added |
-| WAL slot lifecycle management (`system/replication/backup`) | Yes | No | No | ADR 0016 + P4 Epic I reports + slot code | Retention boundaries consumer-aware. `archive` slot exists in the model but is never created — see `2.4` |
+| WAL slot lifecycle management (`system/replication/backup/archive`) | Yes | No | No | ADR 0016 + P4 Epic I + BL-186 S05 | Retention boundaries consumer-aware. Archive slot is created when archiving is configured |
 | Backup manifest + incremental dedup engine | Yes | No | No | P4 EpicD Task1/3 reports, backup engine tests | Engine-level implementation complete |
-| Restore engine, exact restore | Yes | No | No | `RestoreEngine.cs`, restore tests | Engine-level implementation complete |
-| PITR replay from archive | No | No | Yes | `RestoreEngine.cs`/`WalReplayEngine.cs` (code exists, does not work); BL-186 analysis | See `2.4` for why: archive worker never runs, no API accepts a target time, local replay applies a dead frame type |
+| Restore engine, exact restore | Yes | No | No | `RestoreEngine.cs`, restore tests; BL-186 S03 | Re-bases WAL root and catalog directory |
+| PITR replay (local WAL + archive) | Yes | No | No | BL-186 S06/S07; recovery-path replay, HTTP `targetTime` | Transaction-commit granularity; local window is write volume |
 | Backup lifecycle retention and blob GC | Yes | No | No | Task D5 report, `BackupLifecycleManager.cs` | Dry-run default safety model |
 | HRA snapshot (`.hra`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Closes Gap C — rows written since last shutdown are now backed up |
 | Mutable keyed tier (`.mkt`) included in backup | Yes | No | No | P30 S12, `BackupManifestBuilder.cs` | Cache/UPSERT tier rows covered in backup and restore |
-| Public REST backup/restore operations | No | No | Yes | Server controllers + TS client surfaces | No dedicated backup/restore endpoints |
+| Public REST backup/restore operations | Yes | No | No | P16 SA4, `/admin/backup/*`, both SDKs | Exact restore + PITR `targetTime` (BL-186 S07). Studio UI is exact-restore-only |
 | Per-database checkpoint sync in replication host | No | Yes | No | `ReplicationHostedService.cs` limitation note | Uses first available DB for checkpoint today |
 
 ## 2.7 Core concepts and mental model
@@ -410,7 +404,7 @@ it is neither, and the sections were never separated. They are now.
    insert-refusal rung (`WAL_CAPACITY_EXCEEDED`, HTTP 503 + `Retry-After`) at 95%, and a
    slot-keep-bytes rung (`MaxSlotWalKeepBytes`, roughly half of `MaxWalBytes`, clamped to 128 MB–2
    GB) — the **only** mechanism that ever forces a slot to give up WAL it has not consumed. This is
-   also the local PITR window's true shape once PITR ships: a bound on **write volume since the
+   also the local PITR window's true shape: a bound on **write volume since the
    last backup**, never a duration and never unbounded, because exempting the backup slot from this
    ladder would reintroduce the unbounded-WAL-growth failure it exists to prevent.
 
@@ -418,38 +412,30 @@ Net effect today: a server that never takes a backup and never archives keeps WA
 the ladder in point 6. A server that takes backups keeps the backup slot's WAL around until the
 next backup or until the ladder invalidates it — whichever comes first.
 
-#### D.2 — The part that does not run: the WAL archive cycle
+#### D.2 — The WAL archive cycle
 
-The code below describes what `WalArchiveWorker` does when a host constructs and drives it
-directly (as its own unit tests do). **No shipped host does this.** Neither `Aouda.Server` nor
-`Aouda.Embedded` ever constructs a `WalArchiveWorker`; setting `Archive.Enabled = true` in server
-config reaches a single log line and nothing else.
+`WalArchiveWorker` is constructed and started by `AoudaEngine.OpenAsync` whenever the host supplies
+an archive destination. `Aouda.Server` does this when `Archive.Enabled` is true and `Destination`
+is set (standalone `Aouda:Archive`, or a replica-set Backup node's `ThisNode.Archive`).
 
 1. `WalArchiveWorker.RunOnceAsync()` loads the local WAL manifest and the archive manifest.
 2. It archives completed (non-active) segments with compression and content-addressable upload.
-3. Archive slot is advanced after successful archive writes.
-4. Cleanup path removes archived entries older than retention while respecting the oldest backup's
+3. Archive slot is advanced after successful archive writes (positions are cumulative byte offsets).
+4. Cleanup path removes archived entries older than `WalRetentionDays` while respecting the oldest backup's
    WAL boundary.
 
-Because this never runs in production:
-- No WAL segment is ever archived anywhere, on any deployment.
-- The `archive` slot is never created, so it never appears in the `MIN(all slots)` boundary from D.1.
-- `RequireArchiveBeforeDelete = true` (default `false`) would block pruning **forever** if an
-  operator set it, because the archive slot it waits for never comes into existence.
-- Point-in-time recovery — which depends on an archive existing beyond the local retention window,
-  or on a correctly-functioning local-WAL replay path, neither of which exists today — cannot
-  execute. See [Backup and restore §2.4](backup.md#24-availability-status) for the full defect
-  chain and BL-186 (this repo's engine tracker) for the plan to fix it.
+`RequireArchiveBeforeDelete = true` is rejected at startup unless archive is enabled and destinationed.
 
-Observability: the archive cycle, bytes, ratio, and error counters listed below exist in `Perf` and
-are wired to be incremented by `WalArchiveWorker`, but stay at zero in every current deployment
-because the worker is never driven.
+The local PITR window remains write volume even when archiving is off. Archiving extends recovery
+beyond that bound. See [Backup and restore §2.4](backup.md#24-availability-status).
 
-Primary tests (exercise the class directly, driven by hand — not through server startup, and so do
-not detect that no host ever runs it; see BL-186 finding F-11):
+Observability: archive cycle, bytes, and error counters are on `GET /api/metrics` (`WalMetrics`);
+`WalArchiveHealthCheck` degrades when archiving is configured but the worker has not completed a cycle.
+
+Primary tests:
 - `tests/Aouda.Engine.Storage.Tests/WalIntegration/WalArchiveWorkerTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/WalRetentionTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/Backup/PitrFromArchivedWalTests.cs`
+- `tests/Aouda.Engine.Api.Tests/Bl186S05ArchiveWorkerLifecycleTests.cs`
+- `tests/Aouda.Server.Tests/Startup/Bl186S05ArchiveWorkerWiringTests.cs`
 
 ## 2.9 Why Aouda is different (differentiators)
 
@@ -458,7 +444,7 @@ not detect that no host ever runs it; see BL-186 finding F-11):
 | Is storage layout explicit and code-governed? | Often implicit/internal conventions | First-class layout classes and constants define server/db/table paths | Easier ops debugging and safer refactors |
 | Can table-level durability diverge from DB defaults? | Often coarse DB-instance toggles | Per-table `TableDurabilityOptions` with validation against DB constraints | Fine-grained durability/cost control |
 | Is WAL retention consumer-aware by design? | Manual purge policies are common | Slot-based boundary across system/replication/backup/archive consumers | Lower risk of destructive WAL pruning |
-| Are backup/restore engines integrated with WAL semantics? | Often external tooling or loose scripts | Backup engine records a WAL boundary as a slot; exact restore is integrated. A WAL-replay/PITR code path also exists but does not work yet — see `2.4` | Better consistency model for engine-level exact restores |
+| Are backup/restore engines integrated with WAL semantics? | Often external tooling or loose scripts | Backup engine records a WAL boundary as a slot; exact restore re-bases the WAL root; PITR replays through crash recovery | Recoverable exact restore and commit-granular PITR |
 | Is implementation honesty documented as surface parity (engine vs server API)? | Docs often blur internal vs public surface | Explicit split: engine-complete backup classes vs partial public API orchestration | Fewer false assumptions for SDK/operator teams |
 
 ## 2.10 Configuration and settings reference (complete surface)
@@ -481,10 +467,10 @@ not detect that no host ever runs it; see BL-186 finding F-11):
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |
 | `CreateDatabaseRequest.maxMemoryBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional |
-| `Archive.Enabled` | bool | `false` | true/false | startup config | Standalone archive mode gate |
+| `Archive.Enabled` | bool | `false` | true/false | startup config | Starts `WalArchiveWorker` when a destination is also set |
 | `Archive.Destination` | string | empty | URI/path | startup config | Required when archive enabled |
-| `Archive.CheckpointIntervalHours` | int | `24` | >=1 | startup config | Archive/checkpoint cadence |
-| `Archive.WalRetentionDays` | int | `7` | >=1 | startup config | Archive retention window |
+| `Archive.WalRetentionDays` | int | `7` | >=1 | startup config | Archive retention (not the local PITR window) |
+| `Archive.RequireArchiveBeforeDelete` | bool | `false` | true/false | startup config | Rejected at startup unless archive is enabled + destinationed |
 | `BackupOptions.Parallelism` | int | engine default | >=1 | .NET engine call | Backup engine only, not server API config |
 | `RestoreOptions.Parallelism` | int | engine default | >=1 | .NET engine call | Restore engine only |
 | `RestoreOptions.TargetTime` | datetime? | null | any valid timestamp | .NET engine call | Enables PITR flow |
@@ -502,7 +488,7 @@ Configuration precedence and behavior notes:
   - Invalid database names and invalid enum values are rejected.
   - Table-level durability cannot override disabled database WAL/replication to `true`.
 - Reserved/partial:
-  - Backup/restore knobs are rich in engine APIs but not exposed as first-class server-admin configuration workflows.
+  - Backup/restore knobs are rich in engine APIs; HTTP restore accepts `targetTime`. Studio has no PITR control.
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
@@ -576,16 +562,16 @@ Common mistake: using `/api/admin/metrics` backup counters as if they are backup
 | Per-table durability overrides | `CreateTableAsync(... durability)` / `AlterTableDurabilityAsync` | No first-class model | No dedicated table durability endpoint | Partial | Engine implemented; not fully surfaced in HTTP/TS |
 | Replication persistence status | `ReplicationState`/host services | `client.admin.replication.status/topology/coverage` | `/admin/replication/*` | Implemented | Monitoring and topology surface available |
 | Backup metrics visibility | Perf + metrics collector | `client.admin.metrics.*` | `GET /api/admin/metrics*` | Implemented | Observability only |
-| Execute backup/restore lifecycle | `BackupEngine`, `RestoreEngine`, `BackupLifecycleManager` | Not exposed | No dedicated endpoints | Missing | Engine/library-complete but API-surface gap |
-| Archive worker lifecycle controls | `WalArchiveWorker` (engine code) | Not exposed | No explicit archive admin routes | Missing | Not merely an API-surface gap — no host (`Aouda.Server` or `Aouda.Embedded`) constructs the worker at all, so there is nothing running for an API to control. See `2.4`. |
+| Execute backup/restore lifecycle | `BackupEngine`, `RestoreEngine`, `BackupLifecycleManager` | `client.admin.backup.*` | `/admin/backup/*` | Implemented | P16 SA4; PITR via `targetTime` (BL-186 S07) |
+| Archive worker lifecycle controls | `WalArchiveWorker` (started with the engine) | Not exposed | No explicit archive admin routes | Partial | Worker runs when configured; no start/stop HTTP API. Health check covers "configured but not cycling." |
 
 ### B) Missing API matrix
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| Trigger/list backup operations over server API | HTTP admin backup endpoints + TS SDK wrappers | Use engine-level APIs in embedded/service code | P4 backup integration follow-up tasks | High |
+| Trigger/list backup operations over server API | — | — | Shipped (P16 SA4) | — |
 | Trigger restore over server API | REST + TS SDK wrappers | — | Shipped (P16 SA4) | — |
-| Trigger PITR at any layer | REST/TS/`.NET` request surface, working archive worker, working WAL replay | None — PITR does not work via `RestoreEngine` either; see `2.4` | BL-186 (this repo's engine tracker) | High |
+| Trigger PITR over HTTP/SDK | — | Studio UI and MCP tool stay exact-restore-only | Shipped (BL-186 S07) | — |
 | Manage archive worker lifecycle (start/stop/state) via API | Archive admin endpoints | Inspect metrics and server logs; custom host wiring | P4/P6 operationalization follow-up | Medium |
 | Table durability endpoint parity | REST/TS update path for table `EnableWal`/`EnableReplication` | Use .NET engine/catalog API | P6 + API parity follow-up | Medium |
 | Per-database checkpoint sync controls in replication API | Explicit API/status for each DB checkpoint sync state | Current first-database checkpoint behavior | P6 replication checkpoint follow-up | Medium |
@@ -634,18 +620,14 @@ When to use:
 Steps:
 1. Use `BackupEngine.CreateBackupAsync(...)` for full backup.
 2. Apply additional writes and run incremental backup.
-3. Use `RestoreEngine.RestoreAsync(...)` to restore the latest backup (exact restore only —
-   `TargetTime` does not work; see `2.4`).
+3. Use `RestoreEngine.RestoreAsync(...)` (or `POST /admin/backup/restore/{id}`) for an exact restore,
+   or pass `targetTime` for PITR (see [Backup and restore](backup.md#24-availability-status)).
 
 Expected result checks:
 - Incremental manifest marks unchanged files as not new.
-- Backup slot advances after successful backup.
+- Backup slot advances after successful backup (a real per-database WAL position, not `0`).
 - Restore integrity verification passes and recovered data reflects the selected backup.
-
-Do not include `WalArchiveWorker.RunOnceAsync()` or a `TargetTime` restore in this validation
-expecting it to demonstrate a working PITR path — driving the worker directly proves the class
-runs, not that any shipped host runs it, and the restore's WAL replay does not apply real WAL
-correctly regardless (`2.4`).
+- A `targetTime` restore keeps writes committed at or before the target and drops later ones.
 
 ## 2.13 Operations and observability
 
@@ -677,7 +659,7 @@ Suggested tuning sequence:
 |---|---|
 | How do I know replay is required after restart? | WAL and checkpoint state diverge; replay driver engages during startup paths |
 | Where do I inspect per-db replication lag? | `GET /admin/replication/status` |
-| Do backup counters mean backup APIs exist? | No; counters indicate engine/host activity, not necessarily public backup-control endpoints |
+| Do backup counters mean backup APIs exist? | Yes — `/admin/backup/*` shipped in P16; counters also reflect engine/host activity |
 | What protects WAL from unsafe deletion? | Slot-based minimum consumer boundary with lifecycle coordinator/retention logic |
 
 ## 2.14 Troubleshooting by symptom
@@ -688,8 +670,8 @@ Suggested tuning sequence:
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | Effective table durability has WAL disabled or DB WAL disabled | Check DB `enableWal` and table durability overrides |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
-| Cannot perform backup via HTTP | Backup/restore endpoints not exposed as public API | Use engine-level backup/restore APIs in controlled host/embedded workflows |
-| PITR target always fails | PITR is not implemented in this release — no archive worker ever runs, so no archive exists to cover any window; a local-WAL attempt fails differently, by applying zero rows | Not currently resolvable; track BL-186. Exact restore (no `TargetTime`) is unaffected. |
+| Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
+| PITR target fails | Window closed (write volume since last backup, or archive gap); backup not PITR-eligible (`walPosition` 0); or target at/before backup `createdUtc` | Take a newer backup, enable archiving, or pick a later `targetTime`. Exact restore (no `targetTime`) is unaffected |
 
 ## 2.15 Verification ledger
 
@@ -716,7 +698,7 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
 | Table-name directory storage | P6 Task4 report-linked tests + `TablePathValidatorTests.cs` | Pass | Strong | Path validation and resolver wiring |
 | Per-table durability control | `TableDurabilityTests.cs`, `TableDurabilityPersistenceTests.cs` | Pass | Strong | Override + inheritance + persistence |
 | Backup engine | `BackupEngineTests.cs`, `BackupEngineParallelTests.cs`, `BackupEngineIntegrationTests.cs`, `BackupEngineSlotTests.cs` | Pass | Strong | Full/incremental/slot semantics |
-| Restore + PITR | `RestoreIntegrationTests.cs`, `PitrFromArchivedWalTests.cs` | Pass | Medium/Strong | Restore and archive-assisted replay |
+| Restore + PITR | `RestoreIntegrationTests.cs`, `Bl186S06PitrRecoveryPathTests.cs`, `Bl186S07PitrHttpTests.cs` | Pass | Strong | Exact restore + recovery-path PITR over HTTP |
 | Backup lifecycle retention/GC | `LifecycleIntegrationTests.cs`, `BackupLifecycleManagerTests.cs` | Pass | Strong | Chain-preservation and dry-run safety |
 | Server persistence config path | `ConfigurationIntegrationTests.cs` | Pass | Medium | Validation and startup config behavior |
 | TS persistence-adjacent API contracts | `../aouda-client-ts/tests/databases.test.ts`, `../aouda-client-ts/tests/admin.test.ts` | Pass | Medium | Client HTTP contract coverage |
@@ -725,7 +707,6 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| No first-class server integration tests for backup job endpoints | Public surface may be assumed by users but is absent | Add explicit server contract tests asserting backup routes are absent or gated until implemented | High |
 | Limited cross-surface test: engine backup completion reflected through server metrics in realistic host wiring | Confirms observability parity and avoids stale assumptions | Add integration harness that runs backup engine in host context and asserts `/api/admin/metrics` backup counters | Medium |
 | Per-database checkpoint sync limitation not guarded by dedicated regression test | Future changes could silently regress or mislead | Add replication integration test documenting and asserting current first-db checkpoint behavior until upgraded | Medium |
 | No TS SDK tests for table durability override APIs (because surface missing) | API parity gap can drift unnoticed | Add TODO contract tests when table durability endpoints are introduced | Medium |
@@ -734,14 +715,11 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
 ## 2.18 Known gaps and undone work
 
 - Public backup/restore orchestration surface:
-  - Engine-level capabilities are mature, but server-level admin APIs for running/managing backup and restore are not first-class.
-  - User impact: operators must use embedded/service code paths rather than standard HTTP admin contracts.
-- Archive operationalization parity:
-  - Archive config and worker exist, but integrated host lifecycle and operational surface are less complete than replication-hosted orchestration.
-  - User impact: configuration may imply more turnkey behavior than current API/operator tooling exposes.
+  - HTTP `/admin/backup/*` and both SDKs ship exact restore and PITR (`targetTime`). Studio UI is exact-restore-only (BL-332).
+- Archive destinations:
+  - Local and S3 ship; Azure/GCS throw `NotSupportedException`.
 - Replication checkpoint sync:
-  - `ReplicationHostedService` checkpoint path still uses first available database (deferred per-db checkpoint coverage).
-  - User impact: multi-database checkpoint behavior requires careful operational expectations.
+  - `ReplicationHostedService` checkpoint path still uses first available database; atomic apply of replica catch-up is BL-328.
 - Persistence-policy ADR breadth:
   - ADR 0005 policy language (`MemoryOnly`, `DiskOnly`, `Hybrid`) is broader than currently explicit HTTP/TS policy modeling.
   - User impact: policy intent should be mapped to actual shipped knobs (`enableWal`, table/db options), not ADR labels alone.

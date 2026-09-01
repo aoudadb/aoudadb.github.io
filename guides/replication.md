@@ -381,15 +381,14 @@ Key implementation anchors:
 | `...Subscriptions[*].DatabaseName` | string | n/a | existing DB names | appsettings/env | Secondary subscription scope |
 | `...Subscriptions[*].Tables.Mode` | enum | `All` | `All`, `Include`, `Exclude` | appsettings/env | Include/Exclude require names |
 | `...Subscriptions[*].Tables.TableNames` | string[] | `[]` | non-empty for Include/Exclude | appsettings/env | Resolved to `TableId` at connect |
-| `Aouda:ReplicaSet:ThisNode:Archive:*` | object | n/a | see archive fields | appsettings/env | Validated for a backup node; does not start a running WAL archive worker (same limitation as `Aouda:Archive:*` above) |
+| `Aouda:ReplicaSet:ThisNode:Archive:*` | object | n/a | see archive fields | appsettings/env | Effective archive config on a backup node; starts `WalArchiveWorker` when enabled + destinationed |
 | `Aouda:ReplicaSet:KeyFile` | string? | `null` | file path | appsettings/env | HMAC keyfile auth when set |
 | `Aouda:ReplicaSet:HeartbeatIntervalMs` | int | `2000` | positive | appsettings/env | Heartbeat period |
 | `Aouda:ReplicaSet:ElectionTimeoutMs` | int | `10000` | positive | appsettings/env | Failure/election threshold |
 | `Aouda:ReplicaSet:ReplicationPort` | int | `5433` | `1..65535` | appsettings/env | WAL stream port; election uses `+1` |
-| `Aouda:Archive:Enabled` | bool | `false` | true/false | appsettings/env | Validated at startup; **does not start a WAL archive worker** — see [Backup and restore §2.4](backup.md#24-availability-status) |
-| `Aouda:Archive:Destination` | string | `""` | URI/path | appsettings/env | Required when archive enabled; not consumed by any running worker today |
-| `Aouda:Archive:CheckpointIntervalHours` | int | `24` | `>=1` | appsettings/env | Archive cadence; not consumed by anything today |
-| `Aouda:Archive:WalRetentionDays` | int | `7` | `>=1` | appsettings/env | Retention window; not consumed by anything today |
+| `Aouda:Archive:Enabled` | bool | `false` | true/false | appsettings/env | Starts a WAL archive worker when a destination is also set — see [Backup and restore §2.4](backup.md#24-availability-status) |
+| `Aouda:Archive:Destination` | string | `""` | URI/path | appsettings/env | Required when archive enabled |
+| `Aouda:Archive:WalRetentionDays` | int | `7` | `>=1` | appsettings/env | How long archived WAL is kept (not the local PITR window) |
 | `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | appsettings/env | Source-side DB replication switch |
 | `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`, `Majority`, `All` | appsettings/env | DB write concern default |
 | `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | `>=100` | appsettings/env | Used for concern > `One` |

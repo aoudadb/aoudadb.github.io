@@ -756,8 +756,14 @@ await client.admin.backup.trigger({ incremental: true });
 // List backups
 const backups = await client.admin.backup.list();
 
-// Restore
+// Restore exact backup
 await client.admin.backup.restore(backupId);
+
+// Point-in-time restore — last transaction commit <= targetTime
+await client.admin.backup.restore({
+  backupId,
+  targetTime: "2026-05-01T12:00:00Z",
+});
 
 // Schedule
 const schedule = await client.admin.backup.getSchedule();

@@ -1777,7 +1777,7 @@ await client.branches.delete("feature-x");
 
 ### Backup and Restore
 
-- **[Backup and Restore](Getting-Started-Backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). REST and TypeScript client APIs for exact restore. Retention and GC. Point-in-time recovery is not implemented yet — see the guide's PITR note.
+- **[Backup and Restore](Getting-Started-Backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). REST and TypeScript client APIs for exact restore and point-in-time recovery. Retention and GC.
 
 ### Authentication & Authorization
 

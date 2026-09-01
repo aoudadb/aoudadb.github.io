@@ -193,7 +193,7 @@ If you do not configure schema management explicitly:
 | Column nullable / encoder / rename / references | Yes | No | No | P36 S08–S10, S12 | Imperative PATCH + declarative apply |
 | Column default + description | Yes | No | No | P36 S11 | Declarative + catalog; default does not rewrite existing pages |
 | Primary key membership change | Yes | No | No | P36 S15 | Uniqueness scan + PK index rebuild; no `col_*.seg` rewrite |
-| Durable catalog DDL (WAL envelope, replica-consumed) | Yes | No | No | P36 S01–S02 | Generic `CatalogDdl` WAL tag; crash recovery does not replay it (catalog comes from the checkpoint instead) and point-in-time recovery does not consume it yet — see [Backup and restore](backup.md#24-availability-status) |
+| Durable catalog DDL (WAL envelope, replica-consumed, PITR-replayed) | Yes | No | No | P36 S01–S02, BL-186 S06 | Generic `CatalogDdl` WAL tag; crash recovery still ignores it (catalog comes from the checkpoint) but point-in-time recovery replays it — see [Backup and restore](backup.md#24-availability-status) |
 | Pending jobs HTTP (`GET …/jobs`) | Yes | No | No | P36 S12 | Projects `ColumnRewrite` / `PkIndexRebuild` |
 | Studio column alter UI | Yes | No | No | P36 S14 | Alter / PK / reorder / default-description dialogs |
 | Identity-insert (ordinary insert + bulk-load) | Yes | No | No | BL-130, BL-131 — see HTTP API / Bulk Load / Getting Started | Request/job-scoped; does not flip schema `autoIncrement` |

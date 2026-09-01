@@ -38,18 +38,16 @@ For local development, enable archiving in an optional `appsettings.json` or via
     "Archive": {
       "Enabled": true,
       "Destination": "C:\\aouda\\archive",
-      "CheckpointIntervalHours": 24,
       "WalRetentionDays": 7
     }
   }
 }
 ```
 
-That is all that is needed for local backup. **`Enabled = true` does not start a WAL archive
-worker** — nothing in the current release constructs one, so no WAL segment is ever uploaded to
-`Destination` regardless of this setting. `CheckpointIntervalHours` and `WalRetentionDays` are
-validated but not consumed by anything today. Exact backup/restore works independently of this
-setting; point-in-time restore does not work in this release — see
+That is all that is needed for local backup. **`Enabled = true` with a `Destination` starts the WAL
+archive worker.** Archived WAL extends point-in-time recovery beyond the local write-volume window.
+`WalRetentionDays` is how long archived WAL is kept — it is not the local PITR window (that is
+write volume since the last backup). Exact restore and PITR over HTTP/SDK both work — see
 [Backup and Restore](../guides/backup.md#24-availability-status).
 
 ---
@@ -64,7 +62,6 @@ setting; point-in-time restore does not work in this release — see
     "Archive": {
       "Enabled": true,
       "Destination": "s3://my-aouda-backups/prod",
-      "CheckpointIntervalHours": 24,
       "WalRetentionDays": 30,
       "S3": {
         "Region": "us-east-1"
@@ -117,7 +114,6 @@ Credentials are resolved from the standard AWS chain in order:
         "Archive": {
           "Enabled": true,
           "Destination": "s3://my-aouda-backups/prod-dr",
-          "CheckpointIntervalHours": 24,
           "WalRetentionDays": 14,
           "S3": {
             "Region": "eu-west-1"
@@ -215,13 +211,13 @@ if (restoreResult is RestoreBackupResult.Success s)
     Console.WriteLine($"Restored {s.Response.FilesRestored} files in {s.Response.DurationSeconds:F1}s");
 ```
 
-> **Note on PITR: not implemented in this release.** Point-in-time restore requires replaying WAL
-> records after loading a backup, but the WAL archive worker that would keep archived WAL around
-> for replay is never started, no server or client API accepts a restore target time, and the
-> local-WAL replay path does not apply real production WAL frames correctly. `WalRetentionDays`
-> is validated but has no effect on anything today. Track BL-186 (this repo's engine tracker) and
-> [ADR 0044](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0044-recoverable-restore-and-point-in-time-recovery.md)
-> for the plan to ship it. Exact restore (below) is unaffected and works today.
+> **Point-in-time recovery.** Pass `targetTime` on restore (HTTP body, `RestoreBackupRequest`, or
+> `@aouda/client` `restore({ backupId, targetTime })`). Replay stops at the last transaction commit
+> at or before that instant. The local window is write volume since the last backup, not a number
+> of days — enable `Archive` to keep WAL beyond that. A backup with WAL position `0` is
+> exact-restore-only. Studio restores exact backup points only. See
+> [Backup and Restore](../guides/backup.md#24-availability-status)
+> and [HTTP API](../reference/http-api.md#post-adminbackuprestoreid).
 
 ---
 
@@ -238,9 +234,15 @@ curl -X POST http://localhost:5000/admin/backup/trigger \
 curl http://localhost:5000/admin/backup/list \
   -H "Authorization: Bearer <admin-token>"
 
-# Restore a specific backup
+# Restore a specific backup (exact)
 curl -X POST http://localhost:5000/admin/backup/restore/<backup-id> \
   -H "Authorization: Bearer <admin-token>"
+
+# Point-in-time restore (newest backup at or before the instant)
+curl -X POST http://localhost:5000/admin/backup/restore \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"targetTime":"2026-05-01T12:00:00Z"}'
 
 # Get or update backup schedule
 curl http://localhost:5000/admin/backup/schedule \
@@ -264,6 +266,12 @@ const backups = response.backups;
 
 // Restore — pass backupId (string), not a numeric index
 await client.admin.backup.restore(backups[0].backupId);
+
+// Point-in-time restore
+await client.admin.backup.restore({
+  backupId: backups[0].backupId,
+  targetTime: "2026-05-01T12:00:00Z",
+});
 
 // Schedule — uses cronExpression, not cron; incremental is a required boolean
 const schedule = await client.admin.backup.getSchedule();
@@ -312,7 +320,7 @@ The test suite creates a fresh bucket per test run, exercises the full `IArchive
 | `NoSuchBucket` | Bucket does not exist | Create the bucket first; Aouda does not create buckets automatically |
 | Timeout connecting to MinIO | Wrong `ServiceUrl` or container not running | Check `ServiceUrl` and `ForcePathStyle: true` |
 | Restore hash mismatch | Corrupted blob in S3 | Run `RestoreEngine.VerifyBackupAsync`; re-run backup to upload a fresh set |
-| `PitrWindowException` | PITR is not implemented in this release (see the note above) — this is the *best*-case failure; more commonly no archive exists at all because the archive worker never runs | Not currently resolvable; track BL-186 |
+| `PitrWindowException` | Target outside the local write-volume window and the archive, or backup not PITR-eligible | Take a newer backup, enable archiving, or pick a later `targetTime` |
 | `NotSupportedException` for `azure://` or `gcs://` | Azure/GCS not yet implemented | Use `s3://` or a local path |
 
 ---

@@ -18,7 +18,7 @@
 - [Getting Started](https://aoudadb.github.io/getting-started/): Full onboarding — embedded mode, server mode, insert, query, schema, auth
 - [Authentication Setup](https://aoudadb.github.io/getting-started/auth/): Two-layer auth, API keys, aouda init, application auth service
 - [Testing](https://aoudadb.github.io/getting-started/testing/): In-process integration tests with Aouda.Testing package
-- [Backup and Restore](https://aoudadb.github.io/getting-started/backup/): Incremental backups, exact restore, S3-compatible storage. Point-in-time recovery (PITR) is not implemented yet.
+- [Backup and Restore](https://aoudadb.github.io/getting-started/backup/): Incremental backups, exact restore, S3-compatible storage, point-in-time recovery over HTTP and both SDKs.
 
 ## Clients and SDKs
 
@@ -54,7 +54,7 @@
 - [Hot/Cold Storage](https://aoudadb.github.io/guides/hot-cold/): Memory control, temperature policies, hot retention
 - [Write Path Durability](https://aoudadb.github.io/guides/write-durability/): WAL model, write concern, crash recovery
 - [Real-time Streaming](https://aoudadb.github.io/guides/real-time/): WebSocket streaming, availability status, usage playbooks
-- [Backup and Restore](https://aoudadb.github.io/guides/backup/): Incremental manifests, exact restore, retention, REST APIs. Point-in-time recovery (PITR) is not implemented yet.
+- [Backup and Restore](https://aoudadb.github.io/guides/backup/): Incremental manifests, exact restore, retention, REST APIs, point-in-time recovery. Local PITR window is write volume, not a duration.
 - [Replication and Clustering](https://aoudadb.github.io/guides/replication/): Cluster lifecycle, witness role, node management
 - [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): Partition keys, tenant isolation
 - [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling

@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+**BL-186 complete — point-in-time recovery is shipped.** Exact restore re-bases WAL and catalog; backup WAL positions are per-database; the archive worker runs when configured; PITR is reachable over HTTP and both SDKs at transaction-commit granularity. The local window is write volume since the last backup, not a duration. Public guides that said PITR was unimplemented (the S01 honesty pass) now describe this contract. Studio's backup page still restores exact catalog points only. [Backup and restore](guides/backup.md), [HTTP API](reference/http-api.md), [TypeScript client](clients/typescript.md).
+
 ## 0.1.15 — 2026-09-01
 
 **BL-319 Derive pilot gap close + BL-312 + BL-186 progress (mid-stream).** Server **0.1.15**, `Aouda.Client` **0.1.15**, `@aouda/client` **0.1.16** (unchanged), Studio **0.0.21**. See [Compatibility](clients/compatibility.md).

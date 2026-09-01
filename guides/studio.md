@@ -389,7 +389,7 @@ Per-node detail page (clickable from topology):
 | Restore | Select backup → confirmation → progress indicator |
 | Schedule | Cron builder with human-readable preview |
 | Destination config | Local / S3 / Azure Blob / GCS selector |
-| Recovery timeline | Full-backup-granularity timeline of restore points. WAL-level point-in-time recovery is not implemented on the server yet and is not offered in this UI. |
+| Recovery timeline | Full-backup-granularity timeline of restore points. WAL-level point-in-time recovery is available over HTTP and both SDKs; this UI does not offer it. |
 
 ---
 
