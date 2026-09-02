@@ -13,7 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-**BL-186 complete — point-in-time recovery is shipped.** Exact restore re-bases WAL and catalog; backup WAL positions are per-database; the archive worker runs when configured; PITR is reachable over HTTP and both SDKs at transaction-commit granularity. The local window is write volume since the last backup, not a duration. Public guides that said PITR was unimplemented (the S01 honesty pass) now describe this contract. Studio's backup page still restores exact catalog points only. [Backup and restore](guides/backup.md), [HTTP API](reference/http-api.md), [TypeScript client](clients/typescript.md).
+## 0.1.16 — 2026-09-02
+
+**BL-186 complete — point-in-time recovery is shipped.** Server **0.1.16**, `Aouda.Client` **0.1.16**, `@aouda/client` **0.1.17**, Studio pin `@aouda/client` **0.1.17**. See [Compatibility](clients/compatibility.md).
+
+- **PITR over HTTP and both SDKs.** `POST /admin/backup/restore` accepts `targetTime`; list responses gain `pitrEligible`; restore responses gain `targetTime` / `pitr`. Exact restore unchanged. Studio backup UI stays exact-restore-only. [Backup and restore](guides/backup.md), [HTTP API](reference/http-api.md), [TypeScript client](clients/typescript.md).
+- **BL-343.** Unfiltered `POST /query` no longer 500s when the catalog is wider than a segment (derived / never-written columns synthesize defaults).
 
 ## 0.1.15 — 2026-09-01
 
