@@ -57,7 +57,7 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Token` | No | Consistency token (`AtLeast`). 42-character lowercase hex. Query `at_least` **wins** when both are sent. Empty value is `TOKEN_MALFORMED`. **Not** the fencing header `X-Aouda-Current-Token`. |
 | `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
 | `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default `fetchPrimary`. |
-| `Authorization` | **Required when the target database has auth enabled** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). App auth endpoints (`/api/databases/{db}/auth/signup|signin|refresh`) require at least an API key (`anon`, `pub`, or higher). |
+| `Authorization` | **Required when the target database has auth enabled, except public app-auth POSTs** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). `POST /api/databases/{db}/auth/{signup\|signin\|refresh\|request-password-reset\|reset-password}` are keyless (a present bearer is ignored). |
 | `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. |
 
 ## Standard Response Headers
@@ -83,7 +83,7 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 
 | Prefix | Type | System | Description |
 |--------|------|--------|-------------|
-| `mk_anon_` | App anon key | Application Auth | Public/frontend key for **auth endpoints only** (signup, signin, refresh, OIDC). Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
+| `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
 | `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access. Ad-hoc query is allowed on the **admin** listener. |
 | `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. |
@@ -139,7 +139,7 @@ See [Direct client access](../guides/direct-client-access.md) for configuration,
 | `/api/auth/signin`, `/api/auth/refresh` | No | None (these produce credentials) |
 | `/api/auth/signout`, `/api/auth/me`, etc. | Yes | Server JWT |
 | `/api/auth/admin/*` | Yes (`db_admin`) | Server JWT or `mk_srv_` with admin role |
-| `/api/databases/{db}/auth/signup\|signin\|refresh` | Yes (Layer 1) | Any app API key (`mk_anon_`, `mk_pub_`, `mk_svc_`, `mk_`, custom) |
+| `/api/databases/{db}/auth/signup\|signin\|refresh\|request-password-reset\|reset-password` | No | None (public POST; bearer ignored) |
 | `/api/databases/{db}/auth/me\|signout\|password` | Yes (Layer 1 + 2) | API key + user JWT in `X-User-Token`, or user JWT directly |
 | `/api/databases/{db}/query\|tables\|rows\|...` | **Only if db has linked auth** | Any valid credential (see below) |
 | `/api/databases/{db}/query\|...` (no auth db) | No | None — open access |
@@ -303,6 +303,7 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user |
 | `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys |
 | `/api/databases/{db}/auth/admin/api-keys/{id}` | DELETE | API key (`db_admin`) | Revoke custom API key |
+| `/api/databases/{db}/auth/admin/signup-settings` | GET/PUT | API key (`db_admin`) | Read/write `allowSelfSignup` and `selfSignupRole` (null → `db_writer`) |
 
 **App auth signin request:**
 
@@ -518,7 +519,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
 | `AUTH_API_KEY_INVALID` | 401 | API key invalid, revoked, or expired |
-| `AUTH_API_KEY_REQUIRED` | 401 | App auth endpoint requires an API key (`anon` or higher) but none was provided |
+| `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
 | `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
 | `NOT_AUTHENTICATED` | 401 | Authentication required (database has auth enabled but no valid token) |
 | `AUTHORIZATION_DENIED` | 403 | Authenticated but no role for the target database |
@@ -528,6 +529,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic message to prevent information leakage) |
+| `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is disabled for this database (`allowSelfSignup` is false) |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is invalid, expired, or revoked |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email is already registered in this auth database |
 | `AUTH_PASSWORD_TOO_WEAK` | 400 | Password does not meet the minimum password policy |

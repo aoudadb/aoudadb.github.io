@@ -91,45 +91,36 @@ const current = await client.getConsistencyToken();
 ### With Authentication
 
 ```typescript
-// App auth with anon API key (for end-user sign-in flows)
+// Browser login — URL + database only (no API key)
 const client = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
-  appAuth: { apiKey: 'mk_anon_abc123...' },
 });
 await client.connect();
+await client.auth.signIn('user@example.com', 'secret');
 
 // App auth with service key (backend service acting on behalf of users)
-const client = new AoudaClient({
+const backend = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
   appAuth: { apiKey: 'mk_svc_abc123...' },
 });
-await client.connect();
+await backend.connect();
 
 // Server/admin auth with API key
-const client = new AoudaClient({
+const admin = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
   serverAuth: { apiKey: 'mk_srv_abc123...' },
 });
-await client.connect();
-
-// Session auth — use appAuth for Layer-1, then signIn for Layer-2 user identity
-const client = new AoudaClient({
-  serverUrl: 'http://localhost:5000',
-  database: 'mydb',
-  appAuth: { apiKey: 'mk_anon_abc123...' },
-});
-await client.connect();
-await client.auth.signIn('user@example.com', 'secret');
+await admin.connect();
 ```
 
 **Auth option rules:**
-- `appAuth` and `serverAuth` are mutually exclusive.
+- `appAuth` and `serverAuth` are mutually exclusive. Omitting both still exposes `client.auth` for keyless browser login.
 - Within each, `apiKey` and `token` are mutually exclusive.
 - `refreshToken` requires `token` to also be set.
-- The `apiKey` is a Layer-1 connection key (`mk_anon_`, `mk_pub_`, `mk_svc_`, `mk_srv_`, or custom `mk_`). Call `client.auth.signIn()` to establish Layer-2 user identity. `mk_pub_*` is accepted only on the [data-plane listener](../guides/direct-client-access.md).
+- Browser signup/signin do not need `apiKey`. Backends pass `mk_svc_*`. `mk_pub_*` is for pre-auth named queries on the [data-plane listener](../guides/direct-client-access.md).
 
 **Common mistake:** passing `apiKey` at the top level (no such option exists — it must be nested inside `appAuth` or `serverAuth`).
 

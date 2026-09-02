@@ -523,20 +523,17 @@ aouda start --port 5433 --data-dir .\data
 
 # 4. Sign up or admin-create a user
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signup `
-  -H "Authorization: Bearer mk_anon_..." `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com", "password": "SecurePass123!" }'
 
 # 5. Request reset (email must be configured — sendgrid, capture, or console)
 curl -X POST http://localhost:5433/api/databases/myapp/auth/request-password-reset `
-  -H "Authorization: Bearer mk_anon_..." `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com" }'
 
 # 6. Read OTP from email (SendGrid), Studio outbox / GET /admin/notifications/outbox (capture),
 #    or server console (console provider), then reset
 curl -X POST http://localhost:5433/api/databases/myapp/auth/reset-password `
-  -H "Authorization: Bearer mk_anon_..." `
   -H "Content-Type: application/json" `
   -d '{ "email": "alice@example.com", "otp": "482391", "newPassword": "NewSecure456!" }'
 ```

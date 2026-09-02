@@ -114,7 +114,7 @@ All endpoints under `/api/databases/{db}/auth/...`.
 
 | Endpoint | Method | Auth Required | Description |
 |----------|--------|---------------|-------------|
-| `.../auth/signup` | POST | API key (anon or higher) | Register a new user |
+| `.../auth/signup` | POST | None (public POST; 403 `AUTH_SIGNUP_DISABLED` unless `allowSelfSignup`) | Register a new user |
 | `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens |
 | `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token |
 | `.../auth/signout` | POST | User JWT | Revoke session |
@@ -196,6 +196,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/api-keys` | POST | Create custom API key |
 | `.../admin/api-keys/{id}` | DELETE | Revoke API key |
 | `.../admin/regenerate-keys` | POST | Regenerate auto-generated keys |
+| `.../admin/signup-settings` | GET/PUT | Read/write self-service signup (`allowSelfSignup`, `selfSignupRole`; null role → `db_writer`) |
 | `.../admin/users/{id}/password` | PUT | Admin override of a user's password — no current-password check; optionally set `forcePasswordChange` |
 | `.../admin/users/{id}/invite` | POST | (Re-)send an invite email with OTP to set a password; invalidates previous unused tokens |
 | `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user |
@@ -383,7 +384,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature | Discard token; force re-sign-in |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
 | `AUTH_TOKEN_REVOKED` | 401 | Token was revoked (session signed out) | Redirect to sign-in |
-| `AUTH_API_KEY_REQUIRED` | 401 | Public app-auth endpoint called without an API key | Include `Authorization: Bearer mk_anon_...` for public app-auth entry points (`signup`, `signin`, `refresh`). Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) require a user JWT instead — if you receive this error on those routes, your request is using a plain JWT on a public-only path, or you are hitting an older server version. |
+| `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
 | `AUTH_API_KEY_INVALID` | 401 | API key is invalid, revoked, or expired | Regenerate via the admin regenerate-keys endpoint |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected) | Redirect to sign-in; entire token family is invalidated |
 | `UNAUTHORIZED` | 401 | Unrecognised path when server auth is configured (deny-by-default) | Ensure request targets a valid path with a valid credential |
@@ -397,6 +398,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_ACCOUNT_DISABLED` | 423 | Account disabled by an administrator | Re-enable via `POST .../admin/users/{id}/enable` |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email already registered | Show "Account exists" |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic; prevents info leakage) | Check server logs; try again |
+| `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is off for this database | Enable via `PUT …/admin/signup-settings` |
 | `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format | Prompt the user to correct the email field |
 | `AUTH_PASSWORD_TOO_WEAK` | 400 | Password does not meet the minimum policy (default: 8 chars) | Prompt the user to choose a stronger password |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests | Implement exponential backoff |
@@ -523,9 +525,27 @@ Default rate limits for auth endpoints:
 - Sign-in: 20 attempts per minute per IP
 - Sign-up: 5 attempts per minute per IP
 
+Those per-IP limits (and per-account lockout, 10 failures / 15 minutes) cannot see a credential-stuffing campaign that tries one password against many accounts from many addresses. Each account sees one failure; each IP sees one request; nothing reaches a threshold.
+
+An optional **failed-signin ceiling** (`Aouda:Auth:FailedSigninCeiling`) is the aggregate control for that shape. It is **off by default**. When enabled, failed sign-ins against one auth database are counted in a sliding window; successful sign-ins do not consume the budget. When the ceiling is exceeded, further sign-in attempts against that database return **429** `AUTH_RATE_LIMITED` with `Retry-After` until the window drains — including before Argon2 runs, so a tripped ceiling cannot be used to drive accounts into lockout.
+
+**A tripped ceiling blocks every sign-in on that database**, including callers who type the correct password, until the window drains. Successful logins stay free of the budget only *until* the trip point; after that the database is a full login outage, not degraded service. Size the number with that failure mode in mind.
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `Aouda:Auth:FailedSigninCeiling:Enabled` | `false` | Operator must opt in |
+| `Aouda:Auth:FailedSigninCeiling:PermitLimit` | `100` | Failed attempts per window per auth database |
+| `Aouda:Auth:FailedSigninCeiling:WindowSeconds` | `300` | 5 minutes |
+
+**How to pick a number.** Size it from observed *failed* login volume on that auth database, not peak successful traffic. A starting point is a few times the 95th-percentile failed-signin count in a 5-minute window on a quiet day, with headroom for a legitimate outage (users retrying). Too low is a **full login outage** for that database (correct passwords included) until the window drains; too high lets stuffing run longer. The first trip logs once at Warning and writes `_audit_log` action `signin_ceiling_tripped` — that signal is often more useful than the 429 itself.
+
+**Per process.** The counter is in-memory on each server process. N nodes means N × the ceiling. Divide your chosen number by the process count, or treat the product as the cluster-wide budget. There is no shared store.
+
+Signup, refresh, password-reset, and MFA verification are not covered. Sign-in is where credentials are guessed.
+
 ### Audit Logging
 
-All auth events are logged to the `_audit_log` table: sign-up, sign-in, sign-out, failed attempts, password changes, role changes, admin actions.
+All auth events are logged to the `_audit_log` table: sign-up, sign-in, sign-out, failed attempts, password changes, role changes, admin actions, and `signin_ceiling_tripped` when the optional failed-signin ceiling first fires.
 
 ---
 

@@ -549,6 +549,8 @@ Aouda.Server speaks plain HTTP. For remote access, put it behind a TLS-terminati
 
 Aouda does not manage TLS certificates. The reverse proxy is the TLS boundary.
 
+Then set `Aouda:ForwardedHeaders` so Aouda trusts that proxy. Until you do, per-IP rate limits, lockout attribution, and `_audit_log` client IPs are the proxy's address. Worked nginx and cloud-LB examples: [Behind a reverse proxy](../deployment/reverse-proxy.md).
+
 **Layer 3 — Application: API Key Authentication**
 
 All API endpoints require authentication when server auth is configured. Use a server API key (`mk_srv_...`) with the Connect dialog.

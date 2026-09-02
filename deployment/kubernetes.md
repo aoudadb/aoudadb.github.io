@@ -125,4 +125,4 @@ helm template aouda charts/aouda-cluster --set witness.enabled=true --set studio
 
 - `replicaCount=1` runs Aouda in standalone mode (no replica-set env vars).
 - Witness is for election quorum and stores no data.
-- Ingress/TLS/cert-manager are intentionally out of scope for this chart version.
+- Ingress/TLS/cert-manager are intentionally out of scope for this chart version. If you add an Ingress or cloud load balancer in front of the Service, configure [trusted proxies](reverse-proxy.md) on Aouda — otherwise per-IP rate limits, lockout attribution, and audit-log client IPs are the proxy's address.

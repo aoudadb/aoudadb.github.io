@@ -184,18 +184,21 @@ Frontend handles auth flows directly with Aouda; backend handles data operations
 ```
 ┌──────────────┐  auth ────→ ┌──────────────┐
 │  Frontend     │             │  Aouda        │
-│               │             │  mk_anon_...  │
-│               │  data ────→ │              │
-│               │             │  Your Backend │──→ Aouda (mk_svc_...)
+│  (URL + db)   │             │  (keyless     │
+│               │             │   signup/     │
+│               │  JWT ─────→ │   signin)     │
+│               │             │               │
+│               │  data ────→ │  Your Backend │──→ Aouda (mk_svc_...)
 └──────────────┘             └──────────────┘
 ```
 
 **How it works:**
-1. Frontend uses the anon key to call Aouda auth endpoints directly (signup, signin).
-2. After signin, the frontend sends the JWT to your backend.
-3. Backend uses the service key + the user's JWT (`X-User-Token`) for PLS-scoped data queries.
+1. Frontend constructs `new AoudaClient({ serverUrl, database })` — no `mk_anon_*`. CORS on the data-plane listener is the browser origin control.
+2. Frontend calls signup/signin directly. Self-registration is **off until enabled** (`allowSelfSignup`); enabled signups grant `db_writer` unless `selfSignupRole` is set (BL-357). Password reset can trigger outbound email at 20/min/IP.
+3. After signin, the frontend sends the JWT to your backend.
+4. Backend uses the service key + the user's JWT (`X-User-Token`) for PLS-scoped data queries. Pre-auth named queries still need `mk_pub_*` (BL-356).
 
-**When to use:** When you want the auth UI to interact with Aouda directly (like Supabase) but want your backend to control data access.
+**When to use:** When you want the auth UI to interact with Aouda directly but want your backend to control data access. Do not bake `mk_anon_*` / `NEXT_PUBLIC_AOUDA_ANON_KEY` into the SPA.
 
 ### Pattern E: Standalone Auth Service (Microservice Gateway)
 

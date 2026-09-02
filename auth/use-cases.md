@@ -119,12 +119,11 @@ The most common use case: Aouda handles both auth and data.
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "taskapp",
-  appAuth: { apiKey: "mk_anon_..." },
 });
 
 await client.connect();
 
-// Sign up (Layer 2)
+// Sign up
 const { user } = await client.auth.signUp("alice@example.com", "Pass123!");
 
 // Insert data — PLS scoped to alice
@@ -333,7 +332,6 @@ On first sign-in, the response includes `"requiresPasswordChange": true`:
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signin \
-  -H "Authorization: Bearer <anon-or-service-key>" \
   -H "Content-Type: application/json" \
   -d '{ "email": "bob@example.com", "password": "TempPass789!" }'
 ```
@@ -383,13 +381,12 @@ The previous unused OTP is invalidated and a new one is emailed to the user.
 
 The password reset flow covers two scenarios: a user who forgot their password, and an invite-pending user setting their password for the first time after receiving an invite email. Both cases use the same two endpoints.
 
-**Prerequisites:** The Aouda server must have **email delivery configured** (`sendgrid` for production, or `console` for local testing). Without any provider, `request-password-reset` returns `200` but no OTP is sent. See [Email, SMS & Notifications](notifications.md). Your app calls these endpoints with the **anon API key** (`mk_anon_...`) on public routes, same as signup/signin.
+**Prerequisites:** The Aouda server must have **email delivery configured** (`sendgrid` for production, or `console` for local testing). Without any provider, `request-password-reset` returns `200` but no OTP is sent. See [Email, SMS & Notifications](notifications.md). These endpoints are public POSTs (no API key). They can trigger outbound email unauthenticated, bounded by 20/min/IP. `request-password-reset` does not disclose whether the account exists.
 
 ### Step 1 — User Requests a Reset
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/request-password-reset \
-  -H "Authorization: Bearer <anon-or-service-key>" \
   -H "Content-Type: application/json" \
   -d '{ "email": "alice@example.com" }'
 # → 200 { "ok": true }  (always — does not reveal whether email exists)
@@ -401,7 +398,6 @@ A 6-digit OTP is emailed to the user. The endpoint always returns `200` regardle
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/reset-password \
-  -H "Authorization: Bearer <anon-or-service-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "email":       "alice@example.com",

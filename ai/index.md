@@ -265,17 +265,17 @@ Primary evidence:
 - `src/Aouda.Server/DevServer/DevServerHost.cs`
 - `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs`
 
-### Walk-through B: App auth endpoint guard path
+### Walk-through B: App auth public entry (keyless)
 
 1. Request enters `AuthenticationMiddleware`.
-2. Scope resolves to `AppAuth` for `/api/databases/{db}/auth/*`.
-3. Middleware requires bearer API key shape (`mk_...`) before allowing route.
-4. Missing bearer or JWT bearer yields `AUTH_API_KEY_REQUIRED` with remediation suggestion.
+2. `PublicRouteAllowlist.IsAppAuthPublicEntry` matches POST signup/signin/refresh/password-reset (segment-aware `{db}` parse).
+3. Layer-1 is skipped — a missing, stale, or valid bearer does not change the outcome.
+4. Unallowlisted `/auth/*` (e.g. `/me`, `/mfa/enroll`) is `AppAuthUser` and fails closed with `AUTH_TOKEN_MISSING` if no bearer.
 
 Primary evidence:
+- `src/Aouda.Server/Auth/PublicRouteAllowlist.cs`
 - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
-- `src/Aouda.Server/Auth/AuthErrorResponses.cs`
-- `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs`
+- `tests/Aouda.Server.Tests/Auth/AppAuthPublicEntryTests.cs`
 
 ### Walk-through C: Service key with `X-User-Token`
 
@@ -392,13 +392,12 @@ await client.auth.createPartitionGrant("usr_123", {
 
 Expected result: authenticated admin creates partition grant through app admin API wrapper.
 
-Common mistake: using `client.auth` without `serverAuth` or `appAuth` configured in client options.
+Common mistake: providing both `apiKey` and `token` in `appAuth`. Browser login does not need `appAuth`.
 
 ### HTTP/protocol examples
 
 ```http
 POST /api/databases/myapp/auth/signin
-Authorization: Bearer mk_anon_...
 Content-Type: application/json
 
 {
@@ -535,7 +534,7 @@ Recommended tuning sequence:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `AUTH_API_KEY_REQUIRED` on app auth route | Missing/incorrect layer-1 key | Send `Authorization: Bearer mk_anon_...` or `mk_svc_...` |
+| `AUTH_API_KEY_REQUIRED` on app auth route | Pre-BL-355 server, or a non-public `/auth/*` path | Public signup/signin/refresh are keyless. `/me` and `/mfa/*` need a user JWT. |
 | Service key request fails with `X-User-Token` error | User token expired/revoked/invalid | Refresh/reissue user token, retry |
 | Fan-out query returns too few rows | Missing partition grants for dimension | Add grants for missing partition keys |
 | Write denied on granted partition | Grant is `read` level only | Promote to `write`/`admin` access level |

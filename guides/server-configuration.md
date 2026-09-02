@@ -84,6 +84,9 @@ All server settings exposed through `AoudaServerOptions` can be set with environ
 | `AOUDA_REPLICASET__NAME` | `Aouda:ReplicaSet:Name` | |
 | `AOUDA_REPLICASET__MEMBERS__0` | `Aouda:ReplicaSet:Members:0` | Array index |
 | `AOUDA_AUTH__EMAIL__PROVIDER` | `Aouda:Auth:Email:Provider` | e.g. `sendgrid`, `console` |
+| `AOUDA_FORWARDEDHEADERS__ENABLED` | `Aouda:ForwardedHeaders:Enabled` | Required to honour `X-Forwarded-For`; `--trusted-proxies-enabled` |
+| `AOUDA_FORWARDEDHEADERS__KNOWNPROXIES` | `Aouda:ForwardedHeaders:KnownProxies` | Comma-separated IPs; `--trusted-proxies` |
+| `AOUDA_FORWARDEDHEADERS__KNOWNNETWORKS` | `Aouda:ForwardedHeaders:KnownNetworks` | Comma-separated CIDRs; `--trusted-proxy-networks` |
 
 ```bash
 # Docker / Kubernetes — typical bootstrap
@@ -126,6 +129,11 @@ CLI flag mappings include:
 | `--bind` | `Aouda:Bind` |
 | `--join` | `Aouda:Join` |
 | `--max-memory` / `-m` | `Aouda:Memory:MaxTotalRamBytes` |
+| `--trusted-proxies-enabled` | `Aouda:ForwardedHeaders:Enabled` |
+| `--trusted-proxies` | `Aouda:ForwardedHeaders:KnownProxies` |
+| `--trusted-proxy-networks` | `Aouda:ForwardedHeaders:KnownNetworks` |
+
+`Aouda:ForwardedHeaders:Enabled` (`AOUDA_FORWARDEDHEADERS__ENABLED` or `--trusted-proxies-enabled`) is required in addition to the trust list. Off by default. A CLI-only start is `aouda start --trusted-proxies-enabled --trusted-proxies 10.0.0.1`. See [Behind a reverse proxy](../deployment/reverse-proxy.md) — without it, per-IP rate limits, lockout attribution, and audit-log client IPs are the TCP peer (the proxy, in a typical public deployment).
 
 ---
 

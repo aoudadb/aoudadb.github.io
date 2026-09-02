@@ -16,7 +16,7 @@ parent: "Auth and Authorization"
 
 ## 10. Integrating with the .NET Client
 
-The .NET client supports the two-layer model: API key for connection (Layer 1), then optional user sign-in (Layer 2).
+The .NET client supports keyless browser login: URL + database is enough, then `SignInAsync`. Backends still pass `ApiKey` (`mk_svc_*`).
 
 ### AppAuthOptions vs ServerAuthOptions
 
@@ -24,7 +24,7 @@ The .NET client uses two separate options types — one per auth system:
 
 | Property | `AppAuthOptions` | `ServerAuthOptions` |
 |----------|:-:|:-:|
-| `ApiKey` | Yes (`mk_anon_`, `mk_pub_`, `mk_svc_`, custom) | Yes (`mk_srv_`) |
+| `ApiKey` | Optional (`mk_svc_*` for backends; not required for browser login) | Yes (`mk_srv_`) |
 | `Token` / `RefreshToken` | Yes | Yes |
 | `Email` / `Password` | **Not available** — use `SignInAsync()` | Yes |
 | `UserToken` | Yes (with service keys) | Yes (with `mk_srv_`) |
@@ -75,26 +75,12 @@ var client = new AoudaClient(new AoudaClientOptions
 var userOrders = await client.GetTable("orders").Limit(10).ToListAsync();
 ```
 
-### Frontend: Anon Key + User Sign-In
+### Frontend: URL + database + Sign-In
 
 ```csharp
-var client = new AoudaClient(new AoudaClientOptions
-{
-    ServerUrl = "http://localhost:5433",
-    DatabaseName = "myapp",
-    AppAuth = new AppAuthOptions
-    {
-        ApiKey = "mk_anon_a1b2c3..."
-    }
-});
+var client = new AoudaClient("http://localhost:5433", "myapp");
 
-// User signs in — separate step from creating the client
 var result = await client.Auth.SignInAsync("alice@example.com", "SecurePass123!");
-// Client stores JWT internally, uses it for subsequent requests
-// Auto-refreshes before expiry, retries on 401
-
-var orders = await client.GetTable("orders").Limit(10).ToListAsync();
-// PLS-scoped to alice
 ```
 
 ### Pre-Obtained Token
@@ -165,23 +151,16 @@ const client = createAoudaClient({
 });
 ```
 
-### Frontend: Anon Key + Sign-In
+### Frontend: URL + database + Sign-In
 
 ```typescript
-const client = createAoudaClient({
+const client = new AoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  appAuth: {
-    apiKey: process.env.NEXT_PUBLIC_AOUDA_ANON_KEY,  // mk_anon_...
-  },
 });
 
 await client.connect();
 const session = await client.auth.signIn("alice@example.com", "SecurePass123!");
-// Client switches to user JWT for all subsequent requests
-
-const orders = await client.table("orders").limit(10).execute();
-// PLS-scoped to alice
 ```
 
 ### Frontend Pattern (React / Next.js)
@@ -193,7 +172,6 @@ import { createAoudaClient } from "@aouda/client";
 export const aouda = createAoudaClient({
   serverUrl: process.env.NEXT_PUBLIC_AOUDA_URL ?? "http://localhost:5433",
   database: "myapp",
-  appAuth: { apiKey: process.env.NEXT_PUBLIC_AOUDA_ANON_KEY },
 });
 
 // pages/signup.tsx
@@ -241,20 +219,22 @@ Aouda has **four** API key types. Understanding when to use each is critical.
 | Key Type | Prefix | Created By | Scope | Stored In | Use Case |
 |----------|--------|-----------|-------|-----------|----------|
 | **Server API key** | `mk_srv_` | Server admin (`/api/auth/admin/api-keys`) | One or more databases | `_serverauth` | Backend services, CI/CD, cross-database access |
-| **App `anon` key** | `mk_anon_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **auth only** — signup, signin, refresh, OIDC |
+| **App `anon` key** | `mk_anon_` | Auto-generated on `auth.enabled` | One database | `_auth` | **Not required for login.** Leftover; denied on data/admin |
 | **App `public` key** | `mk_pub_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **data** — named queries, mutations, subscriptions (plus auth) |
 | **App `service_role` key** | `mk_svc_` | Auto-generated on `auth.enabled` | One database | `_auth` | Per-database backend access, admin tools |
 
 Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control.
 
-`mk_pub_` arrived with the data-plane listener in server `0.1.7`. `mk_anon_` is **denied on data routes** — if you are giving a frontend read access, that is `mk_pub_`, on the data-plane, through [named queries](../guides/named-queries.md). Full rules: [Direct client access](../guides/direct-client-access.md).
+`mk_pub_` arrived with the data-plane listener in server `0.1.7`. Signup/signin/refresh/password-reset are **keyless**. `mk_anon_` is **denied on data routes** — if you are giving a frontend read access before login, that is `mk_pub_`, on the data-plane, through [named queries](../guides/named-queries.md). Full rules: [Direct client access](../guides/direct-client-access.md).
+
+Enabling auth on a database does **not** open public self-registration. Set `allowSelfSignup: true` (create-database, or `PUT …/auth/admin/signup-settings`) to allow `POST …/auth/signup`. Enabled signups grant `db_writer` unless `selfSignupRole` names another existing role. CORS on the data-plane is the browser origin control; `CorsOrigins: "*"` lets any origin call those POSTs. Password reset can send email unauthenticated at 20/min/IP (`request-password-reset` does not disclose whether the account exists).
 
 ### When to Use Which Key
 
 | Need | Best Key | Why |
 |------|----------|-----|
 | Frontend reading data directly | App `public` key (`mk_pub_`) | Safe to expose; named artifacts only; PLS/RLS enforced; data-plane only |
-| Frontend that only signs users in (data goes through your backend) | App `anon` key (`mk_anon_`) | Safe to expose; auth endpoints only |
+| Frontend that only signs users in (data goes through your backend) | None — `new AoudaClient({ serverUrl, database })` | Signup/signin are public POSTs |
 | Backend accessing one database (app auth enabled) | App `service_role` key (`mk_svc_`) | Full access to that database, PLS bypassed |
 | Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases |
 | CI/CD pipeline | Server API key (`mk_srv_`) | Scoped to test databases |

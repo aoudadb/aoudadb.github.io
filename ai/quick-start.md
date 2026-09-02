@@ -104,7 +104,6 @@ Capture `anonKey` and `serviceRoleKey` from the create-database JSON response, t
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "default",
-  appAuth: { apiKey: "mk_anon_..." },  // key from startup output
 });
 
 await client.connect();

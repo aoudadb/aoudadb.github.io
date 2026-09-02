@@ -70,9 +70,20 @@ curl -X POST http://localhost:5433/api/databases \
   -H "Authorization: Bearer <server-admin-token>" \
   -d '{
     "name": "myapp",
-    "auth": { "enabled": true }
+    "auth": { "enabled": true, "allowSelfSignup": true }
   }'
 ```
+
+Self-service signup is **off by default**. Pass `allowSelfSignup: true` at create time (as above, or top-level on `kind: "auth"`) or later:
+
+```bash
+curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/signup-settings \
+  -H "Authorization: Bearer <mk_svc_…>" \
+  -H "Content-Type: application/json" \
+  -d '{ "allowSelfSignup": true, "selfSignupRole": "db_writer" }'
+```
+
+`selfSignupRole` is optional; omit it (or send `null`) to grant `db_writer`. The role must already exist in the auth database.
 
 Response:
 
@@ -157,7 +168,6 @@ All Application Auth endpoints are scoped by database:
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signup \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer mk_anon_a1b2c3d4e5f6..." \
   -d '{
     "email": "alice@example.com",
     "password": "SecurePass123!"
@@ -186,7 +196,6 @@ The user is signed in immediately after signup.
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signin \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer mk_anon_a1b2c3d4e5f6..." \
   -d '{
     "email": "alice@example.com",
     "password": "SecurePass123!"
@@ -231,7 +240,6 @@ Revokes the session and invalidates the refresh token.
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/refresh \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer mk_anon_a1b2c3d4e5f6..." \
   -d '{ "refreshToken": "dGhpcyBpcyBhIHJlZnJl..." }'
 ```
 

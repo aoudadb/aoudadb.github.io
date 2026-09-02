@@ -335,55 +335,75 @@ Server admin API keys are database-scoped — specify `databaseRoles` to control
 
 ## 4. The Two-Layer Model Explained
 
-Like Supabase and Firebase, Aouda uses a **two-layer authentication model** for Application Auth:
+Application Auth for browsers is **URL + database name**. Signup, signin, refresh, and password-reset are public POSTs — no API key.
+
+```ts
+const client = new AoudaClient({
+  serverUrl: "https://data.example.com",
+  database: "auth",
+});
+await client.auth.signIn(email, password);
+```
 
 | Layer | Question It Answers | Credential | Who Provides It |
 |-------|-------------------|------------|-----------------|
-| **Layer 1: Connection** | "What application is accessing this database?" | API key (`anon` or `service_role`) | Developer (from database creation response) |
-| **Layer 2: User Identity** | "Which user is making this request?" | User JWT (from signin) | End user (via signup/signin flow) |
+| **Public app-auth entry** | "Can this client reach signup/signin?" | None. CORS + per-IP rate limits + credential lockout + optional failed-signin ceiling. | Operator (listener + CORS config) |
+| **User identity** | "Which user is making this request?" | User JWT (from signin) | End user (via signup/signin flow) |
+| **Pre-auth named queries** | "May this browser run a listed named query before login?" | `mk_pub_*` (BL-356 — still required) | Developer (from database creation / regenerate-keys) |
+| **Backend / admin** | "Is this a trusted service?" | `mk_svc_*` (secret) | Developer (keep server-side) |
 
-### Layer 1: API Keys (Connection Gate)
+`mk_anon_*` is **not** required for browser login. It may still be minted. It is not a secret, not app identity, and not a security control for these routes. Do not bake it into a SPA or `NEXT_PUBLIC_*`. After sign-in, the user JWT is the data credential. CORS, then JWT + RLS/grants, do the work — with these consequences you must plan for:
 
-When you create a database with auth enabled, Aouda auto-generates two API keys:
+- **Self-registration is opt-in.** Linking an auth database to `{db}` does **not** open public signup. `POST …/auth/signup` returns **403** `AUTH_SIGNUP_DISABLED` until an operator sets `allowSelfSignup: true` (create-database body, or `PUT /api/databases/{db}/auth/admin/signup-settings`). Enabled signups receive `db_writer` (`read,write,delete`) scoped to that database unless `selfSignupRole` names another existing role.
+- **CORS is the browser origin control, and it is only as good as its configuration.** The data-plane listener denies all origins when `Aouda:Listeners:DataPlane:CorsOrigins` is unset, but the setting accepts `*`. A `*` origin lets any website's JavaScript call your public auth POSTs (and, after login, any data-plane route the JWT can reach). Prefer an explicit origin list.
+- **Password reset triggers outbound email unauthenticated**, bounded by 20/min/IP. `request-password-reset` always returns `{ ok: true }` and does not disclose whether the account exists.
+- **Credential stuffing across accounts and IPs is invisible to per-IP limits and lockout.** The optional failed-signin ceiling (`Aouda:Auth:FailedSigninCeiling`, off by default) caps **failed** sign-ins per auth database so that attack is visible. It is per process; successful logins do not consume the budget *until the ceiling trips* — after that every sign-in on that database is 429 until the window drains (a full login outage, not degraded service). See [Auth reference — Rate Limiting](../auth/reference.md#rate-limiting).
+
+### API keys that still exist
+
+When you create a database with auth enabled, Aouda still auto-generates keys. They are not the browser login credential:
 
 | Key | Prefix | Role | PLS | Use Case | Safety |
 |-----|--------|------|-----|----------|--------|
-| **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | Enforced | Frontend, mobile, public clients | Safe to embed in client-side code |
+| **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | Enforced | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
+| **`public`** | `mk_pub_` | `public` | Enforced | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
 | **`service_role`** | `mk_svc_` | `db_admin` (full access) | **Bypassed** | Backend servers, admin tools | **Must keep secret** |
 
-The API key is the **gate** that controls which applications can talk to the database. Without a valid API key, even the auth endpoints (signup, signin) are inaccessible:
-
 ```bash
-# Without API key → 401 AUTH_API_KEY_REQUIRED
+# Enable self-service signup (app-admin) — default is off
+curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/signup-settings \
+  -H "Authorization: Bearer <mk_svc_… or db_admin JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{ "allowSelfSignup": true }'
+
+# Keyless signup — 201 when enabled; 403 AUTH_SIGNUP_DISABLED otherwise
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signup \
+  -H "Content-Type: application/json" \
   -d '{ "email": "user@example.com", "password": "Pass123!" }'
 
-# With anon key → success
-curl -X POST http://localhost:5433/api/databases/myapp/auth/signup \
-  -H "Authorization: Bearer mk_anon_..." \
+# Keyless signin — 200
+curl -X POST http://localhost:5433/api/databases/myapp/auth/signin \
+  -H "Content-Type: application/json" \
   -d '{ "email": "user@example.com", "password": "Pass123!" }'
 ```
 
-### Layer 2: User JWTs (Identity)
+A stale `Authorization: Bearer mk_anon_…` on those POSTs is ignored. Wiping or reminting the auth database does not require a frontend rebuild.
+
+### User JWTs (Identity)
 
 After a user signs in, they receive a JWT that contains their identity, roles, and tenant information. The client sends this JWT as the `Authorization: Bearer` header for data operations:
 
 ```
-1. Client created:    Authorization: Bearer mk_anon_...
-                      ↑ API key identifies the APPLICATION
+1. Client created:    no Authorization (browser) or mk_svc_… (backend)
 
-2. Before sign-in:   Requests use the anonymous role
-                     PLS allows only public data (none by default)
+2. User signs in:     POST /api/databases/myapp/auth/signin  (no API key)
+                      → Aouda returns a user JWT
 
-3. User signs in:    POST /databases/myapp/auth/signin
-                     → Aouda returns a user JWT
+3. After sign-in:     Authorization: Bearer eyJhbG...
+                      PLS/RLS evaluate JWT claims (tenant_id, user_id, roles)
 
-4. After sign-in:    Authorization: Bearer eyJhbG...
-                     ↑ User JWT replaces the API key
-                     PLS evaluates JWT claims (tenant_id, user_id, roles)
-
-5. Backend access:   Authorization: Bearer mk_svc_...
-                     → Service key bypasses PLS, grants full access
+4. Backend access:    Authorization: Bearer mk_svc_...
+                      → Service key audited-bypasses PLS, grants full access
 ```
 
 ### How the Middleware Distinguishes Keys from JWTs
@@ -393,7 +413,7 @@ The middleware detects the credential type by prefix:
 - Starts with `mk_` → **API key** → validate against `_api_keys` table
 - Anything else → **JWT** → validate signature against auth database keys
 
-After a successful sign-in, the user JWT replaces the API key in the `Authorization` header. The client SDK handles this transition automatically.
+Public app-auth POSTs skip this gate entirely. After a successful sign-in, the user JWT is the bearer. The client SDK handles this transition automatically.
 
 ---
 

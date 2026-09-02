@@ -143,6 +143,7 @@ If you enable auth and keep defaults:
 - token validation mode defaults to `Hybrid` in server middleware;
 - password policy defaults to min length 8, max length 128;
 - user lockout threshold defaults to 10 failed attempts with 15-minute lockout;
+- failed-signin ceiling is **off** (`Aouda:Auth:FailedSigninCeiling:Enabled = false`); when enabled, default 100 failures / 300 seconds per auth database, per process. A tripped ceiling is a full login outage on that database until the window drains;
 - app auth database creation defaults to `AuthDatabaseKind.Application`;
 - default system roles are seeded: `db_admin`, `db_writer`, `db_reader`, `anonymous`;
 - enabling app auth generates system anon/service keys (`mk_anon_...`, `mk_svc_...`) and keeps server key model (`mk_srv_...`) for server-side credentials.
@@ -157,6 +158,9 @@ If you enable auth and keep defaults:
 | `PasswordPolicy.MaxLength` | `128` | Integer ≥ `MinLength` | Upper bound for password size |
 | `UserService.LockoutThreshold` | `10` | Positive integer | Locks after repeated bad credentials |
 | `UserService.LockoutDuration` | `15 minutes` | Any positive `TimeSpan` | Temporary lockout cooldown window |
+| `Aouda:Auth:FailedSigninCeiling:Enabled` | `false` | `true`, `false` | Opt-in aggregate cap on **failed** sign-ins per auth database |
+| `Aouda:Auth:FailedSigninCeiling:PermitLimit` | `100` | Integer ≥ 1 when enabled | Failures allowed per window; successes do not count. Once the ceiling trips, **every** sign-in on that database is 429 until the window drains (correct passwords included) |
+| `Aouda:Auth:FailedSigninCeiling:WindowSeconds` | `300` | Integer ≥ 1 when enabled | Sliding window; counter is per process |
 | `AuthDatabaseOptions.Kind` | `Application` | `Application`, `Server` | Explicit auth DB creation defaults to app auth kind |
 | Default roles | `db_admin`, `db_writer`, `db_reader`, `anonymous` | Fixed (not configurable) | Baseline RBAC scaffolding seeded at auth DB creation |
 | App auth API key gate | API key required on app auth routes | Fixed (not configurable) | Prevents direct JWT-only calling of signup/signin/refresh endpoints |
@@ -311,7 +315,7 @@ Key modules:
 
 1. Client calls `POST /api/databases/{db}/auth/signin` with `Authorization: Bearer <api_key>`.
 2. `AuthenticationMiddleware` identifies `AppAuth` scope and enforces API key bearer shape.
-3. `AppAuthController.Signin` validates body and resolves linked app auth engine.
+3. `AppAuthController.Signin` validates body and resolves linked app auth engine. If the optional failed-signin ceiling is enabled and that auth database is over budget, this returns 429 before Argon2.
 4. `UserService.VerifyCredentialAsync` validates password and lockout state.
 5. `TokenService.MintTokenPairAsync` creates access/refresh tokens.
 6. `SessionService.CreateSessionAsync` persists token hash session.
@@ -412,7 +416,8 @@ Precedence and operational notes:
 - Root user bootstrap is startup-time behavior; treat config updates as restart-required.
 - Auth/admin endpoint changes (users, roles, grants, resolvers) are dynamic at runtime.
 - Safety-gated behavior:
-  - app auth endpoints reject missing API key in app-auth scope (`AUTH_API_KEY_REQUIRED`);
+  - public app-auth POSTs (signup, signin, refresh, password-reset) are keyless; `AUTH_API_KEY_REQUIRED` is no longer returned on those routes;
+  - self-service signup is **opt-in** (`allowSelfSignup`, default off). Enable via `PUT …/auth/admin/signup-settings` or create-database `allowSelfSignup`. The grant is `db_writer` unless `selfSignupRole` is set (BL-357);
   - reserved system key kinds (`anon`, `service_role`) are blocked from generic custom key creation APIs.
 - Reserved/deferred:
   - no public claim that external IdP federation knobs are active in server config as a shipped feature.
@@ -429,10 +434,6 @@ var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5000",
     DatabaseName = "appdb",
-    AppAuth = new AppAuthOptions
-    {
-        ApiKey = "mk_anon_...",
-    }
 });
 
 var auth = await client.Auth.SignInAsync("user@site.com", "correct horse battery staple");
@@ -442,7 +443,7 @@ Console.WriteLine($"{me.Email} {auth.ExpiresIn}");
 
 Expected result: sign-in returns access/refresh tokens, and subsequent calls use the authenticated user context.
 
-Common mistake: providing both `ApiKey` and `Token` in `AppAuthOptions` (validation rejects mutually exclusive setup).
+Common mistake: providing both `ApiKey` and `Token` in `AppAuthOptions` (validation rejects mutually exclusive setup). Browser login does not need `AppAuth` at all.
 
 ### TypeScript example (app auth + ADRA admin wrapper)
 
@@ -462,13 +463,12 @@ console.log(resolvers.length);
 
 Expected result: authenticated session and successful RLS resolver query via `/auth/admin` wrapper path.
 
-Common mistake: using `client.auth` without configuring `serverAuth` or `appAuth`.
+Common mistake: providing both `apiKey` and `token` in `appAuth` (mutually exclusive). Browser login does not need `appAuth` at all.
 
 ### HTTP/protocol examples
 
 ```http
 POST /api/databases/appdb/auth/signin
-Authorization: Bearer mk_anon_xxxxx
 Content-Type: application/json
 
 {
@@ -605,7 +605,7 @@ Recommended tuning/operation sequence:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `AUTH_API_KEY_REQUIRED` on app auth endpoint | Request in app-auth scope did not use API key bearer | Send anon/service API key in `Authorization: Bearer` for app auth routes |
+| `AUTH_API_KEY_REQUIRED` on app auth endpoint | Hitting a pre-BL-355 server, or a non-public `/auth/*` path | Public signup/signin/refresh/password-reset are keyless. `/me`, `/signout`, `/mfa/*` still need a user JWT (`AUTH_TOKEN_MISSING` if absent). |
 | Sign-in keeps failing then returns account locked | Exceeded lockout threshold | Wait lockout duration or re-enable user via admin API |
 | User has new grants but behavior still old briefly | Cached permission context not yet refreshed for session | Trigger next request and verify `_permission_version` increment happened |
 | `auth-db-pls` table rejects write unexpectedly | Grant exists but `access_level` is read-only or partition key not granted | Update partition grant to proper key and `write` access level |

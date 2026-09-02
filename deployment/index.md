@@ -21,4 +21,4 @@ See [Getting Started — Server Mode](../getting-started/#4-server-mode--standal
 
 **Configuration:** [Server configuration](../guides/server-configuration.md) — precedence among install bootstrap, env vars, CLI flags, optional appsettings, runtime API, and what survives restart.
 
-The guide below covers Kubernetes and Helm in depth.
+The guide below covers Kubernetes and Helm in depth. If an Ingress, Service `LoadBalancer`, or other reverse proxy terminates TLS in front of the chart, configure trusted proxies or **per-IP rate limits, lockout attribution, and audit-log client IPs are wrong** — [Behind a reverse proxy](reverse-proxy.md).

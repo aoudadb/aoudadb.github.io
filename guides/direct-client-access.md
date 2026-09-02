@@ -30,7 +30,7 @@ Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#
 | Opt a table into browser reads | [`dataPlaneAccess`](#table-opt-in-fail-closed) |
 | Opt an MQ result table into browser reads | [`dataPlaneAccess` on MQ entries](#table-opt-in-fail-closed) |
 | Connect Studio or Hub | [Studio and Hub](#studio-and-hub) |
-| Put TLS/WAF in front | [Topology](#topology-a-thin-edge) |
+| Put TLS/WAF in front | [Topology](#topology-a-thin-edge) · [Behind a reverse proxy](../deployment/reverse-proxy.md) |
 | Sign users in from a browser | [Authentication that exists](#authentication-that-exists) |
 | See what a browser-tier read cannot do | [Browser-tier read limits](browser-tier-read-limits.md) |
 
@@ -60,7 +60,7 @@ Environment: `Aouda__Listeners__DataPlane__Bind=0.0.0.0:5434` and `Aouda__Listen
 
 If `DataPlane:Bind` is **unset**, behaviour equals today: one listener, current CORS, **no** `mk_pub_*` acceptance. The fail-closed table default (`dataPlaneAccess: false`) only affects browser-tier credentials on a data-plane listener that is actually listening.
 
-**CORS is per listener.** Admin defaults include Studio / Hub origins (`https://studio.aouda.com`, `https://hub.aouda.dev`, plus `Aouda:StudioOrigin`) unless `Aouda:CorsOrigins` replaces them. Data-plane origins come **only** from `Aouda:Listeners:DataPlane:CorsOrigins` (empty = no browser origins). Do not put the Studio origin on the data-plane.
+**CORS is per listener.** Admin defaults include Studio / Hub origins (`https://studio.aouda.com`, `https://hub.aouda.dev`, plus `Aouda:StudioOrigin`) unless `Aouda:CorsOrigins` replaces them. Data-plane origins come **only** from `Aouda:Listeners:DataPlane:CorsOrigins` (empty = no browser origins). The setting accepts `*` — that lets **any** website's JavaScript call public auth POSTs and, after login, any data-plane route the JWT can reach. Prefer an explicit origin list. Do not put the Studio origin on the data-plane.
 
 The profile is tagged on the **Kestrel connection**. There is no request header you can send to switch profiles.
 
@@ -78,7 +78,7 @@ Listed named-artifact routes still **do not enumerate names**. On the data-plane
 
 | Prefix | May call | Listener |
 |---|---|---|
-| `mk_anon_` | Signup, signin, refresh, OIDC only | Data-plane (auth). **Denied on data routes** (404 `NAMED_QUERY_NOT_FOUND` on listed named-artifact execute, not 403). Keep it that way. |
+| `mk_anon_` | Leftover; public auth POSTs ignore it | Data-plane (optional on auth). **Denied on data routes** (404 `NAMED_QUERY_NOT_FOUND` on listed named-artifact execute, not 403). Keep it that way. |
 | `mk_pub_` | Named query / mutation / subscribe (plus auth) | **Data-plane only.** On admin → `401 AUTH_KEY_LISTENER_MISMATCH`. |
 | `mk_svc_` | Full data + admin (per RBAC) | Either; **ad-hoc query only on admin** (data-plane `/query` is 404 for everyone). |
 | User JWT (end user) | Same as `mk_pub_*` | Data-plane |
@@ -129,7 +129,7 @@ A named query over a non-opted-in table is still **allowed to apply** — operat
 
 **Runtime (data-plane only):** per-identity sliding window, default 60 permits / 60 seconds. One permit per execute, per **batch envelope**, per mutation execute, per subscribe attempt. Exceed → `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After`. Disabled on admin-only deployments. Config: `Aouda:IdentityQuota:PermitLimit` / `WindowSeconds` / `Enabled`.
 
-Signup 5/min and signin 20/min per IP still apply.
+Signup 5/min and signin 20/min per IP still apply. An optional failed-signin ceiling (`Aouda:Auth:FailedSigninCeiling`, off by default) caps **failed** sign-ins per auth database — the attack shape per-IP limiting cannot see. It is per process. A tripped ceiling is a full login outage on that database until the window drains (correct passwords included); see [Auth reference](../auth/reference.md#rate-limiting).
 
 ---
 
@@ -157,16 +157,18 @@ Studio  ──TLS──►              Aouda admin      :5433
 Hub     ──────────────────►  Aouda admin      :5433
 ```
 
+**Trusted proxies.** The edge is the TCP peer. Until you set `Aouda:ForwardedHeaders`, per-IP rate limits, lockout attribution, and `_audit_log` client IPs are the proxy's address — one global bucket. Configure the feature and name the proxies; see [Behind a reverse proxy](../deployment/reverse-proxy.md).
+
 ---
 
 ## Authentication that exists
 
 Application end users today:
 
-1. Browser holds `mk_anon_` (auth endpoints) or `mk_pub_` (auth + named data).
-2. `POST /api/databases/{db}/auth/signup` or `/signin` with that key → user JWT + refresh token.
-3. Subsequent named-query calls: `Authorization: Bearer <user JWT>` on the **data-plane**.
-4. `POST …/auth/refresh` when the access token expires.
+1. Browser holds the **data-plane URL and database name** — no `mk_anon_*`. CORS on `Aouda:Listeners:DataPlane:CorsOrigins` is the origin control (unset = no browser origins; `*` = any origin can call public auth POSTs — prefer an explicit list).
+2. `POST /api/databases/{db}/auth/signup` or `/signin` with **no API key** → user JWT + refresh token. Signup is **opt-in** (`allowSelfSignup`, default off) and grants `db_writer` (`read,write,delete`) on `{db}` unless `selfSignupRole` is set. Enable via `PUT …/auth/admin/signup-settings` or create-database `allowSelfSignup`. Password reset can send email unauthenticated at 20/min/IP; `request-password-reset` does not disclose whether the account exists.
+3. Subsequent named-query calls: `Authorization: Bearer <user JWT>` on the **data-plane**. Pre-auth named queries still need `mk_pub_*` (BL-356).
+4. `POST …/auth/refresh` when the access token expires (also keyless).
 5. WebSocket: first message `auth` with the JWT; later `re_auth` with the refreshed token so subscriptions survive. Failed `re_auth` closes the session.
 
 ### What is not shipped
@@ -175,7 +177,7 @@ Application end users today:
 
 OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. That is not a federated login.
 
-Until PKCE exists, the supported browser pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)), or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
+Until PKCE exists, the supported browser pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)) with **no API key**, or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
 
 The **application** holds the consistency token (cookie or header **you** name). The SDK captures `X-Aouda-Token` in memory and **never** `Set-Cookie`. Recreating the client without a shared store loses read-your-writes. See [Freshness](freshness.md).
 
