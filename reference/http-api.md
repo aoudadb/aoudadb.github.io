@@ -232,7 +232,7 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/me` | PATCH | Bearer JWT | Update profile metadata |
 | `/api/auth/password` | PUT | Bearer JWT | Change password |
 | `/api/auth/admin/users` | GET | Bearer JWT (`db_admin`) | List server users |
-| `/api/auth/admin/users/{id}` | GET/PATCH | Bearer JWT (`db_admin`) | Get/update user |
+| `/api/auth/admin/users/{id}` | GET/PATCH/DELETE | Bearer JWT (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
 | `/api/auth/admin/users/{id}/disable` | POST | Bearer JWT (`db_admin`) | Disable user |
 | `/api/auth/admin/users/{id}/enable` | POST | Bearer JWT (`db_admin`) | Enable user |
 | `/api/auth/admin/roles` | GET/POST | Bearer JWT (`db_admin`) | List/create roles |
@@ -297,7 +297,7 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
 | `/api/databases/{db}/auth/admin/users` | GET | API key (`db_admin`) | List app users |
 | `/api/databases/{db}/auth/admin/users` | POST | API key (`db_admin`) | Create user; supports `sendInviteEmail` + `forcePasswordChange` flags |
-| `/api/databases/{db}/auth/admin/users/{id}` | GET/PATCH | API key (`db_admin`) | Get/update user |
+| `/api/databases/{db}/auth/admin/users/{id}` | GET/PATCH/DELETE | API key (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
 | `/api/databases/{db}/auth/admin/users/{id}/password` | PUT | API key (`db_admin`) | Admin override of user's password (no current-password check); optional `forcePasswordChange` |
 | `/api/databases/{db}/auth/admin/users/{id}/invite` | POST | API key (`db_admin`) | (Re-)send invite email with OTP; invalidates previous unused tokens |
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user |
