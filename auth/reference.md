@@ -182,6 +182,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users` | POST | Create a user — password optional; omit to create invite-pending account |
 | `.../admin/users/{id}` | GET | Get user details |
 | `.../admin/users/{id}` | PATCH | Update user |
+| `.../admin/users/{id}` | DELETE | Delete user by id (204; 404 if missing). Cascades that user's roles, claims, grants, credentials, sessions, tokens, MFA, and API keys. Leaves `_audit_log`. Use this to remove extra rows when a database still has duplicate emails. |
 | `.../admin/users/{id}/disable` | POST | Disable user |
 | `.../admin/users/{id}/enable` | POST | Enable user |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
@@ -218,6 +219,8 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
   "totalCount": 42
 }
 ```
+
+Email is unique per auth database (normalized: trim + lower-case). Duplicate `_users` rows for the same email are an operator-repair case via `DELETE .../admin/users/{id}`, not a supported sign-in mode.
 
 **`POST .../admin/users`** — Returns `201 Created` on success, `409 Conflict` if email already exists.
 
