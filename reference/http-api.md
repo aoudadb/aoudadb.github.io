@@ -290,7 +290,7 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
 | `/api/databases/{db}/auth/request-password-reset` | POST | API key (Layer 1) | Request 6-digit OTP emailed to user; always 200 (anti-enumeration) |
 | `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set |
-| `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor |
+| `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor. Phone: 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; delete existing factor then re-enroll to replace number |
 | `/api/databases/{db}/auth/mfa/challenge` | POST | User JWT | Create MFA challenge; sends SMS OTP for phone factors |
 | `/api/databases/{db}/auth/mfa/verify` | POST | User JWT | Submit OTP/TOTP/backup code; returns `aal2` token pair on success |
 | `/api/databases/{db}/auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
@@ -300,7 +300,7 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/admin/users/{id}` | GET/PATCH/DELETE | API key (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
 | `/api/databases/{db}/auth/admin/users/{id}/password` | PUT | API key (`db_admin`) | Admin override of user's password (no current-password check); optional `forcePasswordChange` |
 | `/api/databases/{db}/auth/admin/users/{id}/invite` | POST | API key (`db_admin`) | (Re-)send invite email with OTP; invalidates previous unused tokens |
-| `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user |
+| `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user. 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor is already active or pending; existing factor id in `detail` |
 | `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys |
 | `/api/databases/{db}/auth/admin/api-keys/{id}` | DELETE | API key (`db_admin`) | Revoke custom API key |
 | `/api/databases/{db}/auth/admin/signup-settings` | GET/PUT | API key (`db_admin`) | Read/write `allowSelfSignup` and `selfSignupRole` (null → `db_writer`) |

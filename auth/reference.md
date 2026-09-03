@@ -123,7 +123,7 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/password` | PUT | User JWT | Change password |
 | `.../auth/request-password-reset` | POST | API key (anon or higher) | Request a 6-digit OTP emailed to the user; always returns 200 |
 | `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success |
-| `.../auth/mfa/enroll` | POST | User JWT | Enrol a TOTP or phone MFA factor |
+| `.../auth/mfa/enroll` | POST | User JWT | Enrol a TOTP or phone MFA factor. Phone enrol is idempotent per-user: a second call returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists (same or different number). To replace a number: `DELETE .../auth/mfa/factors/{id}` then enrol again |
 | `.../auth/mfa/challenge` | POST | User JWT | Create a challenge for an enrolled factor; sends SMS for phone factors |
 | `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success |
 | `.../auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
@@ -200,7 +200,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/signup-settings` | GET/PUT | Read/write self-service signup (`allowSelfSignup`, `selfSignupRole`; null role → `db_writer`) |
 | `.../admin/users/{id}/password` | PUT | Admin override of a user's password — no current-password check; optionally set `forcePasswordChange` |
 | `.../admin/users/{id}/invite` | POST | (Re-)send an invite email with OTP to set a password; invalidates previous unused tokens |
-| `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user |
+| `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user. Returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; existing factor id in `detail` |
 
 #### Response Bodies
 
@@ -419,6 +419,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_MFA_FACTOR_NOT_FOUND` | 404 | MFA factor ID does not exist or belongs to another user | Verify the `factorId`; re-fetch factor list via `GET .../auth/mfa/factors` |
+| `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | 409 | A phone factor is already active or pending for this user. The existing factor id is in the `detail` field. | Use the existing factor, or `DELETE .../auth/mfa/factors/{id}` then enroll the new number |
 | `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user | Show "Invalid code"; prompt user to try again or re-request a challenge |
 | `AUTH_MFA_CHALLENGE_EXPIRED` | 400 | Challenge window has passed (10 minutes for both TOTP and phone) | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
 | `AUTH_MFA_CHALLENGE_EXHAUSTED` | 400 | Five consecutive wrong codes on the same challenge; challenge is permanently invalid | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
