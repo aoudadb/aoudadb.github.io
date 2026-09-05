@@ -110,6 +110,12 @@ Scope boundaries:
 | Client `AppendBatchSize` | `50000` | Client sends up to 50K rows per append, then honors server lower cap if returned. |
 | Client `WriteConcern` | `Acknowledged` | Maps to server `acknowledged` commit concern request. |
 | Engine / client `IdentityInsert` | `false` | Default bulk-load path does **not** allocate autoIncrement IDs and does **not** bump the counter. Set `true` for seed/reseed with explicit IDs (including `0`); counter advances only after successful commit. |
+| Server `Aouda:BulkLoad:TargetSegmentBytes` | `67108864` (64 MB) | Accrued bytes at which a bucket seals into a segment — matches every other segment the engine writes. |
+| Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, clamped to **[8 MB, 256 MB]**. |
+| Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. |
+| Cluster `Aouda:BulkLoad:EmitFramesOnSingleNode` | `false` | On a detected single-node topology, `LogShipSegments` elides `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames by default — no per-segment re-read/hash. `true` restores frames on a single node. |
+| Cluster `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | `64` | Segment count above which, combined with a low median rows/segment, a job's commit logs one advisory warning. See `2.13`. |
+| Cluster `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | `1000` | Median rows/segment below which the same warning can fire. |
 
 ---
 
@@ -232,6 +238,51 @@ Scope boundaries:
 3. Multi-table jobs require `_table` discriminator on append payload rows.
 4. `ForceLogShipBulkLoad=true` disallows skip/snapshot replication modes.
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
+
+### Sizing a session: fewer, longer, one commit
+
+> **Fewer, longer sessions produce well-sized segments. Many short sessions do not.**
+
+The `:commit` boundary does not decide segment size by itself — the engine seals a bucket into a segment on its own triggers (`MaxRowsPerSegment`, `TargetSegmentBytes`, or the job's ingest buffer budget), and the end-of-job drain writes whatever remains, however small. A client that batches every 10 000 rows across 250 partitions and commits after each batch forces a full drain every time, producing 250 segments of ~40 rows each — every commit, forever. The batching a client chooses still sets the ceiling: **a session cannot produce a segment larger than the rows it was given.**
+
+**Do this:**
+- Open **one** session (`:begin`), stream the whole migration through repeated `:append` calls, and `:commit` **once** at the end.
+- Size `:append` batches for the network, not for segment size — 10 000–100 000 rows per call is fine.
+- Track your upstream cursor at `rowsDurablyCommitted`, never at rows appended to the buffer.
+
+**Not this:**
+- One `:begin` / `:append` / `:commit` cycle per batch. Each commit forces a full drain, so this is the shape that produces tiny segments regardless of anything the engine does.
+
+Segment size is bounded from above by roughly:
+
+```
+min(TargetSegmentBytes, IngestBufferBudgetBytes / activeBuckets)
+```
+
+so a table with hundreds of live partition-key directories cannot produce large segments under any buffer budget a server can afford — see [Choosing partition storage mode](#choosing-partition-storage-mode) below. Partition storage mode is a **prerequisite** for good segment sizing, not an optimization layered on top of it.
+
+The worked example (a table partitioned on two columns with ~250 distinct value pairs):
+
+| Shape | Segments per job | Median rows/segment |
+|---|---|---|
+| Commit every 10 k rows, `Dedicated` storage | ~250 | ~40 |
+| One session, `Auto` storage (16 shared buckets) | ≤ 16 | ~625 |
+| One session, 1 000 000 rows | 22 | 54 000 |
+
+On top of segment shape, this engine also removes a per-segment fixed cost that shape alone cannot: on a detected single-node deployment, `LogShipSegments`'s default no longer re-reads and BLAKE3-hashes every written segment file or appends a WAL frame for it. Measured on the first worked row above collapsed to `Auto`/16 buckets (250 partitions × 40 rows, 16 sealed segments): `finalizeMs` dropped from 13 ms to 0 ms and `walMs` from 2 ms to 0 ms (`walPosition` becomes `-1` — the same shape `SkipReplication` already used). See [Single-Node Deployment](single-node-deployment.md) for the durability trade-off that default makes.
+
+For the engineering detail behind these triggers and the ingest buffer budget's own formula, see the private companion guide `docs/dev/BulkLoad-Ingest-Sizing-Guide.md` in the engine repository.
+
+### Choosing partition storage mode
+
+Ask one question before creating a partitioned table: **will any single partition key, on its own, plausibly reach 10 million rows or 1 GB?**
+
+- **No** (the common case — a few hundred to a few thousand distinct key values, each holding a modest share of the table): leave `partitionStorage` unset. A declaratively-managed table defaults to `Auto`, which starts every key in a shared bucket (16 by default) and promotes an individual key to its own dedicated directory only if it actually crosses that threshold.
+- **Yes** (a small number of keys, each independently huge — e.g. partitioning by tenant for a handful of enterprise tenants who each hold the whole table's data): declare `partitionStorage: "Dedicated"` explicitly. Starting such a key in a shared bucket only to have it promote out immediately is pure overhead.
+
+**The legacy-table exception.** `Auto` is the default only for a table created (or re-applied) through declarative schema apply after this default was introduced. A table that predates it keeps its original, implicit `Dedicated` storage — nothing changes it automatically, and there is no automated migration tool yet. If a table stuck in `Dedicated` is producing the tiny-segment shape above, the supported route today is manual: export the table's data, drop it, re-create it **under a different name** with the desired `partitionStorage`, and reload. See the private engineering guide's own migration-route section for the exact steps and a known caveat about reusing the dropped table's name.
+
+See [Partitioning and Multi-tenancy](partitioning.md) for the full storage-mode reference (`Auto`/`Dedicated`/`Shared`, promotion thresholds, routing).
 
 ---
 
@@ -493,6 +544,17 @@ Quick-answer matrix:
 | Why is resumed cursor not advancing during append? | Current server session cursor update is commit-centric in Stage 1. |
 | Why was replication mode rejected? | Cluster has `ForceLogShipBulkLoad=true`. |
 
+### Reading `:commit completed` and the job-shape warning
+
+Every `:commit` logs a `BulkLoad :commit completed …` line carrying: `segments`, `partitions`, `segmentWriteMs`, `finalizeMs`, `walMs`, `catalogSaveMs`, `medianRowsPerSegment`, `p95RowsPerSegment`, `minRowsPerSegment`, and `bufferHighWaterRows`. If a table's segment shape quietly regresses, `medianRowsPerSegment` and `bufferHighWaterRows` are where it shows first.
+
+A job whose segment count is high and whose median rows/segment is low also logs one additional, advisory `Warning` — never more than one per job, and it never blocks or delays the commit (a storage-mode consequence is never a hard failure). It names one of two likely causes:
+
+- A destination table in `Dedicated` partition storage with many live partition keys — see [Choosing partition storage mode](#choosing-partition-storage-mode).
+- Many short `:begin`/`:append`/`:commit` cycles instead of one long session — see [Sizing a session](#sizing-a-session-fewer-longer-one-commit).
+
+Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`, default `64` segments; `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold`, default `1000` rows) — see `2.3`.
+
 ---
 
 ## 2.14 Troubleshooting by symptom
@@ -560,6 +622,8 @@ Quick-answer matrix:
 - `docs/tasks/P20-COMPLETION.md`
 - `docs/tasks/BL-COMPLETION.md`
 - `docs/decisions/0030-bulk-load-replication.md`
+- `docs/dev/BulkLoad-Ingest-Sizing-Guide.md` (engine repo — engineering-detail companion to `2.7`'s sizing subsections)
+- `docs/tasks/BL/OutOfTheBox-Ingest-Overview.md`, `docs/tasks/BL/OutOfTheBox-Ingest-S05-Commit-Cost.md`, `docs/tasks/BL/OutOfTheBox-Ingest-S06-Fanout-Guardrails.md` (engine repo — single-node frame elision and job-shape guardrail sessions)
 - `src/Aouda.Engine.Api/AoudaEngine.BulkLoad.cs`
 - `src/Aouda.Engine.Api/BulkLoadOptions.cs`
 - `src/Aouda.Engine.Storage/BulkLoad/BulkLoadCoordinator.cs`

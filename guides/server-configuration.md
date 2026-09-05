@@ -29,7 +29,7 @@ Aouda settings come from several layers. Think of them as separate concerns:
 
 **Install directory vs data directory:** users may copy binaries to any folder (`C:\Program Files\Aouda`, `D:\Apps\Aouda`, `/opt/aouda`, …). That choice does **not** determine where databases live. The **data directory** (chosen at install) holds all persistent engine state.
 
-The default memory budget is a **fraction of detected RAM** (about 70% of host or cgroup memory), not a fixed 2 GiB. You can resize it without a restart from Studio (Settings → Server), `PATCH /admin/config`, or `aouda budget`. Runtime PATCH values do not persist across restart unless you also set env, CLI, or appsettings.
+The default memory budget is a **fraction of detected RAM**, not a fixed 2 GiB: **70%** of host or cgroup memory when detection found a real cgroup isolation boundary, **40%** when it fell back to physical RAM. You can resize it without a restart from Studio (Settings → Server), `PATCH /admin/config`, or `aouda budget`. Runtime PATCH values do not persist across restart unless you also set env, CLI, or appsettings. See the [Defaults Reference](defaults-reference.md) for the full derivation, worked at several host sizes.
 
 ---
 
@@ -245,6 +245,7 @@ The Windows **release publish output does not include** `appsettings.json`. Defa
 
 ## Related docs
 
+- [Defaults Reference](defaults-reference.md) — every derived default (memory, bulk load, partitioning), worked at several host sizes
 - [Server multi-database](server-multi-database.md) — per-database config keys and API surface
 - [Studio guide — Aouda.Setup](studio.md#12-aoudasetup-installer) — interactive install sequence
 - [Deployment](../deployment/) — Docker, Kubernetes, Windows Service
