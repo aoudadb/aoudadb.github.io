@@ -1415,6 +1415,7 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
   "columns": [
     {
       "name": "id",
+      "id": 1,
       "type": "Int64",
       "isNullable": false,
       "isAutoIncrement": true,
@@ -1422,6 +1423,7 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
     },
     {
       "name": "customer_id",
+      "id": 2,
       "type": "Int64",
       "isNullable": false,
       "partitionKeyOrder": 1,
@@ -1433,6 +1435,7 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
     },
     {
       "name": "order_date",
+      "id": 3,
       "type": "Timestamp",
       "isNullable": false,
       "clusterOrder": 1
@@ -1462,6 +1465,28 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
 | `clusterColumns` | string[] | Column names for cluster ordering, in order |
 | `indexes` | array | Secondary indexes (placeholder for future) |
 | `relationships` | array? | Relationships to other tables (both declared and inferred) |
+
+**Column fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Column name — what request and response bodies use |
+| `id` | number | **Catalog column id.** Stable for the life of the column, unique within the table, assigned in creation order and never reused after a drop. Absent on servers older than the release that added it (deserializes to `0`, never a valid id). |
+| `type` | string | Aouda data type |
+| `isNullable` | bool | Whether the column accepts null |
+| `isAutoIncrement` | bool? | Omitted when false |
+| `primaryKeyOrder` / `partitionKeyOrder` / `clusterOrder` | number? | 1-based position in the respective key; omitted when not part of it |
+| `partitionFunction` | string? | Partition function, when the column is part of a partition key |
+| `reference` | object? | Foreign-key target (`targetTable`, `targetColumn`, `source`) |
+| `encoder` | string? | Explicit encoder; omitted when `Auto` |
+
+**Why `id` matters.** Storage, the write-ahead log and engine diagnostics identify columns by id, not
+by name — an engine message can name `id=34` where the schema shows only names. A column that is
+dropped and re-added under the **same name** gets a **new** id, so `id` is what tells you whether the
+column you are looking at is the same column the engine is talking about. Note that the response
+carries names and keys but not the declarative `derived` expression or check constraints; for the
+full declarative document use `GET /api/databases/{db}/schema/export` (see
+[Schema management](../guides/schema.md)).
 
 #### `GET /api/schema/relationships`
 

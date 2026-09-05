@@ -272,6 +272,25 @@ Key anchors:
 4. If at least one change applied and not dry-run, history entry is recorded.
 5. Caller receives `SchemaApplyResponse` with result summary and optional `historyId`.
 
+> **A declarative apply drops by omission.** The diff is computed against the *whole* catalog, so any
+> column the table currently has and your `aouda.schema.json` does not list is planned as a
+> **`DropColumn`** — and executed when `allowDestructive: true`. Nobody has to ask for a drop: deleting
+> a field from the schema file, renaming it in a way the differ does not recognise as a rename, or
+> applying an **older** copy of the file (a rollback, a stale artifact baked into a deploy image, a
+> second service applying its own version) is enough. The same holds for whole tables.
+>
+> This matters most in pipelines that hard-set `allowDestructive: true` for an environment. Two
+> habits make it safe:
+>
+> - Run `POST …/schema/diff` (or `dryRun: true`) first and read the plan. `DropColumn` / `DropTable`
+>   entries are listed explicitly.
+> - Apply exactly one version of a file per database. If two things apply schemas to the same
+>   database, an older one will silently undo the newer one's columns.
+>
+> A dropped column's data is not recoverable from the catalog: re-adding a column of the same name
+> creates a **new** column (new `id`, see [`GET …/tables/{name}/schema`](../reference/http-api.md)),
+> backfilled with its default for existing rows.
+
 ### Walk-through C: Add-column on existing cold segments
 
 1. Table column add request enters `TablesController`.

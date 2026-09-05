@@ -13,6 +13,10 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A destructive schema apply no longer leaves the table unwritable (BL-382).** After an apply with `allowDestructive: true` dropped a column from a table the server had already written to, every later insert into that table returned **HTTP 500** (`Pending column {name} (id=N) has 0 rows …`) until the server process was restarted. Queries were unaffected, and restarting the client application did not help. Fixed, together with the same class of failure when a schema apply runs concurrently with in-flight writes (`Collection was modified`, `Cannot add column while a transaction is active`, `Unknown column N`).
+- **`GET …/tables/{table}/schema` reports each column's catalog `id`.** Engine diagnostics identify columns by id, and a column dropped and re-added under the same name gets a new one. See [HTTP API](reference/http-api.md).
+- **Schema guide: a declarative apply drops by omission.** [Schema management](guides/schema.md) now spells out that any column in the catalog but not in your `aouda.schema.json` is planned as a `DropColumn` — including when an older copy of the file is applied — and how to avoid it.
+
 ## 0.1.19 — 2026-09-04
 
 **Memory governor, Timestamp MQ, table row counts, phone MFA.** Server **0.1.19**, `Aouda.Client` **0.1.19**, `@aouda/client` **0.1.18** (unchanged), Studio **0.0.23**. See [Compatibility](clients/compatibility.md).
