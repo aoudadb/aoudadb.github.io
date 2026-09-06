@@ -111,7 +111,8 @@ Scope boundaries:
 | Client `WriteConcern` | `Acknowledged` | Maps to server `acknowledged` commit concern request. |
 | Engine / client `IdentityInsert` | `false` | Default bulk-load path does **not** allocate autoIncrement IDs and does **not** bump the counter. Set `true` for seed/reseed with explicit IDs (including `0`); counter advances only after successful commit. |
 | Server `Aouda:BulkLoad:TargetSegmentBytes` | `67108864` (64 MB) | Accrued bytes at which a bucket seals into a segment — matches every other segment the engine writes. |
-| Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, clamped to **[8 MB, 256 MB]**. |
+| Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, floored at 8 MB. As of P45, the ceiling is no longer a fixed 256 MB — it grows with the server's own memory governor (shared with other concurrent loads and background work), so a well-provisioned host's fraction actually means something. Nothing changes on a small host, where `0.04 × governed` was already under 256 MB. |
+| Server `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` | `0` (derive, per above) | Set to a specific byte count to pin the ceiling explicitly — `268435456` reproduces the pre-P45 fixed 256 MB behavior exactly. |
 | Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. |
 | Cluster `Aouda:BulkLoad:EmitFramesOnSingleNode` | `false` | On a detected single-node topology, `LogShipSegments` elides `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames by default — no per-segment re-read/hash. `true` restores frames on a single node. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | `64` | Segment count above which, combined with a low median rows/segment, a job's commit logs one advisory warning. See `2.13`. |
@@ -272,6 +273,12 @@ The worked example (a table partitioned on two columns with ~250 distinct value 
 On top of segment shape, this engine also removes a per-segment fixed cost that shape alone cannot: on a detected single-node deployment, `LogShipSegments`'s default no longer re-reads and BLAKE3-hashes every written segment file or appends a WAL frame for it. Measured on the first worked row above collapsed to `Auto`/16 buckets (250 partitions × 40 rows, 16 sealed segments): `finalizeMs` dropped from 13 ms to 0 ms and `walMs` from 2 ms to 0 ms (`walPosition` becomes `-1` — the same shape `SkipReplication` already used). See [Single-Node Deployment](single-node-deployment.md) for the durability trade-off that default makes.
 
 For the engineering detail behind these triggers and the ingest buffer budget's own formula, see the private companion guide `docs/dev/BulkLoad-Ingest-Sizing-Guide.md` in the engine repository.
+
+**This page is about bulk load specifically — the ordinary (row-by-row) insert path has its own shape
+story.** As of P45, a table fed continuous streaming writes no longer accumulates small segments forever:
+a background process merges and re-clusters small cold segments as steady-state maintenance, not as an
+occasional repair. See [Partitioning and Multi-tenancy](partitioning.md#choosing-initialbucketcount-at-scale-p45)
+for how segment shape and bucket count interact for that path.
 
 ### Choosing partition storage mode
 
@@ -547,6 +554,14 @@ Quick-answer matrix:
 ### Reading `:commit completed` and the job-shape warning
 
 Every `:commit` logs a `BulkLoad :commit completed …` line carrying: `segments`, `partitions`, `segmentWriteMs`, `finalizeMs`, `walMs`, `catalogSaveMs`, `medianRowsPerSegment`, `p95RowsPerSegment`, `minRowsPerSegment`, and `bufferHighWaterRows`. If a table's segment shape quietly regresses, `medianRowsPerSegment` and `bufferHighWaterRows` are where it shows first.
+
+**(P45)** Six fields are appended after the ones above — `SpillRunsCreated`, `SpillRunsMerged`,
+`SpillWriteMs`, `SpillMergeMs`, `SpillRunBytesWritten`, `SpillBytesWritten` — reporting the job's
+spill-and-merge activity when its ingest buffer budget was exceeded (see [Choosing partition storage
+mode](#choosing-partition-storage-mode) and the budget formula above). The ten original fields listed
+above are unchanged in name, order and meaning. A job that never reaches its ingest-buffer budget writes
+no runs and pays no merge cost, so all six spill fields are zero — the common case on a well-provisioned
+host.
 
 A job whose segment count is high and whose median rows/segment is low also logs one additional, advisory `Warning` — never more than one per job, and it never blocks or delays the commit (a storage-mode consequence is never a hard failure). It names one of two likely causes:
 

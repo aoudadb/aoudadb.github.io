@@ -8,12 +8,12 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-05-22
+Last updated: 2026-09-06
 
-Coverage phases: P4, P6, P7, P12, P14
-Primary task folders: `docs/tasks/P4/`, `docs/tasks/P6/`, `docs/tasks/P7/`, `docs/tasks/P12/`, `docs/tasks/P14/`
+Coverage phases: P4, P6, P7, P12, P14, P45
+Primary task folders: `docs/tasks/P4/`, `docs/tasks/P6/`, `docs/tasks/P7/`, `docs/tasks/P12/`, `docs/tasks/P14/`, `docs/tasks/P45/`
 Primary ADRs: `docs/decisions/0009-partitioning-multitenancy.md`, `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
-Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Auth-And-Authorization.md`, `docs/dev/Functionality-Storage-And-Persistence.md`
+Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Auth-And-Authorization.md`, `docs/dev/Functionality-Storage-And-Persistence.md`, `docs/tasks/P45/P45-PruningAndShape-Overview.md`, `docs/dev/Partitioning-Ingest-And-Pruning-Analysis.md` (both in the `aouda` engine repository)
 
 ## Start Here
 
@@ -148,9 +148,10 @@ If you create a table/database without tuning partition or multidb options:
 |---|---|---|---|
 | `PartitionOptions.StorageMode` | `Auto` | `Auto`, `Dedicated`, `Shared` | Starts shared, can promote heavy partitions to dedicated paths |
 | `PartitionOptions.RequirePartitionFilter` | `true` | `true`, `false` | Safer and usually faster partitioned-table queries by default |
-| `PartitionOptions.PromotionRowThreshold` | `10_000_000` | Non-negative integer | Auto-promotion can trigger at high row volume |
-| `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Non-negative integer (bytes) | Auto-promotion can trigger at high byte volume |
-| `PartitionOptions.InitialBucketCount` | `16` | Integer ≥ 1 | Shared-partition hashing starts with 16 buckets |
+| `PartitionOptions.PromotionRowThreshold` | `10_000_000` | Non-negative integer | Auto-promotion can trigger at high row volume. Declarable on the schema (`promotionRowThreshold`) and mutable after table creation. |
+| `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Non-negative integer (bytes) | Auto-promotion can trigger at high byte volume. Declarable on the schema (`promotionByteThreshold`) and mutable after table creation. |
+| `PartitionOptions.InitialBucketCount` | `16` when every partition-key column carries a bounded time-truncation `partitionFunction`; **`128`** otherwise (P45) | Integer ≥ 1 | Shared-partition hashing starts with this many buckets. Declarable on the schema (`initialBucketCount`, `Auto`/`Shared` tables only) but **fixed for the life of the table** — see [Choosing `initialBucketCount` at scale](#choosing-initialbucketcount-at-scale-p45). |
+| `TableOptions.PkUniqueness` | `Strict` | `Strict`, `Recent`, `BestEffort` | Not a `PartitionOptions` field, but declarable on the schema (`pkUniqueness`, any table) and mutable after creation as of P45 — previously only reachable per bulk-load job. |
 | `PartitionOptions.LateArrivalPolicy` | `Delta` | `Delta`, `Reject`, `Inline` | Late-arriving rows are routed to delta path |
 | `PartitionOptions.LateArrivalThreshold` | `1 hour` | Any positive `TimeSpan` | Defines "late" cutoff when policy needs it |
 | `MigrationOptions.Strategy` | `None` | `None`, `Background`, `Eager`, `Blocking` | Retrospective migration is off unless configured |
@@ -178,6 +179,38 @@ On a partitioned table the guard defaults **on**. A query must include `eq` or `
 Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Error `PARTITION_FILTER_REQUIRED` names the **missing** columns and the satisfying operators.
 
 `crossPartitionAccess` is not a named-query field. Browser-tier alternatives: the watchlist `in` shape, auth-db-pls fan-out, or an MQ over the universe. Full page: [What a browser-tier read cannot do](browser-tier-read-limits.md#partition-filter-rule).
+
+### Partition and bucket pruning (P45)
+
+The rule above decides whether a query on a partitioned table is **allowed**. This section decides how
+much of the table it actually **reads**.
+
+As of P45, a query against a partitioned table eliminates every segment its predicate proves cannot
+match — *before* that segment is opened — whenever the predicate constrains the partition key with `eq`
+or `in` (including a constrained prefix of a composite partition key):
+
+- **This is exact, not a probabilistic narrowing.** A segment that is eliminated is a proven non-match,
+  not a low-probability one — the same guarantee whether the table is in `Dedicated` storage (one
+  directory per key) or `Auto`/`Shared` storage (a hash bucket shared by many keys).
+- **A range predicate (`gt`, `lt`, `between`, and similar) never eliminates a hash bucket.** Hashing
+  destroys the ordering a range comparison depends on, so a shared-bucket table gets no extra pruning from
+  a range condition on the partition key — this is a correctness property of hashing, not a current
+  limitation. Only an `eq`/`in`-constrained key can eliminate a bucket.
+- **A key that is promoted to its own dedicated directory while a query is already running is still
+  found.** Pruning always consults the table's current routing state, never a value fixed when the query
+  started.
+- This is a distinct mechanism from cluster-column pruning (physical column statistics on non-partition
+  columns) — the two operate on different inputs and are reported separately (see `2.13`).
+
+**What this changes in practice:** a single-key lookup on a partitioned table used to scan every segment
+in the table regardless of storage mode. It now reads only the one partition directory (`Dedicated`) or
+the one hash bucket (`Auto`/`Shared`) that key routes to — see [Choosing `initialBucketCount` at
+scale](#choosing-initialbucketcount-at-scale-p45) for how many segments that bucket actually holds, which
+is a separate question pruning alone does not answer.
+
+A query on a partitioned table that scans without this elimination firing — no partition-key filter, a
+range predicate on the partition key, or an unsupported predicate shape — logs one advisory warning naming
+the reason, unless the scan was an explicit, intentional cross-partition read (see `2.13`).
 
 
 ## 2.4 Availability status (implementation honesty)
@@ -235,6 +268,7 @@ Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Er
 | P7 | `P7-Task8-MultiDatabaseScenarios-Report.md` | Scenario validation of multi-db lifecycle, isolation, WAL recovery, memory budget, route behavior | Some scenario breadth noted as partial in report (table durability override limitations) | `docs/BACKLOG.md` |
 | P12 | Task G1/G2/G3/G4 reports | PLS flag + jwt-claim enforcement, admin cross-partition bypass, bypass rate limiting and query audit path | DML service-key bypass audit delivered in P14 BL-041 | `docs/tasks/P14/BL-041-ServiceKeyPlsBypassAudit-DML.md` |
 | P14 | `P14-ADRA-Tasks.md`, `P14-TaskS4-EnhancedPLS.md` | Unified enforcer dispatch and auth-db-pls permission-context path, safer OR/fan-out handling model | Ongoing ADRA hardening and full ecosystem parity | `docs/BACKLOG.md` BL-044 (+ future ADRA tasks) |
+| P45 | `docs/tasks/P45/P45-PruningAndShape-Overview.md` (sessions S01–S08) | Exact partition-key and hash-bucket segment pruning; cached segment discovery; background cold-segment coalescing so streaming-write segment shape stops decaying; declarable `initialBucketCount`/promotion thresholds/`pkUniqueness` with a cardinality-derived default; byte-sized page splitting for cheaper materialization | Bucket-count rebalancing of an existing table; partial-bucket accrual across a bulk-load `:commit` boundary | `docs/BACKLOG.md` BL-300 (manual migration route), BL-381 (deferred) |
 
 ## 2.6 Capability coverage matrix
 
@@ -261,6 +295,8 @@ Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Er
 | DML service-key bypass audit logging | Yes | No | No | `PartitionSecurityEnforcer.cs` + `QueryController.cs` + `TablesController.cs` + BL-041 task | Query and DML paths emit `service_key_pls_bypass` when applicable |
 | PLS helper support for `WhereClause.Groups` | No | Yes | No | `Messages.cs` + `PartitionSecurityEnforcer.cs` + BL-044 | Server has groups in protocol; helper logic not fully groups-aware |
 | TypeScript fluent cross-partition toggle | No | No | Yes | `../aouda-client-ts/src/query-builder.ts` | No `withCrossPartitionAccess()` in current TS query builder |
+| Partition-key and hash-bucket segment pruning | Yes | No | No | P45 overview + S02 report | Exact for `eq`/`in`/constrained composite prefix; never prunes a bucket on a range predicate |
+| Background cold-segment coalescing | Yes | No | No | P45 overview + S05 report | Steady-state, not a one-off repair; keeps streaming-write segment shape from decaying indefinitely |
 
 ## 2.7 Core concepts and mental model
 
@@ -281,6 +317,39 @@ Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Er
   - Route database must match body database for scoped request DTOs.
   - Partition enforcement decisions occur before table query execution.
   - Cross-partition bypasses are explicit and observable (audit/rate-limiter paths).
+
+### Choosing `initialBucketCount` at scale (P45)
+
+**Partition on a key only when every key will produce at least one full segment's worth of rows per load
+cycle.** Above that line, a per-key or per-bucket directory costs nothing extra and buys exact pruning.
+Below it, more directories just multiply how many small segments the table ends up with — no
+configuration recovers that, and it happens regardless of storage mode.
+
+This gives a hard ceiling on how many buckets are ever worth having, independent of query selectivity:
+
+> **A table cannot usefully have more buckets than its total row count divided by the row count of one
+> full segment.** Beyond that ceiling, a bucket holds a fraction of a segment no matter how the count is
+> set, and the small-segment problem returns — background coalescing (`2.13`) can tidy up *within* a
+> bucket, but it cannot merge across bucket boundaries.
+
+Worked examples, for a table with one high-cardinality identity column and everything else held constant:
+
+| Table shape | Rows per key | Right choice | Why |
+|---|---|---|---|
+| 200 million rows, 1 million distinct keys | ~200 | `Auto`/`Shared`, moderate bucket count | Each key is far short of a full segment. `Dedicated` (one directory per key) would produce a directory holding ~200 rows each — thousands of times smaller than a full segment, for every one of a million keys. |
+| 1 billion rows, 100 thousand distinct keys | ~10 000 | `Auto`/`Shared`, higher bucket count | Still well short of a full segment per key — `Dedicated` remains the wrong call — but the ceiling above now supports meaningfully more buckets than the previous shape before a bucket starts holding a fractional segment. |
+| 10 billion rows, 10 thousand distinct keys | ~1 000 000 | `Dedicated` | Each key is now, on its own, roughly one full segment. `Dedicated` and a well-chosen bucket count produce the same file count here — `Dedicated` is free at this crossover, and simpler. |
+| 1 000 billion rows, 1 thousand distinct keys | ~1 000 000 000 | `Dedicated` (storage mode stops being the interesting question) | Each key is now many full segments regardless of layout — the conversation moves to sharding, not partitioning. |
+
+**The default bucket count for a newly created `Auto`/`Shared` table now reflects this**, instead of a
+flat `16` regardless of shape: `16` when every partition-key column carries a bounded time-truncation
+`partitionFunction`, `128` otherwise. `128` is chosen to sit safely under the bucket ceiling above for a
+non-time-bounded key at realistic table sizes, without assuming a specific one — a customer whose table
+needs more (or fewer) states `initialBucketCount` explicitly (`2.10`). **This number cannot be changed
+after the table is created** — there is no bucket-count rebalancer yet, so pick it deliberately for a
+table you expect to grow into a high-cardinality shape. If a table is stuck with the wrong storage mode
+or bucket count today, see [Choosing partition storage mode](bulk-load.md#choosing-partition-storage-mode)
+for the supported (manual) migration route.
 
 ## 2.8 How Aouda implements it
 
@@ -393,11 +462,15 @@ Core modules:
 |---|---|---|---|---|---|
 | `CreateColumnRequest.partitionKeyOrder` | int? | `null` | positive ordinal | table create payload | Declares column as partition key and order in composite key |
 | `CreateTableRequest.partitionStorage` | string? | `null` (engine uses `Auto`) | `Auto`, `Dedicated`, `Shared` | table create payload | Controls partition storage mode |
+| `CreateTableRequest.initialBucketCount` / `TableDefinition.initialBucketCount` (P45) | int? | `null` (engine derives `16` or `128` — see `2.7`) | `>= 1`; `Auto`/`Shared` only | table create payload / declarative schema | **Immutable after table creation.** Declaring it alongside `partitionStorage: "Dedicated"` is rejected — a dedicated table has no bucket count. A differing value against an *existing* table is reported as drift by `aouda schema diff` and never auto-applied. |
+| `CreateTableRequest.promotionRowThreshold` / `TableDefinition.promotionRowThreshold` (P45) | long? | `null` (engine uses `10_000_000`) | `>= 0` | table create payload / declarative schema | Mutable after creation — takes effect at the next promotion check. |
+| `CreateTableRequest.promotionByteThreshold` / `TableDefinition.promotionByteThreshold` (P45) | long? | `null` (engine uses `1_000_000_000`) | `>= 0` | table create payload / declarative schema | Mutable after creation — takes effect at the next promotion check. |
+| `CreateTableRequest.pkUniqueness` / `TableDefinition.pkUniqueness` (P45) | string? | `null` (engine uses `Strict`) | `Strict`, `Recent`, `BestEffort` | table create payload / declarative schema | Not partition-key-scoped — valid on any table. Mutable after creation — takes effect on the next insert. Previously reachable only per bulk-load job (`pkUniquenessOverride`). |
 | `PartitionOptions.StorageMode` | enum | `Auto` | `Auto`, `Dedicated`, `Shared` | catalog policy | Core partition routing mode |
 | `PartitionOptions.RequirePartitionFilter` | bool | `true` | `true/false` | catalog policy | Query guard for partitioned tables |
 | `PartitionOptions.PromotionRowThreshold` | long | `10_000_000` | `>= 0` | catalog policy | Auto-promotion row trigger |
 | `PartitionOptions.PromotionByteThreshold` | long | `1_000_000_000` | `>= 0` | catalog policy | Auto-promotion byte trigger |
-| `PartitionOptions.InitialBucketCount` | int | `16` | `>= 1` | catalog policy | Shared mode initial bucket fanout |
+| `PartitionOptions.InitialBucketCount` | int | `16` (engine-level constant; see the row above for the value a new table actually gets) | `>= 1` | catalog policy | Shared mode initial bucket fanout. Resolved to `16` or `128` at table-create time per the rule in `2.7` before this field is ever persisted. |
 | `PartitionOptions.LateArrivalPolicy` | enum | `Delta` | `Delta`, `Reject`, `Inline` | catalog policy | Late-arrival strategy |
 | `PartitionOptions.LateArrivalThreshold` | `TimeSpan` | `1h` | positive | catalog policy | Late-arrival time boundary |
 | `PartitionOptions.Migration` | `MigrationOptions?` | `null` | object/null | catalog policy | Retrospective partition migration config |
@@ -599,6 +672,14 @@ Monitor first:
 - Partitioning behavior:
   - partition promotion queue depth / in-progress counts
   - dedicated partition growth and promotion byte counters
+  - **(P45)** per-query segment counts: how many segments were eliminated by partition key, how many by
+    hash bucket, and — when neither fired — why (no partition-key filter, a range predicate on the
+    partition key, or an unsupported predicate shape). A slow query on a partitioned table is
+    self-diagnosing from these counts alone. The reason is never set for a scan made under explicit
+    cross-partition access — that is an intentional unfiltered read, not a missed optimization.
+  - **(P45)** segment-discovery cache hit/miss counts — repeated queries against an unchanged table stop
+    paying the filesystem-walk cost after the first one; a concurrent flush, commit, or promotion is
+    visible to the very next query regardless of the cache.
 - Query enforcement and bypass:
   - partition-filter-required rejections
   - cross-partition bypass counts
@@ -679,12 +760,35 @@ Last verification date (UTC): `2026-03-31`.
 - Retrospective partitioning phase-2 strategy gap:
   - `Eager`/`Blocking` strategy fields are defined but not documented as fully shipped behavior.
   - User impact: treat these as reserved/planned rather than production-ready guarantees.
+- `initialBucketCount` has no rebalancer (P45):
+  - The bucket count is fixed for the life of a table; there is no automated way to change it once data
+    has been written under it.
+  - User impact: a customer who under- or over-provisions a table's bucket count must migrate to a new
+    table under a different name — the same manual route already used for a `Dedicated`-mode table stuck
+    with the wrong storage mode. See [Choosing partition storage mode](bulk-load.md#choosing-partition-storage-mode).
+- Partial-bucket accrual across `:commit` is deferred (P45, `BL-381`):
+  - A commit-per-batch bulk-load client still caps its largest possible segment at the batch size divided
+    by the routing keys it spans, even with steady-state coalescing and spill-and-merge both in place.
+  - User impact: for that client shape, prefer fewer, longer bulk-load sessions (see [Sizing a
+    session](bulk-load.md#sizing-a-session-fewer-longer-one-commit)) over relying on this to be fixed
+    automatically.
+- The 64 KB page-size default is validated on one measured shape (P45):
+  - The default was chosen by measuring a ten-`Int64`-column segment; a table with wide `String` columns
+    will cut pages at a different row count for the same byte target.
+  - User impact: the default is a reasonable starting point, not a universal optimum — it stays
+    configurable for a table where measurement shows it should move.
 
 ## 2.19 References
 
 - ADRs:
-  - `docs/decisions/0009-partitioning-multitenancy.md`
+  - `docs/decisions/0009-partitioning-multitenancy.md`, including its "Amendment (P45 S01 — pruning is
+    exact, and what the schema can now declare)" section — the normative source for the pruning
+    guarantees and declarable fields on this page
   - `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
+- P45 — Query Pruning and Segment Shape:
+  - `docs/tasks/P45/P45-PruningAndShape-Overview.md`
+  - `docs/dev/Partitioning-Ingest-And-Pruning-Analysis.md` — the engineering analysis this phase
+    implements (internal; the material on this page is its public restatement)
 - Task docs/reports:
   - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure.md`
   - `docs/tasks/P4/P4-EpicF-Task1-PartitionStorageInfrastructure-Report.md`
