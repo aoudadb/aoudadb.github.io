@@ -31,7 +31,7 @@ explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
-| Bulk-load ingest buffer budget | `clamp(0.04 × yourDatabaseShare, 8 MB, 256 MB)` | `Aouda:BulkLoad:IngestBufferBudgetFraction` |
+| Bulk-load ingest buffer budget | `max(0.04 × yourDatabaseShare, 8 MB)`, growing with headroom in the server's shared memory governor instead of stopping at a fixed number (P45) | `Aouda:BulkLoad:IngestBufferBudgetFraction`, or `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` to pin an explicit ceiling (`268435456` reproduces the old fixed-256 MB behavior) |
 
 Worked at three detected host sizes, both branches (all figures in MB unless marked GB; rounded to the
 nearest whole MB):
@@ -61,6 +61,11 @@ your actual registration, per database, alongside `memoryWeight` and `l2KeyCache
 192 MB, the ingest buffer budget's 8 MB) are reached at a larger detected-host size than on the
 cgroup-bounded branch. This is expected, not a bug — the smaller fraction is the point.
 
+**The ingest-buffer-budget row above is unaffected at all three host sizes in the table.** P45 removed
+the old fixed 256 MB ceiling, but every figure in the row (8–195 MB) was already well under it — the
+change only matters once `0.04 × yourDatabaseShare` itself exceeds 256 MB, which needs a considerably
+larger governed budget than 32 GB affords at these weights.
+
 ---
 
 ## Bulk load
@@ -84,7 +89,7 @@ cgroup-bounded branch. This is expected, not a bug — the smaller fraction is t
 | **Legacy-table exception** | implicit `Dedicated` | — | Applies only to a table created **before** the `Auto` default was introduced. Nothing migrates it automatically today — no automated tool exists yet. The supported route is manual: export, drop, re-create under a **different name** with the desired mode, reload. See [Bulk Load — Choosing partition storage mode](bulk-load.md#choosing-partition-storage-mode). |
 | `PromotionRowThreshold` | 10,000,000 rows | `PartitionOptions.PromotionRowThreshold` | Auto-promotion trigger, per key. |
 | `PromotionByteThreshold` | 1 GB | `PartitionOptions.PromotionByteThreshold` | Auto-promotion trigger, per key. |
-| `InitialBucketCount` | `16` | `PartitionOptions.InitialBucketCount` | Number of shared buckets `Auto`/`Shared` routing starts with. |
+| `InitialBucketCount` | `16` if the partition key is time-bounded, `128` otherwise (P45) | `PartitionOptions.InitialBucketCount` / schema `initialBucketCount` | Number of shared buckets `Auto`/`Shared` routing starts with. Fixed for the life of the table. See [Partitioning and Multi-tenancy](partitioning.md#choosing-initialbucketcount-at-scale-p45) for the full rule. |
 
 See [Partitioning and Multi-tenancy](partitioning.md) for the full storage-mode and promotion reference.
 

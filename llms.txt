@@ -56,7 +56,7 @@
 - [Real-time Streaming](https://aoudadb.github.io/guides/real-time/): WebSocket streaming, availability status, usage playbooks
 - [Backup and Restore](https://aoudadb.github.io/guides/backup/): Incremental manifests, exact restore, retention, REST APIs, point-in-time recovery. Local PITR window is write volume, not a duration.
 - [Replication and Clustering](https://aoudadb.github.io/guides/replication/): Cluster lifecycle, witness role, node management
-- [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): Partition keys, tenant isolation
+- [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): Partition keys, tenant isolation, exact partition/bucket query pruning, choosing `initialBucketCount` at scale
 - [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling
 - [Materialized Queries](https://aoudadb.github.io/guides/materialized/): Materialized query definitions, refresh, Studio browser
 - [Market Data and Stock Quotes](https://aoudadb.github.io/guides/market-data/): **P40 browser-tier worked example.** Watchlist subscribe, `latestPerKey` last-price, candle chart via `outputName`, paged screener with `whenParamPresent`, top-gainers with computed MQ + `orderByChoices`. Conformance fixture: `examples/p40-browser-tier/`
@@ -64,7 +64,7 @@
 - [Cloud and Hub](https://aoudadb.github.io/guides/cloud-hub/): Hub backend, cloud control plane, Kubernetes operator
 - [Studio](https://aoudadb.github.io/guides/studio/): Web management console — data explorer, cluster ops, backup UI
 - [Testing and DX](https://aoudadb.github.io/guides/testing-dx/): Aouda.Testing package, xUnit/NUnit/MSTest fixtures
-- [Bulk Load](https://aoudadb.github.io/guides/bulk-load/): Begin/append/commit sessions, sizing (fewer, longer sessions, one commit), choosing partition storage mode, single-node WAL frame elision
+- [Bulk Load](https://aoudadb.github.io/guides/bulk-load/): Begin/append/commit sessions, sizing (fewer, longer sessions, one commit), choosing partition storage mode, single-node WAL frame elision, spill-and-merge under memory pressure, the governed (no longer fixed) ingest-buffer ceiling
 - [Graph and Vector](https://aoudadb.github.io/guides/graph-vector/)
 - [Primary Key Indexing and Memory](https://aoudadb.github.io/guides/pk-indexing/)
 - [Server and Multi-Database](https://aoudadb.github.io/guides/server-multi-database/)
