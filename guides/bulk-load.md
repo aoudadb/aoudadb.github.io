@@ -373,6 +373,20 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `Aouda:BulkLoad:IdempotencyWindowMinutes` | int | `10` | `>=1` | Server config | Idempotency key window. |
 | `Aouda:BulkLoad:AllowWritePermission` | bool | `false` | `true/false` | Server config | Compatibility gate for write-only principals. |
 | `Aouda:BulkLoad:ForceLogShipBulkLoad` | bool | `false` | `true/false` | Cluster/server config | Rejects non-log-ship modes. |
+| `BulkLoadOptions.RequestTimeout` | `TimeSpan` | `10m` | positive duration | Client | Deadline for each individual bulk-load HTTP call. Deliberately not `AoudaClientOptions.Timeout` (30 s), which is sized for point operations and cannot cover a `:commit` that seals a million rows. Governs one call, not the job. A caller-supplied `HttpClient` keeps its own `HttpClient.Timeout`, which caps this. |
+| `BulkLoadOptions.MaxAppendBytes` | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). |
+| `Aouda:BulkLoad:StreamingRequestTimeoutMs` | int | `600000` | `>=0` (`0` disables) | Server config | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. Not the bound on an abandoned session — `SessionIdleTimeoutMinutes` is. |
+| `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | int | `10` | `>=0` (`0` disables) | Server config | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock and ingest budget. |
+| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` and `:commit` run in. They do not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. |
+| `Aouda:BulkLoad:StreamingRequestQueueLimit` | int | `100` | `>=0` | Server config | How many streaming requests may wait for a lane slot; beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
+| `Aouda:MaxConnections` | int | `100` | `>=0` (`0` = unlimited) | Server config | Kestrel's concurrent-connection ceiling. A migration holds a connection for the whole of each `:append`; on a host also serving app traffic, raise it or set `0`. |
+
+**`:append` is not retried, and must not be.** The server writes each accepted row into the
+session's row channel before responding, so replaying an `:append` whose response was lost
+duplicates every row the first attempt landed — silently. The official clients exclude it from
+their retry policy for that reason; a caller who wraps `bulkLoad` in a retry of their own is
+opting into duplicate rows. Resume from the durable cursor with the same idempotency key
+instead (see 2.14).
 
 Precedence notes:
 - Begin-time options (`BulkLoadOptionsDto`) set per-job ingest and replication behavior.

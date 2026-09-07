@@ -3503,6 +3503,36 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
 | `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` | Controls Aggregate MQ rebuild after commit. `"auto"` (default): all Aggregate MQs whose source tables are in this load are automatically rebuilt after `BulkLoadCommitted`. `"skip"`: no MQ rebuild; use for multi-step pipelines where you call `POST .../materialized-queries/{name}:refresh` explicitly. |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
+| `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
+| `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. |
+
+**Transform intent is mandatory for a table with write-time compute.**
+
+If any destination table has a derived column, an expression default, or a check constraint, `:begin`
+requires **exactly one** of `applyTransforms` or `preTransformed`. Omitting both is
+`BULK_LOAD_TRANSFORM_INTENT_REQUIRED` (400); setting both is `BULK_LOAD_TRANSFORM_INTENT_CONFLICT`
+(400). Neither flag is a fallback for the other — the server will not guess whether the numbers you
+sent are inputs or results, because both readings silently produce a loaded table.
+
+Both are valid choices:
+
+| | Send | Server does | Use when |
+|---|---|---|---|
+| `applyTransforms: true` | Only the source columns | Computes derived values, evaluates checks and expression defaults, locks the whole transform-graph closure | The computation belongs to the database — ongoing ingest, several writers, or a formula you do not want duplicated in a client |
+| `preTransformed: true` | Every column, derived ones included | Writes the named tables as-is | A one-shot backfill or migration where you already have the values. Cheaper: no per-row planning, and a narrower lock set. You are asserting the values are correct — nothing recomputes them |
+
+A table with no write-time compute needs neither flag.
+
+**Deadlines and sizes.** These are server settings, not request fields:
+
+| Setting | Default | What it governs |
+|---|---|---|
+| `Aouda:BulkLoad:StreamingRequestTimeoutMs` | `600000` (10 min) | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. `0` disables the deadline on them. |
+| `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
+| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` and `:commit` run in. They do **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. |
+| `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
+| `Aouda:MaxConnections` | `100` | Kestrel's concurrent-connection ceiling. A migration holds a connection for the whole of each `:append`; on a host also serving app traffic, set this higher or to `0` for unlimited. |
+
 
 **Response body:**
 
@@ -3692,3 +3722,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.4 | 2026-08-21 | **P38:** consistency token (`X-Aouda-Token` / `?at_least=` / envelope `token` / `GET …/token`); named-query alias `freshness`; `TOKEN_*` / `FRESHNESS_*` errors; stream `token` alongside `version`; bulk-load commit `walPosition` → `token`. **Breaking:** `MaxLagSeconds` is measured staleness, not lag-bytes ÷ 1 MB/s. Default read preference remains `Primary`. |
 | 2.5 | 2026-08-22 | **BL-188:** named-query identity is the unique schema name. **Breaking:** `{name}` routes and batch/subscribe/warning `"name"`; alias surface (`?alias=`, `X-Aouda-Named-Query-Alias`, body `alias`) and `NAMED_QUERY_ALIAS_MISMATCH` retired; omitting a name deletes the definition; codegen is types-only (optional Args/Row). Historical 2.3 / 2.4 shipped content-hash identity. |
 | 2.6 | 2026-08-29 | **Catalog GET/list auth linkage:** `auth.enabled` / `auth.database` on every database response (never `mk_*` on GET). GET `{name}` documented as metadata-only; 404 while `Dropping`. Health probe split (`/health` liveness vs `/ready` / GET `state=Active`). Create-role `permissions` optional; 400 `INVALID_REQUEST` with `suggestion`. |
+| 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections`) — all shipped in server 0.1.20+ by BL-404 / BL-405. |
