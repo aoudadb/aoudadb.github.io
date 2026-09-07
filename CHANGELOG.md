@@ -13,7 +13,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-- **Bulk load: transform intent, deadlines and the admission lane are documented (BL-406).** [HTTP API — Bulk Load](reference/http-api.md#bulk-load-api) now states that a table with any write-time compute requires exactly one of `applyTransforms` or `preTransformed`, what each one means, and when to prefer each. The [bulk-load guide](guides/bulk-load.md) gains the client's `RequestTimeout` and `MaxAppendBytes`, the server's `Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests` and `StreamingRequestQueueLimit`, and `Aouda:MaxConnections` — plus an explicit warning that `:append` is not idempotent and must not be retried by callers.
+- **Bulk load: transform intent, deadlines and the admission lane are documented (BL-406).** The transform-intent contract applies to every released version; the timeout, append-size and admission-lane settings ship in the **next** server train and are marked as such. [HTTP API — Bulk Load](reference/http-api.md#bulk-load-api) now states that a table with any write-time compute requires exactly one of `applyTransforms` or `preTransformed`, what each one means, and when to prefer each. The [bulk-load guide](guides/bulk-load.md) gains the client's `RequestTimeout` and `MaxAppendBytes`, the server's `Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests` and `StreamingRequestQueueLimit`, and `Aouda:MaxConnections` — plus an explicit warning that `:append` is not idempotent and must not be retried by callers.
 
 ## 0.1.20 — 2026-09-07
 

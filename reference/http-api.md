@@ -3523,7 +3523,13 @@ Both are valid choices:
 
 A table with no write-time compute needs neither flag.
 
-**Deadlines and sizes.** These are server settings, not request fields:
+**Deadlines and sizes.** These are server settings, not request fields.
+
+> **Not in 0.1.20.** Every setting in this table ships in the **next** server train (BL-404 /
+> BL-405). On 0.1.20 the `Aouda:BulkLoad:*` keys below are ignored, and `Aouda:MaxConnections: 0`
+> is rejected at startup with `MaxConnections must be at least 1` — on that version the value
+> must be a positive integer. Check your server version before changing any of them.
+
 
 | Setting | Default | What it governs |
 |---|---|---|
@@ -3531,7 +3537,7 @@ A table with no write-time compute needs neither flag.
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
 | `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` and `:commit` run in. They do **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. |
 | `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
-| `Aouda:MaxConnections` | `100` | Kestrel's concurrent-connection ceiling. A migration holds a connection for the whole of each `:append`; on a host also serving app traffic, set this higher or to `0` for unlimited. |
+| `Aouda:MaxConnections` | `100` | Kestrel's concurrent-connection ceiling. A migration holds a connection for the whole of each `:append`; on a host also serving app traffic, set this higher, or to `0` for unlimited. **`0` requires the next server train** — on 0.1.20 and earlier it fails validation at startup. |
 
 
 **Response body:**
@@ -3722,4 +3728,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.4 | 2026-08-21 | **P38:** consistency token (`X-Aouda-Token` / `?at_least=` / envelope `token` / `GET …/token`); named-query alias `freshness`; `TOKEN_*` / `FRESHNESS_*` errors; stream `token` alongside `version`; bulk-load commit `walPosition` → `token`. **Breaking:** `MaxLagSeconds` is measured staleness, not lag-bytes ÷ 1 MB/s. Default read preference remains `Primary`. |
 | 2.5 | 2026-08-22 | **BL-188:** named-query identity is the unique schema name. **Breaking:** `{name}` routes and batch/subscribe/warning `"name"`; alias surface (`?alias=`, `X-Aouda-Named-Query-Alias`, body `alias`) and `NAMED_QUERY_ALIAS_MISMATCH` retired; omitting a name deletes the definition; codegen is types-only (optional Args/Row). Historical 2.3 / 2.4 shipped content-hash identity. |
 | 2.6 | 2026-08-29 | **Catalog GET/list auth linkage:** `auth.enabled` / `auth.database` on every database response (never `mk_*` on GET). GET `{name}` documented as metadata-only; 404 while `Dropping`. Health probe split (`/health` liveness vs `/ready` / GET `state=Active`). Create-role `permissions` optional; 400 `INVALID_REQUEST` with `suggestion`. |
-| 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections`) — all shipped in server 0.1.20+ by BL-404 / BL-405. |
+| 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections: 0`) — **not yet released**: BL-404 / BL-405 are on `Unreleased` and ship in the **next** server train, after 0.1.20. |

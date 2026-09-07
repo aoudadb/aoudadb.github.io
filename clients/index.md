@@ -21,6 +21,9 @@ For version compatibility across server, SDKs, and Studio, see [SDK Compatibilit
 
 ## Bulk load from a client
 
+> **Version note.** The two options in this section ship in the **next** client release; they are
+> not in `Aouda.Client` 0.1.20 / `@aouda/client` 0.1.19.
+
 Both official clients expose bulk load, and both apply their own deadline to it rather than the
 general-purpose request timeout — a `:commit` that seals a million rows cannot honestly finish
 inside a deadline chosen for a key lookup.
