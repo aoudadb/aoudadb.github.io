@@ -29,6 +29,7 @@ Update this table when shipping breaking server, client, or Studio changes.
 
 | Server (approx.) | Wire protocol | `@aouda/client` | `Aouda.Client` (NuGet) | Studio (approx.) | Notes |
 |------------------|---------------|-----------------|------------------------|------------------|-------|
+| `0.1.20` | `1` | `≥ 0.1.19` (column `id`; `rowCountIsExact`; elastic memory fields) | `≥ 0.1.20` | `≥ 0.0.24` (pin `@aouda/client` **0.1.19** after npm) | **P45 S06–S08** spill/merge + page sizing; **OutOfTheBox-Ingest** elastic shares / single-node profile; **BL-382** column DDL + schema `id`; **BL-378/379** hot validity; **BL-398/395** table data-directory identity; Bool/coalesce/merge fixes. |
 | `0.1.19` | `1` | `≥ 0.1.18` | `≥ 0.1.19` | `≥ 0.0.23` | **BL-366** per-database memory governor accounting + richer `GET /api/server/memory`. **BL-373** Timestamp MQ / Date key encoding. **BL-374** catalog `rowCount` + `rowCountIsExact`. **BL-363** idempotent phone MFA enroll. No TS/Studio pin change. |
 | `0.1.18` | `1` | `≥ 0.1.18` | `≥ 0.1.18` | `≥ 0.0.23` | **BL-362** auth identity integrity (unique email, id-keyed admin mutations, DELETE revoke+cascade). No TS/Studio pin change. |
 | `0.1.17` | `1` | `≥ 0.1.18` (keyless `client.auth` without `appAuth.apiKey`) | `≥ 0.1.17` | `≥ 0.0.23` (pin `@aouda/client` **0.1.18**) | **BL-355** keyless browser app-auth (breaking: no API key on public auth POSTs). **BL-357** self-signup opt-in (default off). **BL-358** CORS startup warnings. **BL-359** trusted-proxy client IP. **BL-360** failed-signin ceiling. |

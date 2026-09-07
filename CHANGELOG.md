@@ -13,9 +13,15 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+## 0.1.20 — 2026-09-07
+
+**P45 spill/merge + OutOfTheBox ingest + column DDL.** Server **0.1.20**, `Aouda.Client` **0.1.20**, `@aouda/client` **0.1.19**, Studio **0.0.24** (pin after npm). See [Compatibility](clients/compatibility.md).
+
 - **A destructive schema apply no longer leaves the table unwritable (BL-382).** After an apply with `allowDestructive: true` dropped a column from a table the server had already written to, every later insert into that table returned **HTTP 500** (`Pending column {name} (id=N) has 0 rows …`) until the server process was restarted. Queries were unaffected, and restarting the client application did not help. Fixed, together with the same class of failure when a schema apply runs concurrently with in-flight writes (`Collection was modified`, `Cannot add column while a transaction is active`, `Unknown column N`).
 - **`GET …/tables/{table}/schema` reports each column's catalog `id`.** Engine diagnostics identify columns by id, and a column dropped and re-added under the same name gets a new one. See [HTTP API](reference/http-api.md).
 - **Schema guide: a declarative apply drops by omission.** [Schema management](guides/schema.md) now spells out that any column in the catalog but not in your `aouda.schema.json` is planned as a `DropColumn` — including when an older copy of the file is applied — and how to avoid it.
+
+- **Elastic memory shares and single-node bulk-load defaults.** A database at its fair share can borrow idle sibling headroom; fallback host-RAM detection uses a safer default fraction; single-node `LogShipSegments` can skip per-segment WAL frames. See [HTTP API](reference/http-api.md).
 
 ## 0.1.19 — 2026-09-04
 
