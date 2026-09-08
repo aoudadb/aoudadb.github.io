@@ -202,7 +202,7 @@ The ingest-service deletion (checks + `route`) is the other copy-paste: [Insert-
 - Static admissibility of client-composed queries (D-23).
 - SQL-ish authoring for named queries (D-24).
 - Tier 3 embedded functions (loops, branch trees, outbound HTTP).
-- Named-mutation batching (D-28 is read-only).
+- Named-mutation **update/delete** batching. Insert batching exists via [`batchParam`](named-queries.md#batch-insert-batchparam); D-28's read batch envelope stays read-only either way.
 
 ---
 

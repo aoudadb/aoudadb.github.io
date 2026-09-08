@@ -7,7 +7,7 @@ parent: "Guides"
 # Named queries and mutations
 
 Document status: Complete (BL-188 S09)  
-Last updated: 2026-08-22
+Last updated: 2026-09-08
 
 A **named query** is a server-authored, parameterized query template. The client sends a **name** plus arguments. It cannot name tables, columns, or operators. Identity is injected from the validated principal — it is never an argument.
 
@@ -26,6 +26,7 @@ Named **mutations** are the write-side mirror (insert / update / delete template
 | Author a named query in `aouda.schema.json` | [Schema](#schema) |
 | Call it from TypeScript, C#, or curl | [Execute](#execute) |
 | Collapse independent reads into one round trip | [Batch](#batch-one-snapshot) |
+| Insert many rows in one call | [Batch insert (`batchParam`)](#batch-insert-batchparam) |
 | Subscribe to live results | [Subscribe by name](#subscribe-by-name) |
 | Optional Args/Row types | [Types (optional codegen)](#types-optional-codegen) |
 | Page with a total ("1–25 of 412") | [Paging, distinct, and count](#paging-distinct-and-count) |
@@ -587,6 +588,55 @@ await client.namedMutations.execute("equity.adjustQty", { id: 1, qty: 10 });
 
 Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `rowsDeleted`) plus optional `RETURNING` rows. Mutations are **not** allowed in the read batch.
 
+### Batch insert (`batchParam`)
+
+An `op: "insert"` definition can accept an **array of rows in one execute call** instead of a single row. Declare `batchParam` with the name of a parameter that will carry the array; `values` stays the per-row template, and each array element is a flat object resolving that row's `{ "param": … }` holes — the same shape a single-row `args` has today.
+
+```json
+"tick.record": {
+  "op": "insert",
+  "table": "PriceTick",
+  "values": {
+    "ticker": { "param": "ticker" },
+    "px": { "param": "px" }
+  },
+  "batchParam": "rows",
+  "params": {
+    "ticker": { "maxLength": 8 },
+    "px": {},
+    "rows": { "maxItems": 20000 }
+  }
+}
+```
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  http://localhost:5434/api/databases/trading/named-mutations/tick.record/execute \
+  -d '{"args":{"rows":[{"ticker":"AAPL","px":189.2},{"ticker":"MSFT","px":402.1}]}}'
+```
+
+```typescript
+await client.namedMutations.execute("tick.record", {
+  rows: ticks.map((t) => ({ ticker: t.ticker, px: t.px })),
+});
+```
+
+`maxItems` on the batch parameter is **required** — schema apply fails without it (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`), the same mechanism that bounds an `in`/`nin` list. `batchParam` is only legal on `op: "insert"`; setting it on `update`/`delete` fails apply (`NAMED_MUTATION_BATCH_NON_INSERT`) — batching those is a separate, still-deferred predicate-shaped question (which row does which predicate identify?).
+
+Bind is **all-or-nothing**, matching the plain multi-row insert path: the cap is checked, then every row is bound, before any row reaches the engine. One malformed element fails the whole call — no partial insert — and the `400` response names the offending array index:
+
+```json
+{
+  "error": "Required parameter 'px' was not supplied. (batch index 1)",
+  "code": "NAMED_QUERY_PARAM_REQUIRED",
+  "rowErrors": [{ "index": 1, "code": "NAMED_QUERY_PARAM_REQUIRED", "message": "Required parameter 'px' was not supplied. (batch index 1)" }]
+}
+```
+
+This is the recommended path for a bounded, continuous-trickle insert feed (e.g. a ~10s-cadence ingest worker) through the data-plane listener, without reaching for the admin-only, exclusive-lock [Bulk Load](bulk-load.md) path. A definition without `batchParam` is unaffected — `args` stays one flat object, exactly as before.
+
 ---
 
 ## Authorization (always underneath)
@@ -612,6 +662,9 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Schema apply `NAMED_QUERY_COUNT_UNBOUNDED` | `count: true` on a join, `distinct`, or uncovered partition keys | Cover every partition key with required `eq`/`in`, or drop `count` |
 | Schema apply `NAMED_QUERY_COST_EXCEEDED` | Too many joins | Split the query or drop a join (cap default 8 = `1 + joins`) |
 | Batch HTTP 400 `NAMED_QUERY_BATCH_MUTATION` | Mutation name in `queries` | Mutations have their own execute route |
+| Schema apply `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED` | `batchParam` set without `maxItems` on that parameter | Declare `"maxItems"` on the batch parameter's `params` entry |
+| Schema apply `NAMED_MUTATION_BATCH_NON_INSERT` | `batchParam` set on `op: "update"` / `"delete"` | Batch insert only; update/delete batching is not shipped |
+| Batch insert HTTP 400 with `rowErrors` | One array element failed to bind | Fix the element at `rowErrors[0].index`; the whole call was rejected, nothing was inserted |
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |
@@ -623,7 +676,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 
 - SQL-ish authoring surface (definitions are JSON `QueryMessage` templates).
 - Runtime registration of definitions.
-- Named-mutation batching (the batch envelope is **read-only**).
+- Named-mutation **update/delete** batching — a separate, predicate-shaped design question (which row does which predicate identify?). Insert batching exists via [`batchParam`](#batch-insert-batchparam). The read [batch envelope](#batch-one-snapshot) stays read-only either way — a named-mutation name is always illegal there.
 - Static admissibility of client-composed queries (Firestore-style). Named queries are the browser-tier surface instead.
 - Cross-server named-query sharing through Hub (use a shared schema fragment in git).
 - OAuth 2.0 authorization code + PKCE — [not shipped](direct-client-access.md#authentication-that-exists).

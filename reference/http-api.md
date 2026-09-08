@@ -1187,13 +1187,42 @@ Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) �
 
 Named mutations are the write-side mirror: name-addressed insert/update/delete templates over ADR 0037 expressions. **Invoker rights only.** They are **not** members of the read batch.
 
+**Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying an **array** of row-argument objects, so one `execute` call inserts many rows. `values` stays the per-row template; each array element resolves that row's `{"param": …}` holes exactly as a single-row `args` object would. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT`; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap and every row are checked before any row is inserted — one bad element fails the whole call and names its array index in `rowErrors`, the same shape as insert-transform per-row errors.
+
+Definition:
+
+```json
+{
+  "op": "insert",
+  "table": "PriceTick",
+  "values": {
+    "ticker": { "param": "ticker" },
+    "px": { "param": "px" }
+  },
+  "batchParam": "rows",
+  "params": {
+    "ticker": { "maxLength": 8 },
+    "px": {},
+    "rows": { "maxItems": 20000 }
+  }
+}
+```
+
+Execute:
+
+```json
+{ "args": { "rows": [ { "ticker": "AAPL", "px": 189.2 }, { "ticker": "MSFT", "px": 402.1 } ] } }
+```
+
+A definition without `batchParam` is unaffected — `args` stays one flat object of parameter values, exactly as before.
+
 #### `POST /api/databases/{db}/named-mutations/{name}/execute`
 
-**Request body:** `{ "args": { … } }`
+**Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the row array; every other field is unchanged.
 
-**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`).
+**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE` and `NAMED_MUTATION_RETURNING_STAR`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Access-surface diff
 

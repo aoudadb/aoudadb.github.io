@@ -13,6 +13,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Named-mutation batch insert via `batchParam` (BL-416).** An `op: "insert"` named mutation can declare `batchParam`, the name of a parameter carrying an array of row objects, so one `execute` call inserts many rows through the data-plane listener — bounded by a required `maxItems` cap, bound all-or-nothing, with a bind failure naming the offending array index in `rowErrors`. See [HTTP API — Named mutations](reference/http-api.md#named-mutations) and [Named queries and mutations — Batch insert](guides/named-queries.md#batch-insert-batchparam).
 - **Bulk load: transform intent, deadlines and the admission lane are documented (BL-406).** The transform-intent contract applies to every released version; the timeout, append-size and admission-lane settings ship in the **next** server train and are marked as such. [HTTP API — Bulk Load](reference/http-api.md#bulk-load-api) now states that a table with any write-time compute requires exactly one of `applyTransforms` or `preTransformed`, what each one means, and when to prefer each. The [bulk-load guide](guides/bulk-load.md) gains the client's `RequestTimeout` and `MaxAppendBytes`, the server's `Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests` and `StreamingRequestQueueLimit`, and `Aouda:MaxConnections` — plus an explicit warning that `:append` is not idempotent and must not be retried by callers.
 
 ## 0.1.20 — 2026-09-07
