@@ -871,7 +871,38 @@ const results = await client.materializedQueries.query('active_users_summary');
 
 // Drop
 await client.materializedQueries.drop('active_users_summary');
+
+// Refresh (BL-419, next train): refresh() now resolves the outcome instead of void.
+// "complete" (200) only reaches you with await: true; "scheduled" (202) means the rebuild is
+// still running — fire-and-forget, or the server's await window elapsed. Either way the rebuild
+// is never cancelled. A 202 with an empty body (an already-deployed server hitting the
+// ambient-timeout race this fix closes server-side) also resolves "scheduled" rather than
+// throwing; a 200 with an empty body still throws — that's a real protocol violation.
+const outcome = await client.materializedQueries.refresh('active_users_summary', { await: true });
+// outcome: "complete" | "scheduled"
+
+// refreshAndWait() (BL-419, next train) is the answer to "after a 202, how do I know it's done?"
+// — it issues the refresh and, on "scheduled", polls status() until the query leaves Rebuilding.
+const finished = await client.materializedQueries.refreshAndWait('active_users_summary', {
+  timeoutMs: 5 * 60_000,   // optional caller deadline; default: none
+  pollIntervalMs: 2000,    // optional; default 2000, floor 250
+});
+// Throws if the query reaches state 3 (Error), or if timeoutMs elapses.
 ```
+
+**Do not** call `refresh()` for a table you just bulk-loaded with the default
+`postLoadMqBehavior: "auto"` — the engine already scheduled that rebuild at commit. The bulk-load
+handle can wait on it directly instead (BL-419, next train):
+
+```typescript
+const handle = await client.table('users').bulkLoad(rows);
+handle.mqRebuildStatus;                     // snapshot at commit: "pending" | "inProgress" | …
+const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 2000 });
+// finalStatus: "completed" | "skipped" | "unknown" (terminal — no live session to report from)
+// Throws if the rebuild status reaches "failed".
+```
+
+See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#materialized-query-auto-refresh-after-bulk-load-p31--adr-0036).
 
 ---
 

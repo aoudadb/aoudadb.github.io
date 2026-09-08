@@ -154,14 +154,24 @@ Scope boundaries:
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
   - Default path unchanged (coerce missing/null autoIncrement values to `0`; no allocation; no counter bump from bulk-load alone).
   - Ordinary insert identity-insert is documented in [HTTP API insert](../reference/http-api.md) and [Getting Started](../getting-started/index.md) (BL-130).
-  - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Error`).
+  - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Failed`; C#/TS clients also expose `Unknown` — see below, **BL-419, next train**).
   - `BulkLoadJobHandle.MqRebuildCompleted`: `Task` that resolves when all dependent MQ rebuilds finish.
   - Replica coordinator: `MqRebuildScheduler` delegate triggers rebuild after all segments fetched.
   - Explicit on-demand refresh: `engine.RefreshMaterializedQueryAsync(name, ct)` and `POST .../materialized-queries/{name}:refresh`.
   - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
   - TypeScript client: `client.materializedQueries.refresh(name, { await: true })`.
   - CLI: `aouda mq refresh <name> [--await]` and `--skip-mq-refresh` on `aouda table bulk-load`.
-  - `mqRebuildStatus` field in bulk-load job status response.
+  - `mqRebuildStatus` field in bulk-load job status response, and (**BL-419, next train**) in the `:commit` response too.
+
+> **Do not hand-refresh an MQ after a Bulk Load.** With `postLoadMqBehavior: "auto"` (the default),
+> the engine already schedules the rebuild in the background at commit — it is not something you
+> need to trigger. Calling `POST .../materialized-queries/{name}:refresh` yourself for a
+> just-loaded table is redundant: it queues behind the scheduled rebuild via the server's per-name
+> lock, and then re-scans the whole source table a **second time**. Instead, wait on
+> `mqRebuildStatus` — the C# client's `BulkLoadJobHandle.WaitForMaterializedQueriesAsync()` and the
+> TypeScript client's `handle.waitForMaterializedQueries()` (both **BL-419, next train**) do this
+> polling for you; both return (rather than spin) on the terminal `"unknown"` value a job with no
+> live session (e.g. after a server restart) reports, since the WAL alone cannot say more.
 
 ### Planned / proposed
 
