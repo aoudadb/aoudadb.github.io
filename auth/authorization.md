@@ -210,6 +210,51 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/usr_bob/
 
 **Thin JWT benefit:** A user belonging to 500 chat rooms would add ~10 KB to a JWT if room memberships were embedded as claims. With `auth-db-pls`, the JWT carries only the user's identity; grants live in the auth DB and are resolved from the session cache at query time.
 
+### 19.4.5 Durable Credentials for Non-Interactive Services
+
+Every example above authenticates with `<alice-jwt>` — a 15-minute access token from a JWT session. That's the right shape for a human sitting in front of a browser, but it's the wrong shape for a backend service, a scheduled feeder job, or anything else that holds one static secret in a config file and never signs in interactively: it would have to implement OAuth-style refresh-token rotation just to stay authenticated.
+
+For that case, link a `custom` API key to a user instead of minting sessions for it. The key is durable (no expiry unless you set one) and its principal resolves that user's `auth-db-pls` partition-grants through the **same** resolution path a JWT session for that user would use — there is no separate "API key scoping" mechanism to reason about, and no bypass.
+
+```bash
+# 1. Create a user to hold the service identity (it never signs in interactively)
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
+  -H "Authorization: Bearer <admin-token>" \
+  -d '{ "email": "svc-quote-feeder@internal" }'
+# → { "id": "usr_feeder", ... }
+
+# 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user)
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_feeder/partition-grants \
+  -H "Authorization: Bearer <admin-token>" \
+  -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "write" }'
+
+# 3. Create a custom API key linked to that user
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/api-keys \
+  -H "Authorization: Bearer <admin-token>" \
+  -d '{
+    "name": "oslo-bors-feeder",
+    "kind": "custom",
+    "userId": "usr_feeder",
+    "roles": [{ "role": "db_writer" }]
+  }'
+# → { "key": "mk_...", "userId": "usr_feeder", ... } — the key is shown once; store it like a password
+
+# The feeder authenticates with that static key going forward:
+curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
+  -H "Authorization: Bearer mk_..." \
+  -d '{ "rows": [{ "id": 1, "quote_source": "oslo_bors", "instrument_id": "EQNR", "bid": 289.10, "ask": 289.30 }] }'
+# → 200 — granted partition
+
+curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
+  -H "Authorization: Bearer mk_..." \
+  -d '{ "rows": [{ "id": 2, "quote_source": "bloomberg", "instrument_id": "EQNR", "bid": 289.10, "ask": 289.30 }] }'
+# → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
+```
+
+**Do not** reach for `mk_svc_`/`mk_srv_` for this instead. Both are a full, audited bypass of PLS on every table (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to `quote_source=oslo_bors`.
+
+`userId` is only accepted on `kind: "custom"` keys — `anon`, `service_role`, `public`, and `server_admin` stay singleton, system-managed credentials and reject it with `400 INVALID_REQUEST`. Revoke the key (`DELETE .../admin/api-keys/{id}`) to cut the service off immediately, or delete the specific partition grant to narrow its access without rotating the credential.
+
 ---
 
 ## 19.5 Mode 3: `auth-db-rls` (Row-Level Security)

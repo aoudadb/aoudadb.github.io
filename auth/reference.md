@@ -331,6 +331,33 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 **400 `INVALID_REQUEST`:** missing `name`, duplicate name, or malformed JSON. Body is `{ "error", "message", "suggestion", "requestId" }` — log it. `permissions` is not required.
 
+**`POST .../admin/api-keys`** — Create a `custom` API key. Returns `201 Created`. The raw key is returned **only in this response** — it is stored hashed, and cannot be recovered later.
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `name` | string | **Yes** | Display name shown in `GET .../admin/api-keys`. |
+| `roles` | array | No | RBAC roles for this key: `[{ "role": "db_writer", "scope": null }]`. `scope` is a database name or `null` for all databases — same shape as user role assignments. |
+| `expiresAt` | string? | No | ISO-8601 timestamp. Omit for a non-expiring key. |
+| `kind` | string | No | Defaults to `"custom"`. `"anon"`, `"service_role"`, `"public"`, and `"server_admin"` are reserved — they are singleton, system-managed keys and this endpoint rejects creating them (`400 INVALID_REQUEST`). |
+| `userId` | string? | No | Links this key to an existing user. The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
+
+```json
+{
+  "id":        "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "name":      "oslo-bors-feeder",
+  "key":       "mk_7f3a9c...",
+  "keyPrefix": "mk_7f3a9c1",
+  "roles":     [{ "role": "db_writer", "scope": null }],
+  "expiresAt": null,
+  "createdAt": "2026-01-15T10:30:00Z",
+  "kind":      "custom",
+  "isSystem":  false,
+  "userId":    "usr_feeder"
+}
+```
+
+**`GET .../admin/api-keys`** — Lists keys (wrapped: `{ "apiKeys": [...] }`). Never returns the raw `key`, only `keyPrefix`. Each item includes `userId` (`null` for an unlinked key) so an operator can see which user's grants a given key inherits without cross-referencing the grants table separately.
+
 **`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name.
 
 ```json
