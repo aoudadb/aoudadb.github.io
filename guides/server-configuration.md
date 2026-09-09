@@ -87,6 +87,9 @@ All server settings exposed through `AoudaServerOptions` can be set with environ
 | `AOUDA_FORWARDEDHEADERS__ENABLED` | `Aouda:ForwardedHeaders:Enabled` | Required to honour `X-Forwarded-For`; `--trusted-proxies-enabled` |
 | `AOUDA_FORWARDEDHEADERS__KNOWNPROXIES` | `Aouda:ForwardedHeaders:KnownProxies` | Comma-separated IPs; `--trusted-proxies` |
 | `AOUDA_FORWARDEDHEADERS__KNOWNNETWORKS` | `Aouda:ForwardedHeaders:KnownNetworks` | Comma-separated CIDRs; `--trusted-proxy-networks` |
+| `AOUDA_SHUTDOWNTIMEOUT` | `Aouda:ShutdownTimeout` | Default `00:02:00` (120 s). See §8 |
+| `AOUDA_DATABASEOPENTIMEOUT` | `Aouda:DatabaseOpenTimeout` | Default `00:00:00` (disabled). See §8 |
+| `AOUDA_DATABASEOPENSLOWWARNING` | `Aouda:DatabaseOpenSlowWarning` | Default `00:00:30`. See §8 |
 
 ```bash
 # Docker / Kubernetes — typical bootstrap
@@ -231,7 +234,41 @@ The Windows **release publish output does not include** `appsettings.json`. Defa
 
 ---
 
-## 8) Quick reference by role
+## 8) Startup, shutdown, and slow opens
+
+These three knobs are chosen together. The Derive incident that produced them had a 10 s compose `stop_grace_period` against an implicit 30 s host shutdown timeout, and an operator who restarted three times during a silent 50-minute open quarantined their own store.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `Aouda:ShutdownTimeout` | **120 s** | Bound to `HostOptions.ShutdownTimeout`. `IHostedService.StopAsync` is cancelled when this elapses. |
+| `Aouda:DatabaseOpenTimeout` | **disabled** (`00:00:00`) | A wall-clock cancel around each database `OpenAsync`. Leave it disabled: a genuinely slow open should finish, not quarantine. |
+| `Aouda:DatabaseOpenSlowWarning` | **30 s** | After this long, a Warning names the database and says not to restart. `00:00:00` disables the warning. |
+
+**Orchestrator grace must outlive the host timeout.** Set `stop_grace_period` (Compose) or `terminationGracePeriodSeconds` (Kubernetes) to `ShutdownTimeout` **plus a margin**. This repository's reference compose files use **130 s** (120 s + 10 s). If grace is *shorter* than the host timeout, the orchestrator SIGKILLs before the host has finished waiting — checkpoints and snapshots are abandoned, and the next open pays crash recovery.
+
+Worked Compose example (the 120 s default can be omitted; shown here so the two numbers are visible together):
+
+```yaml
+services:
+  aouda:
+    image: aouda/server
+    stop_grace_period: 130s
+    environment:
+      AOUDA_DATA_PATH: /data
+      AOUDA_SHUTDOWNTIMEOUT: "00:02:00"
+```
+
+**Slow opens.** A Warning at 30 s means the open is still running — watch `docker logs -f`, do not restart to "unstick" it. Three process deaths *after* the open has chosen a path (`OpenPathDecided`) quarantine the database as `OpenKilled`. Recover with one command:
+
+```bash
+aouda databases unquarantine --name <db>
+```
+
+or `POST /api/databases/{db}/unquarantine`. Inspect first with `aouda databases inspect --name <db>`.
+
+---
+
+## 9) Quick reference by role
 
 | Role | What to configure | Where |
 | --- | --- | --- |
