@@ -77,7 +77,9 @@ larger governed budget than 32 GB affords at these weights.
 | Single-node WAL frame emission | `false` (elided) | `Aouda:BulkLoad:EmitFramesOnSingleNode` | On a detected single-node topology, `LogShipSegments` no longer re-reads/hashes segment files or appends a WAL frame. See [Single-Node Deployment](single-node-deployment.md). |
 | Job-shape warning — segment count | `64` | `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | Advisory only, never blocks a commit. See [Bulk Load — Reading `:commit completed`](bulk-load.md#reading-commit-completed-and-the-job-shape-warning). |
 | Job-shape warning — median rows/segment | `1000` | `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | Same. |
-| Post-load Materialized Query refresh | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | Triggers a dependent MQ rebuild after `BulkLoadCommitted`. Set `Skip` to defer refresh in a multi-step pipeline. |
+| Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | `Auto` accumulates affected MQs of all four types during the load and publishes at commit. Wait on `mqRebuildStatus` / `MqRebuildCompleted`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |
+| Ingest-fed MQ reservation floor | 1 MB | `Aouda:BulkLoad:MqIngestReservationFloorBytes` | Opening `Transient` reservation per destination table, and the size growth doubles from. Unconfigured = the S04 constant. |
+| Ingest-fed MQ reservation ceiling | `0` (no dedicated cap) | `Aouda:BulkLoad:MqIngestReservationCeilingBytes` | `0` = the `Transient` governor is the bound. A positive value that live accumulator bytes would exceed falls those queries back to a scan-fed rebuild; the load still commits. |
 
 ---
 

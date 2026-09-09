@@ -8,10 +8,10 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-08-22
+Last updated: 2026-09-09
 
-Coverage phases: P4, P10, P11, P28, P31
-Primary task folders: `docs/tasks/P4/`, `docs/tasks/P10/`, `docs/tasks/P11/`, `docs/tasks/P28/`, `docs/tasks/P31/`
+Coverage phases: P4, P10, P11, P28, P31, P46
+Primary task folders: `docs/tasks/P4/`, `docs/tasks/P10/`, `docs/tasks/P11/`, `docs/tasks/P28/`, `docs/tasks/P31/`, `docs/tasks/P46/`
 Primary ADRs: `docs/decisions/0015-materialized-queries.md`, `docs/decisions/0020-real-time-streaming.md`, `docs/decisions/0036-bulk-load-mq-refresh.md`
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Query-Execution.md`, `docs/dev/Functionality-RealTime-Streaming.md`, `docs/dev/Functionality-Storage-And-Persistence.md`
 
@@ -183,6 +183,7 @@ If you create a materialized query with standard helpers and no special options:
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types accumulate during the load; wait, do not `:refresh` |
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -209,10 +210,10 @@ If you create a materialized query with standard helpers and no special options:
 - Streaming behavior:
   - Subscribe to MQ results through normal table subscription path.
   - No protocol-level MQ target-kind required.
-- MQ rebuild (P31 / ADR 0036):
-  - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern. The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
-  - Auto-trigger after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), all Aggregate MQs whose source tables were bulk-loaded are automatically rebuilt after `BulkLoadCommitted`. `MemoryOnly` source tables are skipped.
-  - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Error`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
+- MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
+  - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
+  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
   - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
   - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
   - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
@@ -248,7 +249,8 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | P10 | S10 spec/report intent | Standard table subscription path for MQ result tables | Distinct not-ready error code deferred | `docs/BACKLOG.md` BL-053 |
 | P11 | R8 fix report (handoff) | Honest documentation of unresolved duplicate-row issue; test-relaxation reverted | Engine-side fix still pending | `docs/BACKLOG.md` BL-019 |
 | P28 (S2) | `docs/tasks/P28/MarketData-Gaps-S2-MQ-OHLC-Candles.md` | `FIRST`/`LAST` aggregate functions with `orderByColumn`; derived time-bucket group-by expressions (`TruncateToHour`, `TruncateToMinute`); `AggregateConfig` v2 (backward-compatible); `TimeBucketTruncator` | OHLC quantile/volume aggregates deferred | P28-COMPLETION |
-| P31 (S1+S2) | `docs/tasks/P31/` | `RefreshMaterializedQueryAsync`, shadow-build, auto-trigger after `BulkLoadAsync`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, replica rebuild hook, HTTP refresh endpoint, C# + TS + CLI surfaces | Incremental rebuild; cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
+| P31 (S1+S2) | `docs/tasks/P31/` | `RefreshMaterializedQueryAsync`, shadow-build, auto-trigger after `BulkLoadAsync`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, replica rebuild hook, HTTP refresh endpoint, C# + TS + CLI surfaces | Incremental rebuild from cold-segment arrival outside a bulk load; cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
+| P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` bulk loads accumulate all four MQ types during the load's own pass; scan-fed path retained for `:refresh`, fallback, restore | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
 
 ## 2.6 Capability coverage matrix
 
@@ -270,8 +272,8 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
 | `AggregateConfig` v1 backward compatibility | Yes | No | No | P28 S2, implicit string → `GroupByExpression` conversion | Existing v1 definitions parse without migration |
 | Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
-| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1, `PostLoadMqBehavior.Auto`, `AoudaEngine.BulkLoad.cs` | Triggers for all Aggregate MQs on bulk-loaded source tables; `MemoryOnly` sources skipped |
-| `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Error; awaitable Task |
+| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, ingest-fed feed | All four MQ types accumulate during the load; some queries still fall back to a scan. `MemoryOnly` sources skipped |
+| `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Failed; awaitable Task |
 | Replica MQ rebuild after bulk-load | Yes | No | No | P31 S1, `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched; factory via `engine.CreateReplicaMqRebuildScheduler()` |
 | HTTP `POST .../materialized-queries/{name}:refresh` | Yes | No | No | P31 S2, `MaterializedQueriesController` | `?await=true` waits; `?await=false` fire-and-forget |
 | C# client `MaterializedQueries.RefreshAsync` | Yes | No | No | P31 S2, `src/Aouda.Client/MaterializedQueriesApi.cs` | `awaitCompletion` parameter |
@@ -413,13 +415,13 @@ Key implementation anchors:
 
 ### Walk-through E: Full rebuild of an Aggregate MQ (shadow-build)
 
-1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` or auto-triggered after `BulkLoadAsync` with `PostLoadMqBehavior.Auto`.
+1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` — the scan-fed path, also used on fallback. A bulk load with `PostLoadMqBehavior.Auto` does **not** take this path for eligible queries: it accumulates during ingest and publishes the same shadow swap at commit.
 2. State transition:
    - MQ state immediately changes to `Rebuilding`.
    - The current result table remains readable throughout with stale data.
 3. Shadow build:
    - A new `MaterializedQueryMaintainer` is constructed from scratch.
-   - A full-table scan of the source populates the new result table.
+   - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and ingest-fed fallback). An `Auto` bulk load that stayed ingest-fed never opens this scan.
 4. Atomic swap:
    - New maintainer atomically replaces the old one.
    - MQ state transitions to `Ready`.
@@ -576,17 +578,17 @@ An aggregate materialized query may declare `computed` columns — physical, alw
 
 A named query over `barsWithChange` can then `orderBy: [{ "column": "changePct", "descending": true }]` with `limit: 20`. That is a catalog column, not a read-path expression. For sorts on a **base** table, use a stored `derived` column instead.
 
-### .NET example (explicit MQ refresh — P31)
+### .NET example (wait for bulk-load materialization — P31 / P46)
 
 ```csharp
-// Explicit on-demand rebuild
+// Explicit on-demand rebuild (a scan). Use this when you changed the definition,
+// not after a bulk load — Auto already built the affected queries during the load.
 await engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct);
 
-// Bulk-load with automatic post-load MQ rebuild (default Auto)
+// Bulk-load with automatic materialization (default Auto). Wait; do not :refresh.
 var handle = await engine.BulkLoadAsync(options, ct);
-await handle.MqRebuildCompleted; // wait for all dependent candle MQs to rebuild
+await handle.MqRebuildCompleted; // usually short: the work happened during the load
 
-// Check rebuild status
 Console.WriteLine(handle.MqRebuildStatus); // Completed
 ```
 

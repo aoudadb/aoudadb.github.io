@@ -8,10 +8,10 @@ parent: "Guides"
 
 Document status: Complete
 Primary owner: Engineering
-Last updated: 2026-06-23
+Last updated: 2026-09-09
 
-Coverage phases: P20, BL (Post20-S1, Post20-S3), P31
-Primary task folders: `docs/tasks/P20/`, `docs/tasks/BL-COMPLETION.md`, `docs/tasks/P31/`
+Coverage phases: P20, BL (Post20-S1, Post20-S3), P31, P46
+Primary task folders: `docs/tasks/P20/`, `docs/tasks/BL-COMPLETION.md`, `docs/tasks/P31/`, `docs/tasks/P46/`
 Primary ADRs: `docs/decisions/0030-bulk-load-replication.md`, `docs/decisions/0036-bulk-load-mq-refresh.md`
 Related functionality docs: `docs/dev/Functionality-Write-Path-Durability.md`, `docs/dev/Functionality-Replication-And-Clustering.md`, `docs/dev/Functionality-Server-And-Multi-Database.md`, `docs/dev/Functionality-TypeScript-Client.md`, `docs/dev/Functionality-Studio.md`, `docs/dev/Functionality-Graph-And-Vector.md`
 
@@ -147,8 +147,8 @@ Scope boundaries:
 - CLI shipped for both single and multi-table:
   - `aouda table bulk-load`
   - `aouda bulk-load`
-- **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036):**
-  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) triggers MQ rebuild after `BulkLoadCommitted`; `Skip` preserves old behavior.
+- **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036, ingest-fed path P46):**
+  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulates every affected MQ of all four types **during** the load's own pass and publishes at commit; `Skip` creates no sinks and leaves existing results untouched.
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
@@ -164,14 +164,17 @@ Scope boundaries:
   - `mqRebuildStatus` field in bulk-load job status response, and (**BL-419, next train**) in the `:commit` response too.
 
 > **Do not hand-refresh an MQ after a Bulk Load.** With `postLoadMqBehavior: "auto"` (the default),
-> the engine already schedules the rebuild in the background at commit — it is not something you
-> need to trigger. Calling `POST .../materialized-queries/{name}:refresh` yourself for a
-> just-loaded table is redundant: it queues behind the scheduled rebuild via the server's per-name
-> lock, and then re-scans the whole source table a **second time**. Instead, wait on
-> `mqRebuildStatus` — the C# client's `BulkLoadJobHandle.WaitForMaterializedQueriesAsync()` and the
-> TypeScript client's `handle.waitForMaterializedQueries()` (both **BL-419, next train**) do this
-> polling for you; both return (rather than spin) on the terminal `"unknown"` value a job with no
-> live session (e.g. after a server restart) reports, since the WAL alone cannot say more.
+> affected materialized queries accumulate during the load's own pass and are published at commit —
+> there is nothing left to trigger. Calling `POST .../materialized-queries/{name}:refresh` yourself
+> for a just-loaded table queues behind that publication via the server's per-name lock, and then
+> re-scans the whole source table. The wait after commit is usually short because the work already
+> happened. Wait on `mqRebuildStatus` instead — the C# client's
+> `BulkLoadJobHandle.WaitForMaterializedQueriesAsync()` and the TypeScript client's
+> `handle.waitForMaterializedQueries()` (both **BL-419, next train**) do this polling for you; both
+> return (rather than spin) on the terminal `"unknown"` value a job with no live session (e.g. after
+> a server restart) reports, since the WAL alone cannot say more. Some queries still fall back to a
+> scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling
+> refusal); that fallback is still the load's own rebuild, not a reason to call `:refresh`.
 
 ### Planned / proposed
 
@@ -200,7 +203,8 @@ Scope boundaries:
 | P20 (`3.3`, `5`) | `docs/tasks/P20-COMPLETION.md` | Core bulk-load primitive, WAL frame model, HTTP `begin/append/commit/abort/status`, .NET client + CLI surface | Multi-node durability polish, restart reconstruction maturity | `BL-066`, `BL-067`, `BL-069` |
 | BL Post20-S1 | `docs/tasks/BL-COMPLETION.md` Post20-S1 | Replication completion: replay coordinator, checkpoint segment fetch protocol, force-log-ship cluster setting, watchdog lifecycle integration | Further replication scalability behaviors | `BL-066` |
 | BL Post20-S3 | `docs/tasks/BL-COMPLETION.md` Post20-S3 | Admin list/force-abort routes and Studio-facing server support | Studio UX evolution sits outside this repo | (tracked in Studio/task stream) |
-| P31 (S1+S2) | `docs/tasks/P31/` | Materialized Query auto-refresh after bulk-load: `PostLoadMqBehavior`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, `RefreshMaterializedQueryAsync`, replica scheduler, HTTP refresh endpoint, C# + TS clients, CLI | Incremental rebuild (full only); cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
+| P31 (S1+S2) | `docs/tasks/P31/` | Materialized Query auto-refresh after bulk-load: `PostLoadMqBehavior`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, `RefreshMaterializedQueryAsync`, replica scheduler, HTTP refresh endpoint, C# + TS clients, CLI | Cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
+| P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` loads accumulate affected MQs during the load's own pass (all four types); scan-fed path retained for `:refresh`, fallback, restore | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
 
 ---
 
@@ -226,7 +230,7 @@ Scope boundaries:
 | Persistent server session recovery across restart | No | No | Yes | `BulkLoadSessionRegistry.AdoptInFlight` stub | Explicitly not implemented yet. |
 | P2P replica fan-out | No | No | Yes | ADR 0030 open question, backlog | Primary-centric transfer today. |
 | Segment dedup on retry | No | No | Yes | ADR 0030 open question, backlog | Retry may duplicate segment rows. |
-| Materialized Query auto-rebuild after bulk-load | Yes | No | No | P31 ADR 0036, `BulkLoadJobHandle.MqRebuildStatus`, `AoudaEngine.MaterializedQuery.cs` | Default `Auto` mode; `Skip` available for multi-step pipelines. |
+| Materialized Query auto-rebuild after bulk-load | Yes | No | No | P31 + P46 ADR 0036, ingest-fed feed, `BulkLoadJobHandle.MqRebuildStatus` | Default `Auto` accumulates during the load (all four types); `Skip` for multi-step pipelines; some queries still fall back to a scan. |
 | Explicit on-demand MQ refresh | Yes | No | No | P31 `RefreshMaterializedQueryAsync`, `POST .../materialized-queries/{name}:refresh` | Shadow-build; result table readable throughout with stale data. |
 | Replica MQ rebuild after bulk-load | Yes | No | No | P31 `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched on replica. |
 | Identity-insert (`IdentityInsert`) | Yes | No | No | BL-131, `AoudaEngine.BulkLoadAsync`, `BulkLoadOptionsDto.IdentityInsert` | Job-scoped; counter bump only after successful commit; Studio UI out of scope. |
