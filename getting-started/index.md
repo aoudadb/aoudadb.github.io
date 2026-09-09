@@ -1002,7 +1002,7 @@ Sometimes you need to insert **client-chosen** values into an `autoIncrement` co
 
 | Mode | When to use |
 |------|-------------|
-| Normal insert (`identityInsert` omitted/`false`) | Everyday writes. `0` / omitted means “please generate”. Explicit non-zero without the flag is stored but does **not** advance the counter. |
+| Normal insert (`identityInsert` omitted/`false`) | Everyday writes. The autoIncrement column **must be present**; `0` means “please generate” (`generatedValues` returns the allocated id). **Omitting** it is `400 INVALID_REQUEST` (`Missing required column`), not auto-generate — engine work to treat omit as `0` is BL-429. Explicit non-zero without the flag is stored but does **not** advance the counter. |
 | Identity-insert (`identityInsert: true`) | Seed / reserved IDs. Every autoIncrement column required and non-null; `0` is a real stored value; after success the counter becomes `max(inserted)`. |
 | Schema toggle (BL-126) | Permanently switch the column between Auto and Manual for all future writes. |
 | Bulk-load `options.identityInsert` (BL-131) | Same semantics as identity-insert for large P20 begin/append/commit jobs — see [Bulk Load guide](../guides/bulk-load.md). |

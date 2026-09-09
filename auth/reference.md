@@ -358,7 +358,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 **`GET .../admin/api-keys`** — Lists keys (wrapped: `{ "apiKeys": [...] }`). Never returns the raw `key`, only `keyPrefix`. Each item includes `userId` (`null` for an unlinked key) so an operator can see which user's grants a given key inherits without cross-referencing the grants table separately.
 
-**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name.
+**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name. Filter matching is **case-sensitive** (same as grant create / PLS check): `?dimension=source` will not list a grant stored as `"Source"`. See [Data Authorization §19.8](authorization.md#198-admin-api-partition-grants).
 
 ```json
 {
@@ -388,7 +388,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201) |
+| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). `dimension` must match the table `permissionDimension` byte-for-byte (case-sensitive); a casing mismatch still 201s and never matches at check time (BL-430) |
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 

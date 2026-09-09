@@ -888,7 +888,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `durability` | `durability` | `TableDurabilityDto` | None | WAL and replication settings for this table. |
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
 | `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. `auth-db-pls` implies partition-level security even when `partitionLevelSecurity` is omitted; a partition key is required. |
-| `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. |
+| `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. Partition-grant `dimension` must match this string **byte-for-byte** (case-sensitive) — `"source"` does not match `"Source"`. See [Data Authorization §19.8](../auth/authorization.md#198-admin-api-partition-grants). |
 | `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Used with `"auth-db-rls"` mode. The resolver itself is created via the admin API, not schema apply. |
 | `plsClaimBinding` | `plsClaimBinding` | `string` | `claim:tenant_id` | jwt-claim PLS source. `"subject"` or `"claim:<name>"`. Omit keeps `tenant_id`. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
@@ -899,7 +899,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 |---|---|---|---|---|
 | `type` | `type` | `string` | **Required** | Column data type. See valid values below. May be changed in place (P36): Tier 1 widens instantly; Tier 2 validates then rewrites. |
 | `primaryKey` | `primaryKey` | `int` | None | Ordinal position in composite primary key (1-based). Omit if not a PK column. Membership is changeable via apply. |
-| `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer columns. Allowed values: `true`, `false`. |
+| `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer columns. Allowed values: `true`, `false`. On ordinary insert the column **must be present** in the row (and in a named-mutation `values` template); send `0` to auto-generate. Omitting it is `400 Missing required column`, not auto-generate — see [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows) (BL-429). |
 | `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. Allowed values: `true`, `false`. |
 | `references` | `references` | `string` | None | Foreign key reference in `"table.column"` format. |
 | `encoder` | `encoder` | `string` | None | Optional `EncoderPreference` name (e.g. `String_Dict`). Omit = Auto. |

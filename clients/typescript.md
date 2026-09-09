@@ -378,6 +378,8 @@ await client.table('events').insertMany([
 ]);
 ```
 
+If the table has an `autoIncrement` primary key, that column **must be present** on every row — send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column`), not auto-generate. See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows) (BL-429).
+
 #### Identity-insert (explicit autoIncrement IDs)
 
 Use `{ identityInsert: true }` when you must supply IDs on an `autoIncrement` column without flipping schema (Bond `isAutoIncrementDisabled: true`). Every autoIncrement column must be present and non-null; literal `0` is stored as-is; after success the runtime counter advances to `max(inserted)`.

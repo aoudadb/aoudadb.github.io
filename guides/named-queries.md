@@ -625,6 +625,22 @@ await client.namedMutations.execute("tick.record", {
 
 `maxItems` on the batch parameter is **required** — schema apply fails without it (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`), the same mechanism that bounds an `in`/`nin` list. `batchParam` is only legal on `op: "insert"`; setting it on `update`/`delete` fails apply (`NAMED_MUTATION_BATCH_NON_INSERT`) — batching those is a separate, still-deferred predicate-shaped question (which row does which predicate identify?).
 
+**autoIncrement primary keys.** The `tick.record` example above has no surrogate PK. If the target table has an `autoIncrement` primary key (e.g. `"Id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }`), that column **must** appear in `values` — omitting it from the template is accepted at schema apply, then every `execute` fails with `400 INVALID_REQUEST` (`Missing required column 'Id'`). Bind it and send `0` per row:
+
+```json
+"values": {
+  "Id": { "param": "id" },
+  "ticker": { "param": "ticker" },
+  "px": { "param": "px" }
+}
+```
+
+```json
+{ "args": { "rows": [ { "id": 0, "ticker": "AAPL", "px": 189.2 } ] } }
+```
+
+`0` still means auto-generate; `generatedValues` in the mutation result carries the allocated id. The same presence-required rule applies to plain `POST …/tables/{t}/rows`. Engine work to treat an omitted autoIncrement column as `0` is BL-429.
+
 Bind is **all-or-nothing**, matching the plain multi-row insert path: the cap is checked, then every row is bound, before any row reaches the engine. One malformed element fails the whole call — no partial insert — and the `400` response names the offending array index:
 
 ```json
@@ -665,6 +681,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Schema apply `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED` | `batchParam` set without `maxItems` on that parameter | Declare `"maxItems"` on the batch parameter's `params` entry |
 | Schema apply `NAMED_MUTATION_BATCH_NON_INSERT` | `batchParam` set on `op: "update"` / `"delete"` | Batch insert only; update/delete batching is not shipped |
 | Batch insert HTTP 400 with `rowErrors` | One array element failed to bind | Fix the element at `rowErrors[0].index`; the whole call was rejected, nothing was inserted |
+| Insert / named-mutation execute `400` `Missing required column 'Id'` | `autoIncrement` PK omitted from the row / `values` template | Bind the column and send `0` per row (`0` = auto-generate). Omit is not equivalent to `0` today (BL-429) |
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |

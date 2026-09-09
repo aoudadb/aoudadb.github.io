@@ -223,7 +223,8 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
   -d '{ "email": "svc-quote-feeder@internal" }'
 # → { "id": "usr_feeder", ... }
 
-# 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user)
+# 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user).
+#    `dimension` must match the table permissionDimension byte-for-byte (case-sensitive).
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_feeder/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
   -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "write" }'
@@ -483,6 +484,8 @@ Response (201 Created):
 ```
 
 `accessLevel` must be `"read"`, `"write"`, or `"admin"`. Missing or empty `dimension` / `partitionKey` returns 400 `AUTH_GRANT_INVALID`.
+
+**`dimension` is case-sensitive.** It must match the table's `permissionDimension` **byte-for-byte** (`StringComparison.Ordinal` — `"source"` ≠ `"Source"`). Creation does **not** validate or normalize against any table: a grant with the wrong casing returns `201` and looks fine on read-back, then every insert/query against the table fails `403` (`Partition '…' is not in the user's grant set for dimension 'Source'`). Copy the `permissionDimension` string from the schema; do not lowercase it. Partition **keys** are also compared ordinal-case-sensitive (they are data). Engine work to case-fold or reject a casing mismatch at grant-create time is BL-430.
 
 ### List Partition Grants
 

@@ -1216,6 +1216,8 @@ Execute:
 
 A definition without `batchParam` is unaffected — `args` stays one flat object of parameter values, exactly as before.
 
+**autoIncrement primary keys.** Omitting an `autoIncrement` column from `values` is **not** treated as “please generate”. Schema apply accepts the definition, but every `execute` returns `400 INVALID_REQUEST` (`Missing required column 'Id'`), the same as a plain `POST …/tables/{t}/rows` body that omits the column. Bind it (`"Id": { "param": "id" }`) and send `0` per row — `0` still means auto-generate, and `generatedValues` carries the allocated id. See [Insert rows](#post-apidatabasesdbtablesnamerows). Engine work to treat an omitted autoIncrement column as `0` is BL-429.
+
 #### `POST /api/databases/{db}/named-mutations/{name}/execute`
 
 **Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the row array; every other field is unchanged.
@@ -1754,8 +1756,8 @@ Insert one or more rows into a table.
   "database": "mydb",
   "table": "orders",
   "rows": [
-    { "status": "pending", "price": 100.50 },
-    { "status": "shipped", "price": 200.00 }
+    { "id": 0, "status": "pending", "price": 100.50 },
+    { "id": 0, "status": "shipped", "price": 200.00 }
   ],
   "writeConcern": "majority",
   "identityInsert": false
@@ -1768,7 +1770,7 @@ Insert one or more rows into a table.
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
 | `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
-| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior (`0` / omitted means auto-generate; explicit non-zero without the flag does **not** bump the counter). |
+| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: the column **must be present** and `0` means auto-generate (`generatedValues` returns the allocated id). **Omitting** the column is `400 INVALID_REQUEST` (`Missing required column '…'`), not auto-generate — engine work to treat omit as `0` is tracked as BL-429. Explicit non-zero without the flag is stored but does **not** bump the counter. |
 
 **Response:** `200 OK`
 
@@ -1813,7 +1815,7 @@ Insert one or more rows into a table.
 
 - Stores client-supplied autoIncrement values as-is (including literal `0` — does **not** mean “please generate”).
 - Requires every autoIncrement column on every row; missing or `null` → `400` / clear error; no partial insert.
-- After success, the next normal insert with `id: 0` (or omitted) receives `max(inserted) + 1`.
+- After success, the next normal insert with `id: 0` receives `max(inserted) + 1`. Omitting the column is still `400` (BL-429).
 - Does **not** flip catalog `autoIncrement` (use schema apply / Studio Toggle AutoId for that — BL-126).
 - For large seed/reseed jobs, prefer bulk-load `options.identityInsert` (see [Bulk Load API](#bulk-load-api)).
 
@@ -1832,7 +1834,7 @@ Insert one or more rows into a table.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, or `identityInsert: true` with a missing/`null` autoIncrement column |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, omitted `autoIncrement` column (send `0` to auto-generate; BL-429), or `identityInsert: true` with a missing/`null` autoIncrement column |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
