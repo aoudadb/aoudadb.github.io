@@ -90,6 +90,7 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 | `POST` | `/api/databases/{db}/named-queries/batch` | Named-query batch |
 | `POST` | `/api/databases/{db}/named-mutations/{name}/execute` | Named-mutation execute |
 | `*` | `/api/databases/{db}/ws` | WebSocket (subscribe by name); method not checked |
+| `*` | `/api/databases/{db}/stream/longpoll/*` | WebSocket long-poll fallback (connect / send / poll / disconnect); method not checked |
 
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
 

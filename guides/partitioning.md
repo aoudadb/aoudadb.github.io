@@ -55,6 +55,7 @@ Partitioning and multitenancy exist to make a single Aouda deployment practical 
 | If you need to know... | Go to section |
 |---|---|
 | What defaults apply if I do nothing? | `2.3 Defaults and zero-config behavior` |
+| How do I build a per-user live feed on a partitioned table? | [`Live subscriptions on a partitioned table`](#live-subscriptions-on-a-partitioned-table) |
 | What is shipped vs planned vs reserved? | `2.4 Availability status` |
 | Which phase delivered which capability? | `2.5 Phase coverage matrix` |
 | Overall feature completeness | `2.6 Capability coverage matrix` |
@@ -179,6 +180,51 @@ On a partitioned table the guard defaults **on**. A query must include `eq` or `
 Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Error `PARTITION_FILTER_REQUIRED` names the **missing** columns and the satisfying operators.
 
 `crossPartitionAccess` is not a named-query field. Browser-tier alternatives: the watchlist `in` shape, auth-db-pls fan-out, or an MQ over the universe. Full page: [What a browser-tier read cannot do](browser-tier-read-limits.md#partition-filter-rule).
+
+### Live subscriptions on a partitioned table
+
+**The rule above applies to subscriptions exactly as it does to reads.** A `subscribe` runs a snapshot query first, and that snapshot goes through the same enforcement as `POST /named-queries/{name}/query` — the same code, the same guard. A named query that cannot execute cannot be subscribed to either.
+
+This catches people out because the failure is **late**. The schema applies. The named query deploys. A catalog export lists it. Nothing complains until the first browser subscribes, and then every subscribe fails with `PARTITION_FILTER_REQUIRED` while a service key — which bypasses the guard entirely — works perfectly. It reads like a transport bug. It is not one.
+
+#### The per-user feed
+
+The common shape is a table partitioned by the user's own id:
+
+```jsonc
+// RoomMembers, partition key: UserId
+{ "namedQueries": { "rooms.mine": { "table": "RoomMembers" } } }   // fails at first subscribe
+```
+
+Every user should see only their own rows, so the partition value **is** the caller's identity. There are two ways to say that, and you need one of them.
+
+**Option A — let Aouda inject it (recommended).** Configure partition-level security on the table. The caller's own partition value is then supplied from their token on every query, snapshot and subscription. Nothing in the named query mentions `UserId`, and no client can ask for another user's rows:
+
+```jsonc
+{
+  "tables": {
+    "RoomMembers": {
+      "partitionBy": ["UserId"],
+      "permissionDimension": "UserId"    // plus an identity source — see Access control
+    }
+  }
+}
+```
+
+**Option B — bind it in the definition.** Take the partition key as a parameter the caller supplies. Simpler to set up, but the value now comes from the client, so authorization has to come from somewhere else (RLS, or a grant check) — otherwise any user can pass another user's id.
+
+Without one of these, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess()` — a query-builder method. **There is no such toggle on a named query or a subscription**, and a browser-tier caller could not use it if there were.
+
+#### Which one you want
+
+| You want | Use |
+|---|---|
+| Each user sees only their own rows | **Option A** — PLS injects the value; the client cannot override it |
+| A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values |
+| A trusted backend reads across all partitions | A service key, which bypasses the guard |
+| A browser reads across all partitions | Not available — see [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule) |
+
+See [Access control](../auth/authorization.md) for identity sources and how the injected predicate is resolved.
 
 ### Partition and bucket pruning (P45)
 
@@ -715,6 +761,8 @@ Suggested tuning sequence:
 |---|---|---|
 | `400` saying body database must match path database | Route/body mismatch | Ensure request body `database` equals `/api/databases/{db}` segment |
 | Query on partitioned table fails with partition filter required | Missing `eq`/`in` on every partition-key column (ranges and prefixes do not count) and no admin bypass | Add `eq`/`in` on the missing keys (named in the error); browser-tier cannot set `crossPartitionAccess`. See [partition-filter rule](#partition-filter-rule-p40) |
+| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key bypasses the guard, so it hides the gap | Configure `permissionDimension` on the table so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
+| A named artifact returns `404 NOT_FOUND` to a user token, but exists in the catalog export | On the data-plane listener a permission denial is deliberately masked as "not found", so callers cannot enumerate artifacts | Read the **server** log: it records the real denial reason, code and subject for every masked 404. Grant the caller access — re-deploying the artifact will not change it |
 | Cross-partition admin queries suddenly return 429 | Rate limiter enabled and threshold exceeded | Reduce request rate, widen window/permit settings, or retry after suggested delay |
 | Service key writes bypass PLS but no corresponding audit entries | Should not occur after BL-041 | Confirm `_audit_log` contains `service_key_pls_bypass` for the database/table; see integration tests in `PartitionLevelSecurityEnforcementIntegrationTests` |
 | PLS behavior seems odd with nested/grouped filter shapes | `WhereClause.Groups` helper adoption gap | Keep partition conditions in top-level `and`/`or` until BL-044 work lands |
