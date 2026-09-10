@@ -18,7 +18,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## 0.1.22 — 2026-09-10
 
-**MQ correctness, P46 bulk-load materialization, bounded lifecycle.** Server **0.1.22**, `Aouda.Client` **0.1.22**, `@aouda/client` **0.1.21** (pin after npm — published line still **0.1.20**), Studio **0.0.24**. See [Compatibility](clients/compatibility.md).
+**MQ correctness, P46 bulk-load materialization, bounded lifecycle.** Server **0.1.22**, `Aouda.Client` **0.1.22**, `@aouda/client` **0.1.21**, Studio **0.0.25**. See [Compatibility](clients/compatibility.md).
 
 - **Bulk load materializes affected queries during the load (P46).** With `postLoadMqBehavior: "auto"` (the default), materialized queries of all four types accumulate in the load's own pass and are published at commit — a manual `:refresh` afterwards queues behind that work and re-scans the table. Wait on `mqRebuildStatus` / `MqRebuildCompleted` / `waitForMaterializedQueries()` instead. Reservation floor/ceiling: `Aouda:BulkLoad:MqIngestReservationFloorBytes` (default 1 MB) and `MqIngestReservationCeilingBytes` (default `0` = Transient governor is the bound). [Materialized queries](guides/materialized.md), [Bulk load](guides/bulk-load.md), [Defaults reference](guides/defaults-reference.md), [HTTP API — Bulk Load](reference/http-api.md#bulk-load-api).
 - **MQ refresh await and client wait APIs (BL-419).** `:refresh?await=true` uses its own timeout policy; default `Aouda:MaterializedQueries:RefreshAwaitTimeout` is **120 s**. C# `RefreshAsync` / `RefreshAndWaitAsync` / `WaitForMaterializedQueriesAsync`; TS `refreshAndWait` / `waitForMaterializedQueries` (in the **0.1.21** npm cut). Bulk-load commit/status carry `mqRebuildStatus`.
