@@ -33,21 +33,21 @@ This train:
 
 | Artifact | Version |
 |----------|---------|
-| Server | `0.1.14` |
-| Wire / HTTP API notes | v2.6 catalog GET auth linkage; P43 write-side; P42 catalog directory (ops, not wire) |
-| `@aouda/client` | `≥ 0.1.16` |
-| `Aouda.Client` | `≥ 0.1.14` |
-| Studio | `≥ 0.0.21` (pin `0.1.16` after npm) |
+| Server | `0.1.22` |
+| Wire / HTTP API notes | MQ `isStale`/`staleReason`; refresh await + bulk-load `mqRebuildStatus`; `MaxConnections` default `0`; `RefreshAwaitTimeout` 120s; P46 bulk-load MQ materialization |
+| `@aouda/client` | `≥ 0.1.21` (pin after npm — published line still `0.1.20`) |
+| `Aouda.Client` | `≥ 0.1.22` |
+| Studio | `≥ 0.0.24` (pin `0.1.21` after npm) |
 
 ---
 
 ## 2. Public changelog
 
-Move `CHANGELOG.md` **Unreleased** bullets into a dated section that names the same versions (this train: **0.1.14 — 2026-08-29**). Keep Unreleased empty afterwards.
+Move `CHANGELOG.md` **Unreleased** bullets into a dated section that names the same versions (this train: **0.1.22 — 2026-09-10**). Keep Unreleased for not-yet-shipped clarifications only.
 
-Include user-facing cross-repo facts: P42/P43, catalog GET `auth.enabled` / `auth.database`, create-role contract, identity stamp / `plsClaimBinding` / claims at mint. Link [HTTP API](../reference/http-api.md) and [Compatibility](../clients/compatibility.md).
+Include user-facing cross-repo facts for this train: P46 bulk-load MQ materialization, BL-419 wait APIs / `MaxConnections` default / `RefreshAwaitTimeout`, BL-427 staleness + health Degraded, BL-432/424 correctness, BL-423 lifecycle, WS auth handshake. Link [HTTP API](../reference/http-api.md) and [Compatibility](../clients/compatibility.md).
 
-Update the intro line that still says “P0–P40 complete” if phases shipped (P41–P43).
+Update the intro line phase range when newer phases ship (currently P0–P46).
 
 ---
 
@@ -58,17 +58,17 @@ Update the intro line that still says “P0–P40 complete” if phases shipped 
 - [ ] Ready to **commit**?
 - [ ] Ready to **push**? (docs site deploys from `main`)
 
-If Studio is not yet `0.0.21` on GitHub, either wait or write “Studio **0.0.21** (pin after npm)” and ship the docs row when Studio lands.
+If `@aouda/client` **0.1.21** is not yet on npm, write “pin after npm” and ship the docs row with that marker; refresh the pin note after publish.
 
 ---
 
 ## 4. Chain — where this file sits
 
 ```
-aouda (server 0.1.14)
-  ├─ aouda-client-ts (npm 0.1.16)
+aouda (server 0.1.22)
+  ├─ aouda-client-ts (npm 0.1.21 after publish; published line still 0.1.20)
   ├─ THIS REPO (matrix + public changelog)   ← can start as soon as numbers are known
-  └─ aouda-studio (app 0.0.21, after npm)
+  └─ aouda-studio (app 0.0.24, pin 0.1.21 after npm)
 ```
 
 **Upstream:**
