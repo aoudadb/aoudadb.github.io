@@ -258,6 +258,10 @@ Steps 1–4 are load-bearing: everything after them assumes the schema file exis
 }
 ```
 
+The `partitionKey` line above is illustrative, not a default to copy: it is right for an `Order` table
+where a single tenant will hold ~1 M rows, and wrong for one where tenants hold a few thousand each. The
+row for it below says how to tell which you have.
+
 What each choice buys you, in the order you should think about it:
 
 | Decide | Field | Why it matters later |
@@ -266,8 +270,8 @@ What each choice buys you, in the order you should think about it:
 | Primary key | `primaryKey: n`, `autoIncrement` | Composite keys are ordered by `n`. Server-generated ids, or bring your own with identity-insert |
 | Uniqueness | `unique: true` | Enforced on write, not just indexed |
 | Relationships | `references: "Table.col"` | Enforced on write. This is what lets a detail page be one named query with joins instead of three round trips |
-| Tenancy / sharding | `partitionKey` | The single highest-leverage decision on this page. It determines physical layout, what a browser-tier read may filter on, and how row isolation works. Read [Partitioning and multi-tenancy](partitioning.md) **before** you pick |
-| Physical ordering | `clusterColumns` | Time-ordered data scans dramatically better clustered. [Time-series and clustering](time-series.md) |
+| Tenancy / sharding | `partitionKey` | The single highest-leverage decision on this page — including the decision **not** to set it, which is right for more tables than not. Partition a key only when each individual key value will hold on the order of a million rows; below that it buys no useful pruning and costs `PARTITION_FILTER_REQUIRED` on every read and every subscribe for the life of the table. Read [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45) **before** you pick |
+| Physical ordering | `clusterColumns` | Time-ordered data scans dramatically better clustered — and on an unpartitioned table this is what gives you segment pruning, with no query-shape guard attached. [Time-series and clustering](time-series.md) |
 | Memory residency | `policy.storageTemperature` | `Hot` / `Auto` / `ColdPreferred` / mutable tiers. You control what stays in RAM. [Hot/cold storage](hot-cold.md) |
 | Durability | `durability.walEnabled` | Per-table write-ahead logging. [Write path durability](write-durability.md) |
 | Browser visibility | `dataPlaneAccess` | Defaults to **false**. Fail-closed. Every table a browser-tier read touches needs it, **including join tables and materialized-query result tables** |
@@ -577,9 +581,9 @@ The showcase, and the table to check your feature list against. If something you
 | A bulk import or a migration | Bulk load, multi-table atomic, idempotency keys, identity-insert | [Bulk load](bulk-load.md) |
 | A high-rate event or telemetry ingest | Write stream (`insert`/`upsert`), plus `route`/`tee` to fan rows out | [Real-time](real-time.md) · [Insert-time transforms](insert-transforms.md) |
 | An append-only audit or event log | Table clustered on time, `ColdPreferred` temperature, WAL on | [Time-series](time-series.md) · [Hot/cold](hot-cold.md) |
-| Multi-tenant row isolation (SaaS) | `partitionKey` + `partitionLevelSecurity` + `jwt-claim` or `auth-db-pls` | [Partitioning](partitioning.md) · [Data authorization](../auth/authorization.md) |
+| Multi-tenant row isolation (SaaS) | `auth-db-rls` with a named resolver, or `auth-db-pls` if you want grant-level access tiers. **Whether the table also gets a `partitionKey` is a separate, volume-only decision** | [Layout vs mode](../auth/authorization.md#layout-and-authorization-mode-are-independent-choices) · [Partitioning](partitioning.md) |
 | "Only rows I own" | `auth-db-rls` with a named resolver | [Mode 3: auth-db-rls](../auth/authorization.md#195-mode-3-auth-db-rls-row-level-security) |
-| Users who span many tenants/rooms/tickers | `auth-db-pls` with `permissionDimension` and partition grants | [Mode 2: auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) |
+| Users who span many tenants/rooms/tickers | `auth-db-pls` with `permissionDimension` and partition grants — **needs a `partitionKey`**; or `auth-db-rls` with a `PartitionGrant` rule, which does not and takes the same grants | [Mode 2: auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) · [The unpartitioned variant](../auth/authorization.md#the-unpartitioned-variant--same-grants-no-partition-key) |
 | Role-based admin screens | Server auth + RBAC (read/write/delete/admin per table) | [Data authorization](../auth/authorization.md) |
 | Sign-up, sign-in, refresh, password change | Application auth, called directly from the browser | [Setup and flows](../auth/setup.md) |
 | MFA | TOTP enrolment and verification (HTTP; not wrapped by the SDKs) | [Auth reference](../auth/reference.md) |

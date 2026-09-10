@@ -625,7 +625,18 @@ Use a user JWT on the **admin listener**. RLS/PLS need a principal; do not put t
 
 ### Use Case 1 — Chat Application (`auth-db-pls`, hundreds of rooms)
 
-A user belongs to hundreds of chat rooms. The `messages` table is partitioned by `room_id`. The application grants partition access at room-join time, and revokes it when the user leaves.
+{: .warning }
+**Check the volume before copying this shape.** This use case partitions `messages` by `room_id`, and that
+is only the right layout when **each room individually** holds on the order of a million rows. A typical
+chat product does not: tens of thousands of rooms and a few thousand messages a day across the whole
+product puts each room in the tens of rows — orders of magnitude below the line. Partitioning there
+creates a directory per room holding almost nothing, and imposes `PARTITION_FILTER_REQUIRED` on every read
+and every subscribe for the life of the table. See
+[Should this table have a partition key?](../guides/partitioning.md#should-this-table-have-a-partition-key-p45),
+then read [the unpartitioned variant](#the-unpartitioned-variant--same-grants-no-partition-key) below —
+for most chat applications that is the one to build.
+
+A user belongs to hundreds of chat rooms. In this use case the `messages` table is partitioned by `room_id` — assume it has cleared the rule above. The application grants partition access at room-join time, and revokes it when the user leaves.
 
 ```bash
 # Grant Alice write access to 3 rooms (repeat at join time for each room)
@@ -660,6 +671,100 @@ curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
 ```
 
 **Why not embed room memberships in the JWT?** A user in 500 rooms would add ~10 KB to the JWT. With `auth-db-pls`, the JWT carries only Alice's identity; room grants live in the auth DB's `_user_partition_grants` table and are resolved from the in-memory session cache at query time. Granting or revoking room access takes effect on the next request — no token re-issuance required.
+
+#### The unpartitioned variant — same grants, no partition key
+
+**A partition grant does not require a partitioned table.** The `partitionKey` field on a grant is a key
+*within the grant document*; it is not a claim about the table's physical layout. An `auth-db-rls` rule
+with `valueSource: "PartitionGrant"` reads the caller's grants for a dimension and injects them as an
+ordinary `IN` predicate on a named column — it never consults the partition router, so it behaves
+identically whether or not the table is partitioned.
+
+That is what lets a chat application keep everything the use case above buys — grants minted at join time,
+revoked at leave time, resolved from the session cache, no memberships in the JWT — while dropping a
+partition key its volume does not justify:
+
+```jsonc
+// aouda.schema.json — no partitionKey anywhere
+{
+  "tables": {
+    "messages": {
+      "clusterColumns": ["sent_at"],
+      "authMode": "auth-db-rls",
+      "rlsResolverName": "room_thread"
+    }
+  }
+}
+```
+
+```bash
+# The resolver is admin HTTP, not schema apply
+curl -X POST http://localhost:5433/api/databases/chat/auth/admin/rls-resolvers \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "room_thread",
+    "targetTable": "messages",
+    "resolverType": "ColumnMatch",
+    "rules": [
+      { "ruleOrder": 0, "columnName": "room_id", "operator": "In",
+        "valueSource": "PartitionGrant", "valueConfig": "{\"dimension\":\"chat_room\"}",
+        "combinator": null }
+    ],
+    "writeCheckRules": [
+      { "ruleOrder": 0, "columnName": "user_id", "operator": "Eq",
+        "valueSource": "UserId", "valueConfig": "{}", "combinator": null }
+    ]
+  }'
+```
+
+The grant `curl`s from the use case above are **unchanged** — same dimension, same `partitionKey` values,
+same admin endpoint.
+
+| | Partitioned (`auth-db-pls`) | Unpartitioned (`auth-db-rls` + `PartitionGrant`) |
+|---|---|---|
+| Grants | Minted per room, resolved from session cache | Identical |
+| Unentitled rows | Never routed to | Filtered by the injected predicate |
+| Named query with `params: {}` | Fails `PARTITION_FILTER_REQUIRED` | Legal — RLS supplies the predicate |
+| `subscribe` for a user token | Needs `permissionDimension` or a bound param | Works as-is |
+| Write authorization | Grant `accessLevel` on the target partition | `writeCheckRules` (above), or grant-based rules |
+
+Note that `permissionDimension` and `auth-db-rls` are **mutually exclusive**: declaring both fails apply
+with *"authMode 'auth-db-rls' cannot be combined with permissionDimension."* Pick one mode per table.
+
+#### Layout and authorization mode are independent choices
+
+It is tempting to read the table above as "big rooms → `auth-db-pls`, small rooms → `auth-db-rls`". That
+is not the rule, and getting it wrong is how a table ends up partitioned for a reason that was never a
+partitioning reason.
+
+There are two decisions, and they do not determine each other:
+
+1. **Does the table get a `partitionKey`?** Decided purely by volume —
+   [Should this table have a partition key?](../guides/partitioning.md#should-this-table-have-a-partition-key-p45).
+   This is the decision that buys pruning.
+2. **Which authorization mode?** Decided by the policy you need to express.
+
+**RLS is not the slower option.** Both modes deposit an ordinary predicate into the same `Where` before
+translation — PLS into `Where.And` / `Where.Or`, RLS into `Where.Groups` — and the planner sees one
+predicate tree either way. So on a table that *is* partitioned, an RLS rule constraining the partition
+key with `Eq` / `In` satisfies the partition-filter guard **and** drives the same exact partition and
+bucket pruning that PLS does. Pinned by `RlsPartitionGuardAndPruningTests` in the engine repository,
+which asserts the pruning counters, not just the row set.
+
+What actually separates the two modes:
+
+| | `auth-db-pls` (and `jwt-claim` PLS) | `auth-db-rls` |
+|---|---|---|
+| Needs a partition key | **Yes** — apply fails without one | No |
+| Can constrain | Only the partition-key column | Any column, compound rules, admin pass-through |
+| Predicate shapes | Equality, or OR-of-equality fan-out over grants | `Eq`, `In`, `Like`, `And`/`Or` combinations |
+| Mixed `Where.Or` from the caller | Rejected — a leak guard | Allowed; RLS nests in its own group |
+| Read cost, same predicate | — identical — | — identical — |
+| Write cost | Grant `accessLevel` check | `UPDATE`/`DELETE` additionally **pre-read** matching rows to evaluate the write check |
+
+So: choose the layout on volume, then choose the mode on policy. The only combination the engine forbids
+is PLS without a partition key.
 
 ---
 

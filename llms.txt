@@ -31,7 +31,7 @@
 - [Auth Architecture](https://aoudadb.github.io/auth/architecture/): Deployment models A-D, ADRA modes, PLS/RLS
 - [Setup and Flows](https://aoudadb.github.io/auth/setup/): Signup, signin, token lifecycle, practical setup sequences
 - [Client Integration](https://aoudadb.github.io/auth/client-integration/): .NET and TypeScript integration patterns
-- [Data Authorization](https://aoudadb.github.io/auth/authorization/): ADRA modes — jwt-claim (`plsClaimBinding`), auth-db-pls, auth-db-rls (`UserId` / `Literal` / `PartitionGrant`, `writeCheckRules`). Fixture: [p43-write-side](https://github.com/aoudadb/aouda-docs/tree/main/examples/p43-write-side) (identity stamp + public OR member)
+- [Data Authorization](https://aoudadb.github.io/auth/authorization/): ADRA modes — jwt-claim (`plsClaimBinding`), auth-db-pls, auth-db-rls (`UserId` / `Literal` / `PartitionGrant`, `writeCheckRules`). `auth-db-pls` requires a partition key; `auth-db-rls` does not, **including its `PartitionGrant` value source** — grants work on unpartitioned tables. `auth-db-rls` + `permissionDimension` is an apply error. Fixture: [p43-write-side](https://github.com/aoudadb/aouda-docs/tree/main/examples/p43-write-side) (identity stamp + public OR member)
 - [Use Cases](https://aoudadb.github.io/auth/use-cases/): Common implementation patterns, password reset, MFA
 - [Email, SMS & Notifications](https://aoudadb.github.io/auth/notifications/): SendGrid, GatewayAPI, OTP delivery configuration
 - [Auth Reference](https://aoudadb.github.io/auth/reference/): API endpoints, error codes, local developer setup
@@ -56,8 +56,8 @@
 - [Real-time Streaming](https://aoudadb.github.io/guides/real-time/): WebSocket streaming, availability status, usage playbooks
 - [Backup and Restore](https://aoudadb.github.io/guides/backup/): Incremental manifests, exact restore, retention, REST APIs, point-in-time recovery. Local PITR window is write volume, not a duration.
 - [Replication and Clustering](https://aoudadb.github.io/guides/replication/): Cluster lifecycle, witness role, node management
-- [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): Partition keys, tenant isolation, exact partition/bucket query pruning, choosing `initialBucketCount` at scale
-- [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling
+- [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): **Whether to partition at all** (partition a key only when each key value holds ~1 000 000 rows — below that, no `partitionKey`), tenant isolation, exact partition/bucket query pruning, choosing `initialBucketCount` at scale, live subscriptions and the partition-filter guard
+- [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling. `clusterColumns` prunes segments on unpartitioned tables too, with no partition-filter guard
 - [Materialized Queries](https://aoudadb.github.io/guides/materialized/): Materialized query definitions, refresh, Studio browser
 - [Market Data and Stock Quotes](https://aoudadb.github.io/guides/market-data/): **P40 browser-tier worked example.** Watchlist subscribe, `latestPerKey` last-price, candle chart via `outputName`, paged screener with `whenParamPresent`, top-gainers with computed MQ + `orderByChoices`. Conformance fixture: `examples/p40-browser-tier/`
 - [Storage and Persistence](https://aoudadb.github.io/guides/storage/): Columnar storage model, segment lifecycle, WAL
