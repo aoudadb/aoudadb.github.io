@@ -296,9 +296,15 @@ for how segment shape and bucket count interact for that path.
 
 ### Choosing partition storage mode
 
-Ask one question before creating a partitioned table: **will any single partition key, on its own, plausibly reach 10 million rows or 1 GB?**
+**This section assumes the table should be partitioned at all.** That is a separate and earlier question,
+answered by a different threshold: partition a key only when each individual key value will hold on the
+order of **one full segment — around a million rows**. A table whose keys fall short of that wants no
+`partitionKey`, and none of the choices below apply to it. See
+[Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45).
 
-- **No** (the common case — a few hundred to a few thousand distinct key values, each holding a modest share of the table): leave `partitionStorage` unset. A declaratively-managed table defaults to `Auto`, which starts every key in a shared bucket (16 by default) and promotes an individual key to its own dedicated directory only if it actually crosses that threshold.
+Given a table that clears it, ask one more question: **will any single partition key, on its own, plausibly reach 10 million rows or 1 GB?** — the *promotion* thresholds, not the partition-or-not line above.
+
+- **No** (the common case — a few hundred to a few thousand distinct key values, each holding a modest share of the table): leave `partitionStorage` unset. A declaratively-managed table defaults to `Auto`, which starts every key in a shared bucket and promotes an individual key to its own dedicated directory only if it actually crosses that threshold. The starting bucket count is `16` when every partition-key column carries a bounded time-truncation `partitionFunction` and `128` otherwise (P45) — see [Choosing `initialBucketCount` at scale](partitioning.md#choosing-initialbucketcount-at-scale-p45), and note it is fixed for the life of the table.
 - **Yes** (a small number of keys, each independently huge — e.g. partitioning by tenant for a handful of enterprise tenants who each hold the whole table's data): declare `partitionStorage: "Dedicated"` explicitly. Starting such a key in a shared bucket only to have it promote out immediately is pure overhead.
 
 **The legacy-table exception.** `Auto` is the default only for a table created (or re-applied) through declarative schema apply after this default was introduced. A table that predates it keeps its original, implicit `Dedicated` storage — nothing changes it automatically, and there is no automated migration tool yet. If a table stuck in `Dedicated` is producing the tiny-segment shape above, the supported route today is manual: export the table's data, drop it, re-create it **under a different name** with the desired `partitionStorage`, and reload. See the private engineering guide's own migration-route section for the exact steps and a known caveat about reusing the dropped table's name.

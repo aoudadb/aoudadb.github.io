@@ -35,6 +35,14 @@ If your question is "What is implemented vs missing?", jump to:
 
 Aouda time-series clustering exists to keep append-heavy workloads fast without forcing a full "sort-on-insert plus background rewrite" architecture.
 
+**Clustering is not partitioning, and does not require it.** `clusterColumns` orders rows physically
+within a segment and records per-segment min/max statistics, so a range or last-N read on the clustered
+column skips segments that cannot match — on a partitioned *or* an unpartitioned table. It carries none of
+partitioning's query-shape obligations: no `RequirePartitionFilter`, so no `PARTITION_FILTER_REQUIRED`.
+For a table too small to justify a partition key — the common case, see
+[Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45) —
+`clusterColumns` on the time column is the whole layout decision.
+
 - User problem solved:
   - Keep range query pruning effective on very large time-oriented tables.
   - Support out-of-order arrivals without corrupting main historical segment layout.
@@ -192,7 +200,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 |---|---|---|---|---|
 | P4 | Epic G tasks (G.1-G.6) + reports | Cluster declaration, partition functions, nested paths, manifests, segment stats pruning, sort-on-seal, late-arrival delta foundation | Extended API surfacing for many advanced knobs | `docs/BACKLOG.md` (BL-004/005/006/007/008 completion notes) |
 | P4 follow-ups | BL-004/005/005b/006/007/008 reports | Metadata caching tiers, retrospective partitioning framework, full K-way delta merge, query and flush integration for delta paths | Some migration strategy paths remain phase-2 scoped | `docs/BACKLOG.md` BL-005 phase-2 notes |
-| P8 | Declarative schema management tasks | Schema format carries `partitionKey.function` and `clusterColumns`; apply/export/diff paths include these fields | Schema apply still does not set partition options block (storage mode, late-arrival, migration) | `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md` |
+| P8 | Declarative schema management tasks | Schema format carries `partitionKey.function` and `clusterColumns`; apply/export/diff paths include these fields | Schema apply set no part of the partition options block at P8. Since P45 it sets `partitionStorage`, `initialBucketCount`, `promotionRowThreshold`, `promotionByteThreshold` and `pkUniqueness` — late-arrival policy and migration options are still not declarable. See [Partitioning `2.10`](partitioning.md#210-configuration-and-settings-reference-complete-surface) | `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`, `docs/tasks/P45/` |
 | P28 (S1) | `docs/tasks/P28/` | `TruncateToMinute` partition function (`PartitionFunction = 6`); minute-level time partitioning; TypeScript `partitionFunction` string union extended | None | P28-COMPLETION |
 
 ## 2.6 Capability coverage matrix

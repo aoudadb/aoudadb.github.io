@@ -17,6 +17,10 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 
 ## Start Here
 
+If your question is "Should this table be partitioned at all?" — start there, because it is the decision
+every other section on this page assumes you have already made:
+- [`Should this table have a partition key?`](#should-this-table-have-a-partition-key-p45)
+
 If your question is "How do I use partitioning and multitenancy right now?", start with:
 - `2.3 Defaults and zero-config behavior`
 - `2.10 Configuration and settings reference`
@@ -54,6 +58,7 @@ Partitioning and multitenancy exist to make a single Aouda deployment practical 
 
 | If you need to know... | Go to section |
 |---|---|
+| **Should this table be partitioned at all?** | [`Should this table have a partition key?`](#should-this-table-have-a-partition-key-p45) — read this before anything else on the page |
 | What defaults apply if I do nothing? | `2.3 Defaults and zero-config behavior` |
 | How do I build a per-user live feed on a partitioned table? | [`Live subscriptions on a partitioned table`](#live-subscriptions-on-a-partitioned-table) |
 | What is shipped vs planned vs reserved? | `2.4 Availability status` |
@@ -196,31 +201,79 @@ The common shape is a table partitioned by the user's own id:
 { "namedQueries": { "rooms.mine": { "table": "RoomMembers" } } }   // fails at first subscribe
 ```
 
-Every user should see only their own rows, so the partition value **is** the caller's identity. There are two ways to say that, and you need one of them.
+**First check whether this table should be partitioned at all.** A membership, roster, inbox or
+presence table typically holds a handful of rows per user and a few thousand rows in total — orders of
+magnitude below the line in [Should this table have a partition key?](#should-this-table-have-a-partition-key-p45).
+At that size the partition key buys no pruning worth having, and it is the direct cause of this failure.
+**Option C removes it**, and for a table of that shape it is the right answer rather than a fallback.
 
-**Option A — let Aouda inject it (recommended).** Configure partition-level security on the table. The caller's own partition value is then supplied from their token on every query, snapshot and subscription. Nothing in the named query mentions `UserId`, and no client can ask for another user's rows:
+If the table *is* partitioned for volume reasons, every user should still see only their own rows — so
+the partition value **is** the caller's identity, and you need Option A or Option B to say so.
+
+**Option A — let Aouda inject it.** Configure partition-level security on the table. The caller's own partition value is then supplied from their token on every query, snapshot and subscription. Nothing in the named query mentions `UserId`, and no client can ask for another user's rows:
 
 ```jsonc
 {
   "tables": {
     "RoomMembers": {
-      "partitionBy": ["UserId"],
-      "permissionDimension": "UserId"    // plus an identity source — see Access control
+      "partitionKey": [{ "column": "UserId" }],
+      "authMode": "auth-db-pls",
+      "permissionDimension": "UserId"
     }
   }
 }
 ```
 
+Three things that are easy to get wrong here:
+
+- `authMode: "auth-db-pls"` enables PLS on its own. `partitionLevelSecurity: true` is the older, separate
+  way to say the same thing and is not needed alongside it.
+- **Either route requires a partition key.** Applying PLS to an unpartitioned table fails with
+  *"Partition-level security can only be enabled on tables with a partition key."*
+- `permissionDimension` is only read in `auth-db-pls` mode. On a `jwt-claim` table it validates and then
+  does nothing; next to `auth-db-rls` it is a hard apply error (*"authMode 'auth-db-rls' cannot be
+  combined with permissionDimension"*).
+
 **Option B — bind it in the definition.** Take the partition key as a parameter the caller supplies. Simpler to set up, but the value now comes from the client, so authorization has to come from somewhere else (RLS, or a grant check) — otherwise any user can pass another user's id.
 
-Without one of these, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess()` — a query-builder method. **There is no such toggle on a named query or a subscription**, and a browser-tier caller could not use it if there were.
+**Option C — drop the partition key and authorize by row.** Remove `partitionKey` entirely, put
+`clusterColumns` on the table's time column if reads are time-ordered, and switch the table to
+`auth-db-rls` with a named resolver. The guard disappears with the partition key, so `params: {}` on the
+named query is legal again, and the resolver injects the caller's predicate on every read *and* every
+subscribe:
+
+```jsonc
+{
+  "tables": {
+    "RoomMembers": {
+      "clusterColumns": ["JoinedAt"],
+      "authMode": "auth-db-rls",
+      "rlsResolverName": "room_inbox"
+    }
+  }
+}
+```
+
+The resolver itself is **admin HTTP, not schema apply** — `POST /api/databases/{db}/auth/admin/rls-resolvers`
+with `"columnName": "UserId", "operator": "Eq", "valueSource": "UserId"`. See
+[RLS resolvers](../auth/authorization.md#199-admin-api-rls-resolvers).
+
+**A partition grant does not require a partitioned table.** This is the part that surprises people: an RLS
+rule with `valueSource: "PartitionGrant"` reads the caller's grants for a dimension and injects them as an
+ordinary `IN` predicate on a named column. It never consults the partition router, so it works exactly the
+same on an unpartitioned table. A grant's `partitionKey` field is a key *within the grant document* — it is
+not a claim about the table's physical layout. That is what lets a "user belongs to many rooms" app keep
+grant-based authorization while dropping partitioning it does not have the volume to justify.
+
+Without one of these three, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess()` — a query-builder method. **There is no such toggle on a named query or a subscription**, and a browser-tier caller could not use it if there were.
 
 #### Which one you want
 
 | You want | Use |
 |---|---|
-| Each user sees only their own rows | **Option A** — PLS injects the value; the client cannot override it |
-| A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values |
+| A small membership / roster / inbox table, whatever the auth model | **Option C** — no partition key, `auth-db-rls`; the guard never applies |
+| Each user sees only their own rows, on a table partitioned for volume | **Option A** — PLS injects the value; the client cannot override it |
+| A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values — or Option C with a `PartitionGrant` rule |
 | A trusted backend reads across all partitions | A service key, which bypasses the guard |
 | A browser reads across all partitions | Not available — see [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule) |
 
@@ -364,21 +417,62 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - Partition enforcement decisions occur before table query execution.
   - Cross-partition bypasses are explicit and observable (audit/rate-limiter paths).
 
+### Should this table have a partition key? (P45)
+
+Answer this before choosing a storage mode or a bucket count — those questions only arise once this one
+is settled, and for a large share of application tables the answer here is **no**.
+
+> **Partition on a key only when every key will produce at least one full segment's worth of rows per
+> load cycle.**
+
+A full segment is on the order of **1 000 000 rows**. Divide the rows you expect the table to hold by the
+number of distinct values the candidate key will take; if the result is not in that neighbourhood, the key
+does not clear the line.
+
+Above the line, a per-key or per-bucket directory costs nothing extra and buys exact pruning. Below it,
+more directories just multiply how many small segments the table ends up with — no configuration recovers
+that, and it happens regardless of storage mode. Background coalescing (`2.13`) tidies up *within* a
+bucket; it cannot merge across bucket boundaries, and it cannot merge across partition keys at all.
+
+| Table shape | Rows per key | Right choice |
+|---|---|---|
+| **1 million rows, 20 thousand distinct keys** (a chat app's rooms, a SaaS app's small tenants, a membership or roster table) | **~50** | **No `partitionKey`.** Add `clusterColumns` on the time column if reads are time-ordered. See below |
+| 200 million rows, 1 million distinct keys | ~200 | Partition; `Auto`/`Shared` with a moderate bucket count |
+| 10 billion rows, 10 thousand distinct keys | ~1 000 000 | Partition; `Dedicated` |
+
+**What you give up by not partitioning: less than you would guess.**
+
+- **Pruning still happens.** `clusterColumns` gives segment elimination from per-segment min/max
+  statistics on a physical column — a "last 50 messages in this room" or "this month's rows" read skips
+  the segments that provably cannot contain a match. It is best-effort rather than exact, but on a table
+  small enough to fail the rule above, the whole table is a handful of segments anyway.
+- **Row isolation still works.** `auth-db-rls` needs no partition key, including its `PartitionGrant`
+  value source — see [Live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table).
+  Only `auth-db-pls` and `jwt-claim` PLS require one.
+
+**What you avoid:** `RequirePartitionFilter`. On an unpartitioned table there is no guard, so a named
+query with `params: {}` is legal, a subscribe works, and `PARTITION_FILTER_REQUIRED` cannot occur. On a
+partitioned table every read must pin every partition key with `eq`/`in` — a real constraint on
+browser-tier reads, and one paid on every query for the life of the table.
+
+**Partitioning cannot be added or removed later.** `partitionKey` and `clusterColumns` are both
+drop-and-recreate changes (`schema apply` reports them as warnings and refuses to migrate). Both
+directions cost the same migration, so an unpartitioned table is not the timid choice — it is no harder to
+undo than the partitioned one, and the rule above is the only thing that should decide between them.
+
 ### Choosing `initialBucketCount` at scale (P45)
 
-**Partition on a key only when every key will produce at least one full segment's worth of rows per load
-cycle.** Above that line, a per-key or per-bucket directory costs nothing extra and buys exact pruning.
-Below it, more directories just multiply how many small segments the table ends up with — no
-configuration recovers that, and it happens regardless of storage mode.
-
-This gives a hard ceiling on how many buckets are ever worth having, independent of query selectivity:
+Once the rule above says to partition, this decides the fan-out. It gives a hard ceiling on how many
+buckets are ever worth having, independent of query selectivity:
 
 > **A table cannot usefully have more buckets than its total row count divided by the row count of one
 > full segment.** Beyond that ceiling, a bucket holds a fraction of a segment no matter how the count is
 > set, and the small-segment problem returns — background coalescing (`2.13`) can tidy up *within* a
 > bucket, but it cannot merge across bucket boundaries.
 
-Worked examples, for a table with one high-cardinality identity column and everything else held constant:
+Worked examples, for a table with one high-cardinality identity column and everything else held constant.
+All four have already cleared the previous section's rule — a table that has not does not appear here,
+because its answer is no partition key at all:
 
 | Table shape | Rows per key | Right choice | Why |
 |---|---|---|---|
@@ -744,10 +838,11 @@ Recovery expectations:
 
 Suggested tuning sequence:
 
-1. Start with partition filter requirement enabled and explicit tenant filters in app queries.
-2. Choose `Auto` partition storage first unless workload shape is clearly known.
-3. Add per-db memory caps when multiple high-volume databases share one server.
-4. Enable cross-partition limiter before granting broad admin bypass usage.
+1. Confirm the table should be partitioned at all — [the rule](#should-this-table-have-a-partition-key-p45). Steps 2 and 3 apply only to tables that clear it.
+2. Start with partition filter requirement enabled and explicit tenant filters in app queries.
+3. Choose `Auto` partition storage first unless workload shape is clearly known.
+4. Add per-db memory caps when multiple high-volume databases share one server.
+5. Enable cross-partition limiter before granting broad admin bypass usage.
 
 | Question | Practical answer |
 |---|---|
@@ -761,7 +856,7 @@ Suggested tuning sequence:
 |---|---|---|
 | `400` saying body database must match path database | Route/body mismatch | Ensure request body `database` equals `/api/databases/{db}` segment |
 | Query on partitioned table fails with partition filter required | Missing `eq`/`in` on every partition-key column (ranges and prefixes do not count) and no admin bypass | Add `eq`/`in` on the missing keys (named in the error); browser-tier cannot set `crossPartitionAccess`. See [partition-filter rule](#partition-filter-rule-p40) |
-| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key bypasses the guard, so it hides the gap | Configure `permissionDimension` on the table so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
+| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key bypasses the guard, so it hides the gap | First ask whether the table clears [the partitioning rule](#should-this-table-have-a-partition-key-p45) — on a membership or roster table it usually does not, and dropping `partitionKey` for `auth-db-rls` removes the guard outright. Otherwise set `authMode: "auth-db-pls"` + `permissionDimension` so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
 | A named artifact returns `404 NOT_FOUND` to a user token, but exists in the catalog export | On the data-plane listener a permission denial is deliberately masked as "not found", so callers cannot enumerate artifacts | Read the **server** log: it records the real denial reason, code and subject for every masked 404. Grant the caller access — re-deploying the artifact will not change it |
 | Cross-partition admin queries suddenly return 429 | Rate limiter enabled and threshold exceeded | Reduce request rate, widen window/permit settings, or retry after suggested delay |
 | Service key writes bypass PLS but no corresponding audit entries | Should not occur after BL-041 | Confirm `_audit_log` contains `service_key_pls_bypass` for the database/table; see integration tests in `PartitionLevelSecurityEnforcementIntegrationTests` |
@@ -770,7 +865,7 @@ Suggested tuning sequence:
 
 ## 2.15 Verification ledger
 
-Last verification date (UTC): `2026-03-31`.
+Last verification date (UTC): `2026-09-10`.
 
 | Verification scope | Command | Result | Date (UTC) | Notes |
 |---|---|---|---|---|
