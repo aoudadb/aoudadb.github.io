@@ -728,10 +728,43 @@ same admin endpoint.
 | Named query with `params: {}` | Fails `PARTITION_FILTER_REQUIRED` | Legal — RLS supplies the predicate |
 | `subscribe` for a user token | Needs `permissionDimension` or a bound param | Works as-is |
 | Write authorization | Grant `accessLevel` on the target partition | `writeCheckRules` (above), or grant-based rules |
-| Right when | Each room holds ~1 M rows | Each room holds far less — the common case |
 
 Note that `permissionDimension` and `auth-db-rls` are **mutually exclusive**: declaring both fails apply
 with *"authMode 'auth-db-rls' cannot be combined with permissionDimension."* Pick one mode per table.
+
+#### Layout and authorization mode are independent choices
+
+It is tempting to read the table above as "big rooms → `auth-db-pls`, small rooms → `auth-db-rls`". That
+is not the rule, and getting it wrong is how a table ends up partitioned for a reason that was never a
+partitioning reason.
+
+There are two decisions, and they do not determine each other:
+
+1. **Does the table get a `partitionKey`?** Decided purely by volume —
+   [Should this table have a partition key?](../guides/partitioning.md#should-this-table-have-a-partition-key-p45).
+   This is the decision that buys pruning.
+2. **Which authorization mode?** Decided by the policy you need to express.
+
+**RLS is not the slower option.** Both modes deposit an ordinary predicate into the same `Where` before
+translation — PLS into `Where.And` / `Where.Or`, RLS into `Where.Groups` — and the planner sees one
+predicate tree either way. So on a table that *is* partitioned, an RLS rule constraining the partition
+key with `Eq` / `In` satisfies the partition-filter guard **and** drives the same exact partition and
+bucket pruning that PLS does. Pinned by `RlsPartitionGuardAndPruningTests` in the engine repository,
+which asserts the pruning counters, not just the row set.
+
+What actually separates the two modes:
+
+| | `auth-db-pls` (and `jwt-claim` PLS) | `auth-db-rls` |
+|---|---|---|
+| Needs a partition key | **Yes** — apply fails without one | No |
+| Can constrain | Only the partition-key column | Any column, compound rules, admin pass-through |
+| Predicate shapes | Equality, or OR-of-equality fan-out over grants | `Eq`, `In`, `Like`, `And`/`Or` combinations |
+| Mixed `Where.Or` from the caller | Rejected — a leak guard | Allowed; RLS nests in its own group |
+| Read cost, same predicate | — identical — | — identical — |
+| Write cost | Grant `accessLevel` check | `UPDATE`/`DELETE` additionally **pre-read** matching rows to evaluate the write check |
+
+So: choose the layout on volume, then choose the mode on policy. The only combination the engine forbids
+is PLS without a partition key.
 
 ---
 

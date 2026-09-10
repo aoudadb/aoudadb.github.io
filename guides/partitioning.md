@@ -272,10 +272,17 @@ Without one of these three, the definition can never execute for a user-token ca
 | You want | Use |
 |---|---|
 | A small membership / roster / inbox table, whatever the auth model | **Option C** — no partition key, `auth-db-rls`; the guard never applies |
-| Each user sees only their own rows, on a table partitioned for volume | **Option A** — PLS injects the value; the client cannot override it |
+| Each user sees only their own rows, on a table partitioned for volume | **Option A** — PLS injects the value; the client cannot override it. **Option C also works here** and prunes identically — see below |
 | A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values — or Option C with a `PartitionGrant` rule |
 | A trusted backend reads across all partitions | A service key, which bypasses the guard |
 | A browser reads across all partitions | Not available — see [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule) |
+
+**Option C is not the "small table" option.** It is listed first for small tables because there the
+partition key should not exist at all — but on a table that *is* partitioned, an RLS rule constraining
+the partition key with `Eq` / `In` satisfies the guard and drives the same exact pruning PLS does. Both
+modes deposit a predicate into the same `Where` before translation; the planner sees one predicate tree
+either way. Choose the layout on volume and the authorization mode on policy — they are independent. See
+[Layout and authorization mode are independent choices](../auth/authorization.md#layout-and-authorization-mode-are-independent-choices).
 
 See [Access control](../auth/authorization.md) for identity sources and how the injected predicate is resolved.
 
