@@ -217,6 +217,14 @@ When a token or lag budget is in play, the read may wait up to `waitMs` (default
 
 This engine work makes a regional replica *safe*. Hub region-aware scheduling (`CP-B4`) is a commercial dependency, not shipped here.
 
+### Store wiped or recreated — the mirror image of scale-out
+
+[Scale-out](#scale-out--the-default-store-is-not-enough) is a **new client** with no token talking to an **unchanged** store. This is the reverse: an **existing client** holding a valid-looking token talks to a store that was wiped and recreated — a standalone node reset, a replica set restored from backup, a test fixture that drops and recreates data between runs. The fresh store's WAL starts at a lower epoch/offset than the token names, so that position is never reached, not on the current primary and not on any future one.
+
+Every read that presents the old token gets `421 TOKEN_FETCH_PRIMARY` (or `409 TOKEN_UNSATISFIED` under `onExceeded: wait`/`fail`), and it does not stop: retrying against "the real primary" does not help, because the token itself is stale, not the node's role. Nothing in the response distinguishes this from ordinary replication lag — the error code is identical either way.
+
+The fix is client-side and one-time: clear the token from the client's [consistency-token store](#sdks) (the in-memory default, or an injected shared store) so the next write or `GET …/token` mints a fresh one against the recreated store. There is no server-side signal for this case — if a wipe/recreate is part of your deploy or test-reset flow, clear the token store as part of that same flow rather than waiting for clients to loop.
+
 ---
 
 ## Not in this release
@@ -238,6 +246,7 @@ This engine work makes a regional replica *safe*. Hub region-aware scheduling (`
 | 409 `TOKEN_EPOCH_SUPERSEDED` | Failover lost the write, or future term | Do not retry the same token; write again or fetch `GET …/token` |
 | 409 `TOKEN_UNSATISFIED` | Token or budget unmet after `waitMs` (or `onExceeded=fail`) | Retry later, or use `fetchPrimary`, or read the primary |
 | 421 `TOKEN_FETCH_PRIMARY` | Replica declared `fetchPrimary` | Retry against the current primary (`GET /admin/replication/topology`). Distinct from 421 `MISDIRECTED_REQUEST` (wrong **role**) |
+| 421 `TOKEN_FETCH_PRIMARY` forever, on a **standalone** node or right after all replicas were wiped/recreated | The client's token references a WAL position the fresh store can never reach — [store wiped or recreated](#store-wiped-or-recreated--the-mirror-image-of-scale-out), the mirror image of the scale-out caveat | Clear the client's consistency-token store once, then let it mint a fresh token. Retrying against "the primary" does not help — there is nothing wrong with the primary |
 | 400 `FRESHNESS_LOOSENED` | Call site weaker than the named query’s declared budget, or Secondary on fail-safe | Drop the looser param, or use Primary |
 | 400 `FRESHNESS_CONTRACT_INVALID` | Unknown `onExceeded`, `waitMs` out of range, `serveStaleAndRevalidate` | Fix the contract. Default wait is 250; cap is 30 000 |
 | Recreated client "forgets" the write | Default in-memory store | Share the store or persist the string ([scale-out](#scale-out--the-default-store-is-not-enough)) |

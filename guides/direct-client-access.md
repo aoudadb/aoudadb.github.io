@@ -230,6 +230,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
 | Data-plane named-query 404 with no token | Listed-route non-disclosure | Expected. Admin listener still 401. Use `mk_pub_*` or an entitled JWT. |
+| Data-plane named-mutation 404 with a valid, entitled JWT | Same listed-route non-disclosure, but the cause is the caller's RBAC role lacking `write` on this database (e.g. `db_reader`) — **not** the name and not PLS/RLS | Same masked 404 as "no token" (not 403). Check `db_roles` scope for this database before suspecting the artifact name; see [RBAC vs PLS/RLS](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls) |
 | WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `name` |
 | WS `DATA_PLANE_WRITE_STREAM` | `stream_open` on data-plane | Ingest from a service key on admin, or HTTP named mutation |
 

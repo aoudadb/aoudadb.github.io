@@ -14,6 +14,24 @@ Aouda supports three table-level authorization modes, each suited to a different
 
 ---
 
+## 19.0 RBAC is a separate gate from PLS/RLS
+
+Everything else on this page — `jwt-claim`, `auth-db-pls`, `auth-db-rls` — decides **which rows** an already-authorized caller may see or write. It has nothing to do with whether the caller may invoke the artifact at all. That's a coarser, separate gate: **RBAC role membership, scoped per database**, and it is what actually authorizes named-query and named-mutation **execute**.
+
+- A role assignment's `scope` is a database name (or `null`/`"*"` for all databases) — never a table, a named query, or a named mutation. See [Auth reference — Application Auth Admin Endpoints](reference.md#application-auth-admin-endpoints) for the wire shape (`{ "roleName": "db_reader", "scope": "mydb" }`).
+- Named-mutation execute needs the caller's role to carry `write` (or better) on that database; named-query execute needs `read`. This check runs **before** PLS/RLS: an authenticated JWT with a perfectly good partition grant or RLS predicate is still denied here first if it's holding the wrong database-scoped role.
+- On the [data-plane listener](../guides/direct-client-access.md), denial at this gate is **not** `403 INSUFFICIENT_PERMISSIONS`. It is the same masked `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` used for an unknown artifact name or an unsigned caller ([wire reference](../reference/http-api.md#error-codes)) — so a 404 on a name you know is right does not necessarily mean the name is wrong.
+
+| Caller | Result |
+|---|---|
+| No token / `mk_anon_*` | 404 `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` |
+| Valid JWT, role has the needed scope | 200 |
+| Valid JWT, real user, but role lacks `write` on this database (e.g. `db_reader` calling a named mutation) | **Same 404** — not 403 |
+
+If a named-mutation call 404s and the name is definitely right, check the caller's `db_roles` scope for that database next — before suspecting PLS/RLS. PLS/RLS denials that *do* pass the RBAC gate surface their own codes (`AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_RLS_INSERT_VIOLATION`, etc. — see [§19.3](#193-mode-1-jwt-claim-default) onward), not this masked 404.
+
+---
+
 ## 19.1 Mode Overview
 
 | Mode | Partition routing | Row filtering | JWT requires | Auth DB queried |
