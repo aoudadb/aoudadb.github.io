@@ -175,6 +175,19 @@ Scope boundaries:
 > a server restart) reports, since the WAL alone cannot say more. Some queries still fall back to a
 > scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling
 > refusal); that fallback is still the load's own rebuild, not a reason to call `:refresh`.
+>
+> **`postLoadMqBehavior: "skip"` opts out of this entirely, not partially.** With `skip`, the load
+> creates no ingest-time sinks at all — every affected MQ is left exactly as stale as it was before
+> the load, stamped `MqRebuildStatus.Skipped`. If your own code still calls `:refresh` afterward
+> (a pattern from before this section's `auto` behavior existed), that call does the **full**
+> pre-auto rebuild: an unbounded, unwatermarked scan of the **entire** source table's history, not
+> just the newly loaded rows. For an `Aggregate` MQ this can exhaust server memory rather than
+> merely take longer — the per-group accumulator has no spill-to-disk and, on this manually
+> triggered path, no governor reservation bounds its growth (unlike the load's own `auto` pass,
+> which does). A fine-granularity aggregate over a long or high-cardinality history (e.g. an
+> OHLC bar at 1-minute resolution across many symbols) is the shape most likely to hit this. If
+> you are still setting `skip`, switch to `auto` (or leave `postLoadMqBehavior` unset) and delete
+> the manual refresh call — do not keep both.
 
 ### Planned / proposed
 
