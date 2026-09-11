@@ -1,4 +1,4 @@
----
+﻿---
 title: "Bulk Load"
 nav_order: 17
 parent: "Guides"
@@ -148,7 +148,7 @@ Scope boundaries:
   - `aouda table bulk-load`
   - `aouda bulk-load`
 - **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036, ingest-fed path P46):**
-  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulates every affected MQ of all four types **during** the load's own pass and publishes at commit; `Skip` creates no sinks and leaves existing results untouched.
+  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulates every affected MQ of all four types **during** the load's own pass and publishes at commit; `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind).
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
@@ -158,6 +158,7 @@ Scope boundaries:
   - `BulkLoadJobHandle.MqRebuildCompleted`: `Task` that resolves when all dependent MQ rebuilds finish.
   - Replica coordinator: `MqRebuildScheduler` delegate triggers rebuild after all segments fetched.
   - Explicit on-demand refresh: `engine.RefreshMaterializedQueryAsync(name, ct)` and `POST .../materialized-queries/{name}:refresh`.
+  - **After a `Skip` load, refresh once — pooled, not per query (BL-474).** Queries over one source table are rebuilt from a single traversal of it, so `POST .../materialized-queries:refresh` with `{ "sourceTable": "EquityTrade", "staleOnly": true }` decodes `EquityTrade` once for all of its rollups instead of once each. `staleOnly` selects exactly what the `Skip` load left behind. See [Materialized queries — pooled refresh](materialized.md#211a-refreshing-several-queries-at-once-pooled-refresh).
   - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
   - TypeScript client: `client.materializedQueries.refresh(name, { await: true })`.
   - CLI: `aouda mq refresh <name> [--await]` and `--skip-mq-refresh` on `aouda table bulk-load`.

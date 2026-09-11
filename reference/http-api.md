@@ -1,4 +1,4 @@
----
+﻿---
 title: "HTTP API"
 nav_order: 1
 parent: "Reference"
@@ -1279,6 +1279,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
 | POST | `/{name}/query` | Read | Return materialized rows as JSON objects (see response). |
+| POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
 > **BL-419 (next train).** Before this fix, `:refresh` sat under the server's global 30s
@@ -1294,6 +1295,55 @@ Base path: `/api/databases/{db}/materialized-queries`
 > **120s** — `202 scheduled` was the normal answer for any MQ worth materializing at 30s, which
 > surprised every caller. Non-positive values still skip the wait and return `202` immediately (the
 > rebuild still runs).
+
+### Pooled refresh: `POST /api/databases/{db}/materialized-queries:refresh`
+
+Queries over one source table are built from a **single traversal** of it, so three OHLC rollups over
+`EquityTrade` decode it once between them rather than three times. Use this instead of calling
+`{name}:refresh` once per query.
+
+> With `postLoadMqBehavior: "auto"` (the default) a bulk load already materializes its affected
+> queries during its own pass — do not refresh at all. Pooled refresh is for the case where you
+> loaded with `"skip"` deliberately.
+
+**Request:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `sourceTable` | string? | one of | Refresh every materialized query over this table. |
+| `names` | string[]? | one of | Explicit list. An unknown name is a `404`. |
+| `staleOnly` | bool? | no | With `sourceTable`: restrict to queries a `postLoadMqBehavior: "skip"` load left stale. `400` without `sourceTable`. |
+| `await` | bool? | no | Same semantics, same window and the same BL-419 guarantees as `{name}:refresh`. Default `false`. |
+
+Supplying both `names` and `sourceTable`, or neither, is a `400` naming the conflict.
+
+**Response** — `200` when an `await: true` wait completed, `202` when it is still running:
+
+```json
+{
+  "status": "complete",
+  "sourceGroups": 1,
+  "results": [
+    { "name": "EquityTradeOhlc1H", "state": 1 },
+    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because the build exceeded its memory budget: …" }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `status` | `complete` (200) or `scheduled` (202), same vocabulary as `{name}:refresh`. On `scheduled`, `results` lists what was scheduled, not outcomes. |
+| `sourceGroups` | Source tables traversed. `results.length / sourceGroups` is what the pooled call saved over calling `{name}:refresh` per query. |
+| `results[].state` | Raw `MaterializedQueryState`: `0` Building, `1` Ready, `2` Rebuilding, `3` Error — the same encoding `GET /{name}` uses. |
+| `results[].error` | Why that query is not `Ready`; absent when it is. |
+
+**A per-query failure is reported, not thrown.** One query that exceeded its memory budget appears as
+`state: 3` with its message while its siblings appear as `state: 1`, and the response is still
+`200`/`202` — the request was carried out. Check `results`, not the status code. A genuine capacity
+refusal (the server could not start the work at all) is `503` with `Retry-After`, as elsewhere.
+
+**Authorization** is `Alter`, as on `{name}:refresh`. With `sourceTable` the check is scoped to that
+table, so a caller with no grant on it can neither refresh nor enumerate its materialized queries.
 
 **Create body** (camelCase JSON):
 

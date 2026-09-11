@@ -1,4 +1,4 @@
----
+﻿---
 title: "Materialized Queries"
 nav_order: 12
 parent: "Guides"
@@ -219,6 +219,18 @@ If you create a materialized query with standard helpers and no special options:
   - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
   - TypeScript client: `client.materializedQueries.refresh(name, { await: true })`.
   - CLI: `aouda mq refresh <name> [--await]`; `--skip-mq-refresh` flag on `aouda table bulk-load`.
+  - **Pooled refresh (BL-474)**: several queries over one source table are rebuilt from a *single*
+    traversal of it. `POST /api/databases/{db}/materialized-queries:refresh` (collection-level),
+    `engine.RefreshMaterializedQueriesForTableAsync(sourceTable, staleOnly, ct)` /
+    `RefreshMaterializedQueriesAsync(names, ct)`,
+    `client.MaterializedQueries.RefreshTableAsync(...)` / `RefreshManyAsync(...)`, and
+    `aouda mq refresh --source-table <table> [--stale-only]`. See
+    [§2.11a](#211a-refreshing-several-queries-at-once-pooled-refresh). No TypeScript client surface
+    yet.
+  - **Memory budget**: a rebuild holds one in-memory entry per output group. An over-budget build
+    writes its working set through to the query's shadow result table and, if that is still not
+    enough, retires the largest query with a diagnosable error while its siblings complete. See
+    [§2.11b](#211b-what-a-rebuild-costs-and-what-bounds-it).
 
 ### Planned / proposed
 
@@ -781,6 +793,187 @@ The `mqRebuildStatus` field is returned in `GET /api/databases/appdb/bulk-load/{
 | Distinct not-ready subscription error | No `MATERIALIZED_QUERY_NOT_READY` protocol/server code | Current `TABLE_NOT_FOUND` handling | `docs/BACKLOG.md` BL-053 | Low |
 | JOIN-based MQ definitions | No query/API support for JOIN materialization | Build denormalized source table first | `docs/BACKLOG.md` BL-010 (depends BL-009) | Medium |
 | Rich routed-query controls in TS | No TS equivalent of .NET `WithDirectScan()` | Use query shape changes / backend controls | Future query API parity work | Medium |
+
+## 2.11a Refreshing several queries at once (pooled refresh)
+
+**If several materialized queries share a source table, refresh them in one call.** Queries over one
+source table are built from a single traversal of it, so `EquityTradeOhlc1M`, `…1H` and `…1D` decode
+`EquityTrade` **once between them**, not three times. Calling `{name}:refresh` three times decodes it
+three times.
+
+**This is the recommended shape whenever you refresh by hand.**
+
+### First: check whether you need to refresh at all
+
+With `PostLoadMqBehavior.Auto` — the default — a bulk load materializes its affected queries
+**during the load's own pass**. You do not need to call refresh, and calling it makes the engine do
+the work twice. Wait on `MqRebuildCompleted` / `mqRebuildStatus` instead. See
+[Bulk load — do not hand-refresh](bulk-load.md).
+
+Pooled refresh is for the case where you deliberately loaded with `PostLoadMqBehavior.Skip`, because
+you wanted ingestion to finish fast and will materialize later.
+
+### What a `Skip` load leaves behind
+
+A `Skip` load marks every affected query **stale**: `GET …/materialized-queries/{name}` reports
+`isStale: true` with a `staleReason` naming what happened. The query stays readable and routable —
+it is behind, not broken — and `staleOnly` selects exactly this set.
+
+Staleness is durable. If the server restarts before you refresh, the query is **rebuilt from source
+at startup** rather than being reattached with the loaded rows missing. That is deliberate: serving
+a result that silently omits a committed load is worse than doing the rebuild you deferred. If you
+would rather control when that work happens, refresh before restarting — which is what `staleOnly`
+is for.
+
+### HTTP
+
+```http
+POST /api/databases/appdb/materialized-queries:refresh
+Content-Type: application/json
+
+{ "sourceTable": "EquityTrade", "staleOnly": true, "await": true }
+```
+
+Supply **either** `sourceTable` **or** `names`, never both:
+
+```json
+{ "names": ["EquityTradeOhlc1M", "EquityTradeOhlc1H"], "await": true }
+```
+
+| Field | Meaning |
+|---|---|
+| `sourceTable` | Refresh every materialized query over this table, from one traversal. |
+| `staleOnly` | With `sourceTable`: only the queries a `PostLoadMqBehavior.Skip` load left stale. Rejected without `sourceTable`. |
+| `names` | Explicit list. An unknown name is a `404`. |
+| `await` | `true` waits up to the server's await window; `false` returns immediately. A wait timeout does **not** cancel the rebuild. |
+
+Response — `200` when the wait completed, `202` when it is still running:
+
+```json
+{
+  "status": "complete",
+  "sourceGroups": 1,
+  "results": [
+    { "name": "EquityTradeOhlc1H", "state": 1 },
+    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because …" }
+  ]
+}
+```
+
+`state` is the raw `MaterializedQueryState` value (`0` Building, `1` Ready, `2` Rebuilding,
+`3` Error), matching the status endpoint's encoding. `sourceGroups` is the number of source tables
+traversed — the ratio of `results` to `sourceGroups` is what the pooled call saved you.
+
+**A query in `Error` is reported, not thrown.** The response is still `200`/`202`, because the
+request was carried out; one query that could not be built does not deny you the news that its
+siblings succeeded. Check the `results` list rather than relying on the status code.
+
+A genuine capacity refusal — the server could not start the work at all — is a `503` with
+`Retry-After`, as elsewhere.
+
+### C# client
+
+```csharp
+var result = await client.MaterializedQueries.RefreshTableAsync(
+    sourceTable: "EquityTrade", staleOnly: true, awaitCompletion: true);
+
+foreach (var entry in result.Results)
+{
+    if (entry.State == MaterializedQueryState.Error)
+        Console.WriteLine($"{entry.Name}: {entry.Error}");
+}
+
+// Or by explicit name:
+await client.MaterializedQueries.RefreshManyAsync(
+    new[] { "EquityTradeOhlc1M", "EquityTradeOhlc1H" }, awaitCompletion: true);
+```
+
+`RefreshAsync(name)` is unchanged and still refreshes exactly one query.
+
+### CLI
+
+```bash
+aouda mq refresh --source-table EquityTrade --stale-only --await
+aouda mq refresh EquityTradeOhlc1M,EquityTradeOhlc1H --await
+aouda mq refresh EquityTradeOhlc1M --await     # one name: the single-query route, as before
+```
+
+`--json` prints per-name outcomes. The command exits non-zero if any query ended in `Error`.
+
+---
+
+## 2.11b What a rebuild costs, and what bounds it
+
+A scan-fed rebuild — `:refresh`, restart restore, or a schema-change rebuild — reads the **whole
+source table**, not just rows added since the last build, and holds **one in-memory entry per output
+group** while it does.
+
+**The case to watch is high group cardinality**: a 1-minute-bucket rollup over years of ticks has one
+group per minute per symbol, and that set is what has to fit in memory. An hourly or daily rollup
+over the same data is 60× or 1440× smaller.
+
+### The ceiling
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `Aouda:MaterializedQueries:Rebuild:ReservationCeilingBytes` | `0` — no dedicated cap | The budget a rebuild's accumulators are held to. `0` means the database's memory governor is the only bound. |
+| `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` | `1048576` (1 MB) | The opening reservation, and the granularity it grows by. |
+| `Aouda:MaterializedQueries:Rebuild:SpillEnabled` | `true` | Whether an over-budget build writes its working set through to its shadow result table before giving up. |
+
+With the default (`0`) nothing changes from earlier releases. Set a positive ceiling when you have a
+known-huge rollup and want it bounded deliberately rather than competing with everything else for the
+database's share.
+
+### What happens when a build goes over
+
+1. **It writes through first.** The working set is written into the query's own shadow result table
+   and re-read on demand. This buys a **constant factor** — roughly 3× on an OHLC-shaped rollup —
+   not an unlimited budget. `MqBuildSpillReadBacks` growing tells you a build is paying for having
+   written through; if it grows a lot, raise the ceiling.
+2. **If that is still not enough, it retires one query at a time, largest first**, and re-checks.
+   Dropping the biggest is often enough for the rest to fit.
+3. **Retired queries land in `Error`. Their siblings complete.** A 1-minute rollup that cannot fit
+   does not take the 1-hour and 1-day rollups down with it.
+
+`TopNPerGroup` **cannot** write through: its working set holds candidates below rank N that the
+published top-N result does not contain, so writing it out would lose exactly the rows it exists to
+keep. Its error message says so, rather than leaving you looking for a setting that would help.
+
+### Counters
+
+| Counter | What it tells you |
+|---|---|
+| `MqRebuildBytesReserved` | Memory charged for a scan-fed rebuild's accumulators. |
+| `MqRebuildSinksRetiredByBudget` | Queries retired because the group could not fit. Non-zero means someone got an `Error`. |
+| `MqBuildSpills` / `MqBuildSpilledGroups` | How often, and how much, a build had to write through. |
+| `MqBuildSpillReadBacks` | Groups re-read after writing through — the cost of having spilled. |
+| `MqRebuildPooledRequests` / `MqRebuildPooledQueries` / `MqRebuildSourceGroups` | Pooled refresh usage. `PooledQueries / SourceGroups` is how many queries each traversal served. |
+
+---
+
+## 2.11c When a query lands in `Error`
+
+`GET /api/databases/{db}/materialized-queries/{name}` returns the reason in `errorMessage`. A
+memory-budget refusal names the query, the rows and groups it had accumulated, the bytes those cost,
+the ceiling in force, and the configuration key that changes it:
+
+```
+Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because the build
+exceeded its memory budget: 15300000 rows accumulated into 812000 groups, retaining an estimated
+532672000 bytes (…), against a ceiling of 268435456 bytes. Raise
+'Aouda:MaterializedQueries:Rebuild:ReservationCeilingBytes', give the database a larger memory
+share, or reduce the query's group cardinality.
+```
+
+Your options, in the order worth trying:
+
+1. **Reduce group cardinality** — a coarser time bucket, or fewer group-by columns. This is the only
+   one that makes the query cheaper rather than giving it more room.
+2. **Raise the ceiling**, or set it to `0` and let the database's memory governor be the bound.
+3. **Give the database a larger memory share.**
+
+Its siblings over the same source table are unaffected and will be `Ready`; re-running the refresh
+after changing a setting rebuilds only what you ask for.
 
 ## 2.12 Scenario playbooks (minimum three)
 
