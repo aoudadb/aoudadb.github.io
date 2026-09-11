@@ -931,13 +931,23 @@ Execute a query against a table.
 | `nin` | Value not in array (empty array is **400**) | `["deleted", "archived"]` |
 | `like` | SQL LIKE pattern, **String columns only** | `"A%"`, `"%acme%"`, `"%985"` |
 
+**Case-insensitive comparison (`ignoreCase`, server 0.1.24+):**
+
+`eq`, `ne`, `in`, `nin`, and `like` accept an optional `"ignoreCase": true` alongside `column`/`op`/`value`, **String columns only**:
+
+```json
+{"column": "ticker", "op": "eq", "value": "nokr", "ignoreCase": true}
+```
+
+Default `false` — omitted, existing payloads and named-query hashes are unaffected. Matching then uses ordinal, case-insensitive comparison (`StringComparison.OrdinalIgnoreCase`), not a locale collation. Two things it deliberately does **not** change: primary-key/unique-column uniqueness stays always case-sensitive, so a case-insensitive `eq` against such a column can return more than one row if case-variant duplicates exist; and it never satisfies the [partition-filter rule](../guides/browser-tier-read-limits.md), the same treatment `like` already gets. A case-insensitive condition also skips zone-map/bloom-filter pruning for that predicate (full-page scan), same as `like`.
+
 **`like` semantics:**
 
 - `%` matches any sequence of characters, including none. `_` matches exactly one character.
 - `\` escapes `%`, `_`, or `\` itself. A pattern that ends in a lone `\`, or escapes anything else, is
   rejected with `INVALID_REQUEST` (400) rather than treated as a literal.
-- Matching is **ordinal and case-sensitive**, the same as `eq` on a String column. There is no
-  case-insensitive form; upper- or lower-case both the column and the pattern if you need one.
+- Matching is **ordinal and case-sensitive** by default, the same as `eq` on a String column — add
+  `"ignoreCase": true` for a case-insensitive match (see above).
 - A **null** column value never matches — not even `"%"` — following SQL's `NULL LIKE x` is unknown.
 - The value is a *pattern*, not a comparand: a `like` condition against a non-String column is rejected
   (`INVALID_REQUEST`, 400), and a named query that declares one is rejected at `schema/apply` with
