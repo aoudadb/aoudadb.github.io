@@ -585,6 +585,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_MUTATION_DEPRECATED` | 200 warning | Same for named mutations |
 | `NAMED_MUTATION_UNCAPPED_DELETE` | 400 (schema apply) | Named-mutation delete is missing a numeric `limit` cap |
 | `NAMED_MUTATION_RETURNING_STAR` | 400 (schema apply) | Named-mutation `returning` contains `*` |
+| `NAMED_MUTATION_VALUE_NODE_INVALID` | 400 (schema apply) | A `values` / `set` entry is an object node that is neither `{ "param": "<name>" }` nor `{ "value": <literal> }` |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
@@ -1197,6 +1198,18 @@ Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) �
 
 Named mutations are the write-side mirror: name-addressed insert/update/delete templates over ADR 0037 expressions. **Invoker rights only.** They are **not** members of the read batch.
 
+**What a `values` / `set` entry may be.** Exactly three forms:
+
+| Form | Meaning |
+|------|---------|
+| `"Qty": 10`, `"Note": null`, `"Vec": [0.1, 0.2]` | A **bare literal** — any JSON value that is not an object. |
+| `"Qty": { "param": "qty" }` | A **parameter hole**, filled from `args` at execute. |
+| `"Qty": { "value": 10 }` | A **constant**, spelled explicitly. The wrapped value may be a scalar, `null`, or an array — but not an object. |
+
+The object shape is reserved for those two one-key forms, because `{ "param": … }` already claims it: a bare object constant would be indistinguishable from a mistyped hole. Any other object node — an unknown key (`{ "valu": 0 }`), both keys at once, an empty object, or an object nested under `value` — fails **schema apply** with `NAMED_MUTATION_VALUE_NODE_INVALID`, naming the field (`values` / `set`), the column, and the keys it actually found. A definition stored before that check existed still loads, and its `execute` fails with `NAMED_MUTATION_BIND_FAILED` naming the column (BL-479 — previously such a node was carried into the row and surfaced as an untyped `INVALID_REQUEST` from deep in column conversion).
+
+To store a JSON document in a `String` column, send it as a JSON **string** (`"Meta": "{\"a\":1}"`), not as a bare object.
+
 **Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying an **array** of row-argument objects, so one `execute` call inserts many rows. `values` stays the per-row template; each array element resolves that row's `{"param": …}` holes exactly as a single-row `args` object would. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT`; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap and every row are checked before any row is inserted — one bad element fails the whole call and names its array index in `rowErrors`, the same shape as insert-transform per-row errors.
 
 Definition:
@@ -1226,7 +1239,13 @@ Execute:
 
 A definition without `batchParam` is unaffected — `args` stays one flat object of parameter values, exactly as before.
 
-**autoIncrement primary keys.** Omitting an `autoIncrement` column from `values` is **not** treated as “please generate”. Schema apply accepts the definition, but every `execute` returns `400 INVALID_REQUEST` (`Missing required column 'Id'`), the same as a plain `POST …/tables/{t}/rows` body that omits the column. Bind it (`"Id": { "param": "id" }`) and send `0` per row — `0` still means auto-generate, and `generatedValues` carries the allocated id. See [Insert rows](#post-apidatabasesdbtablesnamerows). Engine work to treat an omitted autoIncrement column as `0` is BL-429.
+**autoIncrement primary keys.** Omitting an `autoIncrement` column from `values` is **not** treated as “please generate”. Schema apply accepts the definition, but every `execute` returns `400 INVALID_REQUEST` (`Missing required column 'Id'`), the same as a plain `POST …/tables/{t}/rows` body that omits the column. The column must be present, holding `0` — `0` still means auto-generate, and `generatedValues` carries the allocated id. Any of the three entry forms above works:
+
+- `"Id": 0` — the shortest, when every call auto-generates.
+- `"Id": { "value": 0 }` — the same constant, spelled explicitly.
+- `"Id": { "param": "id" }` with `0` sent per row — when the caller decides.
+
+See [Insert rows](#post-apidatabasesdbtablesnamerows). Engine work to treat an omitted autoIncrement column as `0` is BL-429.
 
 #### `POST /api/databases/{db}/named-mutations/{name}/execute`
 
@@ -1234,7 +1253,7 @@ A definition without `batchParam` is unaffected — `args` stays one flat object
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Access-surface diff
 

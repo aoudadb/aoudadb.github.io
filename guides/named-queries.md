@@ -588,6 +588,46 @@ await client.namedMutations.execute("equity.adjustQty", { id: 1, qty: 10 });
 
 Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `rowsDeleted`) plus optional `RETURNING` rows. Mutations are **not** allowed in the read batch.
 
+### Writing `values` and `set`
+
+Each entry maps a **column** to one of three things — a literal, a parameter hole, or an explicit constant:
+
+```json
+"message.send": {
+  "op": "insert",
+  "table": "Messages",
+  "values": {
+    "ConversationId": { "param": "conversationId" },
+    "Content":        { "param": "content" },
+    "Source":         "web",
+    "Id":             { "value": 0 }
+  },
+  "params": { "conversationId": {}, "content": { "maxLength": 4000 } }
+}
+```
+
+- **Literal** — any JSON value that is not an object (`"web"`, `0`, `null`, `[0.1, 0.2]`). Stored as written, on every call.
+- **`{ "param": "<name>" }`** — filled from the caller's `args`, validated against that parameter's `params` entry.
+- **`{ "value": <literal> }`** — the same thing a bare literal does, said out loud. Useful where a constant reads better next to the holes around it, as `"Id"` does above.
+
+The object shape belongs to those two one-key forms and nothing else, because `{ "param": … }` already owns it — a bare object constant would be indistinguishable from a mistyped hole. So a typo is caught at **schema apply**, not on the thousandth execute:
+
+```json
+{ "Id": { "valu": 0 } }
+```
+
+```text
+NAMED_MUTATION_VALUE_NODE_INVALID: Named mutation values column 'Id' is an object node
+with key(s) 'valu'; expected a literal, a { "param": "<name>" } hole, or a
+{ "value": <literal> } constant.
+```
+
+The same goes for `{ "value": 0, "param": "id" }`, `{}`, and an object nested under `value`. A definition deployed before this check existed still loads; its `execute` fails with `NAMED_MUTATION_BIND_FAILED` naming the column (BL-479 — such a node used to be carried into the row and die much later as an untyped `INVALID_REQUEST` from column conversion, naming neither the column nor the mutation).
+
+To put a JSON document in a `String` column, send it as a JSON **string** — `"Meta": "{\"a\":1}"` — not as a bare object.
+
+Identity columns are the one thing `values` may **not** name: a column with `derived: { "identity": "subject" }` is stamped by the engine from the caller's token, and naming it fails apply with `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE`. Leave it out; it is filled in for you.
+
 ### Batch insert (`batchParam`)
 
 An `op: "insert"` definition can accept an **array of rows in one execute call** instead of a single row. Declare `batchParam` with the name of a parameter that will carry the array; `values` stays the per-row template, and each array element is a flat object resolving that row's `{ "param": … }` holes — the same shape a single-row `args` has today.
@@ -625,7 +665,17 @@ await client.namedMutations.execute("tick.record", {
 
 `maxItems` on the batch parameter is **required** — schema apply fails without it (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`), the same mechanism that bounds an `in`/`nin` list. `batchParam` is only legal on `op: "insert"`; setting it on `update`/`delete` fails apply (`NAMED_MUTATION_BATCH_NON_INSERT`) — batching those is a separate, still-deferred predicate-shaped question (which row does which predicate identify?).
 
-**autoIncrement primary keys.** The `tick.record` example above has no surrogate PK. If the target table has an `autoIncrement` primary key (e.g. `"Id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }`), that column **must** appear in `values` — omitting it from the template is accepted at schema apply, then every `execute` fails with `400 INVALID_REQUEST` (`Missing required column 'Id'`). Bind it and send `0` per row:
+**autoIncrement primary keys.** The `tick.record` example above has no surrogate PK. If the target table has an `autoIncrement` primary key (e.g. `"Id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }`), that column **must** appear in `values` — omitting it from the template is accepted at schema apply, then every `execute` fails with `400 INVALID_REQUEST` (`Missing required column 'Id'`). When the caller never chooses the id, the constant form says so once in the definition and keeps it out of every call's `args`:
+
+```json
+"values": {
+  "Id": { "value": 0 },
+  "ticker": { "param": "ticker" },
+  "px": { "param": "px" }
+}
+```
+
+For a batch insert, bind it instead and send `0` per row:
 
 ```json
 "values": {
@@ -681,7 +731,9 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Schema apply `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED` | `batchParam` set without `maxItems` on that parameter | Declare `"maxItems"` on the batch parameter's `params` entry |
 | Schema apply `NAMED_MUTATION_BATCH_NON_INSERT` | `batchParam` set on `op: "update"` / `"delete"` | Batch insert only; update/delete batching is not shipped |
 | Batch insert HTTP 400 with `rowErrors` | One array element failed to bind | Fix the element at `rowErrors[0].index`; the whole call was rejected, nothing was inserted |
-| Insert / named-mutation execute `400` `Missing required column 'Id'` | `autoIncrement` PK omitted from the row / `values` template | Bind the column and send `0` per row (`0` = auto-generate). Omit is not equivalent to `0` today (BL-429) |
+| Insert / named-mutation execute `400` `Missing required column 'Id'` | `autoIncrement` PK omitted from the row / `values` template | Put the column in `values` as `{ "value": 0 }` (or bind it and send `0` per row). `0` = auto-generate; omit is not equivalent to `0` today (BL-429) |
+| Schema apply `NAMED_MUTATION_VALUE_NODE_INVALID` | A `values` / `set` entry is an object that is neither `{ "param": … }` nor `{ "value": … }` — usually a typo, or a bare object meant as a constant | Use one of the [three entry forms](#writing-values-and-set). A JSON document for a `String` column goes in as a JSON string |
+| Execute `400` `NAMED_MUTATION_BIND_FAILED` naming a column | Same bad node, in a definition deployed before apply validated it | Re-apply the schema with a valid node; the error names the column |
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |

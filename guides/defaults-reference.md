@@ -97,6 +97,22 @@ See [Partitioning and Multi-tenancy](partitioning.md) for the full storage-mode 
 
 ---
 
+## Class entitlements
+
+Every memory reservation carries a work class, and each class has a share of the transient budget. The fractions differ by resource mode because `Abundant` puts the extra where headroom buys speed — buffering.
+
+| Class | `Constrained` / `Balanced` | `Abundant` | What it covers |
+|---|---|---|---|
+| `Interactive` | 0.35 | 0.30 | Query result materialisation, grouped-aggregate state, sort buffers |
+| `Streaming` | 0.05 | 0.05 | Fan-out projections. High preference, low entitlement |
+| `Ingest` | 0.25 | 0.30 | Bulk-load and insert buffering |
+| `Background` | 0.25 | 0.25 | Materialized-query rebuilds, index rebuilds |
+| `Maintenance` | 0.10 | 0.10 | Compaction and cold-merge buffers |
+
+Each column sums to 1.00, which is a contract rather than a coincidence: a table summing to less silently strands budget, and one summing to more silently over-commits.
+
+**A class may borrow idle headroom.** A sole claimant's ceiling is the whole governed budget, so nothing is stranded when only one kind of work is running. From the second claimant onward each borrower takes at most half the idle remainder, so a second borrower can always start and no claimant faces a cliff on its first byte.
+
 ## Related docs
 
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into

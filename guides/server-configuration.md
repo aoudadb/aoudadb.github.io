@@ -280,6 +280,21 @@ or `POST /api/databases/{db}/unquarantine`. Inspect first with `aouda databases 
 
 ---
 
+## 10) Resource governance settings
+
+Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults are the shipped values.
+
+| Key | Default | What it does |
+|---|---|---|
+| `Aouda:Cpu:ConfiguredCores` | unset | Overrides CPU detection. Set it when the process is co-tenanted and no cgroup quota is available — see [Sizing](sizing.md#sizing-cpu). |
+| `Aouda:Cpu:OversubscriptionFactor` | `2.0` | Ceiling on total granted parallelism as a multiple of schedulable cores. |
+| `Aouda:Memory:PerClassAdmissionEnabled` | `true` | Per-class entitlements. Off admits against the process ceiling alone, which is the pre-governance behaviour. Always off under `Advisory` enforcement (embedded, `aouda dev`). |
+| `Aouda:Memory:ForegroundQuiescenceWindow` | see `MemoryBudgetSection` | How long after the last foreground unit finishes before background work returns to full rate. |
+| `Aouda:Memory:PageCacheEnabled` | unset (three-valued) | Unset follows the measured resource mode — off in `Constrained`, on otherwise. An explicit `true`/`false` wins in every mode. |
+| `Aouda:Memory:ResourceMode` | unset | Pins the resource state instead of measuring it. Normally leave unset. |
+| `Aouda:Query:MaxResultRows` | `1000000` | A query whose result exceeds this is refused with a typed retryable `503` rather than materialised. |
+| `residency.hotOnlyBackstop` | `RefuseWrites` | **Per table, not server config.** What a `HotOnly` pin does when honouring it would breach the ceiling — see [Hot/Cold](hot-cold.md#when-a-pin-cannot-be-honoured). |
+
 ## Related docs
 
 - [Defaults Reference](defaults-reference.md) — every derived default (memory, bulk load, partitioning), worked at several host sizes

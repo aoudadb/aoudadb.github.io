@@ -176,7 +176,8 @@ If you do nothing beyond default server config:
   - Server-level coordination via `ServerMemoryBudgetManager` and `/api/server/memory`.
 - Public policy APIs:
   - REST/Protocol + TypeScript client support table create/update for `storageTemperature`.
-  - REST/Protocol support for `memoryFilter`, `memoryRowCap`, `targetMemoryBytes`, and `pinAllInMemory` — all readable and settable via the existing table create and update-policy endpoints (BL-091).
+  - REST/Protocol support for `memoryFilter`, `memoryRowCap` and `targetMemoryBytes` — all readable and settable via the existing table create and update-policy endpoints (BL-091).
+  - ⚠️ **`pinAllInMemory` was removed.** It was a second spelling of `storageTemperature: HotOnly` that no engine path ever read; a request that sets it now gets a `400` naming `HotOnly` as the replacement, rather than being silently ignored as before. On-disk catalogs and replicated DDL frames are unaffected. The TypeScript and C# SDKs never sent it, so this is a raw-HTTP concern only.
 - Filter-based partial residency (BL-091):
   - `ResidencyPolicy.MemoryFilter` — JSON predicate grammar (segment-granularity). Validated at catalog write time; enforced during maintenance sweeps by preferring to demote segments provably unable to match the filter.
   - `ResidencyPolicy.MemoryRowCap` — per-table cap on resident (hot) row count. Enforced in the periodic maintenance sweep independently of the byte budget.
@@ -278,7 +279,7 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
   - `null` (unset) is always valid and means "no filter" — no ordering change.
   - Validated at catalog write time (`SetTablePolicyAsync`/`CreateTableAsync`); invalid filters are rejected with a descriptive `MemoryFilterParseException` message before any catalog mutation.
 
-- **`MemoryRowCap`** (`long? > 0`) — per-table cap on hot resident row count. The maintenance sweep sums `HotSegmentInfo.RowCount` per table; when the sum exceeds the cap, segments are demoted (oldest-first, filter-ordered if a `MemoryFilter` is also set) until the row count settles at or below the cap.
+- **`MemoryRowCap`** (`long? > 0`) — per-table cap on hot resident row count. The maintenance sweep sums `HotSegmentInfo.RowCount` per table; when the sum exceeds the cap, segments are demoted until the row count settles at or below the cap. ⚠️ **Ordering is coldest-first, not oldest-first:** segments rank by `(couldMatchFilter, lastAccessUtc, createdUtc)` — the `MemoryFilter` partition first, then **least recently read**, with age only as a tie-break. Any expectation that demotion is age-ordered is now wrong.
 
 - **`TargetMemoryBytes`** (`long? > 0`) — per-table hot-byte budget, overriding the global `AutoHotByteBudgetBytes` for that table. Wired to the existing `MemoryBudgetManager.SetTableHotLimit` mechanism.
 
@@ -286,7 +287,22 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 
 - "Ordering not eligibility": `MemoryFilter` never prevents a segment from being demoted if the table is genuinely over budget or row-cap. It only influences *which* segment gets picked first.
 - OR semantics for dual caps: if both `MemoryRowCap` and `TargetMemoryBytes` are set, exceeding *either* triggers demotion; demotion continues until *both* are satisfied.
-- Pinned segments (`PinAllInMemory`) are never demoted by filter/cap logic.
+- Pinned segments (`storageTemperature: HotOnly`) are never demoted by filter/cap logic.
+
+### When a pin cannot be honoured
+
+`storageTemperature: HotOnly` pins a table's segments resident. That used to be an unbounded claim: no ceiling, no admission control, and no reclaim path. It now carries a required answer for the case where honouring it would breach the server's memory ceiling — `residency.hotOnlyBackstop`:
+
+| Value | Behaviour |
+|---|---|
+| `RefuseWrites` (**default**) | Writes to that table are refused with the typed retryable `503` / `MEMORY_BUDGET_EXCEEDED`. Every segment stays resident. The only answer that keeps both the pin and the ceiling true. |
+| `DemoteAnyway` | The table's coldest segments are demoted under critical pressure, and a warning naming the table and the policy is logged. Availability at the cost of the pin. |
+
+⚠️ **`RefuseWrites` is stricter than ordinary back-pressure, and applies only to pinned tables.** An unpinned table under pressure is throttled and proceeds while reclamation catches up. For a pinned table there is nothing to catch up — its segments are exactly the ones that may not be demoted — so the write is refused rather than delayed. Unpinned tables are unaffected.
+
+### What per-table residency actually enforces
+
+Per-table residency is a **convergence target reached by a periodic sweep**, not an instantaneous ceiling. `TargetMemoryBytes`, `MemoryRowCap` and `MemoryFilter` are read by the maintenance sweep, which demotes the table's coldest segments until the table is back under target — so a burst can exceed the target between sweeps. The **process** ceiling is the hard one.
 - `HotOnly` and `ColdPreferred` tables ignore these fields in v1; the fields persist in the catalog and are validated at write time, but enforcement only applies to `Auto`-policy tables.
 - The periodic maintenance sweep is the only enforcement path. The reactive `MemoryBudgetManager` pressure path is not yet wired to per-table `TargetMemoryBytes`/`MemoryRowCap` (BL-124).
 - A `MemoryFilter` parse failure at runtime (e.g. future grammar migration) is handled gracefully: the sweep falls back to `CreatedUtc`-only ordering for that table, never throws out of the sweep.

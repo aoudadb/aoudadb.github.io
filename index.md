@@ -6,7 +6,7 @@ description: "Aouda — columnar database engine for .NET with TypeScript client
 
 # Aouda Documentation
 
-Aouda is a **columnar database engine** for .NET with a TypeScript client SDK. It runs embedded in your process (like SQLite) or as a standalone server (like PostgreSQL). You control what stays in memory — from fully in-memory sub-millisecond access to terabytes on disk with only active partitions loaded.
+Aouda is a **columnar database engine** for .NET with a TypeScript client SDK. It runs embedded in your process (like SQLite) or as a standalone server (like PostgreSQL). You control what stays in memory — declare a per-table residency target in bytes, rows or a predicate, and the engine converges on it inside a hard process-wide ceiling it will not exceed. From fully in-memory sub-millisecond access to terabytes on disk with only active partitions loaded. And you can see what it did: reserved bytes by activity and by table, split by where they live.
 
 ---
 
