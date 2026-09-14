@@ -23,6 +23,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **Insert `autoIncrement`: `0` means generate; omit does not (BL-429).** Ordinary `POST …/tables/{t}/rows` and named-mutation insert require the autoIncrement column to be **present**; send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column '…'`), not the previously documented “`0` / omitted” equivalence. [HTTP API insert](reference/http-api.md#post-apidatabasesdbtablesnamerows), [Named queries — batch insert](guides/named-queries.md#batch-insert-batchparam). Engine work to treat omit as `0` is BL-429 (not yet shipped).
 - **Partition-grant `dimension` is case-sensitive (BL-430).** `POST …/partition-grants` `dimension` must match the table `permissionDimension` byte-for-byte (`"source"` ≠ `"Source"`). A casing mismatch still returns `201` and then every insert/query 403s. [Data Authorization §19.8](auth/authorization.md#198-admin-api-partition-grants). Engine work to case-fold or reject the mismatch is BL-430 (not yet shipped).
 
+## 0.1.28 — 2026-09-14
+
+**PR #348 review follow-ups on the 0.1.27 durability train.** Server **0.1.28**, `Aouda.Client` **0.1.28**, `@aouda/client` **0.1.22** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **Rows deleted just before a flush can no longer come back at the next open (BL-507).** A failed pre-freeze deletion-mask write now fails the flush (rollback + retry) instead of publishing a discoverable segment whose deletions were never on disk. Same defect shape as BL-504 in 0.1.27.
+- **Demoted edge tables keep their table kind in the segment manifest, and column-less demoted segments still get a manifest (BL-439 follow-ups).** Closes two holes left in the 0.1.27 demotion-manifest fix.
+
 ## 0.1.27 — 2026-09-14
 
 **Durability and MQ correctness: PITR incarnation, demotion recovery, checkpoint sync, flush/horizon row-loss, MQ watermark fixes, and over-budget aggregate partitioning.** Server **0.1.27**, `Aouda.Client` **0.1.27**, `@aouda/client` **0.1.22** (unchanged — no TypeScript surface in this train), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
