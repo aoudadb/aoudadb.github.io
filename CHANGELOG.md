@@ -23,6 +23,17 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **Insert `autoIncrement`: `0` means generate; omit does not (BL-429).** Ordinary `POST …/tables/{t}/rows` and named-mutation insert require the autoIncrement column to be **present**; send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column '…'`), not the previously documented “`0` / omitted” equivalence. [HTTP API insert](reference/http-api.md#post-apidatabasesdbtablesnamerows), [Named queries — batch insert](guides/named-queries.md#batch-insert-batchparam). Engine work to treat omit as `0` is BL-429 (not yet shipped).
 - **Partition-grant `dimension` is case-sensitive (BL-430).** `POST …/partition-grants` `dimension` must match the table `permissionDimension` byte-for-byte (`"source"` ≠ `"Source"`). A casing mismatch still returns `201` and then every insert/query 403s. [Data Authorization §19.8](auth/authorization.md#198-admin-api-partition-grants). Engine work to case-fold or reject the mismatch is BL-430 (not yet shipped).
 
+## 0.1.27 — 2026-09-14
+
+**Durability and MQ correctness: PITR incarnation, demotion recovery, checkpoint sync, flush/horizon row-loss, MQ watermark fixes, and over-budget aggregate partitioning.** Server **0.1.27**, `Aouda.Client` **0.1.27**, `@aouda/client` **0.1.22** (unchanged — no TypeScript surface in this train), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **A backup now records which WAL-root incarnation it was taken against (BL-330, BL-438).** PITR no longer picks an unrelated recreated local WAL by byte offset alone, and archive restores can place a backup among superseded incarnations. Older backups without the fields keep working (unknown = prior behaviour + warning).
+- **Demoted cold segments are recoverable end to end (BL-439, BL-506).** Demotion writes `segment.manifest`, and a legitimately-null rebuild is no longer cached for the life of the process.
+- **Checkpoint sync works (BL-328).** Staging is a sibling of the data directory, so apply no longer moves staging away with the parent and fails every attempt.
+- **A failed hot-segment write fails the flush (BL-504), and a flush does not advance the redo horizon past an in-flight writer (BL-500).** Closes acknowledged-then-lost row paths on crash recovery.
+- **Materialized-query watermark / consistency-token correctness (BL-487, BL-501, BL-498).** Cross-table tokens no longer wedge reads; create publishes the WAL head; a write during build/refresh is reported stale rather than silently omitted; budget-retired queries re-arm when the ceiling rises.
+- **An over-budget aggregate materialized query can finish by partitioning (BL-477, BL-491)** instead of retiring permanently. New settings under `Aouda:MaterializedQueries:Rebuild:` (`PartitioningEnabled`, `MaxPartitions`). See [Materialized queries](guides/materialized.md).
+
 ## 0.1.26 — 2026-09-13
 
 **Resource governance: work is classified, background yields to live traffic, and a host with headroom gets a faster Aouda.** Server **0.1.26**, `Aouda.Client` **0.1.26**, `@aouda/client` **0.1.22** (unchanged — no TypeScript surface in this train), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
