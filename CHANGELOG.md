@@ -7,7 +7,7 @@ nav_order: 9
 
 Public, user-facing release notes. Engine phase status lives in the server
 [CHANGELOG](https://github.com/aoudadb/aouda/blob/main/docs/CHANGELOG.md) and
-[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P49 complete).
+[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P50 complete).
 
 ---
 
@@ -22,6 +22,15 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **Live subscriptions on a partitioned table are now documented.** The partition-filter rule applies to `subscribe` exactly as it does to reads — a `subscribe` runs its snapshot through the same enforcement — but the guide only ever described queries, so the commonest shape of all (a per-user live feed on a table partitioned by user id) had no coverage anywhere. The failure is late and misleading: the schema applies, the named query deploys, the catalog export lists it, and nothing complains until the first browser subscribes and gets `PARTITION_FILTER_REQUIRED` while a service key works fine. The new section covers the ways to supply the caller's partition value, which to pick, and why `.WithCrossPartitionAccess()` is not one of them on this path. [Partitioning — live subscriptions](guides/partitioning.md#live-subscriptions-on-a-partitioned-table).
 - **Insert `autoIncrement`: `0` means generate; omit does not (BL-429).** Ordinary `POST …/tables/{t}/rows` and named-mutation insert require the autoIncrement column to be **present**; send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column '…'`), not the previously documented “`0` / omitted” equivalence. [HTTP API insert](reference/http-api.md#post-apidatabasesdbtablesnamerows), [Named queries — batch insert](guides/named-queries.md#batch-insert-batchparam). Engine work to treat omit as `0` is BL-429 (not yet shipped).
 - **Partition-grant `dimension` is case-sensitive (BL-430).** `POST …/partition-grants` `dimension` must match the table `permissionDimension` byte-for-byte (`"source"` ≠ `"Source"`). A casing mismatch still returns `201` and then every insert/query 403s. [Data Authorization §19.8](auth/authorization.md#198-admin-api-partition-grants). Engine work to case-fold or reject the mismatch is BL-430 (not yet shipped).
+
+## 0.1.29 — 2026-09-15
+
+**P50: a materialized query result is an ordinary table.** Server **0.1.29**, `Aouda.Client` **0.1.29**, `@aouda/client` **0.1.22** (unchanged — `workingSetTruncated` TS parity is a follow-up), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **Materialized queries now read and write through the engine's ordinary table path.** Incremental result changes emit `update` with `prev` again; `QueryMaterializedAsync` no longer returns empty after a checkpoint or demotion (Timestamp columns arrive as `DateTime`); a rebuild no longer leaves the previous generation beside the new one; deletes work after the result goes cold. `MemoryIntent.Mutable` is no longer forced on result tables.
+- **`UpdateMode.Sync` means the update is never dropped for queue backpressure**, not that it runs on the dispatch thread. Neither mode is read-your-write; wait explicitly. [Materialized queries](guides/materialized.md).
+- **Opt-in bounded Top-N-per-group rebuild (BL-502).** `Aouda:MaterializedQueries:Rebuild:TopNPartitioningEnabled` (default `false`) plus `TopNPartitioningReserve`. Truncated groups mark the query stale rather than answering short. `GET` MQ status / `Aouda.Client` gain `workingSetTruncated`.
+- **Tombstoned primary keys are no longer reported live (BL-508).** Re-insert after delete works once the row has left the write buffer. Phone MFA verify updates in place and never returns a zero-byte 500. Ingest no longer spends minutes backing off 503s that did not fit the arithmetic. A standalone node no longer rejects its own just-issued consistency token.
 
 ## 0.1.28 — 2026-09-14
 
