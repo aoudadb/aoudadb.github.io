@@ -7,7 +7,7 @@ nav_order: 9
 
 Public, user-facing release notes. Engine phase status lives in the server
 [CHANGELOG](https://github.com/aoudadb/aouda/blob/main/docs/CHANGELOG.md) and
-[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P50 complete).
+[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P51 complete).
 
 ---
 
@@ -22,6 +22,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **Live subscriptions on a partitioned table are now documented.** The partition-filter rule applies to `subscribe` exactly as it does to reads — a `subscribe` runs its snapshot through the same enforcement — but the guide only ever described queries, so the commonest shape of all (a per-user live feed on a table partitioned by user id) had no coverage anywhere. The failure is late and misleading: the schema applies, the named query deploys, the catalog export lists it, and nothing complains until the first browser subscribes and gets `PARTITION_FILTER_REQUIRED` while a service key works fine. The new section covers the ways to supply the caller's partition value, which to pick, and why `.WithCrossPartitionAccess()` is not one of them on this path. [Partitioning — live subscriptions](guides/partitioning.md#live-subscriptions-on-a-partitioned-table).
 - **Insert `autoIncrement`: `0` means generate; omit does not (BL-429).** Ordinary `POST …/tables/{t}/rows` and named-mutation insert require the autoIncrement column to be **present**; send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column '…'`), not the previously documented “`0` / omitted” equivalence. [HTTP API insert](reference/http-api.md#post-apidatabasesdbtablesnamerows), [Named queries — batch insert](guides/named-queries.md#batch-insert-batchparam). Engine work to treat omit as `0` is BL-429 (not yet shipped).
 - **Partition-grant `dimension` is case-sensitive (BL-430).** `POST …/partition-grants` `dimension` must match the table `permissionDimension` byte-for-byte (`"source"` ≠ `"Source"`). A casing mismatch still returns `201` and then every insert/query 403s. [Data Authorization §19.8](auth/authorization.md#198-admin-api-partition-grants). Engine work to case-fold or reject the mismatch is BL-430 (not yet shipped).
+
+## 0.1.30 — 2026-09-16
+
+**P51 ingest amplification, P50 S09 bounded Filter, and BL-525 freshness.** Server **0.1.30**, `Aouda.Client` **0.1.30**, `@aouda/client` **0.1.23** (pin after npm — published line still **0.1.22**), Studio **0.0.26** (unchanged pin until npm). See [Compatibility](clients/compatibility.md).
+
+- **A bulk load no longer rescans its table once per commit to rebuild materialized queries (BL-517 / P51).** The seed now reads every tier through the engine; a commit publishes incrementally.
+- **A `Filter` rebuild is bounded by the shadow's flush trigger, not the match count (BL-503 / P50 S09).** Publication is an atomic two-name swap.
+- **A freshness shortfall no longer permanently kills a live subscription (BL-525).** Omitted `onExceeded` is now `wait` on Primary/Standalone (explicit `fetchPrimary` is unchanged). A materialized query that is still building answers `MQ_NOT_READY` (409) instead of an unsatisfiable `TOKEN_FETCH_PRIMARY`. Both SDKs retry `MQ_NOT_READY`. [HTTP API](reference/http-api.md), [Freshness](guides/freshness.md).
+- **Unsigned / float / decimal predicates no longer throw or match the wrong rows (BL-521).**
+- **A hot segment's primary-key index partition is retired when the segment leaves the hot tier (BL-509).**
 
 ## 0.1.29 — 2026-09-15
 

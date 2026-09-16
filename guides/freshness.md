@@ -83,8 +83,10 @@ The gate on the receiving node, in order:
 | Value | After the wait |
 |---|---|
 | `wait` (then timeout) | HTTP 409 `TOKEN_UNSATISFIED` |
-| `fetchPrimary` (default) | HTTP 421 `TOKEN_FETCH_PRIMARY` — **the server does not proxy**; the client retries against the current primary from topology |
+| `fetchPrimary` | HTTP 421 `TOKEN_FETCH_PRIMARY` — **the server does not proxy**; the client retries against the current primary from topology |
 | `fail` | HTTP 409 immediately (no wait) |
+
+Omitted `onExceeded` is **role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. An explicit value is never rewritten. That is why a standalone subscribe no longer dies with 421 `TOKEN_FETCH_PRIMARY` the first time the token is momentarily ahead.
 
 On the **primary** a token that is already covered is a no-op. `Standalone` serves every preference.
 
@@ -245,6 +247,7 @@ The fix is client-side and one-time: clear the token from the client's [consiste
 | 400 `TOKEN_FOREIGN_DATABASE` | Token issued for another database | Same; tokens are per database |
 | 409 `TOKEN_EPOCH_SUPERSEDED` | Failover lost the write, or future term | Do not retry the same token; write again or fetch `GET …/token` |
 | 409 `TOKEN_UNSATISFIED` | Token or budget unmet after `waitMs` (or `onExceeded=fail`) | Retry later, or use `fetchPrimary`, or read the primary |
+| 409 `MQ_NOT_READY` | Token-bearing read/subscribe against a materialized query that is not `Ready` | Retry with backoff. Do not discard the token — the query is still building |
 | 421 `TOKEN_FETCH_PRIMARY` | Replica declared `fetchPrimary` | Retry against the current primary (`GET /admin/replication/topology`). Distinct from 421 `MISDIRECTED_REQUEST` (wrong **role**) |
 | 421 `TOKEN_FETCH_PRIMARY` forever, on a **standalone** node or right after all replicas were wiped/recreated | The client's token references a WAL position the fresh store can never reach — [store wiped or recreated](#store-wiped-or-recreated--the-mirror-image-of-scale-out), the mirror image of the scale-out caveat | Clear the client's consistency-token store once, then let it mint a fresh token. Retrying against "the primary" does not help — there is nothing wrong with the primary |
 | 400 `FRESHNESS_LOOSENED` | Call site weaker than the named query’s declared budget, or Secondary on fail-safe | Drop the looser param, or use Primary |

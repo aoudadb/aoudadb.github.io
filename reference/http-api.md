@@ -56,7 +56,7 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Read-Preference` | No | Read preference for query routing |
 | `X-Aouda-Token` | No | Consistency token (`AtLeast`). 42-character lowercase hex. Query `at_least` **wins** when both are sent. Empty value is `TOKEN_MALFORMED`. **Not** the fencing header `X-Aouda-Current-Token`. |
 | `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
-| `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default `fetchPrimary`. |
+| `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default is **role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. An explicit value is never rewritten. |
 | `Authorization` | **Required when the target database has auth enabled, except public app-auth POSTs** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). `POST /api/databases/{db}/auth/{signup\|signin\|refresh\|request-password-reset\|reset-password}` are keyless (a present bearer is ignored). |
 | `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. |
 
@@ -430,7 +430,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Return | Response header `X-Aouda-Token` and JSON `token` on mutation/read success and on `TOKEN_*` errors |
 | Current | `GET /api/databases/{db}/token` → `{ "database", "token" }` |
 | Wait | `waitMs` / `X-Aouda-Wait-Ms` (default 250, cap 30 000) |
-| Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately |
+| Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
@@ -563,6 +563,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TOKEN_EPOCH_SUPERSEDED` | 409 | Failover lost the write, or future term. **Never waited.** Do not retry the same token. |
 | `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. |
 | `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
+| `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
 
@@ -604,6 +605,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
 | `CONFLATE_NOOP` | `snapshot_complete` warning | `conflate` is set without `collapse_inserts` and the key is not the table PK (insert-only no-op). Subscribe still registers. |
+| `MQ_NOT_READY` | 409 / WS error | Materialized query is not `Ready`; watermark cannot satisfy a token. Retry; do not treat as a dead token. |
 
 #### Protocol Errors
 
@@ -858,7 +860,7 @@ Execute a query against a table.
 | `readPreference` | `Primary` | Read preference (overrides header) |
 | `at_least` | _(omitted)_ | Consistency token. Wins over `X-Aouda-Token`. |
 | `waitMs` | 250 when gate active | Freshness wait; cap 30 000 |
-| `onExceeded` | `fetchPrimary` | `wait` \| `fetchPrimary` \| `fail` |
+| `onExceeded` | role-aware (`wait` on Primary/Standalone; `fetchPrimary` on a secondary) | `wait` \| `fetchPrimary` \| `fail` |
 | `maxLagBytes` / `maxLagSeconds` / `maxStalenessMs` | unset | Lag budget (time is measured staleness) |
 | `readYourWrites` | _(alias / fail-safe)_ | Call-site tighten only |
 
