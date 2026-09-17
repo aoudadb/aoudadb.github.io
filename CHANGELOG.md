@@ -23,6 +23,15 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **Insert `autoIncrement`: `0` means generate; omit does not (BL-429).** Ordinary `POST …/tables/{t}/rows` and named-mutation insert require the autoIncrement column to be **present**; send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column '…'`), not the previously documented “`0` / omitted” equivalence. [HTTP API insert](reference/http-api.md#post-apidatabasesdbtablesnamerows), [Named queries — batch insert](guides/named-queries.md#batch-insert-batchparam). Engine work to treat omit as `0` is BL-429 (not yet shipped).
 - **Partition-grant `dimension` is case-sensitive (BL-430).** `POST …/partition-grants` `dimension` must match the table `permissionDimension` byte-for-byte (`"source"` ≠ `"Source"`). A casing mismatch still returns `201` and then every insert/query 403s. [Data Authorization §19.8](auth/authorization.md#198-admin-api-partition-grants). Engine work to case-fold or reject the mismatch is BL-430 (not yet shipped).
 
+## 0.1.32 — 2026-09-17
+
+**Decimal demotion, coalesced bulk-load MQ rebuilds.** Server **0.1.32**, `Aouda.Client` **0.1.32**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **A decimal that overflows compact encoding no longer pins the segment in RAM (BL-565).** The page is written as `DecimalPlain` instead of failing the whole demotion.
+- **Forced demotion skips a segment already proven unbuildable (BL-566).** Emergency pressure no longer reconstructs the same failing segment dozens of times.
+- **A memory refusal names what sits in the untracked gap (BL-567),** including resident hot-segment bytes (`ResidentAttributedBytes`).
+- **Overlapping bulk-load materialized-query rebuilds coalesce (BL-568).** At most one in-flight scan-fed generation per source table, plus one queued follow-up.
+
 ## 0.1.31 — 2026-09-17
 
 **P52: smaller pieces, not a bigger ceiling.** Server **0.1.31**, `Aouda.Client` **0.1.31** (`CreateBatchWriter`), `@aouda/client` **0.1.23** (unchanged — TS batch-writer parity is BL-543), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
