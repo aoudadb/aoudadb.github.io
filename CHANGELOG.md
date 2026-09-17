@@ -7,7 +7,7 @@ nav_order: 9
 
 Public, user-facing release notes. Engine phase status lives in the server
 [CHANGELOG](https://github.com/aoudadb/aouda/blob/main/docs/CHANGELOG.md) and
-[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P51 complete).
+[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P52 complete).
 
 ---
 
@@ -22,6 +22,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **Live subscriptions on a partitioned table are now documented.** The partition-filter rule applies to `subscribe` exactly as it does to reads — a `subscribe` runs its snapshot through the same enforcement — but the guide only ever described queries, so the commonest shape of all (a per-user live feed on a table partitioned by user id) had no coverage anywhere. The failure is late and misleading: the schema applies, the named query deploys, the catalog export lists it, and nothing complains until the first browser subscribes and gets `PARTITION_FILTER_REQUIRED` while a service key works fine. The new section covers the ways to supply the caller's partition value, which to pick, and why `.WithCrossPartitionAccess()` is not one of them on this path. [Partitioning — live subscriptions](guides/partitioning.md#live-subscriptions-on-a-partitioned-table).
 - **Insert `autoIncrement`: `0` means generate; omit does not (BL-429).** Ordinary `POST …/tables/{t}/rows` and named-mutation insert require the autoIncrement column to be **present**; send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column '…'`), not the previously documented “`0` / omitted” equivalence. [HTTP API insert](reference/http-api.md#post-apidatabasesdbtablesnamerows), [Named queries — batch insert](guides/named-queries.md#batch-insert-batchparam). Engine work to treat omit as `0` is BL-429 (not yet shipped).
 - **Partition-grant `dimension` is case-sensitive (BL-430).** `POST …/partition-grants` `dimension` must match the table `permissionDimension` byte-for-byte (`"source"` ≠ `"Source"`). A casing mismatch still returns `201` and then every insert/query 403s. [Data Authorization §19.8](auth/authorization.md#198-admin-api-partition-grants). Engine work to case-fold or reject the mismatch is BL-430 (not yet shipped).
+
+## 0.1.31 — 2026-09-17
+
+**P52: smaller pieces, not a bigger ceiling.** Server **0.1.31**, `Aouda.Client` **0.1.31** (`CreateBatchWriter`), `@aouda/client` **0.1.23** (unchanged — TS batch-writer parity is BL-543), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **An over-budget ingest-fed materialized-query build now partitions and keeps going, instead of retiring into a full-table scan (P52 S01–S03).** A memory refusal no longer buys a scan; a hard-limited heap paces ingest instead of killing the process. [HTTP API](reference/http-api.md).
+- **Ordinary keyed ingest no longer collapses once the table has cold segments (BL-560, closing BL-415).** Ordinary single-row update no longer 500s as `Duplicate primary key` (BL-529). Insert/update/delete no longer fail with `FileNotFoundException` because compaction unlinked a file mid-decode (BL-559).
+- **A materialized query over another query's result table can be maintained (BL-530).** Republishing no longer strands the queries built on top of it (BL-563). A deferred query comes back on its own when the heap recovers (BL-547).
+- **`Aouda.Client` gains `CreateBatchWriter()` for one-row-at-a-time producers (BL-542).** No wire change. TypeScript parity is BL-543.
+- **Replication on a table that writes no WAL is refused (BL-545).** Elastic-share activity term is on by default (BL-552). A swallowed hot-segment load failure is a retryable activation, not missing rows.
 
 ## 0.1.30 — 2026-09-16
 
