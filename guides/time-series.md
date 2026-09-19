@@ -240,6 +240,24 @@ If you create a partitioned time-series table and do not set advanced controls:
 - Metadata caching tiers:
   - Segment summaries always lightweight and resident; page summaries are policy/pressure managed.
 
+### A materialized query's result table clusters too, and you do not declare it {#mq-result-clustering}
+
+A time-bucketed `aggregate` materialized query produces a result table you never wrote a
+`clusterColumns` list for. **Its leading derived time bucket is the cluster column**
+(`TruncateToMinute`, `TruncateToHour`, `TruncateToDay` …), chosen by the engine.
+
+🔎 **What that buys is residency, not read speed.** The hot/cold sweep demotes the
+least-recently-accessed segment first, which on time-ordered data is a good proxy for *keep recent
+buckets resident, send historical ones to cold* — so a `residency.memoryRowCap` on a candle result
+bounds what stays resident without your knowing the arrival rate. Without the ordering the proxy
+would break: one still-updating current-bucket row would keep its whole segment hot, year-old buckets
+included. See [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives).
+
+**Only the leading time bucket clusters.** A plain group-by (ticker, user, account) carries no
+temporal order, so clustering on it would cost a sort on every seal and buy nothing; a second bucket
+over the same column is already ordered by the first. `filter`, `latestPerKey`, `firstPerKey` and
+`topNPerGroup` results are untouched — they are keyed by identity, not by time.
+
 Invariants:
 
 - Cluster order and partition key order are validated as consecutive sequences starting at 1.

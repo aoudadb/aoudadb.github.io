@@ -163,9 +163,10 @@ If you create a materialized query with standard helpers and no special options:
 - `CreatedUtc` is auto-set if omitted.
 - Result table naming uses unified namespace (`result table name == MQ name`).
 - Normal `TableQuery` reads attempt MQ auto-routing when a compatible MQ is `Ready`.
-- Result-table storage temperature defaults by query type:
-  - `Aggregate`, `LatestPerKey`, `FirstPerKey`: `HotOnly`
-  - `Filter`, `TopNPerGroup`: `Auto`
+- Result-table storage temperature defaults to **`Auto`** — for **every** query type, the same
+  default an ordinary table has. Residency is policy, not something inferred from the query type.
+  Declare `storage.storageTemperature` to choose; see
+  [2.3.1](#where-a-materialized-querys-result-lives).
 - Subscription manager defaults:
   - `MaxLag = 1s`
   - `MaxQueueDepth = 10000`
@@ -177,13 +178,103 @@ If you create a materialized query with standard helpers and no special options:
 | `MaterializedQueryDefinition.CreatedUtc` | set to `DateTime.UtcNow` when missing | Definitions always have creation timestamp |
 | `MaterializedQueryDefinition.ResultTableName` | `Name` (BL-021) | Query/subscription uses normal table name |
 | `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries are served from MQ result tables unless `WithDirectScan()` is used |
-| Result table temperature (`Aggregate`) | `HotOnly` | Keeps small aggregate result sets hot |
-| Result table temperature (`LatestPerKey`) | `HotOnly` | Keeps lookup-style results hot |
-| Result table temperature (`Filter`) | `Auto` | Allows larger result sets to use hot/cold policy |
+| Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
 | `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types accumulate during the load; wait, do not `:refresh` |
+
+### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
+
+**A result table is an ordinary table** (that is the whole point of P50), so it lives in the same hot
+tier, obeys the same `storageTemperature`, and is charged against the same per-database and
+process-wide hot ceilings as any table you declared yourself.
+
+**Residency is policy, not a property of the query type.** With no declaration, every result table —
+`aggregate`, `latestPerKey`, `firstPerKey`, `filter`, `topNPerGroup` alike — defaults to **`Auto`**:
+hot while the tier has room, cold when it does not, demoted and promoted by the ordinary sweep.
+
+That is a default, not a recommendation. **`Auto` is the right answer when you do not know; it is
+rarely the best answer when you do**, and the table below is how to decide.
+
+#### Choosing a temperature
+
+`storage.storageTemperature` on the query's schema entry takes `Auto`, `HotOnly` or `ColdPreferred`:
+
+```json
+"materializedQueries": {
+  "candles_bid_1m": {
+    "type": "aggregate",
+    "sourceTable": "quotes",
+    "groupBy": [
+      { "column": "ticker" },
+      { "column": "time", "function": "TruncateToMinute", "outputName": "time" }
+    ],
+    "aggregates": [ /* … */ ],
+    "storage": { "storageTemperature": "ColdPreferred" }
+  }
+}
+```
+
+Valid values are `Auto`, `HotOnly` and `ColdPreferred`; an unrecognised one fails **at schema apply**
+with `Invalid storageTemperature '…' on materialized query '…'`, not at query time.
+
+| Your result is… | Declare | What you get |
+|---|---|---|
+| **Large, historical, append-shaped** — candles, rollups, daily aggregates, anything keyed by a time bucket | **`ColdPreferred`** | No hot segment is ever created, at any ceiling. The bytes are on disk; the page cache serves the recent end. This is the right default for most analytical results. |
+| **Genuinely small and read on every request** — a few thousand keys at most, a dashboard header, a per-user summary | **`HotOnly`** + `residency.targetMemoryBytes` | A *stated* reservation. Refused on its own budget rather than because an unrelated database filled the process, and caught at declaration time if your pins together over-subscribe. |
+| **Recent hot, historical cold** — a live feed whose tail is queried constantly and whose history is queried rarely | **`Auto`** + `residency.memoryRowCap` | The maintenance sweep demotes least-recently-accessed segments first, so the cap self-scales without your knowing the arrival rate. |
+| **You genuinely do not know** | **`Auto`** (or declare nothing) | Hot while the tier has room, cold when it does not. The engine decides per flush. |
+
+🔎 **`ColdPreferred` creates no hot segment at all**, at any ceiling. A flush writes exactly **one**
+representation and decides which at flush time, so the cost is avoided rather than deferred to a
+sweep.
+
+#### Residency is not declarable in the schema file — only temperature is
+
+⚠️ The `storage` block on a `materializedQueries` entry accepts **`storageTemperature` only**. There
+is no `residency` key there, so `memoryRowCap`, `targetMemoryBytes`, `memoryFilter` and
+`hotOnlyBackstop` cannot be declared alongside the query.
+
+Set them on the **result table** afterwards, through the ordinary table-policy endpoint — the result
+table's name is the query's name:
+
+```http
+PUT /api/databases/finance/tables/candles_bid_1m/policy
+Content-Type: application/json
+
+{
+  "storageTemperature": "Auto",
+  "memoryRowCap": 50000
+}
+```
+
+Sentinel convention applies as it does on any table: omitted means *leave unchanged*, `0` **clears**
+a `memoryRowCap` or `targetMemoryBytes`, `""` clears a `memoryFilter`. See
+[Hot/Cold Storage](hot-cold.md#211-api-and-cli-coverage-reference-complete--gap-aware).
+
+⚠️ **A destructive schema replace recreates the result table**, and the policy you set by hand does
+not survive it — changing a query's definition at the same name is a drop-then-create. Re-apply the
+policy after any such change, or keep the result at `ColdPreferred` via `storage`, which *is* carried
+in the schema.
+
+#### Why a row cap is the right bound for a candle table
+
+A **count** bound is the right shape for *"keep the recent window resident"*, and a **duration** is
+the wrong one: a duration cannot be honoured without knowing the arrival rate — at 1.25 MB/s, "keep
+24 hours" is **108 GB**, which would have to be refused when you declared it. A count needs no such
+input and self-scales across a 1 ms tick feed and a 1-minute candle alike.
+
+**What makes it work is the ordering underneath.** A time-bucketed `aggregate` result table is
+clustered by its leading derived time bucket, and the maintenance sweep demotes the
+least-recently-accessed segment first — so on time-ordered data that is a good proxy for *keep recent
+buckets resident, send historical ones to cold*. Measured end to end: **400 minute-buckets under a
+50-row cap stay queryable, complete and gap-free** while the resident footprint stays bounded.
+
+🔎 **Only the leading time bucket clusters.** A plain group-by carries no temporal order, so
+clustering on it would cost a sort on every seal and buy nothing; a second bucket over the same
+column is already ordered by the first. `filter`, `latestPerKey`, `firstPerKey` and `topNPerGroup`
+results are keyed by identity rather than time, and are not clustered.
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -500,10 +591,18 @@ Admin HTTP `POST /api/databases/{db}/materialized-queries` remains; schema apply
     "sourceTable": "EquityQuote",
     "groupBy": ["ticker"],
     "orderBy": "eventTime",
-    "descending": true
+    "descending": true,
+    "storage": { "storageTemperature": "ColdPreferred" }
   }
 }
 ```
+
+**`storage.storageTemperature`** is the one residency field declarable here — `Auto`, `HotOnly` or
+`ColdPreferred`. Omitting it means the engine picks, and *which* default it picks changed between
+server versions, so declaring it is the portable choice. `residency` sub-fields (`memoryRowCap`,
+`targetMemoryBytes`, `memoryFilter`, `hotOnlyBackstop`) are **not** accepted here — set them on the
+result table through the table-policy endpoint, and re-apply them after any destructive replace. Full
+treatment in [2.3.1](#where-a-materialized-querys-result-lives).
 
 See [Schema Management](schema-management.md).
 
@@ -975,6 +1074,91 @@ Your options, in the order worth trying:
 Its siblings over the same source table are unaffected and will be `Ready`; re-running the refresh
 after changing a setting rebuilds only what you ask for.
 
+## 2.11d What a query costs to maintain: the `amplification` object {#amplification}
+
+A materialized query trades write cost for read cost. Until now you could see only half of that
+trade: the engine could say precisely what a **bulk load** cost its materialized queries and nothing
+at all about what a **stream of ordinary inserts** cost them — which is the shape most deployments
+actually run in, and the shape the remaining cost is worst on.
+
+`GET /api/databases/{db}/materialized-queries/{name}` (and the list route) now carries an
+`amplification` object **per query**:
+
+```json
+{
+  "name": "candles_bid_1m",
+  "state": 1,
+  "rowCount": 41200,
+  "amplification": {
+    "sourceRowsIngested": 1000000,
+    "keysPlanned": 1000000,
+    "priorRowsRead": 958800,
+    "applies": 512,
+    "resultRowsUpserted": 1000000,
+    "resultRowsDeleted": 0,
+    "rebuildSourceRowsScanned": 0,
+    "rebuildResultRowsWritten": 0,
+    "sourceColumnsDecoded": 12000000,
+    "sourceColumnsDeclared": 3000000,
+    "resultRowsWritten": 1000000,
+    "writeAmplification": 1.0,
+    "readAmplification": 4.0,
+    "isEmpty": false
+  }
+}
+```
+
+| Field | What it counts |
+|---|---|
+| `sourceRowsIngested` | Source-row changes this query was asked to absorb, on either path. The denominator of `writeAmplification`. |
+| `keysPlanned` | Result-table keys the maintainer asked to read back before computing its mutation |
+| `priorRowsRead` | Prior result rows that read-back actually returned (≤ `keysPlanned`) |
+| `applies` | Calls into the result applier — the batch count, not the row count |
+| `resultRowsUpserted` / `resultRowsDeleted` | Result rows physically written or removed by maintenance |
+| `rebuildSourceRowsScanned` / `rebuildResultRowsWritten` | The same, for a **rebuild** rather than incremental maintenance |
+| `sourceColumnsDecoded` | Source column *values* materialised on this query's behalf — rows scanned × the width the scan actually decodes |
+| `sourceColumnsDeclared` | Column values the query's **declaration** says it needs, over the same rows |
+| `resultRowsWritten` | Every result row this query caused to be written, maintenance **and** rebuild |
+| `writeAmplification` | `resultRowsWritten / sourceRowsIngested`. `null` while nothing has been ingested |
+| `readAmplification` | `sourceColumnsDecoded / sourceColumnsDeclared`. `1.0` once the scan reads only what the query declared; greater while it reads everything |
+| `isEmpty` | `true` when nothing has been recorded |
+
+### Reading the two ratios
+
+**`writeAmplification` — result rows written per source row ingested.** A `latestPerKey` over a
+high-rate feed sits near `1.0`: every tick upserts one row. An `aggregate` over a coarse bucket
+should sit *below* `1.0` once buckets start being revisited rather than created. A ratio climbing
+well above `1.0` means each source row is provoking several result writes — usually a bucket too
+fine for the arrival rate, or a rebuild firing repeatedly.
+
+⚠️ **A rebuild's writes are in the numerator on purpose.** A rebuild provoked by an ingest is exactly
+the amplification this number exists to expose, and a numerator that excluded it would go *down* as
+the engine got worse.
+
+**`readAmplification` — source column values decoded per column value the query declared.** A
+materialized query's source scan currently decodes **every column of every row**, even for a query
+that declared which three it needs. On a twelve-column table feeding a three-column aggregate that is
+`4.0` — four times more column values than the query reads. There is nothing you can configure to
+change that today; the number exists so the cost is a measurement rather than an argument from source
+code, and so a future improvement is checkable.
+
+### What it is not
+
+- ⚠️ **Not a process total, and not summable into one.** An eight-query fan-out reports eight of
+  these. A process total cannot be divided back out, and it is the per-query figure an operator can
+  act on.
+- ⚠️ **Not persisted, and not comparable across a restart.** Every counter is since **process
+  start**. A restart zeroes them.
+- ⚠️ **Not a rate.** These are monotonic totals plus two ratios over them. To get a rate, poll and
+  difference.
+- 🔎 **Omitted entirely for a query that has done nothing**, so an idle query's response bytes are
+  unchanged — treat an absent `amplification` as "no data yet", not as zero.
+
+### What it does not change
+
+Nothing about how a query is maintained. The counters are a handful of interlocked adds per commit
+batch — never per row — on a path that has just done a keyed read-back and an engine write.
+
 ## 2.12 Scenario playbooks (minimum three)
 
 ### Scenario 1: First-run baseline MQ (latest-per-key)
@@ -1036,6 +1220,11 @@ Monitor first:
   - `SubscriptionQueueDepth`, `SubscriptionLagMs`
 - Routing outcomes:
   - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`, `MaterializedQueryMatchTimeNs`
+- Per-query cost — `amplification` on the status route, not a counter. `writeAmplification` and
+  `readAmplification`, plus the totals behind them. See [2.11d](#amplification).
+- What the results are holding in RAM — `pinnedHotBytes` on `GET /api/server/memory` is the
+  per-database total of declared residency pins, including any result table you declared `HotOnly`.
+  See [2.3.1](#where-a-materialized-querys-result-lives).
 
 Recovery/restart expectations:
 
@@ -1064,6 +1253,11 @@ Suggested tuning sequence:
 | Duplicate rows after compaction/flush on MQ result table | Known unresolved engine bug from P11 R8 | Track/fix through P11 handoff; do not relax correctness assertions |
 | Attempted FirstPerKey/TopN definition fails or is unusable | Type reserved but no full maintainer path | Use supported patterns only (`LatestPerKey`, `Aggregate`, `Filter`) |
 | Subscription loops or floods unexpectedly | Incorrect result-table re-routing would cause loops, but guard prevents this | Confirm `_catalog.Exists(tableName)` guard remains intact and unmodified |
+| Hot tier is fuller than your declared tables account for | A result table is an ordinary table in the same tier, and an `aggregate` / `latestPerKey` result grows with the source's cardinality | Declare `storage.storageTemperature` — `ColdPreferred` for historical results, `Auto` + a row cap for recent-hot. [2.3.1](#where-a-materialized-querys-result-lives) |
+| Writes on an unrelated table are refused with a retryable `503` while that database's own share had room | Pinned result tables shrank the elastic hot tier; the process was full, your database was not the one holding it | Read `processHotCeilingBytes` / `processHotResidentBytes` / `pinnedHotBytes`, then un-pin the results that do not need pinning. [Sizing](sizing.md#mq-result-residency) |
+| A `memoryRowCap` on a result table does nothing | Caps are enforced on `Auto` tables only — on a `HotOnly` or `ColdPreferred` result they validate, persist and are ignored by the sweep | Set the temperature to `Auto` if you want a cap to bind. [2.3.1](#where-a-materialized-querys-result-lives) |
+| A result's `storageTemperature` reverted after a schema change | Changing a definition at the same name is a **destructive replace** — drop then create | Re-apply the table policy, or declare the temperature in `storage` where the schema carries it |
+| `writeAmplification` well above `1.0` on an `aggregate` | Bucket too fine for the arrival rate, or a rebuild firing repeatedly | Coarsen the bucket, or check `rebuildSourceRowsScanned` for a rebuild loop. [2.11d](#amplification) |
 
 ## 2.15 Verification ledger
 

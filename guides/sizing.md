@@ -77,6 +77,18 @@ fields rather than one.
 
 Aouda answers hot-tier pressure in cost order, and **the first answer costs the writer nothing**.
 
+| Rung | What it does | Cost to the writer | Default | Key |
+|---|---|---|---|---|
+| **0 — drain harder** | Sweeps more often, demotes to a lower target | **None.** Disk I/O only | **on**, inert below 60 % | `Aouda:Memory:HotDrainAccelerationEnabled` |
+| **0.5 — seal cold** | The flush writes a cold segment instead of a hot one | A read of those rows comes from disk | **on** | `Aouda:Memory:HotAdmissionEnabled` |
+| **1 — pace the writer** | Delays the writer to a measured admissible rate | Latency, bounded | **off**, inert below 80 % | `Aouda:Memory:HotPacingEnabled` |
+| **2 — refuse** | Typed retryable `503` with `Retry-After` | The write fails and must be retried | **on** | — |
+| **3 — break a pin** | Demotes a `HotOnly` table's segments anyway | Only if you asked for it | per table | `residency.hotOnlyBackstop` |
+
+Each rung is tried before the one below it, and a rung that is off is skipped rather than substituted
+for — turning rung 1 off does not make rung 2 fire sooner, it means a tier that rung 0 cannot drain
+fast enough reaches the ceiling and refuses instead of slowing down first.
+
 Above **60 %** of a database's hot ceiling the engine simply drains harder: the hot/cold maintenance
 sweep runs more often and demotes to a lower per-table target, and the reclaim ladder aims to bring
 the tier back to that mark rather than merely under the ceiling. It spends disk I/O — which is rarely
@@ -178,6 +190,12 @@ whichever is smaller: its own ceiling, or its share of the aggregate
 ⚠️ **If a write is refused while your database's own share still had room, these are the fields to
 read.** The process was full; your database was simply not the one holding most of it.
 
+**A refusal names which ceiling bound it, because the two have opposite fixes.** Bound by the
+database's **own** ceiling, that database wants a larger share of the budget or a faster drain. Bound
+by the **process aggregate**, it is already inside its own share and is being held down by what the
+other databases hold — giving it a bigger share alone would change nothing, and the fix is to reclaim
+elsewhere.
+
 🔎 **On a healthy server this changes nothing**, and that is by construction rather than by
 tuning: the aggregate is the same fraction the per-database ceilings are derived from, so the two
 agree exactly wherever no floor is binding. It is the small-host, many-database case — where the
@@ -217,6 +235,67 @@ not participate in the over-subscription check, and is bounded by the hot tier i
 `hotOnlyBackstop: "DemoteAnyway"` is unchanged — such a table yields its segments under pressure
 instead of refusing writes.
 
+## Materialized query results live in this tier too {#mq-result-residency}
+
+A materialized query's result is an **ordinary table** with the query's name. It is in the same hot
+tier, obeys the same `storageTemperature`, is demoted and promoted by the same sweep, and is charged
+against the same per-database and process-wide ceilings as the tables you declared yourself.
+
+**With no declaration it defaults to `Auto`** — for every query type. Residency is policy, not
+something inferred from the query's shape.
+
+⚠️ **`Auto` is the right answer when you do not know; it is rarely the best one when you do.** An
+`aggregate` result holds **one row per group** and a `latestPerKey` result **one row per key**, so
+both grow with the source's cardinality — a measured eight-query fan-out held **2 199 815 groups**,
+and per-minute candles over a few thousand instruments is an ordinary shape, not a pathological one.
+A result table you never thought about is a common reason a hot tier is fuller than its owner
+expects.
+
+⚠️ **A pin here costs what any pin costs.** If you declare `HotOnly` on a result table, its bytes
+come off the ceiling everything else is admitted against, the table is skipped for demotion, and its
+cold segments are re-promoted — so rung 0 has nothing it is allowed to drain there. That is the
+bargain a declared pin makes, and it is worth making deliberately on a small result and not by
+accident on a large one.
+
+### Declaring a temperature
+
+`storage.storageTemperature` on the query's schema entry:
+
+```json
+"candles_bid_1m": {
+  "type": "aggregate",
+  "sourceTable": "quotes",
+  "groupBy": [ { "column": "ticker" },
+               { "column": "time", "function": "TruncateToMinute", "outputName": "time" } ],
+  "aggregates": [ /* … */ ],
+  "storage": { "storageTemperature": "ColdPreferred" }
+}
+```
+
+| Your result is… | Declare | Why |
+|---|---|---|
+| Large, historical, append-shaped — candles, rollups, anything keyed by a time bucket | **`ColdPreferred`** | It never creates a hot segment at all, at any ceiling. The bytes stay on disk and the page cache serves the recent end. |
+| Genuinely small and read on every request — a few thousand keys at most | **`HotOnly` + `residency.targetMemoryBytes`** | A stated reservation, refused on its own budget, and caught at declaration time if your pins over-subscribe. |
+| Somewhere in between, or you want *recent hot, historical cold* | **`Auto` + `residency.memoryRowCap`** | The sweep demotes least-recently-accessed segments first, so a row cap self-scales without your knowing the arrival rate. |
+
+🔎 **What makes the third row work is the ordering underneath.** A time-bucketed `aggregate` result
+table is clustered by its leading derived time bucket, and the sweep demotes the
+least-recently-accessed segment first — so on time-ordered data that is a good proxy for *keep recent
+buckets resident, send historical ones to cold*. Measured: 400 minute-buckets under a 50-row cap stay
+queryable, complete and gap-free while the resident footprint stays bounded.
+
+🔎 **`memoryRowCap` is the answer to "keep the last 24 hours hot", and it is a better one than a time
+window.** A *duration* cannot be honoured without knowing the arrival rate — at 1.25 MB/s, "24 h" is
+108 GB, which would have to be refused when you declared it. A *count* bound needs no such input and
+self-scales across a 1 ms feed and a 1-minute candle alike.
+
+⚠️ **`residency` is not declarable next to the query** — `storage` carries `storageTemperature` only.
+Set `memoryRowCap` / `targetMemoryBytes` on the result table via
+`PUT /api/databases/{db}/tables/{name}/policy`, and re-apply after a destructive schema replace.
+
+Full treatment, including the amplification counters that say what a query costs:
+[Materialized queries](materialized.md#where-a-materialized-querys-result-lives).
+
 ## What happens when the GC heap gets tight
 
 Aouda watches the managed heap separately from its own memory ledger, because they are different
@@ -232,11 +311,45 @@ a grace window — up to 60 seconds — in which the engine drains the hot tier 
 writer instead of refusing. If the heap recovers inside the window, no write is ever refused. If it
 does not, the refusal happens exactly as before.
 
+⚠️ **Except within 10 % of the heap hard limit, where no grace is granted at all.** Above **90 %** of
+the hard limit the engine refuses straight away rather than spending the remaining room on a wait —
+there is not enough headroom left for pacing to plausibly recover it, and a wait there buys a crash
+instead of a `503`.
+
 ⚠️ **The grace is deliberately unavailable with pacing off.** Refusing is what stops a heap-exhausted
 process dying, and it is only safe to defer while something else is bounding how fast memory arrives.
 
 `heapPressureGraceExpired` on the performance counters is the number to watch: it counts the times
 pacing was given its window and the heap stayed tight anyway.
+
+### The state between "within budget" and "terminate"
+
+A heap can be tight for hours without ever satisfying the termination rule. The watchdog arms
+termination on six **consecutive** samples above 98 % of the heap limit — but a process fighting its
+collector oscillates (one observed incident ran 91.5 → 98.8 → 91.6 %), so the consecutive counter
+reset every time and the process sat alive-but-wedged: refusing writes, collecting continuously,
+neither recovering nor dying.
+
+Three fields on `GET /api/server/memory` report that state, and two of them also appear in the
+`memory` health component's details:
+
+| Field | What it is |
+|---|---|
+| `heapSustainedDegradation` | `true` when a **majority of a sliding window** of samples was above 90 % of the heap limit |
+| `heapDegradedSinceUtc` | when that began; `null` while healthy |
+| `heapDegradedForSeconds` | how long it has been true — the number to alert on |
+
+⚠️ **This reports; it never acts.** Termination's own rule is untouched, and nothing here refuses,
+delays or reroutes a write.
+
+⚠️ **A window majority rather than a consecutive run, deliberately.** Oscillation is a *symptom* of
+the condition, not evidence against it — a consecutive rule gets harder to trip the harder the
+collector is fighting, which is precisely backwards.
+
+🔎 **Why a field and not just a log line.** Every other memory figure on these surfaces is
+instantaneous, and an instantaneous reading cannot tell a spike the next collection resolves from a
+process that has been unable to make room for an hour. Alert on `heapDegradedForSeconds` crossing a
+threshold you choose; a log line is gone from a polling system the moment it scrolls past.
 
 ## When ingest outruns flush
 
@@ -245,88 +358,26 @@ Refusals now name **which class of work** was refused and why. A `503` may say a
 
 Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed the class ceiling is refused, where it previously succeeded while holding far more memory than it had reserved. Both are the same typed retryable `503`.
 
-## Where flushed rows go, and the two rates that say whether the hot tier is coping
+## Which rungs are actually running
 
-Aouda keeps recently written rows in a **hot** tier in RAM and moves them to **cold** storage on disk as
-they age. Two things changed here, and both are visible on `GET /api/server/memory`.
+Every rung above has a config key, and the server prints the ladder **as it is actually in force** in
+one startup line:
 
-**A flush now writes exactly one representation.** It used to build the in-RAM copy first and produce
-the on-disk one only later, on demotion — for every table, whatever its policy. Now the decision is
-made when the rows are flushed: hot when the tier can afford them, cold when it cannot, and **cold
-unconditionally for a `ColdPreferred` table**. Three consequences worth knowing before you meet them:
+```
+Memory ladder: admission=on, rung0=on (T42=60 %), rung1=off (T43=80 %, T44=00:01:00,
+  T45=00:00:30), processHotCeiling=on, flushAlwaysHotFirst=off
+```
 
-- **`ColdPreferred` finally does what it says.** Such a table creates no hot segment at all. If you
-  followed the advice above to prefer it for archival tables, you now get an avoided cost rather than
-  a deferred one.
-- **A bulk load into an edge or vector table writes cold by default.** Set
-  `Aouda:BulkLoad:Temperature` to `HotAndCold` to restore the previous behaviour per job or per
-  server.
-- **Rows flushed cold under pressure read from disk, not RAM.** Read-after-write on those rows is
-  slower. This only happens when the alternative was approaching the hot ceiling, and the page cache
-  is the tier that exists for it — but it is a real change and it is why it is named here.
+⚠️ **Read the effective values here, not the ones you set.** Every non-boolean on this line
+**self-clamps** — `T43` against `T42`, both durations against their own floors and ceilings — so a
+value you configured can be silently replaced by a different one. That is exactly why the line prints
+the effective number rather than the configured one.
 
-Set `Aouda:Memory:FlushAlwaysHotFirst=true` to restore the previous flush for every table.
+⚠️ **On servers before this line existed, these settings were not merely off — they were
+unreachable.** The engine held them, but nothing bound them from configuration, so a deployment ran
+the whole ladder at its compiled-in defaults permanently. If you set one of these keys and the
+behaviour did not change, check for this line before assuming the key is wrong.
 
-**The two numbers to watch** are `hotArrivalBytesPerSecond` and `hotDrainBytesPerSecond`, reported per
-database and for the process. Arrival is resident hot bytes created per second; drain is bytes
-released per second by hot→cold demotion. A tier that is coping has arrival at or below drain over
-time. A tier that is filling has arrival above drain, and the gap — not either number alone — is the
-thing to alert on.
+Every key, with its default and what it restores, is in the
+[Defaults Reference](defaults-reference.md#hot-tier-and-ingest-admission).
 
-⚠️ **`hotDrainStalled` is not the same as a drain of zero.** Zero drain is normal on an idle server
-and needs nothing. `hotDrainStalled` means the drain **tried and failed** in the last sampling
-interval, which is a different condition with the opposite remedy: look at `hotDrainLatencyP90Ms` and
-at the `hotDrainAttempted` / `hotDrainSucceeded` split, and check the logs for demotion failures.
-
-Also reported: `totalHotBytesAdmitted` / `totalHotBytesDrained` (monotonic since process start),
-`pinnedHotBytes` (what this database's `HotOnly` tables hold — see below), and, for the process,
-`processHotCeilingBytes` with `processHotResidentBytes`.
-
-## The hot tier is bounded across databases, not only within one
-
-Each database has its own hot ceiling, and there is now a **process-wide** one as well. The
-per-database ceiling carries a 32 MB floor, so on a small host with many databases those floors could
-sum to more than the process would ever commit — at a 256 MB budget with thirteen databases they sum
-to 416 MB against a 208 MB heap limit. The aggregate ceiling closes that.
-
-It is **inert wherever the per-database ceilings already sum correctly**, which is every host with a
-few databases or a budget above about 2 GB. It binds only where the floor has broken the sum, which
-is exactly the small-host, many-database shape it exists to protect. Turn it off with
-`Aouda:Memory:ProcessHotCeilingEnabled=false`.
-
-⚠️ **A refusal names which ceiling bound it**, because the two have opposite fixes. Bound by the
-database's own ceiling, that database wants more of the budget or a faster drain. Bound by the
-process aggregate, it is inside its own share and is being held down by what the other databases
-hold — giving it a bigger share alone would change nothing.
-
-## A residency pin is a reservation with a price
-
-A `HotOnly` table's segments are pinned in RAM. That pin is now **charged**: its bytes come off the
-ceiling the rest of the hot tier is admitted against, so declaring one visibly shrinks the elastic
-tier rather than competing with it. `pinnedHotBytes` on `GET /api/server/memory` is how much.
-
-Two changes follow:
-
-- **A pinned table under `hotOnlyBackstop: RefuseWrites` is refused on its own exhausted
-  reservation** — `residency.targetMemoryBytes` when you declared one, otherwise the database's hot
-  ceiling. It is **no longer refused because an unrelated database filled the process**, which is
-  what used to happen and which told the operator nothing useful.
-- **Pins that together exceed the process hot ceiling are refused when they are declared**, naming
-  both numbers, rather than discovered at 98 % of heap.
-
-## Backpressure on ingest, and what it costs
-
-Under sustained pressure the engine answers in cost order, cheapest first: it drains harder (more
-I/O, **no writer is delayed**), then paces the writer against a measured admissible rate, then
-refuses with a typed retryable `503`, and only then touches a declared pin.
-
-Draining harder is on by default and is inert below 60 % hot occupancy —
-`Aouda:Memory:HotDrainAccelerationEnabled=false` turns it off.
-
-⚠️ **Writer pacing ships disabled.** It is the first response that can make a healthy workload slower
-if a constant is wrong, and two of its constants are carried from another system rather than derived
-from Aouda's own arithmetic. Enable it with `Aouda:Memory:HotPacingEnabled=true`. Below the pacing
-water mark it cannot delay anything by construction, so turning it on does not put a cost on a server
-whose drain is keeping up. Enabling it also allows sustained heap pressure a bounded window to pace
-and drain before it refuses — except within 10 % of the heap hard limit, where the engine refuses
-straight away rather than spending the remaining room on a wait.

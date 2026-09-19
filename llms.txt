@@ -51,15 +51,15 @@
 - [Schema Lifecycle](https://aoudadb.github.io/guides/schema/): Schema-on-write, explicit schema, evolution, inference modes
 - [Schema Management](https://aoudadb.github.io/guides/schema-management/): Declarative schema, aouda.schema.json, diff and apply
 - [Schema CI/CD](https://aoudadb.github.io/guides/schema-cicd/): Schema lifecycle in CI/CD pipelines
-- [Hot/Cold Storage](https://aoudadb.github.io/guides/hot-cold/): Memory control, temperature policies, hot retention
+- [Hot/Cold Storage](https://aoudadb.github.io/guides/hot-cold/): Memory control, temperature policies, hot retention, per-table residency (`memoryRowCap` / `targetMemoryBytes` / `memoryFilter`, enforced on `Auto` tables only). **A materialized query's result table is an ordinary table and obeys all of it**
 - [Write Path Durability](https://aoudadb.github.io/guides/write-durability/): WAL model, write concern, crash recovery
 - [Real-time Streaming](https://aoudadb.github.io/guides/real-time/): WebSocket streaming, availability status, usage playbooks
 - [Backup and Restore](https://aoudadb.github.io/guides/backup/): Incremental manifests, exact restore, retention, REST APIs, point-in-time recovery. Local PITR window is write volume, not a duration.
 - [Replication and Clustering](https://aoudadb.github.io/guides/replication/): Cluster lifecycle, witness role, node management
 - [Partitioning and Multi-tenancy](https://aoudadb.github.io/guides/partitioning/): **Whether to partition at all** (partition a key only when each key value holds ~1 000 000 rows — below that, no `partitionKey`), tenant isolation, exact partition/bucket query pruning, choosing `initialBucketCount` at scale, live subscriptions and the partition-filter guard
-- [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling. `clusterColumns` prunes segments on unpartitioned tables too, with no partition-filter guard
-- [Materialized Queries](https://aoudadb.github.io/guides/materialized/): Materialized query definitions, refresh, Studio browser
-- [Market Data and Stock Quotes](https://aoudadb.github.io/guides/market-data/): **P40 browser-tier worked example.** Watchlist subscribe, `latestPerKey` last-price, candle chart via `outputName`, paged screener with `whenParamPresent`, top-gainers with computed MQ + `orderByChoices`. Conformance fixture: `examples/p40-browser-tier/`
+- [Time-series and Clustering](https://aoudadb.github.io/guides/time-series/): Cluster declaration, partition functions, delta handling. `clusterColumns` prunes segments on unpartitioned tables too, with no partition-filter guard. A time-bucketed `aggregate` MQ's result table is clustered by its leading time bucket — which is what makes a row cap keep recent buckets hot
+- [Materialized Queries](https://aoudadb.github.io/guides/materialized/): Materialized query definitions, refresh, Studio browser. **Where a result table lives (RAM or disk)** — residency is policy, not a property of the query type: every result table defaults to `Auto`, and `storage.storageTemperature` is how you choose. Which temperature suits which query shape, plus the per-query `amplification` object (write/read amplification)
+- [Market Data and Stock Quotes](https://aoudadb.github.io/guides/market-data/): **P40 browser-tier worked example.** Watchlist subscribe, `latestPerKey` last-price, candle chart via `outputName`, paged screener with `whenParamPresent`, top-gainers with computed MQ + `orderByChoices`. **Where each MQ result lives — RAM or disk**, per query in the schema. Conformance fixture: `examples/p40-browser-tier/`
 - [Storage and Persistence](https://aoudadb.github.io/guides/storage/): Columnar storage model, segment lifecycle, WAL
 - [Cloud and Hub](https://aoudadb.github.io/guides/cloud-hub/): Hub backend, cloud control plane, Kubernetes operator
 - [Studio](https://aoudadb.github.io/guides/studio/): Web management console — data explorer, cluster ops, backup UI
@@ -69,7 +69,8 @@
 - [Primary Key Indexing and Memory](https://aoudadb.github.io/guides/pk-indexing/)
 - [Server and Multi-Database](https://aoudadb.github.io/guides/server-multi-database/)
 - [Server configuration](https://aoudadb.github.io/guides/server-configuration/): Precedence (Setup, env, CLI, appsettings), restart behavior, data-dir persistence
-- [Defaults Reference](https://aoudadb.github.io/guides/defaults-reference/): Every derived default (memory fraction split, per-database shares, bulk-load sizing, partition storage mode) worked at several host sizes
+- [Sizing memory and WAL](https://aoudadb.github.io/guides/sizing/): The process RSS ceiling and what it splits into, CPU sizing under co-tenancy, the hot tier's arrival/drain rates, the reclaim ladder (drain harder → seal cold → pace the writer → refuse → break a pin), the process-wide hot ceiling, charged residency pins, and sustained heap degradation
+- [Defaults Reference](https://aoudadb.github.io/guides/defaults-reference/): Every derived default (memory fraction split, per-database shares, bulk-load sizing, partition storage mode) worked at several host sizes, plus every `Aouda:Memory:` hot-tier and ingest-admission key
 - [Single-Node Deployment](https://aoudadb.github.io/guides/single-node-deployment/): The one setting for a supported single-node profile, what it changes today, the PITR trade-off, and what changes when a second node joins
 
 ## Deployment
