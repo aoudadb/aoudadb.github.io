@@ -322,31 +322,22 @@ tier, is demoted and promoted by the same sweep, is charged against the same per
 process-wide ceilings, and accepts the same `PUT /api/databases/{db}/tables/{name}/policy` body as
 any table you created yourself.
 
-⚠️ **Some of them are pinned `HotOnly` without anyone declaring it.** On server **`0.1.32` and
-earlier** a result table's temperature was inferred from the query *type* — `Aggregate`,
-`LatestPerKey` and `FirstPerKey` → `HotOnly`; `Filter` and `TopNPerGroup` → `Auto`. The reasoning
-written in the engine was that those results are "usually small"; an `Aggregate` result holds one row
-per group and a `LatestPerKey` one row per key, so both are unbounded in the source's cardinality.
+**Residency is policy here too, not a property of the query type.** With no declaration a result
+table defaults to `Auto`, for every query type — the same default an ordinary table has. Declare
+`storage.storageTemperature` on the query's schema entry (`Auto` | `HotOnly` | `ColdPreferred`) to
+choose something else.
 
-Three consequences follow from the rest of this section, and all three are easy to miss because the
-pin is nowhere in the schema file:
+⚠️ **Declaring `HotOnly` on a result table costs what any pin costs**, and two of those costs are
+easy to miss on a table you did not create by hand:
 
 - **`TargetMemoryBytes` / `MemoryRowCap` / `MemoryFilter` are ignored on it.** Per the bullet above,
-  enforcement is `Auto`-only — so a row cap you set on a pinned result table validates, persists and
-  does nothing.
-- **It is skipped for demotion, and its cold segments are re-promoted.** The sweep cannot reclaim
-  there under pressure.
-- **Its bytes come off the elastic tier.** A pin is a charged reservation, so it shrinks the ceiling
-  the rest of the database is admitted against — `pinnedHotBytes` on `GET /api/server/memory` is how
-  much.
+  enforcement is `Auto`-only — so a row cap on a pinned result table validates, persists and does
+  nothing.
+- **It is skipped for demotion, and its cold segments are re-promoted**, so the sweep cannot reclaim
+  there under pressure. Its bytes also come off the ceiling the rest of the database is admitted
+  against — `pinnedHotBytes` on `GET /api/server/memory` is how much.
 
-✅ **On `main` (unreleased) the per-type table is gone** and every result defaults to `Auto`, the same
-default an ordinary table has. `Aouda:Memory:MaterializedResultHotOnlyByQueryType=true` restores the
-old behaviour whole.
-
-**An explicit declaration has always been honoured**, on every version, and is the portable answer:
-`storage.storageTemperature` on the query's schema entry (`Auto` | `HotOnly` | `ColdPreferred`). Note
-that `storage` accepts **temperature only** — `residency` sub-fields must be set on the result table
+⚠️ **`storage` accepts temperature only.** `residency` sub-fields must be set on the result table
 through the policy endpoint afterwards, and do not survive a destructive schema replace.
 
 See [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives) for which

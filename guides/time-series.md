@@ -243,19 +243,15 @@ If you create a partitioned time-series table and do not set advanced controls:
 ### A materialized query's result table clusters too, and you do not declare it {#mq-result-clustering}
 
 A time-bucketed `aggregate` materialized query produces a result table you never wrote a
-`clusterColumns` list for. **On `main`, its leading derived time bucket is the cluster column**
+`clusterColumns` list for. **Its leading derived time bucket is the cluster column**
 (`TruncateToMinute`, `TruncateToHour`, `TruncateToDay` …), chosen by the engine.
 
-⚠️ **On server `0.1.32` and earlier there was no cluster column at all.** The schema builder set a
-primary-key order on the group-by columns and a cluster order on nothing, so result rows sat in
-**arrival order** — while the *source* table they aggregate is clustered by its timestamp.
-
-🔎 **The cost of that is residency, not read speed.** The hot/cold sweep demotes the
+🔎 **What that buys is residency, not read speed.** The hot/cold sweep demotes the
 least-recently-accessed segment first, which on time-ordered data is a good proxy for *keep recent
-buckets resident, send historical ones to cold*. Without the ordering the proxy breaks: one
-still-updating current-bucket row keeps its whole segment hot, year-old buckets included — which is
-why a `memoryRowCap` on a candle result did not bound what stayed resident. See
-[Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives).
+buckets resident, send historical ones to cold* — so a `residency.memoryRowCap` on a candle result
+bounds what stays resident without your knowing the arrival rate. Without the ordering the proxy
+would break: one still-updating current-bucket row would keep its whole segment hot, year-old buckets
+included. See [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives).
 
 **Only the leading time bucket clusters.** A plain group-by (ticker, user, account) carries no
 temporal order, so clustering on it would cost a sort on every seal and buy nothing; a second bucket

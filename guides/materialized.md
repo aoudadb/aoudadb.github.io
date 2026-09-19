@@ -163,14 +163,10 @@ If you create a materialized query with standard helpers and no special options:
 - `CreatedUtc` is auto-set if omitted.
 - Result table naming uses unified namespace (`result table name == MQ name`).
 - Normal `TableQuery` reads attempt MQ auto-routing when a compatible MQ is `Ready`.
-- Result-table storage temperature: **the default changed, and which one you get depends on your
-  server version** — see [2.3.1](#where-a-materialized-querys-result-lives).
-  - **Server `0.1.32` and earlier:** inferred from the query type. `Aggregate`, `LatestPerKey`,
-    `FirstPerKey` → **`HotOnly`** (pinned in RAM); `Filter`, `TopNPerGroup` → `Auto`.
-  - **Server `main` (unreleased):** **`Auto`** for every type, the same default an ordinary table
-    has. Restore the old table with `Aouda:Memory:MaterializedResultHotOnlyByQueryType=true`.
-  - **An explicit `storage.storageTemperature` is honoured identically on both**, which is why
-    declaring one is the portable thing to do.
+- Result-table storage temperature defaults to **`Auto`** — for **every** query type, the same
+  default an ordinary table has. Residency is policy, not something inferred from the query type.
+  Declare `storage.storageTemperature` to choose; see
+  [2.3.1](#where-a-materialized-querys-result-lives).
 - Subscription manager defaults:
   - `MaxLag = 1s`
   - `MaxQueueDepth = 10000`
@@ -182,9 +178,7 @@ If you create a materialized query with standard helpers and no special options:
 | `MaterializedQueryDefinition.CreatedUtc` | set to `DateTime.UtcNow` when missing | Definitions always have creation timestamp |
 | `MaterializedQueryDefinition.ResultTableName` | `Name` (BL-021) | Query/subscription uses normal table name |
 | `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries are served from MQ result tables unless `WithDirectScan()` is used |
-| Result table temperature (`Aggregate`) | `HotOnly` **≤ 0.1.32** → `Auto` on `main` | ⚠️ Pinned in RAM on a released server, **and the pin is charged against the hot ceiling**. One row per group, so it grows with the source's cardinality. [2.3.1](#where-a-materialized-querys-result-lives) |
-| Result table temperature (`LatestPerKey`, `FirstPerKey`) | `HotOnly` **≤ 0.1.32** → `Auto` on `main` | ⚠️ Same. One row per key. |
-| Result table temperature (`Filter`, `TopNPerGroup`) | `Auto` | Unchanged on every version — hot while the tier has room, cold when it does not |
+| Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
@@ -194,40 +188,18 @@ If you create a materialized query with standard helpers and no special options:
 
 **A result table is an ordinary table** (that is the whole point of P50), so it lives in the same hot
 tier, obeys the same `storageTemperature`, and is charged against the same per-database and
-process-wide hot ceilings as any table you declared yourself. It is also, on a released server, the
-most likely thing in your database to be **pinned in RAM without anyone having asked for it**.
+process-wide hot ceilings as any table you declared yourself.
 
-#### What the engine decides for you
+**Residency is policy, not a property of the query type.** With no declaration, every result table —
+`aggregate`, `latestPerKey`, `firstPerKey`, `filter`, `topNPerGroup` alike — defaults to **`Auto`**:
+hot while the tier has room, cold when it does not, demoted and promoted by the ordinary sweep.
 
-| Query type | `≤ 0.1.32` | `main` (unreleased) |
-|---|---|---|
-| `aggregate` | **`HotOnly`** — pinned | `Auto` |
-| `latestPerKey` | **`HotOnly`** — pinned | `Auto` |
-| `firstPerKey` | **`HotOnly`** — pinned | `Auto` |
-| `filter` | `Auto` | `Auto` |
-| `topNPerGroup` | `Auto` | `Auto` |
+That is a default, not a recommendation. **`Auto` is the right answer when you do not know; it is
+rarely the best answer when you do**, and the table below is how to decide.
 
-The reasoning behind the pin, written in the engine source, was that these results are *"small,
-frequent access"* and *"usually small"*. **They are not bounded that way.** An `aggregate` result
-holds one row per group and a `latestPerKey` result one row per key, so both are unbounded in the
-source's cardinality — a measured eight-query fan-out held **2 199 815 groups**, and per-minute
-candles over a few thousand instruments is an ordinary shape rather than an abusive one.
+#### Choosing a temperature
 
-⚠️ **The guess stopped being free.** Once a residency pin became a *charged reservation*, a pinned
-table's bytes are **subtracted** from the ceiling the rest of the hot tier is admitted against, the
-table is **skipped for demotion**, and its cold segments are **re-promoted**. So an undeclared pin
-shrank the elastic tier on exactly the tables producing the most hot bytes, and the drain-harder rung
-had nothing there it was permitted to reclaim. The bargain a declared pin makes is that the declarer
-pays a *stated* price — here nobody had declared anything.
-
-🔎 **This is invisible in your schema file.** Nothing in a `materializedQueries` entry says
-`HotOnly`, so the only way to see it is `GET /api/server/memory` → `pinnedHotBytes`, or the table's
-own policy. If your hot tier is fuller than your tables account for, look here first.
-
-#### Declaring it instead
-
-`storage.storageTemperature` is honoured identically on every version, so **declaring one is the only
-portable answer** — and it is what makes a schema behave the same before and after the default moved:
+`storage.storageTemperature` on the query's schema entry takes `Auto`, `HotOnly` or `ColdPreferred`:
 
 ```json
 "materializedQueries": {
@@ -252,13 +224,11 @@ with `Invalid storageTemperature '…' on materialized query '…'`, not at quer
 | **Large, historical, append-shaped** — candles, rollups, daily aggregates, anything keyed by a time bucket | **`ColdPreferred`** | No hot segment is ever created, at any ceiling. The bytes are on disk; the page cache serves the recent end. This is the right default for most analytical results. |
 | **Genuinely small and read on every request** — a few thousand keys at most, a dashboard header, a per-user summary | **`HotOnly`** + `residency.targetMemoryBytes` | A *stated* reservation. Refused on its own budget rather than because an unrelated database filled the process, and caught at declaration time if your pins together over-subscribe. |
 | **Recent hot, historical cold** — a live feed whose tail is queried constantly and whose history is queried rarely | **`Auto`** + `residency.memoryRowCap` | The maintenance sweep demotes least-recently-accessed segments first, so the cap self-scales without your knowing the arrival rate. |
-| **You genuinely do not know** | **`Auto`** (or nothing, on `main`) | Hot while the tier has room, cold when it does not. The engine decides per flush. |
+| **You genuinely do not know** | **`Auto`** (or declare nothing) | Hot while the tier has room, cold when it does not. The engine decides per flush. |
 
-⚠️ **`ColdPreferred` means it, now.** Until the P53 flush work, a `ColdPreferred` table still built a
-hot segment at flush and left a background sweep to undo it — so the policy bought a *deferred* cost
-rather than an avoided one. A flush now writes exactly **one** representation and decides which at
-flush time, so `ColdPreferred` creates no hot segment at all. If you set it on a result table
-previously and saw no improvement, that is why.
+🔎 **`ColdPreferred` creates no hot segment at all**, at any ceiling. A flush writes exactly **one**
+representation and decides which at flush time, so the cost is avoided rather than deferred to a
+sweep.
 
 #### Residency is not declarable in the schema file — only temperature is
 
@@ -288,27 +258,23 @@ not survive it — changing a query's definition at the same name is a drop-then
 policy after any such change, or keep the result at `ColdPreferred` via `storage`, which *is* carried
 in the schema.
 
-#### Why a row cap works on a candle table, and why it did not use to
+#### Why a row cap is the right bound for a candle table
 
-A count bound is the right shape for *"keep the recent window resident"*, and a duration is the wrong
-one: a duration cannot be honoured without knowing the arrival rate — at 1.25 MB/s, "keep 24 hours"
-is **108 GB**, which has to be refused at declaration time or not offered at all. A count needs no
-such input and self-scales across a 1 ms tick feed and a 1-minute candle alike.
+A **count** bound is the right shape for *"keep the recent window resident"*, and a **duration** is
+the wrong one: a duration cannot be honoured without knowing the arrival rate — at 1.25 MB/s, "keep
+24 hours" is **108 GB**, which would have to be refused when you declared it. A count needs no such
+input and self-scales across a 1 ms tick feed and a 1-minute candle alike.
 
-⚠️ **On `0.1.32` and earlier the ordering a row cap depends on was missing.** A time-bucketed
-`aggregate` result was stored in **arrival order** — the schema builder set a primary-key order on
-the group-by columns and a cluster order on nothing. So "demote the least recently accessed segment"
-did not mean "demote the oldest buckets": one still-updating current-bucket row kept its whole
-segment resident, year-old buckets included.
-
-✅ **On `main`, a derived time bucket is the result table's cluster column**, which restores the
-proxy. Measured end to end: **400 minute-buckets under a 50-row cap stay queryable, complete and
-gap-free** while the resident footprint stays bounded.
+**What makes it work is the ordering underneath.** A time-bucketed `aggregate` result table is
+clustered by its leading derived time bucket, and the maintenance sweep demotes the
+least-recently-accessed segment first — so on time-ordered data that is a good proxy for *keep recent
+buckets resident, send historical ones to cold*. Measured end to end: **400 minute-buckets under a
+50-row cap stay queryable, complete and gap-free** while the resident footprint stays bounded.
 
 🔎 **Only the leading time bucket clusters.** A plain group-by carries no temporal order, so
 clustering on it would cost a sort on every seal and buy nothing; a second bucket over the same
 column is already ordered by the first. `filter`, `latestPerKey`, `firstPerKey` and `topNPerGroup`
-are untouched — their results are keyed by identity, not by time.
+results are keyed by identity rather than time, and are not clustered.
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -1257,8 +1223,7 @@ Monitor first:
 - Per-query cost — `amplification` on the status route, not a counter. `writeAmplification` and
   `readAmplification`, plus the totals behind them. See [2.11d](#amplification).
 - What the results are holding in RAM — `pinnedHotBytes` on `GET /api/server/memory` is the
-  per-database total of **declared** residency pins, which on a `0.1.32`-or-earlier server includes
-  every `aggregate`, `latestPerKey` and `firstPerKey` result table whether or not you declared one.
+  per-database total of declared residency pins, including any result table you declared `HotOnly`.
   See [2.3.1](#where-a-materialized-querys-result-lives).
 
 Recovery/restart expectations:
@@ -1288,9 +1253,9 @@ Suggested tuning sequence:
 | Duplicate rows after compaction/flush on MQ result table | Known unresolved engine bug from P11 R8 | Track/fix through P11 handoff; do not relax correctness assertions |
 | Attempted FirstPerKey/TopN definition fails or is unusable | Type reserved but no full maintainer path | Use supported patterns only (`LatestPerKey`, `Aggregate`, `Filter`) |
 | Subscription loops or floods unexpectedly | Incorrect result-table re-routing would cause loops, but guard prevents this | Confirm `_catalog.Exists(tableName)` guard remains intact and unmodified |
-| Hot tier is fuller than your declared tables account for; `pinnedHotBytes` is large and you pinned nothing | On `≤ 0.1.32` every `aggregate` / `latestPerKey` / `firstPerKey` result is pinned `HotOnly` by query type | Declare `storage.storageTemperature` explicitly — `ColdPreferred` for historical results. On `main`, leave it and the default is `Auto`. [2.3.1](#where-a-materialized-querys-result-lives) |
-| Writes on an unrelated table are refused with a retryable `503` while that database's own share had room | Pinned result tables shrank the elastic hot tier; the process was full, your database was not the one holding it | Read `processHotCeilingBytes` / `processHotResidentBytes` / `pinnedHotBytes`, then un-pin the results that do not need pinning. [Sizing](sizing.md#the-pin-you-did-not-declare-materialized-query-results) |
-| A `memoryRowCap` on a candle result does not bound what stays resident | On `≤ 0.1.32` a time-bucketed result is stored in arrival order, so one live bucket keeps its whole segment hot | Fixed on `main` — the leading time bucket is now the cluster column. Before that, use `ColdPreferred` instead. [2.3.1](#where-a-materialized-querys-result-lives) |
+| Hot tier is fuller than your declared tables account for | A result table is an ordinary table in the same tier, and an `aggregate` / `latestPerKey` result grows with the source's cardinality | Declare `storage.storageTemperature` — `ColdPreferred` for historical results, `Auto` + a row cap for recent-hot. [2.3.1](#where-a-materialized-querys-result-lives) |
+| Writes on an unrelated table are refused with a retryable `503` while that database's own share had room | Pinned result tables shrank the elastic hot tier; the process was full, your database was not the one holding it | Read `processHotCeilingBytes` / `processHotResidentBytes` / `pinnedHotBytes`, then un-pin the results that do not need pinning. [Sizing](sizing.md#mq-result-residency) |
+| A `memoryRowCap` on a result table does nothing | Caps are enforced on `Auto` tables only — on a `HotOnly` or `ColdPreferred` result they validate, persist and are ignored by the sweep | Set the temperature to `Auto` if you want a cap to bind. [2.3.1](#where-a-materialized-querys-result-lives) |
 | A result's `storageTemperature` reverted after a schema change | Changing a definition at the same name is a **destructive replace** — drop then create | Re-apply the table policy, or declare the temperature in `storage` where the schema carries it |
 | `writeAmplification` well above `1.0` on an `aggregate` | Bucket too fine for the arrival rate, or a rebuild firing repeatedly | Coarsen the bucket, or check `rebuildSourceRowsScanned` for a rebuild loop. [2.11d](#amplification) |
 

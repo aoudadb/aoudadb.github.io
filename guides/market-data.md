@@ -403,8 +403,7 @@ And separate named queries `candles.byTickerDay`, `candles.byTickerMinute`. Same
 {: .warning }
 **A minute-interval candle MQ is the one to think hardest about.** One row per `(ticker, minute)` is
 1 440 rows per ticker per day — over 5 000 tickers, **7.2 million rows a day**, growing without
-bound. On a server at `0.1.32` or earlier that result table is pinned in RAM by default and nothing
-in this schema file says so. Read the next section before deploying one.
+bound. Decide where that result table lives before deploying one: see the next section.
 
 ---
 
@@ -416,24 +415,21 @@ against the same memory ceiling as `quotes` and `trades`. The `storage` lines in
 [section 2](#2-one-schema-file) are not decoration — they are the difference between a market-data
 database that fits on a 2 GB host and one that does not.
 
-### The default is not what you would guess, and it depends on your server version
+### The default is `Auto`, and for market data that is rarely the best answer
 
-| Server | `latestPerKey`, `aggregate`, `firstPerKey` | `filter`, `topNPerGroup` |
-|---|---|---|
-| **`0.1.32` and earlier** | **`HotOnly`** — pinned in RAM, never demoted | `Auto` |
-| **`main` (unreleased)** | `Auto` | `Auto` |
+With no `storage` block a result table defaults to **`Auto`** — hot while the tier has room, cold
+when it does not — for every query type. Residency is policy, not something inferred from whether
+the query is a `latestPerKey` or an `aggregate`.
 
-The pin was inferred from the *query type*, on the reasoning that these results are "usually small".
-For market data that reasoning does not hold: an `aggregate` result holds **one row per group**, and
-a per-minute candle over a few thousand instruments is millions of groups within a day.
+That is a safe default and a weak one here, because market-data results split cleanly into two very
+different shapes. An `aggregate` keyed by a **time bucket** holds one row per group and grows
+forever: a per-minute candle over a few thousand instruments is millions of groups within a day. A
+`latestPerKey` keyed by **identity** holds one row per instrument and stops growing.
 
-⚠️ **A pinned table's bytes are subtracted from the ceiling everything else is admitted against**,
-the table is skipped for demotion, and its cold segments are re-promoted. So a candle MQ you never
-declared a residency for can quietly shrink the tier your tick ingest is admitted into — and the
-symptom is a `503` on an *insert into `quotes`*, not on the candle table.
-
-✅ **Declaring `storage.storageTemperature` is honoured identically on every version**, so a schema
-that declares it behaves the same before and after the default moved. Declare it on every MQ.
+⚠️ **Declaring `HotOnly` is a charge, not a hint.** A pinned table's bytes are subtracted from the
+ceiling everything else is admitted against, the table is skipped for demotion, and its cold segments
+are re-promoted. Pin the candle series and you shrink the tier your *tick ingest* is admitted into —
+and the symptom is a `503` on an `insert into quotes`, not on the candle table.
 
 ### What to declare, per query in this schema
 
@@ -468,11 +464,10 @@ Content-Type: application/json
 The hot/cold sweep demotes least-recently-accessed segments first, so the cap self-scales: you do not
 have to know your tick rate, and the same number works for a 1 ms feed and a 1-minute candle.
 
-⚠️ **On `0.1.32` and earlier this does not do what you want.** A time-bucketed result was stored in
-*arrival* order with no cluster column, so one still-updating current-minute row kept its whole
-segment resident — including buckets from months ago. On `main` the leading time bucket is the result
-table's cluster column, which is what makes "demote the least recently used segment" mean "demote the
-oldest candles". Until you are on a server with that fix, prefer `ColdPreferred` over a row cap.
+🔎 **What makes the cap mean what you want is the ordering underneath.** A time-bucketed result
+table is clustered by its leading time bucket, so "demote the least recently used segment" amounts
+to "demote the oldest candles". Without that ordering one still-updating current-minute row would
+keep its whole segment resident, buckets from months ago included.
 
 ⚠️ **A row cap does not survive a destructive schema replace.** Changing an MQ's definition at the
 same name is a drop-then-create, and the new result table starts with default policy. `storage` in
@@ -488,9 +483,8 @@ refused when you declared it. A count needs no such input.
 GET /api/server/memory
 ```
 
-- **`pinnedHotBytes`** (per database) — bytes held by declared residency pins. On a
-  `0.1.32`-or-earlier server this includes every `aggregate` / `latestPerKey` result whether or not
-  you declared one. If this is large and you pinned nothing, that is the cause.
+- **`pinnedHotBytes`** (per database) — bytes held by declared residency pins, including any
+  result table you declared `HotOnly`. This is what your pins are costing the elastic tier.
 - **`hotArrivalBytesPerSecond` vs `hotDrainBytesPerSecond`** — the gap, not either number, says
   whether the tier is filling faster than it empties.
 - **`processHotCeilingBytes` / `processHotResidentBytes`** — the process-wide bound. A refusal while
@@ -502,7 +496,7 @@ candle query whose `writeAmplification` sits well above `1.0` has a bucket too f
 rate.
 
 Full treatment: [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives)
-and [Sizing](sizing.md#the-pin-you-did-not-declare-materialized-query-results).
+and [Sizing](sizing.md#mq-result-residency).
 
 ---
 
@@ -739,10 +733,10 @@ you forgot to follow up costs a full rebuild at the next restart.
 
 {: .note }
 **Loading years of history is the case where result residency bites hardest.** A historical load of
-`quotes` regenerates every candle bucket in the range at once. If `candles_bid_1h` is pinned — which
-it is by default on a server at `0.1.32` or earlier — those rows are all admitted into the hot tier
-and none of them can be demoted. Declare `storageTemperature: "ColdPreferred"` on historical candle
-MQs *before* the load, not after. See [Where each MQ result lives](#mq-residency).
+`quotes` regenerates every candle bucket in the range at once. Under `Auto` that is a large burst of
+hot admissions all at once; under a declared `HotOnly` none of it can be demoted at all. Declare
+`storageTemperature: "ColdPreferred"` on historical candle MQs *before* the load, not after. See
+[Where each MQ result lives](#mq-residency).
 
 🔎 **Ordinary tabular bulk loads write cold only** and always have. It is the *materialized query
 results* they feed that land hot, which is why the residency declaration is what matters here rather
@@ -756,4 +750,4 @@ than a bulk-load setting. (Graph and vector bulk loads are a separate case — t
 - Conformance fixture: `examples/p40-browser-tier/` — `aouda.schema.json`, `seed.json`, `expected.json`
 - ADRs: [0040 direct-client-access and trust boundary](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0040-direct-client-access-and-the-trust-boundary.md) (D-3, D-5, D-15, D-20, D-30–D-36), [0015 materialized queries](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0015-materialized-queries.md), [0009 partitioning](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0009-partitioning-multitenancy.md)
 - Engine tests: `tests/Aouda.Server.Tests/P40/P40BrowserTierConformanceTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`
-- Memory and residency: [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives) (where a result lives), [§2.11d](materialized.md#amplification) (what a query costs), [Sizing](sizing.md#the-pin-you-did-not-declare-materialized-query-results) (the hot tier and the reclaim ladder), [Hot/Cold Storage](hot-cold.md) (per-table residency policy), [Defaults Reference](defaults-reference.md#hot-tier-and-ingest-admission) (every `Aouda:Memory:` key)
+- Memory and residency: [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives) (where a result lives), [§2.11d](materialized.md#amplification) (what a query costs), [Sizing](sizing.md#mq-result-residency) (the hot tier and the reclaim ladder), [Hot/Cold Storage](hot-cold.md) (per-table residency policy), [Defaults Reference](defaults-reference.md#hot-tier-and-ingest-admission) (every `Aouda:Memory:` key)

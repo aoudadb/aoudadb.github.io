@@ -235,43 +235,31 @@ not participate in the over-subscription check, and is bounded by the hot tier i
 `hotOnlyBackstop: "DemoteAnyway"` is unchanged — such a table yields its segments under pressure
 instead of refusing writes.
 
-## The pin you did not declare: materialized query results
+## Materialized query results live in this tier too {#mq-result-residency}
 
-⚠️ **On a server running **0.1.32 or earlier**, some materialized query result tables are pinned
-`HotOnly` and you never asked for it.** The residency was inferred from the query *type*:
+A materialized query's result is an **ordinary table** with the query's name. It is in the same hot
+tier, obeys the same `storageTemperature`, is demoted and promoted by the same sweep, and is charged
+against the same per-database and process-wide ceilings as the tables you declared yourself.
 
-| Query type | Result-table temperature, **≤ 0.1.32** |
-|---|---|
-| `aggregate` | **`HotOnly`** — pinned |
-| `latestPerKey` | **`HotOnly`** — pinned |
-| `firstPerKey` | **`HotOnly`** — pinned |
-| `filter` | `Auto` |
-| `topNPerGroup` | `Auto` |
+**With no declaration it defaults to `Auto`** — for every query type. Residency is policy, not
+something inferred from the query's shape.
 
-The reasoning, written in the engine source, was that these results are *"small, frequent access"*
-and *"usually small"*. They are not bounded that way. An `aggregate` result holds **one row per
-group** and a `latestPerKey` result **one row per key**, so both grow with the source's cardinality
-— a measured eight-query fan-out held **2 199 815 groups**, and per-minute candles over a few
-thousand instruments is an ordinary shape, not a pathological one.
+⚠️ **`Auto` is the right answer when you do not know; it is rarely the best one when you do.** An
+`aggregate` result holds **one row per group** and a `latestPerKey` result **one row per key**, so
+both grow with the source's cardinality — a measured eight-query fan-out held **2 199 815 groups**,
+and per-minute candles over a few thousand instruments is an ordinary shape, not a pathological one.
+A result table you never thought about is a common reason a hot tier is fuller than its owner
+expects.
 
-**This is the single most common reason a hot tier is fuller than its owner expects**, and it is
-invisible in the schema file, because nothing in the schema says `HotOnly`.
+⚠️ **A pin here costs what any pin costs.** If you declare `HotOnly` on a result table, its bytes
+come off the ceiling everything else is admitted against, the table is skipped for demotion, and its
+cold segments are re-promoted — so rung 0 has nothing it is allowed to drain there. That is the
+bargain a declared pin makes, and it is worth making deliberately on a small result and not by
+accident on a large one.
 
-🔎 **A guess that cost nothing became load-bearing.** Once a pin became a *charged reservation* (see
-the section above), a pinned table's bytes come off the ceiling everything else is admitted against,
-the table is skipped for demotion, and its cold segments are re-promoted. So an undeclared pin shrank
-the elastic tier — on exactly the tables producing the most hot bytes — and rung 0 had nothing it was
-allowed to drain there.
+### Declaring a temperature
 
-**On `main` (unreleased) the per-type table is gone**: every result table defaults to `Auto`, the
-same default an ordinary table has. `Aouda:Memory:MaterializedResultHotOnlyByQueryType=true` restores
-the old table whole for a deployment that was relying on it.
-
-### What to do about it
-
-**Declare the temperature rather than inheriting one.** `storage.storageTemperature` on the query's
-schema entry is honoured identically on every version, so declaring it is also the way to make a
-schema behave the same before and after the default changed:
+`storage.storageTemperature` on the query's schema entry:
 
 ```json
 "candles_bid_1m": {
@@ -290,17 +278,20 @@ schema behave the same before and after the default changed:
 | Genuinely small and read on every request — a few thousand keys at most | **`HotOnly` + `residency.targetMemoryBytes`** | A stated reservation, refused on its own budget, and caught at declaration time if your pins over-subscribe. |
 | Somewhere in between, or you want *recent hot, historical cold* | **`Auto` + `residency.memoryRowCap`** | The sweep demotes least-recently-accessed segments first, so a row cap self-scales without your knowing the arrival rate. |
 
-⚠️ **The third row only started working properly on `main`.** A time-bucketed `aggregate` result used
-to be stored in *arrival* order with no cluster column, so one still-updating current-bucket row kept
-its whole segment resident — year-old buckets included — and "demote the least recently used segment"
-did not mean "demote the oldest buckets". A derived time bucket is now the result table's cluster
-column, which is what makes a row cap mean what you want it to mean. Measured: 400 minute-buckets
-under a 50-row cap stay queryable, complete and gap-free while the resident footprint stays bounded.
+🔎 **What makes the third row work is the ordering underneath.** A time-bucketed `aggregate` result
+table is clustered by its leading derived time bucket, and the sweep demotes the
+least-recently-accessed segment first — so on time-ordered data that is a good proxy for *keep recent
+buckets resident, send historical ones to cold*. Measured: 400 minute-buckets under a 50-row cap stay
+queryable, complete and gap-free while the resident footprint stays bounded.
 
 🔎 **`memoryRowCap` is the answer to "keep the last 24 hours hot", and it is a better one than a time
 window.** A *duration* cannot be honoured without knowing the arrival rate — at 1.25 MB/s, "24 h" is
-108 GB, which has to be refused at declaration time or not offered. A *count* bound needs no such
-input and self-scales across a 1 ms feed and a 1-minute candle alike.
+108 GB, which would have to be refused when you declared it. A *count* bound needs no such input and
+self-scales across a 1 ms feed and a 1-minute candle alike.
+
+⚠️ **`residency` is not declarable next to the query** — `storage` carries `storageTemperature` only.
+Set `memoryRowCap` / `targetMemoryBytes` on the result table via
+`PUT /api/databases/{db}/tables/{name}/policy`, and re-apply after a destructive schema replace.
 
 Full treatment, including the amplification counters that say what a query costs:
 [Materialized queries](materialized.md#where-a-materialized-querys-result-lives).

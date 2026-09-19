@@ -1241,9 +1241,7 @@ Execute:
 
 A definition without `batchParam` is unaffected — `args` stays one flat object of parameter values, exactly as before.
 
-**autoIncrement primary keys.** ✅ **Fixed on `main` (BL-429): omitting an `autoIncrement` column now means the same as sending `0` — auto-generate.** `generatedValues` carries the allocated id either way.
-
-⚠️ **On server `0.1.32` and earlier, omitting it is `400 INVALID_REQUEST`** (`Missing required column 'Id'`), the same as a plain `POST …/tables/{t}/rows` body that omits the column. If you target those servers, keep the column present holding `0`. Any of the three entry forms works, on every version:
+**autoIncrement primary keys.** Omitting an `autoIncrement` column means the same as sending `0` — auto-generate — and `generatedValues` carries the allocated id either way. Any of the three entry forms works when you want to be explicit:
 
 - `"Id": 0` — the shortest, when every call auto-generates.
 - `"Id": { "value": 0 }` — the same constant, spelled explicitly.
@@ -1491,15 +1489,9 @@ both accept an optional `storage` object:
 |---|---|---|
 | `storage.storageTemperature` | `Auto`, `HotOnly`, `ColdPreferred` | **Version-dependent — see below.** |
 
-⚠️ **The default changed, and an explicit value is honoured identically on both sides of the change.**
-
-| Server | `aggregate`, `latestPerKey`, `firstPerKey` | `filter`, `topNPerGroup` |
-|---|---|---|
-| `0.1.32` and earlier | **`HotOnly`** — pinned, and the pin is charged against the hot ceiling | `Auto` |
-| `main` (unreleased) | `Auto` | `Auto` |
-
-`Aouda:Memory:MaterializedResultHotOnlyByQueryType=true` restores the per-type table whole. An
-unrecognised value fails **at schema apply**, not at query time:
+**The default is `Auto` for every query type** — `aggregate`, `latestPerKey`, `firstPerKey`,
+`filter` and `topNPerGroup` alike. Residency is policy, not something inferred from the query type.
+An unrecognised value fails **at schema apply**, not at query time:
 `Invalid storageTemperature '…' on materialized query '…'`.
 
 ⚠️ **`storage` carries temperature only.** `residency` sub-fields (`memoryRowCap`,
@@ -1918,9 +1910,9 @@ sentinel.
 
 ⚠️ **`memoryRowCap`, `targetMemoryBytes` and `memoryFilter` are enforced on `Auto` tables only.** On
 a `HotOnly` or `ColdPreferred` table they validate and persist, and the maintenance sweep ignores
-them — so a row cap set on a pinned table does nothing and reports no error. This matters most on
-materialized query result tables, which are pinned by default on servers at `0.1.32` and earlier:
-see [Hot/Cold Storage](../guides/hot-cold.md#mq-result-tables).
+them — so a row cap set on a pinned table does nothing and reports no error. This catches people most
+often on materialized query result tables, where the temperature was declared on the query rather
+than here: see [Hot/Cold Storage](../guides/hot-cold.md#mq-result-tables).
 
 🔎 **Enforcement is a convergence target reached by a periodic sweep, not an instantaneous ceiling**
 — a burst can exceed the target between sweeps. The process ceiling is the hard one.
@@ -1993,7 +1985,7 @@ Insert one or more rows into a table.
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
 | `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
-| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id. **Omitting** the column means the same as `0` on `main` (BL-429); on server `0.1.32` and earlier it is `400 INVALID_REQUEST` (`Missing required column '…'`). Explicit non-zero without the flag is stored but does **not** bump the counter. |
+| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column means the same as `0`. Explicit non-zero without the flag is stored but does **not** bump the counter. |
 
 **Response:** `200 OK`
 
@@ -2057,7 +2049,7 @@ Insert one or more rows into a table.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, omitted `autoIncrement` column on server `0.1.32` and earlier (send `0` to auto-generate; omitting is accepted from BL-429 onward), or `identityInsert: true` with a missing/`null` autoIncrement column |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, or `identityInsert: true` with a missing/`null` autoIncrement column |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
