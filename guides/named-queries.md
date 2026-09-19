@@ -689,7 +689,7 @@ For a batch insert, bind it instead and send `0` per row:
 { "args": { "rows": [ { "id": 0, "ticker": "AAPL", "px": 189.2 } ] } }
 ```
 
-`0` still means auto-generate; `generatedValues` in the mutation result carries the allocated id. The same presence-required rule applies to plain `POST …/tables/{t}/rows`. Engine work to treat an omitted autoIncrement column as `0` is BL-429.
+`0` still means auto-generate; `generatedValues` in the mutation result carries the allocated id. ✅ **On `main` (BL-429) omitting the column means the same as sending `0`**, so the constant form is a convenience rather than a requirement; on server `0.1.32` and earlier it is required. The same rule applies to plain `POST …/tables/{t}/rows`. Under `identityInsert: true`, omitting the column remains an error on every version.
 
 Bind is **all-or-nothing**, matching the plain multi-row insert path: the cap is checked, then every row is bound, before any row reaches the engine. One malformed element fails the whole call — no partial insert — and the `400` response names the offending array index:
 
@@ -731,7 +731,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Schema apply `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED` | `batchParam` set without `maxItems` on that parameter | Declare `"maxItems"` on the batch parameter's `params` entry |
 | Schema apply `NAMED_MUTATION_BATCH_NON_INSERT` | `batchParam` set on `op: "update"` / `"delete"` | Batch insert only; update/delete batching is not shipped |
 | Batch insert HTTP 400 with `rowErrors` | One array element failed to bind | Fix the element at `rowErrors[0].index`; the whole call was rejected, nothing was inserted |
-| Insert / named-mutation execute `400` `Missing required column 'Id'` | `autoIncrement` PK omitted from the row / `values` template | Put the column in `values` as `{ "value": 0 }` (or bind it and send `0` per row). `0` = auto-generate; omit is not equivalent to `0` today (BL-429) |
+| Insert / named-mutation execute `400` `Missing required column 'Id'` | `autoIncrement` PK omitted from the row / `values` template, against a server at `0.1.32` or earlier | Put the column in `values` as `{ "value": 0 }` (or bind it and send `0` per row). `0` = auto-generate. From BL-429 onward omitting it is equivalent to `0` and this error no longer fires |
 | Schema apply `NAMED_MUTATION_VALUE_NODE_INVALID` | A `values` / `set` entry is an object that is neither `{ "param": … }` nor `{ "value": … }` — usually a typo, or a bare object meant as a constant | Use one of the [three entry forms](#writing-values-and-set). A JSON document for a `String` column goes in as a JSON string |
 | Execute `400` `NAMED_MUTATION_BIND_FAILED` naming a column | Same bad node, in a definition deployed before apply validated it | Re-apply the schema with a valid node; the error names the column |
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |

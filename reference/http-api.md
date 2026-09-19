@@ -1241,13 +1241,17 @@ Execute:
 
 A definition without `batchParam` is unaffected — `args` stays one flat object of parameter values, exactly as before.
 
-**autoIncrement primary keys.** Omitting an `autoIncrement` column from `values` is **not** treated as “please generate”. Schema apply accepts the definition, but every `execute` returns `400 INVALID_REQUEST` (`Missing required column 'Id'`), the same as a plain `POST …/tables/{t}/rows` body that omits the column. The column must be present, holding `0` — `0` still means auto-generate, and `generatedValues` carries the allocated id. Any of the three entry forms above works:
+**autoIncrement primary keys.** ✅ **Fixed on `main` (BL-429): omitting an `autoIncrement` column now means the same as sending `0` — auto-generate.** `generatedValues` carries the allocated id either way.
+
+⚠️ **On server `0.1.32` and earlier, omitting it is `400 INVALID_REQUEST`** (`Missing required column 'Id'`), the same as a plain `POST …/tables/{t}/rows` body that omits the column. If you target those servers, keep the column present holding `0`. Any of the three entry forms works, on every version:
 
 - `"Id": 0` — the shortest, when every call auto-generates.
 - `"Id": { "value": 0 }` — the same constant, spelled explicitly.
 - `"Id": { "param": "id" }` with `0` sent per row — when the caller decides.
 
-See [Insert rows](#post-apidatabasesdbtablesnamerows). Engine work to treat an omitted autoIncrement column as `0` is BL-429.
+⚠️ **Two boundaries did not change.** An explicit `null` is still not a request to generate — validation decides, and nothing new is claimed about nullability. And under `identityInsert: true`, omitting the column is **still an error**: you asked to control the identity and then did not supply one.
+
+See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 #### `POST /api/databases/{db}/named-mutations/{name}/execute`
 
@@ -1393,6 +1397,115 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 ```
 
 `token` is the MQ **maintenance watermark** (the source position the MQ has incorporated), not this node's WAL offset. Token-bearing MQ reads wait on that watermark. GET list/status objects include the same field.
+
+### Status response: `GET /api/databases/{db}/materialized-queries/{name}`
+
+The list route returns an array of the same object.
+
+```json
+{
+  "name": "EquityTradeOhlc1M",
+  "sourceTable": "EquityTrade",
+  "type": 1,
+  "state": 1,
+  "rowCount": 41200,
+  "createdUtc": "2026-09-19T08:14:02.0000000Z",
+  "lastUpdatedUtc": "2026-09-19T09:41:55.0000000Z",
+  "currentLag": "00:00:00.2500000",
+  "rebuildProgress": null,
+  "errorMessage": null,
+  "isStale": false,
+  "staleReason": null,
+  "amplification": {
+    "sourceRowsIngested": 1000000,
+    "keysPlanned": 1000000,
+    "priorRowsRead": 958800,
+    "applies": 512,
+    "resultRowsUpserted": 1000000,
+    "resultRowsDeleted": 0,
+    "rebuildSourceRowsScanned": 0,
+    "rebuildResultRowsWritten": 0,
+    "sourceColumnsDecoded": 12000000,
+    "sourceColumnsDeclared": 3000000,
+    "resultRowsWritten": 1000000,
+    "writeAmplification": 1.0,
+    "readAmplification": 4.0,
+    "isEmpty": false
+  },
+  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | integer | Raw `MaterializedQueryType` enum value. **No `JsonStringEnumConverter` is registered anywhere in the server**, so this is an integer on every enum on every route. |
+| `state` | integer | Raw `MaterializedQueryState` enum value (`Building`, `Ready`, `Rebuilding`, `Error`). |
+| `rowCount` | integer | Rows currently in the result table. |
+| `currentLag` | string? | `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. |
+| `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
+| `isStale` / `staleReason` | boolean / string? | The server lost an update before it reached this query's maintainer, so the result is missing rows. Absent on servers that predate the field, which deserializes as `false`. |
+| `workingSetTruncated` | boolean | ⚠️ **Always `false`; retained for wire compatibility only.** No maintainer keeps a working set any more — a change that cannot be served from the result table marks the query stale and rebuilds it. Read `isStale` / `staleReason` instead. Scheduled for removal on a future train (a wire break). |
+| `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
+| `token` | string? | The maintenance watermark, as above. |
+
+#### The `amplification` object
+
+| Field | Type | Description |
+|---|---|---|
+| `sourceRowsIngested` | integer | Source-row changes this query was asked to absorb, on either path. The denominator of `writeAmplification`. A batch dropped for backpressure is **not** counted — it is reported by `SubscriptionDroppedUpdates`, and counting it would make the ratio *fall* exactly when the engine loses data. |
+| `keysPlanned` | integer | Result-table keys a maintainer asked to read back before computing its mutation. |
+| `priorRowsRead` | integer | Prior result rows that read-back returned (≤ `keysPlanned`). |
+| `applies` | integer | Calls into the result applier — batches, not rows. |
+| `resultRowsUpserted` / `resultRowsDeleted` | integer | Result rows physically written / removed by incremental maintenance. |
+| `rebuildSourceRowsScanned` / `rebuildResultRowsWritten` | integer | The same, for a **rebuild** rather than incremental maintenance. |
+| `sourceColumnsDecoded` | integer | Source column *values* materialised on this query's behalf — rows scanned × the width the scan actually decodes. |
+| `sourceColumnsDeclared` | integer | Column values the query's **declaration** says it needs, over the same rows. |
+| `resultRowsWritten` | integer | `resultRowsUpserted + resultRowsDeleted + rebuildResultRowsWritten` — every result row this query caused to be written. A rebuild's writes are included on purpose: a numerator that excluded them would go *down* as the engine got worse. |
+| `writeAmplification` | number? | `resultRowsWritten / sourceRowsIngested`. **`null`** while nothing has been ingested — a ratio over an empty denominator is not zero. |
+| `readAmplification` | number? | `sourceColumnsDecoded / sourceColumnsDeclared`. `1.0` once the scan reads only what the query declared; greater while it reads every column. |
+| `isEmpty` | boolean | `true` when nothing has been recorded. |
+
+⚠️ **Per query, not per process.** An eight-query fan-out reports eight of these, and a process total
+cannot be divided back out.
+
+⚠️ **Since process start, never persisted.** A restart zeroes every counter, and the ratios are not
+comparable across one. These are monotonic totals, not rates — poll and difference for a rate.
+
+🔎 `readAmplification` above `1.0` is expected today: a materialized query's source scan decodes every
+column of every row even when the query declared three. On a twelve-column table feeding a
+three-column aggregate that is `4.0`. Nothing configurable changes it; the field exists so the cost
+is a measurement rather than an inference.
+
+See [Materialized queries §2.11d](../guides/materialized.md#amplification).
+
+### Create body: result-table storage
+
+`POST /api/databases/{db}/materialized-queries` and the schema file's `materializedQueries` entries
+both accept an optional `storage` object:
+
+```json
+{ "storage": { "storageTemperature": "ColdPreferred" } }
+```
+
+| Field | Values | Default |
+|---|---|---|
+| `storage.storageTemperature` | `Auto`, `HotOnly`, `ColdPreferred` | **Version-dependent — see below.** |
+
+⚠️ **The default changed, and an explicit value is honoured identically on both sides of the change.**
+
+| Server | `aggregate`, `latestPerKey`, `firstPerKey` | `filter`, `topNPerGroup` |
+|---|---|---|
+| `0.1.32` and earlier | **`HotOnly`** — pinned, and the pin is charged against the hot ceiling | `Auto` |
+| `main` (unreleased) | `Auto` | `Auto` |
+
+`Aouda:Memory:MaterializedResultHotOnlyByQueryType=true` restores the per-type table whole. An
+unrecognised value fails **at schema apply**, not at query time:
+`Invalid storageTemperature '…' on materialized query '…'`.
+
+⚠️ **`storage` carries temperature only.** `residency` sub-fields (`memoryRowCap`,
+`targetMemoryBytes`, `memoryFilter`, `hotOnlyBackstop`) are not accepted here — set them on the
+result table via `PUT /api/databases/{db}/tables/{name}/policy` (the result table's name is the
+query's name). They do not survive a destructive schema replace.
 
 ---
 
@@ -1772,16 +1885,45 @@ Rename a table.
 
 #### `PUT /api/databases/{db}/tables/{name}/policy`
 
-Update table storage policy.
+Update table storage policy and per-table residency. Works on **any** table, including a
+materialized query's result table (whose name is the query's name).
 
 **Request:**
 
 ```json
 {
   "database": "mydb",
-  "storageTemperature": "HotOnly"
+  "storageTemperature": "Auto",
+  "memoryRowCap": 50000,
+  "targetMemoryBytes": 536870912,
+  "memoryFilter": "{\"and\":[{\"column\":\"status\",\"op\":\"eq\",\"value\":\"open\"}]}",
+  "hotOnlyBackstop": "RefuseWrites"
 }
 ```
+
+| Field | Type | Description |
+|---|---|---|
+| `database` | string | Required. |
+| `storageTemperature` | string | `Auto`, `HotOnly` or `ColdPreferred`. |
+| `memoryRowCap` | integer? | Cap on resident (hot) rows for this table. |
+| `targetMemoryBytes` | integer? | Per-table hot-byte budget. On a `HotOnly` table this is the **pin's reservation size**; on an `Auto` table it is a demotion target. |
+| `memoryFilter` | string? | JSON predicate naming which rows are preferred-hot. Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`. Affects demotion *ordering* only. |
+| `hotOnlyBackstop` | string? | What happens when honouring a `HotOnly` pin would breach the ceiling: `RefuseWrites` (default) or `DemoteAnyway`. |
+| `pinAllInMemory` | boolean? | ⚠️ **Retired — sending it is a `400`**, not a no-op. Use `storageTemperature: "HotOnly"`. |
+
+⚠️ **Sentinel convention — omitted is not the same as cleared.** `null` / omitted means *leave
+unchanged*. `0` **clears** a `memoryRowCap` or `targetMemoryBytes`; `""` clears a `memoryFilter`. A
+`0` or negative value is rejected as a *setting* (`400`) precisely so it can be a safe clear
+sentinel.
+
+⚠️ **`memoryRowCap`, `targetMemoryBytes` and `memoryFilter` are enforced on `Auto` tables only.** On
+a `HotOnly` or `ColdPreferred` table they validate and persist, and the maintenance sweep ignores
+them — so a row cap set on a pinned table does nothing and reports no error. This matters most on
+materialized query result tables, which are pinned by default on servers at `0.1.32` and earlier:
+see [Hot/Cold Storage](../guides/hot-cold.md#mq-result-tables).
+
+🔎 **Enforcement is a convergence target reached by a periodic sweep, not an instantaneous ceiling**
+— a burst can exceed the target between sweeps. The process ceiling is the hard one.
 
 **Response:** `200 OK` with policy detail
 
@@ -1851,7 +1993,7 @@ Insert one or more rows into a table.
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
 | `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
-| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: the column **must be present** and `0` means auto-generate (`generatedValues` returns the allocated id). **Omitting** the column is `400 INVALID_REQUEST` (`Missing required column '…'`), not auto-generate — engine work to treat omit as `0` is tracked as BL-429. Explicit non-zero without the flag is stored but does **not** bump the counter. |
+| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id. **Omitting** the column means the same as `0` on `main` (BL-429); on server `0.1.32` and earlier it is `400 INVALID_REQUEST` (`Missing required column '…'`). Explicit non-zero without the flag is stored but does **not** bump the counter. |
 
 **Response:** `200 OK`
 
@@ -1915,7 +2057,7 @@ Insert one or more rows into a table.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, omitted `autoIncrement` column (send `0` to auto-generate; BL-429), or `identityInsert: true` with a missing/`null` autoIncrement column |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, omitted `autoIncrement` column on server `0.1.32` and earlier (send `0` to auto-generate; omitting is accepted from BL-429 onward), or `identityInsert: true` with a missing/`null` autoIncrement column |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
@@ -2350,6 +2492,22 @@ The response is large and has grown with every memory-related release; this sect
 | `hotDrainStalled` | boolean | `true` when any database's drain **tried and failed** in the last sampling interval. |
 | `processHotCeilingBytes` | integer | The hot ceiling across every open database. **Not** the sum of the per-database ceilings: each database's ceiling has a 32 MB floor, so that sum grows with the database count and can exceed what the runtime will commit. |
 | `processHotResidentBytes` | integer | Resident hot bytes across every open database — the figure `processHotCeilingBytes` bounds. |
+| `heapSustainedDegradation` | boolean | `true` when a **majority of a sliding window** of samples was above 90 % of the heap limit. |
+| `heapDegradedSinceUtc` | string? | When that began (ISO 8601), or `null` while healthy. |
+| `heapDegradedForSeconds` | number? | How long it has been true. **The field to alert on.** |
+
+⚠️ **The three heap-degradation fields report; they never act.** Nothing here refuses, delays or
+reroutes a write, and the termination watchdog's own rule (six consecutive samples above 98 % of the
+heap limit) is untouched.
+
+⚠️ **They exist because every other memory figure on this response is instantaneous.** An
+instantaneous reading cannot distinguish a spike the next collection resolves from a process that has
+been unable to make room for an hour — which is the state an observed incident sat in while
+oscillating 91.5 → 98.8 → 91.6 %, resetting the consecutive counter every time. A window majority is
+used precisely because oscillation is a *symptom* of the condition rather than evidence against it.
+
+🔎 `heapSustainedDegradation` and `heapDegradedForSeconds` also appear in the `memory` health
+component's `details`, so an orchestrator can key on them without polling this route.
 
 **Per database** (each entry of `perDatabaseUsage`):
 
@@ -3014,7 +3172,7 @@ The following features are not yet supported:
 1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC.
 2. **Expression-based ORDER BY**: Only catalog column names of sortable types can be used for ordering, not expressions or `selectExpr` aliases. The sanctioned workaround is a stored [`derived`](../guides/insert-transforms.md#derived-columns) column. See [browser-tier read limits](../guides/browser-tier-read-limits.md#no-expression-orderby).
 
-**Note — WhereClause nesting:** Earlier versions of this document stated that nested AND/OR was not supported. This is no longer accurate. The `groups` field in `WhereClause` supports up to **5** levels of nesting (`ProtocolConstants.MaxWhereClauseNestingDepth = 5`). Each group is AND'd with the top-level conditions, enabling safe composition of independent filter layers (e.g., partition scope + row scope). See the `groups` field description in the [Query Endpoint](#query-endpoint) section for details.
+**Note — WhereClause nesting:** Earlier versions of this document stated that nested AND/OR was not supported. This is no longer accurate. The `groups` field in `WhereClause` supports up to **5** levels of nesting (`ProtocolConstants.MaxWhereClauseNestingDepth = 5`). Each group is AND'd with the top-level conditions, enabling safe composition of independent filter layers (e.g., partition scope + row scope). See the `groups` field description in the [`POST /api/databases/{db}/query`](#post-apidatabasesdbquery) section for details.
 
 Remaining limitations are tracked in the backlog for future enhancement.
 

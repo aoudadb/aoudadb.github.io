@@ -99,7 +99,8 @@ All tables, materialized queries, and named queries for the market-data fixture 
       "descending":  true,
       "select":      ["ticker", "source", "bid", "ask", "time"],
       "updateMode":  "sync",
-      "dataPlaneAccess": true
+      "dataPlaneAccess": true,
+      "storage":     { "storageTemperature": "HotOnly" }
     },
     "candles_bid_1h": {
       "type":        "aggregate",
@@ -115,7 +116,8 @@ All tables, materialized queries, and named queries for the market-data fixture 
         { "function": "last",  "outputName": "close", "sourceColumn": "bid", "orderByColumn": "time" }
       ],
       "updateMode": "sync",
-      "dataPlaneAccess": true
+      "dataPlaneAccess": true,
+      "storage":    { "storageTemperature": "ColdPreferred" }
     },
     "bars_with_change": {
       "type":        "aggregate",
@@ -139,7 +141,8 @@ All tables, materialized queries, and named queries for the market-data fixture 
         }
       ],
       "updateMode": "sync",
-      "dataPlaneAccess": true
+      "dataPlaneAccess": true,
+      "storage":    { "storageTemperature": "HotOnly" }
     }
   },
   "namedQueries": {
@@ -390,11 +393,116 @@ Add separate MQs:
     { "column": "time", "function": "TruncateToDay", "outputName": "time" }
   ],
   "aggregates": [ ... ],
-  "dataPlaneAccess": true
+  "dataPlaneAccess": true,
+  "storage": { "storageTemperature": "ColdPreferred" }
 }
 ```
 
 And separate named queries `candles.byTickerDay`, `candles.byTickerMinute`. Same select shape — only the MQ name and truncation function differ.
+
+{: .warning }
+**A minute-interval candle MQ is the one to think hardest about.** One row per `(ticker, minute)` is
+1 440 rows per ticker per day — over 5 000 tickers, **7.2 million rows a day**, growing without
+bound. On a server at `0.1.32` or earlier that result table is pinned in RAM by default and nothing
+in this schema file says so. Read the next section before deploying one.
+
+---
+
+## Where each MQ result lives — RAM or disk {#mq-residency}
+
+Every materialized query in this schema produces a **result table**, and a result table is an
+ordinary table: it sits in the same hot tier, obeys the same `storageTemperature`, and is charged
+against the same memory ceiling as `quotes` and `trades`. The `storage` lines in
+[section 2](#2-one-schema-file) are not decoration — they are the difference between a market-data
+database that fits on a 2 GB host and one that does not.
+
+### The default is not what you would guess, and it depends on your server version
+
+| Server | `latestPerKey`, `aggregate`, `firstPerKey` | `filter`, `topNPerGroup` |
+|---|---|---|
+| **`0.1.32` and earlier** | **`HotOnly`** — pinned in RAM, never demoted | `Auto` |
+| **`main` (unreleased)** | `Auto` | `Auto` |
+
+The pin was inferred from the *query type*, on the reasoning that these results are "usually small".
+For market data that reasoning does not hold: an `aggregate` result holds **one row per group**, and
+a per-minute candle over a few thousand instruments is millions of groups within a day.
+
+⚠️ **A pinned table's bytes are subtracted from the ceiling everything else is admitted against**,
+the table is skipped for demotion, and its cold segments are re-promoted. So a candle MQ you never
+declared a residency for can quietly shrink the tier your tick ingest is admitted into — and the
+symptom is a `503` on an *insert into `quotes`*, not on the candle table.
+
+✅ **Declaring `storage.storageTemperature` is honoured identically on every version**, so a schema
+that declares it behaves the same before and after the default moved. Declare it on every MQ.
+
+### What to declare, per query in this schema
+
+| Query | Shape | Declare | Why |
+|---|---|---|---|
+| `latest_quote` | One row per `(ticker, source)` — bounded by your instrument count, read on every page load | **`HotOnly`** | A few thousand rows that back a live price feed. This is what a pin is *for*: small, hot, and now declared rather than assumed. |
+| `candles_bid_1h` | One row per `(ticker, hour)` — grows forever | **`ColdPreferred`** | Historical and append-shaped. The recent end is served from the page cache; nothing needs the whole series resident. |
+| `candles_bid_1d` | One row per `(ticker, day)` — grows forever, 24× slower | **`ColdPreferred`** | Same reasoning. Small enough that `Auto` is also defensible. |
+| `candles_bid_1m` | One row per `(ticker, minute)` — millions per day | **`ColdPreferred`** | The one that will hurt. See the warning above. |
+| `bars_with_change` | One row per ticker, current session | **`HotOnly`** | Bounded by instrument count and read by every screener call. |
+
+🔎 **The rule of thumb: does the group key contain a time bucket?** If it does, the result grows
+without bound and belongs on disk — `ColdPreferred`. If the group key is pure identity (ticker, user,
+account), the result is bounded by your entity count and a pin is honest.
+
+### Keeping the recent window hot without pinning the history
+
+If you do want the last N candles resident — a chart that reloads constantly — use `Auto` plus a
+**row cap** on the result table rather than a pin. The cap is set on the result table (the result
+table's name is the query's name), not in the schema file:
+
+```http
+PUT /api/databases/finance/tables/candles_bid_1m/policy
+Content-Type: application/json
+
+{
+  "storageTemperature": "Auto",
+  "memoryRowCap": 50000
+}
+```
+
+The hot/cold sweep demotes least-recently-accessed segments first, so the cap self-scales: you do not
+have to know your tick rate, and the same number works for a 1 ms feed and a 1-minute candle.
+
+⚠️ **On `0.1.32` and earlier this does not do what you want.** A time-bucketed result was stored in
+*arrival* order with no cluster column, so one still-updating current-minute row kept its whole
+segment resident — including buckets from months ago. On `main` the leading time bucket is the result
+table's cluster column, which is what makes "demote the least recently used segment" mean "demote the
+oldest candles". Until you are on a server with that fix, prefer `ColdPreferred` over a row cap.
+
+⚠️ **A row cap does not survive a destructive schema replace.** Changing an MQ's definition at the
+same name is a drop-then-create, and the new result table starts with default policy. `storage` in
+the schema file *is* carried; a policy you set over HTTP is not.
+
+🔎 **Why a row count and not "keep 24 hours".** A duration cannot be honoured without knowing the
+arrival rate — at a busy feed's byte rate, "24 hours" can be over 100 GB, which would have to be
+refused when you declared it. A count needs no such input.
+
+### Checking what you actually have
+
+```http
+GET /api/server/memory
+```
+
+- **`pinnedHotBytes`** (per database) — bytes held by declared residency pins. On a
+  `0.1.32`-or-earlier server this includes every `aggregate` / `latestPerKey` result whether or not
+  you declared one. If this is large and you pinned nothing, that is the cause.
+- **`hotArrivalBytesPerSecond` vs `hotDrainBytesPerSecond`** — the gap, not either number, says
+  whether the tier is filling faster than it empties.
+- **`processHotCeilingBytes` / `processHotResidentBytes`** — the process-wide bound. A refusal while
+  your own database's share still had room is read here.
+
+Per query, `GET /api/databases/finance/materialized-queries/{name}` carries an `amplification` object
+with `writeAmplification` (result rows written per source row ingested) and `readAmplification`. A
+candle query whose `writeAmplification` sits well above `1.0` has a bucket too fine for its arrival
+rate.
+
+Full treatment: [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives)
+and [Sizing](sizing.md#the-pin-you-did-not-declare-materialized-query-results).
 
 ---
 
@@ -487,13 +595,13 @@ The `derived` expression (base-table computed column) is a fallback for ranking 
 
 Each user's JWT carries a claim matching the partition key (for example ticker symbol). PLS validates or injects the filter automatically. Ideal for apps where each end user watches one symbol.
 
-See [Auth — jwt-claim mode](../auth/authorization.md#mode-1-jwt-claim-default).
+See [Auth — jwt-claim mode](../auth/authorization.md#193-mode-1-jwt-claim-default).
 
 ### Pattern 2 — `auth-db-pls` (multi-ticker watchlists)
 
 When a user may access many tickers (watchlist, portfolio), store grants in the auth database. Fan-out: a named-query subscription automatically merges results from all granted tickers. Revoke access on the next request without re-issuing JWTs.
 
-See [Auth — auth-db-pls](../auth/authorization.md#mode-2-auth-db-pls-enhanced-pls) and [Division of responsibility](division-of-responsibility.md).
+See [Auth — auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) and [Division of responsibility](division-of-responsibility.md).
 
 ---
 
@@ -593,9 +701,29 @@ Authorization: Bearer <admin-token>
 
 ### Bulk-loading historical data {#bulk-loading-historical-data}
 
-When using bulk-load, rows bypass incremental MQ maintenance by design. Refresh after the load commits.
+Bulk-loaded rows bypass **incremental** MQ maintenance by design. What happens instead is decided by
+`postLoadMqBehavior`, and the two settings want opposite follow-up calls.
 
-**HTTP:**
+**`auto` (the default) — accumulate during the load's own pass, publish at commit.** Wait for that
+publication; **do not also call `:refresh`.** A `:refresh` queues behind the publication on the
+server's per-name lock and then re-scans the whole source table, so it buys nothing and costs a
+second full pass.
+
+```csharp
+var handle = await client.BulkLoadAsync("quotes", rows, new BulkLoadOptions
+{
+    PostLoadMqBehavior = ClientPostLoadMqBehavior.Auto   // default
+});
+// Wait on the load's own mqRebuildStatus / MqRebuildCompleted. No :refresh call.
+```
+
+```typescript
+await client.bulkLoad("quotes", rows, { postLoadMqBehavior: "auto" });
+// Poll the job's mqRebuildStatus. No refresh call.
+```
+
+**`skip` — no ingest-fed sinks and no rebuild.** Use it in a multi-step pipeline that loads several
+tables and refreshes once at the end. Then, and only then, `:refresh` is the right call:
 
 ```http
 POST /api/databases/finance/materialized-queries/candles_bid_1h:refresh
@@ -604,23 +732,22 @@ Content-Type: application/json
 { "await": true }
 ```
 
-**.NET client:**
+⚠️ **A `skip` load leaves the query durably stale until you refresh it.** It reports `isStale` with a
+`staleReason`, and a server that restarts before the refresh rebuilds the query at startup rather
+than reattaching an incomplete result. That is a correctness guard, not a bug — but it means a `skip`
+you forgot to follow up costs a full rebuild at the next restart.
 
-```csharp
-var handle = await client.BulkLoadAsync("quotes", rows, new BulkLoadOptions
-{
-    PostLoadMqBehavior = ClientPostLoadMqBehavior.Auto
-});
+{: .note }
+**Loading years of history is the case where result residency bites hardest.** A historical load of
+`quotes` regenerates every candle bucket in the range at once. If `candles_bid_1h` is pinned — which
+it is by default on a server at `0.1.32` or earlier — those rows are all admitted into the hot tier
+and none of them can be demoted. Declare `storageTemperature: "ColdPreferred"` on historical candle
+MQs *before* the load, not after. See [Where each MQ result lives](#mq-residency).
 
-await client.MaterializedQueries.RefreshAsync("candles_bid_1h", awaitCompletion: true);
-```
-
-**TypeScript client:**
-
-```typescript
-await client.bulkLoad("quotes", rows, { postLoadMqBehavior: "auto" });
-await client.materializedQueries.refresh("candles_bid_1h", { await: true });
-```
+🔎 **Ordinary tabular bulk loads write cold only** and always have. It is the *materialized query
+results* they feed that land hot, which is why the residency declaration is what matters here rather
+than a bulk-load setting. (Graph and vector bulk loads are a separate case — those now default to
+`Aouda:BulkLoad:Temperature: ColdDirect`.)
 
 ---
 
@@ -629,3 +756,4 @@ await client.materializedQueries.refresh("candles_bid_1h", { await: true });
 - Conformance fixture: `examples/p40-browser-tier/` — `aouda.schema.json`, `seed.json`, `expected.json`
 - ADRs: [0040 direct-client-access and trust boundary](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0040-direct-client-access-and-the-trust-boundary.md) (D-3, D-5, D-15, D-20, D-30–D-36), [0015 materialized queries](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0015-materialized-queries.md), [0009 partitioning](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0009-partitioning-multitenancy.md)
 - Engine tests: `tests/Aouda.Server.Tests/P40/P40BrowserTierConformanceTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`
+- Memory and residency: [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives) (where a result lives), [§2.11d](materialized.md#amplification) (what a query costs), [Sizing](sizing.md#the-pin-you-did-not-declare-materialized-query-results) (the hot tier and the reclaim ladder), [Hot/Cold Storage](hot-cold.md) (per-table residency policy), [Defaults Reference](defaults-reference.md#hot-tier-and-ingest-admission) (every `Aouda:Memory:` key)

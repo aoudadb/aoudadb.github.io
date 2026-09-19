@@ -68,6 +68,44 @@ larger governed budget than 32 GB affords at these weights.
 
 ---
 
+## Hot tier and ingest admission
+
+The reclaim ladder from [Sizing](sizing.md#what-happens-when-the-hot-tier-fills), key by key. The
+server prints the ladder **as it is actually in force** in one startup line — read that rather than
+your own configuration, because every non-boolean here self-clamps.
+
+| Setting | Default | Config key | Notes |
+|---|---|---|---|
+| Hot admission seam | `true` | `Aouda:Memory:HotAdmissionEnabled` | Whether a flush asks the ceiling before creating a hot segment. `false` stops consulting it altogether — every flush writes hot first, as it did before P53. |
+| Rung 0 — drain acceleration | `true` | `Aouda:Memory:HotDrainAccelerationEnabled` | Sweeps more often and demotes to a lower target above the water mark. Costs disk I/O only; **no writer is ever delayed by it**. `false` restores the previous fixed-cadence sweep exactly. |
+| `T42` — rung 0 water mark | `0.60` | `Aouda:Memory:HotDrainAccelerationWaterMark` | Hot-occupancy fraction at which rung 0 begins. `0` means the default. The response is proportional: nothing at all at the mark, rising to a 4× sweep with a halved target near the ceiling. |
+| Rung 1 — ingest pacing | **`false`** | `Aouda:Memory:HotPacingEnabled` | ⚠️ **Ships off.** See the note below. |
+| `T43` — rung 1 water mark | `0.80` | `Aouda:Memory:HotPacingWaterMark` | `0` means the default. **Clamped to `[T42, 1.0]` by the engine**, so you cannot invert the ladder and make pacing the first answer to pressure. |
+| `T44` — control horizon | `60 s` | `Aouda:Memory:HotControlHorizon` | The horizon the admissible arrival rate is computed over: *drain rate + (ceiling − resident) / T44*. Unset means the default. |
+| `T45` — rate EWMA half-life | `30 s` | `Aouda:Memory:HotRateEwmaHalfLife` | Half-life of the arrival- and drain-rate averages. A time constant, not a share — every database samples on the same tick and must decay on the same half-life, or two databases' rates are not comparable. |
+| `T41` — process hot ceiling | `true` | `Aouda:Memory:ProcessHotCeilingEnabled` | Bounds the **sum** of every database's hot tier, not only each one. Inert wherever the per-database ceilings already sum correctly; binds only where the 32 MB per-database floor has broken the sum. `false` bounds each database by its own ceiling alone. |
+| Legacy hot-first flush | `false` | `Aouda:Memory:FlushAlwaysHotFirst` | `true` restores the pre-P53 flush whole, including hot-first flush for `ColdPreferred` tables. Measured on a 400 000-row load against a 2 MB hot ceiling: default produced 3 segments holding **0 B** resident hot; this flag produced 3 segments holding **17 700 000 B** — 8.8× the ceiling, unbudgeted. |
+| MQ result residency by query type | `false` | `Aouda:Memory:MaterializedResultHotOnlyByQueryType` | `true` restores the pre-BL-586 table in which `aggregate` / `latestPerKey` / `firstPerKey` results were pinned `HotOnly` and `filter` / `topNPerGroup` were `Auto`. See [the pin you did not declare](sizing.md#the-pin-you-did-not-declare-materialized-query-results). |
+| Graph / vector bulk-load temperature | `ColdDirect` | `Aouda:BulkLoad:Temperature` | An edge or vector bulk load writes cold only. `HotAndCold` restores the previous behaviour, in which both built a hot segment for every segment written without consulting the ceiling. Ordinary **tabular** bulk loads were always cold-only and are unaffected. |
+
+⚠️ **`T41` itself, and each database's share of it, are not configurable — only the switch is.** Both
+are computed by the server's budget manager from the governed budget; an operator setting them by
+hand could contradict the arithmetic the ceiling exists to enforce.
+
+⚠️ **Rung 1 ships off, and that is a decision rather than an oversight.** It is the first rung that
+can make a *healthy* workload slower if a constant is wrong, and two of its three constants (`T43`,
+`T44`) are carried from Apache Kudu rather than derived from Aouda's own arithmetic. The safety case
+is made — it cannot engage below `T43` **by construction** (the controller returns before the rate is
+computed), and a healthy server ingesting 300 000 rows in 1.4 s with the flag on took **0 delays and
+0 refusals**. The sizing case is not: nothing in the engine's own suites derives `T43` or `T44` from a
+sustained production ingest. Turn it on deliberately if your drain is not keeping up; leave it off if
+you have not measured.
+
+🔎 **Two keys are absent on purpose**, not missing: `ProcessHotCeilingAggregateBytes` and
+`ProcessHotCeilingShareBytes`, for the reason in the first warning above.
+
+---
+
 ## Bulk load
 
 | Setting | Default | Config key | Notes |
@@ -116,6 +154,7 @@ Each column sums to 1.00, which is a contract rather than a coincidence: a table
 ## Related docs
 
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into
+- [Materialized queries](materialized.md#where-a-materialized-querys-result-lives) — where a query's result table lives, and why the default changed
 - [Server configuration](server-configuration.md) — where each of these keys is set (`appsettings.json`, `AOUDA_*` env vars, CLI flags) and what survives a restart
 - [Bulk Load](bulk-load.md) — sizing a session, choosing partition storage mode, reading `:commit completed`
 - [Single-Node Deployment](single-node-deployment.md) — the one setting that changes bulk load's WAL-frame default, and what changes when a second node joins
