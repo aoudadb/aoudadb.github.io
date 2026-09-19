@@ -2335,6 +2335,38 @@ Component-by-component status (catalog, WAL, replication, backup, materialized q
 
 **Operator wait (create / schema apply):** wait for `GET /ready` 200 **and** `GET /api/databases/{name}` 200 with `state=Active`. After `DELETE`, GET `{name}` 404 means the database is gone from serving.
 
+#### `GET /api/server/memory`
+
+Server-wide memory usage with a per-database breakdown. Lightweight and safe to poll from a dashboard. Server-admin only, like the rest of `/api/server/*`.
+
+The response is large and has grown with every memory-related release; this section documents the **hot-tier fields** added in P53. For what the rest of the fields mean and what to do about them, see [Sizing](../guides/sizing.md). All P53 fields are **additive**: no existing field changed meaning, and reading them changes no behaviour.
+
+**Top level** (the process as a whole):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `hotArrivalBytesPerSecond` | number | Resident hot bytes **created** per second, summed across every database — flushes, promotions, segment loads. |
+| `hotDrainBytesPerSecond` | number | Resident hot bytes **released** per second by hot→cold demotion, across every database. |
+| `hotDrainStalled` | boolean | `true` when any database's drain **tried and failed** in the last sampling interval. |
+| `processHotCeilingBytes` | integer | The hot ceiling across every open database. **Not** the sum of the per-database ceilings: each database's ceiling has a 32 MB floor, so that sum grows with the database count and can exceed what the runtime will commit. |
+| `processHotResidentBytes` | integer | Resident hot bytes across every open database — the figure `processHotCeilingBytes` bounds. |
+
+**Per database** (each entry of `perDatabaseUsage`):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `hotArrivalBytesPerSecond` | number | Resident hot bytes created per second (exponentially weighted, 30-second half-life). |
+| `hotDrainBytesPerSecond` | number | Resident hot bytes released per second by demotion (same weighting). |
+| `hotDrainLatencyP50Ms` / `hotDrainLatencyP90Ms` | number | Median / 90th-percentile wall time of a demotion, in milliseconds. |
+| `hotDrainAttempted` | integer | Demotions that spent real work. Excludes pinned, already-cold and merged-away segments. |
+| `hotDrainSucceeded` | integer | Of those, the ones that released their segment. |
+| `hotDrainStalled` | boolean | This database's drain tried and failed across the last sampling interval. |
+| `totalHotBytesAdmitted` / `totalHotBytesDrained` | integer | The monotonic totals (since process start) behind the two rates. |
+| `processHotCeilingShareBytes` | integer | This database's slice of `processHotCeilingBytes`. The ceiling it is actually bound by is the lower of its own derived ceiling and this — read both when a write is refused while this database's own share still had room. |
+| `pinnedHotBytes` | integer | Bytes held by this database's declared residency pins (`residency` on a `HotOnly` table). **Subtracted** from the ceiling the elastic hot tier is admitted against: a pin shrinks the tier, and this is by how much. |
+
+⚠️ **`hotDrainBytesPerSecond == 0` is not a problem on its own.** A server with nothing to demote drains nothing, which is the healthy resting state. The condition worth alerting on is `hotDrainStalled`: demotions were attempted across the interval and none released a segment. Sustained `hotArrivalBytesPerSecond` above `hotDrainBytesPerSecond` says the hot tier is being filled faster than it empties, while there is still headroom to act in.
+
 ---
 
 ### Backup/Restore Endpoints
