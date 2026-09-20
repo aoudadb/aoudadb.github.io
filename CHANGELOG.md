@@ -7,11 +7,21 @@ nav_order: 9
 
 Public, user-facing release notes. Engine phase status lives in the server
 [CHANGELOG](https://github.com/aoudadb/aouda/blob/main/docs/CHANGELOG.md) and
-[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P52 complete).
+[ROADMAP](https://github.com/aoudadb/aouda/blob/main/docs/ROADMAP.md) (P0–P53 complete).
 
 ---
 
 ## Unreleased
+
+## 0.1.33 — 2026-09-20
+
+**P53 ingest admission, MQ-Amplification, crash reattach, and a large correctness train.** Server **0.1.33**, `Aouda.Client` **0.1.33**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **A crash no longer rebuilds every materialized query (BL-311, BL-519, BL-495).** Restart reattaches to the result the log restored. A crash in the middle of ingest still rebuilds, deliberately. Databases written by earlier versions rebuild once, then attach on subsequent restarts.
+
+- **Per-class memory admission is now enforced by default (BL-523).** A background rebuild can no longer consume an interactive query's share. Work that succeeds today can now be refused — a refusal names the class, what it holds, and its entitlement. `Aouda:Memory:PerClassAdmissionEnabled=false` restores process-ceiling-only admission. `Aouda:Memory:ClassBoundEnforced` is removed.
+
+- **A `filter` materialized query over a source with no primary key now preserves duplicate rows (BL-515).** Two byte-identical source rows are two result rows. An update that moved a row out of the filter no longer leaves a phantom result row. Existing `_rowid` result tables migrate once at the next open.
 
 - **A materialized query's result table is no longer pinned in RAM because of its query type (BL-586).** `aggregate`, `latestPerKey` and `firstPerKey` results were created `StorageTemperature = HotOnly` on the reasoning — written in the engine source — that they are *"small, frequent access"* and *"usually small"*. They are not bounded that way: an `aggregate` result holds one row per group and a `latestPerKey` one row per key, so both grow with the source's cardinality. A measured eight-query fan-out held **2 199 815 groups**, and per-minute candles over a few thousand instruments is an ordinary shape. **The default is now `Auto`**, the same default an ordinary table has.
   - ⚠️ **This was harmless until a pin became a charged reservation.** Since P53, a pinned table's bytes are subtracted from the ceiling the rest of the hot tier is admitted against, the table is skipped for demotion, and its cold segments are re-promoted. So an *undeclared* residency shrank the very tier ingest is paced against, on the tables producing the most hot bytes — and the drain-harder rung had nothing there it was allowed to reclaim.
