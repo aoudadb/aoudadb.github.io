@@ -1038,6 +1038,24 @@ database's share.
 published top-N result does not contain, so writing it out would lose exactly the rows it exists to
 keep. Its error message says so, rather than leaving you looking for a setting that would help.
 
+### What a build leaves on disk while it runs (**BL-620, next train**)
+
+A build that goes over budget and *partitions* writes its scratch under the query's storage path, in
+a `_build_runs/` directory. This is engine scratch: it is in no table's data path, it is read back
+once at publish, and it is deleted when the build finishes. The next engine open deletes anything
+left there, unconditionally.
+
+⚠️ **Size it as one file per concurrent build, not one per spill.** A build opens a single
+`<buildId>.mqspill` file the first time it spills and appends every later spill to it, so the file
+count tracks how many builds are in flight — not how much memory pressure they saw. Before this
+change each spill was its own file, and a 15.3 M-row bulk load into a table carrying six
+materialized queries left roughly **152 000 files / 2.6 GB** behind on a volume it had to share with
+the load itself.
+
+**The bytes are unchanged.** If the scratch volume is the constraint, the lever is the accumulator
+ceiling above, not the file layout — and scratch lives beside the database, so a database directory
+on a small or slow device will feel a large bulk load during the load.
+
 ### Counters
 
 | Counter | What it tells you |
@@ -1046,6 +1064,8 @@ keep. Its error message says so, rather than leaving you looking for a setting t
 | `MqRebuildSinksRetiredByBudget` | Queries retired because the group could not fit. Non-zero means someone got an `Error`. |
 | `MqBuildSpills` / `MqBuildSpilledGroups` | How often, and how much, a build had to write through. |
 | `MqBuildSpillReadBacks` | Groups re-read after writing through — the cost of having spilled. |
+| `MqBuildSpillGenerations` (**BL-620, next train**) | How many times a partitioned build dumped its resident working set. A count of pressure *episodes*, not of files. |
+| `MqBuildSpillFilesCreated` (**BL-620, next train**) | Scratch files a build opened — **one per build that spilled at all**, whatever it spilled. `MqBuildRunsWritten ÷ MqBuildSpillFilesCreated` is how much each file is carrying. |
 | `MqRebuildPooledRequests` / `MqRebuildPooledQueries` / `MqRebuildSourceGroups` | Pooled refresh usage. `PooledQueries / SourceGroups` is how many queries each traversal served. |
 
 ---
