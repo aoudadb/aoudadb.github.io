@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+## 0.1.35 — 2026-09-21
+
+**NULL stays NULL on filtered and ordered reads; auth databases stay resident.** Server **0.1.35**, `Aouda.Client` **0.1.35**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **A filtered read of a cold segment no longer turns a nullable `NULL` into the type's default (BL-613).** A `WHERE` against a demoted segment returned `Guid.Empty`, `0`, `false` or `0001-01-01` for every fixed-width type. The same rows without a filter were correct, and `String` was never affected. Nothing was lost on disk — re-read after upgrading returns `NULL`. This is what made Derive's lab return 401 on every service key after a reclaim: `_api_keys.user_id` is legitimately `NULL`, and a hash lookup read it as `Guid.Empty`.
+
+- **`ORDER BY … LIMIT` no longer does the same thing (BL-615).** The ordered-with-limit fast path discarded validity even on a freshly flushed hot segment. Null sort order is unchanged (a null sort key still sorts as the CLR default).
+
+- **Auth databases keep credential tables in memory (BL-614).** Nineteen of the twenty auth system tables had no residency policy, so an ordinary reclaim could demote `_users`, `_api_keys` and the rest. New auth databases pin them. `_audit_log` stays demotable. `Aouda:Memory:EnableEmergencyDemotion=true` no longer overrides those pins; a per-table `hotOnlyBackstop: DemoteAnyway` still does. **Databases created before this change are not migrated** — recreate them, or pin each table with `storageTemperature: HotOnly`. See [Sizing](guides/sizing.md).
+
 ## 0.1.34 — 2026-09-21
 
 **Unused MQ build tables, log-level defaults that ship, no host-specific memory pin.** Server **0.1.34**, `Aouda.Client` **0.1.34**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
