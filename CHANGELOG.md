@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+## 0.1.36 — 2026-09-21
+
+**A materialized-query build spills to one file.** Server **0.1.36**, `Aouda.Client` **0.1.36**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **A materialized-query build no longer spends one file per partition eviction (BL-620).** A 15.3 M-row load left **173 434 files / 2 578 MB** under `materialized/` — 86 % of the database by size. A spill is now a byte range in one `<buildId>.mqspill` file, and pressure writes the whole working set in a single pass. How much is spilled is unchanged (BL-623). New counters: `MQ Spill Generations` and `MQ Spill Files Created`. A cancelled snapshot read reports cancellation rather than corruption.
+
 ## 0.1.35 — 2026-09-21
 
 **NULL stays NULL on filtered and ordered reads; auth databases stay resident.** Server **0.1.35**, `Aouda.Client` **0.1.35**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
