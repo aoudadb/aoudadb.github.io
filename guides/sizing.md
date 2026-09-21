@@ -122,6 +122,42 @@ Two changes follow:
 - **Pins that together exceed the process hot ceiling are refused when they are declared**, naming
   both numbers, rather than discovered at 98 % of heap.
 
+## Auth databases are resident, and you size for them (**BL-614, next train**)
+
+An **auth database is a system tier**: every table it holds except `_audit_log` is pinned `HotOnly`,
+so an authenticated request never waits on disk for a credential, a role, a permission or a signing
+key. This applies to the server auth database (`_serverauth`) and to every application auth database.
+
+**Budget for it.** The resident cost is bounded by identity volume, not by data volume — users,
+roles, permissions, grants, API keys, plus the live sessions and unexpired tokens. It is small on any
+realistic deployment and it is **not elastic**: those bytes are charged to `pinnedHotBytes` and come
+off the ceiling the rest of the hot tier is admitted against, exactly as the section above describes
+for any declared pin. On a small host, an auth database with a large user table is one of the few
+things that can meaningfully narrow the elastic tier.
+
+`_audit_log` is deliberately **not** pinned. It is never read to authorize a request, it is the
+fastest-growing table in the database, and it pages to disk like ordinary data.
+
+⚠️ **`Aouda:Memory:EnableEmergencyDemotion=true` does not reach an auth database.** That switch is a
+process-wide answer to heap pressure; applying it to credential tables trades an out-of-memory risk
+for a cluster-wide loss of authentication, which is not a trade an operator is making knowingly when
+they set it. There is no setting that turns the auth rule off. A per-table
+`hotOnlyBackstop: DemoteAnyway` still overrides the pin, because that names one table explicitly.
+
+⚠️ **Auth databases created before this change are not migrated.** The pins are applied when the
+database is created, so an older auth database keeps demotable credential tables. Check with
+`GET /api/databases/{db}/tables/{name}/policy`, and fix one in place with:
+
+```http
+PUT /api/databases/{db}/tables/_users/policy
+{ "storageTemperature": "HotOnly" }
+```
+
+The hot/cold maintenance worker promotes that table's already-cold segments back on its next sweep.
+⚠️ It **skips promotions while the server is under memory back-pressure**, which is usually the state
+a server in this condition is in — so expect the promotion to lag the policy change, and re-check
+rather than assuming the write took effect immediately.
+
 ## Backpressure on ingest, and what it costs
 
 Under sustained pressure the engine answers in cost order, cheapest first: it drains harder (more
