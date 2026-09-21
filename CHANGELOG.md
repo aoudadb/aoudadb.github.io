@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+## 0.1.34 — 2026-09-21
+
+**Unused MQ build tables, log-level defaults that ship, no host-specific memory pin.** Server **0.1.34**, `Aouda.Client` **0.1.34**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **A bulk load into a non-empty materialized-query result no longer creates a build table it will never write to (BL-609).** Maintenance applies through the ordinary write path. Measured: 2 064 create-and-drop pairs on one 15.3 M-row load became six.
+
+- **Shipped binaries now run at `Warning` by default (BL-610).** `appsettings.json` never reached a Release publish, so every deployment sat at .NET's `Information` default — thousands of framework lines per second. An operator `Logging:LogLevel` still wins. `Aouda.Server.Startup` stays at `Information` (O(1) lifecycle / budget derivation).
+
+- **No shipped configuration file pins an absolute memory budget (BL-612).** `MaxTotalRamBytes` is left unset so the host derives 70 % of a cgroup grant, or 40 % of total clamped by available memory.
+
 ## 0.1.33 — 2026-09-20
 
 **P53 ingest admission, MQ-Amplification, crash reattach, and a large correctness train.** Server **0.1.33**, `Aouda.Client` **0.1.33**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
