@@ -315,6 +315,34 @@ Per-table residency is a **convergence target reached by a periodic sweep**, not
 - WAL records contain only concrete resolved values — never unevaluated expression ASTs.
 - All three residency fields (`MemoryFilter`, `MemoryRowCap`, `TargetMemoryBytes`) are validated at catalog write time; unsupported operators or column names are rejected with a descriptive error before any mutation.
 
+### Materialized query result tables are subject to all of this {#mq-result-tables}
+
+A materialized query's result is an **ordinary table** with the query's name. It is in the same hot
+tier, is demoted and promoted by the same sweep, is charged against the same per-database and
+process-wide ceilings, and accepts the same `PUT /api/databases/{db}/tables/{name}/policy` body as
+any table you created yourself.
+
+**Residency is policy here too, not a property of the query type.** With no declaration a result
+table defaults to `Auto`, for every query type — the same default an ordinary table has. Declare
+`storage.storageTemperature` on the query's schema entry (`Auto` | `HotOnly` | `ColdPreferred`) to
+choose something else.
+
+⚠️ **Declaring `HotOnly` on a result table costs what any pin costs**, and two of those costs are
+easy to miss on a table you did not create by hand:
+
+- **`TargetMemoryBytes` / `MemoryRowCap` / `MemoryFilter` are ignored on it.** Per the bullet above,
+  enforcement is `Auto`-only — so a row cap on a pinned result table validates, persists and does
+  nothing.
+- **It is skipped for demotion, and its cold segments are re-promoted**, so the sweep cannot reclaim
+  there under pressure. Its bytes also come off the ceiling the rest of the database is admitted
+  against — `pinnedHotBytes` on `GET /api/server/memory` is how much.
+
+⚠️ **`storage` accepts temperature only.** `residency` sub-fields must be set on the result table
+through the policy endpoint afterwards, and do not survive a destructive schema replace.
+
+See [Materialized queries §2.3.1](materialized.md#where-a-materialized-querys-result-lives) for which
+temperature to pick per query shape.
+
 ## 2.8 How Aouda implements it
 
 High-level flow:
