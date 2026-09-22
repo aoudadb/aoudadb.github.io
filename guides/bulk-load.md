@@ -601,7 +601,29 @@ Quick-answer matrix:
 
 ### Reading `:commit completed` and the job-shape warning
 
-Every `:commit` logs a `BulkLoad :commit completed …` line carrying: `segments`, `partitions`, `segmentWriteMs`, `finalizeMs`, `walMs`, `catalogSaveMs`, `medianRowsPerSegment`, `p95RowsPerSegment`, `minRowsPerSegment`, and `bufferHighWaterRows`. If a table's segment shape quietly regresses, `medianRowsPerSegment` and `bufferHighWaterRows` are where it shows first.
+Every `:commit` logs a `BulkLoad :commit completed …` line carrying: `commitMs`, `lockHoldMs`, `mqPublishBacklog`, `segments`, `partitions`, `segmentWriteMs`, `finalizeMs`, `walMs`, `catalogSaveMs`, `medianRowsPerSegment`, `p95RowsPerSegment`, `minRowsPerSegment`, and `bufferHighWaterRows`. If a table's segment shape quietly regresses, `medianRowsPerSegment` and `bufferHighWaterRows` are where it shows first.
+
+⚠️ **If you are on a release before this line's own log category shipped (**BL-632, next train**), you will not see it at all.** The server's default log level is `Warning`, and until BL-632 this line had no carve-out — so on a container with no `appsettings.json` and no `Logging__LogLevel__*` environment variable it was filtered out, and a bulk load that spent minutes in `:commit` left no server-side trace of where the time went. From that release it is emitted by default under the category `Aouda.Server.Observability.BulkLoadCommitLog`. To silence it, or to turn it back up on an older build:
+
+```bash
+# turn it off
+Logging__LogLevel__Aouda.Server.Observability.BulkLoadCommitLog=Warning
+# turn it on (any release)
+Logging__LogLevel__Default=Warning
+Logging__LogLevel__Aouda=Information
+```
+
+**(**BL-632, next train**) Read `commitMs` first — it is the total the rest of the line has to add up to.**
+
+| Field | What it tells you |
+|---|---|
+| `commitMs` | How long the `:commit` call itself took, measured server-side across the whole request. This is the number a client experiences. |
+| `lockHoldMs` | How long the exclusive table lock was held — the **whole session**, from `:begin`. `lockHoldMs` far exceeding `commitMs` means the session was long, which is the recommended shape; it is also how long any other writer to those tables was blocked. |
+| `mqPublishBacklog` | Materialized-query publishes outstanding on this database once this job queued its own, **including this one**, so `1` is the normal value for a load with a query attached. A figure that climbs job over job means the loader is committing faster than its materialized queries can publish. See [Materialized queries](materialized.md). |
+
+⚠️ **The phase fields do not have to sum to `commitMs`, and the gap is the point.** `segmentWriteMs`, `finalizeMs`, `walMs` and `catalogSaveMs` cover the coordinator's own work. Anything left over — buffer drain, spill merge waits, admission — is time nobody has attributed yet. Before `commitMs` existed there was no way to notice that there was a remainder at all.
+
+⚠️ **A rising `mqPublishBacklog` and a directory full of spill files are the same symptom.** A queued publish keeps its build spill on disk until it runs, so a backlog looks exactly like a leak from the filesystem. Check this number before concluding anything from a file count.
 
 **(P45)** Six fields are appended after the ones above — `SpillRunsCreated`, `SpillRunsMerged`,
 `SpillWriteMs`, `SpillMergeMs`, `SpillRunBytesWritten`, `SpillBytesWritten` — reporting the job's
