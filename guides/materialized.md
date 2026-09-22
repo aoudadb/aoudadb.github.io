@@ -1038,14 +1038,48 @@ database's share.
 published top-N result does not contain, so writing it out would lose exactly the rows it exists to
 keep. Its error message says so, rather than leaving you looking for a setting that would help.
 
+### The disk a build borrows while it runs
+
+An `aggregate`, `latestPerKey` or `firstPerKey` build that cannot hold its groups in memory splits
+them across partitions and writes the ones it is not holding to **scratch on disk**, under the
+query's own storage path:
+
+```
+<data>/materialized/<query>/_build_runs/<buildId>.mqspill
+```
+
+Four things are worth knowing about it, because it is disk you did not ask for:
+
+- **It is scratch and it is temporary.** A build deletes its own file when it finishes or fails, and
+  an engine open deletes the whole `_build_runs` directory unconditionally before restoring
+  anything. Nothing reads it back after the build that wrote it.
+- **One file per build** (**BL-620, next train**), however many times that build spills. Before this
+  it was one file per partition eviction — a 15.3 M-row bulk load into a table carrying six
+  materialized queries left about **152 000 files** behind, at a median of 9.4 KB each.
+- **A bulk load spills per commit, per query.** The engine builds each affected query from the rows
+  the load is already streaming, so a load that commits 344 times prepares 344 builds per query. Most
+  of them fit and spill nothing; the ones that do not each borrow a file for the length of the
+  commit.
+- **The volume is bounded by the accumulator ceiling, not by the table.** What a build spills is what
+  its working set exceeds, and it reads all of it back at the end of the same commit.
+
+⚠️ **This directory is not a cache and is not a backup.** Do not back it up, and do not point a
+retention or archive tool at it — everything in it is mid-flight state for a build that is either
+running now or already dead.
+
 ### Counters
 
 | Counter | What it tells you |
 |---|---|
 | `MqRebuildBytesReserved` | Memory charged for a scan-fed rebuild's accumulators. |
 | `MqRebuildSinksRetiredByBudget` | Queries retired because the group could not fit. Non-zero means someone got an `Error`. |
-| `MqBuildSpills` / `MqBuildSpilledGroups` | How often, and how much, a build had to write through. |
+| `MqBuildSpills` / `MqBuildSpilledGroups` | How often, and how much, a build had to write through **to its shadow result table**. |
 | `MqBuildSpillReadBacks` | Groups re-read after writing through — the cost of having spilled. |
+| `MqBuildPartitioningAdopted` | Builds that split their group space rather than retiring the query. |
+| `MqBuildPartitionsEvicted` | Partitions written out to disk scratch under budget pressure. |
+| `MqBuildRunsWritten` / `MqBuildRunsFolded` | Runs written to a build's spill file, and read back at publish. |
+| `MqBuildRunBytesWritten` | Bytes of disk scratch a build borrowed — the disk this memory bound trades for. |
+| `MqBuildSpillGenerations` | How many times a build spilled (**BL-620, next train**). This is the **file** count: one spill file per generation. `MqBuildRunsWritten ÷ MqBuildSpillGenerations` is how much each spill was worth. |
 | `MqRebuildPooledRequests` / `MqRebuildPooledQueries` / `MqRebuildSourceGroups` | Pooled refresh usage. `PooledQueries / SourceGroups` is how many queries each traversal served. |
 
 ---
