@@ -2544,8 +2544,10 @@ answers it for cores. It is `null` under embedded hosting, where nothing derived
 | `availabilityHeadroomFraction` | number | `0.70` of what is free — the ceiling on optimism. `0` on the cgroup path, where the clamp is not a term at all. |
 | `availabilityBoundBytes` | integer? | What that term came to, or `null` when it did not apply. |
 | `availabilityClampBound` | boolean | **The one field to alert on.** `true` means the budget was decided by a *moving measurement* rather than a grant. |
-| `derivedBytes` | integer | What the derivation produced, before the floor and ceiling clamp. |
-| `effectiveBytes` | integer | `MaxTotalRamBytes` as it ended up — always equal to `serverMaxBytes`. |
+| `derivedBytes` | integer | What the derivation produced, before the floor and ceiling clamp. On the configured path (`isDerived: false`) this is **what you asked for**, before the host clamp — the only place that figure survives. |
+| `effectiveBytes` | integer | `MaxTotalRamBytes` as **this decision** left it — the budget at startup. |
+| `currentEffectiveBytes` | integer | The budget **in force now** — always equal to `serverMaxBytes`. |
+| `isStillInForce` | boolean | `false` when a runtime resize has moved the budget since startup, so the block above no longer describes the budget you are running. |
 | `floorBound` / `detectedCeilingBound` | boolean | Whether the 256 MB floor raised it, or the detected total capped it. |
 | `settlingEvidence` | string? | How the availability figure was settled across several samples, when settling ran. `null` on a healthy host. |
 | `derivedAtUtc` | string | When it was decided — **always startup**. Nothing re-derives it. |
@@ -2558,6 +2560,14 @@ the instant it started. Set a container memory limit — `docker run -m 2g`, com
 a guaranteed grant instead. Aouda already logs this once at startup; the block is how you check it
 afterwards, on a server whose startup logs have rotated.
 
+⚠️ **A runtime resize does not re-derive the budget, and `isStillInForce` is how you see that.**
+Resizing `MaxTotalRamBytes` — through the admin config route, or by restoring persisted settings at
+startup — sets the budget directly, because you chose the number and there is nothing to derive from
+the host. `budgetDerivation` keeps describing the **startup** decision, `currentEffectiveBytes`
+carries the figure actually running, and `explanation` appends a `Superseded:` clause when the two
+differ. If you are alerting on `availabilityClampBound`, gate it on `isStillInForce` as well:
+a clamp that bound at startup says nothing about a budget you have since set by hand.
+
 `headroom` is `headroomRatio` with both of its operands, so you can see what it divided.
 
 | Field | Type | Meaning |
@@ -2566,11 +2576,15 @@ afterwards, on a server whose startup logs have rotated.
 | `scope` | string | Always `Process`. See the warning below. |
 | `governedBytes` | integer | The numerator: the **server's** governed budget. |
 | `workingSetHighWaterBytes` | integer | The denominator: a decayed maximum of the process's working set (half-life ~11 minutes). |
-| `workingSetSource` | string | `ProcessRss`, `ReservationLedger` (the fallback when RSS is unreadable), or `Unknown` before the first sample. |
+| `workingSetSource` | string | `ProcessRss`, `ReservationLedger` (the fallback when RSS is unreadable), or `Unknown` before the first sample. Names the quantity that actually supplied the denominator: the high water is a decayed *maximum*, so a smaller reading that loses to the previous one does not relabel it. |
 | `mode` | string | The `resourceMode` this ratio produced. |
 | `transitions` | integer | Mode changes since start. |
 | `balancedEntryRatio` / `balancedExitRatio` | number | `2.0` / `1.5`. |
 | `abundantEntryRatio` / `abundantExitRatio` | number | `3.0` / `2.0`. |
+
+🔎 **The whole block is read from one sample**, so `ratio`, `governedBytes` and
+`workingSetHighWaterBytes` always reconcile — you can divide them and get the ratio printed beside
+them, on a live server under load.
 
 ⚠️ **The resource mode is a property of the *process*, not of a database.** Two databases on one
 host are in the same mode by definition. Aouda's log line names a database —
@@ -2589,7 +2603,8 @@ Read `workingSetHighWaterBytes`, `rssBytes`, `reservedBytes` and `untrackedHeadr
 
 🔎 All six provenance fields also appear in the `memory` health component's `details` —
 `budgetIsDerived`, `budgetSource`, `budgetIsCgroupBounded`, `budgetFractionApplied`,
-`budgetAvailabilityClampBound` and `budgetDerivation`, alongside `resourceMode`, `headroomRatio`,
+`budgetAvailabilityClampBound`, `budgetStartupEffectiveBytes`, `budgetIsStillInForce` and
+`budgetDerivation`, alongside `resourceMode`, `headroomRatio`,
 `headroomGovernedBytes`, `workingSetHighWaterBytes` and `workingSetSource` — so an orchestrator can
 key on them without polling this route.
 

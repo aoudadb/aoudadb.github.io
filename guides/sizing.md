@@ -90,6 +90,13 @@ shares.
 ⚠️ **Nothing re-derives the budget.** `derivedAtUtc` is always startup. On an unbounded host that
 means the ceiling is fixed from a reading that has since moved; restart to re-derive it.
 
+⚠️ **If you resize `MaxTotalRamBytes` at runtime, the block keeps describing startup.** That is
+deliberate — you chose the new number, so there is no host derivation to record — but it means
+`effectiveBytes` (the startup decision) and `currentEffectiveBytes` (the budget running now) can
+differ. `isStillInForce` is `false` when they do, and the `explanation` says `Superseded:`. Gate any
+alert on `availabilityClampBound` behind `isStillInForce`, or you will keep alerting on how a
+budget was sized before you replaced it.
+
 A database picks the new thresholds up **live**, on the transition — it does not need a restart, and it does not need to have been opened while the host was roomy.
 
 ⚠️ **RSS on such a host is higher than it was at the same data volume.** That is the feature, it is still inside the ceiling by construction, and anyone alerting on absolute RSS rather than on RSS-versus-configured will see it. Alert on the ratio.

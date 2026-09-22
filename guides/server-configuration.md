@@ -1,4 +1,4 @@
----
+﻿---
 title: "Server configuration"
 parent: Guides
 nav_order: 2
@@ -308,6 +308,16 @@ out, **auth writes are refused**: no sign-ins, no token refresh, no key minting.
 proportional to login volume, so the busiest deployment hits it first. Disabling the sweep is
 supported — a deployment that keeps expired rows for forensics may want it — but it is an explicit
 trade, and the server logs a warning at startup when it is off.
+
+ℹ️ **Every auth database is swept, including the server auth database.** The sweep covers each
+application auth database *and* the server auth database (`_serverauth` by default), which carries
+the same five tables for server-admin sessions, refresh tokens and MFA challenges. Databases are
+enumerated on every pass, so one created at runtime is swept without a restart, and one that fails
+does not stop the others.
+
+ℹ️ **In a replica set, only the primary sweeps.** A secondary does not delete rows from a database
+it is replicating — the deletions reach it through replication, like any other write. Nothing needs
+configuring for this; the sweep reads the node's role.
 
 ℹ️ **`_api_keys` is deliberately not swept**, though it also has an `expires_at`. That column is
 nullable there (`null` means *never expires*), and an API key row is an administrative record: an
