@@ -1478,8 +1478,7 @@ See [Materialized queries §2.11d](../guides/materialized.md#amplification).
 
 ### Create body: result-table storage
 
-`POST /api/databases/{db}/materialized-queries` and the schema file's `materializedQueries` entries
-both accept an optional `storage` object:
+The schema file's `materializedQueries` entries accept an optional `storage` object:
 
 ```json
 { "storage": { "storageTemperature": "ColdPreferred" } }
@@ -1498,6 +1497,13 @@ An unrecognised value fails **at schema apply**, not at query time:
 `targetMemoryBytes`, `memoryFilter`, `hotOnlyBackstop`) are not accepted here — set them on the
 result table via `PUT /api/databases/{db}/tables/{name}/policy` (the result table's name is the
 query's name). They do not survive a destructive schema replace.
+
+⚠️ **`storage` is a schema-file field, not an HTTP create field** (**BL-625, next train**).
+This page previously said `POST /api/databases/{db}/materialized-queries` accepted it too. It does
+not: `MaterializedQueryCreateBody` has no such property, so a `storage` key posted to that route is
+deserialized away in silence and the result table is created with the engine default. Create the
+query through `POST .../schema/apply`, or set the result table's policy afterwards with
+`PUT /api/databases/{db}/tables/{name}/policy`.
 
 ---
 
@@ -2516,6 +2522,76 @@ component's `details`, so an orchestrator can key on them without polling this r
 | `pinnedHotBytes` | integer | Bytes held by this database's declared residency pins (`residency` on a `HotOnly` table). **Subtracted** from the ceiling the elastic hot tier is admitted against: a pin shrinks the tier, and this is by how much. |
 
 ⚠️ **`hotDrainBytesPerSecond == 0` is not a problem on its own.** A server with nothing to demote drains nothing, which is the healthy resting state. The condition worth alerting on is `hotDrainStalled`: demotions were attempted across the interval and none released a segment. Sustained `hotArrivalBytesPerSecond` above `hotDrainBytesPerSecond` says the hot tier is being filled faster than it empties, while there is still headroom to act in.
+
+
+**Provenance: where the budget came from, and what `headroomRatio` divided** (**BL-611 / BL-622, next train**)
+
+Two additive blocks. Neither changes a threshold, a default or a byte count — they say where the
+numbers beside them came from.
+
+`budgetDerivation` answers *"is this budget a grant or a guess?"*, the way the `cpu` block already
+answers it for cores. It is `null` under embedded hosting, where nothing derived one.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `isDerived` | boolean | `false` when you pinned `Aouda:Memory:MaxTotalRamBytes`. The rest of the block then describes the host, not the decision. |
+| `source` | string | `CgroupV2`, `CgroupV1`, `ProcMemInfo`, `WindowsGlobalMemoryStatus`, `GcMemoryInfo` or `Sentinel`. |
+| `isCgroupBounded` | boolean | **The field that decides everything else.** A cgroup limit is a *promise*; anything else is an observation about a machine that may have other tenants on it. |
+| `detectedTotalBytes` | integer | The cgroup limit, or the machine's physical RAM. |
+| `availableBytes` | integer? | What was measurably free. `null` when the probe reports capacity only. |
+| `fractionApplied` | number | `0.70` under a cgroup, `0.40` otherwise. |
+| `totalAnchorBytes` | integer | `fractionApplied × detectedTotalBytes`, before any clamp. |
+| `availabilityHeadroomFraction` | number | `0.70` of what is free — the ceiling on optimism. `0` on the cgroup path, where the clamp is not a term at all. |
+| `availabilityBoundBytes` | integer? | What that term came to, or `null` when it did not apply. |
+| `availabilityClampBound` | boolean | **The one field to alert on.** `true` means the budget was decided by a *moving measurement* rather than a grant. |
+| `derivedBytes` | integer | What the derivation produced, before the floor and ceiling clamp. |
+| `effectiveBytes` | integer | `MaxTotalRamBytes` as it ended up — always equal to `serverMaxBytes`. |
+| `floorBound` / `detectedCeilingBound` | boolean | Whether the 256 MB floor raised it, or the detected total capped it. |
+| `settlingEvidence` | string? | How the availability figure was settled across several samples, when settling ran. `null` on a healthy host. |
+| `derivedAtUtc` | string | When it was decided — **always startup**. Nothing re-derives it. |
+| `explanation` | string | The whole derivation in one sentence, suitable for an alert body. |
+
+⚠️ **`availabilityClampBound: true` is actionable and the remedy is one line.** It means Aouda is
+sharing a host nobody promised it a share of, and sized itself from whatever happened to be free at
+the instant it started. Set a container memory limit — `docker run -m 2g`, compose
+`deploy.resources.limits.memory`, Kubernetes `resources.limits.memory` — and the budget derives from
+a guaranteed grant instead. Aouda already logs this once at startup; the block is how you check it
+afterwards, on a server whose startup logs have rotated.
+
+`headroom` is `headroomRatio` with both of its operands, so you can see what it divided.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ratio` | number | `governedBytes / workingSetHighWaterBytes`. Identical to the flat `headroomRatio`, which is kept. |
+| `scope` | string | Always `Process`. See the warning below. |
+| `governedBytes` | integer | The numerator: the **server's** governed budget. |
+| `workingSetHighWaterBytes` | integer | The denominator: a decayed maximum of the process's working set (half-life ~11 minutes). |
+| `workingSetSource` | string | `ProcessRss`, `ReservationLedger` (the fallback when RSS is unreadable), or `Unknown` before the first sample. |
+| `mode` | string | The `resourceMode` this ratio produced. |
+| `transitions` | integer | Mode changes since start. |
+| `balancedEntryRatio` / `balancedExitRatio` | number | `2.0` / `1.5`. |
+| `abundantEntryRatio` / `abundantExitRatio` | number | `3.0` / `2.0`. |
+
+⚠️ **The resource mode is a property of the *process*, not of a database.** Two databases on one
+host are in the same mode by definition. Aouda's log line names a database —
+`Resource mode for database 'X' is now Constrained` — only because it is emitted once per open
+database as the mode is applied to each.
+
+⚠️ **Do not compare `headroom.ratio` against a database's `reservedBytes`.** They are ratios of
+different things, and reading them as though they were the same is the most common misdiagnosis on
+this endpoint. `reservedBytes` is the **reservation ledger**; the denominator here is the whole
+process's **resident set**, which also holds hot segments, HRA buffers, PK index caches and
+materialized-query build state — all of which are *reported but never reserved*, deliberately, so
+that resident data cannot make the governor refuse transient work that fits. A database reserving
+120 MB inside a 2.4 GB ceiling, in a process whose RSS high water is 1.9 GB against a 2.76 GB
+governed budget, is at `1.45x` headroom and `Constrained`. Every one of those numbers is correct.
+Read `workingSetHighWaterBytes`, `rssBytes`, `reservedBytes` and `untrackedHeadroomBytes` together.
+
+🔎 All six provenance fields also appear in the `memory` health component's `details` —
+`budgetIsDerived`, `budgetSource`, `budgetIsCgroupBounded`, `budgetFractionApplied`,
+`budgetAvailabilityClampBound` and `budgetDerivation`, alongside `resourceMode`, `headroomRatio`,
+`headroomGovernedBytes`, `workingSetHighWaterBytes` and `workingSetSource` — so an orchestrator can
+key on them without polling this route.
 
 ---
 
