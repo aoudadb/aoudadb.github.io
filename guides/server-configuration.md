@@ -295,6 +295,26 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 | `Aouda:Query:MaxResultRows` | `1000000` | A query whose result exceeds this is refused with a typed retryable `503` rather than materialised. |
 | `residency.hotOnlyBackstop` | `RefuseWrites` | **Per table, not server config.** What a `HotOnly` pin does when honouring it would breach the ceiling — see [Hot/Cold](hot-cold.md#when-a-pin-cannot-be-honoured). |
 
+## 11) Auth maintenance
+
+| Key | Default | What it does |
+|---|---|---|
+| `Aouda:Auth:ExpirySweepIntervalMinutes` | `5` | How often expired rows are deleted from the auth tables that carry a deadline: `_sessions`, `_revoked_tokens`, `_refresh_tokens`, `_mfa_challenges`, `_password_reset_tokens` (**BL-616, next train**). Zero or negative **disables** the sweep. |
+
+⚠️ **Leave the sweep on unless you have a reason.** All five of those tables are pinned
+`HotOnly` (auth storage is a system tier — an authenticated request must never wait on disk for a
+credential), and the default `hotOnlyBackstop` of `RefuseWrites` means that when a pin's budget runs
+out, **auth writes are refused**: no sign-ins, no token refresh, no key minting. The growth is
+proportional to login volume, so the busiest deployment hits it first. Disabling the sweep is
+supported — a deployment that keeps expired rows for forensics may want it — but it is an explicit
+trade, and the server logs a warning at startup when it is off.
+
+ℹ️ **`_api_keys` is deliberately not swept**, though it also has an `expires_at`. That column is
+nullable there (`null` means *never expires*), and an API key row is an administrative record: an
+expired key is *refused* at validation time, but the row stays so it still appears in the admin
+listing as expired rather than vanishing. `_audit_log` is not swept either — it is the one auth
+table left demotable on purpose, so unbounded growth pages to disk instead of exhausting a pin.
+
 ## Related docs
 
 - [Defaults Reference](defaults-reference.md) — every derived default (memory, bulk load, partitioning), worked at several host sizes

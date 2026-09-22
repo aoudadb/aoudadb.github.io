@@ -42,6 +42,54 @@ Aouda measures its own headroom — governed budget against sustained working-se
 
 The state is reported as `resourceMode` on `GET /api/server/memory`, with the `headroomRatio` that produced it and a `resourceModeTransitions` count. Transitions require sustained agreement in both directions, so a burst does not move a threshold; if `resourceModeTransitions` is climbing, that is the signal to investigate rather than a normal reading.
 
+### What `headroomRatio` is a ratio of (**BL-622, next train**)
+
+```
+headroom  =  the server's governed budget
+             ───────────────────────────────────────────────
+             a decayed maximum of the PROCESS's resident set
+```
+
+Since **BL-622** both operands are on the endpoint, as a `headroom` block beside `headroomRatio` —
+`governedBytes`, `workingSetHighWaterBytes`, `workingSetSource` and `scope`, plus the four
+thresholds the ratio is tested against.
+
+⚠️ **Neither operand is a per-database quantity, and neither is the reservation ledger.** This is
+the most common misdiagnosis of this number. A real example: a database granted a 2.3–2.4 GB
+elastic ceiling, with a **~120 MB** reservation peak, zero heap reclaims and zero admission sheds —
+every figure saying there was room — reported `headroom 1.45x` and ran a whole 15 M-row load in
+`Constrained`, with its page cache off. All of those numbers were correct. The process's resident
+set was ~1.9 GB against a 2.76 GB governed budget, and the ~1.78 GB between the ledger and RSS is
+resident data that Aouda **reports but never reserves**: hot segments, HRA buffers, PK index caches
+and materialized-query build state. It is kept out of the ledger on purpose, so that resident data
+cannot make the governor refuse transient work that genuinely fits.
+
+⚠️ **The mode is a property of the process, not of a database.** Two databases on one host are in
+the same mode by definition. The startup log names a database only because the mode is applied to
+each open database in turn.
+
+**What to read together**, when the mode looks wrong for the room you think you have:
+`headroom.workingSetHighWaterBytes` (the denominator), `rssBytes` (the instantaneous version of it),
+`reservedBytes` (the ledger) and `untrackedHeadroomBytes` (the gap between them, which is usually
+most of the answer).
+
+### Where the budget itself came from (**BL-611, next train**)
+
+`GET /api/server/memory` now carries a `budgetDerivation` block recording how `MaxTotalRamBytes` was
+arrived at: `source`, `isCgroupBounded`, the `fractionApplied`, both host readings, whether the
+availability clamp bound, and a one-sentence `explanation`. The same facts appear in the `memory`
+health component's `details`.
+
+⚠️ **`availabilityClampBound: true` is the one worth alerting on.** It means the budget was
+decided by what happened to be free at the instant the process started — a moving measurement —
+rather than by a grant. Aouda says so once, in a startup warning; the block is how you check it on a
+server whose startup logs have long since rotated. The remedy is a container memory limit, after
+which Aouda derives **70 % of a number nobody else can spend** instead of 40 % of a machine it
+shares.
+
+⚠️ **Nothing re-derives the budget.** `derivedAtUtc` is always startup. On an unbounded host that
+means the ceiling is fixed from a reading that has since moved; restart to re-derive it.
+
 A database picks the new thresholds up **live**, on the transition — it does not need a restart, and it does not need to have been opened while the host was roomy.
 
 ⚠️ **RSS on such a host is higher than it was at the same data volume.** That is the feature, it is still inside the ceiling by construction, and anyone alerting on absolute RSS rather than on RSS-versus-configured will see it. Alert on the ratio.

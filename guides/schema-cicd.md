@@ -175,8 +175,11 @@ Copy these three files into `.github/workflows/` in your repository, configure t
 - `AOUDA_STAGING_SERVER` — base URL of staging Aouda (e.g. `https://aouda-staging.example.com`).
 - `AOUDA_PROD_SERVER` — base URL of production Aouda.
 - `AOUDA_DATABASE` — database name (or use separate secrets per environment).
+- `AOUDA_TOKEN` — server admin key or bearer token, **required when the target database has auth
+  enabled** (**BL-464, next train**). Without it the `schema` commands exit `2` with
+  `AUTH_TOKEN_MISSING`; `--token` / `-t` on the command line overrides it.
 
-Use `AOUDA_SERVER` and `AOUDA_DATABASE` in the workflow so the CLI picks them up; the examples use env vars set from secrets.
+Use `AOUDA_SERVER`, `AOUDA_DATABASE` and `AOUDA_TOKEN` in the workflow so the CLI picks them up; the examples use env vars set from secrets.
 
 ---
 
