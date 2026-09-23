@@ -27,6 +27,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 - **One WebSocket per client, and what a subscription id means across a reconnect.** [TypeScript client § one connection, many subscriptions](clients/typescript.md#one-connection-many-subscriptions) — including the `@aouda/client` defect (BL-635, fixed in 0.1.25) where each subscription opened its own socket.
 
+## 0.1.37 — 2026-09-22
+
+**NULL survives hot-segment restart; Derive Connect's three answers; memory provenance.** Server **0.1.37**, `Aouda.Client` **0.1.37**, `@aouda/client` **0.1.23** (unchanged), Studio **0.0.26** (unchanged pin). See [Compatibility](clients/compatibility.md).
+
+- **A restart no longer turns every nullable fixed-width `NULL` into the type default (BL-628).** Hot segments now persist validity. This is what locked Derive's lab out after heap exhaustion: `mk_srv_` keys have `user_id = NULL`, which read back as `Guid.Empty` and failed every validation. Segments sealed before 0.1.37 cannot be repaired in place (BL-630).
+- **Named mutation `"op": "upsert"` (BL-637), `409 DUPLICATE_PRIMARY_KEY` on insert (BL-636), and a repeat `subscribe` replaces instead of refusing (BL-638).** The three answers Derive Connect needed for presence heartbeats and live room lists.
+- **`GET /api/server/memory` reports `budgetDerivation` and `headroom` operands (BL-611, BL-622).** No thresholds moved.
+- **Expired auth rows are actually deleted (BL-616).** The sweep worker was never started; `aouda start` also now gets Server GC like `Aouda.Server.dll` (BL-621).
 
 ## 0.1.36 — 2026-09-21
 
