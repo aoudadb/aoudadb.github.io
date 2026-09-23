@@ -12,7 +12,7 @@ This guide describes how to deploy Aouda to Kubernetes using the official chart 
 
 - Kubernetes cluster (local or managed)
 - Helm 3
-- Access to `aouda/server` and (optionally) `aouda/studio` images
+- Access to `ghcr.io/aoudadb/aouda-server` and (optionally) `aouda/studio` images
 
 ## Quick Start
 

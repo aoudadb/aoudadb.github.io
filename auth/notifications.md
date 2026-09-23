@@ -137,7 +137,7 @@ docker run -p 5433:5433 -v aouda-data:/data \
   -e Aouda__Auth__Sms__Provider=gatewayapi \
   -e Aouda__Auth__Sms__ApiKey=your-token \
   -e Aouda__Auth__Sms__Sender=YourApp \
-  aouda/server
+  ghcr.io/aoudadb/aouda-server
 ```
 
 Restart the server after changing notification configuration.

@@ -112,8 +112,8 @@ aouda start --data-dir ./node3 --bind 0.0.0.0:5002 --join 192.168.1.10:5000 --ro
 
 **How it works:**
 
-1. Place `Aouda.Setup.exe` (Windows) or `aouda-setup` (Linux) alongside `Aouda.Server.exe` / `Aouda.Server` in the release archive.
-2. Double-click or run `./aouda-setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
+1. Place `Aouda.Setup.exe` (Windows) or `Aouda.Setup` (Linux) alongside `Aouda.Server.exe` / `Aouda.Server` in the release archive.
+2. Double-click or run `sudo ./Aouda.Setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
 3. Setup copies binaries, registers the OS service with `--data-path` and `--port`, bootstraps the admin, creates a shortcut, and prints a completion banner with the server URL and API key.
 
 See the [Studio guide §12](studio.md#12-aoudasetup-installer) and [Server configuration](server-configuration.md) for the full interactive prompt sequence, service registration details, and configuration precedence.
@@ -127,7 +127,7 @@ See the [Studio guide §12](studio.md#12-aoudasetup-installer) and [Server confi
 ### Server Image
 
 ```bash
-docker run -p 5000:5000 -v aouda-data:/data aouda/server
+docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
 ```
 
 - Base: `mcr.microsoft.com/dotnet/aspnet:8.0-alpine`
@@ -255,7 +255,7 @@ Creates Studio Deployment + Service. Auto-configured `AOUDA_STUDIO_DEFAULT_SERVE
 | Key | Default | Purpose |
 |-----|---------|---------|
 | `replicaCount` | 1 | Number of data nodes |
-| `image.repository` | `aouda/server` | Server image |
+| `image.repository` | `ghcr.io/aoudadb/aouda-server` | Server image |
 | `persistence.size` | `10Gi` | PVC size per node |
 | `resources.limits.memory` | `2Gi` | Memory limit |
 | `witness.enabled` | `false` | Enable witness node |
@@ -566,7 +566,7 @@ See [Server configuration](server-configuration.md) for precedence vs `AOUDA_COR
 
 | Scenario | What Happens |
 |----------|-------------|
-| `docker run aouda/server` | Single-node server, port 5000, data at `/data`, no auth, CORS allows Hub + `studio.aouda.com` (not localhost) |
+| `docker run ghcr.io/aoudadb/aouda-server` | Single-node server, port 5000, data at `/data`, no auth, CORS allows Hub + `studio.aouda.com` (not localhost) |
 | `aouda start` (temp data dir) | Ephemeral data path, schema inference, auth via API |
 | `aouda start` | Persistent storage in current directory, port 5000 |
 | Hub unreachable | Servers continue operating normally, Studio direct-mode works |

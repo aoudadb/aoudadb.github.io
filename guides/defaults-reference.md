@@ -150,6 +150,47 @@ Each column sums to 1.00, which is a contract rather than a coincidence: a table
 
 **A class may borrow idle headroom.** A sole claimant's ceiling is the whole governed budget, so nothing is stranded when only one kind of work is running. From the second claimant onward each borrower takes at most half the idle remainder, so a second borrower can always start and no claimant faces a cliff on its first byte.
 
+## Logging defaults
+
+⚠️ **Aouda's default log level is `Warning`.** Nothing below that is emitted unless you ask for it — so on a server with no `appsettings.json` and no `Logging__LogLevel__*` environment variable, `Information` and `Debug` lines simply are not there.
+
+That is worth stating plainly, because **a line the documentation says exists and that you cannot see is far more likely to mean "filtered out" than "it did not happen"**.
+
+| Category | Default level | Why |
+|---|---|---|
+| Everything, unless listed below | `Warning` | A production server should be quiet. A chatty default costs disk and buries the lines that matter |
+| Startup narration (`Aouda.Server.Startup.*`) | `Information` | The memory and CPU budget derivations, the database inventory, and the readiness transition. You cannot diagnose a sizing problem from a log that does not say what was derived |
+| The bulk-load commit line | `Information` | `BulkLoad :commit completed …` is how a loader confirms a session landed, and it is documented as such in [Bulk Load](bulk-load.md) |
+
+### Turning it up
+
+Standard ASP.NET Core configuration — no Aouda-specific mechanism:
+
+```bash
+# Everything at Information
+AOUDA__LOGGING__LOGLEVEL__DEFAULT=Information
+
+# Or one category, which is usually what you want
+Logging__LogLevel__Aouda.Engine.Storage=Debug
+```
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Warning",
+      "Aouda.Server.Startup": "Information"
+    }
+  }
+}
+```
+
+⚠️ **Turn one category up, not `Default`.** `Default=Debug` on a busy server produces a volume that is hard to read and expensive to keep, and the line you are looking for is usually in one namespace.
+
+### Where the lines go
+
+Aouda logs to the console, structured as JSON. Under systemd that is `journalctl -u aouda`; under Docker it is `docker logs`; under the Windows SCM it is the service's stdout. There is no file sink by default and no log rotation to configure, because there is no file.
+
 ## Related docs
 
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into

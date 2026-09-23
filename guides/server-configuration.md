@@ -251,7 +251,7 @@ Worked Compose example (the 120 s default can be omitted; shown here so the two 
 ```yaml
 services:
   aouda:
-    image: aouda/server
+    image: ghcr.io/aoudadb/aouda-server
     stop_grace_period: 130s
     environment:
       AOUDA_DATA_PATH: /data
