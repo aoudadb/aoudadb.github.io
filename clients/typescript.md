@@ -705,7 +705,7 @@ Subscription ids are stable for the life of the `Subscription` object and are re
 reconnects, which is what the server expects — see [the `id`
 contract](../reference/http-api.md#subscribe).
 
-> **Fixed in 0.1.25 (`BL-635`, next train).** Before that release `connect()` was not idempotent:
+> **Fixed in 0.1.25 (`BL-635`), released 2026-09-23.** Before that release `connect()` was not idempotent:
 > each subscription's start opened its **own** socket, orphaning the previous one — still open,
 > unpinged, still delivering — and overwriting the single pair of handshake resolvers, so one
 > socket's `auth_ok` completed a different socket's `connect()` and the rest never settled. An
