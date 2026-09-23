@@ -1,4 +1,4 @@
----
+﻿---
 title: "TypeScript Client"
 nav_order: 1
 parent: "Clients"
@@ -690,6 +690,32 @@ const sub = client.table('events')
     onChange: (event) => console.log('Error event:', event.row),
   });
 ```
+
+#### One connection, many subscriptions
+
+Every subscription and write stream on a client shares **one** WebSocket per
+`(serverUrl, database)`. `subscribe()` on an already-connected client reuses that socket; it does
+not open another. Bind as many live views as the application needs — a list, a detail pane, a
+presence feed — and they multiplex.
+
+The transport owns reconnection. On a drop it reconnects with exponential backoff and jitter, then
+re-sends each live subscription with `resume_from` set to the last version it saw, so the server
+can replay from its buffer or fall back to a fresh snapshot. A `gap` is answered the same way.
+Subscription ids are stable for the life of the `Subscription` object and are reused across
+reconnects, which is what the server expects — see [the `id`
+contract](../reference/http-api.md#subscribe).
+
+> **Fixed in 0.1.25 (`BL-635`, next train).** Before that release `connect()` was not idempotent:
+> each subscription's start opened its **own** socket, orphaning the previous one — still open,
+> unpinged, still delivering — and overwriting the single pair of handshake resolvers, so one
+> socket's `auth_ok` completed a different socket's `connect()` and the rest never settled. An
+> application binding several live views in one tick got several server sessions, and the
+> reconnect replay could then land a subscription id on a session that already held it. The server
+> refused it with `DUPLICATE_SUBSCRIPTION_ID`, the client treated any subscription error as fatal
+> and unsubscribed, and the view stayed dead until a page reload. If you are pinned below 0.1.25
+> and cannot upgrade, the workaround is to bind one subscription per client instance; the real fix
+> is the upgrade.
+
 
 ---
 

@@ -588,6 +588,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_MUTATION_RETURNING_STAR` | 400 (schema apply) | Named-mutation `returning` contains `*` |
 | `NAMED_MUTATION_VALUE_NODE_INVALID` | 400 (schema apply) | A `values` / `set` entry is an object node that is neither `{ "param": "<name>" }` nor `{ "value": <literal> }` |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
+| `DUPLICATE_PRIMARY_KEY` | 409 | *BL-636, next train.* An insert named a primary key a live row already holds. `details` carries the offending key. Use `op: "upsert"` (named mutation) or `mode: "upsert"` (write-stream) when the write is meant to replace. Previously surfaced as `500 INTERNAL_ERROR` |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |
@@ -603,6 +604,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
+| `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, next train* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
 | `CONFLATE_NOOP` | `snapshot_complete` warning | `conflate` is set without `collapse_inserts` and the key is not the table PK (insert-only no-op). Subscribe still registers. |
 | `MQ_NOT_READY` | 409 / WS error | Materialized query is not `Ready`; watermark cannot satisfy a token. Retry; do not treat as a dead token. |
@@ -1200,6 +1202,24 @@ Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) �
 
 Named mutations are the write-side mirror: name-addressed insert/update/delete templates over ADR 0037 expressions. **Invoker rights only.** They are **not** members of the read batch.
 
+**`op`** is one of `insert`, `upsert` (**BL-637, next train**), `update`, `delete`.
+
+**`insert` never overwrites.** An `op: "insert"` that names a primary key a live row already holds
+answers **`409 DUPLICATE_PRIMARY_KEY`** (**BL-636, next train**; before that it arrived as
+`500 INTERNAL_ERROR` with the real cause only in the server log). The `details` field carries the
+engine's own sentence, including the offending key.
+
+**`op: "upsert"`** (**BL-637, next train**) is write-or-replace by primary key: same `values` row
+template as `insert`, same `batchParam` support, and a result carrying both `rowsInserted` and
+`rowsUpdated`. It requires the table to declare a primary key — `upsert` on a keyless table is
+refused at schema apply, since there would be nothing to match on. It is last-write-wins on the
+whole row, not a partial merge. This is the op for a row written repeatedly under a key the caller
+does not choose — a presence heartbeat or typing indicator keyed by
+`derived: { "identity": "subject" }` — where `insert` succeeds exactly once and `update` never
+succeeds at all. See [Named mutations § choosing
+`op`](../guides/named-queries.md#choosing-op).
+
+
 **What a `values` / `set` entry may be.** Exactly three forms:
 
 | Form | Meaning |
@@ -1212,7 +1232,7 @@ The object shape is reserved for those two one-key forms, because `{ "param": �
 
 To store a JSON document in a `String` column, send it as a JSON **string** (`"Meta": "{\"a\":1}"`), not as a bare object.
 
-**Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying an **array** of row-argument objects, so one `execute` call inserts many rows. `values` stays the per-row template; each array element resolves that row's `{"param": …}` holes exactly as a single-row `args` object would. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT`; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap and every row are checked before any row is inserted — one bad element fails the whole call and names its array index in `rowErrors`, the same shape as insert-transform per-row errors.
+**Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying an **array** of row-argument objects, so one `execute` call inserts many rows. `values` stays the per-row template; each array element resolves that row's `{"param": …}` holes exactly as a single-row `args` object would. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT` — `upsert` is allowed, being row-shaped; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap and every row are checked before any row is inserted — one bad element fails the whole call and names its array index in `rowErrors`, the same shape as insert-transform per-row errors.
 
 Definition:
 
@@ -3345,7 +3365,7 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Always `"subscribe"` |
-| `id` | string | Yes | Client-assigned subscription ID. Unique per connection. |
+| `id` | string | Yes | Client-assigned subscription ID, scoped to the connection. Re-sending it on the same connection **replaces** that subscription — see below. |
 | `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `name` is set. |
 | `name` | string? | Conditional | Named-query unique name. **Required on the data-plane listener.** |
 | `args` | object? | No | Bind arguments for `name` subscribe. Same shape as HTTP execute `args`. |
@@ -3392,6 +3412,34 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
 
 **Limits:** per-connection 32 subscriptions, per-identity 128. Exceed → `SUBSCRIPTION_LIMIT_EXCEEDED`.
+
+**The `id` contract, in full.** An `id` identifies a subscription **on one connection**; it is not
+global, and it is not a resource the client has to garbage-collect.
+
+- A `subscribe` naming an `id` the connection **already holds replaces** that subscription
+  (**BL-638, next train**): the old registration is dropped and the new one answers with its own
+  `snapshot` / `snapshot_complete`. This is the intended way to re-state a subscription after a
+  `gap`, and it is harmless if the client sends one redundantly.
+- The replace happens **after** every other check on the `subscribe` passes. A `subscribe` refused
+  for any other reason — unknown `name`, `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`, `PERMISSION_REVOKED`,
+  a freshness shortfall — leaves the existing subscription of that `id` untouched and delivering.
+  A client can therefore retry a `subscribe` without first proving it will succeed.
+- Servers **before** BL-638 refused the second `subscribe` with `DUPLICATE_SUBSCRIPTION_ID`
+  instead. That error is informational, not fatal: seeing it means the `id` is registered and
+  delivering, so a client should keep the subscription rather than tearing it down. A client that
+  treats every subscription `error` as fatal will strand a live view on a benign retry.
+- After a **reconnect** the `id` is free again, because the previous connection's registrations
+  died with it. Reuse the same `id` on the new socket with `resume_from`; there is no need to mint
+  a fresh one, and nothing to clean up on the server.
+- `unsubscribe` frees the `id` on that connection immediately and answers `unsubscribed`;
+  unsubscribing an `id` the connection does not hold answers `SUBSCRIPTION_NOT_FOUND`.
+
+> **One connection per client, please.** Subscriptions are multiplexed over a single WebSocket.
+> Opening a socket per subscription gives you one server session per socket, each with its own
+> `id` space and its own idle timeout, and makes the resubscribe behaviour above much harder to
+> reason about. The official clients hold exactly one transport per `(server, database)` — see
+> [TypeScript client](../clients/typescript.md).
+
 
 ---
 

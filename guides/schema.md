@@ -1,4 +1,4 @@
----
+﻿---
 title: "Schema Lifecycle"
 nav_order: 2
 parent: "Guides"
@@ -910,6 +910,16 @@ This section documents every field available in `aouda.schema.json` by type. All
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
 
 **Common mistake:** Using `"Integer"`, `"Long"`, `"Float"`, or `"DateTime"` as type names — these are not valid. Use `Int32`, `Int64`, `Float32`, and `Timestamp` respectively.
+
+**Declaring the column for a C# enum.** A C# enum binds to its **underlying** integral type, which
+is `Int32` unless the enum says otherwise — so `enum RoomType { Direct, Group, Public }` needs
+`"type": "Int32"`, not `"Byte"`, however small its values are. Declaring `Byte` there leaves the
+schema and the model permanently disagreeing: the C# client's `AutoReconcileSchema` refuses the
+write with `AoudaSchemaException` rather than silently narrowing, and will not migrate the column
+on its own. Either declare `Int32`, or give the enum a `: byte` base. Full mapping table and the
+reasoning: [Getting started § how a C# property becomes a column
+type](../getting-started/index.md#how-a-c-property-becomes-a-column-type).
+
 
 #### PartitionKeyEntry (entry in `partitionKey`)
 

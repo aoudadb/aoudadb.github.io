@@ -1,4 +1,4 @@
----
+﻿---
 title: "Changelog"
 nav_order: 9
 ---
@@ -12,6 +12,21 @@ Public, user-facing release notes. Engine phase status lives in the server
 ---
 
 ## Unreleased
+
+**Documented for the next train.** These describe behaviour that is on `main` but not yet released; entries are marked `(BL-NNN, next train)` where they appear in the guides.
+
+- **A named mutation can write-or-replace by primary key: `"op": "upsert"` (BL-637).** Same `values` row template and `batchParam` support as `insert`, a result carrying both `rowsInserted` and `rowsUpdated`, and an apply-time refusal on a table with no primary key. This is the op for one row per identity written on a timer — a presence heartbeat, a typing indicator, a last-seen roster — where `insert` succeeds exactly once per caller and `update` never succeeds at all. See [Named mutations § choosing `op`](guides/named-queries.md#choosing-op).
+
+- **An insert that hits an existing primary key says so: `409 DUPLICATE_PRIMARY_KEY` (BL-636).** It used to reach the caller as `500 INTERNAL_ERROR` with a request id, the actual sentence readable only in the server log — on a named mutation there was no mapping at all, and on `POST .../rows` there was a code but no status class a caller could branch on. `details` now carries the offending key. This is the same masking BL-529 fixed for update/delete/truncate, on the path it missed.
+
+- **Re-sending a subscription id on a connection replaces that subscription (BL-638).** It used to be refused with `DUPLICATE_SUBSCRIPTION_ID`, which turned every benign retry — a reconnect replay, a gap resume — into a permanently stranded view. The replace happens only after the `subscribe` passes every other check, so a refusal for any other reason leaves the existing subscription delivering. The `id` contract is now written down in full: [HTTP API § subscribe](reference/http-api.md#subscribe).
+
+- **How a C# property becomes a column type, including enums.** The mapping table was never published, and the one rule people get wrong was invisible: a C# enum binds to its **underlying** integral type, which is `Int32` unless the enum declares `: byte`. Declaring such a column `"type": "Byte"` in the schema file makes the model and the database disagree permanently — `AutoReconcileSchema` refuses the write and will not migrate the column. See [Getting started § how a C# property becomes a column type](getting-started/index.md#how-a-c-property-becomes-a-column-type).
+
+- **`AutoReconcileSchema`'s type-mismatch message names the enum rule (BL-636).** When both types are integral it now adds one sentence — an enum binds to its underlying integral type, so declare the column `Int32` or declare the enum `: byte` — instead of sending the reader towards `ApplyAsync` and truncation flags, which is the right advice for a real migration and no help where one of the two declarations is simply wrong. Type migration is still never automatic, and that is deliberate: widening a populated column rewrites it, which is an operator's decision.
+
+- **One WebSocket per client, and what a subscription id means across a reconnect.** [TypeScript client § one connection, many subscriptions](clients/typescript.md#one-connection-many-subscriptions) — including the `@aouda/client` defect (BL-635, fixed in 0.1.25) where each subscription opened its own socket.
+
 
 ## 0.1.36 — 2026-09-21
 

@@ -1,4 +1,4 @@
----
+﻿---
 title: "Named queries and mutations"
 nav_order: 8
 parent: "Guides"
@@ -588,6 +588,61 @@ await client.namedMutations.execute("equity.adjustQty", { id: 1, qty: 10 });
 
 Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `rowsDeleted`) plus optional `RETURNING` rows. Mutations are **not** allowed in the read batch.
 
+### Choosing `op`
+
+| `op` | Shape | Requires | Result fields |
+|---|---|---|---|
+| `insert` | row template in `values` | — | `rowsInserted`, `generatedValues` |
+| `upsert` *(**BL-637, next train**)* | row template in `values` | the table declares a **primary key** | `rowsInserted`, `rowsUpdated`, `generatedValues` |
+| `update` | `where` + `set` / `setExpr` | non-empty `where` | `rowsUpdated`, `RETURNING` rows |
+| `delete` | `where` | explicit `limit` cap | `rowsDeleted`, `RETURNING` rows |
+
+> **`insert` will not overwrite. For one row per key, use `upsert`.**
+>
+> An `op: "insert"` that names a primary key a live row already holds fails with **`409
+> DUPLICATE_PRIMARY_KEY`**. It does not update, and there is no "insert if absent" mode of
+> `insert`.
+>
+> This matters most for the shape it is easiest to get wrong: **one row per identity, written on
+> a timer** — a presence heartbeat, a typing indicator, a last-seen roster. The primary key is
+> `derived: { "identity": "subject" }`, so the caller never supplies it and the first call looks
+> like it works. Every call after that names the same key. Declared `insert` it succeeds exactly
+> once per user and then fails forever; declared `update` it never succeeds at all, because on
+> the first call there is no row to match.
+>
+> ```json
+> "connect.presence.heartbeat": {
+>   "op": "upsert",
+>   "table": "Presence",
+>   "values": { "LastHeartbeat": { "param": "lastHeartbeat" } },
+>   "params": { "lastHeartbeat": { "required": true } }
+> }
+> ```
+>
+> ```text
+> first call                every call after
+> { "rowsInserted": 1,      { "rowsInserted": 0,
+>   "rowsUpdated": 0 }        "rowsUpdated": 1 }
+> ```
+>
+> The split is the point of the two counters: an upsert whose `rowsInserted` stays at zero is a
+> heartbeat working correctly, and one that *only* ever inserts is a key that is not matching.
+>
+> **What `upsert` costs.** Matching by key means the target is kept resident as a mutable keyed
+> tier, so lookups stay O(1) and an updated key never seals into a hot copy the write path would
+> have to tombstone. That is the right trade for a **bounded** keyspace — one row per user, per
+> device, per session — and the wrong one for an unbounded stream of new keys, which should stay
+> `insert`. The same mechanism backs the upsert write-stream
+> ([HTTP API `stream_open`](../reference/http-api.md#stream_open)).
+>
+> **Apply-time checks.** `upsert` on a table with no primary key is refused at schema apply —
+> there would be nothing to match on and every call would silently append.
+>
+> `upsert` is last-write-wins: the whole row in `values` replaces the stored row. It is not a
+> partial merge, so a column you omit from `values` is written as its default, not preserved.
+> When you need to change some columns and keep the rest, that is `op: "update"`.
+
+
 ### Writing `values` and `set`
 
 Each entry maps a **column** to one of three things — a literal, a parameter hole, or an explicit constant:
@@ -663,7 +718,7 @@ await client.namedMutations.execute("tick.record", {
 });
 ```
 
-`maxItems` on the batch parameter is **required** — schema apply fails without it (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`), the same mechanism that bounds an `in`/`nin` list. `batchParam` is only legal on `op: "insert"`; setting it on `update`/`delete` fails apply (`NAMED_MUTATION_BATCH_NON_INSERT`) — batching those is a separate, still-deferred predicate-shaped question (which row does which predicate identify?).
+`maxItems` on the batch parameter is **required** — schema apply fails without it (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`), the same mechanism that bounds an `in`/`nin` list. `batchParam` is legal on the row-shaped ops, `op: "insert"` and (**BL-637, next train**) `op: "upsert"`; setting it on `update`/`delete` fails apply (`NAMED_MUTATION_BATCH_NON_INSERT`) — batching those is a separate, still-deferred predicate-shaped question (which row does which predicate identify?).
 
 **autoIncrement primary keys.** The `tick.record` example above has no surrogate PK. If the target table has an `autoIncrement` primary key (e.g. `"Id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }`), that column **must** appear in `values` — omitting it from the template is accepted at schema apply, then every `execute` fails with `400 INVALID_REQUEST` (`Missing required column 'Id'`). When the caller never chooses the id, the constant form says so once in the definition and keeps it out of every call's `args`:
 
@@ -729,7 +784,9 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Schema apply `NAMED_QUERY_COST_EXCEEDED` | Too many joins | Split the query or drop a join (cap default 8 = `1 + joins`) |
 | Batch HTTP 400 `NAMED_QUERY_BATCH_MUTATION` | Mutation name in `queries` | Mutations have their own execute route |
 | Schema apply `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED` | `batchParam` set without `maxItems` on that parameter | Declare `"maxItems"` on the batch parameter's `params` entry |
-| Schema apply `NAMED_MUTATION_BATCH_NON_INSERT` | `batchParam` set on `op: "update"` / `"delete"` | Batch insert only; update/delete batching is not shipped |
+| Schema apply `NAMED_MUTATION_BATCH_NON_INSERT` | `batchParam` set on `op: "update"` / `"delete"` | Row-shaped ops only (`insert`, `upsert`); update/delete batching is not shipped |
+| Execute `409 DUPLICATE_PRIMARY_KEY` *(**BL-636, next train**)* | An `op: "insert"` named a primary key a live row already holds — most often a per-identity row written on a timer | Switch the definition to [`op: "upsert"`](#choosing-op). Before BL-636 this arrived as `500 INTERNAL_ERROR` with the cause only in the server log |
+| Schema apply, `upsert` refused for want of a primary key *(**BL-637, next train**)* | `op: "upsert"` on a table with no `primaryKey` column | Upsert matches on the key; declare one, or use `op: "insert"` |
 | Batch insert HTTP 400 with `rowErrors` | One array element failed to bind | Fix the element at `rowErrors[0].index`; the whole call was rejected, nothing was inserted |
 | Insert / named-mutation execute `400` `Missing required column 'Id'` | A non-`autoIncrement` required column is missing, or `identityInsert: true` with the `autoIncrement` column omitted | Supply the column. An **omitted `autoIncrement`** column is not this error — it means `0` (auto-generate) |
 | Schema apply `NAMED_MUTATION_VALUE_NODE_INVALID` | A `values` / `set` entry is an object that is neither `{ "param": … }` nor `{ "value": … }` — usually a typo, or a bare object meant as a constant | Use one of the [three entry forms](#writing-values-and-set). A JSON document for a `String` column goes in as a JSON string |

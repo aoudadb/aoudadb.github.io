@@ -1,4 +1,4 @@
----
+﻿---
 title: "Getting Started"
 nav_order: 1
 has_children: true
@@ -997,6 +997,73 @@ await db.GetTable<Event>().InsertAsync(new Event { ... });
 Use both together for the common surrogate-key pattern. You can have a primary key without auto-increment (e.g. a `Guid` you supply), or an auto-incrementing column that is not the primary key.
 
 `[AutoIncrement]` behaves identically in both embedded mode and server mode — there are no naming conventions or implicit rules in either path.
+
+### How a C# property becomes a column type
+
+`SchemaInferrer` maps each property through this table. It is the same map used by
+`AutoCreateSchema` (create the table) and by `AutoReconcileSchema` (compare an existing table
+against the model), so a mismatch here is what a reconcile failure is reporting.
+
+| C# type | Column `type` |
+|---|---|
+| `bool` | `Bool` |
+| `byte` | `Byte` |
+| `short` / `int` / `long` | `Int16` / `Int32` / `Int64` |
+| `ushort` / `uint` / `ulong` | `UInt16` / `UInt32` / `UInt64` |
+| `float` / `double` / `decimal` | `Float32` / `Double` / `Decimal` |
+| `string` | `String` |
+| `DateTime` / `DateTimeOffset` | `Timestamp` |
+| `DateOnly` | `Date` |
+| `Guid` | `Guid` |
+| `T?` (`Nullable<T>`) | the underlying `T`'s type, `nullable: true` |
+| **`enum`** | **the type of its *underlying* integral type — `Int32` unless the enum declares otherwise** |
+
+Anything else throws `NotSupportedException` at inference time, naming the type.
+
+> **⚠️ An enum is `Int32` unless you say otherwise.**
+>
+> A C# enum declared the ordinary way —
+>
+> ```csharp
+> public enum RoomType { Direct = 0, Group = 1, Public = 2 }
+> ```
+>
+> — has an underlying type of `int`, so the model expects an **`Int32`** column. It does not
+> matter that every value fits in a byte. If the schema file declares
+>
+> ```json
+> "Type": { "type": "Byte" }
+> ```
+>
+> then the column and the model disagree, and the first write through
+> `AutoReconcileSchema` fails:
+>
+> ```
+> AoudaSchemaException: Table 'Rooms': column 'Type' has type 'Byte' in the database
+> but the model expects 'Int32'. Automatic type migration is not supported by
+> AutoReconcileSchema.
+> ```
+>
+> **This is not migrated automatically, and that is deliberate** — the two directions are not
+> symmetric. Reading a `Byte` into an `Int32` is lossless; writing an `Int32` into a `Byte` is
+> not, and a reconcile cannot know which way the data will travel. Widening a populated column
+> rewrites it, which is a decision an operator makes, not a side effect of an application's first
+> insert. Fix it at the declaration, one of two ways:
+>
+> - **Change the schema to match the model** — `"Type": { "type": "Int32" }`. Correct for a new
+>   or empty table, and the default choice.
+> - **Change the enum to match the schema** — `public enum RoomType : byte { … }`. Correct when
+>   the `Byte` column already holds data you would rather not rewrite, and when the value range
+>   genuinely is 0–255.
+>
+> If the column is already populated and you need it widened, do it explicitly through
+> `ISchemaOperations.ApplyAsync` (a Tier-1 widening; see
+> [Schema § changing a column type](../guides/schema.md#columndefinition-entry-in-columns)) and
+> keep `AutoReconcileSchema = false` until that has run.
+>
+> The same trap applies to any property whose C# type you have not checked against the schema
+> file. `bool IsPublic` is `Bool`, not `String`; `DateOnly` is `Date`, not `Timestamp`.
+
 
 ### Seeding explicit IDs (identity-insert)
 
