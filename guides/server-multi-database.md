@@ -696,8 +696,8 @@ aouda databases drop   --name trading --server http://localhost:5000
 aouda version
 
 # Offline admin bootstrap (Aouda.Server.exe only)
-./Aouda.Server create-admin --email admin@example.com --password "s3cret" \
-    --data /var/aouda/data
+printf '%s' "$PASSWORD" | ./Aouda.Server create-admin --email admin@example.com \
+    --password-stdin --data /var/aouda/data
 ```
 
 ---
@@ -713,7 +713,7 @@ aouda version
 aouda start --data-dir ./data --bind 0.0.0.0:5000
 
 # 2. Bootstrap admin user (interactive, or --json for automation)
-aouda init --admin-email admin@example.com --admin-password "s3cret" \
+printf '%s' "s3cret" | aouda init --admin-email admin@example.com --admin-password-stdin \
     --server http://localhost:5000
 
 # 3. Create a database

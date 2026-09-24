@@ -1062,6 +1062,15 @@ Four things are worth knowing about it, because it is disk you did not ask for:
   commit.
 - **The volume is bounded by the accumulator ceiling, not by the table.** What a build spills is what
   its working set exceeds, and it reads all of it back at the end of the same commit.
+- **A query whose state is bounded by its own definition no longer spills for a sibling's sake**
+  (**BL-623, next train**). Every query on a table used to share one accumulator budget, so an
+  aggregate grouped by a time bucket — whose key space grows for as long as rows arrive — could push
+  a `latestPerKey` over a few hundred instruments into partitioning, eviction, spill and, at the end,
+  a full-table rebuild. The engine now reads each query's state bound off its own definition and
+  budgets the bounded ones separately. ⚠️ **Separately, not freely**: a bounded query is still
+  charged, against the whole ceiling rather than its share of it, and one that turns out unbounded
+  anyway — a `latestPerKey` keyed on a trade id rather than an instrument — rejoins the ordinary path
+  mid-load and is counted as a misprediction.
 
 ⚠️ **This directory is not a cache and is not a backup.** Do not back it up, and do not point a
 retention or archive tool at it — everything in it is mid-flight state for a build that is either
@@ -1080,6 +1089,9 @@ running now or already dead.
 | `MqBuildRunsWritten` / `MqBuildRunsFolded` | Runs written to a build's spill file, and read back at publish. |
 | `MqBuildRunBytesWritten` | Bytes of disk scratch a build borrowed — the disk this memory bound trades for. |
 | `MqBuildSpillGenerations` | How many times a build spilled (**BL-620, next train**). This is the **file** count: one spill file per generation. `MqBuildRunsWritten ÷ MqBuildSpillGenerations` is how much each spill was worth. |
+| `MqBuildFoldGroupsClosed` | Groups a time-bucketed build finished and closed because its **sort-prefix watermark** passed them (**BL-623, next train**). |
+| `MqBuildFoldOutOfOrderRows` / `MqBuildFoldPrefixReturns` | How badly the input's order fits the fold: rows that arrived behind the watermark within one group prefix, and prefixes that came back after the watermark had left them (**BL-623, next train**). ⚠️ **Both are quality signals, never correctness ones** — the engine merges rather than overwrites, so disorder costs work and never a wrong answer. They are separate because a time-major stream scores `0` on the first and everything on the second. |
+| `MqBoundedStateMispredicted` | Queries whose state bound was read as bounded from their definition and turned out not to be (**BL-623, next train**). **Zero is the expected value.** Non-zero means a query's group key is not the property of the domain its shape implied — check what it is grouped by. |
 | `MqRebuildPooledRequests` / `MqRebuildPooledQueries` / `MqRebuildSourceGroups` | Pooled refresh usage. `PooledQueries / SourceGroups` is how many queries each traversal served. |
 
 ---

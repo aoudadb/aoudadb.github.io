@@ -892,6 +892,15 @@ const status = await client.materializedQueries.status('active_users_summary');
 // status.state: 0=Building, 1=Ready, 2=Rebuilding, 3=Error
 // status.rowCount, status.lastUpdatedUtc, status.errorMessage
 
+// ⚠️ state === Ready means READABLE, not CURRENT. Read these three for currency:
+//   status.isStale      — true when the result is readable but not up to date
+//   status.staleReason  — why, in a sentence; null unless isStale
+//   status.currentLag   — how long it has BEEN behind; null when it is not behind
+// A caught-up idle query reports currentLag === null forever, not a growing number, so
+// null means "current", never "unknown". See reference/http-api.md, "Is this query
+// current?". Polling state alone is how twelve of thirteen queries on one production
+// deployment reported Ready while holding 1.7 % of their source (BL-642, next train).
+
 // Query results (returns all rows; options reserved for future use)
 const results = await client.materializedQueries.query('active_users_summary');
 // results.rows: Record<string, unknown>[]
