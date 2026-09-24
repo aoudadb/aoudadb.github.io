@@ -623,6 +623,15 @@ Logging__LogLevel__Aouda=Information
 
 ⚠️ **The phase fields do not have to sum to `commitMs`, and the gap is the point.** `segmentWriteMs`, `finalizeMs`, `walMs` and `catalogSaveMs` cover the coordinator's own work. Anything left over — buffer drain, spill merge waits, admission — is time nobody has attributed yet. Before `commitMs` existed there was no way to notice that there was a remainder at all.
 
+⚠️ **One remainder is attributed: the publish-backlog wait.** From **0.1.38**, a load on a table
+with materialized queries can wait *after* its rows are durable, until the memory budget has room
+for another queued publish (BL-641). A `commitMs` of about **60 s** that barely changes with row
+count is that wait running to its limit. In 0.1.38 it did so on every job whenever the publish queue
+had stopped draining. From (**BL-661, next train**) a load waits only while publishes are still
+settling: the first load to meet a stalled queue waits at most 10 s, and later loads do not wait.
+The rows are committed either way. A `mqPublishBacklog` that climbs by one per job and never falls
+means the queue has stalled, and the server logs one Warning per stall.
+
 ⚠️ **A rising `mqPublishBacklog` and a directory full of spill files are the same symptom.** A queued publish keeps its build spill on disk until it runs, so a backlog looks exactly like a leak from the filesystem. Check this number before concluding anything from a file count.
 
 **(P45)** Six fields are appended after the ones above — `SpillRunsCreated`, `SpillRunsMerged`,
