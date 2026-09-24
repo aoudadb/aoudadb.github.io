@@ -620,6 +620,7 @@ Logging__LogLevel__Aouda=Information
 | `commitMs` | How long the `:commit` call itself took, measured server-side across the whole request. This is the number a client experiences. |
 | `lockHoldMs` | How long the exclusive table lock was held — the **whole session**, from `:begin`. `lockHoldMs` far exceeding `commitMs` means the session was long, which is the recommended shape; it is also how long any other writer to those tables was blocked. |
 | `mqPublishBacklog` | Materialized-query publishes outstanding on this database once this job queued its own, **including this one**, so `1` is the normal value for a load with a query attached. A figure that climbs job over job means the loader is committing faster than its materialized queries can publish. See [Materialized queries](materialized.md). |
+| `mqKeyedLive`, `mqKeyedAbsent`, `mqKeyedUnresolved`, `mqKeyedLocated` | (**BL-662 / BL-664, next train**) — appended at the end of the line. How this database's materialized-query publishes found the existing result row for each group they touched, counted since the server opened the database:<br>• `live`: found in memory by primary key.<br>• `absent`: proven not to exist anywhere, cold storage included (**BL-663**).<br>• `unresolved`: neither, so the result table was read for it.<br>• `located`: the part of `unresolved` that exists in a segment, so its row had to be read. The rest of `unresolved` is keys nothing could decide.<br>They count lookups, not distinct rows. Read them as a ratio, and as the difference between two lines: a publish runs after its own commit, so each line includes every publish that has finished so far. A growing share of undecided keys (`unresolved` minus `located`) means publishes are searching again. |
 
 ⚠️ **The phase fields do not have to sum to `commitMs`, and the gap is the point.** `segmentWriteMs`, `finalizeMs`, `walMs` and `catalogSaveMs` cover the coordinator's own work. Anything left over — buffer drain, spill merge waits, admission — is time nobody has attributed yet. Before `commitMs` existed there was no way to notice that there was a remainder at all.
 
@@ -631,6 +632,17 @@ had stopped draining. From (**BL-661, next train**) a load waits only while publ
 settling: the first load to meet a stalled queue waits at most 10 s, and later loads do not wait.
 The rows are committed either way. A `mqPublishBacklog` that climbs by one per job and never falls
 means the queue has stalled, and the server logs one Warning per stall.
+
+Why it stalled, and what changes (**BL-662, next train**): a publish into a query that already has
+rows reads back and rewrites every group the job touched. Until now both halves scanned the whole
+result table once per 64 groups, so one publish cost *groups touched × result size*. On a
+per-security trade load the largest result is a minute-bucket OHLC query, and one publish could
+outlast the next dozen jobs, with every later publish queued behind it. From the next train both
+halves use the result table's primary-key index wherever it is authoritative, so a publish costs
+roughly what the job touched, whatever the result's size. (**BL-663, next train**) This includes a
+result table the server has demoted to cold storage. A group that does not exist yet is proven new
+from the segments' own indexes, without a scan: a new security, or buckets later than anything
+stored. `MqRebuildCompleted` still means "published, and its dependants caught up".
 
 ⚠️ **A rising `mqPublishBacklog` and a directory full of spill files are the same symptom.** A queued publish keeps its build spill on disk until it runs, so a backlog looks exactly like a leak from the filesystem. Check this number before concluding anything from a file count.
 

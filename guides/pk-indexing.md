@@ -161,6 +161,8 @@ Out of scope for this functionality:
 | L3 keymap persistence (`pk_keymap.dat/.idx`) | Yes | No | No | `L3KeyMapFile.cs`, `HraCompactor.cs` | Strict policy build path. |
 | L3 startup preload | Yes | No | No | `AoudaEngine.PreloadPrimaryKeyIndexes` | Strict tables only. |
 | Latent duplicate counter for phase-1 gate | Yes | No | No | `_pkLatentDuplicates`, `HandleDuplicate`, playbook | Exposed in diagnostics. |
+| Zone maps on every PK column, and the leading value checked against every page's bloom (**BL-663, next train**) | Yes | No | No | `AoudaEngine.KeyProbe.cs` | Sealed-segment lookups exclude a segment when **any** key column is outside that column's min/max, not only the first. So a table clustered on time prunes old segments by time. A leading value that no page's bloom contains excludes the whole segment for all keys with that value. |
+| Key reads use the PK structures (**BL-647, next train**) | Yes | Partial | No | `TableQuery.KeyNarrowing.cs` | A query whose filter is a full-key equality, or an `OR` of them (≤ 256), reads only the buffered rows the L2 index locates and only segments that can hold a key. Applies to row and columnar reads on `Strict` and `Recent` tables that are not partitioned. Not yet applied to streaming, `DISTINCT`, joins, aggregates, or updates and deletes that match several keys. |
 | Open-path preload to avoid first-write rebuild | Yes | No | No | P17 completion, `PreloadPrimaryKeyIndexes` | Extended by P18 with L1/L3 load. |
 | User-level automated duplicate remediation | No | No | Yes | Playbook only | Operator-driven process. |
 
@@ -197,6 +199,16 @@ High-level runtime flow:
    - strict gate on: throw.
    - strict gate off: increment latent counter and continue.
 6. On commit, key entries are inserted into L2.
+
+Reads (**BL-647, next train**). When a query's filter pins full primary keys, the query engine
+narrows its inputs before scanning:
+- The unflushed buffer contributes only the rows L2 locates for those keys, instead of being walked.
+- Every segment proven to hold none of the keys is skipped. The proof uses L2 hot partitions, zone
+  maps on each key column, page blooms and L3.
+
+The scan then runs as before, and the full filter is still evaluated on every row it reads. Results
+are therefore identical to an unnarrowed read; only the work changes. A segment that cannot be ruled
+out is always read.
 
 Seal/open path:
 
