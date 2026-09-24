@@ -39,9 +39,9 @@ aouda databases create --name myapp
 For a secured server, initialize the server admin after the server is running:
 
 ```bash
-aouda init \
+printf '%s' "ChangeMeNow!" | aouda init \
   --admin-email admin@derive.local \
-  --admin-password "ChangeMeNow!" \
+  --admin-password-stdin \
   --server http://localhost:5433 \
   --json
 ```
@@ -51,7 +51,7 @@ aouda init \
 Required and optional arguments:
 
 - `--server` is optional. If omitted, the CLI uses the locally started server from `aouda start`, then `AOUDA_SERVER` / `AOUDA_URL`, then `http://localhost:5000`. Passing `--server` is recommended for non-default ports such as `5433` or service-managed servers.
-- `--admin-email` and `--admin-password` are required when the server is still in setup mode. On an already initialized server, provide them to sign in and return a token, or omit them to only verify that setup is complete.
+- `--admin-email` and a password (`--admin-password-file <path>` or `--admin-password-stdin`) are required when the server is still in setup mode. On an already initialized server, provide them to sign in and return a token, or omit them to only verify that setup is complete. ⚠️ There is no `--admin-password <value>` option: a password never appears on the command line, for the same reason `create-admin --password` was removed (below).
 - `--token` can be supplied when you already have an admin token and want `aouda init` to verify the server state without signing in.
 
 `aouda init` is state-aware and retryable. It checks setup status, creates the first server admin if needed, and returns JSON describing what changed. It does not create databases.
@@ -1331,9 +1331,9 @@ Response while setup is required:
 For server setup, prefer the retryable initializer:
 
 ```bash
-aouda init \
+printf '%s' "ChangeMeNow!" | aouda init \
   --admin-email admin@example.com \
-  --admin-password "ChangeMeNow!" \
+  --admin-password-stdin \
   --server http://localhost:5433 \
   --json
 ```
@@ -1399,18 +1399,18 @@ The server creates the admin on first startup if the `_serverauth` database has 
 #### Option C: Local Bootstrap Command
 
 ```bash
-aouda create-admin \
+printf '%s' "$PASSWORD" | aouda create-admin \
   --email admin@example.com \
-  --password "ChangeMeNow!" \
+  --password-stdin \
   --data ./data
 ```
 
 This creates the admin directly in the data directory without starting the server. For binary-only or air-gapped installs, the native server artifact also supports the same local bootstrap operation:
 
 ```bash
-./Aouda.Server create-admin \
+printf '%s' "$PASSWORD" | ./Aouda.Server create-admin \
   --email admin@example.com \
-  --password "ChangeMeNow!" \
+  --password-stdin \
   --data ./data
 ```
 
@@ -1965,8 +1965,9 @@ aouda create-admin --email admin@example.com \
   --password-file /etc/aouda/admin-password --data /var/lib/aouda
 ```
 
-⚠️ A file readable by group or other is **refused**, naming the mode it found. On Windows that check
-cannot be made the same way, so set the ACL yourself.
+⚠️ A file readable beyond its owner is **refused** — on Linux/macOS, by mode (naming the mode it
+found and the `chmod 600` to fix it); on Windows, by DACL (naming `icacls` if `Everyone`,
+`Authenticated Users`, or `BUILTIN\Users` can read it, including by inheritance from the directory).
 
 *Standard input, which touches no filesystem — the right answer in a pipeline or for an agent:*
 

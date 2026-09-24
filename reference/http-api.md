@@ -1459,12 +1459,54 @@ The list route returns an array of the same object.
 | `type` | integer | Raw `MaterializedQueryType` enum value. **No `JsonStringEnumConverter` is registered anywhere in the server**, so this is an integer on every enum on every route. |
 | `state` | integer | Raw `MaterializedQueryState` enum value (`Building`, `Ready`, `Rebuilding`, `Error`). |
 | `rowCount` | integer | Rows currently in the result table. |
-| `currentLag` | string? | `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. |
+| `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, next train**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
-| `isStale` / `staleReason` | boolean / string? | The server lost an update before it reached this query's maintainer, so the result is missing rows. Absent on servers that predate the field, which deserializes as `false`. |
-| `workingSetTruncated` | boolean | ⚠️ **Always `false`; retained for wire compatibility only.** No maintainer keeps a working set any more — a change that cannot be served from the result table marks the query stale and rebuilds it. Read `isStale` / `staleReason` instead. Scheduled for removal on a future train (a wire break). |
+| `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
 | `token` | string? | The maintenance watermark, as above. |
+
+#### ⚠️ Is this query current? Read `isStale`, `staleReason` and `currentLag` — not `state`
+
+**`state: Ready` means the query is *readable*. It does not mean it is *current*.** The two are
+deliberately separate, and reading `state` alone is the mistake this section exists to prevent.
+
+A materialized query that has fallen behind still holds real rows and still answers reads. Dropping
+it from routing would turn "slightly stale" into "unavailable", which is strictly worse — so it
+stays `Ready`, and its currency is reported by three other fields:
+
+| Field | Meaning |
+|---|---|
+| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. |
+| `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
+| `currentLag` | How long the query has **been behind**. `null` when it is not behind — including for a caught-up query that has been idle for days. |
+
+⚠️ **`currentLag` is not "time since the result was last updated".** A caught-up idle query reports
+`null`, not a number that grows forever. If you are computing freshness, `null` means *current*, not
+*unknown*.
+
+**This matters because the previous behaviour was silence (BL-642, next train).** Before it,
+`currentLag` was `null` on every response — the field existed on the wire and was never populated.
+On one production deployment, **twelve of thirteen materialized queries reported `state: Ready`,
+`errorMessage: null`, `currentLag: null` while holding 1.7 % of their source rows.** Every consumer
+read stale data as current. A client that polls `state` and nothing else will still do so.
+
+**Recommended check:**
+
+```jsonc
+// current
+{ "state": 1, "isStale": false, "currentLag": null }
+
+// readable, but behind — act on this
+{ "state": 1, "isStale": true,
+  "staleReason": "3 bulk-load publish(es) for this query have been queued and have not finished. The result is readable but is not current.",
+  "currentLag": "00:00:12.4310000" }
+```
+
+> **Removed: `workingSetTruncated` (BL-583, next train).** It was hard-wired `false` from the train
+> that removed the working set it described, and — being omitted from JSON when `false` — had
+> already stopped appearing in every response, so no shipped server could send `true`. Read
+> `isStale` / `staleReason` instead. ⚠️ `@aouda/client` (TypeScript) still carries the field; its
+> removal rides that package's own bump.
 
 #### The `amplification` object
 

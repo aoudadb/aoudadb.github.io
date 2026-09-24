@@ -193,9 +193,9 @@ Start the server, initialize the server admin, then create the auth and app data
 aouda start --port 5433
 
 # 2. Initialize server admin only
-aouda init \
+printf '%s' "AdminPass123!" | aouda init \
   --admin-email admin@example.com \
-  --admin-password "AdminPass123!" \
+  --admin-password-stdin \
   --server http://localhost:5433 \
   --json
 

@@ -33,7 +33,8 @@ Start-Process aouda -ArgumentList @(
 # wait until GET http://127.0.0.1:26133/health and :26134/health return 200
 
 # 3. Fresh store → init creates the admin on THIS server.
-aouda init --server http://127.0.0.1:26133 --admin-email … --admin-password … --json
+# --admin-password never appears on the command line — pipe it, e.g. printf '%s' "$PW" | aouda init ...
+printf '%s' … | aouda init --server http://127.0.0.1:26133 --admin-email … --admin-password-stdin --json
 # save accessToken; do not print it. Then:
 aouda databases create -n auth --kind auth -s http://127.0.0.1:26133 -t <token> --json
 # capture auth.keys.anonKey / publicKey from that JSON now — GET list is prefix-only.
