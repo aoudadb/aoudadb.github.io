@@ -37,6 +37,10 @@ docker run -d --name aouda \
 
 The image's entry point is `dotnet Aouda.Server.dll start`, the data directory is `/data`, and it listens on port 5000.
 
+⚠️ **Mounting somewhere other than `/data`?** Override the data path with **one** setting — `AOUDA_DATA_PATH` (the env var this image already sets), `Aouda__DataPath`, or `--data-dir`/`--data-path`/`-d` on the command line. All five are the same setting under the hood; setting more than one is redundant, not additive. There is no `AOUDA_DATA` (without `_PATH`) — that name is not read, and a container relying on it silently falls back to the built-in `/data` default, which then fails to create `{path}/Server` if nothing is actually mounted or writable there.
+
+⚠️ **The container's user is uid/gid 1654** (matching `$APP_UID`, the uid Microsoft's aspnet images standardize on since .NET 8). A bind-mounted host directory must be `chown`ed to `1654:1654` — or writable by it — before the container starts, or directory creation under the data path fails and the process exits immediately. A named volume (as in the example above) does not have this problem: Docker initializes it from the image's own ownership on first use.
+
 ⚠️ **`-p 127.0.0.1:5000:5000`, not `-p 5000:5000`.** The second form publishes the admin API on every interface of the host, which is almost never what you want for a server whose first user was created a minute ago. Put a reverse proxy in front and read [Behind a reverse proxy](reverse-proxy.md).
 
 ---
@@ -134,9 +138,10 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6
 
 ```bash
 printf '%s' "$ADMIN_PASSWORD" | docker exec -i aouda \
-  dotnet Aouda.Server.dll create-admin \
-    --email admin@example.com --password-stdin --data /data
+  aouda create-admin --email admin@example.com --password-stdin --data /data
 ```
+
+The image carries an `aouda` command on `PATH` (a thin wrapper around `dotnet Aouda.Server.dll`) purely for `docker exec` convenience — `dotnet Aouda.Server.dll create-admin ...` still works identically.
 
 Or with Docker secrets, which is the better answer for anything long-lived:
 
