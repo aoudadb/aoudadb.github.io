@@ -15,6 +15,42 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 **Documented for the next train.** These describe behaviour that is on `main` but not yet released; entries are marked `(BL-NNN, next train)` where they appear in the guides.
 
+- **Deployment has real pages now, and they describe what is actually shipped (BL-629, next train).**
+  New [Linux (systemd)](deployment/linux.md), [Windows Service](deployment/windows.md) and
+  [Docker](deployment/docker.md) guides; [Deployment](deployment/) becomes a router to them;
+  `getting-started` §16 is rewritten against what exists rather than what was planned.
+  - ⚠️ **Several things these pages used to say were not true.** The deployment index named six
+    hosting modes and had a page for one, in a table whose Windows row had three cells and two
+    columns. The Windows and systemd examples used **`--contentRoot`**, which is an ASP.NET Core
+    switch that does **not** set Aouda's data directory — a server started that way stores its
+    databases wherever the process was launched from. The container examples named
+    `image: aouda/server`, which was never published under that name; the real image is
+    `ghcr.io/aoudadb/aouda-server`, and it is **private**. `Aouda.Setup` was described as
+    "zero-dependency … self-contained"; it is neither, and its unit file is not the one
+    `aouda service install` writes.
+  - **Every install instruction now says where the artefact comes from and that it needs a token.**
+    Aouda's artefacts are private: no public download, no `curl | sh`, no anonymous `docker pull`.
+    A page that shows a command the reader cannot run is worse than a missing page, because they
+    spend their time before they find out.
+  - **The .NET 8 prerequisite is stated on every page, with the error you get without it.** Aouda
+    ships framework-dependent, so a missing runtime fails in the .NET host loader *before any Aouda
+    code runs* — there is no Aouda error message, and there cannot be.
+  - **The memory limit is explained as what it actually is.** `MemoryMax` / `docker -m` is not only
+    a cap: it creates the cgroup boundary that decides whether Aouda sizes its budget from a grant
+    it was given (70 %) or a host it merely measured (40 %). Both figures, and the 2026-09-11
+    incident that produced them, are now on the page.
+  - **`aouda service install` replaces hand-written unit files**, and the Linux page shows the unit
+    it generates — `Type=notify` so `systemctl start` waits for WAL recovery, `LimitNOFILE` because
+    Aouda stores a file per column, and a hardening block.
+  - ⚠️ **No password appears on a command line in any example.** `create-admin --password` has been
+    removed — a command line is world-readable at `/proc/<pid>/cmdline` and is kept by shell
+    history and audit logs, so a deprecation warning would arrive after the leak. Use
+    `--password-file`, `--password-stdin`, or a systemd `LoadCredential=`.
+  - **New:** [Defaults reference § Logging defaults](guides/defaults-reference.md#logging-defaults)
+    (BL-633). **The default log level is `Warning`**, and the docs had never said so anywhere — so a
+    reader holding a page that says a line exists, and not seeing it, had no way to learn that it
+    was filtered out rather than absent.
+
 - **A named mutation can write-or-replace by primary key: `"op": "upsert"` (BL-637).** Same `values` row template and `batchParam` support as `insert`, a result carrying both `rowsInserted` and `rowsUpdated`, and an apply-time refusal on a table with no primary key. This is the op for one row per identity written on a timer — a presence heartbeat, a typing indicator, a last-seen roster — where `insert` succeeds exactly once per caller and `update` never succeeds at all. See [Named mutations § choosing `op`](guides/named-queries.md#choosing-op).
 
 - **An insert that hits an existing primary key says so: `409 DUPLICATE_PRIMARY_KEY` (BL-636).** It used to reach the caller as `500 INTERNAL_ERROR` with a request id, the actual sentence readable only in the server log — on a named mutation there was no mapping at all, and on `POST .../rows` there was a code but no status class a caller could branch on. `details` now carries the offending key. This is the same masking BL-529 fixed for update/delete/truncate, on the path it missed.

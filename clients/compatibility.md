@@ -14,7 +14,7 @@ Aouda ships multiple artifacts from separate repositories. They do **not** share
 
 | Artifact | Package / image | Repo | Version scheme |
 |----------|-----------------|------|----------------|
-| Aouda server | `aouda/server` (Docker), `Aouda.Server` (binary) | `aouda` | Release train (not npm SemVer) |
+| Aouda server | `ghcr.io/aoudadb/aouda-server` (Docker), `Aouda.Server` (binary) | `aouda` | Release train (not npm SemVer) |
 | TypeScript client | `@aouda/client` (npm) | `aouda-client-ts` | SemVer |
 | .NET client | `Aouda.Client` (NuGet) | `aouda` | SemVer |
 | Studio | `aouda/studio` (Docker), hosted app | `aouda-studio` | App version |

@@ -70,7 +70,7 @@ This explicit server-then-database flow is intentional: it maps cleanly to produ
 ### 2. Docker
 
 ```bash
-docker run -p 5000:5000 -v aouda-data:/data aouda/server
+docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
 ```
 
 ### 3. Docker Compose — server + Studio
@@ -87,7 +87,7 @@ docker compose up
 No PowerShell or bash knowledge required. Extract the release archive and run:
 
 - **Windows:** double-click `Aouda.Setup.exe`
-- **Linux:** `sudo ./aouda-setup`
+- **Linux:** `sudo ./Aouda.Setup`
 
 Answer five prompts (install mode, port, directories, admin email, password). Setup installs the Windows Service or systemd unit, creates a Start Menu / `.desktop` shortcut, and prints your API key.
 
@@ -505,7 +505,7 @@ This gives you a full Aouda server running inside your own host, alongside your 
 Run the official Docker image:
 
 ```bash
-docker run -p 5000:5000 -v aouda-data:/data aouda/server
+docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
 ```
 
 - Server at `http://localhost:5000`
@@ -524,7 +524,7 @@ For production with custom configuration, pass environment variables:
 docker run -p 5000:5000 \
   -v aouda-data:/data \
   -e AOUDA_DATA_PATH=/data \
-  aouda/server
+  ghcr.io/aoudadb/aouda-server
 ```
 
 #### Option E: Docker Compose — server + Studio
@@ -1873,107 +1873,136 @@ This guide intentionally stays focused on Aouda users and production-facing usag
 
 ## 16. Native Production Hosting (Windows + Linux)
 
-This section makes the non-Docker deployment path explicit: publish Aouda as a normal executable, run it as a service, and secure it with server auth on first install.
+Aouda runs from **one binary**. `aouda` and `Aouda.Server` are two names for the same executable —
+there is no separate CLI to install, and no second thing to keep in step. What changes between
+deployments is only which supervisor owns the process.
 
-Aouda intentionally separates the runtime artifact from the administration surface:
+> **Deploying, rather than learning?** The per-platform guides carry the whole procedure, and they
+> are the pages kept current:
+>
+> - [Linux (systemd)](../deployment/linux.md)
+> - [Windows Service](../deployment/windows.md)
+> - [Docker](../deployment/docker.md)
+> - [Kubernetes and Helm](../deployment/kubernetes.md)
+>
+> This section covers what those pages have in common: the artefact, the prerequisite, and the auth
+> bootstrap.
 
-- `Aouda.Server.exe` / `./Aouda.Server` runs the database server and supports local/offline bootstrap commands such as `create-admin`.
-- Windows Service Control Manager, `systemd`, Docker, or Kubernetes should own production process lifecycle.
-- `aouda`, HTTP admin APIs, Studio, and future MCP tools should own normal administration.
+### 16.1 The three ways to run it
 
-### 16.1 Usage Modes You Should Offer
-
-For cross-platform teams, offer these three paths side-by-side:
-
-| Mode | Command style | Best for |
+| Mode | Command | Best for |
 |---|---|---|
-| **Development/local** | `aouda start ...`, then `aouda databases ...` / API | Demos, quick testing, local AI-agent workflows |
-| **Production service** | `Aouda.Server.exe` / `./Aouda.Server` under SCM, `systemd`, Docker, or Kubernetes | VMs, bare metal, containers, managed hosts |
-| **Native bootstrap** | `Aouda.Server create-admin --data ...` | Binary-only or air-gapped first install before the service is exposed |
+| **Development** | `aouda start --data-path ./data --port 5433` | Demos, quick testing, local AI-agent workflows |
+| **Production service** | `aouda service install`, then systemd or the Windows SCM owns it | VMs, bare metal, on-premise |
+| **Container** | `docker run … ghcr.io/aoudadb/aouda-server` | Containerised environments, Kubernetes |
 
-The engine and auth model are the same in all modes. What changes is ownership: service managers keep the server process alive, while `aouda`, HTTP APIs, Studio, and future MCP tools administer the running instance.
+The engine and the auth model are identical in all three. What changes is who keeps the process
+alive.
 
-### 16.2 Publish Aouda as a Native Executable
+⚠️ **`start` is explicit.** `aouda --port 5433` is an error, not a shortcut — a CLI that binds a port
+and creates a `./data` directory when you fumble a flag is a bad CLI. This matters most in a service
+registration, where a missing subcommand installs cleanly and then fails to start.
 
-For user/deployment workflows, use prebuilt Aouda server artifacts for your target platform (`win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`).
+### 16.2 The artefact, and the one prerequisite
 
-If you need to build artifacts from source, use the contributor guide: [Aouda-Developer.md](Aouda-Developer.md).
+⚠️ **Aouda ships framework-dependent.** The binaries do not bundle a .NET runtime, so **the .NET 8
+ASP.NET Core runtime must be installed on the target machine** before anything can start. There is
+no self-contained artefact.
 
-Choose framework-dependent or self-contained artifacts depending on your runtime requirements.
-
-### 16.3 Production Directory Layout (Recommended)
-
-Use explicit directories so upgrades are predictable and data survives binary replacement:
-
-- **Windows**
-  - Binary: `C:\Program Files\Aouda\` (or any install path chosen in Setup)
-  - Data: `C:\ProgramData\Aouda\data\` (default; operator may choose another folder)
-  - Bootstrap: Windows Service command line — `--data-path` and `--port` (not a config file)
-  - Logs: console by default; optional operator logging config
-- **Linux**
-  - Binary: `/opt/aouda/` (or install path from Setup)
-  - Data: `/var/lib/aouda/` (default)
-  - Bootstrap: systemd `ExecStart` flags — `--data-path` and `--port`
-  - Logs: `/var/log/aouda/` (created by install scripts on Linux)
-
-Keep **data** outside the binary folder. See [Server configuration](../guides/server-configuration.md) for precedence and restart behavior.
-
-### 16.4 Production Install Flow (with Server Auth)
-
-For production, treat auth bootstrap as part of installation:
-
-1. Install binaries and create persistent data/config directories.
-2. Bootstrap the first admin with either local/offline data-directory bootstrap or the localhost setup endpoint.
-3. Start Aouda under the production service manager or container runtime.
-4. Create service API key(s) for applications.
-5. Remove plaintext bootstrap password from config (if used).
-6. Point apps to API key auth.
-
-#### Option A: Bootstrap admin locally with the native artifact
-
-```powershell
-& "C:\Program Files\Aouda\Aouda.Server.exe" create-admin `
-  --email admin@example.com `
-  --password "Use-A-Strong-Secret" `
-  --data "C:\ProgramData\Aouda\data"
-```
-
-Linux equivalent:
+This is not a footnote. Without the runtime, the process fails in the .NET host loader — *before a
+single line of Aouda code runs* — so there is no Aouda error message at all, and there cannot be.
+The install scripts check for it first and print what to run; `aouda doctor` reports the runtime's
+**version**, because by the time it can run, the runtime is present by definition.
 
 ```bash
-/opt/aouda/Aouda.Server create-admin \
-  --email admin@example.com \
-  --password "Use-A-Strong-Secret" \
-  --data /var/lib/aouda
+sudo apt-get install -y aspnetcore-runtime-8.0          # Debian / Ubuntu
+dotnet --list-runtimes | grep Microsoft.AspNetCore.App  # verify
 ```
 
-Use this path when the server is not running yet or when you want a minimal binary-only install. It writes directly to the local data directory and does not require `Aouda.Client` or a reachable HTTP endpoint.
+**Platforms:** `linux-x64`, `linux-arm64`, `win-x64`, `win-arm64`.
 
-#### Option B: Bootstrap admin with `aouda create-admin`
+⚠️ **The artefacts are private.** They are published to the private GitHub Releases of
+`aoudadb/aouda`, and the container image to `ghcr.io/aoudadb/aouda-server`. There is no public
+download, no `curl | sh`, and no anonymous `docker pull` — every one needs a token with access to
+that organisation. See each platform page for the exact command.
+
+### 16.3 Directory layout
+
+Keep **data** outside the binary folder, so an upgrade that replaces binaries cannot touch it.
+
+| | Windows | Linux |
+|---|---|---|
+| Binaries | `C:\Program Files\Aouda\` | `/opt/aouda/` |
+| Data | `C:\ProgramData\Aouda\data\` | `/var/lib/aouda/` |
+| Logs | console → the SCM | console → `journalctl` |
+| Bootstrap | the service command line: `start --data-path … --port … --bind …` | the same, in systemd `ExecStart` |
+
+⚠️ **`--data-path`, not `--contentRoot`.** `--contentRoot` is an ASP.NET Core switch that sets where
+the host looks for content files; **it does not set Aouda's data directory**. A server started with
+it stores its databases wherever the process happened to be launched from. If you have a service
+registration carrying `--contentRoot`, that is what it is doing.
+
+`aouda service install` writes the command line for you, which is the reliable way to get this
+right. See [Server configuration](../guides/server-configuration.md) for full precedence.
+
+### 16.4 Bootstrapping the first admin
+
+⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is
+world-readable at `/proc/<pid>/cmdline` for the life of the process, and on every platform it is
+kept by shell history, by process-launch audit rules, by CI logs and by an agent's transcript. None
+of that can be un-leaked, which is why the option was removed rather than deprecated — a deprecation
+warning is printed *after* the leak has already happened.
+
+**Three supported paths.**
+
+*A file, readable only by its owner:*
 
 ```bash
-aouda create-admin \
-  --email admin@example.com \
-  --password "Use-A-Strong-Secret" \
-  --data /var/lib/aouda
+sudo install -m 600 /dev/null /etc/aouda/admin-password
+sudo sh -c 'printf "%s" "$PASSWORD" > /etc/aouda/admin-password'
+
+aouda create-admin --email admin@example.com \
+  --password-file /etc/aouda/admin-password --data /var/lib/aouda
 ```
 
-This is the friendlier CLI path for install scripts and operator laptops. It uses the same local bootstrap implementation but keeps humans and scripts on the normal `aouda` command surface.
+⚠️ A file readable by group or other is **refused**, naming the mode it found. On Windows that check
+cannot be made the same way, so set the ACL yourself.
 
-#### Option C: Bootstrap via setup endpoint (first run only, localhost)
+*Standard input, which touches no filesystem — the right answer in a pipeline or for an agent:*
+
+```bash
+printf '%s' "$PASSWORD" | aouda create-admin \
+  --email admin@example.com --password-stdin --data /var/lib/aouda
+```
+
+⚠️ `printf`, not `echo`: `echo` appends a newline. Aouda strips exactly one trailing newline and no
+other whitespace, so both work — but a password that silently gains a character is a failure nobody
+diagnoses from the symptom.
+
+*A systemd credential, which is the right answer for a service:*
+
+```bash
+sudo aouda service install --admin-password-credential /etc/aouda/admin-password
+```
+
+The unit gets `LoadCredential=aouda-admin-password:/etc/aouda/admin-password`. systemd reads that
+file as root at unit start and places the value at `$CREDENTIALS_DIRECTORY`, mode `0400`, owned by
+the service account, on a tmpfs unmounted when the unit stops. **The unit names the credential; it
+never contains it.**
+
+*Or, first run only, over loopback:*
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/setup \
   -H "Content-Type: application/json" \
-  -d '{
-    "email": "admin@example.com",
-    "password": "Use-A-Strong-Secret"
-  }'
+  --data-binary @- <<'JSON'
+{"email": "admin@example.com", "password": "REPLACE-ME"}
+JSON
 ```
 
-### 16.5 Create Service API Keys for Applications
+### 16.5 API keys for applications
 
-After admin bootstrap, sign in once and create scoped server API keys (`mk_srv_...`) per service:
+After bootstrap, sign in once and create scoped server API keys (`mk_srv_…`) per service:
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/admin/keys \
@@ -1981,146 +2010,62 @@ curl -X POST http://localhost:5433/api/auth/admin/keys \
   -H "Content-Type: application/json" \
   -d '{
     "name": "orders-api",
-    "databaseRoles": {
-      "orders": ["db_writer"],
-      "analytics": ["db_reader"]
-    }
+    "databaseRoles": { "orders": ["db_writer"], "analytics": ["db_reader"] }
   }'
 ```
 
-Store returned keys in a secret manager. Do not keep them in source control or plaintext install scripts.
+Store the returned key in a secret manager immediately — it is shown once. Do not keep it in source
+control or in a plaintext install script.
 
-### 16.6 Run as a Windows Service
+### 16.6 Installing the service
 
-After publishing and copying files, install Aouda under Service Control Manager:
-
-```powershell
-sc.exe create Aouda binPath= "\"C:\Program Files\Aouda\Aouda.Server.exe\" --contentRoot \"C:\ProgramData\Aouda\"" start= auto
-sc.exe start Aouda
-```
-
-Use `sc.exe stop Aouda`, the Services UI, or your deployment system to stop the service. Do not use the server executable as the normal process-control client. For first install, bootstrap admin before exposing the server beyond localhost/firewalled boundaries.
-
-### 16.7 Run as a Linux `systemd` Service
-
-Example unit file (`/etc/systemd/system/aouda.service`):
-
-```ini
-[Unit]
-Description=Aouda Server
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/aouda
-ExecStart=/opt/aouda/Aouda.Server --contentRoot /etc/aouda
-Restart=always
-RestartSec=5
-User=aouda
-Group=aouda
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
+One command, on either platform:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable aouda
-sudo systemctl start aouda
+sudo aouda service install                 # Linux: writes and starts a systemd unit
 ```
-
-Use `sudo systemctl stop aouda`, `restart`, and `status` for lifecycle operations. Use `aouda`, HTTP admin APIs, Studio, or future MCP tools for administration of the running instance.
-
-### 16.8 Make Cross-Platform Setup Equally Simple
-
-To keep Windows and Linux equally easy, ship:
-
-1. Prebuilt artifacts for `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`.
-2. One install script per OS that:
-   - copies binaries and config templates
-   - creates data directories with correct permissions
-   - bootstraps first admin
-   - creates initial service API key
-   - installs/starts OS service
-3. A single "Day 1" checklist in docs:
-   - install
-   - bootstrap auth
-   - create app key
-   - connect first client
-
-If you do this, Docker becomes optional instead of required, and native deployment is first-class on both Windows and Linux.
-
-### 16.9 Interactive Installer: Aouda.Setup
-
-For first-time installs where the operator prefers a guided experience over running scripts, use **Aouda.Setup** — a zero-dependency .NET 8 console app shipped alongside the server binary in the release archive:
-
-| Platform | Binary | Requires |
-|----------|--------|----------|
-| Windows | `Aouda.Setup.exe` (double-click) | Run as Administrator |
-| Linux | `aouda-setup` | `sudo ./aouda-setup` |
-
-The setup app:
-1. Prompts for install mode (Windows Service / systemd, or manual), port, directories, admin email, and password.
-2. Copies binaries to the install directory (no `appsettings.json`).
-3. Registers the OS service with `--data-path` and `--port` on the command line.
-4. Bootstraps the first admin (`Aouda.Server create-admin` directly to the data directory).
-5. Creates a Start Menu shortcut (Windows) or `.desktop` shortcut (Linux).
-6. Prints a completion banner with the server URL and API key.
-
-See [Aouda.Setup guide](../guides/studio.md#12-aoudasetup-installer) for the full interactive sequence, manual mode, service registration details, and shortcut paths.
-
-### 16.10 Automated Install Scripts (Windows + Linux)
-
-For CI/CD pipelines and scripted deployments, the non-interactive install scripts are unchanged and remain the preferred tool:
-
-- binary copy and directory setup
-- initial server admin bootstrap (`Aouda.Server create-admin` or `aouda create-admin`)
-- service installation/start (Windows Service or `systemd`)
-- full server administrator API key creation (`mk_srv_...`, all server-level access)
-
-Scripts:
-
-- `scripts/install-aouda.ps1`
-- `scripts/install-aouda.sh`
-
-#### Prerequisites
-
-1. You have published/extracted Aouda server artifacts for the target OS.
-2. `aouda` CLI is installed on the host (`dotnet tool install -g Aouda.Cli`) if the script creates API keys or performs remote administration. A minimal bootstrap-only install can use the native `Aouda.Server create-admin` command.
-3. You run the script with elevated privileges:
-   - Windows: PowerShell as Administrator
-   - Linux: `sudo`
-
-#### Windows example
 
 ```powershell
-.\scripts\install-aouda.ps1 `
-  -ArtifactDir "C:\temp\aouda-win-x64-sc" `
-  -AdminEmail "admin@example.com" `
-  -AdminPassword "Use-A-Strong-Secret" `
-  -ApiKeyName "primary-admin-key"
+aouda service install                      # Windows, elevated: registers with the SCM
 ```
 
-#### Linux example
+It writes a unit (or a service registration) carrying the resource limits and hardening that a
+production server needs, starts it, and prints what it did. `--dry-run` shows the exact output
+without changing anything.
+
+⚠️ **It is not a thin wrapper over a hand-written unit file.** The generated systemd unit sets
+`Type=notify` so `systemctl start` waits for WAL recovery instead of returning while the node is
+still replaying; `MemoryMax`, which decides whether Aouda sizes its budget from a real grant or a
+guess; `LimitNOFILE`, because Aouda stores a file per column; and a hardening block.
+[The Linux page](../deployment/linux.md#the-unit-file) shows the file and explains each line.
+
+Day-to-day:
 
 ```bash
-chmod +x ./scripts/install-aouda.sh
-sudo ./scripts/install-aouda.sh \
-  --artifact-dir /tmp/aouda-linux-x64-sc \
-  --admin-email admin@example.com \
-  --admin-password 'Use-A-Strong-Secret' \
-  --api-key-name primary-admin-key
+aouda service status | start | stop | uninstall
+aouda status        # running? where? which version? what budget?
+aouda doctor        # what is misconfigured on this machine
 ```
 
-#### Security notes
+Both `status` and `doctor` take `--output json`, which every command accepts.
 
-- The script prints the generated API key once. Store it immediately in your secret manager.
-- Avoid passing secrets on shared shells where command history is collected.
-- Rotate the bootstrap admin password and service API keys according to your security policy.
+### 16.7 Scripted installs
 
----
+The install scripts remain the entry point for CI/CD and scripted deployment, and they now do
+exactly one thing the binary cannot: check for the .NET 8 runtime before running a binary that needs
+it. Everything else they delegate.
+
+```powershell
+.\scripts\install-aouda.ps1 -ArtifactDir .\win-x64 --port 5433
+```
+
+```bash
+sudo ./scripts/install-aouda.sh --artifact-dir ./linux-x64 --port 5433
+```
+
+Any option a script does not recognise is passed through to `aouda service install`.
+
+⚠️ **They take no password and print no key.** Bootstrap auth separately, with one of §16.4's paths.
 
 ## Quick Reference: Embedded vs Server API
 

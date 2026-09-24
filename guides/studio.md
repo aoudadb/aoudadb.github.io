@@ -645,19 +645,33 @@ Manual ops required once per deployment: create the Vercel project, attach the `
 
 ## 12) Aouda.Setup Installer
 
-`Aouda.Setup` is a zero-dependency .NET 8 console app (published as a single self-contained binary) that replaces the manual PowerShell/bash install scripts with an interactive, double-click experience.
+`Aouda.Setup` is a .NET 8 console app, published as a single file, that offers an interactive
+alternative to the install scripts.
+
+> ⚠️ **It is not self-contained and it is not zero-dependency.** Like every Aouda artefact it is
+> **framework-dependent**: the **.NET 8 ASP.NET Core runtime must already be installed** on the
+> machine. Without it the process fails in the .NET host loader before any Aouda code runs, so
+> there is no Aouda error message to read. Install it first:
+> `apt-get install aspnetcore-runtime-8.0`, `winget install Microsoft.DotNet.AspNetCore.8`, or
+> <https://dotnet.microsoft.com/download/dotnet/8.0>.
+
+> ⚠️ **The unit file it writes is not the one `aouda service install` writes.** It predates that
+> command and carries neither the resource limits nor the hardening — no `MemoryMax`, no
+> `LimitNOFILE`, `Type=simple` rather than `Type=notify`. For a production Linux host, prefer
+> [`aouda service install`](../deployment/linux.md#install), which is the tested path.
 
 ### When to Use Aouda.Setup vs. Install Scripts
 
 | Scenario | Use |
 |----------|-----|
-| First-time install by a developer or end user | `Aouda.Setup.exe` / `aouda-setup` |
-| CI/CD automation, scripted deploy pipelines | `scripts/install-aouda.ps1` / `install-aouda.sh` (unchanged) |
-| Container / Kubernetes deployment | Docker / Helm (no install script needed) |
+| First-time install by a developer or end user, on a workstation | `Aouda.Setup` |
+| **A production server, on either platform** | **`aouda service install`** — [Linux](../deployment/linux.md), [Windows](../deployment/windows.md) |
+| CI/CD automation, scripted deploy pipelines | `scripts/install-aouda.ps1` / `install-aouda.sh`, which preflight the runtime and then call `aouda service install` |
+| Container / Kubernetes deployment | [Docker](../deployment/docker.md) / Helm — no installer needed |
 
 ### Interactive Prompt Sequence
 
-Double-click `Aouda.Setup.exe` (Windows) or run `./aouda-setup` (Linux). The app walks you through five prompts with sensible defaults:
+Double-click `Aouda.Setup.exe` (Windows) or run `sudo ./Aouda.Setup` (Linux — the binary keeps its name on both platforms). The app walks you through five prompts with sensible defaults:
 
 ```
 Welcome to Aouda Setup
