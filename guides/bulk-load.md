@@ -154,7 +154,7 @@ Scope boundaries:
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
   - Default path unchanged (coerce missing/null autoIncrement values to `0`; no allocation; no counter bump from bulk-load alone).
   - Ordinary insert identity-insert is documented in [HTTP API insert](../reference/http-api.md) and [Getting Started](../getting-started/index.md) (BL-130).
-  - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Failed`; C#/TS clients also expose `Unknown` — see below, **BL-419, next train**).
+  - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Failed`; C#/TS clients also expose `Unknown` — see below, **BL-419, 0.1.22**).
   - `BulkLoadJobHandle.MqRebuildCompleted`: `Task` that resolves when all dependent MQ rebuilds finish.
   - Replica coordinator: `MqRebuildScheduler` delegate triggers rebuild after all segments fetched.
   - Explicit on-demand refresh: `engine.RefreshMaterializedQueryAsync(name, ct)` and `POST .../materialized-queries/{name}:refresh`.
@@ -162,7 +162,7 @@ Scope boundaries:
   - C# client: `client.MaterializedQueries.RefreshAsync(name, awaitCompletion, ct)`.
   - TypeScript client: `client.materializedQueries.refresh(name, { await: true })`.
   - CLI: `aouda mq refresh <name> [--await]` and `--skip-mq-refresh` on `aouda table bulk-load`.
-  - `mqRebuildStatus` field in bulk-load job status response, and (**BL-419, next train**) in the `:commit` response too.
+  - `mqRebuildStatus` field in bulk-load job status response, and (**BL-419, 0.1.22**) in the `:commit` response too.
 
 > **Do not hand-refresh an MQ after a Bulk Load.** With `postLoadMqBehavior: "auto"` (the default),
 > affected materialized queries accumulate during the load's own pass and are published at commit —
@@ -171,7 +171,7 @@ Scope boundaries:
 > re-scans the whole source table. The wait after commit is usually short because the work already
 > happened. Wait on `mqRebuildStatus` instead — the C# client's
 > `BulkLoadJobHandle.WaitForMaterializedQueriesAsync()` and the TypeScript client's
-> `handle.waitForMaterializedQueries()` (both **BL-419, next train**) do this polling for you; both
+> `handle.waitForMaterializedQueries()` (both **BL-419, 0.1.22**) do this polling for you; both
 > return (rather than spin) on the terminal `"unknown"` value a job with no live session (e.g. after
 > a server restart) reports, since the WAL alone cannot say more. Some queries still fall back to a
 > scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling
@@ -407,13 +407,13 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `Aouda:BulkLoad:IdempotencyWindowMinutes` | int | `10` | `>=1` | Server config | Idempotency key window. |
 | `Aouda:BulkLoad:AllowWritePermission` | bool | `false` | `true/false` | Server config | Compatibility gate for write-only principals. |
 | `Aouda:BulkLoad:ForceLogShipBulkLoad` | bool | `false` | `true/false` | Cluster/server config | Rejects non-log-ship modes. |
-| `BulkLoadOptions.RequestTimeout` — *next train, not in 0.1.20* | `TimeSpan` | `10m` | positive duration | Client | Deadline for each individual bulk-load HTTP call. Deliberately not `AoudaClientOptions.Timeout` (30 s), which is sized for point operations and cannot cover a `:commit` that seals a million rows. Governs one call, not the job. A caller-supplied `HttpClient` keeps its own `HttpClient.Timeout`, which caps this. |
-| `BulkLoadOptions.MaxAppendBytes` — *next train* | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). |
-| `Aouda:BulkLoad:StreamingRequestTimeoutMs` — *next train* | int | `600000` | `>=0` (`0` disables) | Server config | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. Not the bound on an abandoned session — `SessionIdleTimeoutMinutes` is. |
+| `BulkLoadOptions.RequestTimeout` — *since 0.1.22* | `TimeSpan` | `10m` | positive duration | Client | Deadline for each individual bulk-load HTTP call. Deliberately not `AoudaClientOptions.Timeout` (30 s), which is sized for point operations and cannot cover a `:commit` that seals a million rows. Governs one call, not the job. A caller-supplied `HttpClient` keeps its own `HttpClient.Timeout`, which caps this. |
+| `BulkLoadOptions.MaxAppendBytes` — *since 0.1.22* | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). |
+| `Aouda:BulkLoad:StreamingRequestTimeoutMs` — *since 0.1.22* | int | `600000` | `>=0` (`0` disables) | Server config | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. Not the bound on an abandoned session — `SessionIdleTimeoutMinutes` is. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | int | `10` | `>=0` (`0` disables) | Server config | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock and ingest budget. |
-| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` — *next train* | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` and `:commit` run in. They do not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. |
-| `Aouda:BulkLoad:StreamingRequestQueueLimit` — *next train* | int | `100` | `>=0` | Server config | How many streaming requests may wait for a lane slot; beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
-| `Aouda:MaxConnections` | int | `100` | `>=1` on 0.1.20; `>=0` (`0` = unlimited) from the next train | Server config | Kestrel's concurrent-connection ceiling. A migration holds a connection for the whole of each `:append`; on a host also serving app traffic, raise it or set `0`. |
+| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` — *since 0.1.22* | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` and `:commit` run in. They do not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. |
+| `Aouda:BulkLoad:StreamingRequestQueueLimit` — *since 0.1.22* | int | `100` | `>=0` | Server config | How many streaming requests may wait for a lane slot; beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
+| `Aouda:MaxConnections` | int | `0` | `>=0` (`0` = unlimited). On 0.1.20 and earlier the default was `100` and `0` failed startup | Server config | Kestrel's concurrent-connection ceiling. `0` (unlimited) is the default from 0.1.22. A finite value must stay above `MaxConcurrentRequests + RequestQueueLimit`, or Kestrel closes sockets with no HTTP response. |
 
 **`:append` is not retried, and must not be.** The server writes each accepted row into the
 session's row channel before responding, so replaying an `:append` whose response was lost
@@ -603,7 +603,7 @@ Quick-answer matrix:
 
 Every `:commit` logs a `BulkLoad :commit completed …` line carrying: `commitMs`, `lockHoldMs`, `mqPublishBacklog`, `segments`, `partitions`, `segmentWriteMs`, `finalizeMs`, `walMs`, `catalogSaveMs`, `medianRowsPerSegment`, `p95RowsPerSegment`, `minRowsPerSegment`, and `bufferHighWaterRows`. If a table's segment shape quietly regresses, `medianRowsPerSegment` and `bufferHighWaterRows` are where it shows first.
 
-⚠️ **If you are on a release before this line's own log category shipped (**BL-632, next train**), you will not see it at all.** The server's default log level is `Warning`, and until BL-632 this line had no carve-out — so on a container with no `appsettings.json` and no `Logging__LogLevel__*` environment variable it was filtered out, and a bulk load that spent minutes in `:commit` left no server-side trace of where the time went. From that release it is emitted by default under the category `Aouda.Server.Observability.BulkLoadCommitLog`. To silence it, or to turn it back up on an older build:
+⚠️ **If you are on a release before this line's own log category shipped (**BL-632, 0.1.37**), you will not see it at all.** The server's default log level is `Warning`, and until BL-632 this line had no carve-out — so on a container with no `appsettings.json` and no `Logging__LogLevel__*` environment variable it was filtered out, and a bulk load that spent minutes in `:commit` left no server-side trace of where the time went. From that release it is emitted by default under the category `Aouda.Server.Observability.BulkLoadCommitLog`. To silence it, or to turn it back up on an older build:
 
 ```bash
 # turn it off
@@ -613,7 +613,7 @@ Logging__LogLevel__Default=Warning
 Logging__LogLevel__Aouda=Information
 ```
 
-**(**BL-632, next train**) Read `commitMs` first — it is the total the rest of the line has to add up to.**
+**(**BL-632, 0.1.37**) Read `commitMs` first — it is the total the rest of the line has to add up to.**
 
 | Field | What it tells you |
 |---|---|

@@ -8,6 +8,8 @@ This directory is excluded from the Jekyll site (`_config.yml` `exclude`) — it
 
 **Agent guardrails:** Prepare files locally and **stop**. Do not commit or push unless the maintainer says yes in this session.
 
+Do **not** copy a version number out of an old revision of this file. Read `aouda`'s `src/Aouda.Server/Aouda.Server.csproj` `<Version>`, `@aouda/client`'s `package.json`, and Studio's `package.json`.
+
 ---
 
 ## When this file is invoked
@@ -28,47 +30,39 @@ Edit [`clients/compatibility.md`](../clients/compatibility.md):
 
 - Add a **new top row** for the server train (do not rewrite history rows).
 - Minimum `@aouda/client`, `Aouda.Client`, and Studio for that generation.
-
-This train:
-
-| Artifact | Version |
-|----------|---------|
-| Server | `0.1.22` |
-| Wire / HTTP API notes | MQ `isStale`/`staleReason`; refresh await + bulk-load `mqRebuildStatus`; `MaxConnections` default `0`; `RefreshAwaitTimeout` 120s; P46 bulk-load MQ materialization |
-| `@aouda/client` | `≥ 0.1.21` (pin after npm — published line still `0.1.20`) |
-| `Aouda.Client` | `≥ 0.1.22` |
-| Studio | `≥ 0.0.24` (pin `0.1.21` after npm) |
+- If this train did not change the TypeScript client, say so in the row and leave the Studio pin where it is.
 
 ---
 
-## 2. Public changelog
+## 2. Retire `next train` markers for what this train ships
 
-Move `CHANGELOG.md` **Unreleased** bullets into a dated section that names the same versions (this train: **0.1.22 — 2026-09-10**). Keep Unreleased for not-yet-shipped clarifications only.
+Pages mark behaviour that is on `main` but not yet released as `(BL-NNN, next train)`. When the server version that contains that behaviour is the one you are cutting:
 
-Include user-facing cross-repo facts for this train: P46 bulk-load MQ materialization, BL-419 wait APIs / `MaxConnections` default / `RefreshAwaitTimeout`, BL-427 staleness + health Degraded, BL-432/424 correctness, BL-423 lifecycle, WS auth handshake. Link [HTTP API](../reference/http-api.md) and [Compatibility](../clients/compatibility.md).
+- Replace `next train` with the version you are cutting.
+- Leave the marker on anything that is still unreleased.
+- A marker left saying `next train` after the tag exists tells a reader the page describes a server they cannot install yet.
 
-Update the intro line phase range when newer phases ship (currently P0–P46).
+Also move `CHANGELOG.md` **Unreleased** bullets into a dated section that names the same versions. Keep Unreleased for not-yet-shipped clarifications only.
 
 ---
 
 ## 3. Moment 2 (stop)
 
 - [ ] Matrix row matches the versions the maintainer approved
+- [ ] `next train` markers for this train now name the version
 - [ ] Changelog dated section reviewed
 - [ ] Ready to **commit**?
 - [ ] Ready to **push**? (docs site deploys from `main`)
-
-If `@aouda/client` **0.1.21** is not yet on npm, write “pin after npm” and ship the docs row with that marker; refresh the pin note after publish.
 
 ---
 
 ## 4. Chain — where this file sits
 
 ```
-aouda (server 0.1.22)
-  ├─ aouda-client-ts (npm 0.1.21 after publish; published line still 0.1.20)
-  ├─ THIS REPO (matrix + public changelog)   ← can start as soon as numbers are known
-  └─ aouda-studio (app 0.0.24, pin 0.1.21 after npm)
+aouda (server tag: NuGet + RID archives + private image)
+  ├─ aouda-client-ts   only if the TS client gained or lost a type
+  ├─ THIS REPO         matrix + public changelog + next-train markers
+  └─ aouda-studio      only after an npm publish, and only if the pin or the UI moved
 ```
 
 **Upstream:**

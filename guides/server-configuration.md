@@ -299,7 +299,7 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 
 | Key | Default | What it does |
 |---|---|---|
-| `Aouda:Auth:ExpirySweepIntervalMinutes` | `5` | How often expired rows are deleted from the auth tables that carry a deadline: `_sessions`, `_revoked_tokens`, `_refresh_tokens`, `_mfa_challenges`, `_password_reset_tokens` (**BL-616, next train**). Zero or negative **disables** the sweep. |
+| `Aouda:Auth:ExpirySweepIntervalMinutes` | `5` | How often expired rows are deleted from the auth tables that carry a deadline: `_sessions`, `_revoked_tokens`, `_refresh_tokens`, `_mfa_challenges`, `_password_reset_tokens` (**BL-616, 0.1.37**). Zero or negative **disables** the sweep. |
 
 ⚠️ **Leave the sweep on unless you have a reason.** All five of those tables are pinned
 `HotOnly` (auth storage is a system tier — an authenticated request must never wait on disk for a

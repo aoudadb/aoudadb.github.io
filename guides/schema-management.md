@@ -73,7 +73,7 @@ dotnet aouda schema apply --server http://localhost:5433 --database myapp
 
 If you omit `--server` and `--database`, the CLI uses `AOUDA_SERVER` and `AOUDA_DATABASE` environment variables.
 
-**Against an auth-enabled database, pass a token** (**BL-464, next train**). Every `schema`
+**Against an auth-enabled database, pass a token** (**BL-464, 0.1.37**). Every `schema`
 subcommand — `diff`, `apply`, `export`, `validate`, `history`, `seed` — takes `--token` / `-t`, and
 falls back to the `AOUDA_TOKEN` environment variable when the flag is omitted, the same way
 `--server` falls back to `AOUDA_SERVER`:

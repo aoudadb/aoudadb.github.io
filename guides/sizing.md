@@ -42,7 +42,7 @@ Aouda measures its own headroom — governed budget against sustained working-se
 
 The state is reported as `resourceMode` on `GET /api/server/memory`, with the `headroomRatio` that produced it and a `resourceModeTransitions` count. Transitions require sustained agreement in both directions, so a burst does not move a threshold; if `resourceModeTransitions` is climbing, that is the signal to investigate rather than a normal reading.
 
-### What `headroomRatio` is a ratio of (**BL-622, next train**)
+### What `headroomRatio` is a ratio of (**BL-622, 0.1.37**)
 
 ```
 headroom  =  the server's governed budget
@@ -73,7 +73,7 @@ each open database in turn.
 `reservedBytes` (the ledger) and `untrackedHeadroomBytes` (the gap between them, which is usually
 most of the answer).
 
-### Where the budget itself came from (**BL-611, next train**)
+### Where the budget itself came from (**BL-611, 0.1.37**)
 
 `GET /api/server/memory` now carries a `budgetDerivation` block recording how `MaxTotalRamBytes` was
 arrived at: `source`, `isCgroupBounded`, the `fractionApplied`, both host readings, whether the
@@ -290,7 +290,7 @@ not participate in the over-subscription check, and is bounded by the hot tier i
 `hotOnlyBackstop: "DemoteAnyway"` is unchanged — such a table yields its segments under pressure
 instead of refusing writes.
 
-## Auth databases are resident, and you size for them (**BL-614, next train**)
+## Auth databases are resident, and you size for them (**BL-614, 0.1.35**)
 
 An **auth database is a system tier**: every table it holds except `_audit_log` is pinned `HotOnly`,
 so an authenticated request never waits on disk for a credential, a role, a permission or a signing

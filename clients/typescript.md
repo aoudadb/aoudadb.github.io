@@ -899,7 +899,7 @@ const status = await client.materializedQueries.status('active_users_summary');
 // A caught-up idle query reports currentLag === null forever, not a growing number, so
 // null means "current", never "unknown". See reference/http-api.md, "Is this query
 // current?". Polling state alone is how twelve of thirteen queries on one production
-// deployment reported Ready while holding 1.7 % of their source (BL-642, next train).
+// deployment reported Ready while holding 1.7 % of their source (BL-642, 0.1.38).
 
 // Query results (returns all rows; options reserved for future use)
 const results = await client.materializedQueries.query('active_users_summary');
@@ -909,7 +909,7 @@ const results = await client.materializedQueries.query('active_users_summary');
 // Drop
 await client.materializedQueries.drop('active_users_summary');
 
-// Refresh (BL-419, next train): refresh() now resolves the outcome instead of void.
+// Refresh (BL-419, 0.1.22): refresh() now resolves the outcome instead of void.
 // "complete" (200) only reaches you with await: true; "scheduled" (202) means the rebuild is
 // still running — fire-and-forget, or the server's await window elapsed. Either way the rebuild
 // is never cancelled. A 202 with an empty body (an already-deployed server hitting the
@@ -918,7 +918,7 @@ await client.materializedQueries.drop('active_users_summary');
 const outcome = await client.materializedQueries.refresh('active_users_summary', { await: true });
 // outcome: "complete" | "scheduled"
 
-// refreshAndWait() (BL-419, next train) is the answer to "after a 202, how do I know it's done?"
+// refreshAndWait() (BL-419, 0.1.22) is the answer to "after a 202, how do I know it's done?"
 // — it issues the refresh and, on "scheduled", polls status() until the query leaves Rebuilding.
 const finished = await client.materializedQueries.refreshAndWait('active_users_summary', {
   timeoutMs: 5 * 60_000,   // optional caller deadline; default: none
@@ -930,7 +930,7 @@ const finished = await client.materializedQueries.refreshAndWait('active_users_s
 **Do not** call `refresh()` for a table you just bulk-loaded with the default
 `postLoadMqBehavior: "auto"` — the engine already accumulated those queries during the load and
 publishes them at commit. The wait is usually short because the work already happened. The bulk-load
-handle can wait on it directly instead (BL-419, next train):
+handle can wait on it directly instead (BL-419, 0.1.22):
 
 ```typescript
 const handle = await client.table('users').bulkLoad(rows);

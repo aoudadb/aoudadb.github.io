@@ -1053,7 +1053,7 @@ Four things are worth knowing about it, because it is disk you did not ask for:
 - **It is scratch and it is temporary.** A build deletes its own file when it finishes or fails, and
   an engine open deletes the whole `_build_runs` directory unconditionally before restoring
   anything. Nothing reads it back after the build that wrote it.
-- **One file per build** (**BL-620, next train**), however many times that build spills. Before this
+- **One file per build** (**BL-620, 0.1.36**), however many times that build spills. Before this
   it was one file per partition eviction — a 15.3 M-row bulk load into a table carrying six
   materialized queries left about **152 000 files** behind, at a median of 9.4 KB each.
 - **A bulk load spills per commit, per query.** The engine builds each affected query from the rows
@@ -1063,7 +1063,7 @@ Four things are worth knowing about it, because it is disk you did not ask for:
 - **The volume is bounded by the accumulator ceiling, not by the table.** What a build spills is what
   its working set exceeds, and it reads all of it back at the end of the same commit.
 - **A query whose state is bounded by its own definition no longer spills for a sibling's sake**
-  (**BL-623, next train**). Every query on a table used to share one accumulator budget, so an
+  (**BL-623, 0.1.38**). Every query on a table used to share one accumulator budget, so an
   aggregate grouped by a time bucket — whose key space grows for as long as rows arrive — could push
   a `latestPerKey` over a few hundred instruments into partitioning, eviction, spill and, at the end,
   a full-table rebuild. The engine now reads each query's state bound off its own definition and
@@ -1088,11 +1088,16 @@ running now or already dead.
 | `MqBuildPartitionsEvicted` | Partitions written out to disk scratch under budget pressure. |
 | `MqBuildRunsWritten` / `MqBuildRunsFolded` | Runs written to a build's spill file, and read back at publish. |
 | `MqBuildRunBytesWritten` | Bytes of disk scratch a build borrowed — the disk this memory bound trades for. |
-| `MqBuildSpillGenerations` | How many times a build spilled (**BL-620, next train**). This is the **file** count: one spill file per generation. `MqBuildRunsWritten ÷ MqBuildSpillGenerations` is how much each spill was worth. |
-| `MqBuildFoldGroupsClosed` | Groups a time-bucketed build finished and closed because its **sort-prefix watermark** passed them (**BL-623, next train**). |
-| `MqBuildFoldOutOfOrderRows` / `MqBuildFoldPrefixReturns` | How badly the input's order fits the fold: rows that arrived behind the watermark within one group prefix, and prefixes that came back after the watermark had left them (**BL-623, next train**). ⚠️ **Both are quality signals, never correctness ones** — the engine merges rather than overwrites, so disorder costs work and never a wrong answer. They are separate because a time-major stream scores `0` on the first and everything on the second. |
-| `MqBoundedStateMispredicted` | Queries whose state bound was read as bounded from their definition and turned out not to be (**BL-623, next train**). **Zero is the expected value.** Non-zero means a query's group key is not the property of the domain its shape implied — check what it is grouped by. |
+| `MqBuildSpillGenerations` | How many times a build spilled (**BL-620, 0.1.36**). This is the **file** count: one spill file per generation. `MqBuildRunsWritten ÷ MqBuildSpillGenerations` is how much each spill was worth. |
+| `MqBuildFoldGroupsClosed` | Groups a time-bucketed build finished and closed because its **sort-prefix watermark** passed them (**BL-623, 0.1.38**). |
+| `MqBuildFoldOutOfOrderRows` / `MqBuildFoldPrefixReturns` | How badly the input's order fits the fold: rows that arrived behind the watermark within one group prefix, and prefixes that came back after the watermark had left them (**BL-623, 0.1.38**). ⚠️ **Both are quality signals, never correctness ones** — the engine merges rather than overwrites, so disorder costs work and never a wrong answer. They are separate because a time-major stream scores `0` on the first and everything on the second. |
+| `MqBoundedStateMispredicted` | Queries whose state bound was read as bounded from their definition and turned out not to be (**BL-623, 0.1.38**). **Zero is the expected value.** Non-zero means a query's group key is not the property of the domain its shape implied — check what it is grouped by. |
 | `MqRebuildPooledRequests` / `MqRebuildPooledQueries` / `MqRebuildSourceGroups` | Pooled refresh usage. `PooledQueries / SourceGroups` is how many queries each traversal served. |
+
+`MqBuildRunBytesWritten` only goes up. **How much scratch is on disk right now** is
+`mqSpillOutstandingBytes` on `GET /api/server/metrics`, with `mqSpillCeilingBytes`,
+`mqSpillCeilingExceeded`, and `mqPublishBacklog` beside it (**BL-624, 0.1.38**). Crossing the
+ceiling is logged and counted. It does not fail the load.
 
 ---
 

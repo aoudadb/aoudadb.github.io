@@ -13,9 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-**Documented for the next train.** These describe behaviour that is on `main` but not yet released; entries are marked `(BL-NNN, next train)` where they appear in the guides.
+_No notes yet for the train after 0.1.38._
 
-- **Deployment has real pages now, and they describe what is actually shipped (BL-629, next train).**
+## 0.1.38 — 2026-09-24
+
+**An installable server, and materialized queries that say when they are behind.** Server **0.1.38**, `Aouda.Client` **0.1.38**, `@aouda/client` **0.1.25** (unchanged — this train removes a field the TypeScript client never declared), Studio **0.0.26** (pin stays **0.1.25**). See [Compatibility](clients/compatibility.md).
+
+- **Deployment has real pages now, and they describe what is actually shipped (BL-629).**
   New [Linux (systemd)](deployment/linux.md), [Windows Service](deployment/windows.md) and
   [Docker](deployment/docker.md) guides; [Deployment](deployment/) becomes a router to them;
   `getting-started` §16 is rewritten against what exists rather than what was planned.
@@ -51,17 +55,12 @@ Public, user-facing release notes. Engine phase status lives in the server
     reader holding a page that says a line exists, and not seeing it, had no way to learn that it
     was filtered out rather than absent.
 
-- **A named mutation can write-or-replace by primary key: `"op": "upsert"` (BL-637).** Same `values` row template and `batchParam` support as `insert`, a result carrying both `rowsInserted` and `rowsUpdated`, and an apply-time refusal on a table with no primary key. This is the op for one row per identity written on a timer — a presence heartbeat, a typing indicator, a last-seen roster — where `insert` succeeds exactly once per caller and `update` never succeeds at all. See [Named mutations § choosing `op`](guides/named-queries.md#choosing-op).
-
-- **An insert that hits an existing primary key says so: `409 DUPLICATE_PRIMARY_KEY` (BL-636).** It used to reach the caller as `500 INTERNAL_ERROR` with a request id, the actual sentence readable only in the server log — on a named mutation there was no mapping at all, and on `POST .../rows` there was a code but no status class a caller could branch on. `details` now carries the offending key. This is the same masking BL-529 fixed for update/delete/truncate, on the path it missed.
-
-- **Re-sending a subscription id on a connection replaces that subscription (BL-638).** It used to be refused with `DUPLICATE_SUBSCRIPTION_ID`, which turned every benign retry — a reconnect replay, a gap resume — into a permanently stranded view. The replace happens only after the `subscribe` passes every other check, so a refusal for any other reason leaves the existing subscription delivering. The `id` contract is now written down in full: [HTTP API § subscribe](reference/http-api.md#subscribe).
-
-- **How a C# property becomes a column type, including enums.** The mapping table was never published, and the one rule people get wrong was invisible: a C# enum binds to its **underlying** integral type, which is `Int32` unless the enum declares `: byte`. Declaring such a column `"type": "Byte"` in the schema file makes the model and the database disagree permanently — `AutoReconcileSchema` refuses the write and will not migrate the column. See [Getting started § how a C# property becomes a column type](getting-started/index.md#how-a-c-property-becomes-a-column-type).
-
-- **`AutoReconcileSchema`'s type-mismatch message names the enum rule (BL-636).** When both types are integral it now adds one sentence — an enum binds to its underlying integral type, so declare the column `Int32` or declare the enum `: byte` — instead of sending the reader towards `ApplyAsync` and truncation flags, which is the right advice for a real migration and no help where one of the two declarations is simply wrong. Type migration is still never automatic, and that is deliberate: widening a populated column rewrites it, which is an operator's decision.
-
-- **One WebSocket per client, and what a subscription id means across a reconnect.** [TypeScript client § one connection, many subscriptions](clients/typescript.md#one-connection-many-subscriptions) — including the `@aouda/client` defect (BL-635, fixed in 0.1.25) where each subscription opened its own socket.
+- **A materialized query that is behind its source says so (BL-642).** `currentLag` is how long it has been behind, or `null` when it is not — including a caught-up query that has been idle. `state: Ready` means the result is readable, not that it is current. Read `isStale`, `staleReason`, and `currentLag`.
+- **`workingSetTruncated` is gone (BL-583).** It had been hard-wired `false` and was already omitted from every response. Read `isStale` / `staleReason` instead. `@aouda/client` never declared the field.
+- **A materialized query's state bound is read from its definition (BL-623).** A `latestPerKey` is no longer partitioned and spilled because a time-bucketed aggregate on the same table could not be bounded. A time-bucketed build can close groups its sort-prefix watermark has passed; unordered input costs re-opens, not wrong answers.
+- **Spill still on disk is a number (BL-624).** `GET /api/server/metrics` carries `mqSpillOutstandingBytes`, `mqSpillCeilingBytes`, `mqSpillCeilingExceeded`, and `mqPublishBacklog`. Crossing the ceiling is reported. It does not fail the load.
+- **An upsert accepts the same `Timestamp` and `Date` values an insert does (BL-643).** A boolean or a fractional number is refused, same as insert.
+- **Written down for behaviour that already shipped.** How a C# property becomes a column type, including the enum rule (a C# enum binds to its underlying integral type — `Int32` unless the enum declares `: byte`). One WebSocket per client, and the `@aouda/client` **0.1.25** fix (BL-635) where each subscription opened its own socket. Named `upsert`, `409 DUPLICATE_PRIMARY_KEY`, and subscribe-replace were already in the 0.1.37 notes.
 
 ## 0.1.37 — 2026-09-22
 

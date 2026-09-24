@@ -588,7 +588,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_MUTATION_RETURNING_STAR` | 400 (schema apply) | Named-mutation `returning` contains `*` |
 | `NAMED_MUTATION_VALUE_NODE_INVALID` | 400 (schema apply) | A `values` / `set` entry is an object node that is neither `{ "param": "<name>" }` nor `{ "value": <literal> }` |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
-| `DUPLICATE_PRIMARY_KEY` | 409 | *BL-636, next train.* An insert named a primary key a live row already holds. `details` carries the offending key. Use `op: "upsert"` (named mutation) or `mode: "upsert"` (write-stream) when the write is meant to replace. Previously surfaced as `500 INTERNAL_ERROR` |
+| `DUPLICATE_PRIMARY_KEY` | 409 | *BL-636, 0.1.37.* An insert named a primary key a live row already holds. `details` carries the offending key. Use `op: "upsert"` (named mutation) or `mode: "upsert"` (write-stream) when the write is meant to replace. Previously surfaced as `500 INTERNAL_ERROR` |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |
@@ -604,7 +604,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
-| `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, next train* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
+| `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
 | `CONFLATE_NOOP` | `snapshot_complete` warning | `conflate` is set without `collapse_inserts` and the key is not the table PK (insert-only no-op). Subscribe still registers. |
 | `MQ_NOT_READY` | 409 / WS error | Materialized query is not `Ready`; watermark cannot satisfy a token. Retry; do not treat as a dead token. |
@@ -1202,14 +1202,14 @@ Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) �
 
 Named mutations are the write-side mirror: name-addressed insert/update/delete templates over ADR 0037 expressions. **Invoker rights only.** They are **not** members of the read batch.
 
-**`op`** is one of `insert`, `upsert` (**BL-637, next train**), `update`, `delete`.
+**`op`** is one of `insert`, `upsert` (**BL-637, 0.1.37**), `update`, `delete`.
 
 **`insert` never overwrites.** An `op: "insert"` that names a primary key a live row already holds
-answers **`409 DUPLICATE_PRIMARY_KEY`** (**BL-636, next train**; before that it arrived as
+answers **`409 DUPLICATE_PRIMARY_KEY`** (**BL-636, 0.1.37**; before that it arrived as
 `500 INTERNAL_ERROR` with the real cause only in the server log). The `details` field carries the
 engine's own sentence, including the offending key.
 
-**`op: "upsert"`** (**BL-637, next train**) is write-or-replace by primary key: same `values` row
+**`op: "upsert"`** (**BL-637, 0.1.37**) is write-or-replace by primary key: same `values` row
 template as `insert`, same `batchParam` support, and a result carrying both `rowsInserted` and
 `rowsUpdated`. It requires the table to declare a primary key — `upsert` on a keyless table is
 refused at schema apply, since there would be nothing to match on. It is last-write-wins on the
@@ -1325,7 +1325,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
-> **BL-419 (next train).** Before this fix, `:refresh` sat under the server's global 30s
+> **BL-419 (0.1.22).** Before this fix, `:refresh` sat under the server's global 30s
 > `Aouda:RequestTimeoutMs` default like every other endpoint, and that ambient deadline started
 > *before* — and could preempt — the endpoint's own `RefreshAwaitTimeout` wait (30s at the time, so
 > the two raced and the ambient one, being first in the pipeline, always won). The preempted
@@ -1459,7 +1459,7 @@ The list route returns an array of the same object.
 | `type` | integer | Raw `MaterializedQueryType` enum value. **No `JsonStringEnumConverter` is registered anywhere in the server**, so this is an integer on every enum on every route. |
 | `state` | integer | Raw `MaterializedQueryState` enum value (`Building`, `Ready`, `Rebuilding`, `Error`). |
 | `rowCount` | integer | Rows currently in the result table. |
-| `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, next train**). |
+| `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
@@ -1484,7 +1484,7 @@ stays `Ready`, and its currency is reported by three other fields:
 `null`, not a number that grows forever. If you are computing freshness, `null` means *current*, not
 *unknown*.
 
-**This matters because the previous behaviour was silence (BL-642, next train).** Before it,
+**This matters because the previous behaviour was silence (BL-642, 0.1.38).** Before it,
 `currentLag` was `null` on every response — the field existed on the wire and was never populated.
 On one production deployment, **twelve of thirteen materialized queries reported `state: Ready`,
 `errorMessage: null`, `currentLag: null` while holding 1.7 % of their source rows.** Every consumer
@@ -1502,7 +1502,7 @@ read stale data as current. A client that polls `state` and nothing else will st
   "currentLag": "00:00:12.4310000" }
 ```
 
-> **Removed: `workingSetTruncated` (BL-583, next train).** It was hard-wired `false` from the train
+> **Removed: `workingSetTruncated` (BL-583, 0.1.38).** It was hard-wired `false` from the train
 > that removed the working set it described, and — being omitted from JSON when `false` — had
 > already stopped appearing in every response, so no shipped server could send `true`. Read
 > `isStale` / `staleReason` instead. ⚠️ `@aouda/client` (TypeScript) still carries the field; its
@@ -1560,7 +1560,7 @@ An unrecognised value fails **at schema apply**, not at query time:
 result table via `PUT /api/databases/{db}/tables/{name}/policy` (the result table's name is the
 query's name). They do not survive a destructive schema replace.
 
-⚠️ **`storage` is a schema-file field, not an HTTP create field** (**BL-625, next train**).
+⚠️ **`storage` is a schema-file field, not an HTTP create field** (**BL-625, 0.1.37**).
 This page previously said `POST /api/databases/{db}/materialized-queries` accepted it too. It does
 not: `MaterializedQueryCreateBody` has no such property, so a `storage` key posted to that route is
 deserialized away in silence and the result table is created with the engine default. Create the
@@ -2586,7 +2586,7 @@ component's `details`, so an orchestrator can key on them without polling this r
 ⚠️ **`hotDrainBytesPerSecond == 0` is not a problem on its own.** A server with nothing to demote drains nothing, which is the healthy resting state. The condition worth alerting on is `hotDrainStalled`: demotions were attempted across the interval and none released a segment. Sustained `hotArrivalBytesPerSecond` above `hotDrainBytesPerSecond` says the hot tier is being filled faster than it empties, while there is still headroom to act in.
 
 
-**Provenance: where the budget came from, and what `headroomRatio` divided** (**BL-611 / BL-622, next train**)
+**Provenance: where the budget came from, and what `headroomRatio` divided** (**BL-611 / BL-622, 0.1.37**)
 
 Two additive blocks. Neither changes a threshold, a default or a byte count — they say where the
 numbers beside them came from.
@@ -3306,7 +3306,7 @@ Get cluster topology.
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [`docs/dev/Timestamp-Type.md`](../dev/Timestamp-Type.md). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, next train**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [`docs/dev/Timestamp-Type.md`](../dev/Timestamp-Type.md). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
@@ -3459,7 +3459,7 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 global, and it is not a resource the client has to garbage-collect.
 
 - A `subscribe` naming an `id` the connection **already holds replaces** that subscription
-  (**BL-638, next train**): the old registration is dropped and the new one answers with its own
+  (**BL-638, 0.1.37**): the old registration is dropped and the new one answers with its own
   `snapshot` / `snapshot_complete`. This is the intended way to re-state a subscription after a
   `gap`, and it is harmless if the client sends one redundantly.
 - The replace happens **after** every other check on the `subscribe` passes. A `subscribe` refused
@@ -4026,7 +4026,7 @@ A table with no write-time compute needs neither flag.
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
 | `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` and `:commit` run in. They do **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. |
 | `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
-| `Aouda:MaxConnections` | `0` (unlimited) as of **BL-419, next train** — was `100` through 0.1.21 | Kestrel's concurrent-connection ceiling. `0` (Kestrel's own default) means the request limiter (`MaxConcurrentRequests` + `RequestQueueLimit`) is the first thing an overloaded server hits, and it sheds with a retryable HTTP status; the old `100` default sat *below* that budget (150) on every stock deployment, so the connection ceiling — which Kestrel enforces by silently closing the socket with **no HTTP response** — bit first instead. If you do set a finite value, keep it above `MaxConcurrentRequests + RequestQueueLimit`. On 0.1.20 and earlier, `0` fails validation at startup (`MaxConnections must be at least 1`) — check your server version before relying on the unlimited default. |
+| `Aouda:MaxConnections` | `0` (unlimited) as of **BL-419, 0.1.22** — was `100` through 0.1.21 | Kestrel's concurrent-connection ceiling. `0` (Kestrel's own default) means the request limiter (`MaxConcurrentRequests` + `RequestQueueLimit`) is the first thing an overloaded server hits, and it sheds with a retryable HTTP status; the old `100` default sat *below* that budget (150) on every stock deployment, so the connection ceiling — which Kestrel enforces by silently closing the socket with **no HTTP response** — bit first instead. If you do set a finite value, keep it above `MaxConcurrentRequests + RequestQueueLimit`. On 0.1.20 and earlier, `0` fails validation at startup (`MaxConnections must be at least 1`) — check your server version before relying on the unlimited default. |
 
 
 **Response body:**
@@ -4137,7 +4137,7 @@ Commit the session. All sealed segments become queryable.
 | `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
 | `progress` | object? | Present only when `waitForDeferredWork: true`. Fields: `ivfAssignmentsCompleted`, `ivfAssignmentsTotal`, `raBitQEncodingsCompleted`, `raBitQEncodingsTotal`, `cscMirrorsCompleted`, `cscMirrorsTotal`, `pkIndexRebuildCompleted`, `pkIndexRebuildTotal`. |
-| `mqRebuildStatus` | string | **BL-419 (next train).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
+| `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
 
 ---
 
@@ -4159,7 +4159,7 @@ Get current session state and progress.
 | `lastUpdatedUtc` | string | ISO 8601 last state update time. |
 | `progress` | object? | Deferred work progress. Same structure as in commit response. Null if no deferred work is in progress. |
 | `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
-| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"`. Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"unknown"` (BL-419, next train)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone — the WAL does not record rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
+| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"`. Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone — the WAL does not record rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
 | `error` | string? | Human-readable error message. Set when `state = "failed"`. |
 | `errorCode` | string? | Error code when `state = "failed"`. |
 
