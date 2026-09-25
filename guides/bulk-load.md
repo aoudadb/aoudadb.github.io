@@ -268,6 +268,15 @@ Scope boundaries:
 4. `ForceLogShipBulkLoad=true` disallows skip/snapshot replication modes.
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
 
+### What a frame carries is what NDJSON carries
+
+The C# SDK appends column-batch frames where the server accepts them, and NDJSON where it does not or
+where a row holds something a frame cannot carry (a nested value, a list). Either way the table ends
+up with the same values: a frame gives each number the kind its JSON text would have, a `DateTime`
+that is not UTC and a `DateTimeOffset` travel as their JSON text, and a value a frame would have to
+change is sent as NDJSON instead (**BatchFirst S03, next train**). A load that mixes the two formats
+mid-stream is still one load, with one resume cursor.
+
 ### Sizing a session: fewer, longer, one commit
 
 > **Fewer, longer sessions produce well-sized segments. Many short sessions do not.**
