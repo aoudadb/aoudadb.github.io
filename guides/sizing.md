@@ -36,6 +36,28 @@ CPU budget derivation: machine=28, quota=none, configured=none, schedulable=28,
 
 Aouda's Helm chart sets `limits.cpu` and is therefore safe by default; `docker-compose` sets nothing, so a compose deployment on a shared host should set `--cpus` or `ConfiguredCores`.
 
+## Open files (**IngestAtSpeed S02, next train**)
+
+Aouda keeps a file per column per segment, plus the WAL, key maps and spill runs, so a large load
+can reach the common soft limit of **1024 open files**. The symptom is `No file descriptors
+available` on whatever file came next. On Derive's lab it was a `pk_keymap.dat`, just before the
+process ran out of memory.
+
+At startup the server raises its own soft `RLIMIT_NOFILE` to the hard limit (capped at 1,048,576)
+and logs one line:
+
+```
+Open-file limit: soft 1024 -> 1048576 (hard 1048576).
+```
+
+**The hard limit is yours to set.** A process cannot raise its hard limit. For a container, pass
+`--ulimit nofile=1048576:1048576` (Docker) or set it in the runtime. A systemd install already sets
+`LimitNOFILE`. If the log line reports a hard limit near 1024, raise it there.
+
+`GET /api/server/metrics` reports current usage under `process`: `openHandles`,
+`fileDescriptorSoftLimit` and `fileDescriptorHardLimit`. The two limits are `-1` on Windows, which
+has no such limit.
+
 ## What headroom buys
 
 Aouda measures its own headroom — governed budget against sustained working-set high water — and moves between three states: **`Constrained`**, **`Balanced`** and **`Abundant`**. A host with real headroom does not merely get a larger Aouda; several buffering thresholds move, so it gets a **faster** one. Measured on an 8 GB budget loading 1.2 M rows: the per-table flush trigger rose from 64 MB to 307 MB, the load produced 5 segments instead of 6, and wall clock fell from 5 496 ms to 4 630 ms — about 16%.
@@ -49,6 +71,13 @@ headroom  =  the server's governed budget
              ───────────────────────────────────────────────
              a decayed maximum of the PROCESS's resident set
 ```
+
+(**IngestAtSpeed S08, next train**) The resident set in the denominator no longer counts **managed
+garbage**, meaning memory the GC holds committed beyond what is live. RSS counts it and the host does
+see it as used, but it is not load, and taking it as load kept a server doing a fast bulk load in
+`Balanced` or `Constrained` with its live heap at a tenth of the box. `workingSetSource` still reads
+`ProcessRss`. When the mode rises, a materialized query whose rebuild was refused memory gets a retry
+without a `:refresh`. Every such refusal is also retried 30 seconds later, and at most three times.
 
 Since **BL-622** both operands are on the endpoint, as a `headroom` block beside `headroomRatio` —
 `governedBytes`, `workingSetHighWaterBytes`, `workingSetSource` and `scope`, plus the four
@@ -392,6 +421,12 @@ Full treatment, including the amplification counters that say what a query costs
 Aouda watches the managed heap separately from its own memory ledger, because they are different
 quantities: the ledger says what has been promised, the heap says what will actually throw. A process
 can sit at 39 % of its ledger and at its heap limit simultaneously.
+
+(**IngestAtSpeed S08, next train**) The heap figure is the heap **in use after the most recent
+collection**, not the heap the GC has committed. A fast load produces garbage in gigabytes, and the GC
+keeps most of that memory committed after sweeping it. Read as pressure, it throttled the pipeline for
+being fast: on an 8 GB box with ~800 MB live, admission refused a 64 KB rebuild for minutes. The
+`lastGen2LiveBytes` field on `GET /api/server/metrics` is the closest external reading.
 
 **With ingest pacing off (the default), sustained heap pressure refuses writes**, as it has since the
 memory-ceiling work: a retryable `503` naming the heap figure and its limit, with a 30-second
