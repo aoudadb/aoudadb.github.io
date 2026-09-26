@@ -36,6 +36,35 @@ CPU budget derivation: machine=28, quota=none, configured=none, schedulable=28,
 
 Aouda's Helm chart sets `limits.cpu` and is therefore safe by default; `docker-compose` sets nothing, so a compose deployment on a shared host should set `--cpus` or `ConfiguredCores`.
 
+## Inserts and their materialized queries (**BatchFirst S13, next train**)
+
+An insert is cheap; what it costs you is the materialized queries over its table, which are brought
+up to date after every commit. Size for the queries, not for the insert.
+
+Measured on the reference benchmark — four cores, insert-many into a trade table in batches of 2,000,
+nine queries over it (six aggregates, a latest-per-key, two top-Ns over an aggregate's result):
+
+| Offered rate | Held | CPU per million rows | Query lag p99 |
+|---|---|---|---|
+| 10,000 rows/s | yes | ~80 CPU-s | < 0.1 s |
+| 50,000 rows/s | yes | ~55 CPU-s | ~34 s during the burst; current ~5 s after it |
+
+- **The insert keeps up; the queries fall behind.** The table accepts 50k rows/s on four cores (the
+  insert alone is ~8 CPU-s per million rows), and the queries' maintenance runs at about half that. A
+  burst is absorbed and caught up after it ends; a *sustained* rate above what the maintenance can do
+  is lag that grows. Watch `currentLag` on `GET /api/databases/{db}/materialized-queries/{name}` — it is how long the
+  query has been behind, and `null` when it is current.
+- **Batch.** 1,000–5,000 rows per call. Each commit is maintained as one batch per query, so small
+  commits pay the per-commit cost many times over.
+- **Fewer, narrower queries are cheaper than a bigger machine.** Cost is per query per commit; a query
+  nobody reads still costs its share.
+- **A load, not a stream, is better done as a bulk load.** Bulk loads fold their rows into the queries
+  in one pass after the commit (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
+  rows/s end to end *with the queries current*.
+- A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
+  uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
+  against each segment once.
+
 ## What headroom buys
 
 Aouda measures its own headroom — governed budget against sustained working-set high water — and moves between three states: **`Constrained`**, **`Balanced`** and **`Abundant`**. A host with real headroom does not merely get a larger Aouda; several buffering thresholds move, so it gets a **faster** one. Measured on an 8 GB budget loading 1.2 M rows: the per-table flush trigger rose from 64 MB to 307 MB, the load produced 5 segments instead of 6, and wall clock fell from 5 496 ms to 4 630 ms — about 16%.
