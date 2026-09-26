@@ -13,7 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-_No notes yet for the train after 0.1.38._
+- **Operators can list and delete a user's MFA factors (BL-682).**
+  `GET …/auth/admin/users/{id}/mfa/factors` returns the masked factor list, including an empty
+  list. `DELETE …/mfa/factors/{factorId}` removes that factor and its challenges. Admin enroll
+  still returns 409 while a phone factor exists and still does not change the number; replace a
+  number by deleting on the admin route, then enrolling again.
 
 ## 0.1.38 — 2026-09-24
 
