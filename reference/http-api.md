@@ -3968,7 +3968,7 @@ Client                                  Server
 
 The Bulk Load API provides high-throughput batch data ingestion with durability guarantees, idempotency, and optional replication barriers. It uses a begin/append/commit pattern over HTTP.
 
-All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is NDJSON (`application/x-ndjson`) or, on a server that advertises it, the binary column-batch frame (`application/vnd.aouda.column-batch`, **IngestAtSpeed S09, next train**); all other bodies are JSON.
+All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is NDJSON (`application/x-ndjson`) or, on a server that advertises it, the binary column-batch frame (`application/vnd.aouda.column-batch`, **IngestAtSpeed S09, next train**; see [`:append`](#post-jobidappend)); all other bodies are JSON.
 
 ### Endpoints
 
@@ -4053,8 +4053,8 @@ A table with no write-time compute needs neither flag.
 | `tables` | string[] | Echo of the requested tables. |
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
 | `maxRowsPerAppend` | number | Maximum rows allowed per single `:append` call. Clients must chunk larger payloads. |
-| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count). |
 | `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, next train**) The `:append` body formats this server decodes: `"ndjson"` and `"column-batch"`. Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
+| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count). |
 
 **Example:**
 ```
@@ -4084,9 +4084,11 @@ Content-Type: application/json
 
 Append a chunk of rows to an in-flight session.
 
-**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line), or `application/vnd.aouda.column-batch` (below).
+**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line), or `application/vnd.aouda.column-batch` (one or more column-batch frames back to back; layout below).
 
 When the session was begun with more than one table, each row must include a `"_table"` field naming its destination. The `"_table"` field is stripped before inserting.
+
+**NDJSON line ends.** `\n`, `\r\n` and a bare `\r` each end a line (**BatchFirst S03, next train** — a bare `\r` used to leave the whole body as one line and fail it).
 
 **The column-batch frame** (**IngestAtSpeed S09, next train**). A binary, column-major body the SDKs send
 instead of NDJSON when `:begin` lists `"column-batch"`. It carries the same rows, and the server loads the
@@ -4110,10 +4112,22 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   exactly like a JSON line that omits the key: an omitted auto-increment key is allocated. A row in the
   null bitmap has the column with a `null` value. Absent and null rows still occupy their slot.
 - **Strings are dictionary-encoded per frame**: each distinct value once, then one code per row.
-- **Limits:** 1,000,000 rows and 4,096 columns per frame; a name up to 1,024 bytes; a string up to
-  16 MB. `maxRowsPerAppend` applies across all the frames of one `:append`, as it does to NDJSON lines.
+- **Limits:** 1,000,000 rows and 4,096 columns per frame; a name that is empty or longer than 1,024
+  UTF-8 bytes; a string up to 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would
+  decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, next train**:
+  the last two, and the C# SDK no longer writes a name or string the reader refuses).
+  `maxRowsPerAppend` applies across all the frames of one `:append`, as it does to NDJSON lines.
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
   earlier, well-formed frames in the same body are kept and counted, as NDJSON lines before a bad line are.
+
+**A frame loads the same values as the NDJSON body of the same rows.** The C# SDK sends frames to a
+server that advertises them and NDJSON otherwise; the TypeScript SDK sends NDJSON. The C# SDK gives
+every number the kind its JSON text would take on the server (an integral number is an integer, a
+fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and
+every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value
+the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03,
+next train** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was
+widened, and a timestamp loaded into a text column took the server's culture format).
 
 **NDJSON is still fully supported**, for curl and for any client without the frame. From the same train
 the server decodes it straight into column batches, so it is faster too. A column whose lines mix
