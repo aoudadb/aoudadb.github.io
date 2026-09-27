@@ -303,7 +303,7 @@ results are keyed by identity rather than time, and are not clustered.
   - No protocol-level MQ target-kind required.
 - MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
   - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
-  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. (**BatchFirst S12, next train**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load is folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once; `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`) until it is done. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
   - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
   - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
   - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
@@ -924,6 +924,38 @@ a result that silently omits a committed load is worse than doing the rebuild yo
 would rather control when that work happens, refresh before restarting — which is what `staleOnly`
 is for.
 
+### Deferred loads
+
+(**BatchFirst S08, next train**) `PostLoadMqBehavior.Deferred` (`"deferred"` on the wire) is for loads
+large enough that keeping every query current during the load costs more than the load: the load
+writes only its table, fast, and the queries catch up afterwards.
+
+- Every query over the loaded table is marked **stale**, exactly as a `Skip` load leaves it — readable,
+  routable, `isStale: true` with a `staleReason`, and rebuilt at startup if the server restarts first.
+- The job is recorded as **pending**: which load, which table, which segments. Those segments are not
+  merged by compaction while the job is pending, so the rows a query still owes stay where the load put
+  them.
+- `:refresh` on a query brings it current now. An **update, delete or upsert** of the table first brings
+  its queries current, because applying that change to a result that does not yet hold the rows it
+  changes would be wrong.
+- A load that aborts records nothing.
+
+**The deferred pass** (**BatchFirst S09, next train**). The engine brings a table's queries current in
+one pass over the pending jobs' segments: the rows are read once, every aggregate and latest/first-per-key
+query on the table is folded from them together, and each result is written through the ordinary
+maintenance path, so a query downstream of it (a top-N over an aggregate) follows as it would after any
+write. Filter queries, and a query the fold does not handle (an extreme or ordering over a string column),
+are refreshed in the same pass. The pass runs on its own once deferred loads into the table have been
+quiet for 2 seconds, or once the oldest pending job has waited 60 seconds; `:refresh` on any owing query,
+or an update of the table, runs it at once. Many jobs, one pass. Each query's status reports
+`pendingDeferredJobs` until it is current.
+
+If a pass fails while writing a query, that query is left behind and owes nothing further (it is not
+folded twice); refresh it, or a restart rebuilds it.
+
+A query created after a deferred load, or rebuilt since, already holds the load's rows and owes it
+nothing.
+
 ### HTTP
 
 ```http
@@ -942,7 +974,7 @@ Supply **either** `sourceTable` **or** `names`, never both:
 | Field | Meaning |
 |---|---|
 | `sourceTable` | Refresh every materialized query over this table, from one traversal. |
-| `staleOnly` | With `sourceTable`: only the queries a `PostLoadMqBehavior.Skip` load left stale. Rejected without `sourceTable`. |
+| `staleOnly` | With `sourceTable`: only the queries that are stale — a `PostLoadMqBehavior.Skip` or `Deferred` load leaves them so. Rejected without `sourceTable`. |
 | `names` | Explicit list. An unknown name is a `404`. |
 | `await` | `true` waits up to the server's await window; `false` returns immediately. A wait timeout does **not** cancel the rebuild. |
 

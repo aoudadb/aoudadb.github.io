@@ -1355,7 +1355,7 @@ Queries over one source table are built from a **single traversal** of it, so th
 |-------|------|----------|-------------|
 | `sourceTable` | string? | one of | Refresh every materialized query over this table. |
 | `names` | string[]? | one of | Explicit list. An unknown name is a `404`. |
-| `staleOnly` | bool? | no | With `sourceTable`: restrict to queries a `postLoadMqBehavior: "skip"` load left stale. `400` without `sourceTable`. |
+| `staleOnly` | bool? | no | With `sourceTable`: restrict to queries a `postLoadMqBehavior: "skip"` or `"deferred"` load (or anything else) left stale. `400` without `sourceTable`. |
 | `await` | bool? | no | Same semantics, same window and the same BL-419 guarantees as `{name}:refresh`. Default `false`. |
 
 Supplying both `names` and `sourceTable`, or neither, is a `400` naming the conflict.
