@@ -380,6 +380,15 @@ await client.table('events').insertMany([
 
 If the table has an `autoIncrement` primary key, that column **must be present** on every row — send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column`), not auto-generate. See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows) (BL-429).
 
+**On the wire** (**ColumnarCore S06, next train**): `insert` and `insertMany` send the rows as a binary column-batch
+frame once the server has advertised that it reads one (`Accept-Post` on an earlier insert's response), and JSON
+otherwise — so the first insert on a client, and every insert to an older server, is JSON. Rows holding an object, an
+array, a column whose rows disagree on type, a number in exponent notation (`1e21`), or more than the frame holds (4,096
+columns, 1,000,000 rows, a 16 MB string, an empty or 1 KB+ column name) are sent as JSON; so is everything after a `415`.
+A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a `bigint` is refused as `JSON.stringify`
+refuses it, whichever body the client would have sent. A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
+fraction as a decimal, digit for digit (**BL-704, next train**) — so the inserted rows are the same either way. See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
+
 #### Identity-insert (explicit autoIncrement IDs)
 
 Use `{ identityInsert: true }` when you must supply IDs on an `autoIncrement` column without flipping schema (Bond `isAutoIncrementDisabled: true`). Every autoIncrement column must be present and non-null; literal `0` is stored as-is; after success the runtime counter advances to `max(inserted)`.

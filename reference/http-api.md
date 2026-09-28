@@ -1213,7 +1213,9 @@ engine's own sentence, including the offending key.
 template as `insert`, same `batchParam` support, and a result carrying both `rowsInserted` and
 `rowsUpdated`. It requires the table to declare a primary key — `upsert` on a keyless table is
 refused at schema apply, since there would be nothing to match on. It is last-write-wins on the
-whole row, not a partial merge. This is the op for a row written repeatedly under a key the caller
+whole row, not a partial merge. A key named twice in one batch is written once, holding the later
+row's values (**ColumnarMerge S07, next train** — before it, a key new to the table and repeated in
+one batch was stored twice). This is the op for a row written repeatedly under a key the caller
 does not choose — a presence heartbeat or typing indicator keyed by
 `derived: { "identity": "subject" }` — where `insert` succeeds exactly once and `update` never
 succeeds at all. See [Named mutations § choosing
@@ -1463,6 +1465,7 @@ The list route returns an array of the same object.
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
 | `pendingDeferredJobs` | integer? | (**BatchFirst S09, next train**) Deferred bulk loads (`postLoadMqBehavior: "deferred"`) this query has not incorporated yet. **Omitted** when zero. The deferred pass brings it to zero on its own; `:refresh` or an update of the table forces it. |
+| `stalenessMs` | integer? | (**ColumnarMerge S01, next train**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
 | `token` | string? | The maintenance watermark, as above. |
 
@@ -1479,7 +1482,15 @@ stays `Ready`, and its currency is reported by three other fields:
 |---|---|
 | `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. |
 | `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
-| `currentLag` | How long the query has **been behind**. `null` when it is not behind — including for a caught-up query that has been idle for days. |
+| `currentLag` | How long the query has **been behind** without a break. `null` when it is not behind — including for a caught-up query that has been idle for days. |
+| `stalenessMs` | (**ColumnarMerge S01, next train**) How **old** the oldest change the result does not reflect yet is. Omitted when current. |
+
+⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLag`.** Under a steady stream of
+inserts that never lets a query's queue empty, `currentLag` grows for as long as the stream runs — it is
+how long the query has been continuously behind — even when every insert is applied within a few hundred
+milliseconds. `stalenessMs` stays at the age of the oldest change still owed. A query ingesting 50,000
+rows a second and applying each batch promptly reports `currentLag` in minutes and `stalenessMs` in the
+low hundreds.
 
 ⚠️ **`currentLag` is not "time since the result was last updated".** A caught-up idle query reports
 `null`, not a number that grows forever. If you are computing freshness, `null` means *current*, not
@@ -1500,7 +1511,7 @@ read stale data as current. A client that polls `state` and nothing else will st
 // readable, but behind — act on this
 { "state": 1, "isStale": true,
   "staleReason": "3 bulk-load publish(es) for this query have been queued and have not finished. The result is readable but is not current.",
-  "currentLag": "00:00:12.4310000" }
+  "currentLag": "00:00:12.4310000", "stalenessMs": 4120 }
 ```
 
 > **Removed: `workingSetTruncated` (BL-583, 0.1.38).** It was hard-wired `false` from the train
@@ -1636,6 +1647,8 @@ List all tables with statistics.
 | `lastModifiedAt` | string | ISO 8601 timestamp when table/data was last modified (empty for legacy tables) |
 | `sizeBytes` | number | Approximate size in bytes across all segments |
 | `policy` | object | Storage policy |
+| `rowCountIsExact` | boolean | `false` when `rowCount` is a lower bound (a segment's count was unknown) |
+| `keyMapResident` | boolean, optional | (**ColumnarMerge S05, next train**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, or when the server's memory governor refused it — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
 
 #### `GET /api/tables/{name}`
 
@@ -2054,7 +2067,7 @@ Insert one or more rows into a table.
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
 | `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
-| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column means the same as `0`. Explicit non-zero without the flag is stored but does **not** bump the counter. |
+| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column means the same as `0`. An explicit non-zero id without the flag is stored, and the counter moves past it before the insert commits, so a later generated id cannot repeat it (**ColumnarMerge S02, next train**) — as a JSON integer, a numeric string (`"300"`) or an integral number (`5.0`, `1e2`) alike, each stored as that integer (**BL-703, next train**; a string id used to be stored without moving the counter, and a fractional form failed with a `500`). |
 
 **Response:** `200 OK`
 
@@ -2103,6 +2116,36 @@ Insert one or more rows into a table.
 - Does **not** flip catalog `autoIncrement` (use schema apply / Studio Toggle AutoId for that — BL-126).
 - For large seed/reseed jobs, prefer bulk-load `options.identityInsert` (see [Bulk Load API](#bulk-load-api)).
 
+**The column-batch frame body** (**BL-695 / ColumnarCore S06, next train**):
+
+The same endpoint also accepts **one column-batch frame** — `Content-Type: application/vnd.aouda.column-batch`, the
+binary layout bulk-load [`:append`](#post-jobidappend) takes. The rows
+insert exactly as the same rows sent as JSON would: the same values, defaults, generated ids, errors and messages. A
+frame carries values, not JSON text, so where the text matters the server reads the frame's rows as JSON: a number sent
+into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50`), whatever the server's culture. A client
+that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
+cannot say which text it had.
+
+- A frame has no envelope: the **database and table are the URL's**, and `identityInsert` / `writeConcern` are query
+  parameters — `POST /api/databases/mydb/tables/orders/rows?identityInsert=true&writeConcern=majority`. (On a JSON body
+  those query parameters are ignored; the body's own fields apply.)
+- **One frame per request.** A body holding two frames is `400 INVALID_REQUEST`; so is a body that is not a valid frame.
+- The response is the JSON above.
+
+**How a client knows.** Every response the endpoint itself returns — success or error — carries
+`Accept-Post: application/json, application/vnd.aouda.column-batch` (a request refused before it, by authentication or an
+unsupported `Content-Type`, gets none; browsers can read the header through CORS), and `GET /admin/capabilities` lists
+`insertColumnBatch: true`. A server that predates this does not send the header, and answers a frame with
+`415 Unsupported Media Type`. The official SDKs send JSON until they have seen the header, and go back to JSON on a
+`415` (see [.NET](../clients/index.md) and [TypeScript](../clients/typescript.md)).
+
+**JSON is read into columns too.** A JSON body is no longer deserialized into one dictionary per row: the server
+locates `rows` and reads each value straight into the table's typed columns, with the same conversions as before (a
+number in a `String` column is stored as its JSON text; `"12"` in an integer column is parsed). The request format is
+unchanged, and so is what it accepts: `application/json`, `text/json` and `application/*+json`, with or without a UTF-8
+byte-order mark. Two visible differences: a body that is not valid JSON is now a `ProtocolError` `400 INVALID_REQUEST`,
+like every other error of this endpoint, and an empty body is `400 MISSING_DATABASE`.
+
 **`WriteConcernStatus` object:**
 
 | Field | Type | Description |
@@ -2118,7 +2161,8 @@ Insert one or more rows into a table.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, or `identityInsert: true` with a missing/`null` autoIncrement column |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, or a frame body that is not one valid column-batch frame |
+| — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch` |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
@@ -4075,7 +4119,7 @@ When the session was begun with more than one table, each row must include a `"_
 
 **NDJSON line ends.** `\n`, `\r\n` and a bare `\r` each end a line (**BatchFirst S03, next train** — a bare `\r` used to leave the whole body as one line and fail it).
 
-**The column-batch frame** carries the same rows column by column: typed arrays for integers, doubles, decimals, booleans and timestamps (100-ns ticks since the Unix epoch, UTC), and strings as a per-column dictionary plus codes. The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK sends NDJSON. **A frame loads the same values as the NDJSON body of the same rows.** The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, next train** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format).
+**The column-batch frame** carries the same rows column by column: typed arrays for integers, doubles, decimals, booleans and timestamps (100-ns ticks since the Unix epoch, UTC), and strings as a per-column dictionary plus codes. The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK sends NDJSON. **A frame loads the same values as the NDJSON body of the same rows.** The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, next train** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, next train** — before, a fraction went as a double, which a decimal column could store differently).
 
 A frame is refused (`400`) when it is malformed or exceeds a limit: more than 1,000,000 rows or 4,096 columns; a column name that is empty or longer than 1,024 UTF-8 bytes; a string longer than 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, next train**: the last two, and the C# SDK no longer writes a name or string the reader refuses).
 

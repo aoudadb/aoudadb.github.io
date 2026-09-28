@@ -63,7 +63,32 @@ nine queries over it (six aggregates, a latest-per-key, two top-Ns over an aggre
   rows/s end to end *with the queries current*.
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
   uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
-  against each segment once.
+  against each segment once. (**ColumnarMerge S02, next train**) An id the engine allocates is not
+  probed at all: it is unique by construction.
+
+### Auto-increment ids on time series (**ColumnarMerge S02, next train**)
+
+An `autoIncrement` id costs almost nothing on write: ids are allocated as one range per batch and
+stored delta-bit-packed, about 2 bits a row. On a bulk load of column batches it is written as a column;
+before this train it cost ~0.7–1 CPU-second per million rows. It is still a column: it takes storage and
+a primary-key index, and on a time series it is rarely what anyone reads by. **Where the data has a
+natural key — `(series, time)` — prefer it as the primary key.** Keep the id where you need one (many
+setups default to it; it is fully supported).
+
+An **explicit** value in an `autoIncrement` column now moves the column's counter before it is stored,
+so the engine never allocates it again (an explicit `100` followed by an automatic id gives `101`). An
+explicit value at or below the counter — reusing a freed id — makes that table's automatic inserts
+probe for uniqueness again until the next restart.
+
+### The key map: RAM for keyed writes (**ColumnarMerge S05, next train**)
+
+A table with a primary key and `pkUniqueness: Strict` (the default) keeps its keys in memory across every
+tier, so an insert, upsert or materialized-query update learns whether a key exists without reading a
+segment. Budget roughly **64 bytes per key** of the table's cold data (1 million keys ≈ 64 MB; the write
+buffer and hot segments were already covered). The memory comes from the same governed budget as the rest
+of the key index, and more RAM means more tables answered from memory: when the governor refuses, a table
+simply keeps checking keys by reading its segments — correct, and slower — and `keyMapResident: false` on
+`GET /api/tables` says so. The map is rebuilt in the background after a restart; nothing is stored on disk.
 
 ## What headroom buys
 
