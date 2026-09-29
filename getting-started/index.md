@@ -1980,16 +1980,20 @@ printf '%s' "$PASSWORD" | aouda create-admin \
 other whitespace, so both work — but a password that silently gains a character is a failure nobody
 diagnoses from the symptom.
 
-*A systemd credential, which is the right answer for a service:*
+*A systemd credential, which is the right answer for a service — the server creates the first admin
+itself on its first start:*
 
 ```bash
-sudo aouda service install --admin-password-credential /etc/aouda/admin-password
+sudo aouda service install \
+  --admin-email admin@example.com \
+  --admin-password-credential /etc/aouda/admin-password
 ```
 
-The unit gets `LoadCredential=aouda-admin-password:/etc/aouda/admin-password`. systemd reads that
-file as root at unit start and places the value at `$CREDENTIALS_DIRECTORY`, mode `0400`, owned by
-the service account, on a tmpfs unmounted when the unit stops. **The unit names the credential; it
-never contains it.**
+The unit gets `LoadCredential=aouda-admin-password:/etc/aouda/admin-password` and the email as
+`AOUDA__AUTH__ROOTUSER__EMAIL`. systemd reads that file as root at unit start and places the value
+at `$CREDENTIALS_DIRECTORY`, mode `0400`, owned by the service account, on a tmpfs unmounted when
+the unit stops. **The unit names the credential; it never contains it.** The server reads it only
+while it has no users at all, so once the first admin exists it is inert. Linux only.
 
 *Or, first run only, over loopback:*
 
@@ -2044,11 +2048,14 @@ Day-to-day:
 
 ```bash
 aouda service status | start | stop | uninstall
-aouda status        # running? where? which version? what budget?
+aouda status        # running? ready? where? which version? what budget?
 aouda doctor        # what is misconfigured on this machine
 ```
 
-Both `status` and `doctor` take `--output json`, which every command accepts.
+Both `status` and `doctor` take `--output json`, which every command accepts; commands with
+structured output then print one JSON document. `status` finds an installed service from its
+registration, so it needs no arguments for a default install. Exit codes are listed in
+[Linux deployment](../deployment/linux.md#exit-codes) and are the same on every platform.
 
 ### 16.7 Scripted installs
 

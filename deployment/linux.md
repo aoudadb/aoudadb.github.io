@@ -79,7 +79,28 @@ sudo /opt/aouda/Aouda.Server service install --port 5433 --memory-max 70%
 sudo /opt/aouda/Aouda.Server service install --dry-run
 ```
 
-`--dry-run` prints the exact unit file and changes nothing.
+`--dry-run` changes nothing. It prints the exact unit file on standard output — so
+`--dry-run > aouda.service` captures a clean file — and, on standard error, every step the install
+would take:
+
+```
+getent group aouda >/dev/null || groupadd --system aouda
+getent passwd aouda >/dev/null || useradd --system --gid aouda --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --comment 'Aouda server' aouda
+mkdir -p -- /var/lib/aouda
+chown -R -- aouda:aouda /var/lib/aouda
+chmod -- 0750 /var/lib/aouda
+mkdir -p -- /var/log/aouda
+chown -R -- aouda:aouda /var/log/aouda
+chmod -- 0750 /var/log/aouda
+write /etc/systemd/system/aouda.service (the content printed above)
+systemctl daemon-reload
+systemctl enable aouda
+systemctl restart aouda
+```
+
+The service account and the directories are created by the install, not by you: the account only
+if it does not already exist, and the directories owned by it at `0750`. Re-running the install is
+safe.
 
 ### Options worth knowing
 
@@ -91,13 +112,14 @@ sudo /opt/aouda/Aouda.Server service install --dry-run
 | `--memory-max` | `80%` | ⚠️ Read [The memory limit](#the-memory-limit-and-why-it-does-more-than-you-think) first |
 | `--cpu-cores` | unset | Set it when the host is **shared** |
 | `--max-open-files` | `65535` | Rarely |
-| `--admin-password-credential` | unset | A file holding the admin password; the unit gets a systemd `LoadCredential=` naming it |
+| `--admin-password-credential` | unset | A file holding the first admin's password; the unit gets a systemd `LoadCredential=` naming it. Needs `--admin-email` — see [The first admin](#the-first-admin) |
+| `--admin-email` | unset | The first admin's email, used with `--admin-password-credential` |
 
 ---
 
 ## The unit file
 
-`aouda service install` writes `/etc/systemd/system/aouda.service`. This is its real output, including its comments — every directive in it exists because something went wrong without it:
+`aouda service install` writes `/etc/systemd/system/aouda.service`. This is its real output with the long comments shortened — `--dry-run` prints the full text. Every directive in it exists because something went wrong without it:
 
 ```ini
 [Unit]
@@ -107,6 +129,10 @@ Documentation=https://github.com/aoudadb/aouda
 # has been configured, not that an address is bound.
 After=network-online.target
 Wants=network-online.target
+# A crash loop ends in a visible `failed` state: at most 5 starts in 300 s.
+# `systemctl reset-failed aouda` clears it once the cause is fixed.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 # `Type=notify`, not `Type=simple`. With `simple`, `systemctl start` returns as soon as
@@ -114,6 +140,14 @@ Wants=network-online.target
 # operator or an orchestrator believes the node is up while it is still replaying.
 Type=notify
 NotifyAccess=all
+
+# Readiness is gated on WAL recovery, which takes as long as the log is. systemd's 90 s
+# default would kill a recovery that is making progress and restart it from the
+# beginning. To bound it, set Aouda:DatabaseOpenTimeout, which fails with a message.
+TimeoutStartSec=infinity
+# The server's own shutdown budget (Aouda:ShutdownTimeout, 120 s) plus 30 s. If you
+# raise Aouda:ShutdownTimeout, raise this with it.
+TimeoutStopSec=150
 WorkingDirectory=/opt/aouda
 ExecStart=/opt/aouda/Aouda.Server start --data-path /var/lib/aouda --port 5433 --bind 127.0.0.1
 User=aouda
@@ -123,7 +157,7 @@ Group=aouda
 # operator stopped it, and turns a fail-fast configuration error into a crash loop that
 # hides the message telling you which.
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 
 MemoryAccounting=yes
 MemoryMax=80%
@@ -157,7 +191,7 @@ WantedBy=multi-user.target
 
 `MemoryMax` is the single most valuable line in the unit, and **not only because it caps memory**.
 
-It creates a cgroup v2 boundary, and Aouda sizes its own budget differently depending on whether it finds one:
+It creates a cgroup boundary, and Aouda sizes its own budget differently depending on whether it finds one:
 
 | What Aouda finds | Budget it takes |
 |---|---|
@@ -174,7 +208,7 @@ The fallback is conservative on purpose: a host's total memory says nothing abou
 Memory budget derivation: detected=... available=... source=... cgroupBounded=... governed=...
 ```
 
-`cgroupBounded=false` means the limit did not take. Or ask:
+`cgroupBounded=false` means the limit did not take. Aouda reads the limit on its **own** cgroup and every parent up to the root, and takes the tightest — so a limit set on a parent slice counts too. Or ask:
 
 ```bash
 aouda doctor
@@ -215,14 +249,17 @@ printf '%s' "$PASSWORD" | sudo /opt/aouda/Aouda.Server create-admin \
 
 ⚠️ A file readable by group or other is **refused**, with the mode it found. `chmod 600` it.
 
-**3. A systemd credential**, which is the right answer for a service. Point the installer at the file and the unit gets a `LoadCredential=` naming it:
+**3. A systemd credential**, which is the right answer for a service: the server creates the first admin itself, on its first start. Point the installer at the file and name the admin:
 
 ```bash
 sudo /opt/aouda/Aouda.Server service install \
+  --admin-email admin@example.com \
   --admin-password-credential /etc/aouda/admin-password
 ```
 
-systemd then reads that file as root at unit start and places the value at `$CREDENTIALS_DIRECTORY/aouda-admin-password`, mode `0400`, owned by the service account, on a tmpfs unmounted when the unit stops. **The unit names the credential; it never contains it.**
+The unit gets a `LoadCredential=` naming the file and the email as `AOUDA__AUTH__ROOTUSER__EMAIL`. systemd reads the file as root at unit start and places the value at `$CREDENTIALS_DIRECTORY/aouda-admin-password`, mode `0400`, owned by the service account, on a tmpfs unmounted when the unit stops. **The unit names the credential; it never contains it.**
+
+The server reads the credential only while it has **no users at all**, so once the first admin exists the credential is inert — delete the file whenever you like. The log line says which source it used and never the value.
 
 ---
 
@@ -246,17 +283,40 @@ That prints a warning naming what it just made reachable. Aouda does not termina
 aouda service status      # or: systemctl status aouda
 aouda service start
 aouda service stop
-aouda status              # running? where? what budget?
+aouda status              # running? ready? where? what budget?
 aouda doctor              # what is misconfigured on this machine
 ```
 
-`aouda status` and `aouda doctor` both take `--output json`:
+`aouda status` finds the server without being told where it is: it reads the installed service's port from the unit, probes `/ready` with a bounded timeout, and reports what it saw. The memory budget needs an admin token on a server with auth enabled (`--token`, or `AOUDA_TOKEN`); without one it says so rather than guessing.
+
+Every command takes `--output json`, and commands with structured output then print one JSON document. Put it before the command name for `schema export` and `generate`, whose own `--output` after the name is a file path:
 
 ```bash
 aouda doctor --output json
 ```
 
-`doctor` reports findings with an id, a severity and a remedy — it is meant to be pasted into a support thread. Its exit code is `0` unless something **failed** (warnings alone do not fail it), and `aouda status` exits `70` when the server is not running, which is a different answer from `69`, "I could not tell".
+`doctor` reports findings with an id, a severity and a remedy — it is meant to be pasted into a support thread. It reads the limits of the cgroup the **server** runs in, not the shell you run it from, and what it cannot establish it reports as unknown rather than as a failure.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | OK |
+| `1` | The command failed |
+| `64` | Usage error — an unknown command or option, a missing value, an unknown `--output` format |
+| `65` | `doctor` found at least one **failed** check (warnings alone do not fail it) |
+| `69` | `status`: the server is running but not serving (still recovering, or nothing answered `/ready` within the probe's deadline) |
+| `70` | `status`: the server is not running |
+| `77` | Not permitted — `service install` or `service uninstall` without root (an elevated prompt on Windows) |
+| `78` | The service manager (systemd, the SCM) refused an operation or could not be reached |
+
+### Upgrading from an install made before `aouda service install`
+
+A unit written by the old `install-aouda.sh` runs `Aouda.Server --data-path … --port …` with no `start`, and the current binary rejects that as a usage error — **so the service fails to start after an in-place binary swap.** Re-run the install, which rewrites the unit (and creates nothing that already exists):
+
+```bash
+sudo /opt/aouda/Aouda.Server service install --data-path /var/lib/aouda --port 5433
+```
 
 ### Logs
 

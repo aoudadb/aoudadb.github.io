@@ -48,8 +48,18 @@ Public, user-facing release notes. Engine phase status lives in the server
     it was given (70 %) or a host it merely measured (40 %). Both figures, and the 2026-09-11
     incident that produced them, are now on the page.
   - **`aouda service install` replaces hand-written unit files**, and the Linux page shows the unit
-    it generates — `Type=notify` so `systemctl start` waits for WAL recovery, `LimitNOFILE` because
-    Aouda stores a file per column, and a hardening block.
+    it generates — `Type=notify` so `systemctl start` waits for WAL recovery, with no start timeout
+    so a long recovery is not killed and restarted from the beginning; a stop timeout covering the
+    server's shutdown budget; `LimitNOFILE` because Aouda stores a file per column; and a hardening
+    block. The install creates the `aouda` service account and owns the data and log directories
+    itself, and `--dry-run` prints every step.
+  - ⚠️ **Upgrading an older install: re-run `aouda service install`.** A service registered by the
+    old install scripts has no `start` on its command line, and the current binary rejects that —
+    so an in-place binary swap leaves a service that will not start. Both deployment pages say how.
+  - **`aouda status` and `aouda doctor`** find an installed service from its registration, and the
+    exit codes are one table, on the [Linux page](deployment/linux.md#exit-codes). A systemd
+    credential (`--admin-password-credential` with `--admin-email`) now creates the first admin on
+    the server's first start.
   - ⚠️ **No password appears on a command line in any example.** `create-admin --password` has been
     removed — a command line is world-readable at `/proc/<pid>/cmdline` and is kept by shell
     history and audit logs, so a deprecation warning would arrive after the leak. Use

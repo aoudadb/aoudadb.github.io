@@ -59,7 +59,7 @@ From an **elevated** PowerShell prompt:
 
 The script checks for the .NET 8 runtime, verifies the checksums, copies the binaries to `C:\Program Files\Aouda`, and hands over to `aouda service install`. Everything else — the service registration itself — is done by the server binary, where it is one tested code path.
 
-Any argument the script does not recognise is passed through:
+Any argument the script does not recognise is passed through, in order. `--dry-run` anywhere on the line means a dry run — the script copies nothing and forwards it:
 
 ```powershell
 .\scripts\install-aouda.ps1 -ArtifactDir .\win-x64 --port 5433 --data-path 'D:\Aouda\data'
@@ -71,7 +71,7 @@ Any argument the script does not recognise is passed through:
 & 'C:\Program Files\Aouda\Aouda.Server.exe' service install --dry-run
 ```
 
-which prints the service command line and changes nothing:
+which prints the service command line on standard output, the steps it would take on standard error, and changes nothing:
 
 ```
 "C:\Program Files\Aouda\Aouda.Server.exe" start --data-path C:\ProgramData\Aouda\data --port 5433 --bind 127.0.0.1
@@ -171,11 +171,19 @@ New-NetFirewallRule -DisplayName 'Aouda admin' -Direction Inbound `
 aouda service status      # or: Get-Service Aouda
 aouda service start
 aouda service stop
-aouda status              # running? where? what budget?
+aouda status              # running? ready? where? what budget?
 aouda doctor              # what is misconfigured on this machine
 ```
 
-Both take `--output json`. `doctor`'s findings carry an id, a severity and a remedy, and are meant to be pasted into a support thread.
+`aouda status` reads the installed service's port from its registration and probes `/ready`, so it needs no arguments for a default install. Both take `--output json`. `doctor`'s findings carry an id, a severity and a remedy, and are meant to be pasted into a support thread. The exit codes are the same on every platform — see [the table on the Linux page](linux.md#exit-codes).
+
+### Upgrading from an install made before `aouda service install`
+
+A service registered by the old `install-aouda.ps1` runs `Aouda.Server.exe --data-path … --port …` with no `start`, which the current binary rejects — **so the service fails to start after an in-place binary swap.** Re-run the install from an elevated prompt; it updates the existing registration's command line:
+
+```powershell
+& 'C:\Program Files\Aouda\Aouda.Server.exe' service install --data-path 'C:\ProgramData\Aouda\data' --port 5433
+```
 
 ### Logs
 
