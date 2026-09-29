@@ -563,11 +563,25 @@ curl -X DELETE http://localhost:5433/api/databases/myapp/auth/mfa/factors/a1b2c3
 ### 21.6 — Admin Enrolling a Phone Factor on Behalf of a User
 
 ```bash
+# List factors for a user who has not signed in. Same shape as the user list.
+# A user with none returns 200 { "factors": [] }, not 404.
+curl http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/mfa/factors \
+  -H "Authorization: Bearer <service-role-key>"
+# → { "factors": [{ "id": "d4e5f6a7-...", "type": "phone", "maskedPhone": "+***-***-0123", "status": "active", "createdAt": "..." }] }
+
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/mfa/enroll \
   -H "Authorization: Bearer <service-role-key>" \
   -H "Content-Type: application/json" \
   -d '{ "type": "phone", "phone": "+447700900123" }'
 # → 200 { "factorId": "d4e5f6a7-b8c9-0123-def0-456789012345", "type": "phone" }
+
+# A second enroll, including a different number, is 409. The stored number is unchanged.
+# detail is the existing factor id. Delete that factor, then enroll the new number.
+curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/mfa/factors/d4e5f6a7-b8c9-0123-def0-456789012345 \
+  -H "Authorization: Bearer <service-role-key>"
+# → 200 { "ok": true }
 ```
 
 Use case: pre-enrol a phone factor during a migration or onboarding flow where the admin knows the user's phone number. The user's next signin will return `"mfaRequired": true` and they will be prompted to verify via SMS.
+
+The list and delete routes use the same credential as enroll. They cover every factor type, including a pending TOTP the user enrolled. The phone in the list is masked. A user JWT cannot call these routes; the signed-in user still uses `GET` and `DELETE .../auth/mfa/factors`. A factor id that belongs to a different user is 404, and that factor is left in place.
