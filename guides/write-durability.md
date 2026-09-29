@@ -196,8 +196,7 @@ When you do not set durability knobs explicitly:
     writes, an upsert four.) Measured: 200 commits to eight tables in flight together took 73 durable writes.
   - ⚠️ **Downgrades (**ColumnarMerge S07, next train**).** Keyed writes (upserts) log a new frame kind, `MergeBatch`,
     which an older server cannot replay: do not downgrade a database that has taken upserts without a clean shutdown
-    first. Deletion masks gained a version an older server misreads, too — see the
-    [storage guide](storage.md#27-core-concepts-and-mental-model) (**ColumnarCore S12**).
+    first.
 - WAL position as durability token:
   - Insert/update return a WAL position used by write concern tracking.
 - Write concern:
