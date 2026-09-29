@@ -938,6 +938,12 @@ Execute a query against a table.
 | `nin` | Value not in array (empty array is **400**) | `["deleted", "archived"]` |
 | `like` | SQL LIKE pattern, **String columns only** | `"A%"`, `"%acme%"`, `"%985"` |
 
+**Nulls (**BL-729, next train**):** a comparison with a null cell is never true, so `eq`, `ne`, `gt`, `gte`, `lt` and
+`lte` all leave out rows whose column is null — `{"column": "qty", "op": "lt", "value": 5}` no longer returns rows with a
+null `qty` (they compared as `0`), and `ne` does not return them either — nor does `nin` (**BL-734**), which
+returned every null row. To select nulls, use `isNull`
+(`{"op": "eq", "value": null}`, below), which is a null test rather than a comparison.
+
 **Case-insensitive comparison (`ignoreCase`, server 0.1.24+):**
 
 `eq`, `ne`, `in`, `nin`, and `like` accept an optional `"ignoreCase": true` alongside `column`/`op`/`value`, **String columns only**:
@@ -1215,7 +1221,9 @@ engine's own sentence, including the offending key.
 template as `insert`, same `batchParam` support, and a result carrying both `rowsInserted` and
 `rowsUpdated`. It requires the table to declare a primary key — `upsert` on a keyless table is
 refused at schema apply, since there would be nothing to match on. It is last-write-wins on the
-whole row, not a partial merge. This is the op for a row written repeatedly under a key the caller
+whole row, not a partial merge. A key named twice in one batch is written once, holding the later
+row's values (**ColumnarMerge S07, next train** — before it, a key new to the table and repeated in
+one batch was stored twice). This is the op for a row written repeatedly under a key the caller
 does not choose — a presence heartbeat or typing indicator keyed by
 `derived: { "identity": "subject" }` — where `insert` succeeds exactly once and `update` never
 succeeds at all. See [Named mutations § choosing
@@ -1464,7 +1472,8 @@ The list route returns an array of the same object.
 | `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
-| `pendingDeferredJobs` | integer | **BatchFirst, next train.** How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (a `"deferred"` load, or an `"auto"` load folded by the pass). `0` when none; absent on older servers. While it is above zero the query is also `isStale`. `:refresh` of the query runs the table's pass at once. |
+| `pendingDeferredJobs` | integer | (**BatchFirst S09, next train**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (a `"deferred"` load, or an `"auto"` load folded by the pass). `0` when none; absent on older servers. While it is above zero the query is also `isStale`. `:refresh` of the query runs the table's pass at once. |
+| `stalenessMs` | integer? | (**ColumnarMerge S01, next train**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
 | `token` | string? | The maintenance watermark, as above. |
 
@@ -1481,7 +1490,15 @@ stays `Ready`, and its currency is reported by three other fields:
 |---|---|
 | `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. |
 | `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
-| `currentLag` | How long the query has **been behind**. `null` when it is not behind — including for a caught-up query that has been idle for days. |
+| `currentLag` | How long the query has **been behind** without a break. `null` when it is not behind — including for a caught-up query that has been idle for days. |
+| `stalenessMs` | (**ColumnarMerge S01, next train**) How **old** the oldest change the result does not reflect yet is. Omitted when current. |
+
+⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLag`.** Under a steady stream of
+inserts that never lets a query's queue empty, `currentLag` grows for as long as the stream runs — it is
+how long the query has been continuously behind — even when every insert is applied within a few hundred
+milliseconds. `stalenessMs` stays at the age of the oldest change still owed. A query ingesting 50,000
+rows a second and applying each batch promptly reports `currentLag` in minutes and `stalenessMs` in the
+low hundreds.
 
 ⚠️ **`currentLag` is not "time since the result was last updated".** A caught-up idle query reports
 `null`, not a number that grows forever. If you are computing freshness, `null` means *current*, not
@@ -1502,7 +1519,7 @@ read stale data as current. A client that polls `state` and nothing else will st
 // readable, but behind — act on this
 { "state": 1, "isStale": true,
   "staleReason": "3 bulk-load publish(es) for this query have been queued and have not finished. The result is readable but is not current.",
-  "currentLag": "00:00:12.4310000" }
+  "currentLag": "00:00:12.4310000", "stalenessMs": 4120 }
 ```
 
 > **Removed: `workingSetTruncated` (BL-583, 0.1.38).** It was hard-wired `false` from the train
@@ -1638,6 +1655,8 @@ List all tables with statistics.
 | `lastModifiedAt` | string | ISO 8601 timestamp when table/data was last modified (empty for legacy tables) |
 | `sizeBytes` | number | Approximate size in bytes across all segments |
 | `policy` | object | Storage policy |
+| `rowCountIsExact` | boolean | `false` when `rowCount` is a lower bound (a segment's count was unknown) |
+| `keyMapResident` | boolean, optional | (**ColumnarMerge S05, next train**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, or when the server's memory governor refused it — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
 
 #### `GET /api/tables/{name}`
 
@@ -1695,6 +1714,7 @@ Get table detail with columns.
 | `clusterOrder` | number? | Position in cluster columns for storage ordering |
 | `partitionFunction` | string? | Function to derive partition key (TruncateToDay, TruncateToHour, etc.) |
 | `reference` | object? | Reference to another table's column (see below) |
+| `precision` / `scale` | number? | A `Decimal(p,s)` column's declaration; omitted for every other column (**ColumnarCore S13, next train**) |
 
 **Reference Info:**
 
@@ -1781,6 +1801,7 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
 | `partitionFunction` | string? | Partition function, when the column is part of a partition key |
 | `reference` | object? | Foreign-key target (`targetTable`, `targetColumn`, `source`) |
 | `encoder` | string? | Explicit encoder; omitted when `Auto` |
+| `precision` / `scale` | number? | A `Decimal(p,s)` column's declaration; omitted for every other column (**ColumnarCore S13, next train**) |
 
 **Why `id` matters.** Storage, the write-ahead log and engine diagnostics identify columns by id, not
 by name — an engine message can name `id=34` where the schema shows only names. A column that is
@@ -1923,6 +1944,10 @@ Create a new table.
 }
 ```
 
+A `Decimal` column may carry `"precision"` and `"scale"` — both or neither, `1 ≤ precision ≤ 18`,
+`0 ≤ scale ≤ precision` — to declare `Decimal(p,s)` (**ColumnarCore S13, next train**; see [Data types](#data-types)).
+A `Decimal(p,s)` partition key is refused.
+
 **Response:** `201 Created` with table detail
 
 #### `DELETE /api/tables/{name}`
@@ -2004,6 +2029,9 @@ Add a column to a table.
 }
 ```
 
+`"precision"` / `"scale"` beside `"type": "Decimal"` add a `Decimal(p,s)` column, as on create (**ColumnarCore S13, next
+train**). A column cannot be changed to or from `Decimal(p,s)`, or to another precision or scale: add a new column and copy.
+
 **Response:** `201 Created` with column detail
 
 #### `PATCH /api/databases/{db}/tables/{name}/columns/{columnName}`
@@ -2056,7 +2084,7 @@ Insert one or more rows into a table.
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
 | `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
-| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column means the same as `0`. Explicit non-zero without the flag is stored but does **not** bump the counter. |
+| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column means the same as `0`. An explicit non-zero id without the flag is stored, and the counter moves past it before the insert commits, so a later generated id cannot repeat it (**ColumnarMerge S02, next train**) — as a JSON integer, a numeric string (`"300"`) or an integral number (`5.0`, `1e2`) alike, each stored as that integer (**BL-703, next train**; a string id used to be stored without moving the counter, and a fractional form failed with a `500`). |
 
 **Response:** `200 OK`
 
@@ -2085,6 +2113,12 @@ Insert one or more rows into a table.
 | `generatedValues` | object? | Generated values for auto-increment columns. Keys are row indices (as strings), values are objects mapping column names to generated values. Only present when the server allocated IDs. Absent or empty for that row/column under `identityInsert: true` (client-supplied values are stored as-is). |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"` (no replication wait). See `WriteConcernStatus` below. |
 
+**Materialized queries are current when the insert returns (**ColumnarMerge S11, next train**).** An insert maintains
+the table's aggregate and latest / first-per-key queries inside its own commit, so the `200` comes after they are
+written — a read right after it sees the rows — and the insert takes longer by their share. Filters, top-Ns,
+cascades and queries with a `maxCoalesceMs` window still follow asynchronously. See
+[Materialized queries](../guides/materialized.md#27-core-concepts-and-mental-model).
+
 **Identity-insert (`identityInsert: true`):**
 
 ```json
@@ -2105,6 +2139,36 @@ Insert one or more rows into a table.
 - Does **not** flip catalog `autoIncrement` (use schema apply / Studio Toggle AutoId for that — BL-126).
 - For large seed/reseed jobs, prefer bulk-load `options.identityInsert` (see [Bulk Load API](#bulk-load-api)).
 
+**The column-batch frame body** (**BL-695 / ColumnarCore S06, next train**):
+
+The same endpoint also accepts **one column-batch frame** — `Content-Type: application/vnd.aouda.column-batch`, the
+binary layout bulk-load [`:append`](#post-jobidappend) takes. The rows
+insert exactly as the same rows sent as JSON would: the same values, defaults, generated ids, errors and messages. A
+frame carries values, not JSON text, so where the text matters the server reads the frame's rows as JSON: a number sent
+into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50`), whatever the server's culture. A client
+that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
+cannot say which text it had.
+
+- A frame has no envelope: the **database and table are the URL's**, and `identityInsert` / `writeConcern` are query
+  parameters — `POST /api/databases/mydb/tables/orders/rows?identityInsert=true&writeConcern=majority`. (On a JSON body
+  those query parameters are ignored; the body's own fields apply.)
+- **One frame per request.** A body holding two frames is `400 INVALID_REQUEST`; so is a body that is not a valid frame.
+- The response is the JSON above.
+
+**How a client knows.** Every response the endpoint itself returns — success or error — carries
+`Accept-Post: application/json, application/vnd.aouda.column-batch` (a request refused before it, by authentication or an
+unsupported `Content-Type`, gets none; browsers can read the header through CORS), and `GET /admin/capabilities` lists
+`insertColumnBatch: true`. A server that predates this does not send the header, and answers a frame with
+`415 Unsupported Media Type`. The official SDKs send JSON until they have seen the header, and go back to JSON on a
+`415` (see [.NET](../clients/index.md) and [TypeScript](../clients/typescript.md)).
+
+**JSON is read into columns too.** A JSON body is no longer deserialized into one dictionary per row: the server
+locates `rows` and reads each value straight into the table's typed columns, with the same conversions as before (a
+number in a `String` column is stored as its JSON text; `"12"` in an integer column is parsed). The request format is
+unchanged, and so is what it accepts: `application/json`, `text/json` and `application/*+json`, with or without a UTF-8
+byte-order mark. Two visible differences: a body that is not valid JSON is now a `ProtocolError` `400 INVALID_REQUEST`,
+like every other error of this endpoint, and an empty body is `400 MISSING_DATABASE`.
+
 **`WriteConcernStatus` object:**
 
 | Field | Type | Description |
@@ -2120,7 +2184,8 @@ Insert one or more rows into a table.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, or `identityInsert: true` with a missing/`null` autoIncrement column |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, next train** — JSON cannot carry them either), or a string cell that is not valid UTF-8 (**BL-716, next train**) |
+| — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch` |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
@@ -3201,10 +3266,14 @@ Returns feature and provider capability metadata for Studio and MCP clients.
     "capabilityDiscovery": true,
     "nodeInfo": true,
     "nodeLogs": true,
-    "nodeLogStream": true
+    "nodeLogStream": true,
+    "insertColumnBatch": true
   }
 }
 ```
+
+`features.insertColumnBatch` (**ColumnarCore S06, next train**): `POST …/tables/{name}/rows` reads the column-batch
+frame as well as JSON (see [`POST …/rows`](#post-apidatabasesdbtablesnamerows)). Absent on a server that predates it.
 
 ---
 
@@ -3316,7 +3385,8 @@ Get cluster topology.
 | `UInt64` | 64-bit unsigned integer |
 | `Float32` | 32-bit floating point |
 | `Double` | 64-bit floating point |
-| `Decimal` | 128-bit decimal |
+| `Decimal` | 128-bit decimal (`System.Decimal`, any scale per value) |
+| `Decimal` with `precision` / `scale` | `Decimal(p,s)`, p ≤ 18: a 64-bit integer scaled by 10^s (**ColumnarCore S13, next train**). Declared with `"precision"` and `"scale"` beside `"type": "Decimal"` in create-table / add-column bodies and schema documents; reported with the same two fields in column details. Values are written and read as decimal numbers with exactly `s` places; more places or more than `p − s` integer digits is a `400`; `avg` returns a `Double`. See the [schema guide](../guides/schema.md) |
 | `String` | UTF-8 string |
 | `Timestamp` | UTC instant (see note below) |
 | `Date` | Date only |
@@ -4008,7 +4078,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
 | `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
-| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"`, `"deferred"` | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables. How `"auto"` does it depends on the table (**BatchFirst, next train**): when every query over the table is an `aggregate` or a `latestPerKey`/`firstPerKey`, the load writes only the table and the table's **deferred pass** folds its rows into every query right after the commit (the queries read as behind, `isStale` with a reason, until it ends); otherwise they accumulate during the load's own pass and publish by shadow-swap at commit. `"skip"`: no ingest-fed sinks and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. `"deferred"` (**BatchFirst, next train**): the load writes only the table, marks its queries behind, and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query. Use it for very large or many back-to-back loads: many loads, one pass. An older server answers `"deferred"` with `400 BULK_LOAD_INVALID_OPTIONS`. |
+| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"`, `"deferred"` | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it queues behind that publication via the server's per-name lock and then re-scans the whole source table. How `"auto"` does it depends on the table: when every query over the table is an `aggregate` or a `latestPerKey`/`firstPerKey` (**ColumnarCore S12, next train**), the load folds its rows as it writes its segments and writes those queries and the queries built on them before `:commit` returns, with `mqRebuildStatus: "completed"` — so `:commit` takes longer; if the fold's memory is refused, it spilled, or a query was created or dropped during the load, the table's **deferred pass** folds its rows in right after the commit instead (the queries read as behind, `isStale` with a reason, until it ends). On any other table the queries accumulate during the load's own pass and publish by shadow-swap at commit. `"skip"`: no ingest-fed sinks and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. `"deferred"` (**BatchFirst S08, next train**): the load writes only the table, marks its queries behind (`isStale: true`, as `"skip"` does), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. Use it for very large or many back-to-back loads: many loads, one pass. An older server answers `"deferred"` with `400 BULK_LOAD_INVALID_OPTIONS`. See [Deferred loads](../guides/materialized.md#deferred-loads). |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
 | `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. |
@@ -4102,11 +4172,12 @@ frame   := "ACB1" rowCount:u32 columnCount:u16 column*
 column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
 flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
 bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
-kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 6 Decimal
+kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 6 Decimal · 8 ScaledDecimal
 values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
          | Double          : rowCount × f64
          | Bool            : bitmap
          | Decimal         : rowCount × 4 × i32 (the .NET decimal layout)
+         | ScaledDecimal   : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
 ```
 
@@ -4122,14 +4193,7 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
   earlier, well-formed frames in the same body are kept and counted, as NDJSON lines before a bad line are.
 
-**A frame loads the same values as the NDJSON body of the same rows.** The C# SDK sends frames to a
-server that advertises them and NDJSON otherwise; the TypeScript SDK sends NDJSON. The C# SDK gives
-every number the kind its JSON text would take on the server (an integral number is an integer, a
-fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and
-every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value
-the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03,
-next train** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was
-widened, and a timestamp loaded into a text column took the server's culture format).
+**A frame loads the same values as the NDJSON body of the same rows.** Decimals travel as the 16-byte `Decimal` kind or, since **ColumnarCore S13 (next train)**, as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores. The TypeScript SDK sends a decimal column that fits 64 bits at its largest scale that way, and the server reads each value as its JSON text says (`101`, not `101.00`) into any column type. The C# SDK sends a .NET `decimal` as the 16-byte kind (a `decimal` keeps its trailing zeros, which an undeclared `Decimal` column stores); a caller building a `ColumnBatch` can add a scaled column directly. The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, next train** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, next train** — before, a fraction went as a double, which a decimal column could store differently).
 
 **NDJSON is still fully supported**, for curl and for any client without the frame. From the same train
 the server decodes it straight into column batches, so it is faster too. A column whose lines mix
@@ -4201,7 +4265,7 @@ Commit the session. All sealed segments become queryable.
 | `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
 | `progress` | object? | Present only when `waitForDeferredWork: true`. Fields: `ivfAssignmentsCompleted`, `ivfAssignmentsTotal`, `raBitQEncodingsCompleted`, `raBitQEncodingsTotal`, `cscMirrorsCompleted`, `cscMirrorsTotal`, `pkIndexRebuildCompleted`, `pkIndexRebuildTotal`. |
-| `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
+| `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. `"completed"` for an `"auto"` load whose queries were written in its own commit (**ColumnarCore S12, next train**). Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
 
 ---
 

@@ -36,6 +36,25 @@ CPU budget derivation: machine=28, quota=none, configured=none, schedulable=28,
 
 Aouda's Helm chart sets `limits.cpu` and is therefore safe by default; `docker-compose` sets nothing, so a compose deployment on a shared host should set `--cpus` or `ConfiguredCores`.
 
+**Materialized-query maintenance follows the same budget (**ColumnarCore S15, next train**).** The deferred pass's
+workers (and its fold chunks) and the number of queries an insert writes side by side come from this CPU budget —
+`Aouda:Cpu:ConfiguredCores` or the probed quota, read when the work starts — instead of the machine's core count capped
+at 16 / 8. A server given four cores no longer schedules sixteen workers on them, and one given sixteen of twenty uses
+them.
+
+### Garbage collection (**ColumnarCore S14, next train**)
+
+The server runs .NET's **Server GC with DATAS** (dynamic adaptation) and a heap hard limit of 85 % of the memory it may
+use; that is in its `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores with the write paths now
+allocating about 0.4–2.4 KB per row: GC pauses stay under 5 % of wall time on bulk loads, inserts and inserts with nine
+materialized queries (0.9–4.9 %). Workstation GC, Server GC without DATAS and a larger gen-0 budget
+(`DOTNET_GCgen0size`) were measured beside it and none was consistently cheaper, so the default stands.
+
+**If you embed the engine in your own process** (the embedded package, or `AoudaEngine` directly), your application's
+GC settings apply, and .NET's default is Workstation GC. Turn Server GC on (`<ServerGarbageCollection>true</ServerGarbageCollection>`
+in the project, or `DOTNET_gcServer=1`): an in-process insert of 2,000-row batches measured 1.8 CPU-s per million rows
+with it and 2.5 without, with GC pauses at 0 % instead of 4 %.
+
 ## Open files (**IngestAtSpeed S02, next train**)
 
 Aouda keeps a file per column per segment, plus the WAL, key maps and spill runs, so a large load
@@ -61,31 +80,71 @@ has no such limit.
 ## Inserts and their materialized queries (**BatchFirst S13, next train**)
 
 An insert is cheap; what it costs you is the materialized queries over its table, which are brought
-up to date after every commit. Size for the queries, not for the insert.
+up to date with every commit. Size for the queries, not for the insert.
 
 Measured on the reference benchmark — four cores, insert-many into a trade table in batches of 2,000,
 nine queries over it (six aggregates, a latest-per-key, two top-Ns over an aggregate's result):
 
-| Offered rate | Held | CPU per million rows | Query lag p99 |
+| Offered rate | Held | CPU per million rows | Query lag / staleness p99 |
 |---|---|---|---|
 | 10,000 rows/s | yes | ~80 CPU-s | < 0.1 s |
-| 50,000 rows/s | yes | ~55 CPU-s | ~34 s during the burst; current ~5 s after it |
+| 50,000 rows/s | in one of two runs (~40,000 rows/s achieved otherwise) | 67–73 CPU-s | ~0.1 s |
 
-- **The insert keeps up; the queries fall behind.** The table accepts 50k rows/s on four cores (the
-  insert alone is ~8 CPU-s per million rows), and the queries' maintenance runs at about half that. A
-  burst is absorbed and caught up after it ends; a *sustained* rate above what the maintenance can do
-  is lag that grows. Watch `currentLag` on `GET /api/databases/{db}/materialized-queries/{name}` — it is how long the
-  query has been behind, and `null` when it is current.
+The 50,000 rows/s row is **ColumnarMerge S11 / S11b (next train)**; before it, the same rate was accepted while the
+queries fell ~34 s behind during the burst.
+
+- **The queries keep up; the insert pays for them (**ColumnarMerge S11, next train**).** An insert now maintains
+  its table's aggregates and latest / first-per-key queries inside its own commit, so they are current when it
+  returns — and the insert takes longer by their share. A rate above what the writer plus its queries can do shows
+  up as a lower achieved rate, not as lag; top-Ns, filters and cascades still follow asynchronously. Watch
+  `stalenessMs` on `GET /api/databases/{db}/materialized-queries/{name}` — how old the oldest change the query does
+  not yet reflect is (**ColumnarMerge S01, next train**); `currentLag` is how long it has been behind without a
+  break, which under a steady stream grows however promptly each commit is applied.
 - **Batch.** 1,000–5,000 rows per call. Each commit is maintained as one batch per query, so small
   commits pay the per-commit cost many times over.
 - **Fewer, narrower queries are cheaper than a bigger machine.** Cost is per query per commit; a query
   nobody reads still costs its share.
 - **A load, not a stream, is better done as a bulk load.** Bulk loads fold their rows into the queries
-  in one pass after the commit (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
-  rows/s end to end *with the queries current*.
+  in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
+  rows/s end to end *with the queries current*. (**ColumnarCore S12, next train**) An `Auto` load into a table of
+  aggregates and latest / first-per-key queries folds them while it writes its segments and returns with them
+  written, so the load itself takes longer and nothing is left to catch up after it.
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
   uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
-  against each segment once.
+  against each segment once. (**ColumnarMerge S02, next train**) An id the engine allocates is not
+  probed at all: it is unique by construction.
+
+### Auto-increment ids on time series (**ColumnarMerge S02, next train**)
+
+An `autoIncrement` id costs almost nothing on write: ids are allocated as one range per batch and
+stored delta-bit-packed, about 2 bits a row. On a bulk load of column batches it is written as a column;
+before this train it cost ~0.7–1 CPU-second per million rows. It is still a column: it takes storage and
+a primary-key index, and on a time series it is rarely what anyone reads by. **Where the data has a
+natural key — `(series, time)` — prefer it as the primary key.** Keep the id where you need one (many
+setups default to it; it is fully supported).
+
+An **explicit** value in an `autoIncrement` column now moves the column's counter before it is stored,
+so the engine never allocates it again (an explicit `100` followed by an automatic id gives `101`). An
+explicit value at or below the counter — reusing a freed id — makes that table's automatic inserts
+probe for uniqueness again until the next restart.
+
+### The key map: RAM for keyed writes (**ColumnarMerge S05, next train**)
+
+A table with a primary key and `pkUniqueness: Strict` (the default) keeps its keys in memory across every
+tier, so an insert, upsert or materialized-query update learns whether a key exists without reading a
+segment. Budget roughly **64 bytes per key** of the table's cold data (1 million keys ≈ 64 MB; the write
+buffer and hot segments were already covered). The memory comes from the same governed budget as the rest
+of the key index, and more RAM means more tables answered from memory: when the governor refuses, a table
+simply keeps checking keys by reading its segments — correct, and slower — and `keyMapResident: false` on
+`GET /api/tables` says so. The map is rebuilt in the background after a restart; nothing is stored on disk.
+
+### Declared decimals are half the size (**ColumnarCore S13, next train**)
+
+An undeclared `Decimal` costs 16 bytes per value in the write buffer, the hot tier and every materialized result
+that carries it, and compresses poorly on disk. A `Decimal(p,s)` column (`"precision"` / `"scale"`, p ≤ 18 — see the
+[schema guide](schema.md)) is a scaled 64-bit integer: 8 bytes in memory, and delta-bitpacked like an `Int64` in
+segments (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
+that have a fixed number of places this way; keep the undeclared `Decimal` for values that need more than 18 digits.
 
 ## What headroom buys
 

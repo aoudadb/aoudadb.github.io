@@ -149,9 +149,7 @@ Scope boundaries:
   - `aouda table bulk-load`
   - `aouda bulk-load`
 - **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036, ingest-fed path P46):**
-  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulates every affected MQ of all four types **during** the load's own pass and publishes at commit; `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind).
-  - **`Deferred` (BatchFirst, next train)**: the load writes only the table at full speed and leaves its queries behind with a durable **pending job**; one **deferred pass** per table later reads what the pending loads wrote, once, and folds it into every query. See [Deferred loads and the table's pass](#deferred-loads-and-the-tables-pass) below.
-  - **`Auto` on a table of folded queries (BatchFirst, next train)**: when every query over the table is an `Aggregate` or a `LatestPerKey`/`FirstPerKey`, an `Auto` load is brought in by the same pass, started at its commit — the load writes only the table, and `MqRebuildCompleted` resolves when the pass (and the queries cascaded from these) has caught up. Other tables keep the ingest-fed path described here.
+  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulates every affected MQ of all four types **during** the load's own pass and publishes at commit — except (**BatchFirst S12, next train**) when every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold: then the load writes only the table, and the table's pass (the one a `Deferred` load waits for) starts at the commit and folds the load into every query at once. (**ColumnarCore S12, next train**) Such a load is now maintained **in its own commit**: its rows are folded as its segments are written, and its queries — and the queries built on them — are written from that fold before the load returns, so the handle (and the `:commit` response) comes back with `mqRebuildStatus` already `completed`. When the engine cannot hold the fold — the memory governor refuses its state, the load spilled to disk, or a query over the table was created or dropped during the load — the load takes the pass after its commit instead, as described next. What you see: such a load, and the server's `:commit`, return only after its queries and their cascades are written, so they take longer; a load waits behind a pass already running on its table; and the handle's publish backlog is 0. `MqRebuildCompleted` still resolves only when the queries **and the queries built on them** are current; until then each reports `isStale`, a reason naming the publish, `currentLag` and `pendingDeferredJobs`. Loads that commit while a pass runs are taken together by the next one. A table with any other query (a filter, a direct top-N) keeps the accumulate-during-the-load path; `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind). `Deferred` (**BatchFirst S08, next train**) is `Skip` with a record: the load writes only the table, the queries are marked behind, and the job is kept as pending so the engine can bring every query on the table current in one pass over the load's segments — see [Deferred loads and the table's pass](#deferred-loads-and-the-tables-pass) below and [Deferred loads](materialized.md#deferred-loads).
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
@@ -169,7 +167,8 @@ Scope boundaries:
 
 > **Do not hand-refresh an MQ after a Bulk Load.** With `postLoadMqBehavior: "auto"` (the default),
 > affected materialized queries accumulate during the load's own pass and are published at commit —
-> there is nothing left to trigger. Calling `POST .../materialized-queries/{name}:refresh` yourself
+> or, for a table of aggregates and latest / first-per-key queries, are written before the load returns
+> (**ColumnarCore S12, next train**) — there is nothing left to trigger. Calling `POST .../materialized-queries/{name}:refresh` yourself
 > for a just-loaded table queues behind that publication via the server's per-name lock, and then
 > re-scans the whole source table. The wait after commit is usually short because the work already
 > happened. Wait on `mqRebuildStatus` instead — the C# client's
@@ -221,8 +220,9 @@ marker, so the restart rebuilds it).
 **When to choose it.** `auto` keeps queries current as each load commits; choose `deferred` when you
 load a lot at once (an initial import, a backfill, a nightly batch) and can let the queries catch
 up a few seconds after the last load. On tables whose queries are all aggregates or
-latest-per-key, `auto` already uses the same pass, started at each commit, so the difference is
-*when* the pass runs, not how much work it does. A `filter` or direct `topNPerGroup` query over a
+latest-per-key, `auto` folds each load in its own commit (**ColumnarCore S12, next train**: the queries are
+current when the load returns; before, the same pass ran at each commit), so the difference is *when* the work is
+paid — per load, or once for many — not how much there is. A `filter` or direct `topNPerGroup` query over a
 table is rebuilt by each pass, not folded — on a very large table, keep those on tables loaded with
 `auto`.
 
@@ -340,8 +340,22 @@ The worked example (a table partitioned on two columns with ~250 distinct value 
 | Shape | Segments per job | Median rows/segment |
 |---|---|---|
 | Commit every 10 k rows, `Dedicated` storage | ~250 | ~40 |
-| One session, `Auto` storage (16 shared buckets) | ≤ 16 | ~625 |
+| One session, `Auto` storage, key bounded by a time function (16 shared buckets) | ≤ 16 | ~625 |
+| One session, `Auto` storage, high-cardinality key (**ColumnarMerge S03, next train**) | 1 | 10 000 |
 | One session, 1 000 000 rows | 22 | 54 000 |
+
+**A high-cardinality `Auto` key coalesces** (**ColumnarMerge S03, next train**). When at least one
+partition-key column has no time function — `(Ticker, Source)`, a tenant id — a bulk load writes every key
+that has not been promoted to its own directory into **one** segment per job (cut at `TargetSegmentBytes`),
+sorted by the partition key and then the cluster columns, instead of one segment per hash bucket the job
+touches. A 170 000-row Equity job that used to write 60 segments of ~2 000 rows now writes one. Rows you
+insert (rather than bulk-load) flush the same way (**ColumnarCore S08, next train**): each flush of such a table writes
+one segment of everything it holds, in the same order, where it used to write one small segment per bucket the
+buffer touched. A key bounded by a time function (`truncateToDay` and the like) keeps its buckets for both. Reads return the same rows either way: a read filtered on
+the partition key skips a job's segment by its zone maps on the key (**ColumnarMerge S06, next train**),
+where it used to skip it by bucket. A keyed table's bulk-loaded segments also get their primary-key
+sidecars — the index and keymap other writers already built — shortly after the commit, so a uniqueness
+check that has to consult one stays cheap.
 
 On top of segment shape, this engine also removes a per-segment fixed cost that shape alone cannot: on a detected single-node deployment, `LogShipSegments`'s default no longer re-reads and BLAKE3-hashes every written segment file or appends a WAL frame for it. Measured on the first worked row above collapsed to `Auto`/16 buckets (250 partitions × 40 rows, 16 sealed segments): `finalizeMs` dropped from 13 ms to 0 ms and `walMs` from 2 ms to 0 ms (`walPosition` becomes `-1` — the same shape `SkipReplication` already used). See [Single-Node Deployment](single-node-deployment.md) for the durability trade-off that default makes.
 

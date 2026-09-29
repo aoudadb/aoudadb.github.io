@@ -75,6 +75,13 @@ What is different in Aouda vs many systems:
 - The result is a regular table, not a special hidden object type.
 - The query name is the table name (unified namespace; no `_mq_` prefix).
 - Subscription uses the normal table streaming path (`target = queryName`), not a custom protocol target.
+  **A rebuild is announced too (**BL-702, next train**):** when a change can only be applied by rebuilding the result
+  (for example, deleting the source row that held an aggregate's `last`), a subscriber of the result receives the
+  difference between the old and new result as ordinary `Insert` / `Update` / `Delete` events on the result table,
+  instead of seeing the changed rows only through a later event.
+  **A maintained `sum` carries the column's type in update events too (**ColumnarCore S10, next train**):** an
+  in-commit update event's `sum` of an integer column is an `Int64`, as its insert event and every read already were
+  (the JSON is the same, `12`), and a `sum` of a `Double` column is a `double` — `3` where it was `3.0`.
 
 - User problem solved:
   - Avoid re-running expensive query logic (for example aggregates, latest-per-key projections) on every read.
@@ -303,7 +310,7 @@ results are keyed by identity rather than time, and are not clustered.
   - No protocol-level MQ target-kind required.
 - MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
   - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
-  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. (**BatchFirst S12, next train**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load is folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once; `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`) until it is done. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. (**BatchFirst S12, next train**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load is folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — and (**ColumnarCore S12, next train**) in the ordinary case folded while its segments are written and its queries written before the load returns (`mqRebuildStatus` is `completed` on the handle), the pass after the commit remaining for a load whose fold the memory governor refuses, that spilled, or whose table's queries changed during it; `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`) until it is done. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
   - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
   - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
   - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
@@ -338,6 +345,13 @@ results are keyed by identity rather than time, and are not clustered.
 ### Reserved / not yet wired
 
 - None for MQ pattern types: `FirstPerKey` (MIN of `orderBy`, not arrival order) and `TopNPerGroup` (N rows per group; in-memory working set) are implemented. Query / subscribe the Top-N result table by name — the planner does not auto-route it.
+- **A `TopNPerGroup` over another query's result keeps its groups in memory (**ColumnarMerge S04, next train**).**
+  When the source of a top-N is another materialized query (the "leaders over daily volume" shape), the
+  query holds every member of each group it has seen, ranked, and needs no read-back per commit: a deleted
+  winner, a winner whose value gets worse and a row that moves to another group are all answered exactly,
+  where before they marked the query stale and rebuilt it. The memory is reserved with the server's memory
+  governor; if it is refused, the query keeps working the previous way (correct, slower). A top-N directly
+  over a source table is unchanged.
 
 Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list/status) were shipped in P16 Epic H (task H.3) and are no longer reserved. See §2.11 for the API reference.
 
@@ -395,12 +409,38 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 - Maintainer:
   - Pattern-specific logic that builds initial state and applies incremental updates.
 - Update mode:
-  - `Async`: enqueue and apply later.
+  - `Async`: enqueue and apply later — except an insert's aggregates and latest/first-per-key queries, which the
+    insert maintains inside its own commit (**ColumnarMerge S11, next train**; see below).
   - `Sync`: apply in commit path.
+- Freshness knob, `maxCoalesceMs` (**ColumnarMerge S10, next train**):
+  - How long an `Async` query's incremental batches may wait so that they are applied together — one write per
+    changed group instead of one per commit. `0` (the default) applies each batch as it comes. Staleness is bounded
+    by the knob plus one commit; a flush (and a clean shutdown) applies what is held at once. Set it on the query in
+    `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
+    query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
+  - Measured: 150 commits of 10 rows into 5 groups wrote 134× fewer result rows with a 500 ms window; at 50,000 rows/s across the nine Equity queries a 100 ms window cut maintenance CPU by a third (111 → 76 CPU-s per million rows) and the worst staleness p99 from 23 s to 13 s.
+- Maintenance inside the insert's commit (**ColumnarMerge S11, next train**): an insert into a table maintains its
+  aggregate and latest/first-per-key queries **before the insert returns** — the insert's rows are folded once, typed,
+  for all of them, and each query's changed groups are written as one batch. Those queries are current when the insert
+  is acknowledged (their watermark is at the insert's commit), so a read right after an insert sees it. What this costs:
+  the insert takes longer by its queries' share, and inserts into one table are applied to its queries one commit at a
+  time. (**ColumnarCore S15, next train**) The next commit's own work (plan, key check, commit, log) now overlaps this
+  commit's query writes, while every query still sees the table's commits in commit order, and how many queries an
+  insert writes side by side follows the server's CPU budget ([sizing](sizing.md#sizing-cpu)). What still goes through the asynchronous queue: upserts, updates and deletes; filters and top-N queries;
+  queries over another query's result (cascades); a query with a freshness window (`maxCoalesceMs` above 0 — it asked
+  to coalesce); and a query that is being refreshed at that moment. A write that fails inside the commit leaves the
+  query visibly stale and rebuilds it; the insert itself still succeeds. Measured on the Equity insert benchmark (nine
+  queries, 50,000 rows/s offered, 4 cores): the worst query staleness p99 went from 23 s to about 0.1 s, maintenance CPU
+  from 111 to ~75 CPU-s per million rows.
+- Resident state (**ColumnarMerge S10, next train**): an aggregate's and a latest/first-per-key query's result rows
+  stay in RAM between commits, so a commit takes the rows it changes from memory instead of reading them back
+  (up to 262,144 keys per query, charged to the memory governor; a refusal falls back to reading back, correct
+  and slower). A group that is not held — new, or evicted — is looked up in the key map and read only if it exists.
 - Routing decision:
   - Planner result that says "serve from MQ result table" or "scan base table."
 - `GroupByExpression` (P28):
   - Either a plain column name (backward-compatible) or a derived time-bucket expression `{ column, function }` where function is `TruncateToHour` or `TruncateToMinute`. Group keys for derived expressions are stored as Int64 epoch milliseconds so candle result tables remain first-class time-series tables (range-queryable, partitionable).
+  - **A null group is a group of its own (**BL-691, next train**).** Grouping by a nullable column gives the rows with a null value their own result row, whose key reads back as `null` — it no longer shares a row (or a key) with the rows whose value is `0` / the type's default. A result created before this release keeps a non-nullable key column; drop and re-create it to get the null group.
 - `FIRST`/`LAST` aggregate (P28):
   - Aggregate function that returns the value of `column` at the row with the minimum (`FIRST`/ascending) or maximum (`LAST`/descending) value of `orderByColumn`. The aggregate maintainer tracks the running extreme value of `orderByColumn` alongside each group's aggregate state. This enables OHLC candle patterns: Open = `FIRST(bid, orderBy=time asc)`, Close = `LAST(bid, orderBy=time asc)`.
 - Shadow-build rebuild (P31):
@@ -555,6 +595,7 @@ Key implementation anchors:
 | `MaterializedQueryDefinition.Type` | enum | none (required) | `LatestPerKey`, `FirstPerKey`, `Aggregate`, `Filter`, `TopNPerGroup` | .NET definition/helper APIs | Only `LatestPerKey`/`Aggregate`/`Filter` are shipped end-to-end |
 | `MaterializedQueryDefinition.ConfigJson` | JSON string | none (required) | type-specific schema | .NET definition/helper APIs | Serialized pattern config |
 | `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | Controls commit-path vs queued maintenance |
+| `MaterializedQueryDefinition.MaxCoalesceMs` (`maxCoalesceMs`) | int | `0` | `0`–`60000` | `aouda.schema.json`; `SetMaterializedQueryMaxCoalesceMsAsync` | **ColumnarMerge S10, next train.** Batches of an `Async` query coalesce this long before one apply |
 | `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` | .NET definition/helper APIs | Optional override; else defaults by type |
 | `SubscriptionManagerOptions.MaxLag` | `TimeSpan` | `1s` | positive | Engine wiring | Lag threshold/backpressure signal |
 | `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound |
@@ -919,7 +960,8 @@ A `Skip` load marks every affected query **stale**: `GET …/materialized-querie
 it is behind, not broken — and `staleOnly` selects exactly this set.
 
 Staleness is durable. If the server restarts before you refresh, the query is **rebuilt from source
-at startup** rather than being reattached with the loaded rows missing. That is deliberate: serving
+at startup** rather than being restored with the loaded rows missing (a query that is behind has no
+checkpoint — **ColumnarMerge S08**). That is deliberate: serving
 a result that silently omits a committed load is worse than doing the rebuild you deferred. If you
 would rather control when that work happens, refresh before restarting — which is what `staleOnly`
 is for.
@@ -944,11 +986,19 @@ writes only its table, fast, and the queries catch up afterwards.
 one pass over the pending jobs' segments: the rows are read once, every aggregate and latest/first-per-key
 query on the table is folded from them together, and each result is written through the ordinary
 maintenance path, so a query downstream of it (a top-N over an aggregate) follows as it would after any
-write. Filter queries, and a query the fold does not handle (an extreme or ordering over a string column),
-are refreshed in the same pass. The pass runs on its own once deferred loads into the table have been
-quiet for 2 seconds, or once the oldest pending job has waited 60 seconds; `:refresh` on any owing query,
-or an update of the table, runs it at once. Many jobs, one pass. Each query's status reports
-`pendingDeferredJobs` until it is current.
+write. A filter, or a top-N directly over the table, takes the jobs' rows as the inserts they are through its own
+maintenance (**ColumnarMerge S09, next train** — it used to be refreshed, a scan of the whole table on every pass);
+a query neither path handles (an extreme or ordering over a string column), or one the replay cannot serve
+exactly, is refreshed in the same pass. Every write a pass makes to a result is one batch in the log
+(**ColumnarMerge S09**), not a user write per row. The pass runs on its own once bulk loading into the table has been
+quiet for 2 seconds — no load in flight, and none committed in that time (**ColumnarMerge S01, next
+train**: a load still streaming used to count as quiet once 2 seconds had passed since the last commit, so
+a pass could start in the middle of a large load) — or once the oldest pending job has waited 60 seconds,
+however busy the table is; `:refresh` on any owing query, or an update of the table, runs it at once.
+Many jobs, one pass. Each query's status reports `pendingDeferredJobs` until it is current, and
+`stalenessMs` says how long ago the oldest load it owes committed. The pass's workers come from the server's CPU
+budget (`Aouda:Cpu:ConfiguredCores` or the probed quota), not the machine's core count (**ColumnarCore S15, next
+train** — see [sizing](sizing.md#sizing-cpu)).
 
 If a pass fails while writing a query, that query is left behind and owes nothing further (it is not
 folded twice); refresh it, or a restart rebuilds it.
@@ -1279,6 +1329,14 @@ Expected checks:
 - Query result has one row per `customer_id`.
 - Reads come back without building aggregations at read time.
 
+**Ties on the order column (**BL-588, next train**).** When two rows of one key have the same `orderBy` value (a
+coarse timestamp, a version), the row with the **lowest source primary key** wins — for `latestPerKey` and `firstPerKey`
+alike, and the same on every path: incremental maintenance, a bulk load, `:refresh` and a rebuild after a restart. An
+update of the winning row that leaves its order value alone keeps it the winner. For this the result table **always
+carries the source's primary-key columns**, even when `selectColumns` leaves them out (as a `topNPerGroup` result always
+has). A query created before this release keeps its earlier rule (the first row read wins, which can differ between
+`:refresh` and maintenance) until it is dropped and re-created; a source table with no primary key has no tie-break.
+
 ### Scenario 2: Production-safe rollout with async lag control
 
 When to use:
@@ -1328,11 +1386,25 @@ Monitor first:
   per-database total of declared residency pins, including any result table you declared `HotOnly`.
   See [2.3.1](#where-a-materialized-querys-result-lives).
 
-Recovery/restart expectations:
+Recovery/restart expectations (**ColumnarMerge S08, next train**):
 
 - Definitions are persisted and restored through catalog/store.
-- Result tables are normal catalog tables and survive restart.
-- Behavior under restart has coverage, but unresolved flush duplicate bug must be considered in production verification.
+- Result tables are normal catalog tables and survive restart. Their changes are logged as one batch per
+  apply, and **those log records are for replicas**: a replica applies them and does not recompute.
+- On the primary, a result is restored from its **checkpoint** — its content at a known position in the log,
+  taken every 15 seconds while the query is current and at every clean shutdown — and the source's appends
+  since then are folded in from the log. Recovery work is therefore proportional to what was written since the
+  last checkpoint, not to the size of the source. (Measured: 200,000 rows since the checkpoint over a
+  400,000-row source, four queries — 5.7 s to open against 8.0 s rebuilding them.)
+- A query is **rebuilt from its source** at startup instead when that cannot be exact: it has no checkpoint
+  yet (created, or rebuilt, less than one checkpoint ago), it was behind when the server stopped, the source took
+  a delete, a replacing upsert, a truncate, a bulk load or a schema change since the checkpoint, or the result's own
+  stored rows changed since it (a flush or a compaction). A query over another query's result is rebuilt from that
+  result whenever its upstream took writes after the checkpoint. A database without a log restores results only
+  after a clean shutdown.
+- The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
+  log is never pruned under it.
+- A database created before this release has no checkpoints, so it rebuilds its results once, at the first open.
 
 Suggested tuning sequence:
 1. Start with default async mode and observe lag/queue metrics.

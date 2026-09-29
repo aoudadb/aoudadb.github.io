@@ -906,8 +906,39 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
+| `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, next train**). |
+| `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
+
+#### `Decimal(p,s)`: a decimal stored as a scaled integer (**ColumnarCore S13, next train**)
+
+A `Decimal` column may declare `precision` (total digits, 1–18) and `scale` (digits after the point, 0–`precision`),
+both or neither:
+
+```json
+"Price": { "type": "Decimal", "precision": 18, "scale": 2 }
+```
+
+A declared decimal is stored, logged, compared, aggregated and encoded as a **64-bit integer scaled by 10^scale**
+(`123.45` is stored as `12345`) — as ClickHouse's and DuckDB's `Decimal(18,2)` are. It is 8 bytes instead of 16, its
+pages delta-compress like an `Int64`, and filters, sorts, keys, `min` / `max` / `sum` run as integer operations. An
+undeclared `Decimal` is unchanged (a 128-bit `System.Decimal`, any scale per value); use it for more than 18 digits.
+
+| | Declared `Decimal(p,s)` |
+|---|---|
+| Writing `10` | means `10.00` (every value is its decimal value, whatever JSON or frame kind carries it) |
+| More decimal places than `scale` | refused (`400`), except trailing zeros: `1.50` into scale 1 is `1.5` |
+| More than `p − s` integer digits | refused (`400`) |
+| Derived columns / computed outputs | computed as decimals, then rounded half away from zero to the scale |
+| Reading | a decimal with exactly `scale` places (`10.50`, not `10.5`); type reported `Decimal` with `precision` / `scale` |
+| Filters | exact: `> 10.555` on scale 2 is `> 10.55`, `= 10.555` matches nothing |
+| `sum`, `min`, `max`, `first`, `last` | `Decimal(18,s)`; a sum past 18 digits is an error, never a wrap |
+| `avg` | `Double` (the sum ÷ 10^scale ÷ count) |
+
+A column cannot be changed to or from `Decimal(p,s)`, nor to another precision or scale, in place: add a new column and
+copy. A `Decimal(p,s)` column cannot be a partition key. Schema export writes the declaration back, so an exported
+schema diffs to nothing. Tables without a declared decimal are untouched.
 
 **Common mistake:** Using `"Integer"`, `"Long"`, `"Float"`, or `"DateTime"` as type names — these are not valid. Use `Int32`, `Int64`, `Float32`, and `Timestamp` respectively.
 

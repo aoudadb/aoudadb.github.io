@@ -114,9 +114,22 @@ you have not measured.
 | Single-node WAL frame emission | `false` (elided) | `Aouda:BulkLoad:EmitFramesOnSingleNode` | On a detected single-node topology, `LogShipSegments` no longer re-reads/hashes segment files or appends a WAL frame. See [Single-Node Deployment](single-node-deployment.md). |
 | Job-shape warning — segment count | `64` | `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | Advisory only, never blocks a commit. See [Bulk Load — Reading `:commit completed`](bulk-load.md#reading-commit-completed-and-the-job-shape-warning). |
 | Job-shape warning — median rows/segment | `1000` | `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | Same. |
-| Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | `Auto` accumulates affected MQs of all four types during the load and publishes at commit. Wait on `mqRebuildStatus` / `MqRebuildCompleted`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |
+| Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | `Auto` accumulates affected MQs of all four types during the load and publishes at commit — for a table whose every query is an aggregate or latest / first per key, writes them in the load's own commit, before it returns (**ColumnarCore S12, next train**). Wait on `mqRebuildStatus` / `MqRebuildCompleted`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |
 | Ingest-fed MQ reservation floor | 1 MB | `Aouda:BulkLoad:MqIngestReservationFloorBytes` | Opening `Transient` reservation per destination table, and the size growth doubles from. Unconfigured = the S04 constant. |
 | Ingest-fed MQ reservation ceiling | `0` (no dedicated cap) | `Aouda:BulkLoad:MqIngestReservationCeilingBytes` | `0` = the `Transient` governor is the bound. A positive value that live accumulator bytes would exceed falls those queries back to a scan-fed rebuild; the load still commits. |
+
+---
+
+## Materialized-query maintenance
+
+| Setting | Default | Config key | Notes |
+|---|---|---|---|
+| In-commit maintenance of an insert | on | — | An insert writes its table's aggregate and latest / first-per-key queries before it returns (**ColumnarMerge S11, next train**). Not configurable; a query with `maxCoalesceMs` above 0 is left to the queue. |
+| Freshness window | `0` ms | `maxCoalesceMs` on the query (`aouda.schema.json`) | 0–60000. How long an `Async` query's batches may wait to be applied together (**ColumnarMerge S10, next train**). See [Materialized queries](materialized.md#27-core-concepts-and-mental-model). |
+| Resident result rows | 262,144 keys per query | — | An aggregate's or latest / first-per-key query's rows kept in RAM between commits, charged to the memory governor, least recently touched evicted (**ColumnarMerge S10, next train**). |
+| Result checkpoint | every 15 s, and at clean shutdown | — | What a restart restores a current result from (**ColumnarMerge S08, next train**). |
+| Deferred-pass quiet window | 2 s with no load in flight or committed; 60 s bound | — | (**ColumnarMerge S01, next train** — a load still streaming no longer counts as quiet.) |
+| Deferred-pass workers; queries an insert writes side by side | the CPU budget | `Aouda:Cpu:ConfiguredCores` (or the probed quota) | Read when the work starts (**ColumnarCore S15, next train**); was the machine's core count capped at 16 / 8. See [Sizing CPU](sizing.md#sizing-cpu). |
 
 ---
 

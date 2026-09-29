@@ -321,6 +321,11 @@ Primary proving tests:
    - at-current -> attach to live only,
    - replay available -> deliver buffer events and continue live,
    - replay expired -> send fresh snapshot fallback.
+     A server keeps a table's changes for replay only once a subscription on that server has watched the table;
+     writes before that are not retained, so a `resume_from` older than them is expired and gets the snapshot
+     rather than an empty replay (**ColumnarCore S09, next train**); on an embedded engine the same holds until an
+     `OnTableChange` handler (or `NoteExternalChangeListener`) listens to the table. A single write larger than the replay buffer's
+     capacity is not retained either: a `resume_from` from before its end gets the snapshot (**BL-723, next train**).
 4. Consumer continues with sequence gate to avoid duplicates across boundary.
 
 Primary anchors:
