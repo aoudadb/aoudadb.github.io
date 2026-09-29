@@ -812,7 +812,7 @@ Before reporting the work complete:
 | Aggregate MQ columns are `_max_bid`, not `high` | Reading internal state columns | Read by `outputName`; re-apply if the result schema is stale |
 | Studio shows a connect error | Studio is pointed at the data-plane listener | Studio and Hub use the **admin** URL |
 | Ingest throughput fell after adding transforms | Write amplification on small batches | Batch size is the tuning parameter; avoid stacking tees on a hot path |
-| `MEMORY_BUDGET_EXCEEDED` / 503 with `Retry-After` | The RSS ceiling is doing its job | [Sizing memory and WAL](sizing.md); raise the budget deliberately or demote a table |
+| `MEMORY_BUDGET_EXCEEDED` / 503 with `Retry-After` | The RSS ceiling is doing its job | [Sizing memory and WAL](sizing.md); raise the budget deliberately or demote a table. If the message says **refused by the server-level budget** (**BL-737, next train**), the database's own budget had room — raising it will not help; the message lists what holds the server's budget by category. Honour `Retry-After` either way |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | An imperative DDL call against an apply-managed table | Change the schema file and re-apply |
 
 ---
