@@ -300,7 +300,9 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/admin/users/{id}` | GET/PATCH/DELETE | API key (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
 | `/api/databases/{db}/auth/admin/users/{id}/password` | PUT | API key (`db_admin`) | Admin override of user's password (no current-password check); optional `forcePasswordChange` |
 | `/api/databases/{db}/auth/admin/users/{id}/invite` | POST | API key (`db_admin`) | (Re-)send invite email with OTP; invalidates previous unused tokens |
-| `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user. 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor is already active or pending; existing factor id in `detail` |
+| `/api/databases/{db}/auth/admin/users/{id}/mfa/factors` | GET | API key (`db_admin`) | List that user's MFA factors (active, pending, and any other stored status). Same body as the user list: `{ "factors": [ { "id", "type", "maskedPhone", "status", "createdAt" } ] }`. Phone is masked (`+***-***-` + last 4). Empty list is 200 `factors: []`. Unknown user is 404. |
+| `/api/databases/{db}/auth/admin/users/{id}/mfa/factors/{factorId}` | DELETE | API key (`db_admin`) | Delete that user's factor and its challenges. 200 `{ "ok": true }`. 404 if the factor is missing or belongs to someone else. |
+| `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user. 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor is already active or pending; existing factor id in `detail`. Does not overwrite the number — `DELETE …/admin/users/{id}/mfa/factors/{factorId}` first, then enroll again |
 | `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys; POST accepts an optional `userId` to link the key to a user's `auth-db-pls` grants — see [Auth Reference](../auth/reference.md) |
 | `/api/databases/{db}/auth/admin/api-keys/{id}` | DELETE | API key (`db_admin`) | Revoke custom API key |
 | `/api/databases/{db}/auth/admin/signup-settings` | GET/PUT | API key (`db_admin`) | Read/write `allowSelfSignup` and `selfSignupRole` (null → `db_writer`) |
@@ -1470,7 +1472,7 @@ The list route returns an array of the same object.
 | `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
-| `pendingDeferredJobs` | integer? | (**BatchFirst S09, next train**) Deferred bulk loads (`postLoadMqBehavior: "deferred"`) this query has not incorporated yet. **Omitted** when zero. The deferred pass brings it to zero on its own; `:refresh` or an update of the table forces it. |
+| `pendingDeferredJobs` | integer | (**BatchFirst S09, next train**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (a `"deferred"` load, or an `"auto"` load folded by the pass). `0` when none; absent on older servers. While it is above zero the query is also `isStale`. `:refresh` of the query runs the table's pass at once. |
 | `stalenessMs` | integer? | (**ColumnarMerge S01, next train**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
 | `token` | string? | The maintenance watermark, as above. |
@@ -2703,7 +2705,7 @@ a clamp that bound at startup says nothing about a budget you have since set by 
 | `ratio` | number | `governedBytes / workingSetHighWaterBytes`. Identical to the flat `headroomRatio`, which is kept. |
 | `scope` | string | Always `Process`. See the warning below. |
 | `governedBytes` | integer | The numerator: the **server's** governed budget. |
-| `workingSetHighWaterBytes` | integer | The denominator: a decayed maximum of the process's working set (half-life ~11 minutes). |
+| `workingSetHighWaterBytes` | integer | The denominator: a decayed maximum of the process's working set (half-life ~11 minutes). (**IngestAtSpeed S08, next train**) The working set is RSS less the managed garbage the GC holds committed beyond the live heap. |
 | `workingSetSource` | string | `ProcessRss`, `ReservationLedger` (the fallback when RSS is unreadable), or `Unknown` before the first sample. Names the quantity that actually supplied the denominator: the high water is a decayed *maximum*, so a smaller reading that loses to the previous one does not relabel it. |
 | `mode` | string | The `resourceMode` this ratio produced. |
 | `transitions` | integer | Mode changes since start. |
@@ -2728,6 +2730,21 @@ that resident data cannot make the governor refuse transient work that fits. A d
 120 MB inside a 2.4 GB ceiling, in a process whose RSS high water is 1.9 GB against a 2.76 GB
 governed budget, is at `1.45x` headroom and `Constrained`. Every one of those numbers is correct.
 Read `workingSetHighWaterBytes`, `rssBytes`, `reservedBytes` and `untrackedHeadroomBytes` together.
+
+#### `runtime` — the process's own counters (**IngestAtSpeed S01, next train**)
+
+Additive. Cumulative since process start, except the two heap figures. Take the difference between
+two samples to measure a piece of work in units that do not depend on the host: CPU-seconds per
+million rows, bytes allocated per row, share of wall time paused for GC.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `processCpuSeconds` | number | User + kernel CPU of every thread, garbage collection included. |
+| `allocatedBytesTotal` | integer | Managed bytes allocated since start. |
+| `gcPauseTotalMs` | number | Total time the runtime paused threads for garbage collection. |
+| `gen0Collections` / `gen1Collections` / `gen2Collections` | integer | Collections of each generation since start. |
+| `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Unlike `managedHeapBytes`, it does not count garbage that has not been collected yet. Under a fast ingest the two can differ by gigabytes. |
+| `heapSizeBytes` | integer | Heap size as of the most recent collection of any generation. |
 
 🔎 All six provenance fields also appear in the `memory` health component's `details` —
 `budgetIsDerived`, `budgetSource`, `budgetIsCgroupBounded`, `budgetFractionApplied`,
@@ -4023,14 +4040,14 @@ Client                                  Server
 
 The Bulk Load API provides high-throughput batch data ingestion with durability guarantees, idempotency, and optional replication barriers. It uses a begin/append/commit pattern over HTTP.
 
-All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is NDJSON (`application/x-ndjson`) or a column-batch frame (`application/vnd.aouda.column-batch`, see [`:append`](#post-jobidappend)); all other bodies are JSON.
+All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is NDJSON (`application/x-ndjson`) or, on a server that advertises it, the binary column-batch frame (`application/vnd.aouda.column-batch`, **IngestAtSpeed S09, next train**; see [`:append`](#post-jobidappend)); all other bodies are JSON.
 
 ### Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/databases/{db}/bulk-load:begin` | Begin a new session. Returns `jobId`. |
-| `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (NDJSON body). |
+| `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (NDJSON or column-batch body). |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:commit` | Commit the session. |
 | `GET` | `/api/databases/{db}/bulk-load/{jobId}:status` | Get session status and progress. |
 | `GET` | `/api/databases/{db}/bulk-load:list` | List all sessions for this database. |
@@ -4061,7 +4078,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
 | `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
-| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"`, `"deferred"` | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): accumulate during the load's own pass and publish by shadow-swap at commit (**ColumnarCore S12, next train**: when every query over the table is an aggregate or a latest / first per key, the load folds its rows as it writes its segments and writes those queries and the queries built on them before `:commit` returns, with `mqRebuildStatus: "completed"` — so `:commit` takes longer; if the fold's memory is refused, it spilled, or a query was created or dropped during the load, the table's deferred pass does it after the commit) — poll `mqRebuildStatus` (below) to know when it's done; **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables, it queues behind that publication via the server's per-name lock and then re-scans the whole source table. `"skip"`: no ingest-fed sinks and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. `"deferred"` (**BatchFirst S08, next train**): the load writes only its table; every affected query is marked behind (`isStale: true`, as `"skip"` does) and the job is recorded as **pending**, so the engine can later bring all the table's queries current in one pass over the load's own segments. `:refresh` on a query brings it current now, and an update, delete or upsert of the table brings its queries current before it applies. An older server rejects the value with `400`. See [Deferred loads](../guides/materialized.md#deferred-loads). |
+| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"`, `"deferred"` | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it queues behind that publication via the server's per-name lock and then re-scans the whole source table. How `"auto"` does it depends on the table: when every query over the table is an `aggregate` or a `latestPerKey`/`firstPerKey` (**ColumnarCore S12, next train**), the load folds its rows as it writes its segments and writes those queries and the queries built on them before `:commit` returns, with `mqRebuildStatus: "completed"` — so `:commit` takes longer; if the fold's memory is refused, it spilled, or a query was created or dropped during the load, the table's **deferred pass** folds its rows in right after the commit instead (the queries read as behind, `isStale` with a reason, until it ends). On any other table the queries accumulate during the load's own pass and publish by shadow-swap at commit. `"skip"`: no ingest-fed sinks and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. `"deferred"` (**BatchFirst S08, next train**): the load writes only the table, marks its queries behind (`isStale: true`, as `"skip"` does), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. Use it for very large or many back-to-back loads: many loads, one pass. An older server answers `"deferred"` with `400 BULK_LOAD_INVALID_OPTIONS`. See [Deferred loads](../guides/materialized.md#deferred-loads). |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
 | `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. |
@@ -4108,7 +4125,7 @@ A table with no write-time compute needs neither flag.
 | `tables` | string[] | Echo of the requested tables. |
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
 | `maxRowsPerAppend` | number | Maximum rows allowed per single `:append` call. Clients must chunk larger payloads. |
-| `acceptedAppendFormats` | string[] | The `:append` bodies this server decodes: `"ndjson"`, and `"column-batch"` on servers that read the frame. A client sends frames only when this lists them. |
+| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, next train**) The `:append` body formats this server decodes: `"ndjson"` and `"column-batch"`. Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
 | `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count). |
 
 **Example:**
@@ -4139,15 +4156,48 @@ Content-Type: application/json
 
 Append a chunk of rows to an in-flight session.
 
-**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line), or `application/vnd.aouda.column-batch` (one or more column-batch frames back to back).
+**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line), or `application/vnd.aouda.column-batch` (one or more column-batch frames back to back; layout below).
 
 When the session was begun with more than one table, each row must include a `"_table"` field naming its destination. The `"_table"` field is stripped before inserting.
 
 **NDJSON line ends.** `\n`, `\r\n` and a bare `\r` each end a line (**BatchFirst S03, next train** — a bare `\r` used to leave the whole body as one line and fail it).
 
-**The column-batch frame** carries the same rows column by column: typed arrays for integers, doubles, decimals, booleans and timestamps (100-ns ticks since the Unix epoch, UTC), and strings as a per-column dictionary plus codes. Decimals travel as 16-byte `System.Decimal` values or, since **ColumnarCore S13 (next train)**, as the `ScaledDecimal` kind (tag 8): one scale byte, then one 64-bit integer per row, each value `v / 10^scale` — what a `Decimal(p,s)` column stores. The TypeScript SDK sends a decimal column that fits 64 bits at its largest scale that way, and the server reads each value as its JSON text says (`101`, not `101.00`) into any column type. The C# SDK sends a .NET `decimal` as the 16-byte kind (a `decimal` keeps its trailing zeros, which an undeclared `Decimal` column stores); a caller building a `ColumnBatch` can add a scaled column directly. The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). **A frame loads the same values as the NDJSON body of the same rows.** The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, next train** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, next train** — before, a fraction went as a double, which a decimal column could store differently).
+**The column-batch frame** (**IngestAtSpeed S09, next train**). A binary, column-major body the SDKs send
+instead of NDJSON when `:begin` lists `"column-batch"`. It carries the same rows, and the server loads the
+same values from it, without parsing one JSON document per row. A body is one or more frames back to
+back. All integers are little-endian.
 
-A frame is refused (`400`) when it is malformed or exceeds a limit: more than 1,000,000 rows or 4,096 columns; a column name that is empty or longer than 1,024 UTF-8 bytes; a string longer than 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, next train**: the last two, and the C# SDK no longer writes a name or string the reader refuses).
+```
+frame   := "ACB1" rowCount:u32 columnCount:u16 column*
+column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
+flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
+bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
+kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 6 Decimal · 8 ScaledDecimal
+values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
+         | Double          : rowCount × f64
+         | Bool            : bitmap
+         | Decimal         : rowCount × 4 × i32 (the .NET decimal layout)
+         | ScaledDecimal   : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
+         | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
+```
+
+- **Absent is not null.** A row whose bit is set in the absent bitmap does not have the column at all,
+  exactly like a JSON line that omits the key: an omitted auto-increment key is allocated. A row in the
+  null bitmap has the column with a `null` value. Absent and null rows still occupy their slot.
+- **Strings are dictionary-encoded per frame**: each distinct value once, then one code per row.
+- **Limits:** 1,000,000 rows and 4,096 columns per frame; a name that is empty or longer than 1,024
+  UTF-8 bytes; a string up to 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would
+  decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, next train**:
+  the last two, and the C# SDK no longer writes a name or string the reader refuses).
+  `maxRowsPerAppend` applies across all the frames of one `:append`, as it does to NDJSON lines.
+- A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
+  earlier, well-formed frames in the same body are kept and counted, as NDJSON lines before a bad line are.
+
+**A frame loads the same values as the NDJSON body of the same rows.** Decimals travel as the 16-byte `Decimal` kind or, since **ColumnarCore S13 (next train)**, as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores. The TypeScript SDK sends a decimal column that fits 64 bits at its largest scale that way, and the server reads each value as its JSON text says (`101`, not `101.00`) into any column type. The C# SDK sends a .NET `decimal` as the 16-byte kind (a `decimal` keeps its trailing zeros, which an undeclared `Decimal` column stores); a caller building a `ColumnBatch` can add a scaled column directly. The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, next train** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, next train** — before, a fraction went as a double, which a decimal column could store differently).
+
+**NDJSON is still fully supported**, for curl and for any client without the frame. From the same train
+the server decodes it straight into column batches, so it is faster too. A column whose lines mix
+integers and fractions is read as decimal for every line.
 
 **Example (single table):**
 ```
@@ -4237,7 +4287,7 @@ Get current session state and progress.
 | `lastUpdatedUtc` | string | ISO 8601 last state update time. |
 | `progress` | object? | Deferred work progress. Same structure as in commit response. Null if no deferred work is in progress. |
 | `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
-| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"`, `"deferred"` (**BatchFirst S08, next train**: the load used `postLoadMqBehavior: "deferred"`; terminal for the job — read each query's status to see when it is current). Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone — the WAL does not record rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
+| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"`, `"deferred"`. Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"deferred"` (BatchFirst, next train)** means the load was `postLoadMqBehavior: "deferred"` and its job is pending the table's deferred pass; it is terminal for this job — follow the queries' `pendingDeferredJobs` and `isStale` instead. **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone — the WAL does not record rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
 | `error` | string? | Human-readable error message. Set when `state = "failed"`. |
 | `errorCode` | string? | Error code when `state = "failed"`. |
 

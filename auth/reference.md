@@ -200,7 +200,9 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/signup-settings` | GET/PUT | Read/write self-service signup (`allowSelfSignup`, `selfSignupRole`; null role → `db_writer`) |
 | `.../admin/users/{id}/password` | PUT | Admin override of a user's password — no current-password check; optionally set `forcePasswordChange` |
 | `.../admin/users/{id}/invite` | POST | (Re-)send an invite email with OTP to set a password; invalidates previous unused tokens |
-| `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user. Returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; existing factor id in `detail` |
+| `.../admin/users/{id}/mfa/factors` | GET | List that user's MFA factors. Same envelope as `GET .../auth/mfa/factors` (`id`, `type`, `maskedPhone`, `status`, `createdAt`). Includes active and pending. Phone is masked. 200 `factors: []` when the user has none. 404 if the user does not exist |
+| `.../admin/users/{id}/mfa/factors/{factorId}` | DELETE | Delete that factor and its challenges. The factor must belong to `{id}` (otherwise 404). 200 `{ "ok": true }` |
+| `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user. Returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; existing factor id in `detail`. Does not change the stored number. To replace it, DELETE the factor on this admin route, then enroll again |
 
 #### Response Bodies
 
@@ -445,8 +447,8 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_MFA_FACTOR_NOT_FOUND` | 404 | MFA factor ID does not exist or belongs to another user | Verify the `factorId`; re-fetch factor list via `GET .../auth/mfa/factors` |
-| `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | 409 | A phone factor is already active or pending for this user. The existing factor id is in the `detail` field. | Use the existing factor, or `DELETE .../auth/mfa/factors/{id}` then enroll the new number |
+| `AUTH_MFA_FACTOR_NOT_FOUND` | 404 | MFA factor ID does not exist or belongs to another user | Re-fetch via `GET .../auth/mfa/factors` (signed-in user) or `GET .../admin/users/{id}/mfa/factors` (operator) |
+| `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | 409 | A phone factor is already active or pending for this user. The existing factor id is in the `detail` field. Enroll does not overwrite the number. | The signed-in user calls `DELETE .../auth/mfa/factors/{id}`. An operator calls `DELETE .../admin/users/{id}/mfa/factors/{factorId}`, then enrolls the new number |
 | `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user | Show "Invalid code"; prompt user to try again or re-request a challenge |
 | `AUTH_MFA_CHALLENGE_EXPIRED` | 400 | Challenge window has passed (10 minutes for both TOTP and phone) | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
 | `AUTH_MFA_CHALLENGE_EXHAUSTED` | 400 | Five consecutive wrong codes on the same challenge; challenge is permanently invalid | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |

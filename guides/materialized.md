@@ -189,7 +189,7 @@ If you create a materialized query with standard helpers and no special options:
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
-| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types accumulate during the load; wait, do not `:refresh` |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server (on a table of only aggregates / latest-per-key, by the table's deferred pass right after commit — **BatchFirst, next train**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
 
 ### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
 
@@ -569,7 +569,7 @@ Key implementation anchors:
    - New maintainer atomically replaces the old one.
    - MQ state transitions to `Ready`.
 5. Error handling:
-   - If the rebuild fails, state transitions to `Error`.
+   - If the rebuild fails, state transitions to `Error`. A rebuild **refused memory** is the exception: the queries stay `Ready`, marked stale and deferred (**IngestAtSpeed S03, next train**; see 2.11c).
    - The rebuild window is never left in `Rebuilding` on any code path.
 6. Observability:
    - `BulkLoadJobHandle.MqRebuildStatus` tracks rebuild state.
@@ -1206,6 +1206,25 @@ Your options, in the order worth trying:
 
 Its siblings over the same source table are unaffected and will be `Ready`; re-running the refresh
 after changing a setting rebuilds only what you ask for.
+
+### A rebuild refused memory outright is deferred, not failed (**IngestAtSpeed S03, next train**)
+
+A rebuild can also be refused before any single query has been singled out: the rebuild's own
+reservation is denied, for instance. That used to leave every query in the rebuild in `Error`, which
+nothing cleared. Those queries now stay **`Ready` and stale**, readable with the result they had, and
+their provenance (`lastRebuildSource`) reads `DeferredMemoryPressure`. The engine retries them when
+memory recovers, and `:refresh` rebuilds them at once. Retirement, described above, still ends in
+`Error`, because it names one query that cannot fit.
+
+### Only a rebuild from the source clears "stale" (**IngestAtSpeed S03, next train**)
+
+A query marked stale is missing rows that are not in its result: a load that was deferred for
+memory, a `Skip` load, a maintenance apply that failed part-way. A later bulk load's maintenance
+adds exactly its own rows and does not repair that. It therefore **no longer clears the mark**.
+Before this release it did, and the query then read as current while missing whole loads. Only a
+rebuild that scans the source table clears it: `:refresh`, a fallback rebuild, or the automatic retry
+of a deferred query. If a query stays stale after a load, that is the reason, and `:refresh` (pooled
+with `staleOnly`) is the remedy.
 
 ## 2.11d What a query costs to maintain: the `amplification` object {#amplification}
 
