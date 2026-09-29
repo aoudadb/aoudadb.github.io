@@ -353,7 +353,9 @@ insert (rather than bulk-load) flush the same way (**ColumnarCore S08, next trai
 one segment of everything it holds, in the same order, where it used to write one small segment per bucket the
 buffer touched. A key bounded by a time function (`truncateToDay` and the like) keeps its buckets for both. Reads return the same rows either way: a read filtered on
 the partition key skips a job's segment by its zone maps on the key (**ColumnarMerge S06, next train**),
-where it used to skip it by bucket. A keyed table's bulk-loaded segments also get their primary-key
+where it used to skip it by bucket. Hot segments are narrowed the same way: a hot segment answers its partition-key
+columns' range (computed once and kept with the segment), so a one-series read of a hot-first coalescing table opens
+only the hot segments that can hold the series, not all of them (**BL-714, next train**). A keyed table's bulk-loaded segments also get their primary-key
 sidecars — the index and keymap other writers already built — shortly after the commit, so a uniqueness
 check that has to consult one stays cheap.
 

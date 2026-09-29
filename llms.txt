@@ -85,7 +85,7 @@
 
 ## Reference
 
-- [HTTP API Reference](https://aoudadb.github.io/reference/http-api/): Wire protocol, REST + WebSocket. v2.5: named-query name identity. P37: named-query execute/batch, named mutations, `mk_pub_*` / listeners, `snapshot_complete`, `gap`, `re_auth`, `values_skipped`
+- [HTTP API Reference](https://aoudadb.github.io/reference/http-api/): Wire protocol, REST + WebSocket. v2.5: named-query name identity. P37: named-query execute/batch, named mutations, `mk_pub_*` / listeners, `snapshot_complete`, `gap`, `re_auth`, `values_skipped`. Next train (v2.8): `POST …/tables/{name}/rows` also accepts one `application/vnd.aouda.column-batch` frame, advertised by `Accept-Post` and `features.insertColumnBatch`
 - [Timestamp Type](https://aoudadb.github.io/reference/timestamp/): Timestamp semantics, storage, query behavior
 - [Changelog](https://aoudadb.github.io/CHANGELOG/): Version history
 

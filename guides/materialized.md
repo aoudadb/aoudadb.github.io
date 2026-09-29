@@ -189,7 +189,7 @@ If you create a materialized query with standard helpers and no special options:
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
-| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server (on a table of only aggregates / latest-per-key, by the table's deferred pass right after commit — **BatchFirst, next train**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server (on a table of only aggregates / latest / first per key, written in the load's own commit, before `:commit` returns — `mqRebuildStatus: completed`; the table's deferred pass runs after the commit only if that fold is refused memory, spills to disk, or a query on the table is created or dropped during the load — **ColumnarCore S12, next train**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
 
 ### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
 
@@ -999,6 +999,14 @@ Many jobs, one pass. Each query's status reports `pendingDeferredJobs` until it 
 `stalenessMs` says how long ago the oldest load it owes committed. The pass's workers come from the server's CPU
 budget (`Aouda:Cpu:ConfiguredCores` or the probed quota), not the machine's core count (**ColumnarCore S15, next
 train** — see [sizing](sizing.md#sizing-cpu)).
+
+**What the pass holds in memory** (**BL-690, next train**). The pass folds its jobs in waves of about a million rows,
+and each wave's folded state is now reserved with the memory governor while its queries are written — before, the pass
+reserved nothing, so the governor never saw it. A refusal does not fail the pass: the wave already folded is written,
+and every wave after it is half the size, down to a sixteenth. An `Auto` load's own in-commit fold is reserved the same
+way; when it is given up (refused, or a bucket spilled) its state and reservations are released at once rather than at
+the end of the load. On an embedded engine with no governor, a load's fold gives up past 256 MB and the pass folds that
+load in waves instead.
 
 If a pass fails while writing a query, that query is left behind and owes nothing further (it is not
 folded twice); refresh it, or a restart rebuilds it.

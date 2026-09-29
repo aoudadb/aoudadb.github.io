@@ -263,7 +263,10 @@ Invariants:
 
 High-level runtime flow:
 
-1. Engine emits `TableChangeEvent` into change emitter/buffer.
+1. Each commit publishes **one change batch** to the change emitter (`EmitCommit`, its only entry point); the table's
+   resume buffer keeps whole batches, and per-row `TableChangeEvent`s are built from a batch only when a listener or a
+   resume reads them — the events a subscriber receives are unchanged (**ColumnarCore S09, next train**; the older
+   per-event entry points are removed).
 2. Subscription manager fans out events to per-subscription channels.
 3. Subscription handler combines user filter + ADRA checks and sends `snapshot`/`change`.
 4. Write stream handler validates mode/sequence/security, writes rows, emits `stream_ack`.

@@ -10,7 +10,7 @@ Aouda provides official clients for .NET and TypeScript, plus a raw HTTP/REST AP
 
 | Client | Package | Use case |
 |---|---|---|
-| **.NET** | `Aouda.Client` (NuGet) | Server mode — connect from any .NET app. Inserts (`InsertAsync`, typed and dictionary) travel as a binary column-batch frame once the server advertises it, JSON otherwise (**ColumnarCore S06, next train**; [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows)). A .NET `decimal` goes as the frame's 16-byte kind; `ColumnBatchBuilder.SetScaledDecimal` writes the `ScaledDecimal` kind a `Decimal(p,s)` column stores (**ColumnarCore S13, next train**) |
+| **.NET** | `Aouda.Client` (NuGet) | Server mode — connect from any .NET app. Inserts (`InsertAsync`, typed and dictionary) travel as a binary column-batch frame once the server advertises it, JSON otherwise (**ColumnarCore S06, next train**; [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows)); after a `415` it stays on JSON for five minutes whatever a later response advertises (**BL-716, next train**). A .NET `decimal` goes as the frame's 16-byte kind; `ColumnBatchBuilder.SetScaledDecimal` writes the `ScaledDecimal` kind a `Decimal(p,s)` column stores (**ColumnarCore S13, next train**) |
 | **.NET Embedded** | `Aouda.Embedded` (NuGet) | In-process database, no server needed |
 | **TypeScript** | `@aouda/client` (npm) | Server mode — connect from Node.js, browser, or edge |
 | **HTTP/REST** | Built into every Aouda server | Any language, direct API calls |

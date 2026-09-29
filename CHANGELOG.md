@@ -19,6 +19,55 @@ Public, user-facing release notes. Engine phase status lives in the server
   still returns 409 while a phone factor exists and still does not change the number; replace a
   number by deleting on the admin route, then enrolling again.
 
+- **Inserts can be sent as a column-batch frame (ColumnarCore S06).** `POST …/tables/{name}/rows`
+  also takes one `application/vnd.aouda.column-batch` frame — the binary layout bulk-load `:append`
+  already reads — and says so with `Accept-Post` on its responses and `insertColumnBatch` in
+  `GET /admin/capabilities`. A frame inserts exactly what the same rows as JSON would. `Aouda.Client`
+  and `@aouda/client` send frames once a server has advertised them, and JSON to an older server.
+  Two visible differences for JSON callers: a body that is not valid JSON is now
+  `400 INVALID_REQUEST`, and an empty body is `400 MISSING_DATABASE`. See
+  [HTTP API insert](reference/http-api.md#post-apidatabasesdbtablesnamerows) (revision 2.8).
+- **After a `415`, both SDKs stay on JSON for five minutes (BL-716).** A later response advertising
+  frames no longer flips them back at once, so a mixed fleet behind one address stops costing an
+  upload per flip. A string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is
+  now a `400` on every path.
+- **`Decimal(p,s)` columns (ColumnarCore S13).** `"type": "Decimal", "precision": 18, "scale": 2`
+  stores the column as a scaled 64-bit integer instead of a 16-byte decimal per cell. Values in and
+  out carry exactly the declared scale (`10.50`); a value with more places, or too many integer
+  digits, is a `400` naming the column. Frames gain a `ScaledDecimal` kind. ⚠️ **An older build
+  cannot read a table with a `Decimal(p,s)` column** — upgrade a primary and its replicas together.
+  Tables without one are untouched. See [Data types](reference/http-api.md#data-types).
+- **An `Auto` bulk load's queries are written in its own commit (ColumnarCore S12)** when every query
+  over the table is an aggregate or a latest / first per key. They used to be folded by the table's deferred pass after the commit,
+  so the handle came back `pending`. Now `:commit` returns with `mqRebuildStatus: "completed"` and a
+  publish backlog of 0 — and takes correspondingly longer. The pass still runs after the commit if
+  the fold is refused memory, spills, or the table's queries change during the load. See
+  [Bulk load](guides/bulk-load.md).
+- **The deferred pass and a load's own fold are charged to the memory governor (BL-690).** A refusal
+  halves the pass's later waves (down to a sixteenth) instead of going unseen; a fold that is given
+  up releases its memory at once. See [Deferred loads](guides/materialized.md#deferred-loads).
+- **Concurrent commits share one durable WAL write (ColumnarCore S07).** A commit is now one write
+  and one flush, and commits arriving while one is on disk share the next. The log's frames are
+  unchanged, so older logs replay as before.
+- **An insert flush writes one segment (ColumnarCore S08).** A table on a high-cardinality `Auto`
+  partition key used to flush one small segment per bucket its rows touched; it now writes one, as
+  bulk loads already do. Reads return the same rows. A one-series read of such a table opens only
+  the hot segments that can hold the series (BL-714).
+- **The replay buffer keeps a table's changes only once something listens (ColumnarCore S09).** Writes
+  made before a subscription watched the table are not retained, so a `resume_from` from before
+  them gets the snapshot rather than an empty replay.
+  The events a subscriber receives are unchanged. See [Real-time](guides/real-time.md).
+- **A maintained `sum` in an in-commit update event carries the column's type (ColumnarCore S10)** —
+  `Int64` for an integer column, as the insert event already did; the JSON is the same (`12`). A
+  `sum` of a `Double` column now reads `3` where it read `3.0`.
+- **Deletion masks have one layout (ColumnarCore S12, BL-725, BL-726).** A merge appends to a
+  segment's mask instead of rewriting it. The version-1 layout is not read — a clean cut, pre-1.0 —
+  and a mask that exists but cannot be read now fails the read instead of resurrecting the rows it
+  deleted.
+- **Materialized-query maintenance follows the server's CPU budget (ColumnarCore S15).** The deferred
+  pass's workers come from `Aouda:Cpu:ConfiguredCores` or the probed quota, not the machine's core
+  count. See [Sizing](guides/sizing.md#sizing-cpu).
+
 ## 0.1.38 — 2026-09-24
 
 **An installable server, and materialized queries that say when they are behind.** Server **0.1.38**, `Aouda.Client` **0.1.38**, `@aouda/client` **0.1.25** (unchanged — this train removes a field the TypeScript client never declared), Studio **0.0.26** (pin stays **0.1.25**). See [Compatibility](clients/compatibility.md).
