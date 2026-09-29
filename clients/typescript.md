@@ -387,7 +387,11 @@ array, a column whose rows disagree on type, a number in exponent notation (`1e2
 columns, 1,000,000 rows, a 16 MB string, an empty or 1 KB+ column name) are sent as JSON; so is everything after a `415`.
 A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a `bigint` is refused as `JSON.stringify`
 refuses it, whichever body the client would have sent. A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
-fraction as a decimal, digit for digit (**BL-704, next train**) — so the inserted rows are the same either way. See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
+fraction as a decimal, digit for digit (**BL-704, next train**) — so the inserted rows are the same either way. A
+decimal column whose every value in the batch fits 64 bits at the column's largest scale goes as the frame's
+`ScaledDecimal` kind — what a server `Decimal(p,s)` column stores — and otherwise as the 16-byte `Decimal` kind; the
+server reads each value as its JSON text says (`101`, not `101.00`) (**ColumnarCore S13, next train**; a server
+from an earlier train refuses that kind with a `400`, so pair this client with a server of the same train). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
 #### Identity-insert (explicit autoIncrement IDs)
 

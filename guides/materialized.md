@@ -75,6 +75,13 @@ What is different in Aouda vs many systems:
 - The result is a regular table, not a special hidden object type.
 - The query name is the table name (unified namespace; no `_mq_` prefix).
 - Subscription uses the normal table streaming path (`target = queryName`), not a custom protocol target.
+  **A rebuild is announced too (**BL-702, next train**):** when a change can only be applied by rebuilding the result
+  (for example, deleting the source row that held an aggregate's `last`), a subscriber of the result receives the
+  difference between the old and new result as ordinary `Insert` / `Update` / `Delete` events on the result table,
+  instead of seeing the changed rows only through a later event.
+  **A maintained `sum` carries the column's type in update events too (**ColumnarCore S10, next train**):** an
+  in-commit update event's `sum` of an integer column is an `Int64`, as its insert event and every read already were
+  (the JSON is the same, `12`), and a `sum` of a `Double` column is a `double` — `3` where it was `3.0`.
 
 - User problem solved:
   - Avoid re-running expensive query logic (for example aggregates, latest-per-key projections) on every read.
@@ -417,7 +424,9 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
   for all of them, and each query's changed groups are written as one batch. Those queries are current when the insert
   is acknowledged (their watermark is at the insert's commit), so a read right after an insert sees it. What this costs:
   the insert takes longer by its queries' share, and inserts into one table are applied to its queries one commit at a
-  time. What still goes through the asynchronous queue: upserts, updates and deletes; filters and top-N queries;
+  time. (**ColumnarCore S15, next train**) The next commit's own work (plan, key check, commit, log) now overlaps this
+  commit's query writes, while every query still sees the table's commits in commit order, and how many queries an
+  insert writes side by side follows the server's CPU budget ([sizing](sizing.md#sizing-cpu)). What still goes through the asynchronous queue: upserts, updates and deletes; filters and top-N queries;
   queries over another query's result (cascades); a query with a freshness window (`maxCoalesceMs` above 0 — it asked
   to coalesce); and a query that is being refreshed at that moment. A write that fails inside the commit leaves the
   query visibly stale and rebuilds it; the insert itself still succeeds. Measured on the Equity insert benchmark (nine
@@ -431,6 +440,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
   - Planner result that says "serve from MQ result table" or "scan base table."
 - `GroupByExpression` (P28):
   - Either a plain column name (backward-compatible) or a derived time-bucket expression `{ column, function }` where function is `TruncateToHour` or `TruncateToMinute`. Group keys for derived expressions are stored as Int64 epoch milliseconds so candle result tables remain first-class time-series tables (range-queryable, partitionable).
+  - **A null group is a group of its own (**BL-691, next train**).** Grouping by a nullable column gives the rows with a null value their own result row, whose key reads back as `null` — it no longer shares a row (or a key) with the rows whose value is `0` / the type's default. A result created before this release keeps a non-nullable key column; drop and re-create it to get the null group.
 - `FIRST`/`LAST` aggregate (P28):
   - Aggregate function that returns the value of `column` at the row with the minimum (`FIRST`/ascending) or maximum (`LAST`/descending) value of `orderByColumn`. The aggregate maintainer tracks the running extreme value of `orderByColumn` alongside each group's aggregate state. This enables OHLC candle patterns: Open = `FIRST(bid, orderBy=time asc)`, Close = `LAST(bid, orderBy=time asc)`.
 - Shadow-build rebuild (P31):
@@ -986,7 +996,9 @@ train**: a load still streaming used to count as quiet once 2 seconds had passed
 a pass could start in the middle of a large load) — or once the oldest pending job has waited 60 seconds,
 however busy the table is; `:refresh` on any owing query, or an update of the table, runs it at once.
 Many jobs, one pass. Each query's status reports `pendingDeferredJobs` until it is current, and
-`stalenessMs` says how long ago the oldest load it owes committed.
+`stalenessMs` says how long ago the oldest load it owes committed. The pass's workers come from the server's CPU
+budget (`Aouda:Cpu:ConfiguredCores` or the probed quota), not the machine's core count (**ColumnarCore S15, next
+train** — see [sizing](sizing.md#sizing-cpu)).
 
 If a pass fails while writing a query, that query is left behind and owes nothing further (it is not
 folded twice); refresh it, or a restart rebuilds it.
@@ -1298,6 +1310,14 @@ Expected checks:
 - Query result has one row per `customer_id`.
 - Reads come back without building aggregations at read time.
 
+**Ties on the order column (**BL-588, next train**).** When two rows of one key have the same `orderBy` value (a
+coarse timestamp, a version), the row with the **lowest source primary key** wins — for `latestPerKey` and `firstPerKey`
+alike, and the same on every path: incremental maintenance, a bulk load, `:refresh` and a rebuild after a restart. An
+update of the winning row that leaves its order value alone keeps it the winner. For this the result table **always
+carries the source's primary-key columns**, even when `selectColumns` leaves them out (as a `topNPerGroup` result always
+has). A query created before this release keeps its earlier rule (the first row read wins, which can differ between
+`:refresh` and maintenance) until it is dropped and re-created; a source table with no primary key has no tie-break.
+
 ### Scenario 2: Production-safe rollout with async lag control
 
 When to use:
@@ -1365,6 +1385,7 @@ Recovery/restart expectations (**ColumnarMerge S08, next train**):
   after a clean shutdown.
 - The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
   log is never pruned under it.
+- A database created before this release has no checkpoints, so it rebuilds its results once, at the first open.
 
 Suggested tuning sequence:
 1. Start with default async mode and observe lag/queue metrics.
