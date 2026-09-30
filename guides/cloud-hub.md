@@ -130,7 +130,7 @@ See the [Studio guide §12](studio.md#12-aoudasetup-installer) and [Server confi
 docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
 ```
 
-- Base: `mcr.microsoft.com/dotnet/aspnet:8.0-alpine`
+- Base: `mcr.microsoft.com/dotnet/aspnet:10.0-alpine` (**BL-739, 0.2.0**; `8.0-alpine` before)
 - Exposes port 5000
 - Data volume at `/data`
 - Environment variable `AOUDA_DATA_PATH=/data` set by default (alias for `AOUDA_DATAPATH` — see [Server configuration](server-configuration.md#21-environment-variable-naming-aouda_))

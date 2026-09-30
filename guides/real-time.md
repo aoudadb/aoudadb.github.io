@@ -265,7 +265,7 @@ High-level runtime flow:
 
 1. Each commit publishes **one change batch** to the change emitter (`EmitCommit`, its only entry point); the table's
    resume buffer keeps whole batches, and per-row `TableChangeEvent`s are built from a batch only when a listener or a
-   resume reads them — the events a subscriber receives are unchanged (**ColumnarCore S09, next train**; the older
+   resume reads them — the events a subscriber receives are unchanged (**ColumnarCore S09, 0.2.0**; the older
    per-event entry points are removed).
 2. Subscription manager fans out events to per-subscription channels.
 3. Subscription handler combines user filter + ADRA checks and sends `snapshot`/`change`.
@@ -326,9 +326,9 @@ Primary proving tests:
    - replay expired -> send fresh snapshot fallback.
      A server keeps a table's changes for replay only once a subscription on that server has watched the table;
      writes before that are not retained, so a `resume_from` older than them is expired and gets the snapshot
-     rather than an empty replay (**ColumnarCore S09, next train**); on an embedded engine the same holds until an
+     rather than an empty replay (**ColumnarCore S09, 0.2.0**); on an embedded engine the same holds until an
      `OnTableChange` handler (or `NoteExternalChangeListener`) listens to the table. A single write larger than the replay buffer's
-     capacity is not retained either: a `resume_from` from before its end gets the snapshot (**BL-723, next train**).
+     capacity is not retained either: a `resume_from` from before its end gets the snapshot (**BL-723, 0.2.0**).
 4. Consumer continues with sequence gate to avoid duplicates across boundary.
 
 Primary anchors:

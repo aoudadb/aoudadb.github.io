@@ -906,12 +906,12 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
-| `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, next train**). |
+| `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). |
 | `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
 
-#### `Decimal(p,s)`: a decimal stored as a scaled integer (**ColumnarCore S13, next train**)
+#### `Decimal(p,s)`: a decimal stored as a scaled integer (**ColumnarCore S13, 0.2.0**)
 
 A `Decimal` column may declare `precision` (total digits, 1–18) and `scale` (digits after the point, 0–`precision`),
 both or neither:

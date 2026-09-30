@@ -188,13 +188,13 @@ When you do not set durability knobs explicitly:
 
 - WAL frame pipeline:
   - Mutations are encoded as WAL frames and flushed before write results are considered durable.
-  - **A commit is one durable write, and concurrent commits share one (**ColumnarCore S07, next train**).** A
+  - **A commit is one durable write, and concurrent commits share one (**ColumnarCore S07, 0.2.0**).** A
     transaction's frames (`TxBegin`, its rows, `TxCommit`) are written back to back in one write and one flush, and
     commits that arrive while a write is on disk share the next one — group commit without a timer: a lone commit is
     written at once. The frames are unchanged byte for byte, only now contiguous, so old logs replay and replicas read
     new ones; a transaction aborted before its commit writes nothing. (Before, an insert made three write-through
     writes, an upsert four.) Measured: 200 commits to eight tables in flight together took 73 durable writes.
-  - ⚠️ **Downgrades (**ColumnarMerge S07, next train**).** Keyed writes (upserts) log a new frame kind, `MergeBatch`,
+  - ⚠️ **Downgrades (**ColumnarMerge S07, 0.2.0**).** Keyed writes (upserts) log a new frame kind, `MergeBatch`,
     which an older server cannot replay: do not downgrade a database that has taken upserts without a clean shutdown
     first.
 - WAL position as durability token:
@@ -233,7 +233,7 @@ Design characteristics:
 1. Client sends insert request with no explicit write concern.
 2. Engine resolves table WAL policy via `ResolveWalWriter(tableEntry)`.
 3. `TableAppender.SealAndWriteAsync` emits begin + append + commit frames.
-4. `WalWriter` flushes frames — the whole transaction in one write, shared with commits queued behind it (**ColumnarCore S07, next train**); insert result carries `WalPosition`.
+4. `WalWriter` flushes frames — the whole transaction in one write, shared with commits queued behind it (**ColumnarCore S07, 0.2.0**); insert result carries `WalPosition`.
 5. `TablesController.InsertRows` resolves effective write concern (table/database defaults).
 6. `WriteConcernService` computes required ACK count and waits on `PendingWriteTracker`.
 7. Once ACK threshold is met (or immediate local path satisfies `One`), response returns with write concern status.
@@ -251,7 +251,7 @@ Design characteristics:
 
 1. Process is terminated after durable and non-durable writes are interleaved.
 2. On startup, storage initializes and WAL replay is invoked.
-3. Replay reads segments, validates frames (CRC), trims torn tail if present, and reapplies durable frames. Reopening the log for writing also checks each frame's CRC and clears what a torn write left, so new commits are not appended behind the tear (**ColumnarCore S07 review, next train**).
+3. Replay reads segments, validates frames (CRC), trims torn tail if present, and reapplies durable frames. Reopening the log for writing also checks each frame's CRC and clears what a torn write left, so new commits are not appended behind the tear (**ColumnarCore S07 review, 0.2.0**).
 4. `{db}/wal/CHECKPOINT` supplies `redoStartPosition`; segments whose end is at or below that horizon are not opened.
 5. Queries after startup observe replayed state; scenario tests validate expected rows.
 

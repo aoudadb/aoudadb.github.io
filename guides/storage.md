@@ -238,11 +238,11 @@ If you run server defaults and do not set per-database overrides:
   - `.mkt` — mutable keyed tier serialisation; included in backup since P30 (Gap C)
   - `.spr` — sparse PK index for cold segments
   - `.tombstone` — durable retirement tombstone preventing orphaned cold file resurrection after crash (P30 S11)
-  - `_deleted.pages` — a segment's deletion mask. (**ColumnarCore S12, next train**) A merge that tombstones rows now
+  - `_deleted.pages` — a segment's deletion mask. (**ColumnarCore S12, 0.2.0**) A merge that tombstones rows now
     appends a small record (each with its own CRC; a torn one is ignored) instead of rewriting the whole mask: the file
     is the whole bitmap followed by those records, rewritten whole when the records outgrow the bitmap. That is its only
     layout. A mask that exists but cannot be read fails the read, naming the table and segment, instead of being taken
-    as nothing deleted (**BL-725, next train**).
+    as nothing deleted (**BL-725, 0.2.0**).
 - **Table segment layout**
   - Table path is name-based.
   - Default non-partitioned path uses `data/seg_*`.
