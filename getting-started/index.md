@@ -1905,8 +1905,8 @@ registration, where a missing subcommand installs cleanly and then fails to star
 
 ### 16.2 The artefact, and the one prerequisite
 
-⚠️ **Aouda ships framework-dependent.** The binaries do not bundle a .NET runtime, so **the .NET 8
-ASP.NET Core runtime must be installed on the target machine** before anything can start. There is
+⚠️ **Aouda ships framework-dependent.** The binaries do not bundle a .NET runtime, so **the .NET 10
+ASP.NET Core runtime must be installed on the target machine** (**BL-739, next train**) before anything can start. There is
 no self-contained artefact.
 
 This is not a footnote. Without the runtime, the process fails in the .NET host loader — *before a
@@ -1915,7 +1915,7 @@ The install scripts check for it first and print what to run; `aouda doctor` rep
 **version**, because by the time it can run, the runtime is present by definition.
 
 ```bash
-sudo apt-get install -y aspnetcore-runtime-8.0          # Debian / Ubuntu
+sudo apt-get install -y aspnetcore-runtime-10.0         # Debian / Ubuntu
 dotnet --list-runtimes | grep Microsoft.AspNetCore.App  # verify
 ```
 
@@ -2060,7 +2060,7 @@ registration, so it needs no arguments for a default install. Exit codes are lis
 ### 16.7 Scripted installs
 
 The install scripts remain the entry point for CI/CD and scripted deployment, and they now do
-exactly one thing the binary cannot: check for the .NET 8 runtime before running a binary that needs
+exactly one thing the binary cannot: check for the .NET 10 runtime before running a binary that needs
 it. Everything else they delegate.
 
 ```powershell

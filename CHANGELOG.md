@@ -13,6 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Aouda now runs on .NET 10 (BL-739).** The server, the install scripts' preflight, the Docker image
+  (`aspnet:10.0-alpine`) and the .NET packages (`Aouda.Client`, `Aouda.Abstractions`, `Aouda.Embedded`,
+  `Aouda.Testing`) move from `net8.0` to `net10.0`. ⚠️ Install the **.NET 10 ASP.NET Core runtime** before
+  upgrading a server — the binaries are framework-dependent and fail in the host loader without it. A .NET 8
+  application must retarget to `net10.0` to take these package versions; until then it stays on the previous
+  release. See [SDK compatibility](clients/compatibility.md#versioning-model). The TypeScript client is
+  unaffected.
+
 - **Operators can list and delete a user's MFA factors (BL-682).**
   `GET …/auth/admin/users/{id}/mfa/factors` returns the masked factor list, including an empty
   list. `DELETE …/mfa/factors/{factorId}` removes that factor and its challenges. Admin enroll

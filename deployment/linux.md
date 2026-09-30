@@ -14,15 +14,15 @@ Install the server on a Linux VM or bare-metal host, register it with systemd, a
 
 | Requirement | Why |
 |---|---|
-| **The .NET 8 ASP.NET Core runtime** | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 8 is missing](#if-net-8-is-missing) |
+| **The .NET 10 ASP.NET Core runtime** (**BL-739, next train**) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 10 is missing](#if-net-10-is-missing) |
 | **Root** | Writing `/etc/systemd/system` and creating a service account |
 | **Access to the private artefact feed** | ⚠️ Aouda's artefacts are **private**. There is no public download, no `curl \| sh`, and no anonymous `docker pull`. See [Getting the artefact](#getting-the-artefact) |
 
 Install the runtime with your distribution's package:
 
 ```bash
-sudo apt-get install -y aspnetcore-runtime-8.0     # Debian / Ubuntu
-sudo dnf install -y aspnetcore-runtime-8.0         # RHEL / Fedora
+sudo apt-get install -y aspnetcore-runtime-10.0    # Debian / Ubuntu
+sudo dnf install -y aspnetcore-runtime-10.0        # RHEL / Fedora
 ```
 
 Verify:
@@ -64,7 +64,7 @@ sha256sum -c SHA256SUMS
 sudo ./install-aouda.sh --artifact-dir ./linux-x64
 ```
 
-The script does three things and then gets out of the way: it checks for the .NET 8 runtime, verifies the checksums, copies the binaries to `/opt/aouda`, and hands over to `aouda service install`. Everything else — the unit file, the service account, the directories — is done by the server binary itself, where it is one tested code path rather than a shell script per platform.
+The script does three things and then gets out of the way: it checks for the .NET 10 runtime, verifies the checksums, copies the binaries to `/opt/aouda`, and hands over to `aouda service install`. Everything else — the unit file, the service account, the directories — is done by the server binary itself, where it is one tested code path rather than a shell script per platform.
 
 Any option the script does not recognise is passed through, so these are equivalent:
 
@@ -340,7 +340,7 @@ Stops the service, disables it, removes the unit and reloads systemd. **The data
 
 ---
 
-## If .NET 8 is missing
+## If .NET 10 is missing
 
 The install script checks first and tells you what to run. If you skipped it and started the binary directly, the failure comes from the .NET host loader rather than from Aouda, and looks like:
 
@@ -348,7 +348,7 @@ The install script checks first and tells you what to run. If you skipped it and
 You must install .NET to run this application.
 App: /opt/aouda/Aouda.Server
 Architecture: x64
-Framework: 'Microsoft.AspNetCore.App', version '8.0.0' (x64)
+Framework: 'Microsoft.AspNetCore.App', version '10.0.0' (x64)
 ```
 
 ⚠️ **There is no Aouda error message for this, and there cannot be.** The binary is framework-dependent, so the loader fails before a single line of Aouda code runs — which is also why the preflight lives in the install script rather than in `aouda doctor`. By the time `doctor` can run, the runtime is present by definition, and what it reports is the version.

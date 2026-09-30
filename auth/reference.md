@@ -1357,7 +1357,7 @@ Add this to your project's `README.md` or `docs/dev/Getting-Started.md`:
 ## Aouda Auth Setup (one-time per developer machine)
 
 ### Prerequisites
-- .NET 8 SDK
+- .NET 10 SDK (**BL-739, next train**)
 - Aouda CLI: `dotnet tool install --global Aouda.Cli`
   (or: `dotnet tool install --global Aouda.Cli --add-source \\shared-drive\aouda-tools`)
 

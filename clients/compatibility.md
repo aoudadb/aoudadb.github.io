@@ -21,6 +21,11 @@ Aouda ships multiple artifacts from separate repositories. They do **not** share
 
 **Release order** when APIs change: server → SDKs → Studio → docs.
 
+**.NET target.** The server and the .NET packages (`Aouda.Client`, `Aouda.Abstractions`, `Aouda.Embedded`,
+`Aouda.Testing`) target **`net10.0`** (**BL-739, next train**); every earlier release targets `net8.0`. A NuGet
+package built for `net10.0` does not restore into a `net8.0` project, so an application on .NET 8 stays on the last
+`net8.0` release of those packages until it retargets. The TypeScript client is unaffected.
+
 ---
 
 ## Compatibility matrix
