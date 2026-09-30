@@ -36,13 +36,13 @@ CPU budget derivation: machine=28, quota=none, configured=none, schedulable=28,
 
 Aouda's Helm chart sets `limits.cpu` and is therefore safe by default; `docker-compose` sets nothing, so a compose deployment on a shared host should set `--cpus` or `ConfiguredCores`.
 
-**Materialized-query maintenance follows the same budget (**ColumnarCore S15, next train**).** The deferred pass's
+**Materialized-query maintenance follows the same budget (**ColumnarCore S15, 0.2.0**).** The deferred pass's
 workers (and its fold chunks) and the number of queries an insert writes side by side come from this CPU budget —
 `Aouda:Cpu:ConfiguredCores` or the probed quota, read when the work starts — instead of the machine's core count capped
 at 16 / 8. A server given four cores no longer schedules sixteen workers on them, and one given sixteen of twenty uses
 them.
 
-### Garbage collection (**ColumnarCore S14, next train**)
+### Garbage collection (**ColumnarCore S14, 0.2.0**)
 
 The server runs .NET's **Server GC with DATAS** (dynamic adaptation) and a heap hard limit of 85 % of the memory it may
 use; that is in its `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores with the write paths now
@@ -55,7 +55,7 @@ GC settings apply, and .NET's default is Workstation GC. Turn Server GC on (`<Se
 in the project, or `DOTNET_gcServer=1`): an in-process insert of 2,000-row batches measured 1.8 CPU-s per million rows
 with it and 2.5 without, with GC pauses at 0 % instead of 4 %.
 
-## Open files (**IngestAtSpeed S02, next train**)
+## Open files (**IngestAtSpeed S02, 0.1.40**)
 
 Aouda keeps a file per column per segment, plus the WAL, key maps and spill runs, so a large load
 can reach the common soft limit of **1024 open files**. The symptom is `No file descriptors
@@ -77,7 +77,7 @@ Open-file limit: soft 1024 -> 1048576 (hard 1048576).
 `fileDescriptorSoftLimit` and `fileDescriptorHardLimit`. The two limits are `-1` on Windows, which
 has no such limit.
 
-## Inserts and their materialized queries (**BatchFirst S13, next train**)
+## Inserts and their materialized queries (**BatchFirst S13, 0.1.40**)
 
 An insert is cheap; what it costs you is the materialized queries over its table, which are brought
 up to date with every commit. Size for the queries, not for the insert.
@@ -90,15 +90,15 @@ nine queries over it (six aggregates, a latest-per-key, two top-Ns over an aggre
 | 10,000 rows/s | yes | ~80 CPU-s | < 0.1 s |
 | 50,000 rows/s | in one of two runs (~40,000 rows/s achieved otherwise) | 67–73 CPU-s | ~0.1 s |
 
-The 50,000 rows/s row is **ColumnarMerge S11 / S11b (next train)**; before it, the same rate was accepted while the
+The 50,000 rows/s row is **ColumnarMerge S11 / S11b (0.2.0)**; before it, the same rate was accepted while the
 queries fell ~34 s behind during the burst.
 
-- **The queries keep up; the insert pays for them (**ColumnarMerge S11, next train**).** An insert now maintains
+- **The queries keep up; the insert pays for them (**ColumnarMerge S11, 0.2.0**).** An insert now maintains
   its table's aggregates and latest / first-per-key queries inside its own commit, so they are current when it
   returns — and the insert takes longer by their share. A rate above what the writer plus its queries can do shows
   up as a lower achieved rate, not as lag; top-Ns, filters and cascades still follow asynchronously. Watch
   `stalenessMs` on `GET /api/databases/{db}/materialized-queries/{name}` — how old the oldest change the query does
-  not yet reflect is (**ColumnarMerge S01, next train**); `currentLag` is how long it has been behind without a
+  not yet reflect is (**ColumnarMerge S01, 0.2.0**); `currentLag` is how long it has been behind without a
   break, which under a steady stream grows however promptly each commit is applied.
 - **Batch.** 1,000–5,000 rows per call. Each commit is maintained as one batch per query, so small
   commits pay the per-commit cost many times over.
@@ -106,15 +106,15 @@ queries fell ~34 s behind during the burst.
   nobody reads still costs its share.
 - **A load, not a stream, is better done as a bulk load.** Bulk loads fold their rows into the queries
   in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
-  rows/s end to end *with the queries current*. (**ColumnarCore S12, next train**) An `Auto` load into a table of
+  rows/s end to end *with the queries current*. (**ColumnarCore S12, 0.2.0**) An `Auto` load into a table of
   aggregates and latest / first-per-key queries folds them while it writes its segments and returns with them
   written, so the load itself takes longer and nothing is left to catch up after it.
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
   uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
-  against each segment once. (**ColumnarMerge S02, next train**) An id the engine allocates is not
+  against each segment once. (**ColumnarMerge S02, 0.2.0**) An id the engine allocates is not
   probed at all: it is unique by construction.
 
-### Auto-increment ids on time series (**ColumnarMerge S02, next train**)
+### Auto-increment ids on time series (**ColumnarMerge S02, 0.2.0**)
 
 An `autoIncrement` id costs almost nothing on write: ids are allocated as one range per batch and
 stored delta-bit-packed, about 2 bits a row. On a bulk load of column batches it is written as a column;
@@ -128,7 +128,7 @@ so the engine never allocates it again (an explicit `100` followed by an automat
 explicit value at or below the counter — reusing a freed id — makes that table's automatic inserts
 probe for uniqueness again until the next restart.
 
-### The key map: RAM for keyed writes (**ColumnarMerge S05, next train**)
+### The key map: RAM for keyed writes (**ColumnarMerge S05, 0.2.0**)
 
 A table with a primary key and `pkUniqueness: Strict` (the default) keeps its keys in memory across every
 tier, so an insert, upsert or materialized-query update learns whether a key exists without reading a
@@ -138,7 +138,7 @@ of the key index, and more RAM means more tables answered from memory: when the 
 simply keeps checking keys by reading its segments — correct, and slower — and `keyMapResident: false` on
 `GET /api/tables` says so. The map is rebuilt in the background after a restart; nothing is stored on disk.
 
-### Declared decimals are half the size (**ColumnarCore S13, next train**)
+### Declared decimals are half the size (**ColumnarCore S13, 0.2.0**)
 
 An undeclared `Decimal` costs 16 bytes per value in the write buffer, the hot tier and every materialized result
 that carries it, and compresses poorly on disk. A `Decimal(p,s)` column (`"precision"` / `"scale"`, p ≤ 18 — see the
@@ -160,7 +160,7 @@ headroom  =  the server's governed budget
              a decayed maximum of the PROCESS's resident set
 ```
 
-(**IngestAtSpeed S08, next train**) The resident set in the denominator no longer counts **managed
+(**IngestAtSpeed S08, 0.1.40**) The resident set in the denominator no longer counts **managed
 garbage**, meaning memory the GC holds committed beyond what is live. RSS counts it and the host does
 see it as used, but it is not load, and taking it as load kept a server doing a fast bulk load in
 `Balanced` or `Constrained` with its live heap at a tenth of the box. `workingSetSource` still reads
@@ -510,7 +510,7 @@ Aouda watches the managed heap separately from its own memory ledger, because th
 quantities: the ledger says what has been promised, the heap says what will actually throw. A process
 can sit at 39 % of its ledger and at its heap limit simultaneously.
 
-(**IngestAtSpeed S08, next train**) The heap figure is the heap **in use after the most recent
+(**IngestAtSpeed S08, 0.1.40**) The heap figure is the heap **in use after the most recent
 collection**, not the heap the GC has committed. A fast load produces garbage in gigabytes, and the GC
 keeps most of that memory committed after sweeping it. Read as pressure, it throttled the pipeline for
 being fast: on an 8 GB box with ~800 MB live, admission refused a 64 KB rebuild for minutes. The

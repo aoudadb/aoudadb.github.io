@@ -14,12 +14,12 @@ Install the server on a Windows host, register it with the Service Control Manag
 
 | Requirement | Why |
 |---|---|
-| **The .NET 8 ASP.NET Core runtime** | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 8 is missing](#if-net-8-is-missing) |
+| **The .NET 10 ASP.NET Core runtime** (**BL-739, 0.2.0**; .NET 8 for 0.1.40 and earlier) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 10 is missing](#if-net-10-is-missing) |
 | **An elevated prompt** | Registering a service |
 | **Access to the private artefact feed** | ⚠️ Aouda's artefacts are **private**. There is no public download. See [Getting the artefact](#getting-the-artefact) |
 
 ```powershell
-winget install Microsoft.DotNet.AspNetCore.8
+winget install Microsoft.DotNet.AspNetCore.10
 dotnet --list-runtimes | Select-String Microsoft.AspNetCore.App
 ```
 
@@ -57,7 +57,7 @@ From an **elevated** PowerShell prompt:
 .\scripts\install-aouda.ps1 -ArtifactDir .\win-x64
 ```
 
-The script checks for the .NET 8 runtime, verifies the checksums, copies the binaries to `C:\Program Files\Aouda`, and hands over to `aouda service install`. Everything else — the service registration itself — is done by the server binary, where it is one tested code path.
+The script checks for the .NET 10 runtime, verifies the checksums, copies the binaries to `C:\Program Files\Aouda`, and hands over to `aouda service install`. Everything else — the service registration itself — is done by the server binary, where it is one tested code path.
 
 Any argument the script does not recognise is passed through, in order. `--dry-run` anywhere on the line means a dry run — the script copies nothing and forwards it:
 
@@ -201,7 +201,7 @@ Stops and removes the service. **The data directory is never touched.**
 
 ---
 
-## If .NET 8 is missing
+## If .NET 10 is missing
 
 The install script checks first. If you skipped it, the failure comes from the .NET host loader rather than from Aouda:
 
@@ -209,7 +209,9 @@ The install script checks first. If you skipped it, the failure comes from the .
 You must install .NET to run this application.
 App: C:\Program Files\Aouda\Aouda.Server.exe
 Architecture: x64
-Framework: 'Microsoft.AspNetCore.App', version '8.0.0' (x64)
+Framework: 'Microsoft.AspNetCore.App', version '10.0.0' (x64)
 ```
 
 ⚠️ **There is no Aouda error message for this, and there cannot be** — the binary is framework-dependent, so the loader fails before any Aouda code runs.
+
+⚠️ **Upgrading from 0.1.40 or earlier is the case that meets this** (**BL-739, 0.2.0**). Those servers ran on .NET 8, so a machine that has run Aouda for months does not necessarily have .NET 10. Install it (`winget install Microsoft.DotNet.AspNetCore.10`) *before* replacing the binaries; the two runtimes install side by side, so the running service is not disturbed.

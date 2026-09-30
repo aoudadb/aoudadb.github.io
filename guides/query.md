@@ -243,7 +243,7 @@ Runtime notes:
 2. Discovery includes persisted segments plus virtual hot segment from HRA snapshot.
 3. Aggregate request sent to `ParallelSegmentScanner.ExecuteAggregatesAsync`.
 4. Merged aggregate result reflects both cold and current hot state.
-5. **Nulls (**BL-735, next train**):** `Min`, `Max`, `Sum` and `Count(column)` skip a column's nulls, as SQL does;
+5. **Nulls (**BL-735, 0.2.0**):** `Min`, `Max`, `Sum` and `Count(column)` skip a column's nulls, as SQL does;
    a bare `Count()` counts every row. Before, a null was aggregated as its type's default (`0`), so `Min` over positive
    values with a null read `0`.
 6. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.

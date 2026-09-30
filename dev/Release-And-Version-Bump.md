@@ -6,7 +6,7 @@ This directory is excluded from the Jekyll site (`_config.yml` `exclude`) — it
 
 **Related:** [`clients/compatibility.md`](../clients/compatibility.md) (the matrix). Chain map (if available): `D:\GitHub\docs\Cross-Repo-Release-And-Version-Bump.md` or `C:\Data\GitHub\docs\…`.
 
-**Agent guardrails:** Prepare files locally and **stop**. Do not commit or push unless the maintainer says yes in this session.
+**Agent guardrails:** Prepare files locally and **stop**. Do not commit, push a branch, or open a pull request unless the maintainer says yes in this session. **Changes reach `main` through a pull request, never a direct push** — the site deploys from `main`, so the merge is the publish, and the maintainer merges.
 
 Do **not** copy a version number out of an old revision of this file. Read `aouda`'s `src/Aouda.Server/Aouda.Server.csproj` `<Version>`, `@aouda/client`'s `package.json`, and Studio's `package.json`.
 
@@ -20,7 +20,7 @@ Typical triggers:
 - Docs-only HTTP/guide fixes (no product version bump — still date the changelog if user-visible).
 - After Studio pins a new `@aouda/client`.
 
-You can run this **in parallel** with the TS client bump. Push the matrix once the version numbers you cite actually exist (or clearly mark them as the intended train).
+You can run this **in parallel** with the TS client bump, and open the PR as soon as the pages are ready. **Merge it once the version numbers it cites actually exist** — the server tag, the npm version — or clearly mark them as the intended train.
 
 ---
 
@@ -51,8 +51,8 @@ Also move `CHANGELOG.md` **Unreleased** bullets into a dated section that names 
 - [ ] Matrix row matches the versions the maintainer approved
 - [ ] `next train` markers for this train now name the version
 - [ ] Changelog dated section reviewed
-- [ ] Ready to **commit**?
-- [ ] Ready to **push**? (docs site deploys from `main`)
+- [ ] Ready to **commit** on a branch, push it, and **open the PR**? (publishes nothing)
+- [ ] Ready to **merge**? (the docs site deploys from `main`; merge after the versions the pages cite exist)
 
 ---
 
