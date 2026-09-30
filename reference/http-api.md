@@ -944,6 +944,12 @@ null `qty` (they compared as `0`), and `ne` does not return them either — nor 
 returned every null row. To select nulls, use `isNull`
 (`{"op": "eq", "value": null}`, below), which is a null test rather than a comparison.
 
+**Strings (**BL-750, next train**):** `gt`, `gte`, `lt` and `lte` accept a string value against a `String` column and
+compare by **ordinal UTF-8 byte order** — Unicode code-point order, no locale collation, case-sensitive (`"Z"` sorts before
+`"a"`, `"é"` after `"z"`). Before, the server rejected a string value for these operators (and in-process `ColumnRef.Gt(string)`
+matched nothing). An `orderBy` with a `limit` on a `String` column sorts in the same order; it followed the server's
+culture before.
+
 **Case-insensitive comparison (`ignoreCase`, server 0.1.24+):**
 
 `eq`, `ne`, `in`, `nin`, and `like` accept an optional `"ignoreCase": true` alongside `column`/`op`/`value`, **String columns only**:
@@ -3404,7 +3410,7 @@ Get cluster topology.
 
 The following features are not yet supported:
 
-1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC.
+1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC — for every column type (**BL-755, next train**: a null in a numeric, `Date` or `Timestamp` sort column of an `orderBy` with a `limit` sorted as its type's default, `0`, so ascending pages began with the null rows).
 2. **Expression-based ORDER BY**: Only catalog column names of sortable types can be used for ordering, not expressions or `selectExpr` aliases. The sanctioned workaround is a stored [`derived`](../guides/insert-transforms.md#derived-columns) column. See [browser-tier read limits](../guides/browser-tier-read-limits.md#no-expression-orderby).
 
 **Note — WhereClause nesting:** Earlier versions of this document stated that nested AND/OR was not supported. This is no longer accurate. The `groups` field in `WhereClause` supports up to **5** levels of nesting (`ProtocolConstants.MaxWhereClauseNestingDepth = 5`). Each group is AND'd with the top-level conditions, enabling safe composition of independent filter layers (e.g., partition scope + row scope). See the `groups` field description in the [`POST /api/databases/{db}/query`](#post-apidatabasesdbquery) section for details.
