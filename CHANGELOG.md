@@ -13,20 +13,39 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-- **Aouda now runs on .NET 10 (BL-739).** The server, the install scripts' preflight, the Docker image
-  (`aspnet:10.0-alpine`) and the .NET packages (`Aouda.Client`, `Aouda.Abstractions`, `Aouda.Embedded`,
-  `Aouda.Testing`) move from `net8.0` to `net10.0`. ⚠️ Install the **.NET 10 ASP.NET Core runtime** before
-  upgrading a server — the binaries are framework-dependent and fail in the host loader without it. A .NET 8
-  application must retarget to `net10.0` to take these package versions; until then it stays on the previous
-  release. See [SDK compatibility](clients/compatibility.md#versioning-model). The TypeScript client is
-  unaffected.
+## 0.2.0 — 2026-09-30
 
-- **Operators can list and delete a user's MFA factors (BL-682).**
-  `GET …/auth/admin/users/{id}/mfa/factors` returns the masked factor list, including an empty
-  list. `DELETE …/mfa/factors/{factorId}` removes that factor and its challenges. Admin enroll
-  still returns 409 while a phone factor exists and still does not change the number; replace a
-  number by deleting on the admin route, then enrolling again.
+**.NET 10, `Decimal(p,s)` columns, and writes that travel and land as columns.** Server **0.2.0**, `Aouda.Client` **0.2.0**, `@aouda/client` **0.2.0**, Studio **0.0.26** (pin stays **0.1.25** until Studio moves). See [Compatibility](clients/compatibility.md).
 
+- ⚠️ **Aouda runs on .NET 10 (BL-739).** The server ships framework-dependent, so the **.NET 10
+  ASP.NET Core runtime** must be on the machine *before* you upgrade. 0.1.40 and earlier ran on
+  .NET 8, and a machine that has only that fails in the .NET host loader, before any Aouda code
+  runs and with no Aouda error message. The install scripts check for it, the container image
+  carries it (`aspnet:10.0-alpine`), and `aouda doctor` reports the version. See
+  [Linux](deployment/linux.md#if-net-10-is-missing) and
+  [Windows](deployment/windows.md#if-net-10-is-missing).
+- ⚠️ **The .NET packages target `net10.0` (BL-739)** — `Aouda.Client`, `Aouda.Abstractions`,
+  `Aouda.Embedded`, `Aouda.Testing` and the `Aouda.Cli` tool. A `net8.0` application cannot restore
+  0.2.0: it stays on 0.1.40 until it retargets. .NET 8 leaves support on 2026-11-10.
+- ⚠️ **`@aouda/client` 0.2.0 belongs with server 0.2.0.** It sends decimal and fractional columns in
+  the frame's new `ScaledDecimal` kind, which a 0.1.40 server refuses with a `400` on a bulk-load
+  append. `@aouda/client` 0.1.25 keeps working against 0.2.0. See
+  [Compatibility](clients/compatibility.md).
+- **`stalenessMs` on a materialized query's status (ColumnarMerge S01).** How old the oldest change
+  the result does not yet reflect is, in milliseconds. For "how fresh is this query", read it and
+  not `currentLag`, which under a steady insert stream grows for as long as the stream runs. See
+  [HTTP API](reference/http-api.md).
+- **`maxCoalesceMs`, a freshness knob for `Async` queries (ColumnarMerge S10).** A query's batches
+  may wait up to that many milliseconds to be applied together: one write per changed group
+  instead of one per commit. `0`–`60000`, default `0`; set in `aouda.schema.json`. See
+  [Materialized queries](guides/materialized.md).
+- **An insert maintains its aggregates and latest / first per key queries in its own commit
+  (ColumnarMerge S11).** Cascades, and queries with a `maxCoalesceMs` window, still follow
+  asynchronously.
+- ⚠️ **A null is no longer compared or aggregated as `0` (BL-729, BL-734, BL-735).** `x < 5`,
+  `x != 5` and `NOT (x = 5)` do not match a null, and `Min`, `Max` and `Count(column)` skip a
+  column's nulls, as SQL does. A query that relied on the old answers returns different rows.
+  See [HTTP API](reference/http-api.md) and [Query](guides/query.md).
 - **Inserts can be sent as a column-batch frame (ColumnarCore S06).** `POST …/tables/{name}/rows`
   also takes one `application/vnd.aouda.column-batch` frame — the binary layout bulk-load `:append`
   already reads — and says so with `Accept-Post` on its responses and `insertColumnBatch` in
@@ -75,6 +94,43 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **Materialized-query maintenance follows the server's CPU budget (ColumnarCore S15).** The deferred
   pass's workers come from `Aouda:Cpu:ConfiguredCores` or the probed quota, not the machine's core
   count. See [Sizing](guides/sizing.md#sizing-cpu).
+
+## 0.1.40 — 2026-09-27
+
+**Deferred bulk loads, column-batch bulk ingest, and admin MFA factor management.** Server **0.1.40**, `Aouda.Client` **0.1.40**, `@aouda/client` **0.1.25** (unchanged — the TypeScript side of deferred loads and column-batch appends ships in **0.2.0**), Studio **0.0.26** (pin stays **0.1.25**). This section and its matrix row were written on 2026-09-30, with the 0.2.0 train; the guides were updated when the work landed. See [Compatibility](clients/compatibility.md).
+
+- **Operators can list and delete a user's MFA factors (BL-682).**
+  `GET …/auth/admin/users/{id}/mfa/factors` returns the masked factor list, including an empty
+  list. `DELETE …/mfa/factors/{factorId}` removes that factor and its challenges. Admin enroll
+  still returns 409 while a phone factor exists and still does not change the number; replace a
+  number by deleting on the admin route, then enrolling again.
+- **Deferred bulk loads (BatchFirst S08 / S09).** `postLoadMqBehavior: "deferred"` writes only the
+  table; the table's deferred pass folds the load into its materialized queries once bulk ingest
+  into the table has been quiet for 2 s, or after 60 s at most. `pendingDeferredJobs` on a query's
+  status counts the loads it still owes. See [Bulk load](guides/bulk-load.md) and
+  [Deferred loads](guides/materialized.md#deferred-loads).
+- **Bulk loads can be sent as column-batch frames (IngestAtSpeed S09).** `:begin` lists
+  `"column-batch"` in `acceptedAppendFormats`, and `:append` then takes one
+  `application/vnd.aouda.column-batch` frame per batch. NDJSON works as before. See
+  [HTTP API](reference/http-api.md).
+- **A default bulk load allocates auto-increment ids (IngestAtSpeed S02).** See
+  [Bulk load](guides/bulk-load.md).
+- **`GET /api/server/memory` gains `runtime` (IngestAtSpeed S01)**, the process's own counters. See
+  [HTTP API](reference/http-api.md).
+
+## 0.1.39 — 2026-09-24
+
+**Materialized-query publishes that drain under a sustained bulk load.** Server **0.1.39**, `Aouda.Client` **0.1.39**, `@aouda/client` **0.1.25** (unchanged), Studio **0.0.26** (pin stays **0.1.25**). This section and its matrix row were written on 2026-09-30, with the 0.2.0 train. See [Compatibility](clients/compatibility.md).
+
+- **Publishes drain during a sustained bulk load again (BL-661 / BL-662 / BL-663 / BL-664).** A
+  publish into a query that already has rows uses the result table's primary-key index wherever it
+  is authoritative, so it costs roughly what the job touched, whatever the result's size —
+  including a result table the server has demoted to cold storage. See
+  [Bulk load](guides/bulk-load.md).
+- **A primary-key read through the query path skips the segments that cannot hold the key
+  (BL-647).** See [Primary-key indexing](guides/pk-indexing.md).
+- **The server image runs as `$APP_UID`, uid/gid 1654 (BL-660).** See
+  [Docker](deployment/docker.md).
 
 ## 0.1.38 — 2026-09-24
 

@@ -645,11 +645,11 @@ Manual ops required once per deployment: create the Vercel project, attach the `
 
 ## 12) Aouda.Setup Installer
 
-`Aouda.Setup` is a .NET 10 (**BL-739, next train**) console app, published as a single file, that offers an interactive
+`Aouda.Setup` is a .NET 10 console app, published as a single file, that offers an interactive
 alternative to the install scripts.
 
 > ⚠️ **It is not self-contained and it is not zero-dependency.** Like every Aouda artefact it is
-> **framework-dependent**: the **.NET 10 ASP.NET Core runtime must already be installed** on the
+> **framework-dependent**: the **.NET 10 ASP.NET Core runtime must already be installed** (**BL-739, 0.2.0**; .NET 8 for 0.1.40 and earlier) on the
 > machine. Without it the process fails in the .NET host loader before any Aouda code runs, so
 > there is no Aouda error message to read. Install it first:
 > `apt-get install aspnetcore-runtime-10.0`, `winget install Microsoft.DotNet.AspNetCore.10`, or

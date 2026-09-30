@@ -1071,7 +1071,7 @@ Sometimes you need to insert **client-chosen** values into an `autoIncrement` co
 
 | Mode | When to use |
 |------|-------------|
-| Normal insert (`identityInsert` omitted/`false`) | Everyday writes. `0` or **omitting** the column means “please generate” (`generatedValues` returns the allocated id; BL-429). An explicit non-zero id is stored, and the counter moves past it so a later generated id cannot repeat it (**ColumnarMerge S02, next train**) — whether sent as an integer, a numeric string or an integral number such as `5.0` (**BL-703, next train**). |
+| Normal insert (`identityInsert` omitted/`false`) | Everyday writes. `0` or **omitting** the column means “please generate” (`generatedValues` returns the allocated id; BL-429). An explicit non-zero id is stored, and the counter moves past it so a later generated id cannot repeat it (**ColumnarMerge S02, 0.2.0**) — whether sent as an integer, a numeric string or an integral number such as `5.0` (**BL-703, 0.2.0**). |
 | Identity-insert (`identityInsert: true`) | Seed / reserved IDs. Every autoIncrement column required and non-null; `0` is a real stored value; after success the counter becomes `max(inserted)`. |
 | Schema toggle (BL-126) | Permanently switch the column between Auto and Manual for all future writes. |
 | Bulk-load `options.identityInsert` (BL-131) | Same semantics as identity-insert for large P20 begin/append/commit jobs — see [Bulk Load guide](../guides/bulk-load.md). |
@@ -1906,8 +1906,8 @@ registration, where a missing subcommand installs cleanly and then fails to star
 ### 16.2 The artefact, and the one prerequisite
 
 ⚠️ **Aouda ships framework-dependent.** The binaries do not bundle a .NET runtime, so **the .NET 10
-ASP.NET Core runtime must be installed on the target machine** (**BL-739, next train**) before anything can start. There is
-no self-contained artefact.
+ASP.NET Core runtime must be installed on the target machine** before anything can start. There is
+no self-contained artefact. (**BL-739, 0.2.0**: server 0.1.40 and earlier need the .NET 8 runtime instead.)
 
 This is not a footnote. Without the runtime, the process fails in the .NET host loader — *before a
 single line of Aouda code runs* — so there is no Aouda error message at all, and there cannot be.
@@ -1915,7 +1915,7 @@ The install scripts check for it first and print what to run; `aouda doctor` rep
 **version**, because by the time it can run, the runtime is present by definition.
 
 ```bash
-sudo apt-get install -y aspnetcore-runtime-10.0         # Debian / Ubuntu
+sudo apt-get install -y aspnetcore-runtime-10.0          # Debian / Ubuntu
 dotnet --list-runtimes | grep Microsoft.AspNetCore.App  # verify
 ```
 

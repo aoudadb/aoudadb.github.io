@@ -238,7 +238,7 @@ Key implementation anchors:
 1. `Aouda.Embedded.csproj` sets package identity (`PackageId`, `Version`, tags, readme, license file).
 2. Build target copies root `LICENSE` into local `LICENSE-Pack.txt` before pack.
 3. Pack item includes `LICENSE-Pack.txt` and `README.md` at package root.
-4. Pack target embeds engine/protocol DLLs into `lib/net10.0/` (**BL-739, next train**).
+4. Pack target embeds engine/protocol DLLs into `lib/net10.0/` (**BL-739, 0.2.0**; `lib/net8.0/` before).
 5. Resulting nupkg carries both legal metadata and runtime payload in one artifact.
 
 Primary anchors:

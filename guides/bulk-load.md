@@ -103,14 +103,14 @@ Scope boundaries:
 | Engine `LockAcquisitionTimeout` | `30s` | Table-lock wait before conflict behavior applies. |
 | Engine `BulkLoadResumeWindow` | `null` -> watchdog default `5m` | In-flight jobs are aborted by watchdog after window expiry. |
 | Server `Aouda:BulkLoad:MaxRowsPerAppend` | `100000` | Hard cap per `:append` call. |
-| Server `Aouda:BulkLoad:MaxQueuedAppendBytes` | `67108864` (64 MB) | (**IngestAtSpeed S10, next train**) How many bytes of decoded rows a job may hold for the engine before an `:append` waits (TCP backpressure follows). The queued rows are charged to the memory governor. One batch always fits an empty queue. Before this, the queue was bounded at `4 × MaxRowsPerAppend` rows, whatever their width, and charged nothing. |
+| Server `Aouda:BulkLoad:MaxQueuedAppendBytes` | `67108864` (64 MB) | (**IngestAtSpeed S10, 0.1.40**) How many bytes of decoded rows a job may hold for the engine before an `:append` waits (TCP backpressure follows). The queued rows are charged to the memory governor. One batch always fits an empty queue. Before this, the queue was bounded at `4 × MaxRowsPerAppend` rows, whatever their width, and charged nothing. |
 | Server `Aouda:BulkLoad:SessionRetentionMinutes` | `10` | Completed/failed/aborted sessions remain queryable for 10 minutes before sweep. Idempotency does not depend on this (see the next row). |
-| Server `Aouda:BulkLoad:IdempotencyWindowMinutes` | `10` | How long after **commit** a `:begin` with the same idempotency key answers with the committed job (`alreadyCompleted: true`) instead of loading again. This holds after the session has been swept and after a server restart, because committed keys are journalled per database (`bulk-load-idempotency.log`). (**IngestAtSpeed S02, next train.** Before this, the setting was read nowhere: a key stopped matching once `SessionRetentionMinutes` swept its session, and at any restart. A retried `:begin` then committed the whole window a second time.) |
+| Server `Aouda:BulkLoad:IdempotencyWindowMinutes` | `10` | How long after **commit** a `:begin` with the same idempotency key answers with the committed job (`alreadyCompleted: true`) instead of loading again. This holds after the session has been swept and after a server restart, because committed keys are journalled per database (`bulk-load-idempotency.log`). (**IngestAtSpeed S02, 0.1.40.** Before this, the setting was read nowhere: a key stopped matching once `SessionRetentionMinutes` swept its session, and at any restart. A retried `:begin` then committed the whole window a second time.) |
 | Server `Aouda:BulkLoad:AllowWritePermission` | `false` | Bulk load remains admin-only unless compatibility mode is enabled. |
 | Cluster `Aouda:BulkLoad:ForceLogShipBulkLoad` | `false` | When true, non-log-ship replication modes are rejected. |
 | Client `AppendBatchSize` | `50000` | Client sends up to 50K rows per append, then honors server lower cap if returned. |
 | Client `WriteConcern` | `Acknowledged` | Maps to server `acknowledged` commit concern request. |
-| Engine / client `IdentityInsert` | `false` | Default bulk-load path **allocates** autoIncrement IDs: a missing, `null` or `0` value gets the next id from the column's counter, as an ordinary insert does, and an explicit non-zero value is stored as given (**IngestAtSpeed S02, next train**; before, such rows were stored as `0`). Set `true` for seed/reseed with explicit IDs (including `0`); the counter advances only after a successful commit. |
+| Engine / client `IdentityInsert` | `false` | Default bulk-load path **allocates** autoIncrement IDs: a missing, `null` or `0` value gets the next id from the column's counter, as an ordinary insert does, and an explicit non-zero value is stored as given (**IngestAtSpeed S02, 0.1.40**; before, such rows were stored as `0`). Set `true` for seed/reseed with explicit IDs (including `0`); the counter advances only after a successful commit. |
 | Server `Aouda:BulkLoad:TargetSegmentBytes` | `67108864` (64 MB) | Accrued bytes at which a bucket seals into a segment — matches every other segment the engine writes. |
 | Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, floored at 8 MB. As of P45, the ceiling is no longer a fixed 256 MB — it grows with the server's own memory governor (shared with other concurrent loads and background work), so a well-provisioned host's fraction actually means something. Nothing changes on a small host, where `0.04 × governed` was already under 256 MB. |
 | Server `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` | `0` (derive, per above) | Set to a specific byte count to pin the ceiling explicitly — `268435456` reproduces the pre-P45 fixed 256 MB behavior exactly. |
@@ -149,11 +149,11 @@ Scope boundaries:
   - `aouda table bulk-load`
   - `aouda bulk-load`
 - **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036, ingest-fed path P46):**
-  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulates every affected MQ of all four types **during** the load's own pass and publishes at commit — except (**BatchFirst S12, next train**) when every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold: then the load writes only the table, and the table's pass (the one a `Deferred` load waits for) starts at the commit and folds the load into every query at once. (**ColumnarCore S12, next train**) Such a load is now maintained **in its own commit**: its rows are folded as its segments are written, and its queries — and the queries built on them — are written from that fold before the load returns, so the handle (and the `:commit` response) comes back with `mqRebuildStatus` already `completed`. When the engine cannot hold the fold — the memory governor refuses its state, the load spilled to disk, or a query over the table was created or dropped during the load — the load takes the pass after its commit instead, as described next. What you see: such a load, and the server's `:commit`, return only after its queries and their cascades are written, so they take longer; a load waits behind a pass already running on its table; and the handle's publish backlog is 0. `MqRebuildCompleted` still resolves only when the queries **and the queries built on them** are current; until then each reports `isStale`, a reason naming the publish, `currentLag` and `pendingDeferredJobs`. Loads that commit while a pass runs are taken together by the next one. A table with any other query (a filter, a direct top-N) keeps the accumulate-during-the-load path; `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind). `Deferred` (**BatchFirst S08, next train**) is `Skip` with a record: the load writes only the table, the queries are marked behind, and the job is kept as pending so the engine can bring every query on the table current in one pass over the load's segments — see [Deferred loads and the table's pass](#deferred-loads-and-the-tables-pass) below and [Deferred loads](materialized.md#deferred-loads).
+  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulates every affected MQ of all four types **during** the load's own pass and publishes at commit — except (**BatchFirst S12, 0.1.40**) when every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold: then the load writes only the table, and the table's pass (the one a `Deferred` load waits for) starts at the commit and folds the load into every query at once. (**ColumnarCore S12, 0.2.0**) Such a load is now maintained **in its own commit**: its rows are folded as its segments are written, and its queries — and the queries built on them — are written from that fold before the load returns, so the handle (and the `:commit` response) comes back with `mqRebuildStatus` already `completed`. When the engine cannot hold the fold — the memory governor refuses its state, the load spilled to disk, or a query over the table was created or dropped during the load — the load takes the pass after its commit instead, as described next. What you see: such a load, and the server's `:commit`, return only after its queries and their cascades are written, so they take longer; a load waits behind a pass already running on its table; and the handle's publish backlog is 0. `MqRebuildCompleted` still resolves only when the queries **and the queries built on them** are current; until then each reports `isStale`, a reason naming the publish, `currentLag` and `pendingDeferredJobs`. Loads that commit while a pass runs are taken together by the next one. A table with any other query (a filter, a direct top-N) keeps the accumulate-during-the-load path; `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind). `Deferred` (**BatchFirst S08, 0.1.40**) is `Skip` with a record: the load writes only the table, the queries are marked behind, and the job is kept as pending so the engine can bring every query on the table current in one pass over the load's segments — see [Deferred loads and the table's pass](#deferred-loads-and-the-tables-pass) below and [Deferred loads](materialized.md#deferred-loads).
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
-  - Default path (**IngestAtSpeed S02, next train**): a missing, `null` or `0` autoIncrement value is **allocated** the next id, exactly as on insert; explicit non-zero ids are kept. Ids are reserved in blocks of 4,096, so an aborted load or the tail of the last block leaves a gap in the sequence, never a reissued id. Before this release the default path stored those rows as `0` and allocated nothing, so a bulk-loaded table's primary key was not a key.
+  - Default path (**IngestAtSpeed S02, 0.1.40**): a missing, `null` or `0` autoIncrement value is **allocated** the next id, exactly as on insert; explicit non-zero ids are kept. Ids are reserved in blocks of 4,096, so an aborted load or the tail of the last block leaves a gap in the sequence, never a reissued id. Before this release the default path stored those rows as `0` and allocated nothing, so a bulk-loaded table's primary key was not a key.
   - Ordinary insert identity-insert is documented in [HTTP API insert](../reference/http-api.md) and [Getting Started](../getting-started/index.md) (BL-130).
   - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Failed`; C#/TS clients also expose `Unknown` — see below, **BL-419, 0.1.22**).
   - `BulkLoadJobHandle.MqRebuildCompleted`: `Task` that resolves when all dependent MQ rebuilds finish.
@@ -168,7 +168,7 @@ Scope boundaries:
 > **Do not hand-refresh an MQ after a Bulk Load.** With `postLoadMqBehavior: "auto"` (the default),
 > affected materialized queries accumulate during the load's own pass and are published at commit —
 > or, for a table of aggregates and latest / first-per-key queries, are written before the load returns
-> (**ColumnarCore S12, next train**) — there is nothing left to trigger. Calling `POST .../materialized-queries/{name}:refresh` yourself
+> (**ColumnarCore S12, 0.2.0**) — there is nothing left to trigger. Calling `POST .../materialized-queries/{name}:refresh` yourself
 > for a just-loaded table queues behind that publication via the server's per-name lock, and then
 > re-scans the whole source table. The wait after commit is usually short because the work already
 > happened. Wait on `mqRebuildStatus` instead — the C# client's
@@ -194,7 +194,7 @@ Scope boundaries:
 
 ### Deferred loads and the table's pass
 
-**BatchFirst, next train.** `postLoadMqBehavior: "deferred"` (`PostLoadMqBehavior.Deferred`) is for
+**BatchFirst, 0.1.40.** `postLoadMqBehavior: "deferred"` (`PostLoadMqBehavior.Deferred`) is for
 loads large enough — or frequent enough — that paying for the materialized queries while rows stream
 is the wrong trade. The load writes only the table (the fastest path the engine has) and records a
 **pending job**: which segments it wrote and which queries owe them. Its queries stay readable and
@@ -220,7 +220,7 @@ marker, so the restart rebuilds it).
 **When to choose it.** `auto` keeps queries current as each load commits; choose `deferred` when you
 load a lot at once (an initial import, a backfill, a nightly batch) and can let the queries catch
 up a few seconds after the last load. On tables whose queries are all aggregates or
-latest-per-key, `auto` folds each load in its own commit (**ColumnarCore S12, next train**: the queries are
+latest-per-key, `auto` folds each load in its own commit (**ColumnarCore S12, 0.2.0**: the queries are
 current when the load returns; before, the same pass ran at each commit), so the difference is *when* the work is
 paid — per load, or once for many — not how much there is. A `filter` or direct `topNPerGroup` query over a
 table is rebuilt by each pass, not folded — on a very large table, keep those on tables loaded with
@@ -310,7 +310,7 @@ The C# SDK appends column-batch frames where the server accepts them, and NDJSON
 where a row holds something a frame cannot carry (a nested value, a list). Either way the table ends
 up with the same values: a frame gives each number the kind its JSON text would have, a `DateTime`
 that is not UTC and a `DateTimeOffset` travel as their JSON text, and a value a frame would have to
-change is sent as NDJSON instead (**BatchFirst S03, next train**). A load that mixes the two formats
+change is sent as NDJSON instead (**BatchFirst S03, 0.1.40**). A load that mixes the two formats
 mid-stream is still one load, with one resume cursor.
 
 ### Sizing a session: fewer, longer, one commit
@@ -341,21 +341,21 @@ The worked example (a table partitioned on two columns with ~250 distinct value 
 |---|---|---|
 | Commit every 10 k rows, `Dedicated` storage | ~250 | ~40 |
 | One session, `Auto` storage, key bounded by a time function (16 shared buckets) | ≤ 16 | ~625 |
-| One session, `Auto` storage, high-cardinality key (**ColumnarMerge S03, next train**) | 1 | 10 000 |
+| One session, `Auto` storage, high-cardinality key (**ColumnarMerge S03, 0.2.0**) | 1 | 10 000 |
 | One session, 1 000 000 rows | 22 | 54 000 |
 
-**A high-cardinality `Auto` key coalesces** (**ColumnarMerge S03, next train**). When at least one
+**A high-cardinality `Auto` key coalesces** (**ColumnarMerge S03, 0.2.0**). When at least one
 partition-key column has no time function — `(Ticker, Source)`, a tenant id — a bulk load writes every key
 that has not been promoted to its own directory into **one** segment per job (cut at `TargetSegmentBytes`),
 sorted by the partition key and then the cluster columns, instead of one segment per hash bucket the job
 touches. A 170 000-row Equity job that used to write 60 segments of ~2 000 rows now writes one. Rows you
-insert (rather than bulk-load) flush the same way (**ColumnarCore S08, next train**): each flush of such a table writes
+insert (rather than bulk-load) flush the same way (**ColumnarCore S08, 0.2.0**): each flush of such a table writes
 one segment of everything it holds, in the same order, where it used to write one small segment per bucket the
 buffer touched. A key bounded by a time function (`truncateToDay` and the like) keeps its buckets for both. Reads return the same rows either way: a read filtered on
-the partition key skips a job's segment by its zone maps on the key (**ColumnarMerge S06, next train**),
+the partition key skips a job's segment by its zone maps on the key (**ColumnarMerge S06, 0.2.0**),
 where it used to skip it by bucket. Hot segments are narrowed the same way: a hot segment answers its partition-key
 columns' range (computed once and kept with the segment), so a one-series read of a hot-first coalescing table opens
-only the hot segments that can hold the series, not all of them (**BL-714, next train**). A keyed table's bulk-loaded segments also get their primary-key
+only the hot segments that can hold the series, not all of them (**BL-714, 0.2.0**). A keyed table's bulk-loaded segments also get their primary-key
 sidecars — the index and keymap other writers already built — shortly after the commit, so a uniqueness
 check that has to consult one stays cheap.
 
@@ -464,9 +464,9 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
 | `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud). |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
-| `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, next train**). |
+| `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, 0.1.40**). |
 | `Aouda:BulkLoad:SessionRetentionMinutes` | int | `10` | `>=1` | Server config | Retention for terminal sessions. |
-| `Aouda:BulkLoad:IdempotencyWindowMinutes` | int | `10` | `>=1` | Server config | How long after commit an idempotency key replays its committed job, across session sweeps and restarts (**IngestAtSpeed S02, next train**). |
+| `Aouda:BulkLoad:IdempotencyWindowMinutes` | int | `10` | `>=1` | Server config | How long after commit an idempotency key replays its committed job, across session sweeps and restarts (**IngestAtSpeed S02, 0.1.40**). |
 | `Aouda:BulkLoad:AllowWritePermission` | bool | `false` | `true/false` | Server config | Compatibility gate for write-only principals. |
 | `Aouda:BulkLoad:ForceLogShipBulkLoad` | bool | `false` | `true/false` | Cluster/server config | Rejects non-log-ship modes. |
 | `BulkLoadOptions.RequestTimeout` — *since 0.1.22* | `TimeSpan` | `10m` | positive duration | Client | Deadline for each individual bulk-load HTTP call. Deliberately not `AoudaClientOptions.Timeout` (30 s), which is sized for point operations and cannot cover a `:commit` that seals a million rows. Governs one call, not the job. A caller-supplied `HttpClient` keeps its own `HttpClient.Timeout`, which caps this. |
@@ -682,13 +682,13 @@ Logging__LogLevel__Aouda=Information
 | `commitMs` | How long the `:commit` call itself took, measured server-side across the whole request. This is the number a client experiences. |
 | `lockHoldMs` | How long the exclusive table lock was held — the **whole session**, from `:begin`. `lockHoldMs` far exceeding `commitMs` means the session was long, which is the recommended shape; it is also how long any other writer to those tables was blocked. |
 | `mqPublishBacklog` | Materialized-query publishes outstanding on this database once this job queued its own, **including this one**, so `1` is the normal value for a load with a query attached. A figure that climbs job over job means the loader is committing faster than its materialized queries can publish. See [Materialized queries](materialized.md). |
-| `mqKeyedLive`, `mqKeyedAbsent`, `mqKeyedUnresolved`, `mqKeyedLocated` | (**BL-662 / BL-664, next train**) — appended at the end of the line. How this database's materialized-query publishes found the existing result row for each group they touched, counted since the server opened the database:<br>• `live`: found in memory by primary key.<br>• `absent`: proven not to exist anywhere, cold storage included (**BL-663**).<br>• `unresolved`: neither, so the result table was read for it.<br>• `located`: the part of `unresolved` that exists in a segment, so its row had to be read. The rest of `unresolved` is keys nothing could decide.<br>They count lookups, not distinct rows. Read them as a ratio, and as the difference between two lines: a publish runs after its own commit, so each line includes every publish that has finished so far. A growing share of undecided keys (`unresolved` minus `located`) means publishes are searching again. |
+| `mqKeyedLive`, `mqKeyedAbsent`, `mqKeyedUnresolved`, `mqKeyedLocated` | (**BL-662 / BL-664, 0.1.39**) — appended at the end of the line. How this database's materialized-query publishes found the existing result row for each group they touched, counted since the server opened the database:<br>• `live`: found in memory by primary key.<br>• `absent`: proven not to exist anywhere, cold storage included (**BL-663**).<br>• `unresolved`: neither, so the result table was read for it.<br>• `located`: the part of `unresolved` that exists in a segment, so its row had to be read. The rest of `unresolved` is keys nothing could decide.<br>They count lookups, not distinct rows. Read them as a ratio, and as the difference between two lines: a publish runs after its own commit, so each line includes every publish that has finished so far. A growing share of undecided keys (`unresolved` minus `located`) means publishes are searching again. |
 
-| `rowLoopMs`, `rowWaitMs`, `mqFeedMs`, `mqDrainMs`, `mqStageWaitMs` | (**IngestAtSpeed S01 / S13, next train**) — appended at the end of the line. Where the session's row loop spent its time. `rowLoopMs` is the loop's wall time across the **whole session**, every `:append` included, so it can exceed `commitMs`. `rowWaitMs` is the part spent waiting for your client's next row (the append channel empty): it is your loader's time, not the server's. The materialized-query work runs on a stage beside the loop (**S13**): `mqFeedMs` is the stage's per-row feed, `mqDrainMs` its spill and build-buffer work, and both overlap `rowLoopMs` rather than adding to it. `mqStageWaitMs` is how long the loop waited for that stage; a large share of `rowLoopMs − rowWaitMs` there means the materialized queries, not the table write, set the ingest rate. (`mqInlineDrainMs`, from S01, is gone: the drains are no longer inline.) |
+| `rowLoopMs`, `rowWaitMs`, `mqFeedMs`, `mqDrainMs`, `mqStageWaitMs` | (**IngestAtSpeed S01 / S13, 0.1.40**) — appended at the end of the line. Where the session's row loop spent its time. `rowLoopMs` is the loop's wall time across the **whole session**, every `:append` included, so it can exceed `commitMs`. `rowWaitMs` is the part spent waiting for your client's next row (the append channel empty): it is your loader's time, not the server's. The materialized-query work runs on a stage beside the loop (**S13**): `mqFeedMs` is the stage's per-row feed, `mqDrainMs` its spill and build-buffer work, and both overlap `rowLoopMs` rather than adding to it. `mqStageWaitMs` is how long the loop waited for that stage; a large share of `rowLoopMs − rowWaitMs` there means the materialized queries, not the table write, set the ingest rate. (`mqInlineDrainMs`, from S01, is gone: the drains are no longer inline.) |
 
 ⚠️ **The phase fields do not have to sum to `commitMs`, and the gap is the point.** `segmentWriteMs`, `finalizeMs`, `walMs` and `catalogSaveMs` cover the coordinator's own work. Anything left over — buffer drain, spill merge waits, admission — is time nobody has attributed yet. Before `commitMs` existed there was no way to notice that there was a remainder at all.
 
-**Each materialized-query publish also logs one line at `Warning`** (**IngestAtSpeed S01, next train**) — `Warning` so the default log level keeps it:
+**Each materialized-query publish also logs one line at `Warning`** (**IngestAtSpeed S01, 0.1.40**) — `Warning` so the default log level keeps it:
 
 ```
 [AoudaEngine] MQ publish source=EquityTrade queries=6 lockWaitMs=0 totalMs=412 perQuery=[EquityTradeChange1D:maintained:38ms:live=120:absent=0:unresolved=0, ...]
@@ -700,19 +700,19 @@ Logging__LogLevel__Aouda=Information
 with materialized queries can wait *after* its rows are durable, until the memory budget has room
 for another queued publish (BL-641). A `commitMs` of about **60 s** that barely changes with row
 count is that wait running to its limit. In 0.1.38 it did so on every job whenever the publish queue
-had stopped draining. From (**BL-661, next train**) a load waits only while publishes are still
+had stopped draining. From (**BL-661, 0.1.39**) a load waits only while publishes are still
 settling: the first load to meet a stalled queue waits at most 10 s, and later loads do not wait.
 The rows are committed either way. A `mqPublishBacklog` that climbs by one per job and never falls
 means the queue has stalled, and the server logs one Warning per stall.
 
-(**IngestAtSpeed S10, next train**) **Batches all the way to the ingest buffer.** The rows of an
+(**IngestAtSpeed S10, 0.1.40**) **Batches all the way to the ingest buffer.** The rows of an
 `:append` stay in the column batches they were decoded into (from either format) until they reach
 the ingest buffer. Auto-increment ids are written into the batch rather than into a copy of each row,
 partition keys are computed once per distinct value in a batch, and typed values are copied without
 boxing. What is loaded does not change. The queue between `:append` and the engine is now bounded in
 bytes and charged to the memory governor (`MaxQueuedAppendBytes` above).
 
-(**IngestAtSpeed S09, next train**) **The SDKs send rows column by column.** Against a server that
+(**IngestAtSpeed S09, 0.1.40**) **The SDKs send rows column by column.** Against a server that
 advertises it in `:begin` (`acceptedAppendFormats`), `Aouda.Client` and `@aouda/client` send each
 `:append` as a binary column-batch frame instead of NDJSON: typed values, each distinct string once per
 batch, no JSON per row. Nothing changes in how you call `BulkLoadAsync` / `bulkLoad`, in what is loaded,
@@ -722,7 +722,7 @@ remains the format for curl and hand-written clients; the server now decodes it 
 dictionary per row. The format is specified in the [HTTP API reference](../reference/http-api.md).
 On the 1 M-trade benchmark the load ran 10–25 % faster, with about 10 % less CPU per row while loading.
 
-(**IngestAtSpeed S07, next train**) **The post-commit wait is gone.** A committed load hands its
+(**IngestAtSpeed S07, 0.1.40**) **The post-commit wait is gone.** A committed load hands its
 publish off at once, so `commitMs` no longer carries a wait. Instead, a load into a table that feeds
 materialized queries is **paced while its rows arrive** (`:append` accepts them more slowly). Pacing
 happens only when the queries are falling behind: the rows committed but not yet published exceed what
@@ -732,26 +732,26 @@ stopped: at worst it is admitted at a tenth of the fastest drain the database ha
 table no materialized query reads from is never paced. The stall Warning and its `commitMs` signature
 no longer exist.
 
-Why it stalled, and what changes (**BL-662, next train**): a publish into a query that already has
+Why it stalled, and what changes (**BL-662, 0.1.39**): a publish into a query that already has
 rows reads back and rewrites every group the job touched. Until now both halves scanned the whole
 result table once per 64 groups, so one publish cost *groups touched × result size*. On a
 per-security trade load the largest result is a minute-bucket OHLC query, and one publish could
-outlast the next dozen jobs, with every later publish queued behind it. From the next train both
+outlast the next dozen jobs, with every later publish queued behind it. From 0.1.39 both
 halves use the result table's primary-key index wherever it is authoritative, so a publish costs
-roughly what the job touched, whatever the result's size. (**BL-663, next train**) This includes a
+roughly what the job touched, whatever the result's size. (**BL-663, 0.1.39**) This includes a
 result table the server has demoted to cold storage. A group that does not exist yet is proven new
 from the segments' own indexes, without a scan: a new security, or buckets later than anything
 stored. `MqRebuildCompleted` still means "published, and its dependants caught up". More precisely
-(**BL-665, next train**): it completes once the load is published and every change admitted before the
+(**BL-665, 0.1.40**): it completes once the load is published and every change admitted before the
 publish finished has reached the dependants. Writes that arrive later are applied as usual and are
 not waited for, so a steady writer on another client can no longer keep it from completing.
 
-(**IngestAtSpeed S05, next train**) Each materialized query on the table publishes in its own lane,
+(**IngestAtSpeed S05, 0.1.40**) Each materialized query on the table publishes in its own lane,
 so a slow query (a minute-bar OHLC over millions of groups, say) no longer delays the others. A
 query still publishes one load at a time, in order. `lockWaitMs` on the server's publish line is the
 longest any single query waited, and each `perQuery` entry reports its own `wait=`.
 
-(**IngestAtSpeed S06, next train**) When loads commit faster than a query can publish, the waiting
+(**IngestAtSpeed S06, 0.1.40**) When loads commit faster than a query can publish, the waiting
 loads no longer queue one publish each. A load whose `aggregate` or `latestPerKey` delta would wait
 behind another load's still-waiting publish is merged into it, so the work waiting grows with the
 groups touched rather than with the number of jobs. Its `MqRebuildCompleted` still resolves only once

@@ -380,18 +380,18 @@ await client.table('events').insertMany([
 
 If the table has an `autoIncrement` primary key, that column **must be present** on every row — send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column`), not auto-generate. See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows) (BL-429).
 
-**On the wire** (**ColumnarCore S06, next train**): `insert` and `insertMany` send the rows as a binary column-batch
+**On the wire** (**ColumnarCore S06, 0.2.0**): `insert` and `insertMany` send the rows as a binary column-batch
 frame once the server has advertised that it reads one (`Accept-Post` on an earlier insert's response), and JSON
 otherwise — so the first insert on a client, and every insert to an older server, is JSON. Rows holding an object, an
 array, a column whose rows disagree on type, a number in exponent notation (`1e21`), or more than the frame holds (4,096
 columns, 1,000,000 rows, a 16 MB string, an empty or 1 KB+ column name) are sent as JSON; so is everything for five
-minutes after a `415`, whatever a later response advertises (**BL-716, next train**).
+minutes after a `415`, whatever a later response advertises (**BL-716, 0.2.0**).
 A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a `bigint` is refused as `JSON.stringify`
 refuses it, whichever body the client would have sent. A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
-fraction as a decimal, digit for digit (**BL-704, next train**) — so the inserted rows are the same either way. A
+fraction as a decimal, digit for digit (**BL-704, 0.2.0**) — so the inserted rows are the same either way. A
 decimal column whose every value in the batch fits 64 bits at the column's largest scale goes as the frame's
 `ScaledDecimal` kind — what a server `Decimal(p,s)` column stores — and otherwise as the 16-byte `Decimal` kind; the
-server reads each value as its JSON text says (`101`, not `101.00`) (**ColumnarCore S13, next train**; a server
+server reads each value as its JSON text says (`101`, not `101.00`) (**ColumnarCore S13, 0.2.0**; a server
 from an earlier train refuses that kind with a `400`, so pair this client with a server of the same train). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
 #### Identity-insert (explicit autoIncrement IDs)
@@ -466,6 +466,9 @@ await client.tables.createTable({
 
 // Add a column
 await client.tables.addColumn('users', { database: 'mydb', name: 'phone', type: 'String' });
+
+// Add a Decimal(p,s) column — precision and scale, both or neither (server 0.2.0, @aouda/client 0.2.0)
+await client.tables.addColumn('users', { database: 'mydb', name: 'balance', type: 'Decimal', precision: 18, scale: 2 });
 
 // Rename a column
 await client.tables.renameColumn('users', 'phone', { database: 'mydb', newName: 'phoneNumber' });
@@ -914,6 +917,11 @@ const status = await client.materializedQueries.status('active_users_summary');
 // null means "current", never "unknown". See reference/http-api.md, "Is this query
 // current?". Polling state alone is how twelve of thirteen queries on one production
 // deployment reported Ready while holding 1.7 % of their source (BL-642, 0.1.38).
+//
+// For "how fresh is it", read status.stalenessMs (server 0.2.0, @aouda/client 0.2.0): the age in
+// milliseconds of the oldest change the result does not reflect yet; absent when current.
+// currentLag is not that number — under a steady insert stream it grows for as long as the
+// stream runs, however promptly each commit is applied.
 
 // Query results (returns all rows; options reserved for future use)
 const results = await client.materializedQueries.query('active_users_summary');

@@ -14,7 +14,7 @@ Install the server on a Windows host, register it with the Service Control Manag
 
 | Requirement | Why |
 |---|---|
-| **The .NET 10 ASP.NET Core runtime** (**BL-739, next train**) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 10 is missing](#if-net-10-is-missing) |
+| **The .NET 10 ASP.NET Core runtime** (**BL-739, 0.2.0**; .NET 8 for 0.1.40 and earlier) | Aouda ships **framework-dependent**: the binaries do not bundle a runtime. ⚠️ Without it the process fails in the .NET host loader — *before any Aouda code runs* — so you get no Aouda error message at all. See [If .NET 10 is missing](#if-net-10-is-missing) |
 | **An elevated prompt** | Registering a service |
 | **Access to the private artefact feed** | ⚠️ Aouda's artefacts are **private**. There is no public download. See [Getting the artefact](#getting-the-artefact) |
 
@@ -213,3 +213,5 @@ Framework: 'Microsoft.AspNetCore.App', version '10.0.0' (x64)
 ```
 
 ⚠️ **There is no Aouda error message for this, and there cannot be** — the binary is framework-dependent, so the loader fails before any Aouda code runs.
+
+⚠️ **Upgrading from 0.1.40 or earlier is the case that meets this** (**BL-739, 0.2.0**). Those servers ran on .NET 8, so a machine that has run Aouda for months does not necessarily have .NET 10. Install it (`winget install Microsoft.DotNet.AspNetCore.10`) *before* replacing the binaries; the two runtimes install side by side, so the running service is not disturbed.
