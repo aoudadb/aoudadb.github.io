@@ -242,7 +242,12 @@ If you run server defaults and do not set per-database overrides:
     appends a small record (each with its own CRC; a torn one is ignored) instead of rewriting the whole mask: the file
     is the whole bitmap followed by those records, rewritten whole when the records outgrow the bitmap. That is its only
     layout. A mask that exists but cannot be read fails the read, naming the table and segment, instead of being taken
-    as nothing deleted (**BL-725, 0.2.0**).
+    as nothing deleted (**BL-725, 0.2.0**). Its header records how many rows the bitmap deletes, and a mask whose
+    count disagrees with its bitmap is unreadable (**ColumnarRead, next train**).
+  - `segment.manifest` — a cold segment's footer (**ColumnarRead, next train**): every page's location and statistics
+    (min / max, null count, sortedness, run count, first / last value, sums, small value sets), the first and last
+    sort-key value of each 8,192-row group, each series' row range, and the primary-key range. CRC-checked; a footer
+    written by an earlier build is refused.
 - **Table segment layout**
   - Table path is name-based.
   - Default non-partitioned path uses `data/seg_*`.

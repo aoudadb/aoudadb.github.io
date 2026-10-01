@@ -13,6 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Cold segments carry a statistics footer (ColumnarRead S09).** Every cold page records, besides
+  min / max and its null count, whether it is constant, sorted or all-null, its run count, first and
+  last value, an exact sum for integer and decimal columns, and up to 16 distinct values; every
+  segment's `segment.manifest` (v4) holds those for each page, the first and last sort-key value of
+  each 8,192-row group, and the row range of each series. Together they stay under 2 % of the
+  segment's bytes. The deletion mask (`_deleted.pages`) records its deleted count. Nothing answers
+  a query from them yet; later read-path work does. Footers, page headers and deletion masks written
+  by an earlier build are refused by name: export with that build and reload.
 - ⚠️ **Cold pages are layout v2, and a 0.2.x data directory does not open (ColumnarRead S08).** Every
   cold column is cut into 8,192-row pages, encoded in 2,048-row vectors that each decode on their own
   (frame-of-reference and delta bit-packing, run-length, constants; ALP for doubles; a sorted
