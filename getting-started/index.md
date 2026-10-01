@@ -160,7 +160,7 @@ Aouda is a **columnar database engine** for .NET with fine-grained control over 
 Key characteristics:
 
 - **Columnar storage** — Data is stored column-by-column, not row-by-row. This makes analytical queries (filtering, aggregation, projection) significantly faster because the engine only reads the columns needed.
-- **Configurable memory residency** — You control what stays in memory. Hot data can live in uncompressed arrays (`int[]`, `double[]`, `string[]`) for sub-millisecond access. Cold data is compressed (Delta-Bitpack, Gorilla, Dictionary encoding) and can remain on disk, loaded on demand. For large datasets like time-series or logs, only a small working set needs to be in memory.
+- **Configurable memory residency** — You control what stays in memory. Hot data can live in uncompressed arrays (`int[]`, `double[]`, `string[]`) for sub-millisecond access. Cold data is encoded per 2,048-row vector — frame-of-reference and delta bit-packing, run-length, ALP for doubles, sorted dictionaries for strings (**ColumnarRead, next train**) and can remain on disk, loaded on demand. For large datasets like time-series or logs, only a small working set needs to be in memory.
 - **Schema-on-write** — Tables and columns are created automatically when you first insert data. No upfront schema design required, though explicit schemas are supported.
 - **Zero index management** — The engine automatically maintains zone maps, bloom filters, and sparse primary indexes. You never create, tune, or rebuild an index.
 - **Dual deployment** — Run it embedded in your process (like SQLite) or as a standalone server (like PostgreSQL).

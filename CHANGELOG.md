@@ -13,6 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- ⚠️ **Cold pages are layout v2, and a 0.2.x data directory does not open (ColumnarRead S08).** Every
+  cold column is cut into 8,192-row pages, encoded in 2,048-row vectors that each decode on their own
+  (frame-of-reference and delta bit-packing, run-length, constants; ALP for doubles; a sorted
+  dictionary or plain UTF-8 for strings). Page min / max no longer count nulls, so more pages are
+  skipped. Pages written by 0.2.x are refused by name ("a layout-v1 codec"): export with a 0.2.x
+  build and reload. A column's `encoder` option no longer changes the encoding (BL-768). Edge
+  tables no longer write `csc_*.col` mirror files (nothing read them; `StoreCsc` still enables
+  bidirectional `ShortestPath`). See [Sizing](guides/sizing.md).
 - ⚠️ **Delta segments are removed (ColumnarRead S07).** Late-arriving rows are flushed inline with
   on-time rows; `LateArrivalPolicy.Delta`, still the default, behaves as `Inline`, and nothing writes
   or reads a table's `data/_delta/`. **Rows an older build left under `data/_delta/` are no longer

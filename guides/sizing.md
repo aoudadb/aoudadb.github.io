@@ -142,8 +142,8 @@ simply keeps checking keys by reading its segments — correct, and slower — a
 
 An undeclared `Decimal` costs 16 bytes per value in the write buffer, the hot tier and every materialized result
 that carries it, and compresses poorly on disk. A `Decimal(p,s)` column (`"precision"` / `"scale"`, p ≤ 18 — see the
-[schema guide](schema.md)) is a scaled 64-bit integer: 8 bytes in memory, and delta-bitpacked like an `Int64` in
-segments (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
+[schema guide](schema.md)) is a scaled 64-bit integer: 8 bytes in memory, and encoded like an `Int64` in
+segments — frame-of-reference or delta bit-packing chosen per 2,048-row vector (**ColumnarRead, next train**) (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
 that have a fixed number of places this way; keep the undeclared `Decimal` for values that need more than 18 digits.
 
 ## What headroom buys
