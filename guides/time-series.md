@@ -49,10 +49,10 @@ For a table too small to justify a partition key — the common case, see
   - Partition directly from timestamp semantics without redundant bucket columns.
 - Operational outcomes:
   - Better segment and page pruning from cluster-aware metadata.
-  - Better write/read balance via bounded sort-on-seal and delta merge paths.
+  - Better write/read balance via bounded sort-on-seal; late rows are flushed inline, with no delta merge path (**ColumnarRead, next train**).
   - Scalable startup through per-segment manifest metadata.
 - Scope boundaries:
-  - This document focuses on cluster declaration, partition functions, manifests, segment pruning, sort-on-seal, delta handling, and metadata caching tiers.
+  - This document focuses on cluster declaration, partition functions, manifests, segment pruning, sort-on-seal, late-arrival handling, and metadata caching tiers.
   - It does not cover replication cluster topology (that is a separate domain).
   - It does not claim all ADR examples are public API today.
 
@@ -116,7 +116,6 @@ For a table too small to justify a partition key — the common case, see
   - `src/Aouda.Engine.Storage/Manifest/PageSummaryCache.cs`
   - `src/Aouda.Engine.Storage/Query/SegmentPruner.cs`
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
-  - `src/Aouda.Engine.Storage/Compaction/DeltaMerger.cs`
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`
   - `src/Aouda.Server/Controllers/TablesController.cs`
@@ -132,10 +131,6 @@ For a table too small to justify a partition key — the common case, see
   - `tests/Aouda.Engine.Storage.Tests/Sorting/SortOnSealIntegrationTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Manifest/ManifestSerializerTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/Partition/LateArrivalRouterTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/Compaction/DeltaMergerTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/Query/SegmentDiscoveryServiceTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/DeltaQueryIntegrationTests.cs`
-  - `tests/Aouda.Engine.Api.Tests/HraFlushPathLateArrivalIntegrationTests.cs`
   - `tests/Aouda.Engine.Schema.Tests/Apply/SchemaApplyEngineTests.cs`
 
 ## 2.3 Defaults and zero-config behavior
@@ -150,7 +145,7 @@ If you create a partitioned time-series table and do not set advanced controls:
   - `RequirePartitionFilter = true`
   - `LateArrivalPolicy = Delta`
   - `LateArrivalThreshold = 1 hour`
-- `LateArrivalPolicy = Delta` is normalized to `Inline` at table creation when no cluster columns are declared.
+- `LateArrivalPolicy = Delta` is normalized to `Inline` at table creation when no cluster columns are declared. With cluster columns it behaves as `Inline` too: delta segments are removed and late rows are flushed inline (**ColumnarRead, next train**).
 - Metadata caching policy defaults to `Auto` at table policy level.
 
 | Setting / behavior | Default | Practical impact |
@@ -160,8 +155,8 @@ If you create a partitioned time-series table and do not set advanced controls:
 | `TableOptions.SortOnSeal` | `true` | Clustered writes are sorted on seal by default |
 | `PartitionOptions.StorageMode` | `Auto` | Shared buckets first, with possible dedicated promotion |
 | `PartitionOptions.RequirePartitionFilter` | `true` | Partitioned queries require key filters unless bypassed |
-| `PartitionOptions.LateArrivalPolicy` | `Delta` | Late data goes to delta path when clustering exists |
-| `PartitionOptions.LateArrivalThreshold` | `1 hour` | Defines late-arrival cutoff |
+| `PartitionOptions.LateArrivalPolicy` | `Delta` | Late data is flushed inline like on-time data; `Delta` behaves as `Inline` (**ColumnarRead, next train**) |
+| `PartitionOptions.LateArrivalThreshold` | `1 hour` | Defines late-arrival cutoff; unused while `Reject` is unenforced (**BL-762, next train**) |
 | `TablePolicy.MetadataCaching` | `Auto` | Segment summaries resident; page summaries policy-driven |
 
 ## 2.4 Availability status (implementation honesty)
@@ -175,9 +170,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 - Segment manifest persistence with cluster stats and per-page metadata.
 - Segment-level cluster-stat pruning in query planning (`SegmentPruner`).
 - Sort-on-seal behavior in storage pipeline for clustered data.
-- Late-arrival detection and routing with `Delta`, `Inline`, and `Reject` policies.
-- Delta query visibility before merge via `SegmentDiscoveryService`.
-- K-way merge path for overlapping delta segments and optimized promotion for non-overlapping segments.
+- Late-arriving rows are flushed inline with on-time rows and are query-visible like any other row. Delta segments, their background merge, and the `data/_delta/` directory are removed; `LateArrivalPolicy.Delta` behaves as `Inline`, and rows an older build left under `data/_delta/` are no longer read (**ColumnarRead, next train**). `LateArrivalPolicy.Reject` is not enforced (**BL-762, next train**).
 - Tiered metadata caching (`SegmentSummaryCache` and `PageSummaryCache`) with pressure-aware eviction.
 - Schema file support for partition functions and cluster column lists (`partitionKey.function`, `clusterColumns`).
 
@@ -214,9 +207,9 @@ If you create a partitioned time-series table and do not set advanced controls:
 | Segment manifest persistence at seal | Yes | No | No | G.4a report + `SegmentManifest.cs` + serializer tests | Fallback compatibility behavior preserved |
 | Segment-level pruning via cluster stats | Yes | No | No | G.4b report + `SegmentPruner.cs` + storage/query tests | Counter `SegmentsPrunedByClusterStats` updates |
 | Sort-on-seal for clustered pages | Yes | No | No | G.5 report + `ClusterSorter.cs` + sort tests | Runtime default is on; effect only with cluster columns |
-| Late-arrival routing (delta/inline/reject) | Yes | No | No | G.6 report + `LateArrivalRouter.cs` + router tests | Delta normalized to inline if no cluster columns |
-| Delta query visibility pre-compaction | Yes | No | No | BL-007 report + `SegmentDiscoveryService.cs` + delta query tests | Main+delta segment union supported |
-| Overlap-aware K-way delta merge | Yes | No | No | BL-006 report + `KWayMergeExecutor.cs` + merger tests | Includes page overlap optimization path |
+| Late-arrival routing (delta/inline/reject) | No | Yes | No | G.6 report + `LateArrivalRouter.cs` + router tests | Late rows are flushed inline; `Delta` behaves as `Inline` (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) |
+| Delta query visibility pre-compaction | No | No | Yes | — | Removed with delta segments (**ColumnarRead, next train**) |
+| Overlap-aware K-way delta merge | No | No | Yes | — | Removed with delta segments (**ColumnarRead, next train**) |
 | Metadata caching tiers | Yes | No | No | BL-004 report + summary/page caches | `Auto`, `InMemory`, `OnDemand` policy model |
 | Retrospective partitioning strategies | No | Yes | No | BL-005/005b reports + `Policies.cs` | Foundation shipped; phase-2 strategy caveats remain |
 | Public API controls for late-arrival and sort-on-seal | No | No | Yes | `TableMessages.cs` + `types.ts` + controller create path | Not exposed in HTTP DTOs/TS typed API |
@@ -234,9 +227,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 - Sort-on-seal:
   - Bounded sorting at seal/flush stages, not full historical re-sorting.
 - Late-arrival handling:
-  - Detect row lateness relative to threshold and route into delta/main/reject path by policy.
-- Delta merge:
-  - Promote non-overlapping deltas quickly, merge overlapping ranges with K-way merge.
+  - Late rows are flushed inline with on-time rows; there is no delta path and no delta merge (**ColumnarRead, next train**). `Reject` is not enforced (**BL-762, next train**).
 - Metadata caching tiers:
   - Segment summaries always lightweight and resident; page summaries are policy/pressure managed.
 
@@ -273,9 +264,8 @@ High-level runtime flow:
 2. Partition key extraction applies declared partition functions for routing.
 3. Writes are flushed/sealed; clustered batches are sorted on seal.
 4. Segment manifests are persisted with page metadata and optional cluster stats.
-5. Query execution discovers main+delta segments and prunes with cluster stats.
-6. Compaction/merge paths promote or merge delta segments based on overlap.
-7. Metadata caches accelerate repeated prune paths under bounded memory.
+5. Query execution reads the segments the table's catalog names (no directory is listed) and prunes with cluster stats (**ColumnarRead, next train**).
+6. Metadata caches accelerate repeated prune paths under bounded memory.
 
 Key implementation anchors:
 
@@ -298,7 +288,6 @@ Key implementation anchors:
   - `src/Aouda.Engine.Storage/Manifest/SegmentSummaryCache.cs`
   - `src/Aouda.Engine.Storage/Manifest/PageSummaryCache.cs`
 - Merge and compaction:
-  - `src/Aouda.Engine.Storage/Compaction/DeltaMerger.cs`
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
@@ -334,38 +323,20 @@ Primary tests:
 - `tests/Aouda.Engine.Storage.Tests/Sorting/ClusterSorterTests.cs`
 - `tests/Aouda.Engine.Storage.Tests/Manifest/ManifestSerializerTests.cs`
 
-### Walk-through C: Query with segment-level pruning and delta inclusion
+### Walk-through C: Query with segment-level pruning
 
-1. Query path asks `SegmentDiscoveryService.DiscoverSegmentsAsync(...)`.
-2. Service combines:
-   - catalog-registered main segments,
-   - filesystem main segments (not yet in catalog),
-   - `_delta` segments.
-3. `SegmentPruner.PruneByClusterStats(...)` applies cluster windows from predicate.
-4. Surviving segments continue into page pruning and row filtering.
-5. Perf counters track segment pruning and delta discovery/query activity.
+1. Query path takes the table's segments from its catalog entries (`SegmentDiscoveryService.FromCatalog(...)`).
+   No directory is listed: a segment directory the catalog does not name is never read, and `_delta`
+   segments no longer exist (**ColumnarRead, next train**).
+2. `SegmentPruner.PruneByClusterStats(...)` applies cluster windows from predicate.
+3. Surviving segments continue into page pruning and row filtering.
+4. Perf counters track segment pruning.
 
-Primary tests:
+### Walk-through D: Late-arrival flush
 
-- `tests/Aouda.Engine.Api.Tests/DeltaQueryIntegrationTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/Query/SegmentDiscoveryServiceTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/Compaction/DeltaMergerTests.cs`
-
-### Walk-through D: Late-arrival flush routing and merge
-
-1. Flush path calls `LateArrivalRouter.Route(...)` using first cluster column value and threshold.
-2. Rows route to main path, delta path, or reject exception by policy.
-3. Delta segments are query-visible immediately via discovery service.
-4. `DeltaMerger.ProcessDeltaAsync(...)` classifies overlap:
-   - promotable (fast move),
-   - mergeable (K-way merge executor).
-5. Merged output replaces old overlap set when safe deletion rules allow.
-
-Primary tests:
-
-- `tests/Aouda.Engine.Storage.Tests/Partition/LateArrivalRouterTests.cs`
-- `tests/Aouda.Engine.Api.Tests/HraFlushPathLateArrivalIntegrationTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/Compaction/DeltaMergerTests.cs`
+1. A late row is flushed like any other row, into the table's normal segments (**ColumnarRead, next train**).
+2. The delta path, its routing and `DeltaMerger` are removed (**ColumnarRead, next train**). The flush-time `Reject`
+   check went with the routing, so `Reject` is not enforced (**BL-762, next train**).
 
 ## 2.9 Why Aouda is different (differentiators)
 
@@ -373,7 +344,7 @@ Primary tests:
 |---|---|---|---|
 | Must users add redundant time bucket columns? | Common in many setups | Partition functions derive bucket keys from original columns | Cleaner schemas and less duplicate write logic |
 | Is clustering always full-table sort/merge heavy? | Often yes for maximal ordering | Bounded sort-on-seal plus manifest-aware pruning | Lower write amplification with strong pruning gains |
-| Are late arrivals "invisible until compaction"? | Sometimes delayed | Delta segments are query-visible immediately | Better freshness for out-of-order event streams |
+| Are late arrivals "invisible until compaction"? | Sometimes delayed | Late rows are flushed inline and query-visible like any row (**ColumnarRead, next train**) | Better freshness for out-of-order event streams |
 | Is startup metadata loading page-scan heavy? | Can be expensive at scale | Segment manifest metadata with tiered caching | Faster startup and better memory control |
 | Is feature intent and implementation split explicit? | Often mixed in docs | This doc separates shipped/proposed/reserved with code-backed claims | Safer operational and product decisions |
 
@@ -388,7 +359,7 @@ Primary tests:
 | `PartitionOptions.PromotionRowThreshold` | long | `10000000` | `>=0` | .NET engine/catalog | Auto-promotion tuning |
 | `PartitionOptions.PromotionByteThreshold` | long | `1000000000` | `>=0` | .NET engine/catalog | Auto-promotion tuning |
 | `PartitionOptions.InitialBucketCount` | int | `16` | `>=1` | .NET engine/catalog | Shared bucket count |
-| `PartitionOptions.LateArrivalPolicy` | enum | `Delta` | `Delta`, `Reject`, `Inline` | .NET engine/catalog | Delta normalized to inline if no cluster columns |
+| `PartitionOptions.LateArrivalPolicy` | enum | `Delta` | `Delta`, `Reject`, `Inline` | .NET engine/catalog | `Delta` behaves as `Inline` (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) |
 | `PartitionOptions.LateArrivalThreshold` | `TimeSpan` | `1h` | Positive duration | .NET engine/catalog | Lateness cutoff |
 | `PartitionOptions.Migration` | object? | `null` | `MigrationOptions` | .NET engine/catalog | Retrospective partition migration controls |
 | `MigrationOptions.Strategy` | enum | `None` | `None`, `Background`, `Eager`, `Blocking` | .NET engine/catalog | `Eager`/`Blocking` marked phase-2 |
@@ -434,7 +405,7 @@ var tableId = await engine.CreateTableAsync(
     });
 ```
 
-Expected result: table metadata includes cluster order and partition function; inserts route by derived day partition, with late-arrival policy active.
+Expected result: table metadata includes cluster order and partition function; inserts route by derived day partition. Late rows are flushed inline: `LateArrivalPolicy.Delta` behaves as `Inline` (**ColumnarRead, next train**).
 
 Common mistake: assuming these advanced partition options are available through current HTTP create-table DTO.
 
@@ -489,7 +460,7 @@ Common mistake: sending unsupported fields like `lateArrivalPolicy` and expectin
 | Set late-arrival policy/threshold | `PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold` | No typed field | No create-table/request field | Partial | .NET only |
 | Set sort-on-seal | Core `TableOptions.SortOnSeal` | No typed field | No field | Partial | Runtime default applies |
 | Set metadata cache policy | `TablePolicy.MetadataCaching` | No typed field | No field | Partial | Internal/.NET policy surface |
-| Query includes delta segments | Engine query path | Indirect (normal query APIs) | Query endpoints unchanged | Implemented | Transparent to callers |
+| Query includes delta segments | — | — | — | Removed (**ColumnarRead, next train**) | Late rows are flushed inline into normal segments |
 | Schema carries cluster columns and partition functions | Schema models/export/apply | Schema CLI paths | `/api/.../schema` introspection | Implemented | Partition options not carried in schema apply create path |
 
 ### B) Missing API matrix
@@ -525,14 +496,13 @@ When to use:
 - Backfill/replay events arrive after their primary historical window.
 
 Steps:
-1. Keep `LateArrivalPolicy = Delta` in .NET partition options.
+1. Keep the default `LateArrivalPolicy` in .NET partition options.
 2. Insert on-time rows, then insert late rows with older timestamps.
-3. Query the historical range before compaction merge.
+3. Query the historical range.
 
 Expected result checks:
 - Late rows are visible in query results immediately.
-- Delta-related counters increase.
-- Compaction later merges/promotes delta segments without data loss.
+- Late rows are flushed inline into the table's normal segments; no delta segment is written (**ColumnarRead, next train**).
 
 ### Scenario 3: Scale read path with manifest and metadata caches
 
@@ -555,13 +525,10 @@ Monitor first:
 
 - Pruning effectiveness:
   - `SegmentsPrunedByClusterStats`
-- Sort and late-arrival behavior:
+- Sort behavior:
   - `PagesSortedOnSeal`
-  - `LateArrivalsDetected`, `LateArrivalsRouted`, `LateArrivalsRejected`, `LateArrivalsInlined`
-- Delta processing:
-  - `DeltaSegmentsPromoted`, `DeltaSegmentsMerged`, `DeltaRowsPromoted`, `DeltaRowsMerged`
-  - `DeltaPagesCopied`, `DeltaPagesMerged`
-  - `DeltaSegmentDiscoveries`, `DeltaSegmentsQueried`
+- Late-arrival and delta counters (`LateArrivals*`, `Delta*`) stay at 0: late rows are flushed inline and
+  delta segments are removed (**ColumnarRead, next train**).
 - Metadata cache health:
   - Segment/page summary cache hits, misses, bytes, evictions, manifest loads
 
@@ -573,14 +540,14 @@ Recovery/restart expectations:
 
 Suggested tuning sequence:
 1. Start with cluster + partition function declarations only.
-2. Observe pruning and delta counters.
+2. Observe pruning counters.
 3. Tune partition storage mode and late-arrival settings in .NET paths if needed.
 4. Adjust migration and caching policy only after baseline behavior is stable.
 
 | Question | Practical answer |
 |---|---|
 | What confirms segment-level pruning is active? | `SegmentsPrunedByClusterStats` rising on range queries |
-| How can I tell late data is not lost? | Late-arrival counters rise and pre-merge queries include those rows |
+| How can I tell late data is not lost? | Queries include late rows as soon as they are written; they are flushed inline (**ColumnarRead, next train**) |
 | How do I detect cache pressure? | Rising page summary evictions and pressure eviction counters |
 
 ## 2.14 Troubleshooting by symptom
@@ -589,9 +556,9 @@ Suggested tuning sequence:
 |---|---|---|
 | `400` on create-table with cluster columns | Non-consecutive `clusterOrder` values | Use contiguous order (`1,2,3...`) |
 | `400` for partition function | Unsupported function name or incompatible type | Use valid enum values and compatible timestamp/date/int type |
-| Late-arrival policy seems ignored | No cluster columns caused normalization to inline | Add cluster columns or use explicit .NET configuration awareness |
+| Late-arrival policy seems ignored | `Delta` behaves as `Inline` (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) | Expected: late rows are accepted and flushed inline |
 | Range query scans too much | Missing/weak clustering metadata or broad predicate | Validate cluster declaration and predicate shape; inspect prune counters |
-| Delta segments accumulate | Merge/compaction not keeping up with overlap | Review compaction cadence and overlap characteristics |
+| Rows under a table's `data/_delta/` are missing after upgrading | An older build left them there; delta segments are removed and that directory is no longer read (**ColumnarRead, next train**) | Before upgrading, check each table for a non-empty `data/_delta/`: this build does not read it |
 | TS createTable cannot set partition storage | Type surface gap | Use HTTP or .NET path for now; track parity follow-up |
 
 ## 2.15 Verification ledger
@@ -615,8 +582,7 @@ Last verification date (UTC): `2026-03-31`.
 | Sort-on-seal behavior | `SortOnSealIntegrationTests.cs`, `ClusterSorterTests.cs` | Pass | Strong | Includes row reordering and conditions |
 | Segment manifest serialization | `ManifestSerializerTests.cs`, `CatalogPersistenceTests.cs` | Pass | Medium/Strong | Focused on metadata correctness and compatibility |
 | Segment-level prune mechanics | `SegmentPrunerTests.cs`, `HotSegmentClusterStatsTests.cs` | Pass (existing) | Medium | Behavior validated with clustered statistics |
-| Late-arrival routing and flush integration | `LateArrivalRouterTests.cs`, `HraFlushPathLateArrivalIntegrationTests.cs` | Pass | Strong | Covers `Delta`/`Inline`/`Reject` behavior |
-| Delta query and merge behavior | `DeltaQueryIntegrationTests.cs`, `DeltaMergerTests.cs`, `SegmentDiscoveryServiceTests.cs` | Pass | Strong | Includes discovery and merge paths |
+| Late-arrival routing | `LateArrivalRouterTests.cs` | Pass | Weak | The router has no production caller since delta segments were removed (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) |
 | Retrospective partition migration behavior | `RetrospectivePartitioningTests.cs`, `EagerBlockingMigrationTests.cs` | Pass | Medium | Includes strategy behavior and constraints |
 | Schema apply/export handling for cluster/partition functions | `SchemaApplyEngineTests.cs`, `SchemaExporterTests.cs`, `SchemaDiffEngineTests.cs` | Pass (existing) | Medium | Confirms schema model handling boundaries |
 
@@ -627,7 +593,6 @@ Last verification date (UTC): `2026-03-31`.
 | No end-to-end HTTP contract test for advanced partition options absence | Prevents accidental assumption that late-arrival/sort knobs are public | Add server contract test asserting unknown fields are ignored/rejected as intended | High |
 | Limited explicit tests around metadata cache policy switching by table policy | Cache policy drift can impact performance and memory | Add integration test toggling `MetadataCaching` and asserting cache behavior counters | Medium |
 | Missing cross-surface parity test (.NET create with advanced options -> API readback expectations) | Users need clarity on what is and is not visible through API | Add parity test verifying advanced options behavior while API omits unsupported fields | Medium |
-| No dedicated long-horizon benchmark regression for mixed overlap delta merge | Merge regressions can be expensive in production | Add deterministic benchmark-style integration with overlap ratios and perf assertions | Medium |
 
 ## 2.18 Known gaps and undone work
 
@@ -681,7 +646,6 @@ Last verification date (UTC): `2026-03-31`.
   - `src/Aouda.Engine.Storage/Manifest/PageSummaryCache.cs`
   - `src/Aouda.Engine.Storage/Query/SegmentPruner.cs`
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
-  - `src/Aouda.Engine.Storage/Compaction/DeltaMerger.cs`
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`
   - `src/Aouda.Server/Controllers/TablesController.cs`

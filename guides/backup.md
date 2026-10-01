@@ -181,6 +181,7 @@ High-level flow:
 ### B) Restore exact backup
 - `RestoreEngine.RestoreAsync(...)` with `TargetTime = null`.
 - Rehydrates files, verifies hashes (default), returns restore stats.
+- When the restored database's catalog is rebuilt from `catalog.chk` (which holds table definitions only), the open catalogues the segment directories it finds, once; reads then use the catalog's list and never list a directory (**ColumnarRead, next train**).
 - Counters: `RestoreOperations*`, `RestoreBlobsDownloaded`, verification counters.
 
 ### C) PITR (HTTP or engine)

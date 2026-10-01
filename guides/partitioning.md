@@ -158,8 +158,8 @@ If you create a table/database without tuning partition or multidb options:
 | `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Non-negative integer (bytes) | Auto-promotion can trigger at high byte volume. Declarable on the schema (`promotionByteThreshold`) and mutable after table creation. |
 | `PartitionOptions.InitialBucketCount` | `16` when every partition-key column carries a bounded time-truncation `partitionFunction`; **`128`** otherwise (P45) | Integer ≥ 1 | Shared-partition hashing starts with this many buckets. Declarable on the schema (`initialBucketCount`, `Auto`/`Shared` tables only) but **fixed for the life of the table** — see [Choosing `initialBucketCount` at scale](#choosing-initialbucketcount-at-scale-p45). |
 | `TableOptions.PkUniqueness` | `Strict` | `Strict`, `Recent`, `BestEffort` | Not a `PartitionOptions` field, but declarable on the schema (`pkUniqueness`, any table) and mutable after creation as of P45 — previously only reachable per bulk-load job. |
-| `PartitionOptions.LateArrivalPolicy` | `Delta` | `Delta`, `Reject`, `Inline` | Late-arriving rows are routed to delta path |
-| `PartitionOptions.LateArrivalThreshold` | `1 hour` | Any positive `TimeSpan` | Defines "late" cutoff when policy needs it |
+| `PartitionOptions.LateArrivalPolicy` | `Delta` | `Delta`, `Reject`, `Inline` | Late-arriving rows are flushed inline with on-time rows: delta segments are removed and `Delta` behaves as `Inline` (**ColumnarRead, next train**). `Reject` is not enforced (**BL-762, next train**) |
+| `PartitionOptions.LateArrivalThreshold` | `1 hour` | Any positive `TimeSpan` | Defines "late" cutoff when policy needs it; no policy uses it while `Reject` is unenforced (**BL-762, next train**) |
 | `MigrationOptions.Strategy` | `None` | `None`, `Background`, `Eager`, `Blocking` | Retrospective migration is off unless configured |
 | `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
 | `DatabaseOptions.EnableWal` | `true` | `true`, `false` | DB has WAL enabled unless explicitly disabled |
@@ -305,6 +305,9 @@ or `in` (including a constrained prefix of a composite partition key):
 - **A key that is promoted to its own dedicated directory while a query is already running is still
   found.** Pruning always consults the table's current routing state, never a value fixed when the query
   started.
+- **A promoted key's earlier rows stay in its shared bucket** (**ColumnarRead, next train**). Promotion
+  no longer migrates a key's historical rows into its dedicated directory; only rows written after the
+  promotion land there. The bucket's rows are still read, so a query on that key returns both.
 - This is a distinct mechanism from cluster-column pruning (physical column statistics on non-partition
   columns) — the two operate on different inputs and are reported separately (see `2.13`).
 
@@ -558,7 +561,9 @@ Core modules:
    - records in-progress state,
    - calls `OnBeginPromotion` WAL callback when configured.
 4. `CompletePromotionAsync(...)` persists completion via callback and updates counters.
-5. State mutation outcome: partition can be treated as dedicated in catalog/router.
+5. State mutation outcome: partition can be treated as dedicated in catalog/router. Rows the key received before
+   the promotion stay in the shared bucket and are still read; the historical row migration is removed
+   (**ColumnarRead, next train**).
 6. Test anchors: partition promotion behavior covered by P4 Task3 report and storage/path integration tests including `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`.
 
 ### Walk-through C: Database-scoped query HTTP path with PLS controls
@@ -618,7 +623,7 @@ Core modules:
 | `PartitionOptions.PromotionRowThreshold` | long | `10_000_000` | `>= 0` | catalog policy | Auto-promotion row trigger |
 | `PartitionOptions.PromotionByteThreshold` | long | `1_000_000_000` | `>= 0` | catalog policy | Auto-promotion byte trigger |
 | `PartitionOptions.InitialBucketCount` | int | `16` (engine-level constant; see the row above for the value a new table actually gets) | `>= 1` | catalog policy | Shared mode initial bucket fanout. Resolved to `16` or `128` at table-create time per the rule in `2.7` before this field is ever persisted. |
-| `PartitionOptions.LateArrivalPolicy` | enum | `Delta` | `Delta`, `Reject`, `Inline` | catalog policy | Late-arrival strategy |
+| `PartitionOptions.LateArrivalPolicy` | enum | `Delta` | `Delta`, `Reject`, `Inline` | catalog policy | Late-arrival strategy. `Delta` behaves as `Inline`: delta segments are removed (**ColumnarRead, next train**). `Reject` is not enforced (**BL-762, next train**) |
 | `PartitionOptions.LateArrivalThreshold` | `TimeSpan` | `1h` | positive | catalog policy | Late-arrival time boundary |
 | `PartitionOptions.Migration` | `MigrationOptions?` | `null` | object/null | catalog policy | Retrospective partition migration config |
 | `MigrationOptions.Strategy` | enum | `None` | `None`, `Background`, `Eager`, `Blocking` | migration config | `Eager`/`Blocking` are phase-2 strategy intents |

@@ -159,7 +159,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | Nested boolean groups in .NET client builders | Yes | No | No | `RemoteConditionBuilder` + `QueryMessageBuilder` | Resolved P14, BL-044; nested group composition now emitted. |
 | Nested boolean groups in TypeScript builder | Yes | No | No | `aouda-client-ts/src/query-builder.ts` (`WhereGroupBuilder`, `whereGroup()`) | `whereGroup()` builds nested `WhereClause.groups` entries. Resolved P14, BL-044. |
 | Hot + cold + unflushed HRA unified visibility | Yes | No | No | P4 R10.4 report + `TableQuery` + P7 summary tests | Virtual hot segment merged into query execution paths. |
-| Delta segment query inclusion | Yes | No | No | P4 BL007 report + `QueryEngine` page reader delta branch | Transparent to callers. |
+| Delta segment query inclusion | No | No | Yes | P4 BL007 report | Removed with delta segments (**ColumnarRead, next train**): late rows are flushed inline. |
 | Page pruning and multi-column pruning | Yes | Partial | No | `QueryEngine`, `RowFilterEngine`, `PagePruner` usage | Ongoing tuning and backlog refinement remain. |
 | Bloom-filter-assisted pruning | Yes | Partial | No | `RowFilterEngine` bloom path + perf counters | Requires bloom index availability and equality predicates. |
 | Parallel multi-segment scanning | Yes | No | No | `ParallelSegmentScanner` + perf counters | Global offset/limit handled after merge/materialization. |
@@ -205,13 +205,14 @@ At a high level:
    - materialized table routing path when matcher hits,
    - row-filter path for predicate-correct cold/hot execution,
    - parallel segment path for materialized or aggregate execution.
-6. Storage query execution uses `QueryEngine` / `RowFilterEngine` over discovered segment IDs, including delta segments.
+6. Storage query execution uses `QueryEngine` / `RowFilterEngine` over the segments the table's catalog names; no directory is listed (**ColumnarRead, next train**).
 7. Results are returned as columnar by default and converted to row format when requested.
 
 Runtime notes:
 
 - `limit=0` on `/query` is interpreted as no cap for full reads.
 - For unflushed writes, `TableQuery` can synthesize a virtual hot segment from HRA snapshots so queries see current data before flush.
+- A read is one view (**ColumnarRead, next train**): its segments, their deletion masks and the unflushed rows are fixed at one instant, so a concurrent MERGE, UPDATE, flush or coalesce is seen wholly or not at all — never half, never twice. A read no longer re-runs when a segment leaves under it. A read whose catalog names a segment it cannot resolve (a Hot segment with no hot copy, for more than a second) fails rather than returning short. A catalog change is visible to reads only once it is durable; if a catalog journal append fails, the table's reads are refused until the database is reopened.
 - `QueryEngine` increments decode/scan/perf counters and emits `QueryBatch` objects to keep row windows aligned across projected columns.
 - `ParallelSegmentScanner` applies global offset/limit after segment execution to preserve query semantics.
 

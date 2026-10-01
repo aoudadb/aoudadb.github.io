@@ -264,4 +264,4 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 
 ## BL-146 — ColdPreferred `rowCount: 0` after partitioned bulk
 
-**Fixed in 0.1.5** (2026-08-10). Not an open engine item. If a pre-0.1.5 database still shows `rowCount: 0` on the base table after partitioned historical bulk into `ColdPreferred` while MQs have data, run `AoudaEngine.SealOrphanedDeltaSegmentsAsync` — it is a recovery, not a temperature change. See [Hot/cold](hot-cold.md#bl-146--coldpreferred-rowcount-0-after-partitioned-bulk).
+**Fixed in 0.1.5** (2026-08-10). Not an open engine item. If a pre-0.1.5 database still shows `rowCount: 0` on the base table after partitioned historical bulk into `ColdPreferred` while MQs have data, run `AoudaEngine.SealOrphanedDeltaSegmentsAsync` on a build that still has it, before upgrading — it is a recovery, not a temperature change. The method is removed and `_delta` is no longer read (**ColumnarRead, next train**). See [Hot/cold](hot-cold.md#bl-146--coldpreferred-rowcount-0-after-partitioned-bulk).

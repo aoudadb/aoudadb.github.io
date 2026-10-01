@@ -13,6 +13,22 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- ⚠️ **Delta segments are removed (ColumnarRead S07).** Late-arriving rows are flushed inline with
+  on-time rows; `LateArrivalPolicy.Delta`, still the default, behaves as `Inline`, and nothing writes
+  or reads a table's `data/_delta/`. **Rows an older build left under `data/_delta/` are no longer
+  read.** `AoudaEngine.SealOrphanedDeltaSegmentsAsync` is removed: a pre-0.1.5 database that still
+  needs it (BL-146) must run it before upgrading. `LateArrivalPolicy.Reject` is not enforced (BL-762).
+  See [Time-series](guides/time-series.md) and [Partitioning](guides/partitioning.md).
+- **A partition key's promotion to a dedicated directory no longer moves its earlier rows (ColumnarRead
+  S07).** They stay in the shared bucket and are still read. See
+  [Partitioning](guides/partitioning.md).
+- **A read is one view (ColumnarRead S07).** A read's segments, deletion masks and unflushed rows are
+  fixed at one instant: a concurrent MERGE, UPDATE, flush or coalesce is no longer seen half or
+  twice. A read takes its segments from the catalog and never lists a directory; a catalog change is
+  visible only once it is durable; and a read that cannot resolve a segment its catalog names fails
+  instead of returning short. A restored database whose catalog is rebuilt from `catalog.chk`
+  catalogues its segments at open. See [Query](guides/query.md) and [Backup](guides/backup.md).
+
 ## 0.2.0 — 2026-09-30
 
 **.NET 10, `Decimal(p,s)` columns, and writes that travel and land as columns.** Server **0.2.0**, `Aouda.Client` **0.2.0**, `@aouda/client` **0.2.0**, Studio **0.0.26** (pin stays **0.1.25** until Studio moves). See [Compatibility](clients/compatibility.md).

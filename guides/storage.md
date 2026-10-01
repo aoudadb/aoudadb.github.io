@@ -246,7 +246,9 @@ If you run server defaults and do not set per-database overrides:
 - **Table segment layout**
   - Table path is name-based.
   - Default non-partitioned path uses `data/seg_*`.
-  - Delta path uses `_delta` under parent data scope.
+  - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, next train**).
+  - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
+    catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, next train**).
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
