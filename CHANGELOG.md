@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Hot segments carry the same statistics footer, and a hot segment file from an earlier build is
+  not read (ColumnarRead S10).** A `.hot` file (now version 2) stores, per 8,192-row slice of every
+  column, the statistics a cold page records, plus the segment's sort-key index, series ranges and
+  key range, so a restart no longer loses them. A version-1 `.hot` file is refused by name and its
+  segment is rebuilt from its cold copy where one exists — as with S08 / S09, export with the earlier
+  build and reload. Merging small hot segments now keeps rows in the table's cluster order.
+- **A column whose type was widened is skipped by its page statistics again (ColumnarRead S10).**
+  Pages written before an order-preserving type change (a wider integer, integer → `Double`,
+  `Float32` → `Double`, `Date` → `Timestamp`) prune by their min / max converted to the new type,
+  instead of being read in full. A change to `String` still reads every page.
 - **Cold segments carry a statistics footer (ColumnarRead S09).** Every cold page records, besides
   min / max and its null count, whether it is constant, sorted or all-null, its run count, first and
   last value, an exact sum for integer and decimal columns, and up to 16 distinct values; every
