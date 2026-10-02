@@ -89,9 +89,8 @@ Aouda treats data temperature and memory pressure as first-class behavior rather
   - `src/Aouda.Engine.Core/Query/Expr.cs` (BL-091-S1 — `Expr.CollectColumnIds`)
   - `src/Aouda.Engine.Catalog/CatalogApi.cs` (BL-091-S1 — `ValidateResidencyPolicy`)
   - `src/Aouda.Engine.Storage/HotCold/HotColdMaintenanceWorker.cs`
-  - `src/Aouda.Engine.Storage/HotCold/MemoryFilterSegmentEvaluator.cs` (BL-091-S2)
+  - `src/Aouda.Engine.Storage/HotCold/FilterDrivenDemotion.cs` (BL-091-S2; ColumnarRead S14 — the scan's row-group classifier over the segment's footer statistics)
   - `src/Aouda.Engine.Storage/HotCold/SegmentDemoter.cs` (BL-091-S2 — `DemotionReason.PolicyRowCapExceeded`)
-  - `src/Aouda.Engine.Storage/HotColdInspector.cs` (BL-091-S3 — `GetSegmentResidencyExplanation`)
   - `src/Aouda.Engine.Storage/Memory/MemoryBudgetOptions.cs`
   - `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs`
   - `src/Aouda.Server/Controllers/TablesController.cs`
@@ -104,7 +103,7 @@ Aouda treats data temperature and memory pressure as first-class behavior rather
   - `tests/Aouda.Engine.Catalog.Tests/HotColdMetadataTests.cs`
   - `tests/Aouda.Engine.Core.Tests/MemoryFilterGrammarTests.cs` (BL-091-S1)
   - `tests/Aouda.Engine.Catalog.Tests/MemoryFilterPolicyValidationTests.cs` (BL-091-S1)
-  - `tests/Aouda.Engine.Storage.Tests/MemoryFilterSegmentEvaluatorTests.cs` (BL-091-S2)
+  - `tests/Aouda.Engine.Storage.Tests/HotCold/FilterDrivenDemotionClassifierTests.cs` (BL-091-S2, ColumnarRead S14)
   - `tests/Aouda.Engine.Storage.Tests/HotColdMaintenanceWorkerTests.cs` (BL-091-S2)
   - `tests/Aouda.Engine.Storage.Tests/HotColdObservabilityTests.cs` (BL-091-S3)
   - `tests/Aouda.Engine.Storage.Tests/HotToColdDemotionTests.cs`
@@ -179,10 +178,10 @@ If you do nothing beyond default server config:
   - REST/Protocol support for `memoryFilter`, `memoryRowCap` and `targetMemoryBytes` — all readable and settable via the existing table create and update-policy endpoints (BL-091).
   - ⚠️ **`pinAllInMemory` was removed.** It was a second spelling of `storageTemperature: HotOnly` that no engine path ever read; a request that sets it now gets a `400` naming `HotOnly` as the replacement, rather than being silently ignored as before. On-disk catalogs and replicated DDL frames are unaffected. The TypeScript and C# SDKs never sent it, so this is a raw-HTTP concern only.
 - Filter-based partial residency (BL-091):
-  - `ResidencyPolicy.MemoryFilter` — JSON predicate grammar (segment-granularity). Validated at catalog write time; enforced during maintenance sweeps by preferring to demote segments provably unable to match the filter.
+  - `ResidencyPolicy.MemoryFilter` — JSON predicate grammar (segment-granularity). Validated at catalog write time; enforced during maintenance sweeps by preferring to demote segments provably unable to match the filter. (**ColumnarRead, next train**) A segment is "provably unable to match" when every row group of it is ruled out by its footer statistics — the same classifier the query scan prunes with; a segment without statistics for a filter column is kept. Before this, the server's maintenance worker was built without the page store the old check needed, so the preference never applied outside tests; it now does.
   - `ResidencyPolicy.MemoryRowCap` — per-table cap on resident (hot) row count. Enforced in the periodic maintenance sweep independently of the byte budget.
   - `ResidencyPolicy.TargetMemoryBytes` — per-table hot-byte budget wired to the existing `MemoryBudgetManager` per-table limit mechanism, overriding the global `AutoHotByteBudgetBytes` for that table.
-  - `HotColdInspector.GetSegmentResidencyExplanation` — per-segment explain API (why is this segment hot or cold under the current policy?).
+  - ~~`HotColdInspector.GetSegmentResidencyExplanation`~~ — removed (**ColumnarRead, next train**): an in-process diagnostics class with no caller in the server or either SDK.
   - `Perf` counters: `MemoryFilterDemotionsPrioritized`, `RowCapDemotions`.
 
 ### Planned / proposed

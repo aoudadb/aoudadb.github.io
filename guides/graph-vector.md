@@ -266,6 +266,7 @@ Aouda extends its columnar storage model with two new primitives alongside the e
 Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, not separate tables. They may appear on any tabular table:
 - `DataType.Vector` — fixed-dimension dense float vectors. Each insert batch is WAL-framed, buffered in a per-column `VectorHraBuffer`, and flushed per IVF cell. Cold sealing optionally writes RaBitQ or PQ companion files.
 - `DataType.MdVector` — variable-length multi-vector storage (ColBERT / ColPali style). Written to `col_{colId}_mdvec.bin`. The companion FDE column for MaxSim retrieval is deferred to Stage 2.
+- **A table query does not return vectors.** A vector column is read by `NearestNeighborsAsync` (and the graph operators), not by `Where` / `Select` / `ToListAsync` / `ToColumnarAsync`, which read the table's own segments: there a vector column reads as **null in every row** (a projection, `ORDER BY`, `DISTINCT`, `COUNT(vec)` = 0, `WHERE vec IS NULL` matches every row). (**ColumnarRead, next train**) Before, a query that projected a vector column threw.
 
 **Key invariant:** Edge and vector storage reuse all existing engine primitives (column-per-file, HRA freeze-and-swap, WAL replay, hot/cold tiering, partition pruning, zone maps). They are not parallel subsystems.
 
