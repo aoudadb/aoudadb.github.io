@@ -242,12 +242,28 @@ Runtime notes:
 
 1. Entry point: `TableQuery.AggregateAsync` or client-side `Count`.
 2. Discovery includes persisted segments plus virtual hot segment from HRA snapshot.
-3. Aggregate request sent to `ParallelSegmentScanner.ExecuteAggregatesAsync`.
+3. Aggregate request sent to `ParallelSegmentScanner.ExecuteAggregatesAsync`. (**ColumnarRead, next train**: every aggregate
+   runs on the one scan instead. An 8,192-row row group the filter selects whole and that has no deleted row is answered
+   from its page statistics — row and null counts, exact integer and decimal sums, exact bounds — without reading a page; a
+   double's `SUM` and a string's `MIN` / `MAX` are decoded for that row group, and a row group with a deletion is decoded
+   whole. `SUM` of a `String`, `Bool`, `Guid`, `Timestamp` or `Date` column is refused.)
 4. Merged aggregate result reflects both cold and current hot state.
 5. **Nulls (**BL-735, 0.2.0**):** `Min`, `Max`, `Sum` and `Count(column)` skip a column's nulls, as SQL does;
    a bare `Count()` counts every row. Before, a null was aggregated as its type's default (`0`), so `Min` over positive
    values with a null read `0`.
-6. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
+   **`Sum` over no value is `null` (**BL-757, next train**)** — a filter that matches nothing, or a column null in every
+   matching row — on every path, joins included; it was `0` when a segment was read and `null` when none was. `Min` / `Max`
+   over no value are `null`; `Count` over nothing is `0`. `Min` / `Max` of a `String` (code-point order) or `Bool` column
+   now answer the value instead of `null` (**ColumnarRead, next train**).
+6. **Grouped aggregates in the embedded engine (**ColumnarRead, next train**):** `TableQuery.GroupBy("Ticker", "Source")`, or
+   `GroupBy(GroupKey.Column("Ticker"), GroupKey.Truncate("DateTime", PartitionFunction.TruncateToMinute, "Minute"))` for a
+   time bucket of a `Timestamp` column, with `Count()`, `Count(col)`, `Sum`, `Min`, `Max`, `First(col, orderBy)` and
+   `Last(col, orderBy)`, executed by `GroupAggregateAsync()`. The result is a `ColumnarQueryResult`: the keys, then one
+   column per aggregate (`COUNT`, `SUM_<col>`, `MIN_<col>`, `FIRST_<col>` …), ordered by the keys ascending with nulls
+   last; `Skip` / `Limit` apply after grouping. An integer `SUM` is an exact `Int64` (an overflow throws). Not over HTTP
+   yet, and no `OrderBy` over a grouped result.
+7. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
+   `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`) and the reference fuzzer.
 
 ### Path D: QueryEngine row-window contract
 
@@ -350,6 +366,7 @@ Notes:
 | Projection | `.Select(...)` | `.select(...)` | `select` | Implemented | Null/omitted means all columns. |
 | Pagination | `.Skip()`, `.Limit()` | `.offset()`, `.limit()` | `offset`, `limit` | Implemented | `limit=0` treated as unlimited. |
 | Ordering | `.OrderBy().ThenBy()` | `.orderBy().thenBy()` | `orderBy[]` | Implemented | Max 8 order-by columns. |
+| Grouped aggregates | Embedded engine: `TableQuery.GroupBy(...)` + `GroupAggregateAsync()` (**ColumnarRead, next train**) | — | Not yet | Embedded only | Time buckets via `GroupKey.Truncate`; `First` / `Last` by an order column. Over HTTP in a later ColumnarRead session. |
 | Count convenience | `.CountAsync()` → `/query/count` | `.count()` uses `/query?limit=0` (not the dedicated endpoint) | `POST .../query/count` | Partial | .NET uses dedicated count endpoint; TS adoption is an open follow-up. |
 | Cross-partition query flag | `.WithCrossPartitionAccess()` | No dedicated fluent method in current builder | `crossPartitionAccess` bool | Partial | TS can still send raw request outside builder. |
 || Expression SELECT (computed columns) | `.SelectExpr((alias, expr), ...)` | `.selectExpr({ alias: expr })` | `selectExpr[]` in query body | Implemented (P27 S7 / P40 S08) | Server-computed columns appended to result; type is inferred where the expression permits (`Unknown` otherwise). Always nullable. See [browser-tier read limits](browser-tier-read-limits.md#selectexpr-result-types) and [Bulk Mutations](bulk-mutations.md). |
@@ -550,6 +567,10 @@ Quick-answer matrix:
 _Updated 2026-04-08 after P14, P15, P16 completion._
 
 ### Resolved gaps
+
+- ~~`DISTINCT` returned a `NULL` and its type's default as one row~~ — ✅ **Resolved** (**ColumnarRead, next train**):
+  `Distinct("Volume")` over rows holding both `NULL` and `0` (or `false`, or `""`) returned only one of them. A `NULL` is
+  now a distinct value of its own. `DISTINCT` also reads constant pages and small value sets from their statistics.
 
 - ~~Nested group construction is not first-class in current SDK query builders~~ — ✅ **Resolved (P14, BL-044)**: WhereClause.Groups adopted end-to-end across SDKs/helpers with nested group support.
 - ~~No max-depth validation for deeply recursive `WhereClause.Groups`~~ — ✅ **Resolved (P14, BL-044)**: depth guardrails implemented.
