@@ -901,6 +901,8 @@ Execute a query against a table.
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
 | `crossPartitionAccess` | boolean | No | When `true`, queries on partitioned tables do not require a partition-key filter. Without this, queries on partitioned tables without a partition filter return `PARTITION_FILTER_REQUIRED`. Default: `false`. |
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
+| `aggregates` | object[] | No | (**ColumnarRead S16, next train**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
+| `groupBy` | object[] | No | (**ColumnarRead S16, next train**) GROUP BY keys; requires `aggregates`. |
 
 **Where Clause:**
 
@@ -1032,6 +1034,62 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
 }
 ```
 
+#### Aggregates and GROUP BY
+
+(**ColumnarRead S16, next train.** Before this, `/query` had no aggregate except the `/query/count` route, and no GROUP BY.)
+
+```json
+{
+  "database": "mydb",
+  "table": "trades",
+  "where": {"and": [{"column": "Ticker", "op": "eq", "value": "AAPL"}]},
+  "groupBy": [
+    {"column": "Source"},
+    {"column": "DateTime", "bucket": "day", "alias": "d"}
+  ],
+  "aggregates": [
+    {"func": "count"},
+    {"func": "sum", "column": "Volume", "alias": "vol"},
+    {"func": "min", "column": "Price"},
+    {"func": "avg", "column": "Price"},
+    {"func": "countDistinct", "column": "Venue"}
+  ],
+  "orderBy": [{"column": "vol", "descending": true}],
+  "limit": 30
+}
+```
+
+| Field | Values |
+|---|---|
+| `aggregates[].func` | `count` (no `column`: the rows; with a `column`: its non-null values), `sum`, `min`, `max`, `avg`, `countDistinct` (the distinct non-null values). Case-insensitive. Every function but `count` needs a `column`. |
+| `aggregates[].alias` | The result column's name. Without it: `COUNT`, or `{FUNC}_{column}` — `COUNT_x`, `SUM_x`, `MIN_x`, `MAX_x`, `AVG_x`, `COUNT_DISTINCT_x`. |
+| `groupBy[].column` | The column grouped by. |
+| `groupBy[].bucket` | A time bucket of a `Timestamp` column: `minute`, `hour`, `day`, `week` (ISO, from Monday), `month`, `year`. The key is the bucket's start. |
+| `groupBy[].alias` | The key column's name (the column's name otherwise). |
+
+The answer is the ordinary query response (columnar, `format=rows`, or frames). It holds the group keys, then one column per
+aggregate in the order asked; without `groupBy` it is **one row**. `where` selects the rows aggregated, and `orderBy` (over the
+result's column names), `offset` and `limit` apply to the groups. Groups come in key order (ascending, nulls last) unless
+`orderBy` says otherwise.
+
+**Types:** `count` / `countDistinct` are `Int64`. `sum` is an exact `Int64` over integers (overflow is an error, not a wrapped
+value), the column's own `Decimal(p,s)` over one, and a `Double` over floating point. `min` / `max` keep the column's type.
+`avg` is a `Double`; a `Decimal(p,s)` mean is divided in decimal first. Over no row, `count` is `0` and every other aggregate is
+`null`. A grouped query over no row answers no row.
+
+**Refused (`400 INVALID_REQUEST`):**
+
+- `groupBy` without `aggregates`;
+- `select`, `selectExpr`, `distinct` or `joins` together with either;
+- an unknown `func` or `bucket`, or a bucket of a non-`Timestamp` column;
+- `sum` / `avg` of a column that is not a number, or any vector column;
+- two result columns with the same name (give one an alias);
+- an `orderBy` that names no result column;
+- `/query/count` with either field.
+
+An unknown column is `400 COLUMN_NOT_FOUND`. A caller denied the table gets the zero-row answer with the aggregate result's
+columns. Named-query definitions do not carry these fields yet (**BL-796**).
+
 **Columnar Response (default):**
 
 ```json
@@ -1069,6 +1127,53 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
   }
 }
 ```
+
+**JSON written from the columns (**ColumnarRead, next train**):** both JSON shapes are now written straight from the
+query's columns into the response and sent as they are written (chunked), instead of being built whole first. The bytes are
+the same as before for every type. One case changes: a `Double` / `Float32` result cell that is `NaN` or infinite, which JSON
+cannot represent, is now a clean `500 INTERNAL_ERROR` naming the column before anything is sent. Before, the response broke
+after its headers. Ask for the frame response below, which carries these values.
+
+**Column-batch frame response (**ColumnarRead, next train**):** a request whose `Accept` header lists
+`application/vnd.aouda.column-batch` gets the result as **column-batch frames**: the same binary format `POST …/rows`
+accepts, described under [`POST …/rows`](#post-apidatabasesdbtablesnamerows). Both SDKs ask for it by default.
+Send `Accept: application/vnd.aouda.column-batch, application/json;q=0.5` and **branch on the response's `Content-Type`**. A
+server older than this, or a result the frame cannot carry (a non-null vector cell, a computed or joined column whose
+values are not its declared type), answers JSON as before. Errors are always JSON `ProtocolError`s with their status.
+`format=columnar|rows` chooses the JSON shape only. The same applies to `POST …/named-queries/{name}/query`; the named-query
+batch stays JSON.
+
+- **Body:** one or more frames back to back, each at most 65,536 rows. There is always at least one frame: an empty result
+  is one frame of 0 rows that still names every column. Every frame carries every column, in result order.
+- **Headers** carry the rest of the JSON envelope:
+
+| Header | Content |
+|---|---|
+| `X-Aouda-Column-Types` | JSON array of the logical type names, the JSON body's `types` (e.g. `["Int64","Decimal","Timestamp"]`) |
+| `X-Aouda-Row-Count` | Total rows across the frames (`rowCount`) |
+| `X-Aouda-Total-Matches` | `totalMatches`, when the query asked for it (a named query with `count: true`) |
+| `X-Aouda-Stats` | The JSON body's `stats` object |
+| `X-Aouda-Warnings` | The JSON body's `warnings` array, when there are any |
+| `X-Aouda-Token` | The consistency token, as on every response |
+
+- **Column kinds by logical type.** A null is the frame's null bit.
+
+| Logical type | Frame kind | Value |
+|---|---|---|
+| `Int64`, `Int32`, `Int16`, `Byte`, `UInt16`, `UInt32` | `Int64` (1) | The value, widened |
+| `UInt64` | `Int64` (1) | The value's 64 bits; read them as unsigned |
+| `Double`, `Float32` | `Double` (2) | The value, widened (exact) |
+| `Boolean` | `Bool` (3) | Bitmap |
+| `String` | `String` (4) | A dictionary per frame |
+| `Guid` | `String` (4) | The `D` form (`0f8fad5b-d9cb-469f-a165-70867728950e`) |
+| `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
+| `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
+| `Decimal` declared `Decimal(p,s)` | `ScaledDecimal` (8) | The unscaled value at scale `s` |
+| `Decimal` (undeclared) | `ScaledDecimal` (8) if every value has one scale and fits, else `Decimal` (6) | |
+| A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
+
+`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`.
+`GET /admin/capabilities` lists `queryColumnBatch: true`.
 
 ---
 
@@ -3275,13 +3380,18 @@ Returns feature and provider capability metadata for Studio and MCP clients.
     "nodeInfo": true,
     "nodeLogs": true,
     "nodeLogStream": true,
-    "insertColumnBatch": true
+    "insertColumnBatch": true,
+    "queryColumnBatch": true
   }
 }
 ```
 
 `features.insertColumnBatch` (**ColumnarCore S06, 0.2.0**): `POST …/tables/{name}/rows` reads the column-batch
 frame as well as JSON (see [`POST …/rows`](#post-apidatabasesdbtablesnamerows)). Absent on a server that predates it.
+
+`features.queryColumnBatch` (**ColumnarRead S16, next train**): `POST …/query` and a named query's execute answer with
+column-batch frames when the request's `Accept` lists them (see [`POST …/query`](#post-apidatabasesdbquery)). Absent on a
+server that predates it.
 
 ---
 
@@ -4356,3 +4466,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.6 | 2026-08-29 | **Catalog GET/list auth linkage:** `auth.enabled` / `auth.database` on every database response (never `mk_*` on GET). GET `{name}` documented as metadata-only; 404 while `Dropping`. Health probe split (`/health` liveness vs `/ready` / GET `state=Active`). Create-role `permissions` optional; 400 `INVALID_REQUEST` with `suggestion`. |
 | 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections: 0`) — **not yet released**: BL-404 / BL-405 are on `Unreleased` and ship in the **next** server train, after 0.1.20. |
 | 2.8 | 2026-09-30 (0.2.0) | **ColumnarCore S06 / S13, BL-716 (additive on the wire):** `POST …/tables/{name}/rows` also accepts one column-batch frame (`Content-Type: application/vnd.aouda.column-batch`; database and table from the URL, `identityInsert` / `writeConcern` as query parameters), advertised by `Accept-Post: application/json, application/vnd.aouda.column-batch` on the endpoint's responses and by `features.insertColumnBatch` in `GET /admin/capabilities`; an older server answers a frame with `415`. Column-batch frames gain the `ScaledDecimal` kind (`8`). `Decimal` columns may declare `precision` / `scale` (`Decimal(p,s)`, `1 ≤ p ≤ 18`, `0 ≤ s ≤ p`) on create-table, add-column and column details. Insert errors: a body that is not valid JSON is `400 INVALID_REQUEST` (was MVC's validation problem), an empty body is `400 MISSING_DATABASE`; a string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is a `400`. |
+| 2.9 | next train (ColumnarRead) | **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |

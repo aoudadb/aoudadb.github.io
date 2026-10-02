@@ -92,7 +92,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
-| HTTP query response format | `columnar` | Lower payload overhead by default; row format is opt-in (`format=rows`). |
+| HTTP query response format | `columnar` | Lower payload overhead by default; row format is opt-in (`format=rows`). A request whose `Accept` lists `application/vnd.aouda.column-batch` gets binary column-batch frames instead, and both SDKs ask for them by default (**ColumnarRead S16, next train**; [HTTP reference](../reference/http-api.md#post-apidatabasesdbquery)). |
 | `limit` when omitted/negative | `1000` (`ProtocolConstants.DefaultLimit`) | Prevents accidental unbounded results. |
 | `limit` upper bound | `10000` (`ProtocolConstants.MaxLimit`) | Oversized client limits are capped server-side. |
 | `limit = 0` | Unlimited | Still valid on `/query` for unbounded reads; remote `.CountAsync()` uses `/query/count` instead. |
@@ -260,8 +260,10 @@ Runtime notes:
    time bucket of a `Timestamp` column, with `Count()`, `Count(col)`, `Sum`, `Min`, `Max`, `First(col, orderBy)` and
    `Last(col, orderBy)`, executed by `GroupAggregateAsync()`. The result is a `ColumnarQueryResult`: the keys, then one
    column per aggregate (`COUNT`, `SUM_<col>`, `MIN_<col>`, `FIRST_<col>` …), ordered by the keys ascending with nulls
-   last; `Skip` / `Limit` apply after grouping. An integer `SUM` is an exact `Int64` (an overflow throws). Not over HTTP
-   yet, and no `OrderBy` over a grouped result.
+   last; `Skip` / `Limit` apply after grouping. An integer `SUM` is an exact `Int64` (an overflow throws). **ColumnarRead S16
+   (next train):** `OrderBy` over a grouped result (by a key's or an aggregate's output name, before `Skip` / `Limit`); `Avg(col)`
+   and `CountDistinct(col)`; `GroupAggregateAsync()` without `GroupBy()` answers one row. Over HTTP as the query message's
+   `aggregates` / `groupBy` ([reference](../reference/http-api.md#aggregates-and-group-by)).
 7. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
    `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`) and the reference fuzzer.
 
@@ -366,7 +368,7 @@ Notes:
 | Projection | `.Select(...)` | `.select(...)` | `select` | Implemented | Null/omitted means all columns. |
 | Pagination | `.Skip()`, `.Limit()` | `.offset()`, `.limit()` | `offset`, `limit` | Implemented | `limit=0` treated as unlimited. |
 | Ordering | `.OrderBy().ThenBy()` | `.orderBy().thenBy()` | `orderBy[]` | Implemented | Max 8 order-by columns. |
-| Grouped aggregates | Embedded engine: `TableQuery.GroupBy(...)` + `GroupAggregateAsync()` (**ColumnarRead, next train**) | — | Not yet | Embedded only | Time buckets via `GroupKey.Truncate`; `First` / `Last` by an order column. Over HTTP in a later ColumnarRead session. |
+| Grouped aggregates | Embedded engine: `TableQuery.GroupBy(...)` + `GroupAggregateAsync()`; remote: `RemoteTableQuery.GroupBy(...)` / `Sum` / `Avg` / `CountDistinct` … + `AggregateAsync()` (**ColumnarRead, next train**) | `.groupBy(...)`, `.sum()`, `.avg()`, `.countRows()`, `.countDistinct()` … (**ColumnarRead S16, next train**) | `aggregates`, `groupBy` in the query message (**S16**) | Implemented (next train) | Time buckets (`minute` … `year`); `orderBy` over the result's names. `First` / `Last` embedded only. |
 | Total matches with a page | Embedded engine: `TableQuery.WithTotalMatches()` → `TotalMatches` on the result (**ColumnarRead, next train**) | — | Named queries: `count: true` → `totalMatches` | Embedded + named queries | Counted by the same read over the same snapshot as the page, ignoring `Skip` / `Limit`. |
 | Rows as views | Embedded engine: `ToListAsync()` rows read the result's columns (**ColumnarRead, next train**) | — | — | Embedded | A row is a view over the result's column arrays: the indexer boxes one cell, `Get<T>` reads a typed column without boxing, `ToDictionary()` copies. |
 | Count convenience | `.CountAsync()` → `/query/count` | `.count()` uses `/query?limit=0` (not the dedicated endpoint) | `POST .../query/count` | Partial | .NET uses dedicated count endpoint; TS adoption is an open follow-up. |
@@ -588,7 +590,7 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 ### New capabilities (P15/P16)
 
 - **Extended filter operators (P16 H.2)**: TypeScript client now supports `in()`, `notIn()`, `like()`, `isNull()`, `isNotNull()`, `between()` in addition to the six comparison operators.
-- **Aggregate query builder (P16 H.1)**: TypeScript client supports `sum()`, `min()`, `max()`, `count()`, `groupBy()`, `groupAggregate()`.
+- **Aggregate query builder (P16 H.1)**: TypeScript client supports `sum()`, `min()`, `max()`, `count()`, `groupBy()`, `groupAggregate()`. ⚠️ Until **ColumnarRead S16 (next train)** the builder sent a field the server ignored, so these returned plain rows; they now send `aggregates` / `groupBy`.
 - **Columnar output (P16 H.4)**: `.toColumnar()` execution method for high-performance columnar access.
 
 ### Remaining gaps

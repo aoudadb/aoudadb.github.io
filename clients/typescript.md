@@ -328,35 +328,41 @@ All standard operations work after joins:
 
 ## 6) Aggregates
 
+(**ColumnarRead S16, next train.** Before this, `sum` / `min` / `max` / `groupBy` sent a field the server ignored, and
+`execute()` returned the table's plain rows. They now send the query message's `aggregates` / `groupBy`; see
+[`POST …/query`](../reference/http-api.md#post-apidatabasesdbquery).)
+
 ### Simple Aggregates
 
+Without `groupBy` the answer is one row: one column per aggregate, named by its alias when given.
+
 ```typescript
-const total = await client.table('orders')
-  .sum('amount')
-  .execute();
-
-const oldest = await client.table('users')
+const { rows: [totals] } = await client.table('orders')
+  .countRows('n')                 // COUNT(*)
+  .sum('amount', 'total')         // optional alias names the output column
   .min('createdAt')
-  .execute();
-
-const maxPrice = await client.table('products')
   .max('price')
+  .avg('price')
+  .countValues('discount')        // COUNT(discount): non-null values
+  .countDistinct('customerId')
   .execute();
 ```
 
 ### Group By
 
 ```typescript
-const salesByCustomer = await client.table('orders')
-  .sum('amount')
-  .groupBy('customerId')
-  .execute();
-
-const countByStatus = await client.table('tasks')
-  .count()
-  .groupBy('status', 'priority')   // rest args, not an array
-  .execute();
+const { rows } = await client.table('trades')
+  .where('Ticker', '=', 'AAPL')
+  .groupBy('Source', { column: 'DateTime', bucket: 'day', alias: 'd' })  // keys; bucket: minute, hour, day, week, month, year
+  .sum('Volume', 'vol')
+  .countRows('n')
+  .orderBy('vol', 'desc')         // over the output's names (keys and aggregates)
+  .limit(30)
+  .execute();                     // rows: the group keys, then one column per aggregate
 ```
+
+`where`, `orderBy`, `offset` and `limit` combine with aggregates; `select`, `selectExpr`, `distinct` and joins do not
+(the server answers `400`). `count()` is unchanged: it returns the number of matching rows, not an aggregate column.
 
 ---
 
@@ -984,6 +990,23 @@ const columnar = await client.table('events')
 ```
 
 `columnar.types` contains the server-declared Aouda type names (`'Int64'`, `'String'`, `'Timestamp'`, `'Double'`, etc.). Timestamp values arrive as Int64 .NET ticks — use `coerceColumnarValue(value, typeName)` (exported from `@aouda/client`) to convert them to ISO 8601 strings if needed.
+
+### Query responses are column-batch frames (**ColumnarRead S16, next train**)
+
+A query (`execute()`, `toColumnar()`, `namedQueries.execute()`) asks for the binary
+[column-batch frame](../reference/http-api.md#post-apidatabasesdbquery)
+(`Accept: application/vnd.aouda.column-batch, application/json;q=0.5`) and reads whatever the server sends by its
+`Content-Type`. An older server, or a result a frame cannot carry, answers JSON as before. The values are the same either
+way: integers, `Date` (days since 1970-01-01), decimals and `UInt64` as numbers, `Guid` as a string, and a `Timestamp`
+row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks.
+
+From frames, the columns are held as typed arrays (`result.typedColumns`) and `result.rows` are **views** over them
+rather than one object per row. Property access, `Object.keys`, spread, `JSON.stringify`, assignment and `delete` behave
+as on a plain object. A view cannot be structured-cloned: pass `{ ...row }` to `structuredClone`, `postMessage` or
+IndexedDB.
+
+A `Timestamp` read through JSON could come back one millisecond early, because a JavaScript number cannot hold its
+.NET ticks exactly. It now reads as the millisecond the ticks round to, on both paths.
 
 ---
 
