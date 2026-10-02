@@ -175,7 +175,7 @@ thresholds the ratio is tested against.
 the most common misdiagnosis of this number. A real example: a database granted a 2.3–2.4 GB
 elastic ceiling, with a **~120 MB** reservation peak, zero heap reclaims and zero admission sheds —
 every figure saying there was room — reported `headroom 1.45x` and ran a whole 15 M-row load in
-`Constrained`, with its page cache off. All of those numbers were correct. The process's resident
+`Constrained`, with its page cache off (the page cache is now on in every mode — **ColumnarRead, next train**). All of those numbers were correct. The process's resident
 set was ~1.9 GB against a 2.76 GB governed budget, and the ~1.78 GB between the ledger and RSS is
 resident data that Aouda **reports but never reserves**: hot segments, HRA buffers, PK index caches
 and materialized-query build state. It is kept out of the ledger on purpose, so that resident data
