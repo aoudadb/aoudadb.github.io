@@ -1069,8 +1069,9 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
 
 The answer is the ordinary query response (columnar, `format=rows`, or frames). It holds the group keys, then one column per
 aggregate in the order asked; without `groupBy` it is **one row**. `where` selects the rows aggregated, and `orderBy` (over the
-result's column names), `offset` and `limit` apply to the groups. Groups come in key order (ascending, nulls last) unless
-`orderBy` says otherwise.
+result's column names), `offset` and `limit` apply to the groups — **including `limit`'s default of 1000**, so a query that
+can make more groups than that sets `limit` (up to 10,000) and pages with `offset`. Groups come in key order (ascending, nulls
+last) unless `orderBy` says otherwise.
 
 **Types:** `count` / `countDistinct` are `Int64`. `sum` is an exact `Int64` over integers (overflow is an error, not a wrapped
 value), the column's own `Decimal(p,s)` over one, and a `Double` over floating point. `min` / `max` keep the column's type.
@@ -1143,8 +1144,11 @@ values are not its declared type), answers JSON as before. Errors are always JSO
 `format=columnar|rows` chooses the JSON shape only. The same applies to `POST …/named-queries/{name}/query`; the named-query
 batch stays JSON.
 
-- **Body:** one or more frames back to back, each at most 65,536 rows. There is always at least one frame: an empty result
-  is one frame of 0 rows that still names every column. Every frame carries every column, in result order.
+- **Body:** one or more frames back to back, each at most 65,536 rows — fewer for a wide result, so that no frame decodes past
+  the reader's 256 MB a frame. There is always at least one frame: an empty result is one frame of 0 rows that still names
+  every column. Every frame carries every column, in result order. A result that names a column twice is answered as JSON.
+  A reader should check that the frames' rows add up to `X-Aouda-Row-Count`: a body cut between two frames is otherwise a
+  shorter, well-formed answer.
 - **Headers** carry the rest of the JSON envelope:
 
 | Header | Content |
@@ -1155,6 +1159,8 @@ batch stays JSON.
 | `X-Aouda-Stats` | The JSON body's `stats` object |
 | `X-Aouda-Warnings` | The JSON body's `warnings` array, when there are any |
 | `X-Aouda-Token` | The consistency token, as on every response |
+
+Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a browser client reads them cross-origin.
 
 - **Column kinds by logical type.** A null is the frame's null bit.
 
