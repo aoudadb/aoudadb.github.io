@@ -453,6 +453,7 @@ Invariants:
   - table create cannot reuse existing MQ name,
   - MQ create cannot reuse existing table name.
 - Auto-routing only applies when a matching MQ is found and is ready; otherwise query falls back.
+- A query with `ORDER BY` or computed (`SelectExpr`) columns is **not** auto-routed: it reads the base table (**ColumnarRead group-4 review, next train** — a routed `ORDER BY … LIMIT` used to come back in storage order).
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
 - `MemoryOnly` source tables are never subject to MQ auto-rebuild after bulk-load.
 
