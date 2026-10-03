@@ -139,8 +139,8 @@ If you do nothing beyond default server config:
 | Table `StorageTemperaturePolicy` | `Auto` | Engine can demote/promote segments using maintenance and access signals |
 | Segment temperature on creation | `Hot` | New data is queried on hot path first |
 | `Aouda:Memory:MaxTotalRamBytes` | ~70% of detected RAM | Process RSS ceiling (set explicitly to pin a number) |
-| `Aouda:Memory:MaxHotBytes` | `0` | Auto-computes effective hot budget as 70% of max total |
-| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes effective cache budget as 20% of max total |
+| `Aouda:Memory:MaxHotBytes` | `0` | Auto-computes effective hot budget (`T10`) as 45% of the governed budget, floor 32 MB |
+| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes effective cache budget (`T12`) as 10% of the governed budget, floor 8 MB. The cache is on in every resource mode (**ColumnarRead, next train**); `Aouda:Memory:PageCacheEnabled = false` turns it off |
 | `MemoryBudgetOptions.TargetRamBytes` | `0` | Effective target is 90% of max total |
 | Database `DefaultTemperature` | `Auto` | New tables inherit `Auto` unless table policy overrides |
 | `HotColdMaintenanceWorkerOptions` | `SweepInterval=5s`, `AutoHotByteBudgetBytes=64MiB`, `PromotionAccessThreshold=3` | Internal maintenance defaults when worker is active |
@@ -168,7 +168,7 @@ If you do nothing beyond default server config:
 - Query/read correctness over mixed hot/cold:
   - Query paths consult segment temperature and deletion-mask correctness fixes are in place.
 - Management and observability:
-  - `HotColdInspector` APIs for listing, health checks, bulk operations, JSON outputs.
+  - ~~`HotColdInspector` APIs for listing, health checks, bulk operations, JSON outputs~~ — removed (**ColumnarRead, next train**): an in-process class with no caller in the server or either SDK. Use `GET /api/server/memory`, the table policy endpoints and the `Perf` counters.
   - Perf counters for hot/cold, promotion/demotion, and memory budget actions.
 - Memory governance:
   - Per-engine `MemoryBudgetManager` wired to hot registry and table policy/name lookups.
@@ -229,10 +229,10 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 | Cold->mutable tier promotion (for update) | Yes | No | No | P30 S6/S7, `SegmentPromoter.PromoteForUpdateAsync` | Promotes cold → mutable keyed tier; two-phase dissolution for crash safety |
 | Two-phase dissolution (Gap B crash safety) | Yes | No | No | P30 S7/S11, catalog + durable tombstone | Phase 1: dissolving; Phase 2: fsync + retire; tombstone prevents orphan resurrection |
 | Maintenance worker policy automation | Yes | No | No | `HotColdMaintenanceWorker.cs`, P3 reports/tests | Auto/HotOnly/ColdPreferred/Mutable handled |
-| Hot/cold management inspection surface | Yes | No | No | P3 Task 8 report, `HotColdInspector.cs` | Rich .NET surface, no equivalent first-class HTTP endpoints |
+| Hot/cold management inspection surface | No | No | Yes | P3 Task 8 report | `HotColdInspector` removed (**ColumnarRead, next train**); it had no caller in the server or either SDK |
 | Per-database memory budget coordination | Yes | No | No | P6 F1 report, `ServerMemoryBudgetManager.cs`, integration tests | Server-level cap + per-db snapshots |
 | Table policy `PinAllInMemory` runtime handling | Yes | No | No | `Policies.cs`, `ResidencyManager.cs`, tests | Implemented in V1 residency manager |
-| Filter-based partial residency (`MemoryFilter`, row cap, target bytes) | Yes | No | No | BL-091-S1–S5 Reports; `MemoryFilterGrammar.cs`, `HotColdMaintenanceWorker.cs`, `TableMessages.cs`, `TablesController.cs`, `HotColdInspector.cs` | Segment-granularity enforcement ("ordering not eligibility"); v1 operators: `eq`/`ne`/`lt`/`lte`/`gt`/`gte`. `HotOnly`/`ColdPreferred` tables ignore these fields in v1 (BL-126). Reactive pressure path not yet wired (BL-124). |
+| Filter-based partial residency (`MemoryFilter`, row cap, target bytes) | Yes | No | No | BL-091-S1–S5 Reports; `MemoryFilterGrammar.cs`, `HotColdMaintenanceWorker.cs`, `TableMessages.cs`, `TablesController.cs`, `FilterDrivenDemotion.cs` (**ColumnarRead, next train**) | Segment-granularity enforcement ("ordering not eligibility"); v1 operators: `eq`/`ne`/`lt`/`lte`/`gt`/`gte`. `HotOnly`/`ColdPreferred` tables ignore these fields in v1 (BL-126). Reactive pressure path not yet wired (BL-124). |
 | Public API for explicit promote/demote operations | No | Yes | No | .NET engine APIs only | HTTP/TS SDK surface for explicit promote/demote not yet exposed |
 
 ## 2.7 Core concepts and mental model
@@ -365,9 +365,9 @@ Key implementation anchors:
   - `src/Aouda.Engine.Storage/HotCold/SegmentDemoter.cs` — `DemotionReason` enum (includes `PolicyRowCapExceeded`, BL-091-S2)
   - `src/Aouda.Engine.Storage/HotCold/SegmentPromoter.cs`
   - `src/Aouda.Engine.Storage/HotCold/HotColdMaintenanceWorker.cs`
-  - `src/Aouda.Engine.Storage/HotCold/MemoryFilterSegmentEvaluator.cs` — segment-level "could match filter" test via `PagePruner.CanSkipEntireSegment` (BL-091-S2)
+  - `src/Aouda.Engine.Storage/HotCold/FilterDrivenDemotion.cs` — segment-level "could match filter" test: the scan's `RowGroupClassifier` over the segment's footer statistics (**ColumnarRead, next train**); replaces `MemoryFilterSegmentEvaluator` and `PagePruner.CanSkipEntireSegment` (BL-091-S2)
 - Diagnostics/ops:
-  - `src/Aouda.Engine.Storage/HotColdInspector.cs` — `GetSegmentResidencyExplanation(...)`, extended `TablePolicyInfo`, extended `ListTablePolicies`, extended `GetTablePolicyReport` (BL-091-S3)
+  - ~~`src/Aouda.Engine.Storage/HotColdInspector.cs`~~ — removed (**ColumnarRead, next train**) (BL-091-S3's `GetSegmentResidencyExplanation`, `ListTablePolicies`, `GetTablePolicyReport` with it)
   - `src/Aouda.Engine.Diagnostics/Perf.cs`
 - Memory governance:
   - `src/Aouda.Engine.Storage/Memory/MemoryBudgetOptions.cs`
@@ -475,20 +475,20 @@ Primary proving tests:
    a. Per-table byte budget = `tableEntry.Policy.Residency.TargetMemoryBytes ?? globalAutoByteBudget`.
    b. Per-table row cap = `tableEntry.Policy.Residency.MemoryRowCap` (null = no row-cap enforcement).
    c. If `MemoryFilter` is non-null: parse once via `MemoryFilterGrammar.TryParse`. On failure, log and fall back to `CreatedUtc`-only ordering.
-   d. For each sealed, unpinned, non-cooldown candidate segment: call `MemoryFilterSegmentEvaluator.CouldMatchAsync(...)`, which loads column page summaries and inverts `PagePruner.CanSkipEntireSegment`. Segments where `couldMatch = false` (provably non-matching) are sorted first; within each group, oldest `CreatedUtc` first.
+   d. For each sealed, unpinned, non-cooldown candidate segment: call `FilterDrivenDemotion.CouldMatch(...)`, which classifies every row group of the segment's footer statistics with the scan's `RowGroupClassifier` (**ColumnarRead, next train**); it used `MemoryFilterSegmentEvaluator` and `PagePruner.CanSkipEntireSegment`. Segments where `couldMatch = false` (provably non-matching) are sorted first; within each group, oldest `CreatedUtc` first.
    e. Walk the sorted candidates, demoting until both byte budget and row cap are satisfied. A `PolicyRowCapExceeded` `DemotionReason` is recorded for row-cap-triggered demotions; `PolicyAutoBudget` for byte-budget-triggered ones.
-3. If the optional `FilePageStore` is absent (not supplied to the constructor), or if `MemoryFilter` is null, step d is skipped and ordering is plain `CreatedUtc`.
+3. If `MemoryFilter` is null, step d is skipped and ordering is plain `CreatedUtc`. A segment without footer statistics counts as could-match (stays in memory). (**ColumnarRead, next train**) The step no longer needs a `FilePageStore`; the server constructed the worker without one, so before this the filter ordering never applied on a server.
 
 Primary code anchors:
 
 - `src/Aouda.Engine.Storage/HotCold/HotColdMaintenanceWorker.cs`
-- `src/Aouda.Engine.Storage/HotCold/MemoryFilterSegmentEvaluator.cs`
+- `src/Aouda.Engine.Storage/HotCold/FilterDrivenDemotion.cs` (**ColumnarRead, next train**)
 - `src/Aouda.Engine.Storage/HotCold/SegmentDemoter.cs`
 
 Primary proving tests:
 
 - `tests/Aouda.Engine.Storage.Tests/HotColdMaintenanceWorkerTests.cs` (`Auto_*` tests — AC1-AC10 from BL-091-S2)
-- `tests/Aouda.Engine.Storage.Tests/MemoryFilterSegmentEvaluatorTests.cs`
+- ~~`tests/Aouda.Engine.Storage.Tests/MemoryFilterSegmentEvaluatorTests.cs`~~ — deleted with the evaluator (**ColumnarRead, next train**); the classifier's cases are in the read-rule oracle
 
 ### Walk-through F: Policy create/update with partial residency fields (BL-091)
 
@@ -530,8 +530,8 @@ Primary proving tests:
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | long | ~70% of detected RAM | `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
-| `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 70% of total |
-| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 20% of total |
+| `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
+| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of the governed budget (floor 8 MB); on in every resource mode (**ColumnarRead, next train**) |
 | `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or positive | startup config | Per-database cap when set |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
@@ -676,11 +676,11 @@ Expected result: `memoryFilter` updated to the new value; `memoryRowCap` explici
 |---|---|---|---|---|---|
 | Create table with storage temperature | `AoudaEngine.CreateTableAsync(..., policy)` | `client.tables.createTable({ policy: { storageTemperature } })` | `POST /api/databases/{db}/tables` | Implemented | Full path available |
 | Update storage temperature policy | `Catalog.SetTablePolicyAsync(...)` via engine/catalog surface | `client.tables.updatePolicy(...)` | `PUT /api/databases/{db}/tables/{name}/policy` | Implemented | End-to-end shipped |
-| Observe hot/cold state and bulk ops | `HotColdInspector.*` | No direct wrapper | No dedicated endpoint | Partial | Available in engine/.NET only |
+| Observe hot/cold state and bulk ops | ~~`HotColdInspector.*`~~ removed (**ColumnarRead, next train**) | No direct wrapper | No dedicated endpoint | Partial | Available in engine/.NET only |
 | Read server + per-db memory budget usage | `ServerMemoryBudgetManager.GetServerUsage()` | `client.admin.server.memory()` | `GET /api/server/memory` | Implemented | Good operator surface |
 | Configure advanced `MemoryBudgetOptions` fields | `new MemoryBudgetOptions(...)` in embedded/open APIs | No direct surface | Server config exposes only 3 core memory keys | Partial | Advanced fields are .NET-only currently |
 | Configure filter-based partial residency (`memoryFilter`, `memoryRowCap`, `targetMemoryBytes`, `pinAllInMemory`) | `Catalog.SetTablePolicyAsync(...)` via engine/catalog | No direct TS SDK wrapper yet | `POST /api/databases/{db}/tables` + `PUT /api/databases/{db}/tables/{name}/policy` | Implemented (BL-091) | v1 operators: `eq`/`ne`/`lt`/`lte`/`gt`/`gte`. Sentinel clear convention on update-policy. `HotOnly`/`ColdPreferred` tables persist the fields but enforcement is `Auto`-only in v1. |
-| Explain segment residency (why hot or cold) | `HotColdInspector.GetSegmentResidencyExplanation(...)` | Not available | No dedicated HTTP endpoint yet | Partial | .NET engine surface only. HTTP endpoint deferred (BL-091 Non-Scope). |
+| Explain segment residency (why hot or cold) | ~~`HotColdInspector.GetSegmentResidencyExplanation(...)`~~ removed (**ColumnarRead, next train**) | Not available | No dedicated HTTP endpoint | Missing | HTTP endpoint deferred (BL-091 Non-Scope). |
 
 ### B) Missing API matrix
 
@@ -758,7 +758,7 @@ Steps:
    ```
 2. Ingest a mix of `status = 'active'` and `status = 'closed'` rows, enough to seal multiple segments.
 3. Wait for maintenance sweep (default `SweepInterval = 5s`) or trigger it.
-4. Query `HotColdInspector.GetSegmentResidencyExplanation(...)` for a known non-matching segment — `CouldMatchFilter` should be `false`, `Summary` should explain the filter eliminated it.
+4. Read the `MemoryFilterDemotionsPrioritized` `Perf` counter: it rises when a demotion was ordered by the filter. (`HotColdInspector.GetSegmentResidencyExplanation` is removed (**ColumnarRead, next train**).)
 
 Expected result checks:
 - Non-matching segments (provably `status` range does not overlap `'active'`) are demoted before matching segments when byte/row pressure exists.
@@ -789,7 +789,7 @@ Steps:
 2. Ingest rows past both limits (ingest > 1 M rows and / or > 512 MiB of hot data).
 3. Wait for the maintenance sweep.
 4. Inspect hot residency:
-   - Via `HotColdInspector.ListTablePolicies(catalog, hotRegistry, coldRegistry)` — `MemoryRowCapUsed` and hot bytes for the table should be at or below the configured limits.
+   - Via `GET /api/server/memory` — the table's entry in `perTableBytes` should be at or below the configured byte limit. (`HotColdInspector.ListTablePolicies` is removed (**ColumnarRead, next train**).)
    - Via `Perf` counters: `RowCapDemotions` should be non-zero if row cap drove the demotions; `MemoryFilterDemotionsPrioritized` remains 0 (no filter set).
 
 Expected result checks:
@@ -821,12 +821,12 @@ Monitor first:
 
 Per-segment residency explain (BL-091):
 
-- `HotColdInspector.GetSegmentResidencyExplanation(catalog, tableId, segmentId, hotRegistry, ...)` returns a `SegmentResidencyExplanation` record with:
+- ~~`HotColdInspector.GetSegmentResidencyExplanation(catalog, tableId, segmentId, hotRegistry, ...)`~~ — removed (**ColumnarRead, next train**) with the rest of `HotColdInspector`; nothing in the server or either SDK called it. It returned a `SegmentResidencyExplanation` record with:
   - `CurrentTemperature` — actual segment temperature from the catalog.
   - `CouldMatchFilter` — `bool?`: `null` = no filter configured; `true` = segment might match; `false` = segment provably cannot match (safe to demote first).
   - `RowCapExceeded` / `ByteTargetExceeded` — point-in-time flags from the registry snapshot.
   - `Summary` — human-readable string, e.g. `"Hot: matches MemoryFilter; table row count 4,200 / cap 5,000; byte target not set."`.
-- Use `GetTablePolicyReport()` output for a tabular view across all tables showing `MemoryRowCapUsed`/`TargetMemoryBytes`/`HasMemoryFilter` alongside the existing hot/cold byte columns.
+- ~~`GetTablePolicyReport()`~~ (removed with it) gave a tabular view across all tables showing `MemoryRowCapUsed`/`TargetMemoryBytes`/`HasMemoryFilter` alongside the existing hot/cold byte columns.
 
 Recovery/restart expectations:
 
@@ -904,7 +904,7 @@ Last verification date (UTC): `2026-03-31`.
 | `PinAllInMemory` persistence | `TablesIntegrationTests.cs` (`CreateTable_PinAllInMemory_RoundTrips`, `UpdatePolicy_PinAllInMemory_RoundTrips`) | Pass | Strong | Settable and readable via HTTP (BL-091-S4) |
 | Filter grammar parser | `tests/Aouda.Engine.Core.Tests/MemoryFilterGrammarTests.cs` (30 tests) | Pass | Strong | AC1-AC5, AC11 from BL-091-S1: all six ops, and/or composition, unknown column, type mismatch, malformed JSON, `CollectColumnIds` |
 | Residency policy validation at catalog write | `tests/Aouda.Engine.Catalog.Tests/MemoryFilterPolicyValidationTests.cs` (17 tests) | Pass | Strong | AC6-AC9 from BL-091-S1: `SetTablePolicyAsync`/`CreateTableAsync` accept/reject; fail-closed ordering; table-id allocator not consumed on rejection |
-| `MemoryFilterSegmentEvaluator` zone-map matching | `tests/Aouda.Engine.Storage.Tests/MemoryFilterSegmentEvaluatorTests.cs` (7 tests) | Pass | Strong | AC8 from BL-091-S2: outside range, overlapping, boundary, zero pages, multi-column And, unknown column, constant predicate |
+| `MemoryFilterSegmentEvaluator` zone-map matching (deleted with the evaluator (**ColumnarRead, next train**); `FilterDrivenDemotion` asks the scan's `RowGroupClassifier`) | `tests/Aouda.Engine.Storage.Tests/MemoryFilterSegmentEvaluatorTests.cs` (7 tests, deleted) | Historical | Strong | AC8 from BL-091-S2: outside range, overlapping, boundary, zero pages, multi-column And, unknown column, constant predicate |
 | Filter/cap enforcement in maintenance sweep | `tests/Aouda.Engine.Storage.Tests/HotColdMaintenanceWorkerTests.cs` (18 tests) | Pass | Strong | AC1-AC10 from BL-091-S2: no-op regression, `TargetMemoryBytes` override, `MemoryRowCap`, dual-cap OR semantics, filter ordering, graceful degradation without `FilePageStore`, `DemotionReason` correctness |
 | Observability: `TablePolicyInfo`, `GetSegmentResidencyExplanation`, perf counters | `tests/Aouda.Engine.Storage.Tests/HotColdObservabilityTests.cs` (21 tests) | Pass | Strong | AC1-AC7 from BL-091-S3: policy info fields, explain `bool?` semantics, CSV column order, counter increments gated on `Perf.Enable` |
 | Residency fields on HTTP create/update-policy endpoints | `tests/Aouda.Server.Tests/TablesIntegrationTests.cs` (13 new tests) | Pass | Strong | AC1-AC8 from BL-091-S4: create/update round-trips, omit-preserves, explicit-clear sentinels, invalid filter/caps → 400, backward compatibility |
@@ -974,11 +974,10 @@ Last verification date (UTC): `2026-03-31`.
   - `src/Aouda.Engine.Core/Query/MemoryFilterException.cs`
   - `src/Aouda.Engine.Core/Query/Expr.cs` (`Expr.CollectColumnIds`)
   - `src/Aouda.Engine.Catalog/CatalogApi.cs` (`ValidateResidencyPolicy`)
-  - `src/Aouda.Engine.Storage/HotCold/MemoryFilterSegmentEvaluator.cs`
+  - `src/Aouda.Engine.Storage/HotCold/FilterDrivenDemotion.cs` (**ColumnarRead, next train**)
   - `src/Aouda.Engine.Storage/HotCold/SegmentDemoter.cs` (`DemotionReason.PolicyRowCapExceeded`)
   - `src/Aouda.Engine.Storage/Memory/MemoryBudgetOptions.cs`
   - `src/Aouda.Engine.Storage/HotCold/HotColdMaintenanceWorker.cs`
-  - `src/Aouda.Engine.Storage/HotColdInspector.cs`
   - `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs`
   - `src/Aouda.Server/Controllers/TablesController.cs`
   - `src/Aouda.Server/Controllers/ServerController.cs`
@@ -991,7 +990,6 @@ Last verification date (UTC): `2026-03-31`.
   - `tests/Aouda.Engine.Catalog.Tests/HotColdMetadataTests.cs`
   - `tests/Aouda.Engine.Core.Tests/MemoryFilterGrammarTests.cs`
   - `tests/Aouda.Engine.Catalog.Tests/MemoryFilterPolicyValidationTests.cs`
-  - `tests/Aouda.Engine.Storage.Tests/MemoryFilterSegmentEvaluatorTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/HotColdMaintenanceWorkerTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/HotColdObservabilityTests.cs`
   - `tests/Aouda.Engine.Storage.Tests/HotToColdDemotionTests.cs`

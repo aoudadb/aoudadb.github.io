@@ -571,6 +571,9 @@ Writes first delay, then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` or `W
 Refusals now name **which class of work** was refused and why. A `503` may say a class hit its own entitlement while the process as a whole still had room — that is a different problem from the process being full, and it names a different fix: run less of that kind of work concurrently, raise that class's entitlement, or set `Aouda:Memory:PerClassAdmissionEnabled=false` to admit against the process ceiling alone. `reservedByClass` on `GET /api/server/memory` says who was holding the budget when it happened.
 
 Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed the class ceiling is refused, where it previously succeeded while holding far more memory than it had reserved. Both are the same typed retryable `503`.
+(**ColumnarRead, next train**) A large scan's decode buffers and a GROUP BY's, top-K's or `DISTINCT`'s growing state are now
+charged to the query's read budget as they grow, so a GROUP BY with more groups than its budget holds fails with the typed
+retryable error while it grows, rather than after.
 
 ## Which rungs are actually running
 

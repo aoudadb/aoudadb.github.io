@@ -112,9 +112,7 @@ For a table too small to justify a partition key — the common case, see
   - `src/Aouda.Engine.Storage/Sorting/ClusterSorter.cs`
   - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
   - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
-  - `src/Aouda.Engine.Storage/Manifest/SegmentSummaryCache.cs`
-  - `src/Aouda.Engine.Storage/Manifest/PageSummaryCache.cs`
-  - `src/Aouda.Engine.Storage/Query/SegmentPruner.cs`
+  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, next train**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`
@@ -146,7 +144,7 @@ If you create a partitioned time-series table and do not set advanced controls:
   - `LateArrivalPolicy = Delta`
   - `LateArrivalThreshold = 1 hour`
 - `LateArrivalPolicy = Delta` is normalized to `Inline` at table creation when no cluster columns are declared. With cluster columns it behaves as `Inline` too: delta segments are removed and late rows are flushed inline (**ColumnarRead, next train**).
-- Metadata caching policy defaults to `Auto` at table policy level.
+- Metadata caching policy defaults to `Auto` at table policy level. `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted (**ColumnarRead, next train**).
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -157,7 +155,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 | `PartitionOptions.RequirePartitionFilter` | `true` | Partitioned queries require key filters unless bypassed |
 | `PartitionOptions.LateArrivalPolicy` | `Delta` | Late data is flushed inline like on-time data; `Delta` behaves as `Inline` (**ColumnarRead, next train**) |
 | `PartitionOptions.LateArrivalThreshold` | `1 hour` | Defines late-arrival cutoff; unused while `Reject` is unenforced (**BL-762, next train**) |
-| `TablePolicy.MetadataCaching` | `Auto` | Segment summaries resident; page summaries policy-driven |
+| `TablePolicy.MetadataCaching` | `Auto` | No effect: the summary caches it governed are deleted (**ColumnarRead, next train**) |
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -168,10 +166,10 @@ If you create a partitioned time-series table and do not set advanced controls:
   - `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`.
 - Nested partition paths under `partitions/` with shared bucket support.
 - Segment manifest persistence with cluster stats and per-page metadata.
-- Segment-level cluster-stat pruning in query planning (`SegmentPruner`).
+- Pruning from each segment's footer statistics: per 8,192-row row group (`RowGroupClassifier`), and a filter that pins every series column reads only that series' rows, from the segment's run directory (**ColumnarRead, next train**); `SegmentPruner` is deleted.
 - Sort-on-seal behavior in storage pipeline for clustered data.
 - Late-arriving rows are flushed inline with on-time rows and are query-visible like any other row. Delta segments, their background merge, and the `data/_delta/` directory are removed; `LateArrivalPolicy.Delta` behaves as `Inline`, and rows an older build left under `data/_delta/` are no longer read (**ColumnarRead, next train**). `LateArrivalPolicy.Reject` is not enforced (**BL-762, next train**).
-- Tiered metadata caching (`SegmentSummaryCache` and `PageSummaryCache`) with pressure-aware eviction.
+- ~~Tiered metadata caching (`SegmentSummaryCache` and `PageSummaryCache`) with pressure-aware eviction~~ — removed (**ColumnarRead, next train**): the page summary cache was never filled and the segment summary cache never constructed. A segment's footer is read once and held by its segment handle.
 - Schema file support for partition functions and cluster column lists (`partitionKey.function`, `clusterColumns`).
 
 ### Planned / proposed
@@ -205,12 +203,12 @@ If you create a partitioned time-series table and do not set advanced controls:
 | `TruncateToMinute` partition function | Yes | No | No | P28 S1, `PartitionFunction = 6`, `PartitionKeyExtractor.TruncateToMinute` | Produces `YYYY-MM-DD-HH-mm` partition key; TypeScript union includes `"TruncateToMinute"` |
 | Nested partition directory structure | Yes | No | No | G.3 report + `PartitionRouter.cs` + nested partition tests | Dedicated paths nested under `partitions/` |
 | Segment manifest persistence at seal | Yes | No | No | G.4a report + `SegmentManifest.cs` + serializer tests | Fallback compatibility behavior preserved |
-| Segment-level pruning via cluster stats | Yes | No | No | G.4b report + `SegmentPruner.cs` + storage/query tests | Counter `SegmentsPrunedByClusterStats` updates |
+| Segment-level pruning via cluster stats | Yes | No | No | G.4b report; `RowGroupClassifier` over the segment footer (**ColumnarRead, next train**; `SegmentPruner.cs` deleted) | Per row group, and per series through the run directory. `SegmentsPrunedByClusterStats` reads 0 |
 | Sort-on-seal for clustered pages | Yes | No | No | G.5 report + `ClusterSorter.cs` + sort tests | Runtime default is on; effect only with cluster columns |
 | Late-arrival routing (delta/inline/reject) | No | Yes | No | G.6 report + `LateArrivalRouter.cs` + router tests | Late rows are flushed inline; `Delta` behaves as `Inline` (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) |
 | Delta query visibility pre-compaction | No | No | Yes | — | Removed with delta segments (**ColumnarRead, next train**) |
 | Overlap-aware K-way delta merge | No | No | Yes | — | Removed with delta segments (**ColumnarRead, next train**) |
-| Metadata caching tiers | Yes | No | No | BL-004 report + summary/page caches | `Auto`, `InMemory`, `OnDemand` policy model |
+| Metadata caching tiers | No | No | Yes | BL-004 report | Removed (**ColumnarRead, next train**): the summary caches were never filled; `MetadataCaching` is accepted and changes nothing |
 | Retrospective partitioning strategies | No | Yes | No | BL-005/005b reports + `Policies.cs` | Foundation shipped; phase-2 strategy caveats remain |
 | Public API controls for late-arrival and sort-on-seal | No | No | Yes | `TableMessages.cs` + `types.ts` + controller create path | Not exposed in HTTP DTOs/TS typed API |
 
@@ -228,8 +226,7 @@ If you create a partitioned time-series table and do not set advanced controls:
   - Bounded sorting at seal/flush stages, not full historical re-sorting.
 - Late-arrival handling:
   - Late rows are flushed inline with on-time rows; there is no delta path and no delta merge (**ColumnarRead, next train**). `Reject` is not enforced (**BL-762, next train**).
-- Metadata caching tiers:
-  - Segment summaries always lightweight and resident; page summaries are policy/pressure managed.
+- Metadata caching tiers: removed (**ColumnarRead, next train**). `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted (**ColumnarRead, next train**).
 
 ### A materialized query's result table clusters too, and you do not declare it {#mq-result-clustering}
 
@@ -264,8 +261,8 @@ High-level runtime flow:
 2. Partition key extraction applies declared partition functions for routing.
 3. Writes are flushed/sealed; clustered batches are sorted on seal.
 4. Segment manifests are persisted with page metadata and optional cluster stats.
-5. Query execution reads the segments the table's catalog names (no directory is listed) and prunes with cluster stats (**ColumnarRead, next train**).
-6. Metadata caches accelerate repeated prune paths under bounded memory.
+5. Query execution reads the segments the table's catalog names (no directory is listed) and prunes by each row group's footer statistics and each segment's run directory (**ColumnarRead, next train**).
+6. A segment's footer is read once and held by its segment handle until the segment changes (**ColumnarRead, next train**; the summary caches are deleted).
 
 Key implementation anchors:
 
@@ -280,13 +277,12 @@ Key implementation anchors:
   - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
   - `src/Aouda.Engine.Storage/Partition/LateArrivalRouter.cs`
 - Pruning and discovery:
-  - `src/Aouda.Engine.Storage/Query/SegmentPruner.cs`
+  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, next train**); `SegmentPruner.cs` is deleted
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
 - Manifest and caching:
   - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
   - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
-  - `src/Aouda.Engine.Storage/Manifest/SegmentSummaryCache.cs`
-  - `src/Aouda.Engine.Storage/Manifest/PageSummaryCache.cs`
+  - (`SegmentSummaryCache.cs` and `PageSummaryCache.cs` are deleted (**ColumnarRead, next train**))
 - Merge and compaction:
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
 
@@ -328,9 +324,11 @@ Primary tests:
 1. Query path takes the table's segments from its catalog entries (`SegmentDiscoveryService.FromCatalog(...)`).
    No directory is listed: a segment directory the catalog does not name is never read, and `_delta`
    segments no longer exist (**ColumnarRead, next train**).
-2. `SegmentPruner.PruneByClusterStats(...)` applies cluster windows from predicate.
-3. Surviving segments continue into page pruning and row filtering.
-4. Perf counters track segment pruning.
+2. The one scan classifies each row group from the segment footer's statistics (`RowGroupClassifier`) and, for a filter that
+   pins every series column, reads only that series' run from the run directory (**ColumnarRead, next train**;
+   `SegmentPruner.PruneByClusterStats` is deleted).
+3. Row groups that may match are decoded and filtered; a segment whose every row group is ruled out reads no page.
+4. `SegmentsPrunedByClusterStats` reads 0 since the change.
 
 ### Walk-through D: Late-arrival flush
 
@@ -369,7 +367,7 @@ Primary tests:
 | `MigrationOptions.MaxParallelism` | int | `2` | `>=1` | .NET engine/catalog | Phase-2 property |
 | `MigrationOptions.BlockingTimeout` | `TimeSpan` | `1h` | Positive duration | .NET engine/catalog | Phase-2 property |
 | `TableOptions.SortOnSeal` | bool | `true` | `true/false` | Core runtime option | No HTTP/TS toggle today |
-| `TablePolicy.MetadataCaching` | enum | `Auto` | `Auto`, `InMemory`, `OnDemand` | .NET/catalog policy | No HTTP/TS create-table field today |
+| `TablePolicy.MetadataCaching` | enum | `Auto` | `Auto`, `InMemory`, `OnDemand` | .NET/catalog policy | No effect since the summary caches were deleted (**ColumnarRead, next train**); no HTTP/TS create-table field |
 
 Configuration precedence and operational notes:
 
@@ -506,6 +504,9 @@ Expected result checks:
 
 ### Scenario 3: Scale read path with manifest and metadata caches
 
+(**ColumnarRead, next train:** the summary caches and their counters are gone, and `SegmentsPrunedByClusterStats` reads 0; check a
+query's latency and `DecodedValues` instead. Kept for its history.)
+
 When to use:
 - Many-segment tables where startup and first-query latency matter.
 
@@ -524,13 +525,12 @@ Expected result checks:
 Monitor first:
 
 - Pruning effectiveness:
-  - `SegmentsPrunedByClusterStats`
+  - `DecodedValues` against the rows returned (`SegmentsPrunedByClusterStats` reads 0 since the scan that wrote it was deleted (**ColumnarRead, next train**))
 - Sort behavior:
   - `PagesSortedOnSeal`
 - Late-arrival and delta counters (`LateArrivals*`, `Delta*`) stay at 0: late rows are flushed inline and
   delta segments are removed (**ColumnarRead, next train**).
-- Metadata cache health:
-  - Segment/page summary cache hits, misses, bytes, evictions, manifest loads
+- Metadata cache health: no longer applies; the summary caches are deleted (**ColumnarRead, next train**).
 
 Recovery/restart expectations:
 
@@ -581,7 +581,7 @@ Last verification date (UTC): `2026-03-31`.
 | Partition function extraction/compatibility | `PartitionFunctionIntegrationTests.cs`, `PartitionFunctionTests.cs`, `PartitionKeyExtractorTests.cs` | Pass | Strong | Covers function parsing and key generation |
 | Sort-on-seal behavior | `SortOnSealIntegrationTests.cs`, `ClusterSorterTests.cs` | Pass | Strong | Includes row reordering and conditions |
 | Segment manifest serialization | `ManifestSerializerTests.cs`, `CatalogPersistenceTests.cs` | Pass | Medium/Strong | Focused on metadata correctness and compatibility |
-| Segment-level prune mechanics | `SegmentPrunerTests.cs`, `HotSegmentClusterStatsTests.cs` | Pass (existing) | Medium | Behavior validated with clustered statistics |
+| Segment-level prune mechanics | `SegmentPrunerTests.cs` (deleted (**ColumnarRead, next train**); the read-rule oracle and fuzzer cover the classifier), `HotSegmentClusterStatsTests.cs` | Pass (existing) | Medium | Behavior validated with clustered statistics |
 | Late-arrival routing | `LateArrivalRouterTests.cs` | Pass | Weak | The router has no production caller since delta segments were removed (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) |
 | Retrospective partition migration behavior | `RetrospectivePartitioningTests.cs`, `EagerBlockingMigrationTests.cs` | Pass | Medium | Includes strategy behavior and constraints |
 | Schema apply/export handling for cluster/partition functions | `SchemaApplyEngineTests.cs`, `SchemaExporterTests.cs`, `SchemaDiffEngineTests.cs` | Pass (existing) | Medium | Confirms schema model handling boundaries |
@@ -642,9 +642,7 @@ Last verification date (UTC): `2026-03-31`.
   - `src/Aouda.Engine.Storage/Sorting/ClusterSorter.cs`
   - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
   - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
-  - `src/Aouda.Engine.Storage/Manifest/SegmentSummaryCache.cs`
-  - `src/Aouda.Engine.Storage/Manifest/PageSummaryCache.cs`
-  - `src/Aouda.Engine.Storage/Query/SegmentPruner.cs`
+  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, next train**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`

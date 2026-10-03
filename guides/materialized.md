@@ -304,7 +304,8 @@ results are keyed by identity rather than time, and are not clustered.
   - MQ results are regular catalog tables (compaction/hot-cold/persistence integration).
   - Unified namespace (no `_mq_` prefix).
 - Planner integration:
-  - Auto-routing from base-table `TableQuery` to matching MQ in `Ready` state.
+  - Auto-routing from base-table `TableQuery` to matching MQ in `Ready` state — and, since **ColumnarRead S18** (next
+    train), only when it is current, on every read path and over HTTP ([routing](#routing-a-read-to-a-maintained-result)).
   - `WithDirectScan()` bypass and routing decision visibility.
 - Streaming behavior:
   - Subscribe to MQ results through normal table subscription path.
@@ -562,12 +563,16 @@ Key implementation anchors:
 
 ### Walk-through C: Auto-routing query to MQ result table
 
-1. Entry point: `TableQuery.ToResultAsync()`.
+1. Entry point: every read terminal — `ToListAsync` / `ToResultAsync`, `ToColumnarAsync`, `GroupAggregateAsync`, a bare
+   `Count()` through `AggregateAsync`, `Distinct`, `LatestPerKey` / `FirstPerKey` — and HTTP `POST …/query` and
+   `…/query/count` (**ColumnarRead S18, next train**; before, `ToResultAsync()` only).
 2. Routing check:
-   - unless `WithDirectScan()` was used, `MaterializedQueryMatcher.FindMatch(...)` runs before segment scan.
+   - unless `WithDirectScan()` was used, `MaterializedQueryMatcher.Route(...)` runs before the scan, with the WAL position
+     the read must cover.
 3. Branching:
-   - match found -> execute on result table and capture routed decision,
-   - no match or unsupported predicate projection -> record not-routed reason and direct-scan.
+   - a current result that holds the answer -> read the result table and record the routed decision,
+   - no such result (none matches, or the match is stale, has work queued or is behind the WAL position) -> record the
+     not-routed reason and scan the table.
 4. Observability:
    - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`,
    - `MaterializedQueryMatchTimeNs`.
@@ -955,7 +960,7 @@ The `mqRebuildStatus` field is returned in `GET /api/databases/appdb/bulk-load/{
 | Generic create/drop/list/status | `CreateMaterializedQueryAsync`, `DropMaterializedQueryAsync`, `ListMaterializedQueriesAsync`, `GetMaterializedQueryStatusAsync` | `client.materializedQueries.create/drop/list/status` | `GET/POST/DELETE /api/databases/{db}/materialized-queries[/{name}]` | Implemented | Full TS + HTTP surface shipped in P16 |
 | Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute()` or `client.materializedQueries.query(name)` | `POST /api/databases/{db}/query` or `POST /api/databases/{db}/materialized-queries/{name}/query` | Implemented | Two paths: normal table query or dedicated MQ query endpoint |
 | Subscribe MQ results | `GetTable(queryName).SubscribeAsync()` pattern in client tests | `client.table(queryName).subscribe(...)` | standard `subscribe` message `target=queryName` | Implemented | No MQ-specific target type |
-| Auto-routing base query to MQ | `TableQuery` matcher + `WithDirectScan()` | Missing explicit control | Not exposed as route flag | Partial | Routing logic is server-side engine behavior |
+| Auto-routing base query to MQ | `TableQuery` matcher + `WithDirectScan()`; `ClientQueryStats.RoutedTo` | No bypass; `result.stats.routedTo` reports a route | `POST …/query` and `…/query/count` route automatically; `stats.routedTo` (**ColumnarRead S18, next train**) | Partial | Routing logic is server-side engine behavior; no route flag to bypass it over HTTP |
 | Explain routing decision | `ExplainRoutingAsync(...)` | Missing | Missing | Partial | .NET diagnostic API only |
 | Explicit on-demand MQ rebuild | `engine.RefreshMaterializedQueryAsync(name, ct)` | `client.materializedQueries.refresh(name, {await})` | `POST /api/databases/{db}/materialized-queries/{name}:refresh?await=true/false` | Implemented (P31) | Shadow-build; result readable throughout with stale data |
 | OHLC `FIRST`/`LAST` aggregate | `AggregateConfig` with `AggregateFunction.First/Last` + `OrderByColumn` | `client.materializedQueries.create(spec)` with v2 config JSON | Same `POST /api/databases/{db}/materialized-queries` | Implemented (P28) | `configJson` must use v2 schema (array of `groupByColumns` objects) |
@@ -1467,7 +1472,7 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Query against MQ name returns table not found | MQ not created, not ready, or dropped; same error shape as missing table | Verify MQ status in .NET host and table presence in catalog |
-| Base query does not auto-route | No compatible MQ, MQ not ready, or predicate/shape mismatch | Use `ExplainRoutingAsync` and inspect matcher conditions |
+| Base query does not auto-route | No compatible MQ, MQ not ready, or predicate/shape mismatch — or (**ColumnarRead S18, next train**) the MQ is stale, has updates queued, or has not yet incorporated the newest writes (under a continuous write load it often has not), or the database has no WAL | Use `ExplainRoutingAsync` and inspect matcher conditions; `stats.routedTo` says when a read was routed. A read that goes to the table returns the same answer |
 | MQ result update lag spikes | Async queue pressure or maintainer exceptions | Check queue/lag/error counters and consider `Sync` for critical flows |
 | Duplicate rows after compaction/flush on MQ result table | Known unresolved engine bug from P11 R8 | Track/fix through P11 handoff; do not relax correctness assertions |
 | Attempted FirstPerKey/TopN definition fails or is unusable | Type reserved but no full maintainer path | Use supported patterns only (`LatestPerKey`, `Aggregate`, `Filter`) |

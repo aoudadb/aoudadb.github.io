@@ -38,7 +38,7 @@ Aouda query execution exists to make one query contract work consistently across
 
 - User problem solved:
   - Query current data even when some rows are still in HRA and others are already compacted to cold segments.
-  - Keep query behavior stable as data moves between hot/cold/delta storage.
+  - Keep query behavior stable as data moves between hot and cold storage.
   - Expose a single API family across server HTTP, .NET client, and TypeScript client.
 - Operational outcomes:
   - Predictable defaults (`columnar` format, bounded limits, strict validation).
@@ -81,7 +81,7 @@ Aouda query execution exists to make one query contract work consistently across
 | Evidence type | Primary sources |
 |---|---|
 | Phase/task reports | `docs/tasks/P3/P3-Task6-QueryEngineHotColdIntegration-Report.md`, `docs/tasks/P4/P4-EpicA-Task2-RestQueryApi-Report.md`, `docs/tasks/P4/P4-EpicG-BL007-QueryEngineDeltaIntegration-Report.md`, `docs/tasks/P4/P4-EpicH-BL016-QueryEngineDataDecoding-Report.md`, `docs/tasks/P4/P4-EpicH-BL017-TableQueryPredicateFiltering-Report.md`, `docs/tasks/P4/P4-EpicH-R10.4-QueryUnflushedHraTableData-Report.md`, `docs/tasks/P7/C2-QueryCorrectness-Summary.md`, `docs/tasks/P12/BL-038-QueryEngine-RowWindow-BatchContract-Report.md`, `docs/tasks/P12/BL-038A-Remove-Legacy-QueryEngine-ExecuteAsync-TupleContract-Report.md` |
-| Runtime code | `src/Aouda.Server/Controllers/QueryController.cs`, `src/Aouda.Server/Query/QueryTranslator.cs`, `src/Aouda.Engine.Api/TableQuery.cs`, `src/Aouda.Engine.Storage/Query/QueryEngine.cs`, `src/Aouda.Engine.Storage/Query/RowFilterEngine.cs`, `src/Aouda.Engine.Storage/Query/ParallelSegmentScanner.cs`, `src/Aouda.Engine.Storage/Query/QueryBatch.cs`, `src/Aouda.Engine.Diagnostics/Perf.cs` |
+| Runtime code | `src/Aouda.Server/Controllers/QueryController.cs`, `src/Aouda.Server/Query/QueryTranslator.cs`, `src/Aouda.Engine.Api/TableQuery.cs`, `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`, `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs`, `src/Aouda.Engine.Core/Query/Scan/PredicateProgram.cs`, `src/Aouda.Engine.Diagnostics/Perf.cs` |
 | Protocol/limits | `src/Aouda.Protocol/Messages.cs`, `src/Aouda.Protocol/ProtocolConstants.cs` |
 | Client surfaces | `src/Aouda.Client/RemoteTableQuery.cs`, `src/Aouda.Client/RemoteConditionBuilder.cs`, `src/Aouda.Client/Internal/QueryMessageBuilder.cs`, `aouda-client-ts/src/query-builder.ts`, `aouda-client-ts/src/types.ts` |
 | Gap tracking | `docs/BACKLOG.md` (`BL-003`, `BL-009`, `BL-010`, `BL-044`) |
@@ -93,7 +93,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
 | HTTP query response format | `columnar` | Lower payload overhead by default; row format is opt-in (`format=rows`). A request whose `Accept` lists `application/vnd.aouda.column-batch` gets binary column-batch frames instead, and both SDKs ask for them by default (**ColumnarRead S16, next train**; [HTTP reference](../reference/http-api.md#post-apidatabasesdbquery)). |
-| `limit` when omitted/negative | `1000` (`ProtocolConstants.DefaultLimit`) | Prevents accidental unbounded results. |
+| `limit` when omitted/negative | `1000` (`ProtocolConstants.DefaultLimit`) | Prevents accidental unbounded results. With `aggregates` / `groupBy` it counts **groups** (**ColumnarRead S16, next train**): set `limit` and page with `offset` when a query can make more. |
 | `limit` upper bound | `10000` (`ProtocolConstants.MaxLimit`) | Oversized client limits are capped server-side. |
 | `limit = 0` | Unlimited | Still valid on `/query` for unbounded reads; remote `.CountAsync()` uses `/query/count` instead. |
 | `offset` | `0` | No row skipping unless explicitly requested. |
@@ -114,17 +114,26 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
   - Engine-side `TableQuery` (`Where`, `Select`, `SelectExpr`, `Skip`, `Limit`, `OrderBy`, `ThenBy`, aggregates).
   - .NET remote `RemoteTableQuery` with ordering and cross-partition flag propagation, plus `.SelectExpr()`.
   - TypeScript `TableQuery` with immutable chaining and operator mapping, plus `.selectExpr()`.
-- Hot/cold query execution through one path:
-  - Unflushed HRA visibility via virtual hot segment projection.
-  - Cold decode path with row-window contract (`QueryBatch`).
-  - Predicate-aware cold execution via `RowFilterEngine` (row-aligned semantics).
-- Optimization primitives in execution path:
-  - Page pruning (`PagePruner`) including multi-column pruning.
-  - Bloom-filter-assisted page skipping when available.
-  - Parallel multi-segment scanning with global offset/limit handling.
-  - Segment-level pruning via cluster stats where available.
-- Delta-segment read support integrated into query path.
-- Materialized-query auto-routing hooks in `TableQuery`/matcher path (when a compatible materialized table exists).
+- Hot/cold query execution through one path — **one scan** (**ColumnarRead, next train**): every read (rows, columns,
+  `COUNT(*)`, aggregates, GROUP BY, `ORDER BY … LIMIT`, `DISTINCT`, joins' sides, streaming) and every write-side scan
+  (DELETE / UPDATE matching, constraint checks) reads cold segments, hot segments and the unflushed write buffer through
+  `TableScan`, with one predicate evaluator (`PredicateProgram`). `QueryEngine`, `RowFilterEngine`, `PagePruner`,
+  `ParallelSegmentScanner` and the other old engines are deleted.
+- Optimization in the execution path (**ColumnarRead, next train**):
+  - Each 8,192-row row group is classified from its statistics (`RowGroupClassifier`): none of its rows can match → not
+    read; every row matches → the filter is not evaluated. Only the filter's columns are decoded first; the others only for
+    the 2,048-row vectors that hold a selected row.
+  - Aggregates and `DISTINCT` answer a row group the filter selects whole, with no deleted row, from its statistics.
+  - `ORDER BY … LIMIT` keeps a top-K whose threshold skips row groups that cannot beat it.
+  - A filter pinning every series column by equality reads only that series' rows, from each segment's run directory; a
+    full-key read of a cold segment reads only the rows the key map located.
+  - Scans above 65,536 rows of work run on several workers within the query's CPU grant (morsels); answers do not depend on
+    the degree.
+  - Partition-key pruning as before. A bloom filter is read only by primary-key lookups (a `Strict` table writes one),
+    not by filters on other columns; the adaptive bloom path is deleted.
+- Late rows are flushed inline; there are no delta segments to read (**ColumnarRead, next train**).
+- Materialized-query routing on every read path and over HTTP, to a current result only
+  ([routing](materialized.md#routing-a-read-to-a-maintained-result); **ColumnarRead S18, next train**).
 
 ### Planned / proposed
 
@@ -160,9 +169,9 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | Nested boolean groups in TypeScript builder | Yes | No | No | `aouda-client-ts/src/query-builder.ts` (`WhereGroupBuilder`, `whereGroup()`) | `whereGroup()` builds nested `WhereClause.groups` entries. Resolved P14, BL-044. |
 | Hot + cold + unflushed HRA unified visibility | Yes | No | No | P4 R10.4 report + `TableQuery` + P7 summary tests | Virtual hot segment merged into query execution paths. |
 | Delta segment query inclusion | No | No | Yes | P4 BL007 report | Removed with delta segments (**ColumnarRead, next train**): late rows are flushed inline. |
-| Page pruning and multi-column pruning | Yes | Partial | No | `QueryEngine`, `RowFilterEngine`, `PagePruner` usage | Ongoing tuning and backlog refinement remain. |
-| Bloom-filter-assisted pruning | Yes | Partial | No | `RowFilterEngine` bloom path + perf counters | Requires bloom index availability and equality predicates. |
-| Parallel multi-segment scanning | Yes | No | No | `ParallelSegmentScanner` + perf counters | Global offset/limit handled after merge/materialization. |
+| Page pruning and multi-column pruning | Yes | No | No | `TableScan` + `RowGroupClassifier` (**ColumnarRead, next train**; `QueryEngine`, `RowFilterEngine`, `PagePruner` deleted) | Per 8,192-row row group, from the segment footer's statistics; `AND` / `OR` / `NOT` in three-valued logic. |
+| Bloom-filter-assisted pruning | No | Partial | No | Key probe only (**ColumnarRead, next train**) | Only primary-key lookups read a bloom (`Strict` tables); the adaptive bloom path is deleted. |
+| Parallel multi-segment scanning | Yes | No | No | Morsels on the query's CPU grant (**ColumnarRead, next train**; `ParallelSegmentScanner` deleted) | Above 65,536 rows of work; rows come back in the sequential order. `ORDER BY … LIMIT` stays on one thread. |
 | Dedicated count API endpoint | Yes (`/query/count`) | No | Yes | Implemented (2026-04-04, `BL-026`) | TS client still on query path until updated. |
 | Fluent JOIN query support | No | No | Yes | Backlog + absence in fluent APIs | Internal planner support exists but not exposed in fluent APIs. |
 
@@ -171,15 +180,17 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 - `QueryMessage`: the wire-level request contract (`database`, `table`, `select`, `where`, `orderBy`, `offset`, `limit`, `crossPartitionAccess`).
 - `TableQuery`: engine-facing immutable builder used by server translation and direct engine consumers.
 - `QueryTranslator`: server bridge from wire DTO to `TableQuery`; enforces defaults and limits.
-- `QueryEngine`: per-segment execution and decode pipeline; emits row-window aligned batches.
-- `QueryBatch`: canonical internal result unit (row count + per-column arrays + optional validity bitmaps).
-- `RowFilterEngine`: specialized predicate path for row-aligned filtering over cold/hot segments.
-- `ParallelSegmentScanner`: orchestrator for multi-segment parallel execution with global offset/limit semantics.
+- `TableScan` (**ColumnarRead, next train**): the one scan every read and write-side scan runs on, over one fixed view of
+  the table's segments, their deletion masks and the write buffer; sinks for rows, aggregates, GROUP BY, top-K and
+  `DISTINCT`.
+- `PredicateProgram`: the one predicate evaluator (three-valued: a null makes a comparison unknown).
+- `RowGroupClassifier`: decides from a row group's statistics whether none, all or some of its rows can match.
+- `QueryEngine`, `QueryBatch`, `RowFilterEngine` and `ParallelSegmentScanner` are deleted (**ColumnarRead, next train**).
 - Optimization layers:
-  - page-level pruning (min/max and joint windows),
-  - optional bloom index pruning,
-  - segment-level pruning where stats are available,
-  - parallel segment execution.
+  - row-group pruning from page statistics,
+  - series and key lookups that read only the rows they return,
+  - top-K thresholds for `ORDER BY … LIMIT`,
+  - parallel morsels for large scans.
 
 Key invariants:
 
@@ -202,19 +213,17 @@ At a high level:
    - ordering,
    - cross-partition flag.
 5. `TableQuery` resolves schema/segments and selects execution path:
-   - materialized table routing path when matcher hits,
-   - row-filter path for predicate-correct cold/hot execution,
-   - parallel segment path for materialized or aggregate execution.
-6. Storage query execution uses `QueryEngine` / `RowFilterEngine` over the segments the table's catalog names; no directory is listed (**ColumnarRead, next train**).
+   - a current materialized result that holds the answer, when one does ([routing](materialized.md#routing-a-read-to-a-maintained-result)),
+   - otherwise the one scan (`TableScan`) for rows, columns, aggregates, GROUP BY, top-K and `DISTINCT` alike (**ColumnarRead, next train**).
+6. The scan reads the segments the table's catalog names; no directory is listed (**ColumnarRead, next train**).
 7. Results are returned as columnar by default and converted to row format when requested.
 
 Runtime notes:
 
 - `limit=0` on `/query` is interpreted as no cap for full reads.
-- For unflushed writes, `TableQuery` can synthesize a virtual hot segment from HRA snapshots so queries see current data before flush.
+- Unflushed writes are read from the write buffer where they are — its frozen arrays and sealed 4,096-row chunks, with the rows the read must not see masked — so queries see current data before flush without copying the buffer (**ColumnarRead S19, next train**; it was flattened into fresh arrays on every read).
 - A read is one view (**ColumnarRead, next train**): its segments, their deletion masks and the unflushed rows are fixed at one instant, so a concurrent MERGE, UPDATE, flush or coalesce is seen wholly or not at all — never half, never twice. A read no longer re-runs when a segment leaves under it. A read whose catalog names a segment it cannot resolve (a Hot segment with no hot copy, for more than a second) fails rather than returning short. A catalog change is visible to reads only once it is durable; if a catalog journal append fails, the table's reads are refused until the database is reopened.
-- `QueryEngine` increments decode/scan/perf counters and emits `QueryBatch` objects to keep row windows aligned across projected columns.
-- `ParallelSegmentScanner` applies global offset/limit after segment execution to preserve query semantics.
+- `OFFSET` / `LIMIT` without an `ORDER BY` stop the scan; with one, a top-K (or, without a `LIMIT`, a sort of a permutation of the rows) applies them after ordering (**ColumnarRead, next train**).
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
@@ -229,24 +238,26 @@ Runtime notes:
 
 ### Path B: Predicate query on cold/mixed segments
 
+(**ColumnarRead, next train:** `RowFilterEngine` and `ExecuteWithRowFilterAsync` are deleted; this path is the one scan.)
+
 1. Entry point: `TableQuery.ToColumnarAsync` (or list path) with predicate set.
-2. Route selection enters `ExecuteWithRowFilterAsync` for row-aligned filtering.
-3. `RowFilterEngine` builds page windows and applies:
-   - min/max pruning,
-   - optional bloom pruning,
-   - decode only required row ranges.
+2. The read fixes its view: the segments its catalog names, their deletion masks and the write buffer, at one instant.
+3. `TableScan` classifies each 8,192-row row group from its statistics (`RowGroupClassifier`), decodes the filter's
+   columns for the rest, evaluates the predicate with `PredicateProgram`, and decodes the other columns only for the
+   2,048-row vectors holding a selected row.
 4. Validity bitmaps and deletion masks are preserved through decode/projection.
-5. Tests: `tests/Aouda.Engine.Storage.Tests/RowFilterEngineColdValidityTests.cs`, `tests/Aouda.Engine.Storage.Tests/RowFilterEngineDriverPruningTypeTests.cs`, `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
+5. Tests: the differential oracle (`ReadRuleOracle*Tests`) and the reference fuzzer (`ReadFuzz*Tests`) in
+   `tests/Aouda.Engine.Api.Tests/ColumnarRead/`, `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
 
 ### Path C: Aggregate/count with mixed hot+cold and unflushed rows
 
 1. Entry point: `TableQuery.AggregateAsync` or client-side `Count`.
-2. Discovery includes persisted segments plus virtual hot segment from HRA snapshot.
-3. Aggregate request sent to `ParallelSegmentScanner.ExecuteAggregatesAsync`. (**ColumnarRead, next train**: every aggregate
-   runs on the one scan instead. An 8,192-row row group the filter selects whole and that has no deleted row is answered
+2. The read's view includes persisted segments plus the unflushed write buffer.
+3. Every aggregate runs on the one scan (**ColumnarRead, next train**; `ParallelSegmentScanner` is deleted). An 8,192-row row group the filter selects whole and that has no deleted row is answered
    from its page statistics — row and null counts, exact integer and decimal sums, exact bounds — without reading a page; a
    double's `SUM` and a string's `MIN` / `MAX` are decoded for that row group, and a row group with a deletion is decoded
-   whole. `SUM` of a `String`, `Bool`, `Guid`, `Timestamp` or `Date` column is refused.)
+   whole. `SUM` of a `String`, `Bool`, `Guid`, `Timestamp` or `Date` column is refused. A `GroupBy` query given to
+   `AggregateAsync()` is refused rather than answered ungrouped — use `GroupAggregateAsync()` (item 6).
 4. Merged aggregate result reflects both cold and current hot state.
 5. **Nulls (**BL-735, 0.2.0**):** `Min`, `Max`, `Sum` and `Count(column)` skip a column's nulls, as SQL does;
    a bare `Count()` counts every row. Before, a null was aggregated as its type's default (`0`), so `Min` over positive
@@ -280,6 +291,9 @@ Runtime notes:
 
 ### Path D: QueryEngine row-window contract
 
+(**ColumnarRead, next train:** `QueryEngine` and `QueryBatch` are deleted with their tests; this path no longer exists. Kept
+for its history.)
+
 1. Entry point: single-segment execute path in `QueryEngine.ExecuteAsync`.
 2. Engine decodes columns and yields explicit `QueryBatch` records.
 3. Legacy tuple contract removed; consumers depend on batch alignment guarantees.
@@ -290,7 +304,7 @@ Runtime notes:
 | Capability question | Typical systems | Aouda approach | User impact |
 |---|---|---|---|
 | Do I need separate APIs for hot vs cold data? | Often yes (cache + store split) | One query surface across hot/cold/unflushed HRA | Simpler app code and fewer consistency surprises. |
-| Is pruning/optimization user-managed? | Often index/query-hint heavy | Optimization is mostly internal (pruning, bloom, parallel scan) | Lower tuning burden for common workloads. |
+| Is pruning/optimization user-managed? | Often index/query-hint heavy | Optimization is mostly internal (row-group statistics, series and key lookups, top-K, parallel morsels) | Lower tuning burden for common workloads. |
 | Are count semantics an independent API today? | Yes (HTTP `/query/count`; .NET `CountAsync`) | TS client may still use full query | C# path avoids columnar materialization. |
 | Can query routing exploit materialized tables automatically? | Usually manual endpoint/view selection | Matcher-based auto-routing in query path | Potential speedup without endpoint changes. |
 | Do clients and server share one protocol contract? | Sometimes fragmented | Shared protocol DTOs + translator + SDK mappers | Predictable behavior across HTTP/.NET/TS surfaces. |
@@ -520,19 +534,22 @@ Expected checks:
 What to monitor first:
 
 - Query throughput and latency: `Perf.QueryApiCalls`, `Perf.QueryApiMs`.
-- Data-temperature scan mix: `Perf.HotScanRows`, `Perf.ColdScanRows`, `Perf.DeltaRowsQueried`.
-- Decode pressure: `Perf.DecodeCount`, `Perf.DecodeMs`.
-- Pruning effectiveness: `Perf.PagesPrunedByMinMax`, `Perf.PagesPrunedByJoint`, `Perf.SegmentsPrunedFully`, bloom counters.
-- Parallel execution behavior: `Perf.ParallelSegmentScans`, `Perf.ParallelScanMs`, `Perf.ParallelEarlyTerminations`.
+- Decode pressure: `Perf.DecodeCount`, `Perf.DecodeMs`, `Perf.DecodedValues`.
+- Partition pruning and hot-tier hits: `Perf.SegmentsPrunedByPartitionKey`, `Perf.HotSegmentHits` / `HotSegmentMisses`.
+- ⚠️ **Counters of the deleted scans read 0 (**ColumnarRead, next train**):** `HotScanRows`, `ColdScanRows`,
+  `DeltaRowsQueried`, `PagesPrunedByMinMax`, `PagesPrunedByJoint`, `PagesAfterPruning`, `PruningBytesSaved`,
+  `SegmentsPrunedFully`, the bloom counters, `ParallelSegmentScans`, `ParallelScanMs`, `ParallelEarlyTerminations`. They
+  stay in the CSV and in `/api/admin/metrics` (the `query` subsystem's `rowsScanned`, `hotScanRows`, `coldScanRows`,
+  `hotAggregateOps`, `coldAggregateOps`, `parallelScans`, `vectorizedOps`, `pagesPrunedByMinMax`, `pagesAfterPruning`, `pruningBytesSaved`, `segmentsPrunedFully`)
+  and no longer move. A query's own `stats` (`rowsScanned`, `executionMs`) are unaffected.
 
 Quick-answer matrix:
 
 | Question | Practical answer |
 |---|---|
 | Are queries CPU-bound on decode? | Check `DecodeMs`/`DecodeCount` against row volume. |
-| Is pruning helping? | Watch min/max/joint/bloom prune counters over representative traffic. |
-| Are LIMIT queries terminating early? | Track `ParallelEarlyTerminations`. |
-| Are we scanning unexpected cold/delta volume? | Compare `ColdScanRows` and `DeltaRowsQueried` trends. |
+| Is pruning helping? | The min/max/joint/bloom prune counters read 0 since **ColumnarRead** (next train); compare `DecodedValues` with the rows the queries return. |
+| Are we decoding unexpected cold volume? | Compare `DecodedValues` / `DecodeMs` trends (`ColdScanRows` reads 0 since **ColumnarRead**, next train). |
 | Are query API calls increasing but rows flat? | Inspect query shape defaults (limit/order/filter) and client behavior. |
 
 ## 2.14 Troubleshooting by symptom
@@ -552,7 +569,7 @@ Quick-answer matrix:
 | Verification scope | Command | Result | Date (UTC) | Notes |
 |---|---|---|---|---|
 | Server query endpoint + translator behavior | `dotnet test tests/Aouda.Server.Tests --no-build --filter "FullyQualifiedName~QueryIntegrationTests|FullyQualifiedName~QueryTranslatorTests" --verbosity minimal` | Pass | 2026-03-31 | Covers request validation, translation defaults/limits, integration query flow. |
-| Storage query engine batch/pruning/validity paths | `dotnet test tests/Aouda.Engine.Storage.Tests --no-build --filter "FullyQualifiedName~QueryEngineRowWindowBatchTests|FullyQualifiedName~QueryEnginePrunedExecutionTests|FullyQualifiedName~RowFilterEngineColdValidityTests" --verbosity minimal` | Pass | 2026-03-31 | Confirms row-window batch contract, pruning execution, cold validity behavior. |
+| Storage query engine batch/pruning/validity paths | `dotnet test tests/Aouda.Engine.Storage.Tests --no-build --filter "FullyQualifiedName~QueryEngineRowWindowBatchTests|FullyQualifiedName~QueryEnginePrunedExecutionTests|FullyQualifiedName~RowFilterEngineColdValidityTests" --verbosity minimal` | Pass | 2026-03-31 | Confirms row-window batch contract, pruning execution, cold validity behavior. Historical: these tests were deleted with their engines (**ColumnarRead, next train**). |
 | TypeScript query builder contract | `npm test -- query-builder.test.ts` | Pass | 2026-03-31 | Confirms immutable builder behavior, operator/order/limit serialization, endpoint path usage. |
 
 ## 2.16 Test coverage matrix
@@ -561,9 +578,7 @@ Quick-answer matrix:
 |---|---|---|---|---|
 | HTTP query integration and error handling | `tests/Aouda.Server.Tests/QueryIntegrationTests.cs` | Pass | Strong | Exercises endpoint behavior and protocol responses. |
 | Query translation/validation/defaults | `tests/Aouda.Server.Tests/QueryTranslatorTests.cs` | Pass | Strong | Validates translator rules and normalization. |
-| QueryEngine `QueryBatch` contract | `tests/Aouda.Engine.Storage.Tests/QueryEngineRowWindowBatchTests.cs` | Pass | Strong | Verifies row-window aligned batch semantics. |
-| Pruned execution behavior | `tests/Aouda.Engine.Storage.Tests/QueryEnginePrunedExecutionTests.cs` | Pass | Medium | Focuses pruning outcomes and execution correctness. |
-| Cold validity + filter path correctness | `tests/Aouda.Engine.Storage.Tests/RowFilterEngineColdValidityTests.cs` | Pass | Strong | Covers validity alignment in cold predicate execution. |
+| One scan: pruning rules, top-K, aggregates, routing against a reference model (**ColumnarRead, next train**) | `tests/Aouda.Engine.Api.Tests/ColumnarRead/ReadRuleOracle*Tests.cs`, `ReadFuzzTests.cs` | — | Strong | Every pruning rule and route has an oracle case, rule on and off. Replaces the deleted `QueryEngineRowWindowBatchTests`, `QueryEnginePrunedExecutionTests` and `RowFilterEngineColdValidityTests` (their engines are gone). |
 | TypeScript query payload mapping | `aouda-client-ts/tests/query-builder.test.ts` | Pass | Strong | Covers builder immutability, operators, order, pagination serialization. |
 | Mixed-state correctness (hot/cold/unflushed) | `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`, `tests/Aouda.Engine.Api.Tests/C2ScenarioMirrorIntegrationTests.cs` | Not run in this pass | Medium | Evidence from prior report cycle; re-run recommended for release gates. |
 
@@ -632,10 +647,9 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 - `src/Aouda.Protocol/Messages.cs`
 - `src/Aouda.Protocol/ProtocolConstants.cs`
 - `src/Aouda.Engine.Api/TableQuery.cs`
-- `src/Aouda.Engine.Storage/Query/QueryEngine.cs`
-- `src/Aouda.Engine.Storage/Query/QueryBatch.cs`
-- `src/Aouda.Engine.Storage/Query/RowFilterEngine.cs`
-- `src/Aouda.Engine.Storage/Query/ParallelSegmentScanner.cs`
+- `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs` (**ColumnarRead, next train**; `QueryEngine.cs`, `QueryBatch.cs`, `RowFilterEngine.cs` and `ParallelSegmentScanner.cs` are deleted)
+- `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs`
+- `src/Aouda.Engine.Core/Query/Scan/PredicateProgram.cs`
 - `src/Aouda.Engine.Diagnostics/Perf.cs`
 - `src/Aouda.Client/RemoteTableQuery.cs`
 - `src/Aouda.Client/RemoteConditionBuilder.cs`
@@ -644,9 +658,7 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 - `aouda-client-ts/src/types.ts`
 - `tests/Aouda.Server.Tests/QueryIntegrationTests.cs`
 - `tests/Aouda.Server.Tests/QueryTranslatorTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/QueryEngineRowWindowBatchTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/QueryEnginePrunedExecutionTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/RowFilterEngineColdValidityTests.cs`
+- `tests/Aouda.Engine.Api.Tests/ColumnarRead/` (`ReadRuleOracle*Tests`, `ReadFuzzTests`)
 - `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`
 - `tests/Aouda.Engine.Api.Tests/C2ScenarioMirrorIntegrationTests.cs`
 - `aouda-client-ts/tests/query-builder.test.ts`

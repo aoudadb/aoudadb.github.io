@@ -63,7 +63,7 @@ API and wire consumers should assume **Timestamp = UTC instant**, not "SQL Serve
 
 ## Predicate pruning and precision
 
-Prior to P29, `SegmentPruner` converted Int64/Timestamp cluster keys to `double` for window extraction. Values above 2^53 lose precision as a `double`, causing incorrect segment pruning for unix-millisecond timestamps (which are well above 2^53 for any post-1970 date). P29 fixed this by switching Int64/Timestamp to a dedicated `LongWindows` path that avoids any floating-point conversion.
+Prior to P29, `SegmentPruner` converted Int64/Timestamp cluster keys to `double` for window extraction. Values above 2^53 lose precision as a `double`, causing incorrect segment pruning for unix-millisecond timestamps (which are well above 2^53 for any post-1970 date). P29 fixed this by switching Int64/Timestamp to a dedicated `LongWindows` path that avoids any floating-point conversion. Since **ColumnarRead** (next train) `SegmentPruner` is deleted: pruning is the scan's `RowGroupClassifier` over each row group's statistics, which compares integers and timestamps exactly, as `Int64`.
 
 ---
 
@@ -82,7 +82,7 @@ The default wire format for `Timestamp` columns is an `Int64` unix millisecond v
 - **Engine.Api (`AoudaEngine`):** `TimestampConversion.DateTimeToUnixUnits` converts `DateTime → Int64` at insert time.
 - **Engine.Api (`ResultTransformer`):** `TimestampConversion.UnixUnitsToDateTime` converts `Int64 → DateTime` in query results.
 - **Engine.Storage (hot segment builder):** Frame-of-Reference encoding computed from unix-ms deltas.
-- **Engine.Storage (`SegmentPruner`):** `LongWindows` path for timestamp range pruning (no double cast).
+- **Engine.Storage (`RowGroupClassifier`):** exact `Int64` comparison for timestamp range pruning (no double cast). `SegmentPruner` and its `LongWindows` path are deleted (**ColumnarRead, next train**).
 - **Catalog:** `TimestampUnit` persisted per column in `CatalogCheckpoint` (v4+). Tables without the field default to `Milliseconds`.
 - **Wire/JSON:** `Int64` unix-ms value over HTTP; ISO-8601 strings accepted on input and normalized.
 - **Market data:** The unix-ms unit is the standard for financial timestamps; used by Aggregate MQ time-bucket functions (`TruncateToHour`, `TruncateToMinute`, etc.) which operate on unix-ms values and return bucket values as `Int64` unix-ms.
@@ -117,6 +117,6 @@ For microsecond financial data:
 - `src/Aouda.Engine.Core/Schema/Types.cs` — `DataType.Timestamp`, `TimestampUnit` enum
 - `src/Aouda.Engine.Core/Util/TimestampConversion.cs` — shared conversion helpers (`DateTimeToUnixUnits`, `UnixUnitsToDateTime`)
 - `src/Aouda.Engine.Storage/Hot/HotSegmentBuilder.cs` — FOR Timestamp encoding
-- `src/Aouda.Engine.Storage/Query/SegmentPruner.cs` — `LongWindows` precision path
+- `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` — exact timestamp range pruning (**ColumnarRead, next train**; `SegmentPruner.cs` is deleted)
 - `guides/market-data.md` — Stock-quote schema design using Timestamp columns
 - `guides/time-series.md` — Time-series clustering and range queries

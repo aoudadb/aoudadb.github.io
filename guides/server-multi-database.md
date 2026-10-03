@@ -110,8 +110,8 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Database registry | `./data/Server/databases.json` | Empty on first run; no databases created automatically |
 | Database layout | `./data/Databases/{name}/…` | Per-db subtree created on first `POST /api/databases` |
 | Memory ceiling | ~70% of detected RAM | One process RSS ceiling, shared as **weighted shares** across databases |
-| Hot segment budget | Auto (70% of ceiling) | Allocated from total RAM |
-| Page cache budget | Auto (20% of ceiling) | Allocated from total RAM |
+| Hot segment budget | Auto (45% of the governed budget, floor 32 MB) | Allocated from total RAM |
+| Page cache budget | Auto (10% of the governed budget, floor 8 MB); on in every resource mode (**ColumnarRead, next train**) | Allocated from total RAM |
 | Request timeout | `30 000 ms` | Returns HTTP 504 on breach |
 | Max concurrent requests | `50` | Returns HTTP 503 when exceeded; queue up to 100 |
 | HTTP/2 | `true` | Kestrel serves HTTP/1.1 and HTTP/2 simultaneously |
@@ -514,8 +514,8 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "M
 | Setting | Type | Default | Env var | Notes |
 |---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | `long` | ~70% of detected RAM | `AOUDA_MEMORY__MAXTOTALRAMBYTES` | Process RSS ceiling; shared as per-database shares |
-| `Aouda:Memory:MaxHotBytes` | `long` | `0` (auto: 70%) | `AOUDA_MEMORY__MAXHOTBYTES` | Hot segment budget; 0 = auto |
-| `Aouda:Memory:MaxPageCacheBytes` | `long` | `0` (auto: 20%) | `AOUDA_MEMORY__MAXPAGECACHEBYTES` | Page cache budget; 0 = auto |
+| `Aouda:Memory:MaxHotBytes` | `long` | `0` (auto: 45% of the governed budget) | `AOUDA_MEMORY__MAXHOTBYTES` | Hot segment budget; 0 = auto |
+| `Aouda:Memory:MaxPageCacheBytes` | `long` | `0` (auto: 10% of the governed budget) | `AOUDA_MEMORY__MAXPAGECACHEBYTES` | Page cache budget; 0 = auto |
 
 ### Tracing settings (`Aouda:Tracing`)
 

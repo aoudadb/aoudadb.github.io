@@ -144,7 +144,7 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ## No `groupBy` / ad-hoc aggregates on the data plane
 
-**Rule.** A named query is a parameterized `QueryMessage`. There is no `groupBy` field on that template. `.Aggregate(...)` on the fluent client is an **engine / admin** API.
+**Rule.** A named query is a parameterized `QueryMessage`. There is no `groupBy` field on that template. `.Aggregate(...)` on the fluent client is an **engine / admin** API. (Ad-hoc `POST …/query` gains `aggregates` / `groupBy` on the admin listener (**ColumnarRead S16, next train**); that route stays 404 on the data plane, and named-query definitions do not carry the fields (**BL-796**).)
 
 **Why.** Unbounded cost. Pre-aggregation belongs on a materialized query (`D-24`).
 

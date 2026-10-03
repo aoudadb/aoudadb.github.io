@@ -949,8 +949,9 @@ returned every null row. To select nulls, use `isNull`
 **Strings (**BL-750, next train**):** `gt`, `gte`, `lt` and `lte` accept a string value against a `String` column and
 compare by **ordinal UTF-8 byte order** — Unicode code-point order, no locale collation, case-sensitive (`"Z"` sorts before
 `"a"`, `"é"` after `"z"`). Before, the server rejected a string value for these operators (and in-process `ColumnRef.Gt(string)`
-matched nothing). An `orderBy` with a `limit` on a `String` column sorts in the same order; it followed the server's
-culture before.
+matched nothing). An `orderBy` on a `String` column sorts in the same order, with or without a `limit` and in joins too,
+and so do `min` / `max` of one (**ColumnarRead, next train**); with a `limit` it followed the server's culture before, and
+without one UTF-16 code units, which put a character at U+E000–U+FFFF after an emoji.
 
 **Case-insensitive comparison (`ignoreCase`, server 0.1.24+):**
 
@@ -1089,7 +1090,8 @@ value), the column's own `Decimal(p,s)` over one, and a `Double` over floating p
 - `/query/count` with either field.
 
 An unknown column is `400 COLUMN_NOT_FOUND`. A caller denied the table gets the zero-row answer with the aggregate result's
-columns. Named-query definitions do not carry these fields yet (**BL-796**).
+columns. Named-query definitions do not carry these fields yet (**BL-796**): ⚠️ a definition that includes them is
+accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 
 **Columnar Response (default):**
 
@@ -1604,9 +1606,11 @@ The list route returns an array of the same object.
 **`state: Ready` means the query is *readable*. It does not mean it is *current*.** The two are
 deliberately separate, and reading `state` alone is the mistake this section exists to prevent.
 
-A materialized query that has fallen behind still holds real rows and still answers reads. Dropping
-it from routing would turn "slightly stale" into "unavailable", which is strictly worse — so it
-stays `Ready`, and its currency is reported by three other fields:
+A materialized query that has fallen behind still holds real rows and still answers reads **by its
+own name**. Making it unreadable would turn "slightly stale" into "unavailable", which is strictly
+worse — so it stays `Ready`. What it no longer does (**ColumnarRead S18, next train**) is answer a
+read of its **source table**: a query is routed to a result only while the result is current, and
+otherwise the table answers, with the same rows as ever. Its currency is reported by these fields:
 
 | Field | Meaning |
 |---|---|
@@ -2117,7 +2121,7 @@ materialized query's result table (whose name is the query's name).
 | `storageTemperature` | string | `Auto`, `HotOnly` or `ColdPreferred`. |
 | `memoryRowCap` | integer? | Cap on resident (hot) rows for this table. |
 | `targetMemoryBytes` | integer? | Per-table hot-byte budget. On a `HotOnly` table this is the **pin's reservation size**; on an `Auto` table it is a demotion target. |
-| `memoryFilter` | string? | JSON predicate naming which rows are preferred-hot. Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`. Affects demotion *ordering* only. |
+| `memoryFilter` | string? | JSON predicate naming which rows are preferred-hot. Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`. Affects demotion *ordering* only: a segment whose statistics rule out every row for the filter is demoted first. (**ColumnarRead S14, next train**: the server now applies it; before, the preference only ever took effect in the engine's tests.) |
 | `hotOnlyBackstop` | string? | What happens when honouring a `HotOnly` pin would breach the ceiling: `RefuseWrites` (default) or `DemoteAnyway`. |
 | `pinAllInMemory` | boolean? | ⚠️ **Retired — sending it is a `400`**, not a no-op. Use `storageTemperature: "HotOnly"`. |
 
@@ -3531,7 +3535,7 @@ Get cluster topology.
 
 The following features are not yet supported:
 
-1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC — for every column type (**BL-755, next train**: a null in a numeric, `Date` or `Timestamp` sort column of an `orderBy` with a `limit` sorted as its type's default, `0`, so ascending pages began with the null rows).
+1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC — for every column type (**BL-755, next train**: a null in a numeric, `Date` or `Timestamp` sort column of an `orderBy` with a `limit` sorted as its type's default, `0`, so ascending pages began with the null rows; **ColumnarRead, next train**: without a `limit`, the default columnar response put a numeric, `Timestamp` or `Bool` null first ascending too).
 2. **Expression-based ORDER BY**: Only catalog column names of sortable types can be used for ordering, not expressions or `selectExpr` aliases. The sanctioned workaround is a stored [`derived`](../guides/insert-transforms.md#derived-columns) column. See [browser-tier read limits](../guides/browser-tier-read-limits.md#no-expression-orderby).
 
 **Note — WhereClause nesting:** Earlier versions of this document stated that nested AND/OR was not supported. This is no longer accurate. The `groups` field in `WhereClause` supports up to **5** levels of nesting (`ProtocolConstants.MaxWhereClauseNestingDepth = 5`). Each group is AND'd with the top-level conditions, enabling safe composition of independent filter layers (e.g., partition scope + row scope). See the `groups` field description in the [`POST /api/databases/{db}/query`](#post-apidatabasesdbquery) section for details.

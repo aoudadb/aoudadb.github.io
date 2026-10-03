@@ -936,14 +936,26 @@ For the full reference, examples, and common patterns, see the
 ### Aggregations (Engine-Level)
 
 ```csharp
-var stats = await engine.Table("orders")
+// One row per category: category, SUM_total, COUNT — keys ascending, nulls last
+var byCategory = await engine.Table("orders")
     .Where(r => r.Col("status").Eq("completed"))
-    .Select("category")
+    .GroupBy("category")
     .Sum("total")
     .Count()
-    .GroupBy("category")
+    .GroupAggregateAsync();
+
+// No GroupBy: one AggregateResult over every matching row
+var totals = await engine.Table("orders")
+    .Where(r => r.Col("status").Eq("completed"))
+    .Sum("total")
+    .Count()
     .AggregateAsync();
 ```
+
+A grouped query runs through `GroupAggregateAsync()`; `AggregateAsync()` refuses one, and `GroupBy` does not combine
+with `Select` — the result is the keys and the aggregates (**ColumnarRead, next train**). A `SUM` over no value is
+`null`, not `0` (**BL-757, next train**). Over HTTP, the same question is the query message's `aggregates` / `groupBy`
+([HTTP API](../reference/http-api.md#aggregates-and-group-by)).
 
 ---
 
@@ -1803,7 +1815,7 @@ Control the total memory Aouda uses:
 }
 ```
 
-When `MaxHotBytes` and `MaxPageCacheBytes` are 0, the engine uses heuristic defaults (70% hot, 20% page cache, 10% overhead).
+When `MaxHotBytes` and `MaxPageCacheBytes` are 0, the engine derives them from the governed budget: 45% for the hot tier (floor 32 MB) and 10% for the page cache (floor 8 MB). The page cache is on in every resource mode (**ColumnarRead, next train**; it was off in `Constrained`, the mode a database starts in); `Aouda:Memory:PageCacheEnabled = false` turns it off. See [Defaults reference](../guides/defaults-reference.md).
 
 ### Per-Table Memory
 
