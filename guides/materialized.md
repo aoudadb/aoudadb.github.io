@@ -453,6 +453,13 @@ Invariants:
   - table create cannot reuse existing MQ name,
   - MQ create cannot reuse existing table name.
 - Auto-routing only applies when a matching MQ is found and is ready; otherwise query falls back.
+  - A result is read for its source only when it is **current**: `Ready`, not stale, nothing queued for it, and no write to its
+    source still on its way to it — a write counts from before it reaches the log until its change is queued for the query (a bulk
+    load: until its publish is queued). Otherwise the query reads the table, with the same answer. (**BL-809, next train**)
+  - After a log record that no commit follows (a flush, a column added to another table) a result reads as behind until it is
+    claimed current again: by the next commit anywhere, or by the next result-checkpoint round (every 15 s). (**BL-607, next train**)
+  - DROP COLUMN, RENAME COLUMN and a changed column default mark the source's results stale before the change and rebuild them
+    after it, so a crash in between cannot bring the old column back. (**BL-810, next train**)
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
 - `MemoryOnly` source tables are never subject to MQ auto-rebuild after bulk-load.
 
