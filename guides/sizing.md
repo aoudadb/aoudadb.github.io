@@ -305,6 +305,17 @@ only arises when the alternative was approaching the hot ceiling.
 Promotions and restart-time segment loads ask the same question. A promotion that would not fit is
 simply not made — the rows are already readable from cold, so nothing is lost but the speed-up.
 
+**Every published segment is on disk before it is visible** (**BL-771, next train**). A flush, a coalesce, a demotion and a
+bulk-load segment fsync their files and directory entries before the catalog names them, so a power loss cannot leave the
+catalog naming a segment whose pages were never written. That costs each flush the device's fsync time: on d03's virtual
+disk, a few milliseconds per hot flush and up to tens of milliseconds per cold one. A DELETE or UPDATE that marks rows in a
+segment adds one fsync of a small mask file. Inserts are unaffected. On a slow or network-backed volume this is the cost to
+watch: `SegmentPublishFsyncMicros` in the engine's counters is the total.
+
+An eager open (lazy residency off) that finds the hot tier too small for a Hot segment now **demotes** that segment to a
+cold copy; it used to leave the table unreadable until a restart. A `HotOnly` table is exempt and keeps the old behaviour,
+with a warning. (**BL-767, next train**)
+
 Set `Aouda:Memory:FlushAlwaysHotFirst=true` to restore the previous unconditional hot-first flush, or
 `Aouda:Memory:HotAdmissionEnabled=false` to stop consulting the ceiling altogether.
 
