@@ -180,6 +180,10 @@ Invariants:
 - PK checks are always policy-aware, but within-batch duplicates are always rejected.
 - Strict policy checks both mutable and sealed data tiers.
 - BestEffort disables cross-tier checks, but does not disable in-batch duplicate detection.
+- A key names one logical row on a `Strict` table only (**BL-791, next train**). On `Recent` and `BestEffort` a table can hold
+  two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
+  `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only. (Before, it also removed every copy of a matched key held in a
+  segment.) On a `Strict` table a key cannot have two live copies, and the behaviour is unchanged.
 - Preload runs before first insert after open to reduce first-write latency spikes.
 
 ---
