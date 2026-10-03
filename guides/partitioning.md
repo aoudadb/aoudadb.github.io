@@ -180,7 +180,7 @@ On a partitioned table the guard defaults **on**. A query must include `eq` or `
 | Watchlist `Ticker in […] AND Source eq '…'` | Passes — **one** named query |
 | `nin`, range (`gt`/`lt`), `between`, `like` | Fails |
 | Composite **prefix** on a query that reads rows | Fails |
-| Directory-answerable `distinct` (PK columns only, ≥1 key constrained, complete directory, ≤ 10 000 tuples) | Passes without the missing keys |
+| Key-only `distinct` (PK columns only, ≥1 key constrained) | Passes without the missing keys — answered by a scan since the **architecture review, next train** (the directory answer, its completeness check and its 10 000-tuple cap are gone) |
 
 Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Error `PARTITION_FILTER_REQUIRED` names the **missing** columns and the satisfying operators.
 
@@ -546,7 +546,7 @@ Core modules:
    - Not partitioned -> valid.
    - `RequirePartitionFilter == false` -> valid.
    - `crossPartitionAccess == true` -> valid cross-partition.
-   - Otherwise requires equality or `in` filters for all partition key columns (`in` lowers to OR-of-equality). A composite prefix does not satisfy the guard for row-reading queries. Directory-answerable DISTINCT is the bounded exception — see [partition-filter rule](#partition-filter-rule-p40). Test anchors also: `tests/Aouda.Engine.Api.Tests/Query/PartitionFilterRuleTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`.
+   - Otherwise requires equality or `in` filters for all partition key columns (`in` lowers to OR-of-equality). A composite prefix does not satisfy the guard for row-reading queries. A key-only DISTINCT (partition-key columns only, one key constrained) is the one exception — see [partition-filter rule](#partition-filter-rule-p40). Test anchors also: `tests/Aouda.Engine.Api.Tests/Query/PartitionFilterRuleTests.cs`, `tests/Aouda.Server.Tests/P40/PartitionFilterRuleDataPlaneTests.cs`.
 4. Failure path throws `PartitionFilterRequiredException`.
 5. Observability: cross-partition executions increment `Perf.CrossPartitionQueries`.
 6. Test anchors: `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs`.

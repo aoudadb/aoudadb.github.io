@@ -254,6 +254,20 @@ If you run server defaults and do not set per-database overrides:
   - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, next train**).
   - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
     catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, next train**).
+- **Upgrading from 0.2.x: export and reload** (**architecture review, next train**)
+  - The catalog format is **5**. A data directory written by 0.2.x (catalog format 4) is **refused at open** with
+    `CatalogFormatException`, saying so: export the data with the 0.2.x build that wrote it and load it into a fresh
+    data directory with this build. There is no in-place upgrade — this build cannot read 0.2.x cold pages, footers or
+    `.hot` files. Before, the catalog version had not moved, so a 0.2.x directory opened and its cold segments read as
+    **zero rows, with no error**. The reverse holds too: a 0.2.x build refuses a directory this build wrote ("newer than
+    this build supports").
+  - A cold segment whose footer is another version fails the read that reaches it with
+    `SegmentFormatUnsupportedException`, naming the table, the segment and the version — never an empty read. That is
+    what a 0.2.x **backup** restored into this build does: it opens, and its segments fail by name when read
+    ([Backup](backup.md#214-troubleshooting-by-symptom)).
+  - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
+    taken with the older build is what carries them over.
+  - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
@@ -679,6 +693,8 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Data path exists but DB cannot open | Invalid/partial directory state or config mismatch | Check server startup logs, validate `DataPath`, verify required DB subdirectories |
+| `CatalogFormatException` at open: "catalog root declares format version 4" | The directory was written by 0.2.x or earlier (**architecture review, next train**) | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
+| A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — typically a 0.2.x backup restored into this one | Restore the backup with the build that wrote it, export, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | Effective table durability has WAL disabled or DB WAL disabled | Check DB `enableWal` and table durability overrides |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |

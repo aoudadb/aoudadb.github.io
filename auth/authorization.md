@@ -438,6 +438,14 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
 
 PLS and RLS are **conjunctive** (AND). There is no cross-layer OR.
 
+**Joins onto a restricted table are refused** (**architecture review, next train**). PLS and RLS are applied as predicates
+on the queried (base) table, and a join reads its targets unfiltered — so a query or named query that joins a table the
+caller's PLS or RLS would filter (or that the caller may read nothing of) is refused with `403 AUTHORIZATION_DENIED`,
+naming the table. A join is allowed only onto tables the caller may read without restriction (an RLS rule that adds no
+predicate for this caller, such as an admin pass-through, counts as unrestricted), and every joined table needs the same
+grant as the base table. Query the restricted table directly instead. Before, a join read such a table whole. **BL-818**
+tracks carrying the restriction onto the join side. See [HTTP API — joins and authorization](../reference/http-api.md#post-apidatabasesdbquery).
+
 ---
 
 ## 19.7 Cross-Partition Fan-Out Queries

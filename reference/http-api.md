@@ -127,7 +127,7 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 
 **Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
 
-**Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After`, code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
+**Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After` (readable cross-origin since the **architecture review, next train**), code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
 
 See [Direct client access](../guides/direct-client-access.md) for configuration, CORS, and Studio/Hub URL rules.
 
@@ -578,6 +578,10 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
+**`Retry-After` is readable from a browser (**architecture review, next train**).** Every CORS policy exposes it, so a
+browser client can honour it on a 429 or 503 as a server-side client does — the back-off the ingest and capacity
+design relies on. Before, it was not exposed and a browser read `null`.
+
 #### Named-query, streaming, and data-plane errors
 
 These also appear as WebSocket `error` `code` values where noted.
@@ -1017,6 +1021,14 @@ storing a definition that could never execute.
 
 For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
 
+**Joins and authorization (**architecture review, next train**).** Every joined table needs the same grant as the base
+`table`. A join reads its targets **unfiltered** — the request's `where`, and the row- and partition-level security
+predicates the server adds to it, filter the base table only — so a join is allowed only onto tables the caller may read
+without restriction. A join onto a table the caller's RLS or PLS would filter (or that the caller may read nothing of) is
+refused with `403 AUTHORIZATION_DENIED`, naming the table (`details: table=<name>`); query that table directly instead.
+The same holds for a named query that joins, single and batch, and for `…/query/count`. **BL-818** tracks applying the
+restriction on the join side. Before, a joined table was read with no grant check and no RLS / PLS.
+
 **Join example:**
 ```json
 {
@@ -1146,8 +1158,14 @@ after its headers. Ask for the frame response below, which carries these values.
 `application/vnd.aouda.column-batch` gets the result as **column-batch frames**: the same binary format `POST …/rows`
 accepts, described under [`POST …/rows`](#post-apidatabasesdbtablesnamerows). Both SDKs ask for it by default.
 Send `Accept: application/vnd.aouda.column-batch, application/json;q=0.5` and **branch on the response's `Content-Type`**. A
-server older than this, or a result the frame cannot carry (a non-null vector cell, a computed or joined column whose
-values are not its declared type), answers JSON as before. Errors are always JSON `ProtocolError`s with their status.
+server older than this, or a result the frame cannot carry, answers JSON as before. A frame cannot carry a non-null
+vector cell, a computed or joined column whose values are not its declared type, more than 4,096 columns, a column name
+it cannot hold (empty, or over 1,024 UTF-8 bytes), a single row that would decode past half the reader's 256 MB frame
+budget, or a string value over 16 MB of UTF-8 (**architecture review, next train**: the last four were not listed
+before). Errors are JSON `ProtocolError`s with their status — as long as they happen before the response starts. A
+failure **after the response headers are sent** cannot turn into an error body: the server aborts the connection and
+sends no trailing error. Both SDKs report that as a retryable connection error (`AoudaConnectionException` in .NET,
+`AoudaConnectionError` in TypeScript).
 `format=columnar|rows` chooses the JSON shape only. The same applies to `POST …/named-queries/{name}/query`; the named-query
 batch stays JSON.
 
@@ -1167,7 +1185,9 @@ batch stays JSON.
 | `X-Aouda-Warnings` | The JSON body's `warnings` array, when there are any |
 | `X-Aouda-Token` | The consistency token, as on every response |
 
-Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a browser client reads them cross-origin.
+Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a browser client reads them cross-origin —
+together with `X-Request-Id`, `X-Aouda-Protocol-Version`, `Accept-Post` and `Retry-After` (**architecture review, next
+train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 
 - **Column kinds by logical type.** A null is the frame's null bit.
 
@@ -1181,9 +1201,13 @@ Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a b
 | `Guid` | `String` (4) | The `D` form (`0f8fad5b-d9cb-469f-a165-70867728950e`) |
 | `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
 | `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
-| `Decimal` declared `Decimal(p,s)` | `ScaledDecimal` (8) | The unscaled value at scale `s` |
+| `Decimal` declared `Decimal(p,s)` | `ScaledDecimal` (8); `Decimal` (6) when the column is empty or every value is null | The unscaled value at scale `s` |
 | `Decimal` (undeclared) | `ScaledDecimal` (8) if every value has one scale and fits, else `Decimal` (6) | |
 | A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
+
+A decimal column's kind is chosen **from the values it holds**, not from its declaration: a reader takes the scale from
+the frame and accepts either kind for any `Decimal` column (**architecture review, next train** — the table above implied
+a `Decimal(p,s)` column was always `ScaledDecimal`).
 
 `X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`.
 `GET /admin/capabilities` lists `queryColumnBatch: true`.
@@ -1200,7 +1224,7 @@ There is **no HTTP route that registers a definition** and **no inventory list**
 
 | Field | Notes |
 |---|---|
-| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Directory-answerable PK distinct sets `stats.distinctServedFromPartitionMetadata` (omitted when false). |
+| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). A `distinct` over partition-key columns runs as a scan like any read (row groups the filter selects whole are answered from their statistics), so a deleted or truncated partition no longer appears; it was answered from the partition directories, which outlive their rows. `stats.distinctServedFromPartitionMetadata` is no longer set (**architecture review, next train**). |
 | `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
 | `freshness` | Declared on the named query: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Budget-only edits do not fire `named_query_body_changed`. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). |
 
@@ -1258,7 +1282,9 @@ Execute one named query by unique name.
 | 404 | `TABLE_NOT_FOUND` | Data-plane browser-tier and a touched table has `dataPlaneAccess: false` |
 | 429 | `IDENTITY_QUOTA_EXCEEDED` | Data-plane quota |
 
-Invoker ADRA always applies (PLS + RLS of the caller). There is no definer / `runAs` field.
+Invoker ADRA always applies (PLS + RLS of the caller). There is no definer / `runAs` field. A definition that joins a
+table the caller's PLS or RLS restricts is refused with `403 AUTHORIZATION_DENIED` naming the table, because a join
+cannot carry that restriction ([joins and authorization](#post-apidatabasesdbquery); **architecture review, next train**).
 
 #### `POST /api/databases/{db}/named-queries/batch`
 
@@ -4481,4 +4507,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.6 | 2026-08-29 | **Catalog GET/list auth linkage:** `auth.enabled` / `auth.database` on every database response (never `mk_*` on GET). GET `{name}` documented as metadata-only; 404 while `Dropping`. Health probe split (`/health` liveness vs `/ready` / GET `state=Active`). Create-role `permissions` optional; 400 `INVALID_REQUEST` with `suggestion`. |
 | 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections: 0`) — **not yet released**: BL-404 / BL-405 are on `Unreleased` and ship in the **next** server train, after 0.1.20. |
 | 2.8 | 2026-09-30 (0.2.0) | **ColumnarCore S06 / S13, BL-716 (additive on the wire):** `POST …/tables/{name}/rows` also accepts one column-batch frame (`Content-Type: application/vnd.aouda.column-batch`; database and table from the URL, `identityInsert` / `writeConcern` as query parameters), advertised by `Accept-Post: application/json, application/vnd.aouda.column-batch` on the endpoint's responses and by `features.insertColumnBatch` in `GET /admin/capabilities`; an older server answers a frame with `415`. Column-batch frames gain the `ScaledDecimal` kind (`8`). `Decimal` columns may declare `precision` / `scale` (`Decimal(p,s)`, `1 ≤ p ≤ 18`, `0 ≤ s ≤ p`) on create-table, add-column and column details. Insert errors: a body that is not valid JSON is `400 INVALID_REQUEST` (was MVC's validation problem), an empty body is `400 MISSING_DATABASE`; a string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is a `400`. |
-| 2.9 | next train (ColumnarRead) | **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |
+| 2.9 | next train (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is `403 AUTHORIZATION_DENIED` (BL-818); `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |

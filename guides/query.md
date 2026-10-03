@@ -172,7 +172,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | Page pruning and multi-column pruning | Yes | No | No | `TableScan` + `RowGroupClassifier` (**ColumnarRead, next train**; `QueryEngine`, `RowFilterEngine`, `PagePruner` deleted) | Per 8,192-row row group, from the segment footer's statistics; `AND` / `OR` / `NOT` in three-valued logic. |
 | Bloom-filter-assisted pruning | No | Partial | No | Key probe only (**ColumnarRead, next train**) | Only primary-key lookups read a bloom (`Strict` tables); the adaptive bloom path is deleted. |
 | Parallel multi-segment scanning | Yes | No | No | Morsels on the query's CPU grant (**ColumnarRead, next train**; `ParallelSegmentScanner` deleted) | Above 65,536 rows of work; rows come back in the sequential order. `ORDER BY … LIMIT` stays on one thread. |
-| Dedicated count API endpoint | Yes (`/query/count`) | No | Yes | Implemented (2026-04-04, `BL-026`) | TS client still on query path until updated. |
+| Dedicated count API endpoint | Yes (`/query/count`) | No | Yes | Implemented (2026-04-04, `BL-026`) | TypeScript `count()` uses it since the **architecture review, next train**. |
 | Fluent JOIN query support | No | No | Yes | Backlog + absence in fluent APIs | Internal planner support exists but not exposed in fluent APIs. |
 
 ## 2.7 Core concepts and mental model
@@ -305,7 +305,7 @@ for its history.)
 |---|---|---|---|
 | Do I need separate APIs for hot vs cold data? | Often yes (cache + store split) | One query surface across hot/cold/unflushed HRA | Simpler app code and fewer consistency surprises. |
 | Is pruning/optimization user-managed? | Often index/query-hint heavy | Optimization is mostly internal (row-group statistics, series and key lookups, top-K, parallel morsels) | Lower tuning burden for common workloads. |
-| Are count semantics an independent API today? | Yes (HTTP `/query/count`; .NET `CountAsync`) | TS client may still use full query | C# path avoids columnar materialization. |
+| Are count semantics an independent API today? | Yes (HTTP `/query/count`; .NET `CountAsync`; TypeScript `count()` since the **architecture review, next train**) | Both SDKs post `/query/count` | No row is transferred to count. |
 | Can query routing exploit materialized tables automatically? | Usually manual endpoint/view selection | Matcher-based auto-routing in query path | Potential speedup without endpoint changes. |
 | Do clients and server share one protocol contract? | Sometimes fragmented | Shared protocol DTOs + translator + SDK mappers | Predictable behavior across HTTP/.NET/TS surfaces. |
 
@@ -395,8 +395,8 @@ Notes:
 | Ordering | `.OrderBy().ThenBy()` | `.orderBy().thenBy()` | `orderBy[]` | Implemented | Max 8 order-by columns. |
 | Grouped aggregates | Embedded engine: `TableQuery.GroupBy(...)` + `GroupAggregateAsync()`; remote: `RemoteTableQuery.GroupBy(...)` / `Sum` / `Avg` / `CountDistinct` … + `AggregateAsync()` (**ColumnarRead, next train**) | `.groupBy(...)`, `.sum()`, `.avg()`, `.countRows()`, `.countDistinct()` … (**ColumnarRead S16, next train**) | `aggregates`, `groupBy` in the query message (**S16**) | Implemented (next train) | Time buckets (`minute` … `year`); `orderBy` over the result's names. `First` / `Last` embedded only. |
 | Total matches with a page | Embedded engine: `TableQuery.WithTotalMatches()` → `TotalMatches` on the result (**ColumnarRead, next train**) | — | Named queries: `count: true` → `totalMatches` | Embedded + named queries | Counted by the same read over the same snapshot as the page, ignoring `Skip` / `Limit`. |
-| Rows as views | Embedded engine: `ToListAsync()` rows read the result's columns (**ColumnarRead, next train**) | — | — | Embedded | A row is a view over the result's column arrays: the indexer boxes one cell, `Get<T>` reads a typed column without boxing, `ToDictionary()` copies. |
-| Count convenience | `.CountAsync()` → `/query/count` | `.count()` uses `/query?limit=0` (not the dedicated endpoint) | `POST .../query/count` | Partial | .NET uses dedicated count endpoint; TS adoption is an open follow-up. |
+| Rows as views | Embedded engine: `ToListAsync()` rows read the result's columns (**ColumnarRead, next train**); remote: `ClientColumnarResult.Rows` over a frame answer's typed columns (**ColumnarRead S16, next train**) | `result.rows` are views over `result.typedColumns` when the server answered with frames (**ColumnarRead S16, next train**) | Column-batch frame response | Implemented (next train) | A row is a view over the result's column arrays: the indexer boxes one cell, `Get<T>` reads a typed column without boxing, `ToDictionary()` copies. |
+| Count convenience | `.CountAsync()` → `/query/count` | `.count()` → `/query/count` (**architecture review, next train**; it downloaded every matching row through `/query`) | `POST .../query/count` | Implemented (next train) | No row is transferred. The filter and joins count; `select`, `orderBy`, `limit`, `offset` and `distinct` do not. Aggregates and `groupBy` are dropped by both SDKs: the count is of matching rows, not groups (C# `CountAsync` sent them and got a 400 before). |
 | Cross-partition query flag | `.WithCrossPartitionAccess()` | No dedicated fluent method in current builder | `crossPartitionAccess` bool | Partial | TS can still send raw request outside builder. |
 || Expression SELECT (computed columns) | `.SelectExpr((alias, expr), ...)` | `.selectExpr({ alias: expr })` | `selectExpr[]` in query body | Implemented (P27 S7 / P40 S08) | Server-computed columns appended to result; type is inferred where the expression permits (`Unknown` otherwise). Always nullable. See [browser-tier read limits](browser-tier-read-limits.md#selectexpr-result-types) and [Bulk Mutations](bulk-mutations.md). |
 || Literal UPDATE | `.UpdateAsync(dict)` | `.update(values)` | `PATCH .../rows` | Implemented | Requires at least one WHERE predicate. See [Bulk Mutations guide](bulk-mutations.md). |
@@ -411,7 +411,6 @@ Notes:
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| TypeScript `count()` dedicated endpoint adoption | TS `count()` uses `/query?limit=0` instead of `POST /query/count` | .NET `CountAsync` is correct; TS is functionally equivalent but incurs columnar decode overhead | TS client adoption | Medium |
 | Fluent JOIN workflows | `Join()` API across SDK fluent builders | Use planner/internal paths only (no stable public fluent route) | `BL-009` | High |
 | JOINed materialized query support | Materialized-query JOIN definition + maintenance | Single-table materialized patterns only | `BL-010` | Medium |
 
@@ -602,7 +601,7 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 
 - ~~Nested group construction is not first-class in current SDK query builders~~ — ✅ **Resolved (P14, BL-044)**: WhereClause.Groups adopted end-to-end across SDKs/helpers with nested group support.
 - ~~No max-depth validation for deeply recursive `WhereClause.Groups`~~ — ✅ **Resolved (P14, BL-044)**: depth guardrails implemented.
-- ~~TypeScript client count may still use full query~~ — ⚠️ **Partially resolved (P14, BL-026)**: server-side `POST .../query/count` endpoint is shipped and .NET `RemoteTableQuery.CountAsync` uses it. However, the TypeScript `count()` method in `query-builder.ts` still sends `POST .../query` with `limit=0` and reads `rowCount` from the response — it does **not** use the dedicated `/query/count` endpoint. The TS client adoption remains an open follow-up.
+- ~~TypeScript client count may still use full query~~ — ✅ **Resolved** (P14, BL-026 for the endpoint and .NET; **architecture review, next train** for TypeScript): `count()` posts `/query/count` and transfers no row. It used to send `POST .../query` with `limit=0` — no limit — and download every matching row to read `rowCount`. Both SDKs drop aggregates and `groupBy` from a count, so it counts matching rows; .NET `CountAsync` sent them and got a 400.
 - ~~Fluent/public JOIN APIs remain unavailable~~ — ✅ **Resolved (P14 BL-009, P15)**: complete join engine with all five join types (INNER, LEFT, RIGHT, FULL OUTER, CROSS), post-join SELECT/WHERE/ORDER BY/LIMIT/aggregates, multi-column keys, chained joins (up to 8 tables), Grace hash join with spill-to-disk. Exposed in both .NET `TableQuery` and TypeScript `@aouda/client` query builders.
 - ~~Bool predicate overload parity~~ — ✅ **Resolved (P14, BL-038)**: `ConstBool`, `ColumnRef.Eq/Ne(bool)` added.
 - ~~Guid PK mixed-type comparison failure~~ — ✅ **Resolved (P14, BL-039)**: added `IsGuid`/`CompileGuid` path in `RowFilterEngine`.

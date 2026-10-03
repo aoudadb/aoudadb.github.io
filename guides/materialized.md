@@ -185,7 +185,7 @@ If you create a materialized query with standard helpers and no special options:
 | `MaterializedQueryDefinition.UpdateMode` | `Async` | Base writes usually stay fast; result visibility can lag |
 | `MaterializedQueryDefinition.CreatedUtc` | set to `DateTime.UtcNow` when missing | Definitions always have creation timestamp |
 | `MaterializedQueryDefinition.ResultTableName` | `Name` (BL-021) | Query/subscription uses normal table name |
-| `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates, GROUP BY, latest-per-key, over HTTP too — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan()` is used ([routing](#routing-a-read-to-a-maintained-result)) |
+| `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates and GROUP BY, over HTTP too, and latest-per-key in the embedded API only (HTTP and TypeScript: **BL-801**) — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan()` is used ([routing](#routing-a-read-to-a-maintained-result)) |
 | Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
@@ -461,8 +461,9 @@ Invariants:
 
 (**ColumnarRead S18, next train**) A question a materialized query already holds the answer to is answered from its result
 table — on **every** read: `ToListAsync` / `ToResultAsync`, `ToColumnarAsync`, `GroupAggregateAsync`, a bare `Count()`
-through `AggregateAsync`, `Distinct`, `LatestPerKey` / `FirstPerKey`, and over HTTP (`POST …/query`, rows, columns, frames,
-`aggregates` / `groupBy`, and `…/query/count`). Before, only `ToResultAsync` routed, only to a filter result, and not with
+through `AggregateAsync`, `Distinct`, `LatestPerKey` / `FirstPerKey` (embedded API only: the query message has no per-key
+collapse — **BL-801**), and over HTTP (`POST …/query`, rows, columns, frames, `aggregates` / `groupBy`, and
+`…/query/count`). Before, only `ToResultAsync` routed, only to a filter result, and not with
 `ORDER BY` or computed columns; HTTP never routed.
 
 **The rule: a routed answer is the table's answer**, names, types, rows and order. Routing is taken only where that is provable,
@@ -492,7 +493,8 @@ rows as they were, and once its watermark moved past the change a routed read an
 a dropped column's old values under a new column of the same name.
 
 The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
-`stats.routedTo` over HTTP (JSON and the frame response's `X-Aouda-Stats`), `ClientQueryStats.RoutedTo` in the C# SDK.
+`stats.routedTo` over HTTP (JSON and the frame response's `X-Aouda-Stats`), `ClientQueryStats.RoutedTo` in the C# SDK,
+`result.stats.routedTo` in the TypeScript SDK.
 `ExplainRoutingAsync` gives the decision with its reason, every candidate's included.
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
 - `MemoryOnly` source tables are never subject to MQ auto-rebuild after bulk-load.

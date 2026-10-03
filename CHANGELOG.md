@@ -13,6 +13,21 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- ⚠️ **Joins onto a restricted table are refused, a 0.2.x data directory is refused at open, and a clean restore keeps hot
+  rows (ColumnarRead architecture review).** A join — ad hoc, `…/query/count` or in a named query — needs the base table's
+  grant on every joined table, and one onto a table the caller's row- or partition-level security would filter is
+  `403 AUTHORIZATION_DENIED` naming the table, because a join reads its targets unfiltered (it read them with no grant check
+  and no RLS / PLS before; BL-818 tracks filtering the join side). The catalog format is 5: a 0.2.x directory fails at open
+  with `CatalogFormatException` (export with 0.2.x and reload; its cold segments used to read as zero rows), a 0.2.x backup
+  restored here fails by segment on read, and a primary and its replicas must run the same build. A clean restore now
+  catalogues `.hot` segments, whose rows it lost. `DISTINCT` over partition-key columns is a scan, so deleted or truncated
+  partitions no longer appear (`stats.distinctServedFromPartitionMetadata` is no longer set; the directory-residue and
+  10,000-tuple refusals are gone). `Retry-After` is readable from a browser. The TypeScript `count()` posts `/query/count`
+  instead of downloading every row, and both SDKs' counts drop aggregates and GROUP BY. Docs corrected beside it: the
+  frame response's JSON fallbacks and its connection abort after the headers, the `Decimal` frame kind, latest-per-key
+  routing (embedded only), row views in both SDKs, and the `Timestamp` wire unit (ticks, not milliseconds; the storage
+  half is BL-808). See [HTTP API](reference/http-api.md#post-apidatabasesdbquery),
+  [Authorization](auth/authorization.md#196-combined-pls--rls) and [Storage](guides/storage.md#27-core-concepts-and-mental-model).
 - **Fixed: wrong answers in routed reads and cold point reads (ColumnarRead group-6 review).** A read of
   a table answered from one of its materialized queries could disagree with the table: after a
   `TRUNCATE`, a column dropped (and added back) or renamed, or a new column default (the result kept the

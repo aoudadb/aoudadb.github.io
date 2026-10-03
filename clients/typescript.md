@@ -166,6 +166,8 @@ const count = await client.table('users')
   .count();
 ```
 
+`count()` posts to `/query/count`: the server counts and returns only the number (**architecture review, next train**).
+
 ### All Filter Operators
 
 `where(column, operator, value)` adds an AND predicate. All operators:
@@ -362,7 +364,10 @@ const { rows } = await client.table('trades')
 ```
 
 `where`, `orderBy`, `offset` and `limit` combine with aggregates; `select`, `selectExpr`, `distinct` and joins do not
-(the server answers `400`). `count()` is unchanged: it returns the number of matching rows, not an aggregate column.
+(the server answers `400`). `count()` returns the number of matching rows, not an aggregate column: it drops the
+aggregates and `groupBy` and posts the query to `/query/count`, so no row is transferred — the filter and joins
+count, `select`, `orderBy`, `limit`, `offset` and `distinct` do not (**architecture review, next train**; it used to
+download every matching row through `/query`).
 
 ---
 
