@@ -169,7 +169,8 @@ If you create a materialized query with standard helpers and no special options:
 - `UpdateMode` defaults to `Async`.
 - `CreatedUtc` is auto-set if omitted.
 - Result table naming uses unified namespace (`result table name == MQ name`).
-- Normal `TableQuery` reads attempt MQ auto-routing when a compatible MQ is `Ready`.
+- Normal `TableQuery` reads attempt MQ auto-routing when a compatible MQ is `Ready` **and current** — on every read and over
+  HTTP (**ColumnarRead S18, next train**; [routing](#routing-a-read-to-a-maintained-result)).
 - Result-table storage temperature defaults to **`Auto`** — for **every** query type, the same
   default an ordinary table has. Residency is policy, not something inferred from the query type.
   Declare `storage.storageTemperature` to choose; see
@@ -184,7 +185,7 @@ If you create a materialized query with standard helpers and no special options:
 | `MaterializedQueryDefinition.UpdateMode` | `Async` | Base writes usually stay fast; result visibility can lag |
 | `MaterializedQueryDefinition.CreatedUtc` | set to `DateTime.UtcNow` when missing | Definitions always have creation timestamp |
 | `MaterializedQueryDefinition.ResultTableName` | `Name` (BL-021) | Query/subscription uses normal table name |
-| `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries are served from MQ result tables unless `WithDirectScan()` is used |
+| `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates, GROUP BY, latest-per-key, over HTTP too — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan()` is used ([routing](#routing-a-read-to-a-maintained-result)) |
 | Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
@@ -452,8 +453,41 @@ Invariants:
 - Name collisions are checked in both directions:
   - table create cannot reuse existing MQ name,
   - MQ create cannot reuse existing table name.
-- Auto-routing only applies when a matching MQ is found and is ready; otherwise query falls back.
-- A query with `ORDER BY` or computed (`SelectExpr`) columns is **not** auto-routed: it reads the base table (**ColumnarRead group-4 review, next train** — a routed `ORDER BY … LIMIT` used to come back in storage order).
+- Auto-routing only applies when a matching MQ is found, `Ready` and current; otherwise the query reads its table. A routed
+  answer is the table's answer, to the last cell ([routing](#routing-a-read-to-a-maintained-result)).
+
+### Routing a read to a maintained result
+
+(**ColumnarRead S18, next train**) A question a materialized query already holds the answer to is answered from its result
+table — on **every** read: `ToListAsync` / `ToResultAsync`, `ToColumnarAsync`, `GroupAggregateAsync`, a bare `Count()`
+through `AggregateAsync`, `Distinct`, `LatestPerKey` / `FirstPerKey`, and over HTTP (`POST …/query`, rows, columns, frames,
+`aggregates` / `groupBy`, and `…/query/count`). Before, only `ToResultAsync` routed, only to a filter result, and not with
+`ORDER BY` or computed columns; HTTP never routed.
+
+**The rule: a routed answer is the table's answer**, names, types, rows and order. Routing is taken only where that is provable,
+and the cases below are what is provable:
+
+| Result | Answers | When |
+|---|---|---|
+| **Filter** | any question — rows, columns, `DISTINCT`, aggregates, GROUP BY, latest-per-key — with its `ORDER BY`, computed columns, `Skip` / `Limit`, total matches | the question's predicate contains the result's own filter as a top-level `AND` term (so every row the question can see is in the result), and the result holds every column the question reads at the table's type. A filter term on a `String` column counts only as an equality, and none on a decimal column: the result's filter compares those differently from a query |
+| **Aggregate** | a GROUP BY, or an aggregate without one, whose keys are the result's keys or **coarser time buckets of them** (minute → hour → day → week / month → year) — keys the question leaves out are **rolled up** | `COUNT(*)`, `COUNT(col)` (when the result counts that column), `SUM` of an integer or `Decimal(p,s)` column, `MIN`, `MAX`, `FIRST` / `LAST(col ORDER BY t)` — read from the result's maintained state; a predicate only on plain group keys, or `t >= c` / `t < c` on the bucketed time column with `c` on a bucket boundary. Not `AVG`, `COUNT(DISTINCT)`, a `SUM` of a floating-point column (its last bits depend on the order it was added in), or a `Decimal(p,s)` with `p` other than 18 (the result keeps 18) |
+| **LatestPerKey / FirstPerKey** | `TableQuery.LatestPerKey(orderBy, keys…)` / `FirstPerKey(…)` with the same keys, order column and direction | the predicate only on the keys (filtering anything else does not commute with "the latest row per key"), the table has a primary key the result breaks ties by, and neither the order column nor a key part is a `String` |
+| **TopNPerGroup** | — | never routed; read it by name |
+
+**Only a current result is read.** A result is written after its source's commit becomes visible — inside the insert after
+the table's lock, on the update queue later, after a bulk load's publish later still. A query is routed to a result only when
+the result is `Ready`, not stale, has nothing queued, and has incorporated every WAL record that can change a table's rows up
+to the moment the read starts. A result that is behind is not read — **the table is** — so a routed read never misses a commit
+another read could see. On a database without a WAL nothing is routed (there is no position to prove a result current by).
+Under a continuous write load a result is often a few milliseconds behind and the read goes to the table: routing then costs a
+check, not an answer.
+
+A **stale** result (a `Skip` or deferred load, a dropped update) is readable by name and is **no longer routed to** until a
+refresh clears the mark (it was before: a stale result answered for its source without the rows it was missing).
+
+The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
+`stats.routedTo` over HTTP (JSON and the frame response's `X-Aouda-Stats`), `ClientQueryStats.RoutedTo` in the C# SDK.
+`ExplainRoutingAsync` gives the decision with its reason, every candidate's included.
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
 - `MemoryOnly` source tables are never subject to MQ auto-rebuild after bulk-load.
 
@@ -957,8 +991,9 @@ you wanted ingestion to finish fast and will materialize later.
 ### What a `Skip` load leaves behind
 
 A `Skip` load marks every affected query **stale**: `GET …/materialized-queries/{name}` reports
-`isStale: true` with a `staleReason` naming what happened. The query stays readable and routable —
-it is behind, not broken — and `staleOnly` selects exactly this set.
+`isStale: true` with a `staleReason` naming what happened. The query stays readable by name — it is
+behind, not broken — and `staleOnly` selects exactly this set. It is not routed to while it is stale
+(**ColumnarRead S18, next train**): a read of the table reads the table.
 
 Staleness is durable. If the server restarts before you refresh, the query is **rebuilt from source
 at startup** rather than being restored with the loaded rows missing (a query that is behind has no
@@ -973,8 +1008,9 @@ is for.
 large enough that keeping every query current during the load costs more than the load: the load
 writes only its table, fast, and the queries catch up afterwards.
 
-- Every query over the loaded table is marked **stale**, exactly as a `Skip` load leaves it — readable,
-  routable, `isStale: true` with a `staleReason`, and rebuilt at startup if the server restarts first.
+- Every query over the loaded table is marked **stale**, exactly as a `Skip` load leaves it — readable by
+  name (not routed to while stale, **ColumnarRead S18**), `isStale: true` with a `staleReason`, and rebuilt at
+  startup if the server restarts first.
 - The job is recorded as **pending**: which load, which table, which segments. Those segments are not
   merged by compaction while the job is pending, so the rows a query still owes stay where the load put
   them.

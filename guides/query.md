@@ -264,8 +264,19 @@ Runtime notes:
    (next train):** `OrderBy` over a grouped result (by a key's or an aggregate's output name, before `Skip` / `Limit`); `Avg(col)`
    and `CountDistinct(col)`; `GroupAggregateAsync()` without `GroupBy()` answers one row. Over HTTP as the query message's
    `aggregates` / `groupBy` ([reference](../reference/http-api.md#aggregates-and-group-by)).
-7. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
-   `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`) and the reference fuzzer.
+7. **The latest (or first) row per key (**BL-450, ColumnarRead S18, next train**):** `TableQuery.LatestPerKey("DateTime",
+   "Ticker", "Source")` keeps, per distinct key, the row with the greatest `DateTime` among the rows the filter selects;
+   `FirstPerKey` the least. A row whose order column is null is not a candidate; among rows tied on it, the lowest primary
+   key wins. `Select`, `OrderBy`, `Skip` / `Limit` and `WithTotalMatches` apply to the collapsed rows; `ToListAsync`,
+   `ToResultAsync` and `ToColumnarAsync` answer it. It is read from a `LatestPerKey` / `FirstPerKey` materialized query of the
+   same keys and order column when one is current and the filter is on the keys only
+   ([routing](materialized.md#routing-a-read-to-a-maintained-result)); the table answers otherwise. Not over HTTP yet.
+8. **Routing (**ColumnarRead S18, next train**):** every one of these reads — rows, columns, aggregates, GROUP BY, the per-key
+   collapse — is answered from a materialized query that holds the answer and is current
+   ([routing](materialized.md#routing-a-read-to-a-maintained-result)); `WithDirectScan()` reads the table regardless.
+9. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
+   `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`; S18's `ReadRuleOracleRoutingTests`
+   for routing) and the reference fuzzer.
 
 ### Path D: QueryEngine row-window contract
 
