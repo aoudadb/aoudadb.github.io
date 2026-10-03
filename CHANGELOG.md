@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Fixed: wrong answers in routed reads and cold point reads (ColumnarRead group-6 review).** A read of
+  a table answered from one of its materialized queries could disagree with the table: after a
+  `TRUNCATE`, a column dropped (and added back) or renamed, or a new column default (the result kept the
+  old rows; it is now marked stale and rebuilt); for a `SUM` whose group lost its last non-null value
+  (0 instead of null); for a string `MIN` / `MAX` (culture order instead of code point); for a
+  latest-per-key winner whose order value an update set to null; for a filter on a `Float32` or
+  `UInt64` column; and a routed `LatestPerKey` page came back in the result's order rather than key
+  order. Separately, a primary-key read of a cold segment holding an updated key twice (the old copy
+  deleted) could return no row. See
+  [Materialized queries](guides/materialized.md#routing-a-read-to-a-maintained-result).
 - **Reads no longer copy the write buffer (ColumnarRead S19).** A read that reached unflushed rows
   flattened all of them into fresh arrays every time; it now reads the buffer where it is. Under a
   steady 50,000 rows/s insert load, a `COUNT` / `SUM` over the table went from 4.4 to 1.5 ms at the
