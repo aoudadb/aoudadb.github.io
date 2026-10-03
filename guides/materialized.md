@@ -1038,7 +1038,9 @@ maintenance path, so a query downstream of it (a top-N over an aggregate) follow
 write. A filter, or a top-N directly over the table, takes the jobs' rows as the inserts they are through its own
 maintenance (**ColumnarMerge S09, 0.2.0** — it used to be refreshed, a scan of the whole table on every pass);
 a query neither path handles (an extreme or ordering over a string column), or one the replay cannot serve
-exactly, is refreshed in the same pass. Every write a pass makes to a result is one batch in the log
+exactly, is refreshed in the same pass. So is a query that was already behind for another reason when the load committed — a
+`Skip` load, an update dropped under back-pressure, a refused rebuild — because folding the load's rows cannot bring back what
+it is missing (**WorkloadCore, next train**: the pass used to fold such a query and report it current without those rows). Every write a pass makes to a result is one batch in the log
 (**ColumnarMerge S09**), not a user write per row. The pass runs on its own once bulk loading into the table has been
 quiet for 2 seconds — no load in flight, and none committed in that time (**ColumnarMerge S01,
 0.2.0**: a load still streaming used to count as quiet once 2 seconds had passed since the last commit, so
