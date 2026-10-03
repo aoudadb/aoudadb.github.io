@@ -348,8 +348,8 @@ Precedence/override notes:
 | `lte` | Less than or equal | `{ "column":"price", "op":"lte", "value":1000 }` |
 
 Notes:
-- The server-side `QueryTranslator.IsValidOperator` accepts only the six comparison operators above (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`). Requests containing any other operator string are rejected with a validation error.
-- The TypeScript client also accepts user-facing operators `in`, `notIn`, `like`, `isNull`, `isNotNull`, and `between`. The `isNull`/`isNotNull` and `between` operators are expanded client-side to standard wire predicates before the request is sent (see SDK mapping table below). The `in`, `notIn`, and `like` operators are translated to wire ops `in`, `nin`, `like` respectively, but the server's current validator rejects them — these are planned for a future server-side extension.
+- The server accepts the six comparison operators above and `in`, `nin` and `like` (see [HTTP API — operators](../reference/http-api.md)); any other operator string is rejected with a validation error.
+- The TypeScript client also accepts user-facing operators `in`, `notIn`, `like`, `isNull`, `isNotNull`, and `between`. The `isNull`/`isNotNull` and `between` operators are expanded client-side to standard wire predicates before the request is sent (see SDK mapping table below). The `in`, `notIn`, and `like` operators are translated to the wire ops `in`, `nin` and `like`, which the server accepts.
 - Type normalization is column-aware in `QueryTranslator` (for example `Timestamp`, `Date`, `Bool`, unsigned numeric types).
 - `gt` / `gte` / `lt` / `lte` on a `String` column compare by ordinal UTF-8 byte (code-point) order, case-sensitive, no locale (**BL-750, next train**; the server refused a string value for them before). See [HTTP API — operators](../reference/http-api.md).
 
@@ -363,9 +363,9 @@ Notes:
 | `>=` | All | `gte` | Yes |
 | `<` | All | `lt` | Yes |
 | `<=` | All | `lte` | Yes |
-| `in` | TypeScript only | `in` | No — server rejects; planned extension |
-| `notIn` | TypeScript only | `nin` | No — server rejects; planned extension |
-| `like` | TypeScript only | `like` | No — server rejects; planned extension |
+| `in` | TypeScript only | `in` | Yes |
+| `notIn` | TypeScript only | `nin` | Yes |
+| `like` | TypeScript only | `like` | Yes — `String` columns only |
 | `isNull` | TypeScript only | `eq null` (expanded client-side) | Yes — expanded before sending |
 | `isNotNull` | TypeScript only | `ne null` (expanded client-side) | Yes — expanded before sending |
 | `between` | TypeScript only | `gte min` + `lte max` (expanded client-side) | Yes — two AND predicates |
@@ -411,7 +411,6 @@ Notes:
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| TypeScript `in`/`notIn`/`like` operators — server-side support | Server `QueryTranslator.IsValidOperator` only accepts `eq/ne/gt/gte/lt/lte`; TS client sends `in`/`nin`/`like` which the server rejects | Use `eq`/`ne` predicates or filter client-side until server-side extension ships | Planned extension of `IsValidOperator` | High |
 | TypeScript `count()` dedicated endpoint adoption | TS `count()` uses `/query?limit=0` instead of `POST /query/count` | .NET `CountAsync` is correct; TS is functionally equivalent but incurs columnar decode overhead | TS client adoption | Medium |
 | Fluent JOIN workflows | `Join()` API across SDK fluent builders | Use planner/internal paths only (no stable public fluent route) | `BL-009` | High |
 | JOINed materialized query support | Materialized-query JOIN definition + maintenance | Single-table materialized patterns only | `BL-010` | Medium |
@@ -586,7 +585,6 @@ Quick-answer matrix:
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| TypeScript `in`/`notIn`/`like` server-side wiring | TS client emits `in`/`nin`/`like` wire ops that the server `IsValidOperator` currently rejects; real gap between client behavior and server validation | Once server-side validator is extended, add integration tests round-tripping these operators end-to-end | High |
 | Depth guardrail regression coverage | `MaxWhereClauseNestingDepth = 5` is implemented in `ProtocolConstants` and validated by `QueryTranslator`; resolved P14, BL-044 | Add regression tests that submit groups at depths 5 (allowed) and 6 (rejected) to confirm boundary is stable | Medium |
 | Count endpoint efficiency baseline | Baseline large-table count latency vs full query | Add benchmark comparing `/query/count` vs materialized full query | Medium |
 | Cross-partition query builder parity in TS | Missing fluent API increases accidental inconsistencies | Add TS builder API + integration tests for `crossPartitionAccess` request emission | Medium |
