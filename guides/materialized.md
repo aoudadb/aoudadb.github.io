@@ -459,7 +459,10 @@ Invariants:
   - After a log record that no commit follows (a flush, a column added to another table) a result reads as behind until it is
     claimed current again: by the next commit anywhere, or by the next result-checkpoint round (every 15 s). (**BL-607, next train**)
   - DROP COLUMN, RENAME COLUMN and a changed column default mark the source's results stale before the change and rebuild them
-    after it, so a crash in between cannot bring the old column back. (**BL-810, next train**)
+    after it, so a crash in between cannot bring the old column back. (**BL-810, next train**) A new expression for a derived
+    column, and a column's new type, do the same: both rewrite stored values no change event carries. (**next train**)
+  - A commit the change dispatcher failed to route marks the source's results stale and rebuilds them, rather than letting a
+    result be read as current past it. (**next train**)
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
 - `MemoryOnly` source tables are never subject to MQ auto-rebuild after bulk-load.
 
