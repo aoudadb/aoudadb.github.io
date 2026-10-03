@@ -207,6 +207,14 @@ shares.
 ⚠️ **Nothing re-derives the budget.** `derivedAtUtc` is always startup. On an unbounded host that
 means the ceiling is fixed from a reading that has since moved; restart to re-derive it.
 
+⚠️ **A grant is a deployment requirement for `BackPressure`** (**WorkloadCore, next train**; ADR 0060 `D-6`). Production
+enforcement needs either a container memory limit or `Aouda:Memory:MaxTotalRamBytes`. Without one, the budget is the
+boot's sample — `min(0.40 × total, 0.70 × available)` — **every boot logs one warning** saying so and naming both remedies,
+and nothing is remembered across boots: a restart while a neighbour is busy can derive a smaller budget. That is the honest
+consequence of running without a grant, and the warning is there so it is not a hidden one. An over-committed host stays a
+refusal inside Aouda rather than a kernel OOM kill. `Advisory` enforcement (embedded, `aouda dev`) enforces nothing and does
+not warn.
+
 ⚠️ **If you resize `MaxTotalRamBytes` at runtime, the block keeps describing startup.** That is
 deliberate — you chose the new number, so there is no host derivation to record — but it means
 `effectiveBytes` (the startup decision) and `currentEffectiveBytes` (the budget running now) can

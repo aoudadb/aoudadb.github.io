@@ -2757,6 +2757,8 @@ Startup probe. 200 when bootstrap is complete (`DatabaseManager` initialized). 5
 
 Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane).
 
+The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, next train** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A hot tier at 80 % of `T10` or more makes the component **degraded**, never unhealthy: a full hot tier is back-pressure, not a threat to the process. A full page cache has no verdict. What makes the component unhealthy, and `/ready` fail, is the managed heap near the GC limit.
+
 **Operator wait (create / schema apply):** wait for `GET /ready` 200 **and** `GET /api/databases/{name}` 200 with `state=Active`. After `DELETE`, GET `{name}` 404 means the database is gone from serving.
 
 #### `GET /api/server/memory`
@@ -4208,9 +4210,9 @@ All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append`
 | `POST` | `/api/databases/{db}/bulk-load:begin` | Begin a new session. Returns `jobId`. |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (NDJSON or column-batch body). |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:commit` | Commit the session. |
-| `GET` | `/api/databases/{db}/bulk-load/{jobId}:status` | Get session status and progress. |
+| `GET` | `/api/databases/{db}/bulk-load/{jobId}` | Get session status and progress. (Listed as `{jobId}:status` until **WorkloadCore, next train**; the route has always been `{jobId}`.) |
 | `GET` | `/api/databases/{db}/bulk-load:list` | List all sessions for this database. |
-| `POST` | `/api/databases/{db}/bulk-load/{jobId}:force-abort` | Operator abort. |
+| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. (Listed under `{jobId}` until **WorkloadCore, next train**; the route has always been this.) |
 
 ---
 
@@ -4426,9 +4428,22 @@ Commit the session. All sealed segments become queryable.
 | `progress` | object? | Present only when `waitForDeferredWork: true`. Fields: `ivfAssignmentsCompleted`, `ivfAssignmentsTotal`, `raBitQEncodingsCompleted`, `raBitQEncodingsTotal`, `cscMirrorsCompleted`, `cscMirrorsTotal`, `pkIndexRebuildCompleted`, `pkIndexRebuildTotal`. |
 | `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. `"completed"` for an `"auto"` load whose queries were written in its own commit (**ColumnarCore S12, 0.2.0**). Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
 
+
+**Errors** (**WorkloadCore, next train**):
+
+| Code | Status | When |
+|---|---|---|
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit. `Retry-After` is set. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set. |
+
+The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the
+same `errorCode`. A repeated `:commit` of that job answers the same 503 rather than a 409. Wait `Retry-After`, then run the
+load again from `:begin`. Before this change both refusals answered **500 `INTERNAL_ERROR`** with no `Retry-After`.
 ---
 
-### `GET {jobId}:status`
+### `GET {jobId}`
+
+_The route is `GET /api/databases/{db}/bulk-load/{jobId}` (no `:status` suffix)._
 
 Get current session state and progress.
 

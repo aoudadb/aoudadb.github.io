@@ -26,7 +26,7 @@ explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical
 | Value | Formula | Restoring key |
 |---|---|---|
 | `MaxTotalRamBytes` (cgroup-bounded) | `0.70 × detected`, floor 256 MB | `Aouda:Memory:MaxTotalRamBytes` (set explicitly to skip detection) |
-| `MaxTotalRamBytes` (fallback) | `0.40 × detected`, floor 256 MB | same |
+| `MaxTotalRamBytes` (fallback) | `min(0.40 × detected, 0.70 × available)` at this boot, floor 256 MB. No grant: every boot under `BackPressure` logs one warning, and nothing is remembered across boots (**WorkloadCore, next train**) | same — or a container memory limit, which makes it the cgroup row |
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
