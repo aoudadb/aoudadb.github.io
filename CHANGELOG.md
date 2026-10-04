@@ -31,10 +31,6 @@ Public, user-facing release notes. Engine phase status lives in the server
   COLUMN_NOT_FOUND`. It used to read the column in the default answer and `null` with `format=rows`.
 - **`reference/timestamp.md` corrected (BL-808).** It said `Timestamp` is stored as Unix milliseconds with a per-column unit;
   it is, and always was, .NET UTC ticks, as the HTTP reference says.
-- **A routed `FIRST` / `LAST` is limited to an order column that cannot tie (BL-811).** A materialized aggregate and the
-  table broke a tie on the order column differently, so a routed answer could name another of the tied rows; such questions
-  are now answered by the table.
-
 - **Cold pages are checked again in the background (BL-815).** A scrubber re-reads every cold page and checks its CRC: 15
   minutes after open, then daily, under 64 MiB/s. A page corrupted on disk after it was first read is reported in the log and
   fails its reads with a corruption error instead of being returned as wrong values. See [Storage](guides/storage.md#213-operations-and-observability).
