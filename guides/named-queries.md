@@ -565,7 +565,7 @@ Notes that bite:
 - **Pass no `filter`.** The predicate is the definition plus your `args`; there is no client-side filter on a named subscription. `client.table(t).subscribe(…)` still sends `target` and still works on the **admin** listener — it is refused on the data-plane.
 - An empty or whitespace name throws before anything is sent.
 - A deprecated name still subscribes. It adds `NAMED_QUERY_DEPRECATED` to `snapshot_complete.warnings`, which raises the named-artifact warning sink **once** and still delivers the snapshot.
-- Definitions using `joins`, `selectExpr`, `distinct`, or a non-zero offset are refused with `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of those still works — only the live path is restricted.
+- Definitions using `joins`, `selectExpr`, `distinct`, `aggregates` / `groupBy`, `perKey` (**next train**), or a non-zero offset are refused with `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of those still works — only the live path is restricted.
 - `conflate` on an insert-only stream is a no-op (see above).
 
 ---

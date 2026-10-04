@@ -901,6 +901,9 @@ Execute a query against a table.
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
 | `crossPartitionAccess` | boolean | No | When `true`, queries on partitioned tables do not require a partition-key filter. Without this, queries on partitioned tables without a partition filter return `PARTITION_FILTER_REQUIRED`. Default: `false`. |
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
+| `aggregates` | object[] | No | `{ "func", "column"?, "alias"? }` — `count`, `sum`, `min`, `max`, `avg`, `countDistinct`; per group with `groupBy`, else one row. The result is the keys, then the aggregates; not with `select`, `selectExpr`, `distinct` or `joins`; `orderBy` names result columns. An aggregate is named its `alias`, else `COUNT` / `{FUNC}_{column}` (`COUNT_DISTINCT_x`). |
+| `groupBy` | object[] | No | `{ "column", "bucket"?, "alias"? }` — a column's value, or a time bucket (`minute` … `year`) of a `Timestamp`. Requires `aggregates`. |
+| `perKey` | object | No | `{ "keys": [...], "orderBy": "col", "latest": true }` — one row per distinct `keys` tuple, the one with the greatest (`latest: false`: least) `orderBy` value, ties to the lowest primary key. `select`, `orderBy` and the page apply to the collapsed rows; a `LatestPerKey` / `FirstPerKey` materialized query of the same shape answers it when current (`stats.routedTo`). Not with `aggregates`, `groupBy`, `distinct`, `selectExpr` or `joins` (400); `/query/count` refuses it (**BL-801, next train**). |
 
 **Where Clause:**
 
@@ -1005,8 +1008,20 @@ storing a definition that could never execute.
 | `rightColumn` | string | No | Right key column for single-column joins. |
 | `leftColumns` | string[] | No | Left key columns for multi-column joins. |
 | `rightColumns` | string[] | No | Right key columns for multi-column joins. |
+| `where` | object | No | A filter on the joined table, in the `where` format; its column names are that table's. It applies to the joined table's rows before they join (**BL-818, next train**). |
 
 For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
+
+**The query's `where` filters the base table; a join's `where` filters its joined table.** A joined row the join's `where`
+rejects takes part in no match: an inner or cross join drops it, a left join answers the base row with `null` in that table's
+columns.
+
+**Row- and partition-level security on a joined table (BL-818, next train).** The caller's RLS and PLS for every joined
+table are applied on that join's side, exactly as on a direct read of the table: a join onto a table the caller may read only
+part of answers with that part. (From the 2026-10 architecture review until this change such a join was refused with `403`
+`AUTHORIZATION_DENIED`.) An RLS rule that denies the caller the whole table joins against no rows of it. Still `403`: a
+joined table the caller has no read grant on, a joined table whose partition-level security refuses the caller (no grant),
+and a joined materialized-query result whose source security cannot be applied to it.
 
 **Join example:**
 ```json
@@ -1079,6 +1094,9 @@ There is **no HTTP route that registers a definition** and **no inventory list**
 | `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Answered on the scan; the never-set `stats.distinctServedFromPartitionMetadata` flag is gone from the response (**ColumnarRead2 S04, next train**). |
 | `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
 | `freshness` | Declared on the named query: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Budget-only edits do not fire `named_query_body_changed`. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). |
+| `aggregates` / `groupBy` | As on `/query`: the definition answers its keys and aggregates (no `select` then). Applied under `/query`'s rules — a shape `/query` would refuse, an unknown column, `sum` / `avg` of a non-number, a bucket of a non-`Timestamp`, or `count: true` beside them fails `schema/apply`. Until now these keys were silently dropped and the query answered plain rows (**BL-796, next train**). Subscribe refuses them. |
+| `perKey` | As on `/query` (**BL-801, next train**). Subscribe refuses it. |
+| `joins[i].where` | A filter on the joined table, with `{ "param": … }` values bound like the base `where` (**BL-818, next train**). |
 
 There is no `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`. Freshness is keyed by the path, batch, or subscribe **name**.
 
@@ -2527,6 +2545,10 @@ result — they are never stored.
 }
 ```
 
+A `colRef` names its column exactly as the table does — case-sensitively, as `where` and `select` do. A mis-cased name is
+`400 COLUMN_NOT_FOUND`; before, it read the column through the default (columnar) answer and `null` through `format=rows`
+(**BL-799, next train**).
+
 **Response** — computed columns appear at the end of `columns` and `types`:
 
 ```json
@@ -3397,7 +3419,7 @@ Get cluster topology.
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [`docs/dev/Timestamp-Type.md`](../dev/Timestamp-Type.md). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, next train**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 

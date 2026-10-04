@@ -13,6 +13,28 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A join onto a table you may read only part of is answered with that part (BL-818).** Your row- and partition-level
+  security for every joined table is applied on that join's side — exactly as on a direct read of the table — instead of the
+  join being refused with `403`. A join can also carry its own filter on the joined table, `joins[i].where` (`joinWhere()` in
+  both SDKs). See [HTTP API — Join Clause](reference/http-api.md).
+- **The latest (or first) row per key over HTTP (BL-801).** `/query` takes `perKey: { keys, orderBy, latest }` —
+  `LatestPerKey` / `FirstPerKey`, routed to a materialized query of the same shape when one answers it. `latestPerKey()` /
+  `firstPerKey()` in both SDKs.
+- **Named queries carry `aggregates`, `groupBy` and `perKey` (BL-796).** A definition with them answers its keys and
+  aggregates, as `/query` does, and is applied under `/query`'s rules (a shape `/query` would refuse fails `schema/apply`).
+  Before, the keys were silently dropped and the named query answered plain rows.
+- ⚠️ **`@aouda/client`: aggregate queries reach the server.** `sum()` / `min()` / `max()` / `groupBy()` were sent in a shape no
+  server reads, and answered as plain rows. Fixed.
+- ⚠️ **`Aouda.Client`: `ClientColumnarResult.Data` holds the public values on both wires (BL-798).** A JSON answer's cells
+  were `JsonElement`s and a frame answer's `long` / `DateTime` / `Guid` / `decimal`; now both are the values.
+- ⚠️ **A computed column's `colRef` is case-sensitive (BL-799)**, as `where` and `select` are: a mis-cased name is `400
+  COLUMN_NOT_FOUND`. It used to read the column in the default answer and `null` with `format=rows`.
+- **`reference/timestamp.md` corrected (BL-808).** It said `Timestamp` is stored as Unix milliseconds with a per-column unit;
+  it is, and always was, .NET UTC ticks, as the HTTP reference says.
+- **A routed `FIRST` / `LAST` is limited to an order column that cannot tie (BL-811).** A materialized aggregate and the
+  table broke a tie on the order column differently, so a routed answer could name another of the tied rows; such questions
+  are now answered by the table.
+
 - **Cold pages are checked again in the background (BL-815).** A scrubber re-reads every cold page and checks its CRC: 15
   minutes after open, then daily, under 64 MiB/s. A page corrupted on disk after it was first read is reported in the log and
   fails its reads with a corruption error instead of being returned as wrong values. See [Storage](guides/storage.md#213-operations-and-observability).
