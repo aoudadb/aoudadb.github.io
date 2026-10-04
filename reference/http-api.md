@@ -575,6 +575,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 |------|-------------|-------------|
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S07, next train**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -4506,7 +4507,7 @@ Commit the session. All sealed segments become queryable.
 
 | Code | Status | When |
 |---|---|---|
-| `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit. `Retry-After` is set. |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, next train**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit. `Retry-After` is set. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set. |
 
 The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the

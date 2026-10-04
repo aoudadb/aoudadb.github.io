@@ -537,6 +537,15 @@ database budget, or `MaxMemoryShare`); its weighted share (`MemoryWeight`) decid
 needs it — the database furthest over its share. Elastic share lending, and `Aouda:Memory:ElasticShares` /
 `ElasticShareActivityWeighted`, are removed.
 
+(**WorkloadCore S07, next train**) **The big consumers ask too.** A bulk load asks for its memory before it takes its tables'
+locks and waits there (up to its lock-acquisition timeout, 30 s by default), so a load waiting for memory does not stall the
+inserts into its tables. Once work is running, its next step — a load's buffer doubling, a read growing past 1 MiB, a
+materialized-query build's accumulators, a deferred pass's wave — is taken only if nothing of the same or a higher class is
+waiting: a load spills sooner, a build spills, a pass takes smaller waves, a read is refused with the queue's `Retry-After`.
+A bulk load's segment writes take their working memory (about twice the bucket being written) from the load's memory and
+run one at a time when it has no more, and a flush charges the page builders it encodes with — both used to be invisible to
+the budget. Recovery after a crash waits up to 10 s for its replay window rather than quarantining the database at once.
+
 **The budget is the deployment's.** It is never lowered in-process any more: a host running short of memory, RSS above the
 budget or a full heap do not shrink it (the 512 MB host-availability floor and "tightening" are gone). Give the server a
 container memory limit and it derives its budget from that grant.
