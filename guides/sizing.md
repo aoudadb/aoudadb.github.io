@@ -12,6 +12,12 @@ Aouda treats `MaxTotalRamBytes` as a **process RSS ceiling**, not an advisory su
 
 Give the process only what remains after the OS. Flush and hot-tier thresholds scale with the budget, so many tables do not each assume a large in-memory buffer. Prefer `ColdPreferred` for archival tables. Ingest will throttle sooner than on a large box — that is the process staying up, not a crash.
 
+Two costs do not scale with the budget (**WorkloadCore, next train**). The server itself — the runtime, ASP.NET, pooled buffers —
+holds 10–20 MB of managed heap that no reservation covers. And **every sign-in or password change holds 64 MiB while its
+password hash runs** (Argon2id, a few hundred milliseconds): a burst of sign-ins on a 512 MB container is a real share of its
+heap. Both are visible on `GET /api/server/memory` (`chargedByConsumer.PasswordHashing`; the rest of the gap in
+`untrackedAtLastGen2Bytes`). Token refreshes do not hash.
+
 ## Typical (~2 GB)
 
 A 2 GiB cap is a reasonable **explicit** choice, not a hidden default. Hot data stays in RAM; colder segments demote. Watch RSS versus the governed budget in Studio Settings and Monitoring.
@@ -132,8 +138,10 @@ probe for uniqueness again until the next restart.
 
 A table with a primary key and `pkUniqueness: Strict` (the default) keeps its keys in memory across every
 tier, so an insert, upsert or materialized-query update learns whether a key exists without reading a
-segment. Budget roughly **64 bytes per key** of the table's cold data (1 million keys ≈ 64 MB; the write
-buffer and hot segments were already covered). The memory comes from the same governed budget as the rest
+segment. Budget **60–110 bytes per key** of the table's cold data — about 60 when the map's dictionary is full, up to
+~110 right after it doubles (1 million keys ≈ 60–110 MB; the write buffer and hot segments were already covered).
+The map is charged what it actually holds, its dictionary's capacity included (**WorkloadCore, next train**; it was charged a
+flat 64 bytes per key, which a heap census measured at 84 on a working load). The memory comes from the same governed budget as the rest
 of the key index, and more RAM means more tables answered from memory: when the governor refuses, a table
 simply keeps checking keys by reading its segments — correct, and slower — and `keyMapResident: false` on
 `GET /api/tables` says so. The map is rebuilt in the background after a restart; nothing is stored on disk.

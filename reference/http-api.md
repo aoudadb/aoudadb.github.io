@@ -2906,20 +2906,30 @@ full queue, which nothing can release, refuses it. While the process is tighteni
 | Field | Where | Type | Meaning |
 |---|---|---|---|
 | `chargedBytes` | top level, per database | integer | Consumer charges at the last sample — at the top level, every database's. |
-| `chargedByConsumer` | top level, per database | object | `chargedBytes` by consumer: `PageCache`, `BloomFilters`, `SegmentHandles`, `ColdMetadata`, `CatalogShards`, `HotSegments`, `ChangeRings`, `MqUpdateQueues`, `SparsePkIndex`, `L3KeyMap`, `GraphVectorBuffers`, `HraScratch`, `BulkLoadQueues` (bulk-load slices queued past a refused reservation). Zero entries are omitted. |
+| `chargedByConsumer` | top level, per database | object | `chargedBytes` by consumer: `PageCache`, `BloomFilters`, `SegmentHandles`, `ColdMetadata`, `CatalogShards`, `HotSegments`, `ChangeRings`, `MqUpdateQueues`, `SparsePkIndex`, `L3KeyMap`, `GraphVectorBuffers`, `HraScratch`, `BulkLoadQueues` (bulk-load slices queued past a refused reservation), `PasswordHashing` (password hashes running now: Argon2id holds 64 MiB per sign-in or password set while it runs), `UnitWorkingMemory` (a unit of work's own working memory while it runs: a cold segment's keys read back to index it, an update's copy of the table's buffered rows; in the ledger, and not yet counted when a reservation is decided) (both **WorkloadCore, next train**). Zero entries are omitted. |
 | `ledgerBytes` | top level, per database | integer | `reservedBytes + chargedBytes`: the whole ledger. |
 | `releasableBytes` | top level, per database | integer | What the consumers could release now by dropping cached data or demoting (re-read from disk on next use), at the last sample. Part of `ledgerBytes` (it may cover a loaded hot segment's reservation). |
+| `liveHeapAtLastGen2Bytes` | top level | integer | The live heap of the most recent gen-2 collection (below), recorded when it ended (**WorkloadCore, next train**). `0` before the first. |
+| `ledgerAtLastGen2Bytes` | top level | integer | `ledgerBytes` as it stood when that collection ended, consumer charges sampled then. |
+| `untrackedAtLastGen2Bytes` | top level | integer | `liveHeapAtLastGen2Bytes − ledgerAtLastGen2Bytes`, never negative: the live heap the ledger did not hold, both read at the same collection. |
+| `lastGen2Index` | top level | integer | The collection's index (`runtime.lastGen2.index`), so a reader can keep one row per collection. |
 
 Two fields **changed meaning**:
 
-- `managedHeapBytes` is the **live heap after the last gen-2 collection** (heap minus fragmentation), the one reading memory
-  decisions take. It used to be the heap after the most recent collection of any kind, which counted every object that died
-  since the last gen-2 as live. It equals `runtime.lastGen2LiveBytes` as of the last reconciliation.
+- `managedHeapBytes` is the **live heap after the last gen-2 collection** — what that collection traced live, never more than
+  the heap less its free space — the one reading memory decisions take, as of the last reconciliation (every 10 s). It used to
+  be the heap after the most recent collection of any kind, which counted every object that died since the last gen-2 as
+  live. A **background** gen-2's heap less free space also counts everything allocated while it ran, untraced; the traced
+  figure leaves that out (**WorkloadCore, next train**). For a blocking gen-2 the two are equal.
 - `untrackedHeadroomBytes` is `managedHeapBytes − ledgerBytes` (never negative): the live heap the ledger does not account
   for. It used to subtract `reservedBytes` only.
 
-🔎 **The completeness of the ledger** is `untrackedHeadroomBytes / managedHeapBytes`. A large share is worth reporting: it is
-memory held outside anything the engine can release or refuse.
+🔎 **The completeness of the ledger** is `untrackedAtLastGen2Bytes / liveHeapAtLastGen2Bytes`, taken at the collections with
+the largest live heap. A large share is worth reporting: it is memory held outside anything the engine can release or refuse.
+⚠️ Not `untrackedHeadroomBytes / managedHeapBytes`: that compares the heap at the last gen-2 with the ledger now. Under load
+the gen-2 is usually a full collection forced at a peak, while work held its reservations, and seconds later the work has
+released them; the difference reads two to three times the real gap (**WorkloadCore, next train**). Expect a share of
+10–20 MB that no reservation can own on any server: the runtime, ASP.NET's caches and pooled buffers.
 
 #### `runtime` — the process's own counters (**IngestAtSpeed S01, 0.1.40**)
 
@@ -2935,6 +2945,7 @@ million rows, bytes allocated per row, share of wall time paused for GC.
 | `gen0Collections` / `gen1Collections` / `gen2Collections` | integer | Collections of each generation since start. |
 | `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Read when the response is built; `managedHeapBytes` is the same reading as of the last reconciliation (**WorkloadCore, next train**: before, `managedHeapBytes` counted garbage not yet collected, and under a fast ingest the two differed by gigabytes). |
 | `heapSizeBytes` | integer | Heap size as of the most recent collection of any generation. |
+| `lastGen2` | object | The most recent gen-2 collection as the runtime reports it (**WorkloadCore, next train**): `index`, `kind` (`Background` or `FullBlocking`), `compacted`, `concurrent`, `heapSizeBytes`, `fragmentedBytes`, `promotedBytes` (what it traced live), `totalCommittedBytes`, `pinnedObjectsCount`, `finalizationPendingCount`, and per generation — 0, 1, 2, the large-object heap, the pinned-object heap — `generationSizeAfterBytes`, `generationFragmentationAfterBytes` and `generationSizeBeforeBytes`. `null` before the first. |
 
 🔎 All six provenance fields also appear in the `memory` health component's `details` —
 `budgetIsDerived`, `budgetSource`, `budgetIsCgroupBounded`, `budgetFractionApplied`,
