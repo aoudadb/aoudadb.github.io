@@ -575,7 +575,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 |------|-------------|-------------|
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
-| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S07, next train**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S07, next train**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -4513,6 +4513,12 @@ Commit the session. All sealed segments become queryable.
 The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the
 same `errorCode`. A repeated `:commit` of that job answers the same 503 rather than a 409. Wait `Retry-After`, then run the
 load again from `:begin`. Before this change both refusals answered **500 `INTERNAL_ERROR`** with no `Retry-After`.
+
+⚠️ **A failure after the load's commit point is never a 503** (**WorkloadCore, next train**). Once a load's rows are durable,
+whatever fails after that — the managed heap included — answers **500 `INTERNAL_ERROR`** with the message *"Bulk-load committed,
+but work after its commit point failed. The rows are durable: do not send the load again."* and no `Retry-After`. Do not run that
+load again: its rows are in the table, and a second load would add them twice.
+
 ---
 
 ### `GET {jobId}`
