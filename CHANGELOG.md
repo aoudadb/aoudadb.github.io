@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Cold pages are checked again in the background (BL-815).** A scrubber re-reads every cold page and checks its CRC: 15
+  minutes after open, then daily, under 64 MiB/s. A page corrupted on disk after it was first read is reported in the log and
+  fails its reads with a corruption error instead of being returned as wrong values. See [Storage](guides/storage.md#213-operations-and-observability).
+- **`AVG` without `groupBy` is answered from the segments' statistics (BL-807).** The same answer as before, without reading
+  every row of the column.
+
 ## 0.2.0 — 2026-09-30
 
 **.NET 10, `Decimal(p,s)` columns, and writes that travel and land as columns.** Server **0.2.0**, `Aouda.Client` **0.2.0**, `@aouda/client` **0.2.0**, Studio **0.0.26** (pin stays **0.1.25** until Studio moves). See [Compatibility](clients/compatibility.md).
