@@ -270,8 +270,10 @@ for — turning rung 1 off does not make rung 2 fire sooner, it means a tier tha
 fast enough reaches the ceiling and refuses instead of slowing down first.
 
 Above **60 %** of a database's hot ceiling the engine simply drains harder: the hot/cold maintenance
-sweep runs more often and demotes to a lower per-table target, and the reclaim ladder aims to bring
-the tier back to that mark rather than merely under the ceiling. It spends disk I/O — which is rarely
+sweep runs more often and demotes to a lower per-table target, bringing the tier back toward that
+mark rather than merely under the ceiling (**WorkloadCore, next train**: the reclaim ladder that also
+aimed at it is replaced by a memory broker, which demotes when the database's whole ledger or the heap
+is over, not the hot tier alone). It spends disk I/O — which is rarely
 the scarce resource — to buy back memory, which is. No write is delayed, refused or rerouted by it,
 at any occupancy.
 

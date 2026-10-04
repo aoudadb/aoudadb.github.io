@@ -2893,14 +2893,21 @@ The governor's ledger covers every holder the engine keeps on purpose. Besides t
 in `reservedByCategory`), each database charges its caches, registries and queues to it as **consumers**: the page cache, the
 bloom store, segment handles, cold segment metadata, catalog shards, flushed hot segments, change rings, materialized-query
 update queues, the sparse primary-key index, the L3 key map, graph and vector buffers, and what a table keeps between merges.
-Consumer charges are sampled on the governor's reconciliation tick (every 10 s), and **do not refuse anything yet**: they
-are in the ledger so that the gap between it and the heap is the memory nobody accounts for.
+Consumer charges are sampled on the governor's reconciliation tick (every 10 s) and on every pass of the memory broker.
+
+Each consumer also reports what it could **release** on request — the page cache, bloom indexes, segment handles, cold segment
+metadata, catalog shards and cold sparse-PK entries by dropping them (they are re-read from disk on next use), hot segments by
+demoting them — and the broker frees those bytes, cheapest first, when a database's ledger passes its target, when the
+process's does, or when the live heap passes 80 % of the GC hard limit. **A reservation is refused only when
+`reservedBytes + chargedBytes − releasableBytes` would pass the ceiling**: a full cache makes room instead of refusing work; a
+full queue, which nothing can release, refuses it (**WorkloadCore, next train**).
 
 | Field | Where | Type | Meaning |
 |---|---|---|---|
 | `chargedBytes` | top level, per database | integer | Consumer charges at the last sample — at the top level, every database's. |
 | `chargedByConsumer` | top level, per database | object | `chargedBytes` by consumer: `PageCache`, `BloomFilters`, `SegmentHandles`, `ColdMetadata`, `CatalogShards`, `HotSegments`, `ChangeRings`, `MqUpdateQueues`, `SparsePkIndex`, `L3KeyMap`, `GraphVectorBuffers`, `HraScratch`, `BulkLoadQueues` (bulk-load slices queued past a refused reservation). Zero entries are omitted. |
 | `ledgerBytes` | top level, per database | integer | `reservedBytes + chargedBytes`: the whole ledger. |
+| `releasableBytes` | top level, per database | integer | What the consumers could release now by dropping cached data or demoting (re-read from disk on next use), at the last sample. Part of `ledgerBytes` (it may cover a loaded hot segment's reservation). |
 
 Two fields **changed meaning**:
 
