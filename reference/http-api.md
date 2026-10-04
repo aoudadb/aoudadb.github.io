@@ -2887,6 +2887,32 @@ that resident data cannot make the governor refuse transient work that fits. A d
 governed budget, is at `1.45x` headroom and `Constrained`. Every one of those numbers is correct.
 Read `workingSetHighWaterBytes`, `rssBytes`, `reservedBytes` and `untrackedHeadroomBytes` together.
 
+#### The ledger: leases and consumer charges (**WorkloadCore, next train**)
+
+The governor's ledger covers every holder the engine keeps on purpose. Besides the reservations (`reservedBytes`, by category
+in `reservedByCategory`), each database charges its caches, registries and queues to it as **consumers**: the page cache, the
+bloom store, segment handles, cold segment metadata, catalog shards, flushed hot segments, change rings, materialized-query
+update queues, the sparse primary-key index, the L3 key map, graph and vector buffers, and what a table keeps between merges.
+Consumer charges are sampled on the governor's reconciliation tick (every 10 s), and **do not refuse anything yet**: they
+are in the ledger so that the gap between it and the heap is the memory nobody accounts for.
+
+| Field | Where | Type | Meaning |
+|---|---|---|---|
+| `chargedBytes` | top level, per database | integer | Consumer charges at the last sample — at the top level, every database's. |
+| `chargedByConsumer` | top level, per database | object | `chargedBytes` by consumer: `PageCache`, `BloomFilters`, `SegmentHandles`, `ColdMetadata`, `CatalogShards`, `HotSegments`, `ChangeRings`, `MqUpdateQueues`, `SparsePkIndex`, `L3KeyMap`, `GraphVectorBuffers`, `HraScratch`, `BulkLoadQueues` (bulk-load slices queued past a refused reservation). Zero entries are omitted. |
+| `ledgerBytes` | top level, per database | integer | `reservedBytes + chargedBytes`: the whole ledger. |
+
+Two fields **changed meaning**:
+
+- `managedHeapBytes` is the **live heap after the last gen-2 collection** (heap minus fragmentation), the one reading memory
+  decisions take. It used to be the heap after the most recent collection of any kind, which counted every object that died
+  since the last gen-2 as live. It equals `runtime.lastGen2LiveBytes` as of the last reconciliation.
+- `untrackedHeadroomBytes` is `managedHeapBytes − ledgerBytes` (never negative): the live heap the ledger does not account
+  for. It used to subtract `reservedBytes` only.
+
+🔎 **The completeness of the ledger** is `untrackedHeadroomBytes / managedHeapBytes`. A large share is worth reporting: it is
+memory held outside anything the engine can release or refuse.
+
 #### `runtime` — the process's own counters (**IngestAtSpeed S01, 0.1.40**)
 
 Additive. Cumulative since process start, except the two heap figures. Take the difference between
@@ -2899,7 +2925,7 @@ million rows, bytes allocated per row, share of wall time paused for GC.
 | `allocatedBytesTotal` | integer | Managed bytes allocated since start. |
 | `gcPauseTotalMs` | number | Total time the runtime paused threads for garbage collection. |
 | `gen0Collections` / `gen1Collections` / `gen2Collections` | integer | Collections of each generation since start. |
-| `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Unlike `managedHeapBytes`, it does not count garbage that has not been collected yet. Under a fast ingest the two can differ by gigabytes. |
+| `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Read when the response is built; `managedHeapBytes` is the same reading as of the last reconciliation (**WorkloadCore, next train**: before, `managedHeapBytes` counted garbage not yet collected, and under a fast ingest the two differed by gigabytes). |
 | `heapSizeBytes` | integer | Heap size as of the most recent collection of any generation. |
 
 🔎 All six provenance fields also appear in the `memory` health component's `details` —
