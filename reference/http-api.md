@@ -2898,9 +2898,10 @@ Consumer charges are sampled on the governor's reconciliation tick (every 10 s) 
 Each consumer also reports what it could **release** on request — the page cache, bloom indexes, segment handles, cold segment
 metadata, catalog shards and cold sparse-PK entries by dropping them (they are re-read from disk on next use), hot segments by
 demoting them — and the broker frees those bytes, cheapest first, when a database's ledger passes its target, when the
-process's does, or when the live heap passes 80 % of the GC hard limit. **A reservation is refused only when
+process's does, or when the live heap passes 80 % of the GC hard limit. **A reservation is refused when
 `reservedBytes + chargedBytes − releasableBytes` would pass the ceiling**: a full cache makes room instead of refusing work; a
-full queue, which nothing can release, refuses it (**WorkloadCore, next train**).
+full queue, which nothing can release, refuses it. While the process is tightening its budget under host pressure
+(`tighteningActive`), the tightened ceiling applies to `reservedBytes` alone (**WorkloadCore, next train**).
 
 | Field | Where | Type | Meaning |
 |---|---|---|---|
