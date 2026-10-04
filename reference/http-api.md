@@ -1008,7 +1008,7 @@ storing a definition that could never execute.
 | `rightColumn` | string | No | Right key column for single-column joins. |
 | `leftColumns` | string[] | No | Left key columns for multi-column joins. |
 | `rightColumns` | string[] | No | Right key columns for multi-column joins. |
-| `where` | object | No | A filter on the joined table, in the `where` format; its column names are that table's. It applies to the joined table's rows before they join (**BL-818, next train**). |
+| `where` | object | No | A filter on the joined table, in the `where` format; its column names are that table's, and its values are read with that table's culture (a slash date on its `Date` column is read the way a `where` on that table reads it). It applies to the joined table's rows before they join (**BL-818, next train**). |
 
 For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
 

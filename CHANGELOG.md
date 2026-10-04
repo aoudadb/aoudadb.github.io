@@ -16,7 +16,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **A join onto a table you may read only part of is answered with that part (BL-818).** Your row- and partition-level
   security for every joined table is applied on that join's side — exactly as on a direct read of the table — instead of the
   join being refused with `403`. A join can also carry its own filter on the joined table, `joins[i].where` (`joinWhere()` in
-  both SDKs). See [HTTP API — Join Clause](reference/http-api.md).
+  both SDKs). Its values are read with the joined table's culture, and in a named-query definition its columns must be the
+  joined table's — a definition naming a base-table column there is refused when it is applied. See
+  [HTTP API — Join Clause](reference/http-api.md).
+- **A named query's `selectExpr` names its columns exactly as the table does (BL-799).** A definition whose expression names
+  `price` for a column `Price` is refused when it is applied; one stored before answers `400 COLUMN_NOT_FOUND`, as `/query`
+  does, instead of `500`.
 - **The latest (or first) row per key over HTTP (BL-801).** `/query` takes `perKey: { keys, orderBy, latest }` —
   `LatestPerKey` / `FirstPerKey`, routed to a materialized query of the same shape when one answers it. `latestPerKey()` /
   `firstPerKey()` in both SDKs.
