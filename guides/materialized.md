@@ -1007,6 +1007,12 @@ A `Skip` load marks every affected query **stale**: `GET …/materialized-querie
 behind, not broken — and `staleOnly` selects exactly this set. It is not routed to while it is stale
 (**ColumnarRead S18, next train**): a read of the table reads the table.
 
+(**WorkloadCore S03, next train**) A query over another query's result (a `TopNPerGroup` over an
+aggregate, say) is stale whenever that result is, with a `staleReason` naming it — whatever made the
+upstream stale, except a [deferred load](#deferred-loads), whose pass feeds the queries above it. It is
+rebuilt when the upstream's rebuild publishes; a `:refresh` of it alone, while the upstream is still
+stale, leaves it stale. Refresh the upstream first.
+
 Staleness is durable. If the server restarts before you refresh, the query is **rebuilt from source
 at startup** rather than being restored with the loaded rows missing (a query that is behind has no
 checkpoint — **ColumnarMerge S08**). That is deliberate: serving

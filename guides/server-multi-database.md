@@ -536,7 +536,6 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "M
 | `Aouda:Health:CheckTimeoutMs` | `int` | `5000` | Per-component check timeout |
 | `Aouda:Health:Thresholds:ReplicationLagDegradedSeconds` | `int` | `10` | |
 | `Aouda:Health:Thresholds:WalQueueDegradedPercent` | `int` | `80` | |
-| `Aouda:Health:Thresholds:MemoryDegradedPercent` | `int` | `80` | |
 
 ### Per-database settings (`Aouda:Databases:<name>`)
 
