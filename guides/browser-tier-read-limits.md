@@ -252,7 +252,7 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 | `latestPerKey` without an imperative create | `materializedQueries` map, `type: "latestPerKey"` |
 | Browser-tier read of an MQ result table | `"dataPlaneAccess": true` on the **MQ entry** (default `false`). No table-options PATCH |
 | Candle columns named `high` / `open` | Aggregate MQ public shape is `outputName` on every read path (`D-31`) |
-| Distinct source list, sub-millisecond | `distinct: true` over partition-key columns meeting the directory-answerable conditions. When it hits, `stats.distinctServedFromPartitionMetadata` is `true` (omitted when false) |
+| Distinct source list | `distinct: true` over the partition-key columns, constrained by the partition filter. Answered on the scan, which skips row groups from their statistics (the partition-directory answer was retired: a directory outlives rows deleted from it) |
 | Paging | `limit` (required cap) + `limitParam` / `offsetParam` (param names; still need a numeric cap). Non-zero offset **disqualifies subscribe** |
 | "1–25 of 412" | `"count": true` on the definition → `totalMatches` on HTTP (omitted when false) and `total_matches` on `snapshot_complete`. Unbounded count fails apply (`NAMED_QUERY_COUNT_UNBOUNDED`). Ad-hoc `/query/count` stays 404 on the data plane |
 | Optional facets in one definition | `"whenParamPresent": true` on `and`-clause conditions (`D-34`). Omitted arg skips the predicate; unmarked omission throws. `or` conditions cannot carry the marker. |

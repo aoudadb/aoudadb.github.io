@@ -190,7 +190,7 @@ If you do not configure schema management explicitly:
 | Cold aligned backfill on add-column | Yes | No | No | P7 fix2 report, storage tests | Prevents cross-column alignment bugs |
 | autoIncrement toggle on existing columns (`UpdateColumnAutoIncrement`) | Yes | No | No | BL-126 / P36, `SchemaDiffEngine.cs`, `PATCH …/columns/{c}` | Integer columns only; counter resets from MAX on first insert after enable |
 | Column type change (Tier 1 widen / Tier 2 validated) | Yes | No | No | P36 S03–S08, `TypePromotionMatrix`, `ColumnRewrite` jobs | Tier 1 instant metadata + coercion; Tier 2 validate-then-flip + background rewrite |
-| Column nullable / encoder / rename / references | Yes | No | No | P36 S08–S10, S12 | Imperative PATCH + declarative apply |
+| Column nullable / rename / references | Yes | No | No | P36 S08–S10, S12 | Imperative PATCH + declarative apply |
 | Column default + description | Yes | No | No | P36 S11 | Declarative + catalog; default does not rewrite existing pages |
 | Primary key membership change | Yes | No | No | P36 S15 | Uniqueness scan + PK index rebuild; no `col_*.seg` rewrite |
 | Durable catalog DDL (WAL envelope, replica-consumed, PITR-replayed) | Yes | No | No | P36 S01–S02, BL-186 S06 | Generic `CatalogDdl` WAL tag; crash recovery still ignores it (catalog comes from the checkpoint) but point-in-time recovery replays it — see [Backup and restore](backup.md#24-availability-status) |
@@ -702,7 +702,7 @@ dotnet aouda schema apply --server http://localhost:5433 --database commerce --f
 | HTTP | `/schema/export` | Available | `SchemaController.cs` + integration tests |
 | HTTP | `/schema/history` | Available | `SchemaController.cs` + integration tests |
 | HTTP | `/schema/seed` | Available | `SchemaController.cs` |
-| HTTP | `PATCH …/tables/{t}/columns/{c}` (ALTER COLUMN) | Available | P36 S12 — type/nullable/encoder/autoIncrement/references/rename |
+| HTTP | `PATCH …/tables/{t}/columns/{c}` (ALTER COLUMN) | Available | P36 S12 — type/nullable/autoIncrement/references/rename |
 | HTTP | `PUT …/tables/{t}/columns:order` | Available | P36 S12 |
 | HTTP | `GET …/jobs` (+ `/{id}`) | Available | P36 S12 — `ColumnRewrite`, `PkIndexRebuild` |
 | C# SDK | `DiffAsync/ApplyAsync/ExportAsync/HistoryAsync` | Available | `SchemaOperations.cs` + client tests |
@@ -733,7 +733,7 @@ When you add `Aouda.Schema.Contract` to your project, you get:
 |---|---|---|
 | `SchemaDocument` | `Aouda.Engine.Schema.Models` | Root type for `aouda.schema.json`: `$schema`, `database`, `tables`, `settings`, `extends` |
 | `TableDefinition` | `Aouda.Engine.Schema.Models` | Per-table structure: `columns`, `partitionKey`, `clusterColumns`, `policy`, `durability`, `partitionLevelSecurity`, `authMode`, `permissionDimension`, `rlsResolverName` |
-| `ColumnDefinition` | `Aouda.Engine.Schema.Models` | Per-column: `type`, `primaryKey`, `autoIncrement`, `nullable`, `references`, `encoder`, `default`, `description` |
+| `ColumnDefinition` | `Aouda.Engine.Schema.Models` | Per-column: `type`, `primaryKey`, `autoIncrement`, `nullable`, `references`, `default`, `description` |
 | `PartitionKeyEntry` | `Aouda.Engine.Schema.Models` | Partition key entry: `column`, `function` |
 | `TablePolicyDto` | `Aouda.Engine.Schema.Models` | Table policy: `storageTemperature` |
 | `TableDurabilityDto` | `Aouda.Engine.Schema.Models` | Table durability: `walEnabled`, `replicationFactor` |
@@ -790,7 +790,6 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
 | `UpdateColumnNullable` | No | Nullability flip; nullable→non-null validates that no nulls exist. |
-| `UpdateColumnEncoder` | No | Encoder preference change; may schedule same-type rewrite. |
 | `RenameColumn` | No | Rename by `ColumnId` — metadata only, no segment I/O. |
 | `ReorderColumns` | No | Catalog display order change — metadata only. |
 | `UpdateColumnReferences` | No | FK target (`table.column`) set/clear. |
@@ -814,7 +813,7 @@ Operations that still produce warnings (not changes) in v1:
 | Column type involving Vector / MdVector | Tier 3 blocked | Not supported in v1. |
 | Type change on a partition-key column | Tier 3 blocked | Would reroute rows across partitions. |
 
-> **Note (P36):** Column `type`, `nullable`, `primaryKey`, `references`, rename, encoder, default, and description are first-class applyable changes. Imperative parity: `PATCH /api/databases/{db}/tables/{t}/columns/{c}` (type/nullable/encoder/autoIncrement/references/rename), `PUT …/columns:order`, and declarative apply for default/description/PK/culture. Non-integer `autoIncrement: true` still warns.
+> **Note (P36):** Column `type`, `nullable`, `primaryKey`, `references`, rename, default, and description are first-class applyable changes. Imperative parity: `PATCH /api/databases/{db}/tables/{t}/columns/{c}` (type/nullable/autoIncrement/references/rename), `PUT …/columns:order`, and declarative apply for default/description/PK/culture. Non-integer `autoIncrement: true` still warns.
 
 Always inspect `SchemaDiffResult.Warnings` after a diff, especially before significant schema migrations. Warnings indicate intent/reality gaps that the apply pass will silently skip.
 
@@ -845,7 +844,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `TablesDropped` | Count of `DropTable` changes |
 | `ColumnsAdded` | Count of `AddColumn` changes |
 | `ColumnsDropped` | Count of `DropColumn` changes |
-| `ColumnsAltered` | Count of column-level alteration types (`UpdateColumnAutoIncrement`, type/nullable/encoder/references/default/description, rename, reorder, PK, …). |
+| `ColumnsAltered` | Count of column-level alteration types (`UpdateColumnAutoIncrement`, type/nullable/references/default/description, rename, reorder, PK, …). |
 | `PoliciesUpdated` | Count of `UpdatePolicy` changes |
 | `DurabilitiesUpdated` | Count of `UpdateDurability` changes |
 | `OptionsUpdated` | Count of `UpdatePartitionLevelSecurity` + `UpdateAuthorizationOptions` changes |
@@ -902,7 +901,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer columns. Allowed values: `true`, `false`. On ordinary insert the column **must be present** in the row (and in a named-mutation `values` template); send `0` to auto-generate. Omitting it is `400 Missing required column`, not auto-generate — see [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows) (BL-429). |
 | `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. Allowed values: `true`, `false`. |
 | `references` | `references` | `string` | None | Foreign key reference in `"table.column"` format. |
-| `encoder` | `encoder` | `string` | None | Optional `EncoderPreference` name (e.g. `String_Dict`). Omit = Auto. |
+| ~~`encoder`~~ | — | — | — | Removed (**BL-768, next train**): it named an encoder preference that changed nothing once columns chose an encoding per vector. A schema file that still carries it applies; the key is ignored, as any unknown key is. |
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |

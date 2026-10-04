@@ -18,6 +18,17 @@ Public, user-facing release notes. Engine phase status lives in the server
   fails its reads with a corruption error instead of being returned as wrong values. See [Storage](guides/storage.md#213-operations-and-observability).
 - **`AVG` without `groupBy` is answered from the segments' statistics (BL-807).** The same answer as before, without reading
   every row of the column.
+- **A schema change's validation reads the table as one snapshot (BL-819).** Adding a primary key or a `NOT NULL`, or narrowing
+  a column's type, checks the existing rows through the same read path as queries. A write landing during the check could
+  before make it refuse a key that was unique ("duplicate primary-key value"); it no longer can.
+- ⚠️ **The column `encoder` option is gone (BL-768).** It named an encoder preference that has changed nothing since columns
+  choose an encoding per vector. `PATCH …/columns/{c}` no longer takes it (a request carrying only `encoder` is a `400`),
+  column details no longer report it, and a schema file that still carries it applies with the key ignored. `@aouda/client`
+  drops it from its types.
+- **Removed: `stats.distinctServedFromPartitionMetadata`** on query responses, which no server has set since the
+  partition-directory `DISTINCT` was retired; and the `.NET`-only `PartitionOptions.LateArrivalPolicy` /
+  `LateArrivalThreshold` (BL-762), which did nothing — a late row is flushed like any other. The metrics endpoint's
+  `timeSeries` object keeps only `manifestsRead`, and `partitioning` loses the `autoModePartitions` counter that was always 0.
 
 ## 0.2.0 — 2026-09-30
 

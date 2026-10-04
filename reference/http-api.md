@@ -1076,7 +1076,7 @@ There is **no HTTP route that registers a definition** and **no inventory list**
 
 | Field | Notes |
 |---|---|
-| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Directory-answerable PK distinct sets `stats.distinctServedFromPartitionMetadata` (omitted when false). |
+| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Answered on the scan; the never-set `stats.distinctServedFromPartitionMetadata` flag is gone from the response (**ColumnarRead2 S04, next train**). |
 | `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
 | `freshness` | Declared on the named query: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Budget-only edits do not fire `named_query_body_changed`. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). |
 
@@ -1800,7 +1800,6 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
 | `primaryKeyOrder` / `partitionKeyOrder` / `clusterOrder` | number? | 1-based position in the respective key; omitted when not part of it |
 | `partitionFunction` | string? | Partition function, when the column is part of a partition key |
 | `reference` | object? | Foreign-key target (`targetTable`, `targetColumn`, `source`) |
-| `encoder` | string? | Explicit encoder; omitted when `Auto` |
 | `precision` / `scale` | number? | A `Decimal(p,s)` column's declaration; omitted for every other column (**ColumnarCore S13, 0.2.0**) |
 
 **Why `id` matters.** Storage, the write-ahead log and engine diagnostics identify columns by id, not
@@ -2036,7 +2035,9 @@ Add a column to a table.
 
 #### `PATCH /api/databases/{db}/tables/{name}/columns/{columnName}`
 
-Rename a column.
+Alter a column: `type`, `nullable`, `autoIncrement`, `references`, and/or `newName` (rename) — at least one, or `400`. The
+`encoder` field is gone (**BL-768, next train**): it changed nothing since columns choose an encoding per vector, and a
+request carrying only `encoder` is now refused as having nothing to alter. The example renames a column.
 
 **Request:**
 

@@ -283,7 +283,7 @@ These fields exist on the definition. They were missing from this page.
 
 **`count: true`.** The response includes `totalMatches` (HTTP; omitted when the definition has no `count`) so a footer can render "1–25 of 412" from one round trip. Subscribe snapshots set `total_matches` on `snapshot_complete`. Count **ignores** limit/offset. Apply rejects a count whose cost is not bounded (`NAMED_QUERY_COUNT_UNBOUNDED`) — joins, `distinct`, or a partitioned table whose WHERE does not cover every partition key with a **required** `eq`/`in`. `POST …/query/count` stays **404** on the data plane.
 
-**`distinct: true`.** Exists. Subscribe refuses it. When every distinct column is a raw partition key, the predicate touches only partition keys, at least one partition key is constrained by `eq`/`in`, and the partition directory is complete and under 10 000 tuples, the engine answers from directory metadata with **zero segment scan**. `stats.distinctServedFromPartitionMetadata` is `true` on that path (omitted when false). That is the "which sources exist for this ticker?" query. Full rule: [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule).
+**`distinct: true`.** Exists. Subscribe refuses it. It is answered on the scan, which skips row groups from their statistics; the partition-directory answer is retired (a directory outlives the rows deleted from it), and with it the `stats.distinctServedFromPartitionMetadata` flag (**ColumnarRead2 S04, next train**). That is the "which sources exist for this ticker?" query. Full rule: [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule).
 
 ---
 
