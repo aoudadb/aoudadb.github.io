@@ -583,6 +583,14 @@ Refusals now name **which class of work** was refused and why. A `503` may say a
 
 Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed the class ceiling is refused, where it previously succeeded while holding far more memory than it had reserved. Both are the same typed retryable `503`.
 
+Two more join them in the next train (**BL-817, BL-776, next train**). A `DELETE` or `UPDATE` whose matched rows do not fit the read
+budget is refused with the same `503` / `MEMORY_BUDGET_EXCEEDED` and changes nothing — it used to hold every matched row, charged to
+nothing (691 MB for a 300,000-row delete under a 64 MB budget that refused the same `SELECT`); narrow the predicate and delete or
+update in pieces. And `POST …/materialized-queries/{name}/query` is held to `MaxResultRows` and the read budget like every other
+read; page a large result through `/query` with a filter and a limit. Embedded hosting (`Advisory`) records both and refuses
+neither. The cold-metadata figure in `/server/memory` now also counts the read path's segment handles (each cold segment's footer,
+page indexes and deletion mask), which its eviction rung releases under pressure (**BL-816, next train**).
+
 ## Which rungs are actually running
 
 Every rung above has a config key, and the server prints the ladder **as it is actually in force** in
