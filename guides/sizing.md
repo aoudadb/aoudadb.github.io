@@ -522,6 +522,25 @@ Set `memoryRowCap` / `targetMemoryBytes` on the result table via
 Full treatment, including the amplification counters that say what a query costs:
 [Materialized queries](materialized.md#where-a-materialized-querys-result-lives).
 
+## Memory is granted before work starts, and small writes have a reserve (**WorkloadCore S06, next train**)
+
+Work asks for memory before it starts — at least what it needs, at most what it can use — and waits in its class's queue if it
+does not fit, instead of being refused part-way. A client's insert or upsert waits at most one 10-second sampling tick, and
+then is refused with a `Retry-After` that the queue estimates. `grants` on `GET /api/server/memory` shows what is waiting.
+
+The top **`max(32 MB, 3 %)` of the budget** (at most an eighth of it) is **held** for small writes (≤ 64 KiB) and sign-ins.
+Everything else is admitted against the budget less that reserve, so a budget of 512 MB gives ordinary work 480 MB. Size for
+it: on a 256 MB budget the reserve is 32 MB.
+
+**A database is no longer held to its share.** Each database's ceiling is the server's budget unless you capped it (a
+database budget, or `MaxMemoryShare`); its weighted share (`MemoryWeight`) decides who gives memory back first when the server
+needs it — the database furthest over its share. Elastic share lending, and `Aouda:Memory:ElasticShares` /
+`ElasticShareActivityWeighted`, are removed.
+
+**The budget is the deployment's.** It is never lowered in-process any more: a host running short of memory, RSS above the
+budget or a full heap do not shrink it (the 512 MB host-availability floor and "tightening" are gone). Give the server a
+container memory limit and it derives its budget from that grant.
+
 ## What happens when the GC heap gets tight
 
 Aouda watches the managed heap separately from its own memory ledger, because they are different
@@ -534,25 +553,12 @@ keeps most of that memory committed after sweeping it. Read as pressure, it thro
 being fast: on an 8 GB box with ~800 MB live, admission refused a 64 KB rebuild for minutes. The
 `lastGen2LiveBytes` field on `GET /api/server/metrics` is the closest external reading.
 
-**With ingest pacing off (the default), sustained heap pressure refuses writes**, as it has since the
-memory-ceiling work: a retryable `503` naming the heap figure and its limit, with a 30-second
-`Retry-After`.
-
-**With `Aouda:Memory:HotPacingEnabled=true`, it paces first.** The first sustained observation starts
-a grace window — up to 60 seconds — in which the engine drains the hot tier harder and slows the
-writer instead of refusing. If the heap recovers inside the window, no write is ever refused. If it
-does not, the refusal happens exactly as before.
-
-⚠️ **Except within 10 % of the heap hard limit, where no grace is granted at all.** Above **90 %** of
-the hard limit the engine refuses straight away rather than spending the remaining room on a wait —
-there is not enough headroom left for pacing to plausibly recover it, and a wait there buys a crash
-instead of a `503`.
-
-⚠️ **The grace is deliberately unavailable with pacing off.** Refusing is what stops a heap-exhausted
-process dying, and it is only safe to defer while something else is bounding how fast memory arrives.
-
-`heapPressureGraceExpired` on the performance counters is the number to watch: it counts the times
-pacing was given its window and the heap stayed tight anyway.
+(**WorkloadCore S06, next train**) **Heap pressure no longer refuses writes.** When the live heap passes 80 % of the GC hard
+limit, the memory broker is woken and frees memory — caches first, then hot segments, then, if nothing else is left, it takes
+back memory granted to background work that can checkpoint and resume. Writes are not refused for the heap: the 503 with a
+30-second `Retry-After`, the 60-second grace window it had under `HotPacingEnabled`, and `heapPressureGraceExpired` are gone.
+Sustained heap pressure (90 % for three samples) still slows a bulk load's row loop and holds back a post-load rebuild, as
+before. The exhaustion watchdog's last line (98 %) is unchanged.
 
 ### The state between "within budget" and "terminate"
 
@@ -585,8 +591,8 @@ threshold you choose; a log line is gone from a polling system the moment it scr
 
 ## When ingest outruns flush
 
-Writes first delay, then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` or `WAL_CAPACITY_EXCEEDED` and `Retry-After`. Retry; the process stays up. After flush and checkpoint, WAL segments below every consumer slot are deleted. The local point-in-time-recovery window is that same bound — **write volume** since the last backup (`MaxSlotWalKeepBytes`), not a number of days; enable WAL archiving to recover further back. Studio Inspect shows bytes on disk versus reclaimable, and `earliestRecoverablePitrPosition`. A database that cannot open (including leftover `insert.wal`) is **quarantined** — inspect or run `aouda wal convert`, then drop if you do not need it. The rest of the server keeps serving.
-Refusals now name **which class of work** was refused and why. A `503` may say a class hit its own entitlement while the process as a whole still had room — that is a different problem from the process being full, and it names a different fix: run less of that kind of work concurrently, raise that class's entitlement, or set `Aouda:Memory:PerClassAdmissionEnabled=false` to admit against the process ceiling alone. `reservedByClass` on `GET /api/server/memory` says who was holding the budget when it happened.
+Writes that do not fit **wait** for memory — before they take any lock, for up to one 10-second sampling tick — and then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` and a `Retry-After` estimated from the queue they waited in (**WorkloadCore S06, next train**), or `WAL_CAPACITY_EXCEEDED` and `Retry-After` from the WAL. Retry; the process stays up. Small writes (≤ 64 KiB) and sign-ins are admitted from a held reserve whatever else holds the memory. After flush and checkpoint, WAL segments below every consumer slot are deleted. The local point-in-time-recovery window is that same bound — **write volume** since the last backup (`MaxSlotWalKeepBytes`), not a number of days; enable WAL archiving to recover further back. Studio Inspect shows bytes on disk versus reclaimable, and `earliestRecoverablePitrPosition`. A database that cannot open (including leftover `insert.wal`) is **quarantined** — inspect or run `aouda wal convert`, then drop if you do not need it. The rest of the server keeps serving.
+(**WorkloadCore S06, next train**) A refusal no longer names a **class** that hit its own entitlement: the per-class ceilings and `Aouda:Memory:PerClassAdmissionEnabled` are removed. A refusal now says how long the request waited, what was queued ahead of it, and the budget less the held reserve it was measured against. `reservedByClass` on `GET /api/server/memory` still says who was holding the budget, and `grants` what was waiting.
 
 Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed the class ceiling is refused, where it previously succeeded while holding far more memory than it had reserved. Both are the same typed retryable `503`.
 (**ColumnarRead, next train**) A large scan's decode buffers and a GROUP BY's, top-K's or `DISTINCT`'s growing state are now

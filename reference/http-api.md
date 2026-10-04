@@ -2757,7 +2757,7 @@ Startup probe. 200 when bootstrap is complete (`DatabaseManager` initialized). 5
 
 Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane).
 
-The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, next train** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, next train**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, an active budget tightening, or a database holding more than 110 % of its grant.
+The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, next train** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, next train**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, or a database holding more than 110 % of its ceiling. (**WorkloadCore S06, next train**: the budget is never tightened in-process any more, so there is no "tightening" verdict; a database's ceiling is the server's budget unless it has a hard cap.)
 
 **Operator wait (create / schema apply):** wait for `GET /ready` 200 **and** `GET /api/databases/{name}` 200 with `state=Active`. After `DELETE`, GET `{name}` 404 means the database is gone from serving.
 
@@ -2900,19 +2900,47 @@ metadata, catalog shards and cold sparse-PK entries by dropping them (they are r
 demoting them — and the broker frees those bytes, cheapest first, when a database's ledger passes its target, when the
 process's does, or when the live heap passes 80 % of the GC hard limit. **A reservation is refused when
 `reservedBytes + chargedBytes − releasableBytes` would pass the ceiling**: a full cache makes room instead of refusing work; a
-full queue, which nothing can release, refuses it. While the process is tightening its budget under host pressure
-(`tighteningActive`), the tightened ceiling applies to `reservedBytes` alone (**WorkloadCore, next train**).
+full queue, which nothing can release, refuses it. Ordinary work meets the ceiling **less the held reserve** (below)
+(**WorkloadCore S06, next train**: the budget is no longer tightened under host pressure, and `tighteningActive` is removed).
 
 | Field | Where | Type | Meaning |
 |---|---|---|---|
 | `chargedBytes` | top level, per database | integer | Consumer charges at the last sample — at the top level, every database's. |
-| `chargedByConsumer` | top level, per database | object | `chargedBytes` by consumer: `PageCache`, `BloomFilters`, `SegmentHandles`, `ColdMetadata`, `CatalogShards`, `HotSegments`, `ChangeRings`, `MqUpdateQueues`, `SparsePkIndex`, `L3KeyMap`, `GraphVectorBuffers`, `HraScratch`, `BulkLoadQueues` (bulk-load slices queued past a refused reservation), `PasswordHashing` (password hashes running now: Argon2id holds 64 MiB per sign-in or password set while it runs), `UnitWorkingMemory` (a unit of work's own working memory while it runs: a cold segment's keys read back to index it, an update's copy of the table's buffered rows; in the ledger, and not yet counted when a reservation is decided) (both **WorkloadCore, next train**). Zero entries are omitted. |
+| `chargedByConsumer` | top level, per database | object | `chargedBytes` by consumer: `PageCache`, `BloomFilters`, `SegmentHandles`, `ColdMetadata`, `CatalogShards`, `HotSegments`, `ChangeRings`, `MqUpdateQueues`, `SparsePkIndex`, `L3KeyMap`, `GraphVectorBuffers`, `HraScratch`, `BulkLoadQueues` (bulk-load slices queued past a refused reservation), `PasswordHashing` (password hashes running now: Argon2id holds 64 MiB per sign-in or password set while it runs), `UnitWorkingMemory` (a unit of work's own working memory while it runs: a cold segment's keys read back to index it, an update's copy of the table's buffered rows; counted when a reservation is decided since **WorkloadCore S06**) (both **WorkloadCore, next train**). Zero entries are omitted. |
 | `ledgerBytes` | top level, per database | integer | `reservedBytes + chargedBytes`: the whole ledger. |
 | `releasableBytes` | top level, per database | integer | What the consumers could release now by dropping cached data or demoting (re-read from disk on next use), at the last sample. Part of `ledgerBytes` (it may cover a loaded hot segment's reservation). |
 | `liveHeapAtLastGen2Bytes` | top level | integer | The live heap of the most recent gen-2 collection (below), recorded when it ended (**WorkloadCore, next train**). `0` before the first. |
 | `ledgerAtLastGen2Bytes` | top level | integer | `ledgerBytes` as it stood when that collection ended, consumer charges sampled then. |
 | `untrackedAtLastGen2Bytes` | top level | integer | `liveHeapAtLastGen2Bytes − ledgerAtLastGen2Bytes`, never negative: the live heap the ledger did not hold, both read at the same collection. |
 | `lastGen2Index` | top level | integer | The collection's index (`runtime.lastGen2.index`), so a reader can keep one row per collection. |
+
+#### Grants, the queue and the held reserve (**WorkloadCore S06, next train**)
+
+Work asks for memory **before it starts**. A request that does not fit waits in its class's queue — first in, first out
+within a class; `Interactive`, `Streaming`, `Ingest`, `Background`, `Maintenance` in that order — and is served the moment
+memory frees. A client's insert or upsert is admitted this way **before it takes any lock**: one that does not fit waits up
+to one sampling tick (10 s), and is then refused with **503 `MEMORY_BUDGET_EXCEEDED`** and a `Retry-After` the queue
+estimates (the bytes ahead of it over the rate the queue has been served at, never less than it already waited) — never a
+constant. A write that runs under a lock (an update, a write inside a named-query batch) is decided at once and never waits.
+
+The top `max(32 MB, 3 %)` of each database's and the server's budget (at most an eighth of it) is a **held reserve**: small
+(≤ 64 KiB, `Aouda:Memory:SmallRequestBytes`) `Interactive` and `Ingest` writes, and any small request on the auth database,
+are admitted from it when everything else is full. Nothing else draws on it, so the write and the token refresh that let a
+client recover are admitted while the rest waits.
+
+| Field | Where | Type | Meaning |
+|---|---|---|---|
+| `grants.waiting` | top level | object | Requests waiting for memory now, per class (non-zero only). |
+| `grants.queuedBytes` | top level | object | The minimums they wait for, per class. |
+| `grants.served` / `grants.timedOut` / `grants.revoked` | top level | integer | Since start: waiters served from the queue; refused after their wait (each a 503 with the queue's `Retry-After`); grants the memory broker took back because the heap was over its line. |
+| `grants.serviceRateBytesPerSecond` | top level | number | The rate the queue has been served at recently — what its `Retry-After` estimates divide by. |
+| `reserve.bytes` / `reserve.heldBytes` / `reserve.admissions` | top level | integer | The server's held reserve, what small writes hold from it now, and how many were admitted from it since start. |
+
+**Removed** (**WorkloadCore S06, next train**): `tighteningActive`, `admissionDenials`, `admissionThrottles`,
+`heapPressureDenials`, `ceilingCountedByClass`, and per database `elasticCeilingBytes`. A database's `governedCeilingBytes` is
+the server's governed budget unless it has a hard cap (a budget it was registered with, or `MaxMemoryShare`);
+`nominalShareBytes` is its weighted share, which is now the memory broker's weight — when the server needs memory back, it
+is taken first from the database furthest over its share — and no longer a limit.
 
 Two fields **changed meaning**:
 

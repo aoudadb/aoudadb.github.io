@@ -288,7 +288,7 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 |---|---|---|
 | `Aouda:Cpu:ConfiguredCores` | unset | Overrides CPU detection. Set it when the process is co-tenanted and no cgroup quota is available — see [Sizing](sizing.md#sizing-cpu). |
 | `Aouda:Cpu:OversubscriptionFactor` | `2.0` | Ceiling on total granted parallelism as a multiple of schedulable cores. |
-| `Aouda:Memory:PerClassAdmissionEnabled` | `true` | Per-class entitlements. Off admits against the process ceiling alone, which is the pre-governance behaviour. Always off under `Advisory` enforcement (embedded, `aouda dev`). |
+| ~~`Aouda:Memory:PerClassAdmissionEnabled`~~ | — | **Removed (WorkloadCore, next train)**: the per-class ceilings are gone; work asks for memory before it starts and waits in its class's queue. Was: | Per-class entitlements. Off admits against the process ceiling alone, which is the pre-governance behaviour. Always off under `Advisory` enforcement (embedded, `aouda dev`). |
 | `Aouda:Memory:ForegroundQuiescenceWindow` | see `MemoryBudgetSection` | How long after the last foreground unit finishes before background work returns to full rate. |
 | `Aouda:Memory:PageCacheEnabled` | unset | Unset: **on in every resource mode**, `Constrained` included, within its `MaxPageCacheBytes` (`T12`) share (**ColumnarRead, next train** — it was off in `Constrained`, the mode every database starts in). `false` turns it off in every mode; `true` is the default said out loud. |
 | `Aouda:Memory:ResourceMode` | unset | Pins the resource state instead of measuring it. Normally leave unset. |
