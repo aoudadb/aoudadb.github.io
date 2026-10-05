@@ -70,7 +70,9 @@ The strong arguments:
 | Identity of a definition | Unique name in `aouda.schema.json` | `^[A-Za-z][A-Za-z0-9_.]*$`. Same string on the wire, on disk, and in export. |
 | Versioning | Explicit names | `quoteByTicker` and `quoteByTickerV2` are two entries. |
 | Removal | Omit the name | Destructive `RemoveNamedQuery`. There is no `dropNamedQueries`. |
-| `select` / `selectExpr` | **Required** | `*` is refused (`NAMED_QUERY_PROJECTION_STAR`). |
+| `select` / `selectExpr` | **Required** — except beside `aggregates` | `*` is refused (`NAMED_QUERY_PROJECTION_STAR`). A definition with `aggregates` / `groupBy` answers its keys and aggregates and takes no `select` (**BL-796, next train**). |
+| `aggregates` / `groupBy` / `perKey` | Optional | As on `/query`, checked at apply under its rules; subscribe refuses them ([HTTP API, named-query definition](../reference/http-api.md)) (**BL-796, BL-801, next train**). |
+| `joins[i].where` | Optional | A filter on the joined table, ANDed with the caller's row security there (**BL-818, next train**). |
 | `limit` | Must be capped in the definition | Uncapped `$limit` fails schema apply. |
 | Parameter in identifier position | Illegal | Table, column, operator, sort, projection. |
 | Identity as a parameter | Illegal | `NAMED_QUERY_IDENTITY_PARAM` at apply. |

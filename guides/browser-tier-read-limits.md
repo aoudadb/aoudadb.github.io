@@ -142,13 +142,13 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ---
 
-## No `groupBy` / ad-hoc aggregates on the data plane
+## Aggregates on the data plane: declared in the definition, not built by the caller
 
-**Rule.** A named query is a parameterized `QueryMessage`. There is no `groupBy` field on that template. `.Aggregate(...)` on the fluent client is an **engine / admin** API.
+**Rule.** A named query is a parameterized `QueryMessage`. A definition may declare `aggregates` / `groupBy` (and `perKey`), checked at `schema/apply` under `/query`'s rules ([HTTP API](../reference/http-api.md)); the browser passes parameters, never a new aggregate (**BL-796, next train** — until then these keys were silently dropped and the definition answered plain rows). Subscribe refuses an aggregate or per-key definition. `.Aggregate(...)` on the fluent client stays an **engine / admin** API.
 
-**Why.** Unbounded cost. Pre-aggregation belongs on a materialized query (`D-24`).
+**Why.** The cost is the definition's, reviewed at apply — not the caller's.
 
-**Instead:** an `aggregate` MQ whose public columns are the declared `outputName`s, then a named query over that result table. For a **count of matches** on a paged list, set `count: true` on the named query and read `totalMatches` (see below) — that is a count, not a `groupBy` DSL.
+**Instead, when the answer must stay current as rows arrive:** an `aggregate` MQ whose public columns are the declared `outputName`s, then a named query over that result table (`D-24`). For a **count of matches** on a paged list, set `count: true` on the named query and read `totalMatches` (see below) — `count: true` beside `aggregates` is refused.
 
 ---
 

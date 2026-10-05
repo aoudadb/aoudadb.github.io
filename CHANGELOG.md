@@ -58,6 +58,31 @@ Public, user-facing release notes. Engine phase status lives in the server
   `LateArrivalThreshold` (BL-762), which did nothing — a late row is flushed like any other. The metrics endpoint's
   `timeSeries` object keeps only `manifestsRead`, and `partitioning` loses the `autoModePartitions` counter that was always 0.
 
+- ⚠️ **Partition directory names are sanitised the same way on every platform.** A partition-key value containing `:` `*` `?`
+  `"` `<` `>` `|` `\` or a control character became a directory of that name on Linux and an underscore on Windows; the Windows
+  rule now applies everywhere. A **Linux** data directory written by an earlier build with such a character in a partition key is
+  not migrated: a partition-scoped read would miss those rows. Re-load such a table after upgrading.
+- **The embedded API refuses a string with an unpaired UTF-16 surrogate (BL-772)**, as HTTP's JSON parsing already did:
+  `InsertRowsAsync`, `UpsertRowsAsync`, `UpdateRowsAsync` and `BulkLoadAsync` throw `ArgumentException` naming the row and column.
+  Such a string has no UTF-8 form; it was stored as U+FFFD and could make a page's bounds skip a matching row. A valid surrogate
+  pair (an emoji) is unaffected.
+- **Rows are no longer lost or hidden after a restart beside coalesced, bulk-loaded or vector segments (BL-849).** In those
+  layouts the write buffer's row ids could restart at the wrong number: rows inserted after a restart were not returned until they
+  flushed, and rows still only in the write-ahead log could be lost in a crash (beside a bulk-loaded segment, or after a vector
+  flush ran ahead of the table's own). Fixed; a branch's own inserts after its parent's coalesce are read as well.
+- **An UPDATE racing a read no longer shows the old row beside the new one**, when the updated cold segment left memory between
+  the read's two steps.
+- **A range query no longer misses rows of a hot segment after a column was made derived (BL-770)**: the segment's statistics
+  kept the old values.
+- **The latest (or first) row per key, read without a materialized query, no longer sorts the table (BL-806).** `perKey` (and
+  `LatestPerKey` / `FirstPerKey` in the SDKs) keeps one row per key as it scans: TSBS's `lastpoint` over 1 M rows went from
+  3.2 s and 1.4 GB of allocation a query to ~36 ms. Same answers. A materialized query is still the way to keep it current for
+  subscribers.
+- **String filters (`=`, `IN`, `LIKE`, ranges) and string `groupBy` keys read cold pages without building a string per row.**
+  A contains-`LIKE` over a ClickBench column went from ~120 ms to ~19 ms. Same answers.
+- **An exported schema document uses LF line endings on every platform**, so the same schema exports as the same bytes on Linux
+  and Windows.
+
 ## 0.2.0 — 2026-09-30
 
 **.NET 10, `Decimal(p,s)` columns, and writes that travel and land as columns.** Server **0.2.0**, `Aouda.Client` **0.2.0**, `@aouda/client` **0.2.0**, Studio **0.0.26** (pin stays **0.1.25** until Studio moves). See [Compatibility](clients/compatibility.md).

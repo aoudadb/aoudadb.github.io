@@ -534,8 +534,7 @@ Key implementation anchors:
    - match found -> execute on result table and capture routed decision,
    - no match or unsupported predicate projection -> record not-routed reason and direct-scan.
 4. Observability:
-   - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`,
-   - `MaterializedQueryMatchTimeNs`.
+   - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`.
 5. Tests:
    - `MaterializedQueryAutoRoutingTests.cs`
    - `MaterializedQueryMatcherTests.cs`.
@@ -1117,7 +1116,7 @@ database's share.
 
 1. **It writes through first.** The working set is written into the query's own shadow result table
    and re-read on demand. This buys a **constant factor** — roughly 3× on an OHLC-shaped rollup —
-   not an unlimited budget. `MqBuildSpillReadBacks` growing tells you a build is paying for having
+   not an unlimited budget. `MqBuildRunBytesWritten` growing tells you a build is paying for having
    written through; if it grows a lot, raise the ceiling.
 2. **If that is still not enough, it retires one query at a time, largest first**, and re-checks.
    Dropping the biggest is often enough for the rest to fit.
@@ -1172,8 +1171,6 @@ running now or already dead.
 |---|---|
 | `MqRebuildBytesReserved` | Memory charged for a scan-fed rebuild's accumulators. |
 | `MqRebuildSinksRetiredByBudget` | Queries retired because the group could not fit. Non-zero means someone got an `Error`. |
-| `MqBuildSpills` / `MqBuildSpilledGroups` | How often, and how much, a build had to write through **to its shadow result table**. |
-| `MqBuildSpillReadBacks` | Groups re-read after writing through — the cost of having spilled. |
 | `MqBuildPartitioningAdopted` | Builds that split their group space rather than retiring the query. |
 | `MqBuildPartitionsEvicted` | Partitions written out to disk scratch under budget pressure. |
 | `MqBuildRunsWritten` / `MqBuildRunsFolded` | Runs written to a build's spill file, and read back at publish. |
@@ -1387,7 +1384,7 @@ Monitor first:
   - `SubscriptionUpdatesEnqueued`, `SubscriptionUpdatesProcessed`, `SubscriptionDroppedUpdates`, `SubscriptionUpdateErrors`
   - `SubscriptionQueueDepth`, `SubscriptionLagMs`
 - Routing outcomes:
-  - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`, `MaterializedQueryMatchTimeNs`
+  - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`
 - Per-query cost — `amplification` on the status route, not a counter. `writeAmplification` and
   `readAmplification`, plus the totals behind them. See [2.11d](#amplification).
 - What the results are holding in RAM — `pinnedHotBytes` on `GET /api/server/memory` is the

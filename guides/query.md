@@ -486,19 +486,18 @@ Expected checks:
 What to monitor first:
 
 - Query throughput and latency: `Perf.QueryApiCalls`, `Perf.QueryApiMs`.
-- Data-temperature scan mix: `Perf.HotScanRows`, `Perf.ColdScanRows`, `Perf.DeltaRowsQueried`.
+- Data-temperature scan mix: `Perf.HotScanRows`, `Perf.ColdScanRows`.
 - Decode pressure: `Perf.DecodeCount`, `Perf.DecodeMs`.
-- Pruning effectiveness: `Perf.PagesPrunedByMinMax`, `Perf.PagesPrunedByJoint`, `Perf.SegmentsPrunedFully`, bloom counters.
-- Parallel execution behavior: `Perf.ParallelSegmentScans`, `Perf.ParallelScanMs`, `Perf.ParallelEarlyTerminations`.
+- Pruning effectiveness: `Perf.PagesPrunedByMinMax` (row groups skipped by their statistics), `Perf.SegmentsPrunedFully`, bloom counters.
+- Parallel execution behavior: `Perf.ParallelSegmentScans`.
 
 Quick-answer matrix:
 
 | Question | Practical answer |
 |---|---|
 | Are queries CPU-bound on decode? | Check `DecodeMs`/`DecodeCount` against row volume. |
-| Is pruning helping? | Watch min/max/joint/bloom prune counters over representative traffic. |
-| Are LIMIT queries terminating early? | Track `ParallelEarlyTerminations`. |
-| Are we scanning unexpected cold/delta volume? | Compare `ColdScanRows` and `DeltaRowsQueried` trends. |
+| Is pruning helping? | Watch the min/max and bloom prune counters over representative traffic. |
+| Are we scanning unexpected cold volume? | Compare `ColdScanRows` and `HotScanRows` trends. |
 | Are query API calls increasing but rows flat? | Inspect query shape defaults (limit/order/filter) and client behavior. |
 
 ## 2.14 Troubleshooting by symptom
