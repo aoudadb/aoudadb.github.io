@@ -1224,6 +1224,21 @@ their provenance (`lastRebuildSource`) reads `DeferredMemoryPressure`. The engin
 memory recovers, and `:refresh` rebuilds them at once. Retirement, described above, still ends in
 `Error`, because it names one query that cannot fit.
 
+(**BL-785, next train**) The same holds when a [deferred pass](#deferred-loads) is refused memory part-way
+through writing a query. The query is deferred, not rebuilt in the same pass: it stays readable and stale, and later
+passes leave it alone until the retry rebuilds it. A refused rebuild no longer fails the pass for the
+other queries. The retry is tried three times, 30 seconds apart, and then **every 15 minutes until it succeeds**. A
+memory budget held by a running load frees up only when the load stops, and nothing signals that moment.
+
+### After a restart, a query is stale until it is rebuilt (**BL-786, next train**)
+
+When a restart finds no checkpoint it can use for a query's result, it rebuilds the result from the
+source, and the query reports **stale** until that rebuild finishes. If the rebuild is refused memory,
+the query stays stale and readable and is retried like any deferred rebuild. A load in the meantime
+adds its rows but does not make the query current. A stale query is never used to answer a query on
+its source table (automatic routing) and never checkpointed. Before this, a refused rebuild at open
+could leave a query reporting `Ready` and current while missing most of its rows.
+
 ### Only a rebuild from the source clears "stale" (**IngestAtSpeed S03, 0.1.40**)
 
 A query marked stale is missing rows that are not in its result: a load that was deferred for
@@ -1411,7 +1426,12 @@ Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
   result whenever its upstream took writes after the checkpoint. A database without a log restores results only
   after a clean shutdown.
 - The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
-  log is never pruned under it.
+  log is never pruned under it. (**BL-787, next train**) Only checkpoints that still exist and can be folded forward
+  hold it. A query that goes stale, rebuilds or errors has its checkpoint dropped, and from the next round
+  (15 seconds) it holds no log. A checkpoint that falls more than `T28` behind the log head is dropped too, so that
+  query is rebuilt at the next startup instead. That is the bound every other WAL slot has. Before, a stale query's
+  old position kept the whole log until the query was dropped, and could fill the WAL to its cap so that every
+  bulk-load commit was refused.
 - A database created before this release has no checkpoints, so it rebuilds its results once, at the first open.
 
 Suggested tuning sequence:

@@ -290,11 +290,11 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
 | `/api/databases/{db}/auth/request-password-reset` | POST | API key (Layer 1) | Request 6-digit OTP emailed to user; always 200 (anti-enumeration) |
 | `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set |
-| `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor. Phone: 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; delete existing factor then re-enroll to replace number |
+| `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor. Phone: 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; delete existing factor then re-enroll to replace number. Needs an `aal2` token, else 403 `AUTH_MFA_STEP_UP_REQUIRED` (**BL-795, next train**) |
 | `/api/databases/{db}/auth/mfa/challenge` | POST | User JWT | Create MFA challenge; sends SMS OTP for phone factors |
 | `/api/databases/{db}/auth/mfa/verify` | POST | User JWT | Submit OTP/TOTP/backup code; returns `aal2` token pair on success |
 | `/api/databases/{db}/auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
-| `/api/databases/{db}/auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
+| `/api/databases/{db}/auth/mfa/factors/{id}` | DELETE | User JWT (`aal2`) | Delete an enrolled MFA factor. A token that is not `aal2` gets 403 `AUTH_MFA_STEP_UP_REQUIRED` (**BL-795, next train**); an operator uses the admin delete |
 | `/api/databases/{db}/auth/admin/users` | GET | API key (`db_admin`) | List app users |
 | `/api/databases/{db}/auth/admin/users` | POST | API key (`db_admin`) | Create user; supports `sendInviteEmail` + `forcePasswordChange` flags |
 | `/api/databases/{db}/auth/admin/users/{id}` | GET/PATCH/DELETE | API key (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
@@ -339,7 +339,7 @@ Content-Type: application/json
 | `email` | User email |
 | `iss` | `{base_url}/api/databases/{db}` |
 | `aud` | Auth database name (e.g. `"_auth"`) |
-| `aal` | Authentication assurance level: `"aal1"` (password only) or `"aal2"` (MFA verified) |
+| `aal` | Authentication assurance level: `"aal1"` (password signin by a user who has an active MFA factor, not yet verified) or `"aal2"` (MFA verified, **or a password signin by a user with no active factor** — **BL-795, next train**) |
 | `tenant_id` | Tenant ID for PLS partition scoping |
 | `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_reader"] }`. Values are always arrays. Scope key for unscoped roles is the auth DB name (e.g. `"_auth"`). |
 | `permissions` | Fine-grained table permissions (if custom role) |
@@ -2594,6 +2594,13 @@ This is **not** “ready for schema apply or traffic”. A database can be `Drop
 Readiness probe. 200 when `DatabaseManager` is initialized and **critical** components (catalog, WAL) are healthy. 503 otherwise (body includes `ready: false` and `reason`).
 
 `/ready` does **not** fail because an operator database is `Creating` or `Dropping` — that would take the whole node out of a load balancer for a long drop. Per-database readiness is `GET /api/databases/{name}` (`state=Active`) and `/health/detailed`.
+
+The `memory` component is critical too. Any of these makes `/ready` return 503: the managed heap at 75 % or more of its limit,
+the budget tightened below its grant, or a database holding more than 110 % of what it was granted. A database that is
+borrowing unused headroom is judged against its **elastic grant**, not its nominal share, so borrowing alone never fails
+readiness (**BL-788, next train**). Before that, a database inside its grant could hold `/ready` at 503 for as long as it
+borrowed. The `reason` names the database, its usage and its grant, and the `memory` component's details carry them as
+`overBudgetDatabase`, `overBudgetUsedBytes` and `overBudgetGrantBytes`.
 
 Use as a Kubernetes `readinessProbe`.
 
