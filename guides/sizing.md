@@ -552,7 +552,8 @@ run one at a time when it has no more, and a flush charges the page builders it 
 the budget. Recovery after a crash waits up to 10 s for its replay window rather than quarantining the database at once.
 
 (**WorkloadCore S09, next train**) **Materialized-query maintenance asks too** (BL-859). Each maintenance unit — a queued apply, an ingest-fed
-drain, a deferred pass — asks for its grant (class Background) before it takes its queries' locks, and waits in the queue;
+drain, a deferred pass — asks for its grant before it takes its queries' locks, and waits in the queue (a queued apply in the
+`Streaming` class, ahead of waiting loads whose memory its backlog holds; a load's drain or pass in `Background`);
 it is never refused part-way through an apply. A load's maintenance that cannot get memory within 30 s is refused before it
 starts, and its queries are left behind and rebuilt. A query's update backlog (up to 64 MiB an update lane) is charged on
 the budget as memory already held.

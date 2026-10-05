@@ -132,7 +132,7 @@ you have not measured.
 | Resident result rows | 262,144 keys per query | — | An aggregate's or latest / first-per-key query's rows kept in RAM between commits, charged to the memory governor, least recently touched evicted (**ColumnarMerge S10, 0.2.0**). |
 | Result checkpoint | every 15 s, and at clean shutdown | — | What a restart restores a current result from (**ColumnarMerge S08, 0.2.0**). |
 | Deferred-pass quiet window | 2 s with no load in flight or committed; 60 s bound | — | (**ColumnarMerge S01, 0.2.0** — a load still streaming no longer counts as quiet.) |
-| Deferred-pass workers; queries an insert writes side by side | the CPU budget | `Aouda:Cpu:ConfiguredCores` (or the probed quota) | Read when the work starts (**ColumnarCore S15, 0.2.0**); was the machine's core count capped at 16 / 8. See [Sizing CPU](sizing.md#sizing-cpu). |
+| Deferred-pass workers | the CPU budget | `Aouda:Cpu:ConfiguredCores` (or the probed quota) | Read when the work starts (**ColumnarCore S15, 0.2.0**); was the machine's core count capped at 16 / 8. An insert no longer writes queries side by side: in-commit maintenance is deleted (**WorkloadCore S09, next train**). See [Sizing CPU](sizing.md#sizing-cpu). |
 
 ---
 

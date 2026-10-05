@@ -1080,7 +1080,8 @@ the end of the load. On an embedded engine with no governor, a load's fold gives
 load in waves instead.
 
 (**WorkloadCore S09, next train**) **Maintenance asks for its memory before it takes a lock** (BL-859). Each maintenance unit — a queued
-apply, an ingest-fed drain, a deferred pass — asks the memory budget for a grant (class Background) before it takes its
+apply, an ingest-fed drain, a deferred pass — asks the memory budget for a grant (a queued apply in the `Streaming` class,
+ahead of waiting loads whose memory its backlog holds; a load's drain or pass in `Background`) before it takes its
 queries' locks, and waits in the queue; it is never refused part-way through an apply. A load's maintenance that cannot
 get memory within 30 s is refused before it starts, and its queries are left behind and rebuilt.
 
