@@ -962,8 +962,8 @@ const finished = await client.materializedQueries.refreshAndWait('active_users_s
 
 **Do not** call `refresh()` for a table you just bulk-loaded with the default
 `postLoadMqBehavior: "auto"` — the engine already accumulated those queries during the load and
-publishes them at commit. The wait is usually short because the work already happened. The bulk-load
-handle can wait on it directly instead (BL-419, 0.1.22):
+brings them current after the commit, in the background. The wait is usually short because the work already happened.
+The bulk-load handle can wait on it directly instead (BL-419, 0.1.22):
 
 ```typescript
 const handle = await client.table('users').bulkLoad(rows);
@@ -972,6 +972,18 @@ const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 20
 // finalStatus: "completed" | "skipped" | "unknown" (terminal — no live session to report from)
 // Throws if the rebuild status reaches "failed".
 ```
+
+(**WorkloadCore S09, next train**) `:commit` itself waits, bounded, for the load's queries to be current, and the handle says how that ended:
+
+```typescript
+const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 30000; 0 = no wait
+loaded.mqStatus;        // "current" | "behind" | "skipped" | "deferred" | "none"; "unknown" from an older server
+loaded.mqFrontierToken; // the lowest frontier among the load's queries, as a consistency token (absent: no query)
+loaded.mqWaitedMs;      // how long :commit waited for them
+```
+
+The load is durable whatever `mqStatus` says; `"behind"` means the queries' maintenance is still running. To read
+them current, read with `loaded.token`, which waits for them.
 
 See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#materialized-query-auto-refresh-after-bulk-load-p31--adr-0036).
 

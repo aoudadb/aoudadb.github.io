@@ -97,12 +97,16 @@ nine queries over it (six aggregates, a latest-per-key, two top-Ns over an aggre
 | 50,000 rows/s | in one of two runs (~40,000 rows/s achieved otherwise) | 67–73 CPU-s | ~0.1 s |
 
 The 50,000 rows/s row is **ColumnarMerge S11 / S11b (0.2.0)**; before it, the same rate was accepted while the
-queries fell ~34 s behind during the burst.
+queries fell ~34 s behind during the burst. (**WorkloadCore S09, next train**) Both rows were measured with the insert maintaining its queries
+inside its own commit, which is removed (next bullet).
 
-- **The queries keep up; the insert pays for them (**ColumnarMerge S11, 0.2.0**).** An insert now maintains
-  its table's aggregates and latest / first-per-key queries inside its own commit, so they are current when it
-  returns — and the insert takes longer by their share. A rate above what the writer plus its queries can do shows
-  up as a lower achieved rate, not as lag; top-Ns, filters and cascades still follow asynchronously. Watch
+- **The queries follow the insert, off its commit (**WorkloadCore S09, next train**).** An insert hands its change batch to its
+  queries' maintainers at the commit and returns; they apply it in the background, so right after an insert its
+  queries may be a moment behind (read with its consistency token to wait for them). A rate above what the queries
+  can keep up with shows up as lag and as a maintenance backlog charged on the memory budget; past the backlog's
+  bound (64 MiB an update lane) a query is marked stale and rebuilt. In 0.2.0 (**ColumnarMerge S11**) an insert
+  maintained its table's aggregates and latest / first-per-key queries inside its own commit: they were current when
+  it returned, and a rate above what the writer plus its queries could do showed up as a lower achieved rate. Watch
   `stalenessMs` on `GET /api/databases/{db}/materialized-queries/{name}` — how old the oldest change the query does
   not yet reflect is (**ColumnarMerge S01, 0.2.0**); `currentLag` is how long it has been behind without a
   break, which under a steady stream grows however promptly each commit is applied.
@@ -113,8 +117,9 @@ queries fell ~34 s behind during the burst.
 - **A load, not a stream, is better done as a bulk load.** Bulk loads fold their rows into the queries
   in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
   rows/s end to end *with the queries current*. (**ColumnarCore S12, 0.2.0**) An `Auto` load into a table of
-  aggregates and latest / first-per-key queries folds them while it writes its segments and returns with them
-  written, so the load itself takes longer and nothing is left to catch up after it.
+  aggregates and latest / first-per-key queries folds them while it writes its segments. (**WorkloadCore S09, next train**) The table's pass
+  writes them from that fold right after the commit, and `:commit` waits for them up to `mqWaitMs` (30 s by default);
+  in 0.2.0 the load returned with them written.
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
   uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
   against each segment once. (**ColumnarMerge S02, 0.2.0**) An id the engine allocates is not
@@ -545,6 +550,12 @@ waiting: a load spills sooner, a build spills, a pass takes smaller waves, a rea
 A bulk load's segment writes take their working memory (about twice the bucket being written) from the load's memory and
 run one at a time when it has no more, and a flush charges the page builders it encodes with — both used to be invisible to
 the budget. Recovery after a crash waits up to 10 s for its replay window rather than quarantining the database at once.
+
+(**WorkloadCore S09, next train**) **Materialized-query maintenance asks too** (BL-859). Each maintenance unit — a queued apply, an ingest-fed
+drain, a deferred pass — asks for its grant (class Background) before it takes its queries' locks, and waits in the queue;
+it is never refused part-way through an apply. A load's maintenance that cannot get memory within 30 s is refused before it
+starts, and its queries are left behind and rebuilt. A query's update backlog (up to 64 MiB an update lane) is charged on
+the budget as memory already held.
 
 **The budget is the deployment's.** It is never lowered in-process any more: a host running short of memory, RSS above the
 budget or a full heap do not shrink it (the 512 MB host-availability floor and "tightening" are gone). Give the server a

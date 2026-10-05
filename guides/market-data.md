@@ -276,7 +276,8 @@ Authorization: Bearer <service-key>
 }
 ```
 
-MQs with `updateMode: "sync"` update before each insert returns. For bulk loads, `updateMode: "async"` + an explicit refresh call after the load completes is more efficient (see [§11 — Bulk loading historical data](#bulk-loading-historical-data)).
+No `updateMode` makes an insert wait for its queries (**WorkloadCore S09, next train**): `sync` and `async` queries alike are applied by
+their maintainer after the commit, so read with the insert's consistency token to see its rows in them. For bulk loads, `updateMode: "async"` + an explicit refresh call after the load completes is more efficient (see [§11 — Bulk loading historical data](#bulk-loading-historical-data)).
 
 ---
 
@@ -698,8 +699,8 @@ Authorization: Bearer <admin-token>
 Bulk-loaded rows bypass **incremental** MQ maintenance by design. What happens instead is decided by
 `postLoadMqBehavior`, and the two settings want opposite follow-up calls.
 
-**`auto` (the default) — accumulate during the load's own pass, publish at commit.** Wait for that
-publication; **do not also call `:refresh`.** A `:refresh` queues behind the publication on the
+**`auto` (the default) — accumulate during the load's own pass, publish after the commit.** `:commit` waits
+for that publication up to `mqWaitMs` (30 s) and says in `mqStatus` whether it finished (**WorkloadCore S09, next train**); wait for it; **do not also call `:refresh`.** A `:refresh` queues behind the publication on the
 server's per-name lock and then re-scans the whole source table, so it buys nothing and costs a
 second full pass.
 

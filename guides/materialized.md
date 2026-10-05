@@ -80,7 +80,8 @@ What is different in Aouda vs many systems:
   difference between the old and new result as ordinary `Insert` / `Update` / `Delete` events on the result table,
   instead of seeing the changed rows only through a later event.
   **A maintained `sum` carries the column's type in update events too (**ColumnarCore S10, 0.2.0**):** an
-  in-commit update event's `sum` of an integer column is an `Int64`, as its insert event and every read already were
+  update event's `sum` of an integer column (the maintainer's event since **WorkloadCore S09, next train**; the
+  insert's in-commit event before) is an `Int64`, as its insert event and every read already were
   (the JSON is the same, `12`), and a `sum` of a `Double` column is a `double` — `3` where it was `3.0`.
 
 - User problem solved:
@@ -179,6 +180,7 @@ If you create a materialized query with standard helpers and no special options:
   - `MaxLag = 1s`
   - `MaxQueueDepth = 10000`
   - `ProcessingBatchSize = 100`
+  - `MaintenanceBacklogMaxBytes = 64 MiB` per update lane (**WorkloadCore S09, next train**)
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -188,9 +190,10 @@ If you create a materialized query with standard helpers and no special options:
 | `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates and GROUP BY, over HTTP too, and latest-per-key in the embedded API only (HTTP and TypeScript: **BL-801**) — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan()` is used ([routing](#routing-a-read-to-a-maintained-result)) |
 | Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
-| `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
+| `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing; past it a query's batches go to its lane's backlog (**WorkloadCore S09, next train**) |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
-| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server (on a table of only aggregates / latest / first per key, written in the load's own commit, before `:commit` returns — `mqRebuildStatus: completed`; the table's deferred pass runs after the commit only if that fold is refused memory, spills to disk, or a query on the table is created or dropped during the load — **ColumnarCore S12, 0.2.0**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
+| `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | `64 MiB` per update lane | (**WorkloadCore S09, next train**) The backlog a lagging query's batches wait in, charged on the memory budget. Only past it is an update lost: the query is marked stale and rebuilt |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background (on a table of only aggregates / latest / first per key, by the table's deferred pass, from the fold the load made as it wrote its segments); `:commit` waits for them up to `mqWaitMs` (30 s) and reports `mqStatus` (**WorkloadCore S09, next train**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
 
 ### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
 
@@ -312,7 +315,7 @@ results are keyed by identity rather than time, and are not clustered.
   - No protocol-level MQ target-kind required.
 - MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
   - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
-  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load is folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — and (**ColumnarCore S12, 0.2.0**) in the ordinary case folded while its segments are written and its queries written before the load returns (`mqRebuildStatus` is `completed` on the handle), the pass after the commit remaining for a load whose fold the memory governor refuses, that spilled, or whose table's queries changed during it; `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`) until it is done. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load is folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written, or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, next train**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`) until it is done. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
   - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
   - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
   - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
@@ -411,9 +414,10 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 - Maintainer:
   - Pattern-specific logic that builds initial state and applies incremental updates.
 - Update mode:
-  - `Async`: enqueue and apply later — except an insert's aggregates and latest/first-per-key queries, which the
-    insert maintains inside its own commit (**ColumnarMerge S11, 0.2.0**; see below).
-  - `Sync`: apply in commit path.
+  - `Async`: enqueue and apply later — every commit, insert included (**WorkloadCore S09, next train**); in 0.2.0 an insert's
+    aggregates and latest/first-per-key queries were maintained inside its own commit (**ColumnarMerge S11**; see below).
+  - `Sync`: fed exactly as `Async` (**WorkloadCore S09, next train**): both are queued at the commit and neither is dropped below the backlog's
+    bound. A `Sync` query only ignores `maxCoalesceMs`.
 - Freshness knob, `maxCoalesceMs` (**ColumnarMerge S10, 0.2.0**):
   - How long an `Async` query's incremental batches may wait so that they are applied together — one write per
     changed group instead of one per commit. `0` (the default) applies each batch as it comes. Staleness is bounded
@@ -421,19 +425,17 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
     `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
     query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
   - Measured: 150 commits of 10 rows into 5 groups wrote 134× fewer result rows with a 500 ms window; at 50,000 rows/s across the nine Equity queries a 100 ms window cut maintenance CPU by a third (111 → 76 CPU-s per million rows) and the worst staleness p99 from 23 s to 13 s.
-- Maintenance inside the insert's commit (**ColumnarMerge S11, 0.2.0**): an insert into a table maintains its
-  aggregate and latest/first-per-key queries **before the insert returns** — the insert's rows are folded once, typed,
-  for all of them, and each query's changed groups are written as one batch. Those queries are current when the insert
-  is acknowledged (their watermark is at the insert's commit), so a read right after an insert sees it. What this costs:
-  the insert takes longer by its queries' share, and inserts into one table are applied to its queries one commit at a
-  time. (**ColumnarCore S15, 0.2.0**) The next commit's own work (plan, key check, commit, log) now overlaps this
-  commit's query writes, while every query still sees the table's commits in commit order, and how many queries an
-  insert writes side by side follows the server's CPU budget ([sizing](sizing.md#sizing-cpu)). What still goes through the asynchronous queue: upserts, updates and deletes; filters and top-N queries;
-  queries over another query's result (cascades); a query with a freshness window (`maxCoalesceMs` above 0 — it asked
-  to coalesce); and a query that is being refreshed at that moment. A write that fails inside the commit leaves the
-  query visibly stale and rebuilds it; the insert itself still succeeds. Measured on the Equity insert benchmark (nine
-  queries, 50,000 rows/s offered, 4 cores): the worst query staleness p99 went from 23 s to about 0.1 s, maintenance CPU
-  from 111 to ~75 CPU-s per million rows.
+- Maintenance off the commit (**WorkloadCore S09, next train**): every commit — insert, upsert, update, delete, merge — hands its change
+  batch to its queries' maintainers at the commit, in the table's commit order and without waiting, and they apply it in
+  the background. A query is current for a reader only once its maintainer has applied every commit the reader may see
+  ([the one rule](#routing-a-read-to-a-maintained-result)), so right after an insert returns its queries may be a moment
+  behind: read with the insert's consistency token (`token` / `X-Aouda-Token`) to wait for them, as for any other write.
+  A lagging query's batches are not dropped: what its queue cannot take waits in a backlog charged on the memory budget,
+  and only past the backlog's bound (64 MiB an update lane) is the query marked behind (`isStale`, reason "Maintenance
+  backlog past its bound …") and rebuilt. Before, an update waited 250 ms for room in a full queue and was then dropped,
+  leaving the query stale until a rebuild (BL-427). This replaces maintenance inside the insert's commit (**ColumnarMerge
+  S11, 0.2.0**), in which an insert wrote its table's aggregate and latest/first-per-key queries before it returned —
+  current at the acknowledgement, paid for in the insert's own latency and in one commit at a time per table.
 - Resident state (**ColumnarMerge S10, 0.2.0**): an aggregate's and a latest/first-per-key query's result rows
   stay in RAM between commits, so a commit takes the rows it changes from memory instead of reading them back
   (up to 262,144 keys per query, charged to the memory governor; a refusal falls back to reading back, correct
@@ -476,8 +478,9 @@ and the cases below are what is provable:
 | **LatestPerKey / FirstPerKey** | `TableQuery.LatestPerKey(orderBy, keys…)` / `FirstPerKey(…)` with the same keys, order column and direction | the predicate only on the keys (filtering anything else does not commute with "the latest row per key"), the table has a primary key the result breaks ties by, and neither the order column nor a key part is a `String`. The rows come back in key order, as from the table (**group-6 review, next train**: a routed page was in the result's own order) |
 | **TopNPerGroup** | — | never routed; read it by name |
 
-**Only a current result is read.** A result is written after its source's commit becomes visible — inside the insert after
-the table's lock, on the update queue later, after a bulk load's publish later still. A query is routed to a result only when
+**Only a current result is read.** A result is written after its source's commit becomes visible — by its maintainer, off the
+commit (**WorkloadCore S09, next train**; an insert used to write some inside its own commit) — and after a bulk load's
+publish later still. A query is routed to a result only when
 the result is `Ready`, not stale, has nothing queued, and has incorporated every WAL record that can change a table's rows up
 to the moment the read starts. A result that is behind is not read — **the table is** — so a routed read never misses a commit
 another read could see. On a database without a WAL nothing is routed (there is no position to prove a result current by).
@@ -651,11 +654,12 @@ Key implementation anchors:
 |---|---|---|---|---|---|
 | `MaterializedQueryDefinition.Type` | enum | none (required) | `LatestPerKey`, `FirstPerKey`, `Aggregate`, `Filter`, `TopNPerGroup` | .NET definition/helper APIs | Only `LatestPerKey`/`Aggregate`/`Filter` are shipped end-to-end |
 | `MaterializedQueryDefinition.ConfigJson` | JSON string | none (required) | type-specific schema | .NET definition/helper APIs | Serialized pattern config |
-| `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | Controls commit-path vs queued maintenance |
+| `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | (**WorkloadCore S09, next train**) No longer changes how updates are fed: both are queued at the commit and never dropped below the backlog's bound. A `Sync` query ignores `maxCoalesceMs` |
 | `MaterializedQueryDefinition.MaxCoalesceMs` (`maxCoalesceMs`) | int | `0` | `0`–`60000` | `aouda.schema.json`; `SetMaterializedQueryMaxCoalesceMsAsync` | **ColumnarMerge S10, 0.2.0.** Batches of an `Async` query coalesce this long before one apply |
 | `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` | .NET definition/helper APIs | Optional override; else defaults by type |
 | `SubscriptionManagerOptions.MaxLag` | `TimeSpan` | `1s` | positive | Engine wiring | Lag threshold/backpressure signal |
-| `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound |
+| `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound; past it, a lane's backlog (**WorkloadCore S09, next train**) |
+| `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | long | `64 MiB` | positive | Engine wiring | (**WorkloadCore S09, next train**) Per update lane; charged on the memory budget. Past it a commit's batch is lost and the query is marked stale and rebuilt |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | int | `100` | positive | Engine wiring | Async queue processing granularity |
 | `TableQuery.WithDirectScan()` | query option | off | enabled/disabled per query | .NET query API | Disables auto-routing for a query |
 | `TablesController includeSystemTables` | query flag | `false` | `true/false` | HTTP table list request | MQ result tables hidden by default |
@@ -1002,8 +1006,8 @@ three times.
 
 ### First: check whether you need to refresh at all
 
-With `PostLoadMqBehavior.Auto` — the default — a bulk load materializes its affected queries
-**during the load's own pass**. You do not need to call refresh, and calling it makes the engine do
+With `PostLoadMqBehavior.Auto` — the default — a bulk load brings its affected queries current
+itself: **during the load's own pass**, and after its commit, in the background (**WorkloadCore S09, next train**). You do not need to call refresh, and calling it makes the engine do
 the work twice. Wait on `MqRebuildCompleted` / `mqRebuildStatus` instead. See
 [Bulk load — do not hand-refresh](bulk-load.md).
 
@@ -1070,10 +1074,15 @@ budget (`Aouda:Cpu:ConfiguredCores` or the probed quota), not the machine's core
 **What the pass holds in memory** (**BL-690, 0.2.0**). The pass folds its jobs in waves of about a million rows,
 and each wave's folded state is now reserved with the memory governor while its queries are written — before, the pass
 reserved nothing, so the governor never saw it. A refusal does not fail the pass: the wave already folded is written,
-and every wave after it is half the size, down to a sixteenth. An `Auto` load's own in-commit fold is reserved the same
-way; when it is given up (refused, or a bucket spilled) its state and reservations are released at once rather than at
+and every wave after it is half the size, down to a sixteenth. An `Auto` load's own fold (written by the pass after its commit
+(**WorkloadCore S09, next train**); in its own commit before) is reserved the same way; when it is given up (refused, or a bucket spilled) its state and reservations are released at once rather than at
 the end of the load. On an embedded engine with no governor, a load's fold gives up past 256 MB and the pass folds that
 load in waves instead.
+
+(**WorkloadCore S09, next train**) **Maintenance asks for its memory before it takes a lock** (BL-859). Each maintenance unit — a queued
+apply, an ingest-fed drain, a deferred pass — asks the memory budget for a grant (class Background) before it takes its
+queries' locks, and waits in the queue; it is never refused part-way through an apply. A load's maintenance that cannot
+get memory within 30 s is refused before it starts, and its queries are left behind and rebuilt.
 
 If a pass fails while writing a query, that query is left behind and owes nothing further (it is not
 folded twice); refresh it, or a restart rebuilds it.
