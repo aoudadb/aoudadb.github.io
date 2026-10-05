@@ -961,8 +961,8 @@ const finished = await client.materializedQueries.refreshAndWait('active_users_s
 ```
 
 **Do not** call `refresh()` for a table you just bulk-loaded with the default
-`postLoadMqBehavior: "auto"` — the engine already accumulated those queries during the load and
-brings them current after the commit, in the background. The wait is usually short because the work already happened.
+`postLoadMqBehavior: "auto"` — the engine brings those queries current after the commit, in the background, with the
+table's pass over the load's segments (**WorkloadCore S10, next train**; before, it accumulated them during the load).
 The bulk-load handle can wait on it directly instead (BL-419, 0.1.22):
 
 ```typescript

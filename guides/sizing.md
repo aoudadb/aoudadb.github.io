@@ -179,6 +179,10 @@ see it as used, but it is not load, and taking it as load kept a server doing a 
 `Balanced` or `Constrained` with its live heap at a tenth of the box. `workingSetSource` still reads
 `ProcessRss`. When the mode rises, a materialized query whose rebuild was refused memory gets a retry
 without a `:refresh`. Every such refusal is also retried 30 seconds later, and at most three times.
+(**WorkloadCore S10, next train**) Those retries are gone: a refused rebuild waits in the memory grant queue, in the
+lowest class, for room of the size it was refused, asks twice as much each time it is refused again, and stops (logged,
+the query left behind and readable) once that exceeds the database's governed budget — see
+[Materialized queries](materialized.md#a-rebuild-refused-memory-outright-is-deferred-not-failed-ingestatspeed-s03-0140).
 
 Since **BL-622** both operands are on the endpoint, as a `headroom` block beside `headroomRatio` —
 `governedBytes`, `workingSetHighWaterBytes`, `workingSetSource` and `scope`, plus the four
@@ -552,7 +556,7 @@ run one at a time when it has no more, and a flush charges the page builders it 
 the budget. Recovery after a crash waits up to 10 s for its replay window rather than quarantining the database at once.
 
 (**WorkloadCore S09, next train**) **Materialized-query maintenance asks too** (BL-859). Each maintenance unit — a queued apply, an ingest-fed
-drain, a deferred pass — asks for its grant before it takes its queries' locks, and waits in the queue (a queued apply in the
+drain (gone in **WorkloadCore S10**: a load's maintenance is its table's pass), a deferred pass — asks for its grant before it takes its queries' locks, and waits in the queue (a queued apply in the
 `Streaming` class, ahead of waiting loads whose memory its backlog holds; a load's drain or pass in `Background`);
 it is never refused part-way through an apply. A load's maintenance that cannot get memory within 30 s is refused before it
 starts, and its queries are left behind and rebuilt. A query's update backlog (up to 64 MiB an update lane) is charged on

@@ -699,9 +699,11 @@ Authorization: Bearer <admin-token>
 Bulk-loaded rows bypass **incremental** MQ maintenance by design. What happens instead is decided by
 `postLoadMqBehavior`, and the two settings want opposite follow-up calls.
 
-**`auto` (the default) — accumulate during the load's own pass, publish after the commit.** `:commit` waits
-for that publication up to `mqWaitMs` (30 s) and says in `mqStatus` whether it finished (**WorkloadCore S09, next train**); wait for it; **do not also call `:refresh`.** A `:refresh` queues behind the publication on the
-server's per-name lock and then re-scans the whole source table, so it buys nothing and costs a
+**`auto` (the default) — the table's pass, started at the commit.** (**WorkloadCore S10, next train**) The load
+records a pending job and the table's pass brings its queries current right after the commit, from the load's segments;
+before S10 the queries accumulated during the load's own pass and were published after the commit. `:commit` waits
+for that up to `mqWaitMs` (30 s) and says in `mqStatus` whether it finished (**WorkloadCore S09, next train**); wait for it; **do not also call `:refresh`.** A `:refresh` either runs the pass
+that was starting anyway or, once it has run, re-scans the whole source table, so it buys nothing and can cost a
 second full pass.
 
 ```csharp
@@ -717,7 +719,7 @@ await client.bulkLoad("quotes", rows, { postLoadMqBehavior: "auto" });
 // Poll the job's mqRebuildStatus. No refresh call.
 ```
 
-**`skip` — no ingest-fed sinks and no rebuild.** Use it in a multi-step pipeline that loads several
+**`skip` — no pending job, no pass and no rebuild.** Use it in a multi-step pipeline that loads several
 tables and refreshes once at the end. Then, and only then, `:refresh` is the right call:
 
 ```http

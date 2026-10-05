@@ -315,7 +315,7 @@ results are keyed by identity rather than time, and are not clustered.
   - No protocol-level MQ target-kind required.
 - MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
   - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
-  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load is folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written, or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, next train**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`) until it is done. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - Auto after `BulkLoadAsync`: (**WorkloadCore S10, next train**) when `PostLoadMqBehavior.Auto` (the default), the load records a pending job and the table's [deferred pass](#deferred-loads) starts at its commit and brings affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) current: a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest. Multi-table and transform loads take the same path. The load does no materialized-query work while its rows stream and is not paced to a drain. Before S10 the queries accumulated during the load's own pass over rows and were published by shadow-swap at commit (the ingest-fed path, P46), with the exception that follows. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load was folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written (gone in **WorkloadCore S10**: the pass reads the load's segments), or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, next train**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`, `current: false`) until it is done. The work under `MqRebuildStatus.InProgress` reads only the load's segments, not a second full scan of the table; a query the pass can neither fold nor apply is rebuilt. `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
   - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
   - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
   - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
@@ -372,7 +372,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | P11 | R8 fix report (handoff) | Honest documentation of unresolved duplicate-row issue; test-relaxation reverted | Engine-side fix still pending | `docs/BACKLOG.md` BL-019 |
 | P28 (S2) | `docs/tasks/P28/MarketData-Gaps-S2-MQ-OHLC-Candles.md` | `FIRST`/`LAST` aggregate functions with `orderByColumn`; derived time-bucket group-by expressions (`TruncateToHour`, `TruncateToMinute`); `AggregateConfig` v2 (backward-compatible); `TimeBucketTruncator` | OHLC quantile/volume aggregates deferred | P28-COMPLETION |
 | P31 (S1+S2) | `docs/tasks/P31/` | `RefreshMaterializedQueryAsync`, shadow-build, auto-trigger after `BulkLoadAsync`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, replica rebuild hook, HTTP refresh endpoint, C# + TS + CLI surfaces | Incremental rebuild from cold-segment arrival outside a bulk load; cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
-| P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` bulk loads accumulate all four MQ types during the load's own pass; scan-fed path retained for `:refresh`, fallback, restore | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
+| P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` bulk loads accumulate all four MQ types during the load's own pass; scan-fed path retained for `:refresh`, fallback, restore (**WorkloadCore S10, next train**: replaced by the table's pass) | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
 
 ## 2.6 Capability coverage matrix
 
@@ -394,7 +394,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
 | `AggregateConfig` v1 backward compatibility | Yes | No | No | P28 S2, implicit string → `GroupByExpression` conversion | Existing v1 definitions parse without migration |
 | Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
-| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, ingest-fed feed | All four MQ types accumulate during the load; some queries still fall back to a scan. `MemoryOnly` sources skipped |
+| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, the table's pass (WorkloadCore S10) | All four MQ types brought current by the table's pass, started at the commit (**WorkloadCore S10, next train**; they accumulated during the load before); queries it cannot fold or apply are rebuilt. `MemoryOnly` sources skipped |
 | `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Failed; awaitable Task |
 | Replica MQ rebuild after bulk-load | Yes | No | No | P31 S1, `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched; factory via `engine.CreateReplicaMqRebuildScheduler()` |
 | HTTP `POST .../materialized-queries/{name}:refresh` | Yes | No | No | P31 S2, `MaterializedQueriesController` | `?await=true` waits; `?await=false` fire-and-forget |
@@ -618,13 +618,13 @@ Key implementation anchors:
 
 ### Walk-through E: Full rebuild of an Aggregate MQ (shadow-build)
 
-1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` — the scan-fed path, also used on fallback. A bulk load with `PostLoadMqBehavior.Auto` does **not** take this path for eligible queries: it accumulates during ingest and publishes the same shadow swap at commit.
+1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` — the scan-fed path, also used on fallback. A bulk load with `PostLoadMqBehavior.Auto` does **not** take this path for queries the table's pass can fold or apply (**WorkloadCore S10, next train**; before, it accumulated during ingest and published the same shadow swap at commit); the pass rebuilds the rest this way.
 2. State transition:
    - MQ state immediately changes to `Rebuilding`.
    - The current result table remains readable throughout with stale data.
 3. Shadow build:
    - A new `MaterializedQueryMaintainer` is constructed from scratch.
-   - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and ingest-fed fallback). An `Auto` bulk load that stayed ingest-fed never opens this scan.
+   - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and a fallback rebuild). A query an `Auto` bulk load's pass folds or applies never opens this scan.
 4. Atomic swap:
    - New maintainer atomically replaces the old one.
    - MQ state transitions to `Ready`.
@@ -795,12 +795,12 @@ A named query over `barsWithChange` can then `orderBy: [{ "column": "changePct",
 
 ```csharp
 // Explicit on-demand rebuild (a scan). Use this when you changed the definition,
-// not after a bulk load — Auto already built the affected queries during the load.
+// not after a bulk load — Auto starts the table's pass at the commit.
 await engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct);
 
 // Bulk-load with automatic materialization (default Auto). Wait; do not :refresh.
 var handle = await engine.BulkLoadAsync(options, ct);
-await handle.MqRebuildCompleted; // usually short: the work happened during the load
+await handle.MqRebuildCompleted; // the table's pass, over the load's segments
 
 Console.WriteLine(handle.MqRebuildStatus); // Completed
 ```
@@ -1007,7 +1007,7 @@ three times.
 ### First: check whether you need to refresh at all
 
 With `PostLoadMqBehavior.Auto` — the default — a bulk load brings its affected queries current
-itself: **during the load's own pass**, and after its commit, in the background (**WorkloadCore S09, next train**). You do not need to call refresh, and calling it makes the engine do
+itself, after its commit, in the background (**WorkloadCore S09, next train**), by the table's pass (**WorkloadCore S10, next train**; until S10 most of the work happened during the load's own pass). You do not need to call refresh, and calling it makes the engine do
 the work twice. Wait on `MqRebuildCompleted` / `mqRebuildStatus` instead. See
 [Bulk load — do not hand-refresh](bulk-load.md).
 
@@ -1040,9 +1040,17 @@ is for.
 large enough that keeping every query current during the load costs more than the load: the load
 writes only its table, fast, and the queries catch up afterwards.
 
-- Every query over the loaded table is marked **stale**, exactly as a `Skip` load leaves it — readable by
-  name (not routed to while stale, **ColumnarRead S18**), `isStale: true` with a `staleReason`, and rebuilt at
-  startup if the server restarts first.
+(**WorkloadCore S10, next train**) Every load but a `Skip` one now works this way: it records a pending job, and the
+table's pass below is its maintenance. `Auto` starts the pass for each table it wrote as soon as it commits (multi-table and
+transform loads included), and `:commit` waits for it up to `mqWaitMs`; `Deferred` leaves it to the quiet period. So
+everything in this section applies to an `Auto` load too, except when its pass runs.
+
+- Every query over the loaded table is **behind** — readable by name (not routed to while behind, **ColumnarRead S18**),
+  `isStale: true` with a `staleReason`, `pendingDeferredJobs` at least 1, `current: false` — and rebuilt at startup if the
+  server restarts first. (**WorkloadCore S10, next train**) It is **owed work, not holed**: the query is not marked stale
+  the way a `Skip` load leaves it, so `staleOnly` does not select it, and the reason reads "N bulk load(s) into its source
+  are pending the table's pass…" (before: "A bulk load committed with PostLoadMqBehavior.Deferred; its rows are pending the
+  deferred pass…"). `currentLag` counts from the commit of the oldest load it owes.
 - The job is recorded as **pending**: which load, which table, which segments. Those segments are not
   merged by compaction while the job is pending, so the rows a query still owes stay where the load put
   them.
@@ -1074,13 +1082,13 @@ budget (`Aouda:Cpu:ConfiguredCores` or the probed quota), not the machine's core
 **What the pass holds in memory** (**BL-690, 0.2.0**). The pass folds its jobs in waves of about a million rows,
 and each wave's folded state is now reserved with the memory governor while its queries are written — before, the pass
 reserved nothing, so the governor never saw it. A refusal does not fail the pass: the wave already folded is written,
-and every wave after it is half the size, down to a sixteenth. An `Auto` load's own fold (written by the pass after its commit
-(**WorkloadCore S09, next train**); in its own commit before) is reserved the same way; when it is given up (refused, or a bucket spilled) its state and reservations are released at once rather than at
-the end of the load. On an embedded engine with no governor, a load's fold gives up past 256 MB and the pass folds that
-load in waves instead.
+and every wave after it is half the size, down to a sixteenth. (**WorkloadCore S10, next train**) An `Auto` load's
+pass folds in the same waves: the fold an `Auto` load used to build as its segments were written — reserved the same way,
+given up when refused or spilled, and past 256 MB on an embedded engine with no governor — is gone, and the load holds no
+materialized-query memory while it streams.
 
 (**WorkloadCore S09, next train**) **Maintenance asks for its memory before it takes a lock** (BL-859). Each maintenance unit — a queued
-apply, an ingest-fed drain, a deferred pass — asks the memory budget for a grant (a queued apply in the `Streaming` class,
+apply, an ingest-fed drain (gone in **WorkloadCore S10**), a deferred pass — asks the memory budget for a grant (a queued apply in the `Streaming` class,
 ahead of waiting loads whose memory its backlog holds; a load's drain or pass in `Background`) before it takes its
 queries' locks, and waits in the queue; it is never refused part-way through an apply. A load's maintenance that cannot
 get memory within 30 s is refused before it starts, and its queries are left behind and rebuilt.
@@ -1264,7 +1272,8 @@ running now or already dead.
 `MqBuildRunBytesWritten` only goes up. **How much scratch is on disk right now** is
 `mqSpillOutstandingBytes` on `GET /api/server/metrics`, with `mqSpillCeilingBytes`,
 `mqSpillCeilingExceeded`, and `mqPublishBacklog` beside it (**BL-624, 0.1.38**). Crossing the
-ceiling is logged and counted. It does not fail the load.
+ceiling is logged and counted. It does not fail the load. (**WorkloadCore S10, next train**) `mqPublishBacklog` counts the
+database's pending bulk-load jobs: loads whose table's pass has not yet run.
 
 ---
 
@@ -1301,6 +1310,16 @@ their provenance (`lastRebuildSource`) reads `DeferredMemoryPressure`. The engin
 memory recovers, and `:refresh` rebuilds them at once. Retirement, described above, still ends in
 `Error`, because it names one query that cannot fit.
 
+(**WorkloadCore S10, next train**) **"When memory recovers" now means: when the memory budget has room of the size it
+was refused.** The rebuild is no longer re-driven on timers — a heap-recovered or resource-mode-rise edge, a 30 s look and
+a 15 min slow look, up to an attempt cap, each a full rescan whatever memory had done meanwhile. Instead the query stays
+readable and behind, and its rebuild waits in the memory grant queue, in the lowest class (`Maintenance`), for room of the
+size it was refused. When it is served, the rebuild runs; refused again, it asks for twice as much next time. Once that
+exceeds the database's governed budget it stops asking, logs a Warning naming the query and the budget, and the query stays
+behind — `:refresh` still rebuilds it, for instance once the budget is larger. A rebuild refused while it was being
+prepared (the result's prior state read back) is handled the same way; it used to put the query in `state: "error"`, where
+reads of it threw and nothing cleared it.
+
 ### Only a rebuild from the source clears "stale" (**IngestAtSpeed S03, 0.1.40**)
 
 A query marked stale is missing rows that are not in its result: a load that was deferred for
@@ -1308,7 +1327,7 @@ memory, a `Skip` load, a maintenance apply that failed part-way. A later bulk lo
 adds exactly its own rows and does not repair that. It therefore **no longer clears the mark**.
 Before this release it did, and the query then read as current while missing whole loads. Only a
 rebuild that scans the source table clears it: `:refresh`, a fallback rebuild, or the automatic retry
-of a deferred query. If a query stays stale after a load, that is the reason, and `:refresh` (pooled
+of a deferred query (**WorkloadCore S10, next train**: the requeued rebuild, served when the memory budget has room). If a query stays stale after a load, that is the reason, and `:refresh` (pooled
 with `staleOnly`) is the remedy.
 
 ## 2.11d What a query costs to maintain: the `amplification` object {#amplification}
