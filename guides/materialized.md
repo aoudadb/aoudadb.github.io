@@ -487,6 +487,16 @@ check, not an answer.
 A **stale** result (a `Skip` or deferred load, a dropped update) is readable by name and is **no longer routed to** until a
 refresh clears the mark (it was before: a stale result answered for its source without the rows it was missing).
 
+**One rule, and the status says its answer** (**WorkloadCore, next train**). Routing, a consistency token on a read of the
+query (`at_least`), and the status's `current` field all ask the same question: is the result current for a reader at this
+position? It is when the result is `Ready` and not stale; nothing is queued or in flight for it or for a query it is built on
+(an incremental update, a bulk-load publish, **a load past its commit point whose maintenance has not finished**); **no commit
+to its source is still being routed**; and its **frontier** — the WAL position the result incorporates, the status's `token` —
+is at or past the reader's. The two bolded conditions are new: a load between its commit point and its publish, and a commit
+written to the log but not yet routed, each left a moment in which a token read was answered without them. The token check is
+the bigger change: it compared the frontier alone, so a query that had **lost an update** answered any token its frozen
+frontier covered. Now it waits for the query to be current, or answers `TOKEN_UNSATISFIED` as for any behind node.
+
 A change no maintenance sees — a **TRUNCATE**, a source column **dropped** or **renamed**, a new column **default** — marks every
 result of the table stale and schedules its rebuild (**ColumnarRead group-6 review, next train**). Before, a result kept the
 rows as they were, and once its watermark moved past the change a routed read answered with them: a truncated table's rows,

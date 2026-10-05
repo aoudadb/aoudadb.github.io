@@ -434,6 +434,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Wait | `waitMs` / `X-Aouda-Wait-Ms` (default 250, cap 30 000) |
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
+| Materialized query | (**WorkloadCore, next train**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
 
@@ -1595,6 +1596,7 @@ The list route returns an array of the same object.
   "errorMessage": null,
   "isStale": false,
   "staleReason": null,
+  "current": true,
   "amplification": {
     "sourceRowsIngested": 1000000,
     "keysPlanned": 1000000,
@@ -1625,8 +1627,10 @@ The list route returns an array of the same object.
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
 | `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (a `"deferred"` load, or an `"auto"` load folded by the pass). `0` when none; absent on older servers. While it is above zero the query is also `isStale`. `:refresh` of the query runs the table's pass at once. |
 | `stalenessMs` | integer? | (**ColumnarMerge S01, 0.2.0**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
+| `current` | boolean | (**WorkloadCore, next train**) **Whether the result is current for a reader starting now** — the one rule the server uses to route a source-table read to this result and to decide whether a consistency token is covered by it: no lost update (`isStale` for that reason), nothing queued or in flight for it or for a query it is built on (an incremental update, a bulk-load publish, a load past its commit point), no commit to its source still being routed, and its frontier (`token`) at the WAL head. `false` on older servers. |
+| `frontierLagBytes` | integer? | (**WorkloadCore, next train**) How many WAL bytes the query's frontier is behind the head. **Omitted** when it is at the head. A size, not a position: positions are only ever on the wire as tokens. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
-| `token` | string? | The maintenance watermark, as above. |
+| `token` | string? | The query's **frontier** (**WorkloadCore, next train**; the maintenance watermark before): the WAL position its result incorporates, encoded as a consistency token. A position to wait for, not a claim that the result is current — `current` is the claim. |
 
 #### ⚠️ Is this query current? Read `isStale`, `staleReason` and `currentLag` — not `state`
 
@@ -1645,6 +1649,7 @@ otherwise the table answers, with the same rows as ever. Its currency is reporte
 | `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
 | `currentLag` | How long the query has **been behind** without a break. `null` when it is not behind — including for a caught-up query that has been idle for days. |
 | `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is. Omitted when current. |
+| `current` | (**WorkloadCore, next train**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. |
 
 ⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLag`.** Under a steady stream of
 inserts that never lets a query's queue empty, `currentLag` grows for as long as the stream runs — it is
@@ -1666,8 +1671,8 @@ read stale data as current. A client that polls `state` and nothing else will st
 **Recommended check:**
 
 ```jsonc
-// current
-{ "state": 1, "isStale": false, "currentLag": null }
+// current (WorkloadCore, next train: read `current`; older servers: `isStale: false` and `currentLag: null`)
+{ "state": 1, "isStale": false, "currentLag": null, "current": true }
 
 // readable, but behind — act on this
 { "state": 1, "isStale": true,
