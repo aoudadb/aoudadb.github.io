@@ -1028,8 +1028,9 @@ rebuilt when the upstream's rebuild publishes; a `:refresh` of it alone, while t
 stale, leaves it stale. Refresh the upstream first.
 
 Staleness is durable. If the server restarts before you refresh, the query is **rebuilt from source
-at startup** rather than being restored with the loaded rows missing (a query that is behind has no
-checkpoint — **ColumnarMerge S08**). That is deliberate: serving
+after startup** rather than being restored with the loaded rows missing (a query that is behind has no
+checkpoint — **ColumnarMerge S08**; (**WorkloadCore S11, next train**) the rebuild runs once the database is open, not
+inside the open — see [recovery](#recovery-restart)). That is deliberate: serving
 a result that silently omits a committed load is worse than doing the rebuild you deferred. If you
 would rather control when that work happens, refresh before restarting — which is what `staleOnly`
 is for.
@@ -1047,7 +1048,8 @@ everything in this section applies to an `Auto` load too, except when its pass r
 
 - Every query over the loaded table is **behind** — readable by name (not routed to while behind, **ColumnarRead S18**),
   `isStale: true` with a `staleReason`, `pendingDeferredJobs` at least 1, `current: false` — and rebuilt at startup if the
-  server restarts first. (**WorkloadCore S10, next train**) It is **owed work, not holed**: the query is not marked stale
+  server restarts first. (**WorkloadCore S11, next train**) Not rebuilt any more: a query that owes a load is restored from its
+  checkpoint at startup with the load still owed, and the table's pass brings the load in once the database is open. (**WorkloadCore S10, next train**) It is **owed work, not holed**: the query is not marked stale
   the way a `Skip` load leaves it, so `staleOnly` does not select it, and the reason reads "N bulk load(s) into its source
   are pending the table's pass…" (before: "A bulk load committed with PostLoadMqBehavior.Deferred; its rows are pending the
   deferred pass…"). `currentLag` counts from the commit of the oldest load it owes.
@@ -1490,7 +1492,7 @@ Monitor first:
   per-database total of declared residency pins, including any result table you declared `HotOnly`.
   See [2.3.1](#where-a-materialized-querys-result-lives).
 
-Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
+<a id="recovery-restart"></a>Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
 
 - Definitions are persisted and restored through catalog/store.
 - Result tables are normal catalog tables and survive restart. Their changes are logged as one batch per
@@ -1500,12 +1502,27 @@ Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
   since then are folded in from the log. Recovery work is therefore proportional to what was written since the
   last checkpoint, not to the size of the source. (Measured: 200,000 rows since the checkpoint over a
   400,000-row source, four queries — 5.7 s to open against 8.0 s rebuilding them.)
-- A query is **rebuilt from its source** at startup instead when that cannot be exact: it has no checkpoint
+- A query is **rebuilt from its source** instead when that cannot be exact: it has no checkpoint
   yet (created, or rebuilt, less than one checkpoint ago), it was behind when the server stopped, the source took
   a delete, a replacing upsert, a truncate, a bulk load or a schema change since the checkpoint, or the result's own
-  stored rows changed since it (a flush or a compaction). A query over another query's result is rebuilt from that
-  result whenever its upstream took writes after the checkpoint. A database without a log restores results only
-  after a clean shutdown.
+  stored rows changed since it (a compaction, or a stored row replaced since; (**WorkloadCore S11, next train**) a flush
+  alone no longer counts — the checkpoint is retaken when the result's segments move). A query over another query's result
+  is rebuilt from that result whenever its upstream took writes after the checkpoint. A database without a log restores
+  results only after a clean shutdown.
+- (**WorkloadCore S11, next train**) **Opening a database never rebuilds a query.** Before, the open rebuilt every query it
+  could not restore, one after another, before the database came up — so a restart took as long as scanning every
+  source once per query. Now the open restores what it can and returns; the others come back **behind and `Building`**
+  (`state: "Building"`, `current: false`, not routed; a read by name or a read with a consistency token answers
+  `MQ_NOT_READY`) and are rebuilt **after** the open, one source table at a time (one scan per source for all its
+  queries), each once memory for it is free. Watch `state` and `current` on the status endpoint; a client that needs the
+  result waits for `current` (or passes a consistency token and retries `MQ_NOT_READY`).
+- (**WorkloadCore S11, next train**) **A query that owes a bulk load restores from its checkpoint** (the load's pending job
+  says which rows it lacks) and the table's pass brings the load in after the open — instead of a rebuild.
+- (**WorkloadCore S11, next train**) **A rebuild of aggregate, latest-per-key and first-per-key queries resumes where it
+  stopped.** It reads its source in chunks of about 2 million rows and records, after each, which source segments its
+  partial state already holds. A rebuild interrupted by a crash, a shutdown or a memory refusal continues from its last
+  chunk — provided none of those segments changed (a compaction that merged them, or a delete in them, starts it over). A
+  group that includes a filter or a top-N query rebuilds from the start, as before.
 - The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
   log is never pruned under it.
 - A database created before this release has no checkpoints, so it rebuilds its results once, at the first open.
