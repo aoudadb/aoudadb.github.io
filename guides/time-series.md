@@ -160,6 +160,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 - Nested partition paths under `partitions/` with shared bucket support.
 - Segment manifest persistence with cluster stats and per-page metadata.
 - Statistics-based skipping on every read: the one scan (`TableScan`) skips row groups whose min/max statistics rule the predicate out (`RowGroupClassifier`).
+- Time windows over `(series, time)`-ordered segments (a bulk load's order): each series' time every 64 rows is kept in the segment's footer, so a window reads only the rows of each series that can fall in it (**ADR 0061, next train**).
 - Sort-on-seal behavior in storage pipeline for clustered data.
 - Out-of-order rows with no special path: flushed like any other row, query-visible at once.
 - Tiered metadata caching (`SegmentSummaryCache` and `PageSummaryCache`) with pressure-aware eviction.
@@ -317,6 +318,7 @@ Primary tests:
 1. The read takes the table's segments from the catalog (`SegmentDiscoveryService.FromCatalog(...)`); no directory is listed, so a segment the catalog does not name is never read.
 2. Every read runs on one scan (`TableScan`) with one predicate evaluator.
 3. `RowGroupClassifier` decides each segment / row group from its min/max statistics: none can match (skipped), all match, or some (decoded and evaluated). Missing statistics mean "some", so skipping is always conservative.
+   A "some" row group of a segment in `(series, time)` order is narrowed further when the predicate bounds the time column: each series' run keeps only the 64-row granules whose recorded times can meet the bound, and only those are decoded and evaluated (**ADR 0061, next train**).
 4. Rows still in the write buffer are read in the same pass, so a just-inserted row (late or not) is visible at once.
 
 Primary tests:

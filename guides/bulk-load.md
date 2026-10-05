@@ -355,7 +355,12 @@ buffer touched. A key bounded by a time function (`truncateToDay` and the like) 
 the partition key skips a job's segment by its zone maps on the key (**ColumnarMerge S06, 0.2.0**),
 where it used to skip it by bucket. Hot segments are narrowed the same way: a hot segment answers its partition-key
 columns' range (computed once and kept with the segment), so a one-series read of a hot-first coalescing table opens
-only the hot segments that can hold the series, not all of them (**BL-714, 0.2.0**). A keyed table's bulk-loaded segments also get their primary-key
+only the hot segments that can hold the series, not all of them (**BL-714, 0.2.0**). A **time window** over bulk-loaded
+history no longer reads every row group either (**ADR 0061, next train**): a segment in `(partition key, time)` order records,
+for each series, its time at every 64th row, so a filter that bounds the cluster's time column (`DateTime >= a AND DateTime < b`)
+reads only the few dozen rows of each series that can fall in the window. On 1 M Equity trades a two-hour window's count and sum
+reads in ~1.4 ms instead of ~2.3 ms, and a day's top 10 by volume in ~2.3 ms instead of 4–6 ms. It needs the bounds as top-level `AND` conditions on the time
+column; a window inside an `OR` reads as before. A keyed table's bulk-loaded segments also get their primary-key
 sidecars — the index and keymap other writers already built — shortly after the commit, so a uniqueness
 check that has to consult one stays cheap.
 

@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Time windows over bulk-loaded history read only the rows they can hold (ADR 0061).** A bulk load writes each series'
+  rows together, so a time window used to decode the time column of every row group. Segments now record each series'
+  time every 64 rows, and a filter that bounds the time column (`DateTime >= a AND DateTime < b`) reads only those
+  granules — hot and cold alike. Same answers; a two-hour window over 1 M trades ~2.3 → ~1.4 ms. See
+  [Bulk load](guides/bulk-load.md).
 - **A join onto a table you may read only part of is answered with that part (BL-818).** Your row- and partition-level
   security for every joined table is applied on that join's side — exactly as on a direct read of the table — instead of the
   join being refused with `403`. A join can also carry its own filter on the joined table, `joins[i].where` (`joinWhere()` in
