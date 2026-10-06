@@ -110,13 +110,13 @@ Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of t
 
 **Does not satisfy the guard:** `nin`, ranges (`gt` / `lt` / `gte` / `lte`), `between` (which is `gte ∧ lte`), and `like` — including a pure prefix pattern such as `Ticker like 'EQN%'`, which looks prunable but is not: the guard is an access gate, and a pattern is not an enumeration of key values. A **prefix** of a composite key on a query that **reads rows** is refused — there is no prefix exception for scans.
 
-**Directory-answerable DISTINCT** (the bounded exception): projection and predicate on partition-key columns only, at least one partition key constrained by `eq`/`in`, a complete partition directory (no `data/` residue, no `_shared/` bucket), and at most 10 000 tuples. That is the path for "which sources exist for this ticker?" It reads **no** row data. If the directory is incomplete or over cap, the result is `PARTITION_FILTER_REQUIRED` — the engine does not fall through to a scan.
+**Key-only DISTINCT** (the one exception): projection and predicate on raw partition-key columns only, and at least one partition key constrained by `eq`/`in`. That is the path for "which sources exist for this ticker?" It runs as a scan pruned to the constrained keys, and row groups the filter selects whole are answered from their statistics (**architecture review, next train**). Before, it was answered from the partition directory without reading row data, so a partition whose rows were deleted or truncated still appeared, and it was refused with `PARTITION_FILTER_REQUIRED` when the directory was incomplete (`data/` residue, a `_shared/` bucket) or over 10 000 tuples. Neither refusal remains.
 
 Pinned by `PartitionFilterRuleTests` (engine, per operator, including the watchlist `in`+`eq` shape) and `PartitionFilterRuleDataPlaneTests` (named query HTTP + subscribe on the data-plane with `mk_pub_*`).
 
 **Why.** The guard is an access gate, not a pruner. Segment discovery is not partition-pruned, so a prefix on a row scan is `crossPartitionAccess` by another name.
 
-**Instead of a prefix on a row query:** enumerate the free key with directory-answerable DISTINCT, then pass it as an `in` parameter; or auth-db-pls fan-out; or an MQ keyed the other way.
+**Instead of a prefix on a row query:** enumerate the free key with a key-only DISTINCT, then pass it as an `in` parameter; or auth-db-pls fan-out; or an MQ keyed the other way.
 
 ---
 
@@ -144,7 +144,7 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ## No `groupBy` / ad-hoc aggregates on the data plane
 
-**Rule.** A named query is a parameterized `QueryMessage`. There is no `groupBy` field on that template. `.Aggregate(...)` on the fluent client is an **engine / admin** API.
+**Rule.** A named query is a parameterized `QueryMessage`. There is no `groupBy` field on that template. `.Aggregate(...)` on the fluent client is an **engine / admin** API. (Ad-hoc `POST …/query` gains `aggregates` / `groupBy` on the admin listener (**ColumnarRead S16, next train**); that route stays 404 on the data plane, and named-query definitions do not carry the fields (**BL-796**).)
 
 **Why.** Unbounded cost. Pre-aggregation belongs on a materialized query (`D-24`).
 
@@ -252,7 +252,7 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 | `latestPerKey` without an imperative create | `materializedQueries` map, `type: "latestPerKey"` |
 | Browser-tier read of an MQ result table | `"dataPlaneAccess": true` on the **MQ entry** (default `false`). No table-options PATCH |
 | Candle columns named `high` / `open` | Aggregate MQ public shape is `outputName` on every read path (`D-31`) |
-| Distinct source list, sub-millisecond | `distinct: true` over partition-key columns meeting the directory-answerable conditions. When it hits, `stats.distinctServedFromPartitionMetadata` is `true` (omitted when false) |
+| Distinct source list | `distinct: true` over partition-key columns with one key constrained ([key-only DISTINCT](#partition-filter-rule)). A scan since the **architecture review, next train**, so deleted partitions no longer appear; `stats.distinctServedFromPartitionMetadata` is no longer set |
 | Paging | `limit` (required cap) + `limitParam` / `offsetParam` (param names; still need a numeric cap). Non-zero offset **disqualifies subscribe** |
 | "1–25 of 412" | `"count": true` on the definition → `totalMatches` on HTTP (omitted when false) and `total_matches` on `snapshot_complete`. Unbounded count fails apply (`NAMED_QUERY_COUNT_UNBOUNDED`). Ad-hoc `/query/count` stays 404 on the data plane |
 | Optional facets in one definition | `"whenParamPresent": true` on `and`-clause conditions (`D-34`). Omitted arg skips the predicate; unmarked omission throws. `or` conditions cannot carry the marker. |
@@ -264,4 +264,4 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 
 ## BL-146 — ColdPreferred `rowCount: 0` after partitioned bulk
 
-**Fixed in 0.1.5** (2026-08-10). Not an open engine item. If a pre-0.1.5 database still shows `rowCount: 0` on the base table after partitioned historical bulk into `ColdPreferred` while MQs have data, run `AoudaEngine.SealOrphanedDeltaSegmentsAsync` — it is a recovery, not a temperature change. See [Hot/cold](hot-cold.md#bl-146--coldpreferred-rowcount-0-after-partitioned-bulk).
+**Fixed in 0.1.5** (2026-08-10). Not an open engine item. If a pre-0.1.5 database still shows `rowCount: 0` on the base table after partitioned historical bulk into `ColdPreferred` while MQs have data, run `AoudaEngine.SealOrphanedDeltaSegmentsAsync` on a build that still has it, before upgrading — it is a recovery, not a temperature change. The method is removed and `_delta` is no longer read (**ColumnarRead, next train**). See [Hot/cold](hot-cold.md#bl-146--coldpreferred-rowcount-0-after-partitioned-bulk).

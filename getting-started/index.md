@@ -160,7 +160,7 @@ Aouda is a **columnar database engine** for .NET with fine-grained control over 
 Key characteristics:
 
 - **Columnar storage** — Data is stored column-by-column, not row-by-row. This makes analytical queries (filtering, aggregation, projection) significantly faster because the engine only reads the columns needed.
-- **Configurable memory residency** — You control what stays in memory. Hot data can live in uncompressed arrays (`int[]`, `double[]`, `string[]`) for sub-millisecond access. Cold data is compressed (Delta-Bitpack, Gorilla, Dictionary encoding) and can remain on disk, loaded on demand. For large datasets like time-series or logs, only a small working set needs to be in memory.
+- **Configurable memory residency** — You control what stays in memory. Hot data can live in uncompressed arrays (`int[]`, `double[]`, `string[]`) for sub-millisecond access. Cold data is encoded per 2,048-row vector — frame-of-reference and delta bit-packing, run-length, ALP for doubles, sorted dictionaries for strings (**ColumnarRead, next train**) and can remain on disk, loaded on demand. For large datasets like time-series or logs, only a small working set needs to be in memory.
 - **Schema-on-write** — Tables and columns are created automatically when you first insert data. No upfront schema design required, though explicit schemas are supported.
 - **Zero index management** — The engine automatically maintains zone maps, bloom filters, and sparse primary indexes. You never create, tune, or rebuild an index.
 - **Dual deployment** — Run it embedded in your process (like SQLite) or as a standalone server (like PostgreSQL).
@@ -936,14 +936,26 @@ For the full reference, examples, and common patterns, see the
 ### Aggregations (Engine-Level)
 
 ```csharp
-var stats = await engine.Table("orders")
+// One row per category: category, SUM_total, COUNT — keys ascending, nulls last
+var byCategory = await engine.Table("orders")
     .Where(r => r.Col("status").Eq("completed"))
-    .Select("category")
+    .GroupBy("category")
     .Sum("total")
     .Count()
-    .GroupBy("category")
+    .GroupAggregateAsync();
+
+// No GroupBy: one AggregateResult over every matching row
+var totals = await engine.Table("orders")
+    .Where(r => r.Col("status").Eq("completed"))
+    .Sum("total")
+    .Count()
     .AggregateAsync();
 ```
+
+A grouped query runs through `GroupAggregateAsync()`; `AggregateAsync()` refuses one, and `GroupBy` does not combine
+with `Select` — the result is the keys and the aggregates (**ColumnarRead, next train**). A `SUM` over no value is
+`null`, not `0` (**BL-757, next train**). Over HTTP, the same question is the query message's `aggregates` / `groupBy`
+([HTTP API](../reference/http-api.md#aggregates-and-group-by)).
 
 ---
 
@@ -1803,7 +1815,7 @@ Control the total memory Aouda uses:
 }
 ```
 
-When `MaxHotBytes` and `MaxPageCacheBytes` are 0, the engine uses heuristic defaults (70% hot, 20% page cache, 10% overhead).
+When `MaxHotBytes` and `MaxPageCacheBytes` are 0, the engine derives them from the governed budget: 45% for the hot tier (floor 32 MB) and 10% for the page cache (floor 8 MB). The page cache is on in every resource mode (**ColumnarRead, next train**; it was off in `Constrained`, the mode a database starts in); `Aouda:Memory:PageCacheEnabled = false` turns it off. See [Defaults reference](../guides/defaults-reference.md).
 
 ### Per-Table Memory
 

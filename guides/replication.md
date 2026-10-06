@@ -248,6 +248,10 @@ Invariants:
 - Hidden members do not serve default reads; they require explicit `Hidden` preference.
 - `w:1` does not register pending tracker waits.
 - ACK position updates advance slot positions; disconnect does not auto-delete replication slots.
+- **A primary and its replicas run the same build** (**architecture review, next train**). A replica checkpoint now
+  carries each segment's footer and its deletion masks — a new checkpoint file type, `DeletionMask`, which an older
+  build does not know — and the two builds cannot read each other's segments. Upgrade every
+  member together; a 0.2.x replica set moves by export and reload ([Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model)).
 - In standalone mode, read preference checks are bypassed by design.
 
 ## 2.8 How Aouda implements it
@@ -698,7 +702,7 @@ When to use:
 - Initial production deployment of basic primary/secondary replication.
 
 Steps:
-1. Configure the same `ReplicaSet.Name` and full `Members` list on all nodes.
+1. Configure the same `ReplicaSet.Name` and full `Members` list on all nodes, and run the same Aouda build on all of them.
 2. Set each node `ThisNode.Address`; keep one node with highest `Priority`.
 3. Configure `KeyFile` on all nodes.
 4. Start servers and call:
@@ -819,6 +823,7 @@ Suggested tuning sequence:
 | Hidden node does not serve default reads | Expected behavior (`Hidden` requires explicit preference) | Query with `readPreference=Hidden` only for hidden workloads |
 | `writeConcern=majority` frequently degrades | Insufficient ACK quorum or timeout too short | Check subscriber counts, lag, timeout config |
 | Secondary repeatedly reboots/catches up via checkpoint | WAL retention boundary too aggressive or prolonged disconnect | Inspect slots/retention settings and replica stability |
+| A rolling upgrade from 0.2.x: members on different builds | Not supported (**architecture review, next train**: the checkpoint carries deletion masks as a new file type, and 0.2.x segments are not readable by this build) | Run the same build on every member; move a 0.2.x replica set by export and reload |
 | Coverage warns "replicated but no subscriber" | Table is replicated but all secondaries filtered it out | Adjust `Subscriptions` include/exclude rules |
 | Health endpoint marks replication degraded | Lag exceeds configured threshold | Check per-db lag, network path, and replica load |
 

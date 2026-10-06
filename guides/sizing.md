@@ -142,8 +142,8 @@ simply keeps checking keys by reading its segments — correct, and slower — a
 
 An undeclared `Decimal` costs 16 bytes per value in the write buffer, the hot tier and every materialized result
 that carries it, and compresses poorly on disk. A `Decimal(p,s)` column (`"precision"` / `"scale"`, p ≤ 18 — see the
-[schema guide](schema.md)) is a scaled 64-bit integer: 8 bytes in memory, and delta-bitpacked like an `Int64` in
-segments (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
+[schema guide](schema.md)) is a scaled 64-bit integer: 8 bytes in memory, and encoded like an `Int64` in
+segments — frame-of-reference or delta bit-packing chosen per 2,048-row vector (**ColumnarRead, next train**) (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
 that have a fixed number of places this way; keep the undeclared `Decimal` for values that need more than 18 digits.
 
 ## What headroom buys
@@ -175,7 +175,7 @@ thresholds the ratio is tested against.
 the most common misdiagnosis of this number. A real example: a database granted a 2.3–2.4 GB
 elastic ceiling, with a **~120 MB** reservation peak, zero heap reclaims and zero admission sheds —
 every figure saying there was room — reported `headroom 1.45x` and ran a whole 15 M-row load in
-`Constrained`, with its page cache off. All of those numbers were correct. The process's resident
+`Constrained`, with its page cache off (the page cache is now on in every mode — **ColumnarRead, next train**). All of those numbers were correct. The process's resident
 set was ~1.9 GB against a 2.76 GB governed budget, and the ~1.78 GB between the ledger and RSS is
 resident data that Aouda **reports but never reserves**: hot segments, HRA buffers, PK index caches
 and materialized-query build state. It is kept out of the ledger on purpose, so that resident data
@@ -571,6 +571,9 @@ Writes first delay, then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` or `W
 Refusals now name **which class of work** was refused and why. A `503` may say a class hit its own entitlement while the process as a whole still had room — that is a different problem from the process being full, and it names a different fix: run less of that kind of work concurrently, raise that class's entitlement, or set `Aouda:Memory:PerClassAdmissionEnabled=false` to admit against the process ceiling alone. `reservedByClass` on `GET /api/server/memory` says who was holding the budget when it happened.
 
 Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed the class ceiling is refused, where it previously succeeded while holding far more memory than it had reserved. Both are the same typed retryable `503`.
+(**ColumnarRead, next train**) A large scan's decode buffers and a GROUP BY's, top-K's or `DISTINCT`'s growing state are now
+charged to the query's read budget as they grow, so a GROUP BY with more groups than its budget holds fails with the typed
+retryable error while it grows, rather than after.
 
 ## Which rungs are actually running
 

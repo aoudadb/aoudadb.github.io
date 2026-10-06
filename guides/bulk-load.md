@@ -198,7 +198,9 @@ Scope boundaries:
 loads large enough — or frequent enough — that paying for the materialized queries while rows stream
 is the wrong trade. The load writes only the table (the fastest path the engine has) and records a
 **pending job**: which segments it wrote and which queries owe them. Its queries stay readable and
-say they are behind: `isStale: true` with a reason, `pendingDeferredJobs` above zero.
+say they are behind: `isStale: true` with a reason, `pendingDeferredJobs` above zero. While they are
+behind, a read of the table is not routed to them — the table answers, with the loaded rows
+(**ColumnarRead S18, next train**; a `skip` load's queries likewise).
 
 The table's **deferred pass** then brings them current: one read of every pending job's segments,
 every foldable query (`aggregate`, `latestPerKey`/`firstPerKey`) folded in the same read and written

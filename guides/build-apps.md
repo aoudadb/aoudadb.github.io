@@ -382,7 +382,7 @@ The fields that make a real UI possible, each of which is often the reason a tea
 
 - **`count: true`** → `totalMatches` on the same response, so a footer renders "1–25 of 412" in one round trip. Count ignores limit/offset. Apply **rejects** a count whose cost is not bounded (`NAMED_QUERY_COUNT_UNBOUNDED`) rather than quietly allowing a full scan.
 - **`limit` / `limitParam`, `offset` / `offsetParam`** — the cap is mandatory; `limitParam` lets the caller choose a *smaller* page; omitted `offsetParam` binds skip **0** (the cap is max skip, not the default). A non-zero offset disqualifies subscribe but HTTP paging still works.
-- **`distinct: true`** — and when every distinct column is a raw partition key and the predicate touches only partition keys, it is answered **from partition-directory metadata with zero segment scan**. That is your "which values exist for this key?" filter dropdown, sub-millisecond.
+- **`distinct: true`** — and when every distinct column is a raw partition key and the predicate touches only partition keys, one constrained key is enough to pass the partition-filter rule. That is your "which values exist for this key?" filter dropdown. It is a scan pruned to that key, answered from row-group statistics where they hold the values (**architecture review, next train** — it used to be answered from the partition directories, which listed partitions whose rows had been deleted).
 - **`joins`** — up to three, so a detail page is one request instead of a waterfall.
 - **The batch envelope** — up to **32** named queries in one request, from **one read snapshot**, costing **one** rate-limit permit. A dashboard's ten independent panels cannot disagree with each other, and burn one permit instead of ten.
 
@@ -567,7 +567,7 @@ The showcase, and the table to check your feature list against. If something you
 |---|---|---|
 | A paged table with "1–25 of 412" | Named query with `limit`/`limitParam`, `offsetParam`, `count: true` | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
 | A filter panel with several optional facets | One definition with `whenParamPresent: true` on each optional condition — omitting the arg skips the predicate entirely | [Optional predicates](browser-tier-read-limits.md#optional-predicates-whenparampresent) |
-| A filter dropdown of "values that exist" | Named query with `distinct: true` — zero segment scan when the columns are partition keys | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
+| A filter dropdown of "values that exist" | Named query with `distinct: true` — one constrained key is enough when the columns are partition keys | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
 | Search-as-you-type over a name | A stored `derived` normalized column plus a prefix/`in` predicate. There is **no full-text search** | [Derived columns](insert-transforms.md#derived-columns) |
 | A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbyChoices--orderbyindex) |
 | A live-updating grid or ticker | `namedQueries.subscribe` by name, collection-shaped, list parameter capped with `maxItems` | [Subscribe by name](named-queries.md#subscribe-by-name) |

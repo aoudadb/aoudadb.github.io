@@ -38,7 +38,7 @@ Aouda query execution exists to make one query contract work consistently across
 
 - User problem solved:
   - Query current data even when some rows are still in HRA and others are already compacted to cold segments.
-  - Keep query behavior stable as data moves between hot/cold/delta storage.
+  - Keep query behavior stable as data moves between hot and cold storage.
   - Expose a single API family across server HTTP, .NET client, and TypeScript client.
 - Operational outcomes:
   - Predictable defaults (`columnar` format, bounded limits, strict validation).
@@ -81,7 +81,7 @@ Aouda query execution exists to make one query contract work consistently across
 | Evidence type | Primary sources |
 |---|---|
 | Phase/task reports | `docs/tasks/P3/P3-Task6-QueryEngineHotColdIntegration-Report.md`, `docs/tasks/P4/P4-EpicA-Task2-RestQueryApi-Report.md`, `docs/tasks/P4/P4-EpicG-BL007-QueryEngineDeltaIntegration-Report.md`, `docs/tasks/P4/P4-EpicH-BL016-QueryEngineDataDecoding-Report.md`, `docs/tasks/P4/P4-EpicH-BL017-TableQueryPredicateFiltering-Report.md`, `docs/tasks/P4/P4-EpicH-R10.4-QueryUnflushedHraTableData-Report.md`, `docs/tasks/P7/C2-QueryCorrectness-Summary.md`, `docs/tasks/P12/BL-038-QueryEngine-RowWindow-BatchContract-Report.md`, `docs/tasks/P12/BL-038A-Remove-Legacy-QueryEngine-ExecuteAsync-TupleContract-Report.md` |
-| Runtime code | `src/Aouda.Server/Controllers/QueryController.cs`, `src/Aouda.Server/Query/QueryTranslator.cs`, `src/Aouda.Engine.Api/TableQuery.cs`, `src/Aouda.Engine.Storage/Query/QueryEngine.cs`, `src/Aouda.Engine.Storage/Query/RowFilterEngine.cs`, `src/Aouda.Engine.Storage/Query/ParallelSegmentScanner.cs`, `src/Aouda.Engine.Storage/Query/QueryBatch.cs`, `src/Aouda.Engine.Diagnostics/Perf.cs` |
+| Runtime code | `src/Aouda.Server/Controllers/QueryController.cs`, `src/Aouda.Server/Query/QueryTranslator.cs`, `src/Aouda.Engine.Api/TableQuery.cs`, `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`, `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs`, `src/Aouda.Engine.Core/Query/Scan/PredicateProgram.cs`, `src/Aouda.Engine.Diagnostics/Perf.cs` |
 | Protocol/limits | `src/Aouda.Protocol/Messages.cs`, `src/Aouda.Protocol/ProtocolConstants.cs` |
 | Client surfaces | `src/Aouda.Client/RemoteTableQuery.cs`, `src/Aouda.Client/RemoteConditionBuilder.cs`, `src/Aouda.Client/Internal/QueryMessageBuilder.cs`, `aouda-client-ts/src/query-builder.ts`, `aouda-client-ts/src/types.ts` |
 | Gap tracking | `docs/BACKLOG.md` (`BL-003`, `BL-009`, `BL-010`, `BL-044`) |
@@ -92,8 +92,8 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
-| HTTP query response format | `columnar` | Lower payload overhead by default; row format is opt-in (`format=rows`). |
-| `limit` when omitted/negative | `1000` (`ProtocolConstants.DefaultLimit`) | Prevents accidental unbounded results. |
+| HTTP query response format | `columnar` | Lower payload overhead by default; row format is opt-in (`format=rows`). A request whose `Accept` lists `application/vnd.aouda.column-batch` gets binary column-batch frames instead, and both SDKs ask for them by default (**ColumnarRead S16, next train**; [HTTP reference](../reference/http-api.md#post-apidatabasesdbquery)). |
+| `limit` when omitted/negative | `1000` (`ProtocolConstants.DefaultLimit`) | Prevents accidental unbounded results. With `aggregates` / `groupBy` it counts **groups** (**ColumnarRead S16, next train**): set `limit` and page with `offset` when a query can make more. |
 | `limit` upper bound | `10000` (`ProtocolConstants.MaxLimit`) | Oversized client limits are capped server-side. |
 | `limit = 0` | Unlimited | Still valid on `/query` for unbounded reads; remote `.CountAsync()` uses `/query/count` instead. |
 | `offset` | `0` | No row skipping unless explicitly requested. |
@@ -114,17 +114,26 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
   - Engine-side `TableQuery` (`Where`, `Select`, `SelectExpr`, `Skip`, `Limit`, `OrderBy`, `ThenBy`, aggregates).
   - .NET remote `RemoteTableQuery` with ordering and cross-partition flag propagation, plus `.SelectExpr()`.
   - TypeScript `TableQuery` with immutable chaining and operator mapping, plus `.selectExpr()`.
-- Hot/cold query execution through one path:
-  - Unflushed HRA visibility via virtual hot segment projection.
-  - Cold decode path with row-window contract (`QueryBatch`).
-  - Predicate-aware cold execution via `RowFilterEngine` (row-aligned semantics).
-- Optimization primitives in execution path:
-  - Page pruning (`PagePruner`) including multi-column pruning.
-  - Bloom-filter-assisted page skipping when available.
-  - Parallel multi-segment scanning with global offset/limit handling.
-  - Segment-level pruning via cluster stats where available.
-- Delta-segment read support integrated into query path.
-- Materialized-query auto-routing hooks in `TableQuery`/matcher path (when a compatible materialized table exists).
+- Hot/cold query execution through one path — **one scan** (**ColumnarRead, next train**): every read (rows, columns,
+  `COUNT(*)`, aggregates, GROUP BY, `ORDER BY … LIMIT`, `DISTINCT`, joins' sides, streaming) and every write-side scan
+  (DELETE / UPDATE matching, constraint checks) reads cold segments, hot segments and the unflushed write buffer through
+  `TableScan`, with one predicate evaluator (`PredicateProgram`). `QueryEngine`, `RowFilterEngine`, `PagePruner`,
+  `ParallelSegmentScanner` and the other old engines are deleted.
+- Optimization in the execution path (**ColumnarRead, next train**):
+  - Each 8,192-row row group is classified from its statistics (`RowGroupClassifier`): none of its rows can match → not
+    read; every row matches → the filter is not evaluated. Only the filter's columns are decoded first; the others only for
+    the 2,048-row vectors that hold a selected row.
+  - Aggregates and `DISTINCT` answer a row group the filter selects whole, with no deleted row, from its statistics.
+  - `ORDER BY … LIMIT` keeps a top-K whose threshold skips row groups that cannot beat it.
+  - A filter pinning every series column by equality reads only that series' rows, from each segment's run directory; a
+    full-key read of a cold segment reads only the rows the key map located.
+  - Scans above 65,536 rows of work run on several workers within the query's CPU grant (morsels); answers do not depend on
+    the degree.
+  - Partition-key pruning as before. A bloom filter is read only by primary-key lookups (a `Strict` table writes one),
+    not by filters on other columns; the adaptive bloom path is deleted.
+- Late rows are flushed inline; there are no delta segments to read (**ColumnarRead, next train**).
+- Materialized-query routing on every read path and over HTTP, to a current result only
+  ([routing](materialized.md#routing-a-read-to-a-maintained-result); **ColumnarRead S18, next train**).
 
 ### Planned / proposed
 
@@ -159,11 +168,11 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | Nested boolean groups in .NET client builders | Yes | No | No | `RemoteConditionBuilder` + `QueryMessageBuilder` | Resolved P14, BL-044; nested group composition now emitted. |
 | Nested boolean groups in TypeScript builder | Yes | No | No | `aouda-client-ts/src/query-builder.ts` (`WhereGroupBuilder`, `whereGroup()`) | `whereGroup()` builds nested `WhereClause.groups` entries. Resolved P14, BL-044. |
 | Hot + cold + unflushed HRA unified visibility | Yes | No | No | P4 R10.4 report + `TableQuery` + P7 summary tests | Virtual hot segment merged into query execution paths. |
-| Delta segment query inclusion | Yes | No | No | P4 BL007 report + `QueryEngine` page reader delta branch | Transparent to callers. |
-| Page pruning and multi-column pruning | Yes | Partial | No | `QueryEngine`, `RowFilterEngine`, `PagePruner` usage | Ongoing tuning and backlog refinement remain. |
-| Bloom-filter-assisted pruning | Yes | Partial | No | `RowFilterEngine` bloom path + perf counters | Requires bloom index availability and equality predicates. |
-| Parallel multi-segment scanning | Yes | No | No | `ParallelSegmentScanner` + perf counters | Global offset/limit handled after merge/materialization. |
-| Dedicated count API endpoint | Yes (`/query/count`) | No | Yes | Implemented (2026-04-04, `BL-026`) | TS client still on query path until updated. |
+| Delta segment query inclusion | No | No | Yes | P4 BL007 report | Removed with delta segments (**ColumnarRead, next train**): late rows are flushed inline. |
+| Page pruning and multi-column pruning | Yes | No | No | `TableScan` + `RowGroupClassifier` (**ColumnarRead, next train**; `QueryEngine`, `RowFilterEngine`, `PagePruner` deleted) | Per 8,192-row row group, from the segment footer's statistics; `AND` / `OR` / `NOT` in three-valued logic. |
+| Bloom-filter-assisted pruning | No | Partial | No | Key probe only (**ColumnarRead, next train**) | Only primary-key lookups read a bloom (`Strict` tables); the adaptive bloom path is deleted. |
+| Parallel multi-segment scanning | Yes | No | No | Morsels on the query's CPU grant (**ColumnarRead, next train**; `ParallelSegmentScanner` deleted) | Above 65,536 rows of work; rows come back in the sequential order. `ORDER BY … LIMIT` stays on one thread. |
+| Dedicated count API endpoint | Yes (`/query/count`) | No | Yes | Implemented (2026-04-04, `BL-026`) | TypeScript `count()` uses it since the **architecture review, next train**. |
 | Fluent JOIN query support | No | No | Yes | Backlog + absence in fluent APIs | Internal planner support exists but not exposed in fluent APIs. |
 
 ## 2.7 Core concepts and mental model
@@ -171,15 +180,17 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 - `QueryMessage`: the wire-level request contract (`database`, `table`, `select`, `where`, `orderBy`, `offset`, `limit`, `crossPartitionAccess`).
 - `TableQuery`: engine-facing immutable builder used by server translation and direct engine consumers.
 - `QueryTranslator`: server bridge from wire DTO to `TableQuery`; enforces defaults and limits.
-- `QueryEngine`: per-segment execution and decode pipeline; emits row-window aligned batches.
-- `QueryBatch`: canonical internal result unit (row count + per-column arrays + optional validity bitmaps).
-- `RowFilterEngine`: specialized predicate path for row-aligned filtering over cold/hot segments.
-- `ParallelSegmentScanner`: orchestrator for multi-segment parallel execution with global offset/limit semantics.
+- `TableScan` (**ColumnarRead, next train**): the one scan every read and write-side scan runs on, over one fixed view of
+  the table's segments, their deletion masks and the write buffer; sinks for rows, aggregates, GROUP BY, top-K and
+  `DISTINCT`.
+- `PredicateProgram`: the one predicate evaluator (three-valued: a null makes a comparison unknown).
+- `RowGroupClassifier`: decides from a row group's statistics whether none, all or some of its rows can match.
+- `QueryEngine`, `QueryBatch`, `RowFilterEngine` and `ParallelSegmentScanner` are deleted (**ColumnarRead, next train**).
 - Optimization layers:
-  - page-level pruning (min/max and joint windows),
-  - optional bloom index pruning,
-  - segment-level pruning where stats are available,
-  - parallel segment execution.
+  - row-group pruning from page statistics,
+  - series and key lookups that read only the rows they return,
+  - top-K thresholds for `ORDER BY … LIMIT`,
+  - parallel morsels for large scans.
 
 Key invariants:
 
@@ -202,18 +213,17 @@ At a high level:
    - ordering,
    - cross-partition flag.
 5. `TableQuery` resolves schema/segments and selects execution path:
-   - materialized table routing path when matcher hits,
-   - row-filter path for predicate-correct cold/hot execution,
-   - parallel segment path for materialized or aggregate execution.
-6. Storage query execution uses `QueryEngine` / `RowFilterEngine` over discovered segment IDs, including delta segments.
+   - a current materialized result that holds the answer, when one does ([routing](materialized.md#routing-a-read-to-a-maintained-result)),
+   - otherwise the one scan (`TableScan`) for rows, columns, aggregates, GROUP BY, top-K and `DISTINCT` alike (**ColumnarRead, next train**).
+6. The scan reads the segments the table's catalog names; no directory is listed (**ColumnarRead, next train**).
 7. Results are returned as columnar by default and converted to row format when requested.
 
 Runtime notes:
 
 - `limit=0` on `/query` is interpreted as no cap for full reads.
-- For unflushed writes, `TableQuery` can synthesize a virtual hot segment from HRA snapshots so queries see current data before flush.
-- `QueryEngine` increments decode/scan/perf counters and emits `QueryBatch` objects to keep row windows aligned across projected columns.
-- `ParallelSegmentScanner` applies global offset/limit after segment execution to preserve query semantics.
+- Unflushed writes are read from the write buffer where they are — its frozen arrays and sealed 4,096-row chunks, with the rows the read must not see masked — so queries see current data before flush without copying the buffer (**ColumnarRead S19, next train**; it was flattened into fresh arrays on every read).
+- A read is one view (**ColumnarRead, next train**): its segments, their deletion masks and the unflushed rows are fixed at one instant, so a concurrent MERGE, UPDATE, flush or coalesce is seen wholly or not at all — never half, never twice. A read no longer re-runs when a segment leaves under it. A read whose catalog names a segment it cannot resolve (a Hot segment with no hot copy, for more than a second) fails rather than returning short. A catalog change is visible to reads only once it is durable; if a catalog journal append fails, the table's reads are refused until the database is reopened.
+- `OFFSET` / `LIMIT` without an `ORDER BY` stop the scan; with one, a top-K (or, without a `LIMIT`, a sort of a permutation of the rows) applies them after ordering (**ColumnarRead, next train**).
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
 
@@ -228,27 +238,61 @@ Runtime notes:
 
 ### Path B: Predicate query on cold/mixed segments
 
+(**ColumnarRead, next train:** `RowFilterEngine` and `ExecuteWithRowFilterAsync` are deleted; this path is the one scan.)
+
 1. Entry point: `TableQuery.ToColumnarAsync` (or list path) with predicate set.
-2. Route selection enters `ExecuteWithRowFilterAsync` for row-aligned filtering.
-3. `RowFilterEngine` builds page windows and applies:
-   - min/max pruning,
-   - optional bloom pruning,
-   - decode only required row ranges.
+2. The read fixes its view: the segments its catalog names, their deletion masks and the write buffer, at one instant.
+3. `TableScan` classifies each 8,192-row row group from its statistics (`RowGroupClassifier`), decodes the filter's
+   columns for the rest, evaluates the predicate with `PredicateProgram`, and decodes the other columns only for the
+   2,048-row vectors holding a selected row.
 4. Validity bitmaps and deletion masks are preserved through decode/projection.
-5. Tests: `tests/Aouda.Engine.Storage.Tests/RowFilterEngineColdValidityTests.cs`, `tests/Aouda.Engine.Storage.Tests/RowFilterEngineDriverPruningTypeTests.cs`, `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
+5. Tests: the differential oracle (`ReadRuleOracle*Tests`) and the reference fuzzer (`ReadFuzz*Tests`) in
+   `tests/Aouda.Engine.Api.Tests/ColumnarRead/`, `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
 
 ### Path C: Aggregate/count with mixed hot+cold and unflushed rows
 
 1. Entry point: `TableQuery.AggregateAsync` or client-side `Count`.
-2. Discovery includes persisted segments plus virtual hot segment from HRA snapshot.
-3. Aggregate request sent to `ParallelSegmentScanner.ExecuteAggregatesAsync`.
+2. The read's view includes persisted segments plus the unflushed write buffer.
+3. Every aggregate runs on the one scan (**ColumnarRead, next train**; `ParallelSegmentScanner` is deleted). An 8,192-row row group the filter selects whole and that has no deleted row is answered
+   from its page statistics — row and null counts, exact integer and decimal sums, exact bounds — without reading a page; a
+   double's `SUM` and a string's `MIN` / `MAX` are decoded for that row group, and a row group with a deletion is decoded
+   whole. `SUM` of a `String`, `Bool`, `Guid`, `Timestamp` or `Date` column is refused. A `GroupBy` query given to
+   `AggregateAsync()` is refused rather than answered ungrouped — use `GroupAggregateAsync()` (item 6).
 4. Merged aggregate result reflects both cold and current hot state.
 5. **Nulls (**BL-735, 0.2.0**):** `Min`, `Max`, `Sum` and `Count(column)` skip a column's nulls, as SQL does;
    a bare `Count()` counts every row. Before, a null was aggregated as its type's default (`0`), so `Min` over positive
    values with a null read `0`.
-6. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`.
+   **`Sum` over no value is `null` (**BL-757, next train**)** — a filter that matches nothing, or a column null in every
+   matching row — on every path, joins included; it was `0` when a segment was read and `null` when none was. `Min` / `Max`
+   over no value are `null`; `Count` over nothing is `0`. `Min` / `Max` of a `String` (code-point order) or `Bool` column
+   now answer the value instead of `null` (**ColumnarRead, next train**).
+6. **Grouped aggregates in the embedded engine (**ColumnarRead, next train**):** `TableQuery.GroupBy("Ticker", "Source")`, or
+   `GroupBy(GroupKey.Column("Ticker"), GroupKey.Truncate("DateTime", PartitionFunction.TruncateToMinute, "Minute"))` for a
+   time bucket of a `Timestamp` column, with `Count()`, `Count(col)`, `Sum`, `Min`, `Max`, `First(col, orderBy)` and
+   `Last(col, orderBy)`, executed by `GroupAggregateAsync()`. The result is a `ColumnarQueryResult`: the keys, then one
+   column per aggregate (`COUNT`, `SUM_<col>`, `MIN_<col>`, `FIRST_<col>` …), ordered by the keys ascending with nulls
+   last; `Skip` / `Limit` apply after grouping. An integer `SUM` is an exact `Int64` (an overflow throws). **ColumnarRead S16
+   (next train):** `OrderBy` over a grouped result (by a key's or an aggregate's output name, before `Skip` / `Limit`); `Avg(col)`
+   and `CountDistinct(col)`; `GroupAggregateAsync()` without `GroupBy()` answers one row. Over HTTP as the query message's
+   `aggregates` / `groupBy` ([reference](../reference/http-api.md#aggregates-and-group-by)).
+7. **The latest (or first) row per key (**BL-450, ColumnarRead S18, next train**):** `TableQuery.LatestPerKey("DateTime",
+   "Ticker", "Source")` keeps, per distinct key, the row with the greatest `DateTime` among the rows the filter selects;
+   `FirstPerKey` the least. A row whose order column is null is not a candidate; among rows tied on it, the lowest primary
+   key wins. `Select`, `OrderBy`, `Skip` / `Limit` and `WithTotalMatches` apply to the collapsed rows; `ToListAsync`,
+   `ToResultAsync` and `ToColumnarAsync` answer it. It is read from a `LatestPerKey` / `FirstPerKey` materialized query of the
+   same keys and order column when one is current and the filter is on the keys only
+   ([routing](materialized.md#routing-a-read-to-a-maintained-result)); the table answers otherwise. Not over HTTP yet.
+8. **Routing (**ColumnarRead S18, next train**):** every one of these reads — rows, columns, aggregates, GROUP BY, the per-key
+   collapse — is answered from a materialized query that holds the answer and is current
+   ([routing](materialized.md#routing-a-read-to-a-maintained-result)); `WithDirectScan()` reads the table regardless.
+9. Tests/evidence: P4 R10.4 report + `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`; ColumnarRead
+   `OneScanAggregateTests`, `GroupByTests`, the differential oracle (`RowGroupAggregates`; S18's `ReadRuleOracleRoutingTests`
+   for routing) and the reference fuzzer.
 
 ### Path D: QueryEngine row-window contract
+
+(**ColumnarRead, next train:** `QueryEngine` and `QueryBatch` are deleted with their tests; this path no longer exists. Kept
+for its history.)
 
 1. Entry point: single-segment execute path in `QueryEngine.ExecuteAsync`.
 2. Engine decodes columns and yields explicit `QueryBatch` records.
@@ -260,8 +304,8 @@ Runtime notes:
 | Capability question | Typical systems | Aouda approach | User impact |
 |---|---|---|---|
 | Do I need separate APIs for hot vs cold data? | Often yes (cache + store split) | One query surface across hot/cold/unflushed HRA | Simpler app code and fewer consistency surprises. |
-| Is pruning/optimization user-managed? | Often index/query-hint heavy | Optimization is mostly internal (pruning, bloom, parallel scan) | Lower tuning burden for common workloads. |
-| Are count semantics an independent API today? | Yes (HTTP `/query/count`; .NET `CountAsync`) | TS client may still use full query | C# path avoids columnar materialization. |
+| Is pruning/optimization user-managed? | Often index/query-hint heavy | Optimization is mostly internal (row-group statistics, series and key lookups, top-K, parallel morsels) | Lower tuning burden for common workloads. |
+| Are count semantics an independent API today? | Yes (HTTP `/query/count`; .NET `CountAsync`; TypeScript `count()` since the **architecture review, next train**) | Both SDKs post `/query/count` | No row is transferred to count. |
 | Can query routing exploit materialized tables automatically? | Usually manual endpoint/view selection | Matcher-based auto-routing in query path | Potential speedup without endpoint changes. |
 | Do clients and server share one protocol contract? | Sometimes fragmented | Shared protocol DTOs + translator + SDK mappers | Predictable behavior across HTTP/.NET/TS surfaces. |
 
@@ -304,9 +348,10 @@ Precedence/override notes:
 | `lte` | Less than or equal | `{ "column":"price", "op":"lte", "value":1000 }` |
 
 Notes:
-- The server-side `QueryTranslator.IsValidOperator` accepts only the six comparison operators above (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`). Requests containing any other operator string are rejected with a validation error.
-- The TypeScript client also accepts user-facing operators `in`, `notIn`, `like`, `isNull`, `isNotNull`, and `between`. The `isNull`/`isNotNull` and `between` operators are expanded client-side to standard wire predicates before the request is sent (see SDK mapping table below). The `in`, `notIn`, and `like` operators are translated to wire ops `in`, `nin`, `like` respectively, but the server's current validator rejects them — these are planned for a future server-side extension.
+- The server accepts the six comparison operators above and `in`, `nin` and `like` (see [HTTP API — operators](../reference/http-api.md)); any other operator string is rejected with a validation error.
+- The TypeScript client also accepts user-facing operators `in`, `notIn`, `like`, `isNull`, `isNotNull`, and `between`. The `isNull`/`isNotNull` and `between` operators are expanded client-side to standard wire predicates before the request is sent (see SDK mapping table below). The `in`, `notIn`, and `like` operators are translated to the wire ops `in`, `nin` and `like`, which the server accepts.
 - Type normalization is column-aware in `QueryTranslator` (for example `Timestamp`, `Date`, `Bool`, unsigned numeric types).
+- `gt` / `gte` / `lt` / `lte` on a `String` column compare by ordinal UTF-8 byte (code-point) order, case-sensitive, no locale (**BL-750, next train**; the server refused a string value for them before). See [HTTP API — operators](../reference/http-api.md).
 
 #### SDK symbol/operator mapping
 
@@ -318,9 +363,9 @@ Notes:
 | `>=` | All | `gte` | Yes |
 | `<` | All | `lt` | Yes |
 | `<=` | All | `lte` | Yes |
-| `in` | TypeScript only | `in` | No — server rejects; planned extension |
-| `notIn` | TypeScript only | `nin` | No — server rejects; planned extension |
-| `like` | TypeScript only | `like` | No — server rejects; planned extension |
+| `in` | TypeScript only | `in` | Yes |
+| `notIn` | TypeScript only | `nin` | Yes |
+| `like` | TypeScript only | `like` | Yes — `String` columns only |
 | `isNull` | TypeScript only | `eq null` (expanded client-side) | Yes — expanded before sending |
 | `isNotNull` | TypeScript only | `ne null` (expanded client-side) | Yes — expanded before sending |
 | `between` | TypeScript only | `gte min` + `lte max` (expanded client-side) | Yes — two AND predicates |
@@ -348,7 +393,10 @@ Notes:
 | Projection | `.Select(...)` | `.select(...)` | `select` | Implemented | Null/omitted means all columns. |
 | Pagination | `.Skip()`, `.Limit()` | `.offset()`, `.limit()` | `offset`, `limit` | Implemented | `limit=0` treated as unlimited. |
 | Ordering | `.OrderBy().ThenBy()` | `.orderBy().thenBy()` | `orderBy[]` | Implemented | Max 8 order-by columns. |
-| Count convenience | `.CountAsync()` → `/query/count` | `.count()` uses `/query?limit=0` (not the dedicated endpoint) | `POST .../query/count` | Partial | .NET uses dedicated count endpoint; TS adoption is an open follow-up. |
+| Grouped aggregates | Embedded engine: `TableQuery.GroupBy(...)` + `GroupAggregateAsync()`; remote: `RemoteTableQuery.GroupBy(...)` / `Sum` / `Avg` / `CountDistinct` … + `AggregateAsync()` (**ColumnarRead, next train**) | `.groupBy(...)`, `.sum()`, `.avg()`, `.countRows()`, `.countDistinct()` … (**ColumnarRead S16, next train**) | `aggregates`, `groupBy` in the query message (**S16**) | Implemented (next train) | Time buckets (`minute` … `year`); `orderBy` over the result's names. `First` / `Last` embedded only. |
+| Total matches with a page | Embedded engine: `TableQuery.WithTotalMatches()` → `TotalMatches` on the result (**ColumnarRead, next train**) | — | Named queries: `count: true` → `totalMatches` | Embedded + named queries | Counted by the same read over the same snapshot as the page, ignoring `Skip` / `Limit`. |
+| Rows as views | Embedded engine: `ToListAsync()` rows read the result's columns (**ColumnarRead, next train**); remote: `ClientColumnarResult.Rows` over a frame answer's typed columns (**ColumnarRead S16, next train**) | `result.rows` are views over `result.typedColumns` when the server answered with frames (**ColumnarRead S16, next train**) | Column-batch frame response | Implemented (next train) | A row is a view over the result's column arrays: the indexer boxes one cell, `Get<T>` reads a typed column without boxing, `ToDictionary()` copies. |
+| Count convenience | `.CountAsync()` → `/query/count` | `.count()` → `/query/count` (**architecture review, next train**; it downloaded every matching row through `/query`) | `POST .../query/count` | Implemented (next train) | No row is transferred. The filter and joins count; `select`, `orderBy`, `limit`, `offset` and `distinct` do not. Aggregates and `groupBy` are dropped by both SDKs: the count is of matching rows, not groups (C# `CountAsync` sent them and got a 400 before). |
 | Cross-partition query flag | `.WithCrossPartitionAccess()` | No dedicated fluent method in current builder | `crossPartitionAccess` bool | Partial | TS can still send raw request outside builder. |
 || Expression SELECT (computed columns) | `.SelectExpr((alias, expr), ...)` | `.selectExpr({ alias: expr })` | `selectExpr[]` in query body | Implemented (P27 S7 / P40 S08) | Server-computed columns appended to result; type is inferred where the expression permits (`Unknown` otherwise). Always nullable. See [browser-tier read limits](browser-tier-read-limits.md#selectexpr-result-types) and [Bulk Mutations](bulk-mutations.md). |
 || Literal UPDATE | `.UpdateAsync(dict)` | `.update(values)` | `PATCH .../rows` | Implemented | Requires at least one WHERE predicate. See [Bulk Mutations guide](bulk-mutations.md). |
@@ -363,8 +411,6 @@ Notes:
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| TypeScript `in`/`notIn`/`like` operators — server-side support | Server `QueryTranslator.IsValidOperator` only accepts `eq/ne/gt/gte/lt/lte`; TS client sends `in`/`nin`/`like` which the server rejects | Use `eq`/`ne` predicates or filter client-side until server-side extension ships | Planned extension of `IsValidOperator` | High |
-| TypeScript `count()` dedicated endpoint adoption | TS `count()` uses `/query?limit=0` instead of `POST /query/count` | .NET `CountAsync` is correct; TS is functionally equivalent but incurs columnar decode overhead | TS client adoption | Medium |
 | Fluent JOIN workflows | `Join()` API across SDK fluent builders | Use planner/internal paths only (no stable public fluent route) | `BL-009` | High |
 | JOINed materialized query support | Materialized-query JOIN definition + maintenance | Single-table materialized patterns only | `BL-010` | Medium |
 
@@ -486,19 +532,22 @@ Expected checks:
 What to monitor first:
 
 - Query throughput and latency: `Perf.QueryApiCalls`, `Perf.QueryApiMs`.
-- Data-temperature scan mix: `Perf.HotScanRows`, `Perf.ColdScanRows`, `Perf.DeltaRowsQueried`.
-- Decode pressure: `Perf.DecodeCount`, `Perf.DecodeMs`.
-- Pruning effectiveness: `Perf.PagesPrunedByMinMax`, `Perf.PagesPrunedByJoint`, `Perf.SegmentsPrunedFully`, bloom counters.
-- Parallel execution behavior: `Perf.ParallelSegmentScans`, `Perf.ParallelScanMs`, `Perf.ParallelEarlyTerminations`.
+- Decode pressure: `Perf.DecodeCount`, `Perf.DecodeMs`, `Perf.DecodedValues`.
+- Partition pruning and hot-tier hits: `Perf.SegmentsPrunedByPartitionKey`, `Perf.HotSegmentHits` / `HotSegmentMisses`.
+- ⚠️ **Counters of the deleted scans read 0 (**ColumnarRead, next train**):** `HotScanRows`, `ColdScanRows`,
+  `DeltaRowsQueried`, `PagesPrunedByMinMax`, `PagesPrunedByJoint`, `PagesAfterPruning`, `PruningBytesSaved`,
+  `SegmentsPrunedFully`, the bloom counters, `ParallelSegmentScans`, `ParallelScanMs`, `ParallelEarlyTerminations`. They
+  stay in the CSV and in `/api/admin/metrics` (the `query` subsystem's `rowsScanned`, `hotScanRows`, `coldScanRows`,
+  `hotAggregateOps`, `coldAggregateOps`, `parallelScans`, `vectorizedOps`, `pagesPrunedByMinMax`, `pagesAfterPruning`, `pruningBytesSaved`, `segmentsPrunedFully`)
+  and no longer move. A query's own `stats` (`rowsScanned`, `executionMs`) are unaffected.
 
 Quick-answer matrix:
 
 | Question | Practical answer |
 |---|---|
 | Are queries CPU-bound on decode? | Check `DecodeMs`/`DecodeCount` against row volume. |
-| Is pruning helping? | Watch min/max/joint/bloom prune counters over representative traffic. |
-| Are LIMIT queries terminating early? | Track `ParallelEarlyTerminations`. |
-| Are we scanning unexpected cold/delta volume? | Compare `ColdScanRows` and `DeltaRowsQueried` trends. |
+| Is pruning helping? | The min/max/joint/bloom prune counters read 0 since **ColumnarRead** (next train); compare `DecodedValues` with the rows the queries return. |
+| Are we decoding unexpected cold volume? | Compare `DecodedValues` / `DecodeMs` trends (`ColdScanRows` reads 0 since **ColumnarRead**, next train). |
 | Are query API calls increasing but rows flat? | Inspect query shape defaults (limit/order/filter) and client behavior. |
 
 ## 2.14 Troubleshooting by symptom
@@ -518,7 +567,7 @@ Quick-answer matrix:
 | Verification scope | Command | Result | Date (UTC) | Notes |
 |---|---|---|---|---|
 | Server query endpoint + translator behavior | `dotnet test tests/Aouda.Server.Tests --no-build --filter "FullyQualifiedName~QueryIntegrationTests|FullyQualifiedName~QueryTranslatorTests" --verbosity minimal` | Pass | 2026-03-31 | Covers request validation, translation defaults/limits, integration query flow. |
-| Storage query engine batch/pruning/validity paths | `dotnet test tests/Aouda.Engine.Storage.Tests --no-build --filter "FullyQualifiedName~QueryEngineRowWindowBatchTests|FullyQualifiedName~QueryEnginePrunedExecutionTests|FullyQualifiedName~RowFilterEngineColdValidityTests" --verbosity minimal` | Pass | 2026-03-31 | Confirms row-window batch contract, pruning execution, cold validity behavior. |
+| Storage query engine batch/pruning/validity paths | `dotnet test tests/Aouda.Engine.Storage.Tests --no-build --filter "FullyQualifiedName~QueryEngineRowWindowBatchTests|FullyQualifiedName~QueryEnginePrunedExecutionTests|FullyQualifiedName~RowFilterEngineColdValidityTests" --verbosity minimal` | Pass | 2026-03-31 | Confirms row-window batch contract, pruning execution, cold validity behavior. Historical: these tests were deleted with their engines (**ColumnarRead, next train**). |
 | TypeScript query builder contract | `npm test -- query-builder.test.ts` | Pass | 2026-03-31 | Confirms immutable builder behavior, operator/order/limit serialization, endpoint path usage. |
 
 ## 2.16 Test coverage matrix
@@ -527,9 +576,7 @@ Quick-answer matrix:
 |---|---|---|---|---|
 | HTTP query integration and error handling | `tests/Aouda.Server.Tests/QueryIntegrationTests.cs` | Pass | Strong | Exercises endpoint behavior and protocol responses. |
 | Query translation/validation/defaults | `tests/Aouda.Server.Tests/QueryTranslatorTests.cs` | Pass | Strong | Validates translator rules and normalization. |
-| QueryEngine `QueryBatch` contract | `tests/Aouda.Engine.Storage.Tests/QueryEngineRowWindowBatchTests.cs` | Pass | Strong | Verifies row-window aligned batch semantics. |
-| Pruned execution behavior | `tests/Aouda.Engine.Storage.Tests/QueryEnginePrunedExecutionTests.cs` | Pass | Medium | Focuses pruning outcomes and execution correctness. |
-| Cold validity + filter path correctness | `tests/Aouda.Engine.Storage.Tests/RowFilterEngineColdValidityTests.cs` | Pass | Strong | Covers validity alignment in cold predicate execution. |
+| One scan: pruning rules, top-K, aggregates, routing against a reference model (**ColumnarRead, next train**) | `tests/Aouda.Engine.Api.Tests/ColumnarRead/ReadRuleOracle*Tests.cs`, `ReadFuzzTests.cs` | — | Strong | Every pruning rule and route has an oracle case, rule on and off. Replaces the deleted `QueryEngineRowWindowBatchTests`, `QueryEnginePrunedExecutionTests` and `RowFilterEngineColdValidityTests` (their engines are gone). |
 | TypeScript query payload mapping | `aouda-client-ts/tests/query-builder.test.ts` | Pass | Strong | Covers builder immutability, operators, order, pagination serialization. |
 | Mixed-state correctness (hot/cold/unflushed) | `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`, `tests/Aouda.Engine.Api.Tests/C2ScenarioMirrorIntegrationTests.cs` | Not run in this pass | Medium | Evidence from prior report cycle; re-run recommended for release gates. |
 
@@ -537,7 +584,6 @@ Quick-answer matrix:
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| TypeScript `in`/`notIn`/`like` server-side wiring | TS client emits `in`/`nin`/`like` wire ops that the server `IsValidOperator` currently rejects; real gap between client behavior and server validation | Once server-side validator is extended, add integration tests round-tripping these operators end-to-end | High |
 | Depth guardrail regression coverage | `MaxWhereClauseNestingDepth = 5` is implemented in `ProtocolConstants` and validated by `QueryTranslator`; resolved P14, BL-044 | Add regression tests that submit groups at depths 5 (allowed) and 6 (rejected) to confirm boundary is stable | Medium |
 | Count endpoint efficiency baseline | Baseline large-table count latency vs full query | Add benchmark comparing `/query/count` vs materialized full query | Medium |
 | Cross-partition query builder parity in TS | Missing fluent API increases accidental inconsistencies | Add TS builder API + integration tests for `crossPartitionAccess` request emission | Medium |
@@ -549,21 +595,25 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 
 ### Resolved gaps
 
+- ~~`DISTINCT` returned a `NULL` and its type's default as one row~~ — ✅ **Resolved** (**ColumnarRead, next train**):
+  `Distinct("Volume")` over rows holding both `NULL` and `0` (or `false`, or `""`) returned only one of them. A `NULL` is
+  now a distinct value of its own. `DISTINCT` also reads constant pages and small value sets from their statistics.
+
 - ~~Nested group construction is not first-class in current SDK query builders~~ — ✅ **Resolved (P14, BL-044)**: WhereClause.Groups adopted end-to-end across SDKs/helpers with nested group support.
 - ~~No max-depth validation for deeply recursive `WhereClause.Groups`~~ — ✅ **Resolved (P14, BL-044)**: depth guardrails implemented.
-- ~~TypeScript client count may still use full query~~ — ⚠️ **Partially resolved (P14, BL-026)**: server-side `POST .../query/count` endpoint is shipped and .NET `RemoteTableQuery.CountAsync` uses it. However, the TypeScript `count()` method in `query-builder.ts` still sends `POST .../query` with `limit=0` and reads `rowCount` from the response — it does **not** use the dedicated `/query/count` endpoint. The TS client adoption remains an open follow-up.
+- ~~TypeScript client count may still use full query~~ — ✅ **Resolved** (P14, BL-026 for the endpoint and .NET; **architecture review, next train** for TypeScript): `count()` posts `/query/count` and transfers no row. It used to send `POST .../query` with `limit=0` — no limit — and download every matching row to read `rowCount`. Both SDKs drop aggregates and `groupBy` from a count, so it counts matching rows; .NET `CountAsync` sent them and got a 400.
 - ~~Fluent/public JOIN APIs remain unavailable~~ — ✅ **Resolved (P14 BL-009, P15)**: complete join engine with all five join types (INNER, LEFT, RIGHT, FULL OUTER, CROSS), post-join SELECT/WHERE/ORDER BY/LIMIT/aggregates, multi-column keys, chained joins (up to 8 tables), Grace hash join with spill-to-disk. Exposed in both .NET `TableQuery` and TypeScript `@aouda/client` query builders.
 - ~~Bool predicate overload parity~~ — ✅ **Resolved (P14, BL-038)**: `ConstBool`, `ColumnRef.Eq/Ne(bool)` added.
 - ~~Guid PK mixed-type comparison failure~~ — ✅ **Resolved (P14, BL-039)**: added `IsGuid`/`CompileGuid` path in `RowFilterEngine`.
 - ~~Nullable timestamp update failure~~ — ✅ **Resolved (P14, BL-040)**: deletion mask applied to validity bitmap.
 - ~~A filtered read of a cold segment returned type defaults instead of `NULL`~~ — ✅ **Resolved** (**BL-613, 0.1.35**): a query with a `where` clause against a segment that had aged out of memory read every nullable fixed-width column back as its type's default — `Guid` as all-zeros, `Int32`/`Int64`/`Date`/`Double`/`Decimal` as `0`, `Bool` as `false`, `Timestamp` as `0001-01-01`. The same rows read **without** a `where` clause were always correct, and `String` columns were never affected. Nothing was lost on disk: the affected rows return the correct `NULL` once you are on a build carrying this fix — no repair or reload is needed. ⚠️ **If you are on an earlier build and a query result looks like a missing foreign key rather than a null one**, this is the likeliest cause; it is invisible in `/health` and needs no restart to appear or disappear, because it follows whether the data happens to be resident in memory.
-- ~~An `ORDER BY` + `LIMIT` query returned type defaults instead of `NULL`~~ — ✅ **Resolved** (**BL-615, 0.1.35**): a single-column `orderBy` with a `limit` read every nullable fixed-width column back as its type's default — the same symptom as the entry above, through a different query path. ⚠️ **This one did not depend on memory residency**: it was equally wrong on freshly-written data, so any ordered, limited page of a table with a nullable column was affected. Unaffected: the same query without a `limit`, and `String` columns. Nothing was lost on disk — affected rows return the correct `NULL` once you are on a build carrying this fix, with no repair or reload. Sort order itself is unchanged: a `NULL` in the *sort* column still orders as its type's default, which remains a separate question from how it is reported.
+- ~~An `ORDER BY` + `LIMIT` query returned type defaults instead of `NULL`~~ — ✅ **Resolved** (**BL-615, 0.1.35**): a single-column `orderBy` with a `limit` read every nullable fixed-width column back as its type's default — the same symptom as the entry above, through a different query path. ⚠️ **This one did not depend on memory residency**: it was equally wrong on freshly-written data, so any ordered, limited page of a table with a nullable column was affected. Unaffected: the same query without a `limit`, and `String` columns. Nothing was lost on disk — affected rows return the correct `NULL` once you are on a build carrying this fix, with no repair or reload. Sort order itself is unchanged: a `NULL` in the *sort* column still orders as its type's default, which remains a separate question from how it is reported. (**BL-755, next train**: it no longer does — a `NULL` sort key orders last ascending and first descending, on every column type and every tier.)
 - Cold-path pruning is restored with cross-column page pruning (`P7-BL025`); further tuning remains normal performance work, not a correctness blocker.
 
 ### New capabilities (P15/P16)
 
 - **Extended filter operators (P16 H.2)**: TypeScript client now supports `in()`, `notIn()`, `like()`, `isNull()`, `isNotNull()`, `between()` in addition to the six comparison operators.
-- **Aggregate query builder (P16 H.1)**: TypeScript client supports `sum()`, `min()`, `max()`, `count()`, `groupBy()`, `groupAggregate()`.
+- **Aggregate query builder (P16 H.1)**: TypeScript client supports `sum()`, `min()`, `max()`, `count()`, `groupBy()`, `groupAggregate()`. ⚠️ Until **ColumnarRead S16 (next train)** the builder sent a field the server ignored, so these returned plain rows; they now send `aggregates` / `groupBy`.
 - **Columnar output (P16 H.4)**: `.toColumnar()` execution method for high-performance columnar access.
 
 ### Remaining gaps
@@ -594,10 +644,9 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 - `src/Aouda.Protocol/Messages.cs`
 - `src/Aouda.Protocol/ProtocolConstants.cs`
 - `src/Aouda.Engine.Api/TableQuery.cs`
-- `src/Aouda.Engine.Storage/Query/QueryEngine.cs`
-- `src/Aouda.Engine.Storage/Query/QueryBatch.cs`
-- `src/Aouda.Engine.Storage/Query/RowFilterEngine.cs`
-- `src/Aouda.Engine.Storage/Query/ParallelSegmentScanner.cs`
+- `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs` (**ColumnarRead, next train**; `QueryEngine.cs`, `QueryBatch.cs`, `RowFilterEngine.cs` and `ParallelSegmentScanner.cs` are deleted)
+- `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs`
+- `src/Aouda.Engine.Core/Query/Scan/PredicateProgram.cs`
 - `src/Aouda.Engine.Diagnostics/Perf.cs`
 - `src/Aouda.Client/RemoteTableQuery.cs`
 - `src/Aouda.Client/RemoteConditionBuilder.cs`
@@ -606,9 +655,7 @@ _Updated 2026-04-08 after P14, P15, P16 completion._
 - `aouda-client-ts/src/types.ts`
 - `tests/Aouda.Server.Tests/QueryIntegrationTests.cs`
 - `tests/Aouda.Server.Tests/QueryTranslatorTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/QueryEngineRowWindowBatchTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/QueryEnginePrunedExecutionTests.cs`
-- `tests/Aouda.Engine.Storage.Tests/RowFilterEngineColdValidityTests.cs`
+- `tests/Aouda.Engine.Api.Tests/ColumnarRead/` (`ReadRuleOracle*Tests`, `ReadFuzzTests`)
 - `tests/Aouda.Engine.Api.Tests/QueryCorrectnessC2IntegrationTests.cs`
 - `tests/Aouda.Engine.Api.Tests/C2ScenarioMirrorIntegrationTests.cs`
 - `aouda-client-ts/tests/query-builder.test.ts`

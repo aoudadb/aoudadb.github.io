@@ -181,6 +181,9 @@ High-level flow:
 ### B) Restore exact backup
 - `RestoreEngine.RestoreAsync(...)` with `TargetTime = null`.
 - Rehydrates files, verifies hashes (default), returns restore stats.
+- When the restored database's catalog is rebuilt from `catalog.chk` (which holds table definitions only), the open catalogues the segment directories it finds, once; reads then use the catalog's list and never list a directory (**ColumnarRead, next train**).
+- ⚠️ **Rows in hot segments come back** (**architecture review, next train**). The open catalogues every restored `.hot` file as a Hot segment (a promoted segment once), with the partition key a hot-only segment's `hot_segment.marker` records; backups now carry those markers, and no longer carry a retired segment's `.hot` file. Before, `.hot` files were backed up and restored but never catalogued, and the restore resets the WAL, so **every row still in a hot segment at backup time was lost** by a clean restore.
+- **A 0.2.x backup** restored into this build opens, but each of its cold segments fails the read that reaches it with `SegmentFormatUnsupportedException`, naming the segment (this build cannot read 0.2.x pages). To move 0.2.x data to this build, restore with the 0.2.x build, export, and reload — see [Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model).
 - Counters: `RestoreOperations*`, `RestoreBlobsDownloaded`, verification counters.
 
 ### C) PITR (HTTP or engine)
@@ -633,7 +636,7 @@ Health behavior:
 | Missing blob during restore | Archive inconsistency or aggressive lifecycle policy | Run `VerifyBackupAsync`, review retention/GC decisions |
 | `PitrWindowException` | Target time outside the local WAL window and the archive (or no PITR-eligible backup) | Take a newer backup, enable archiving, or pick a later `targetTime`. The local window is write volume since the last backup, not a duration |
 | Health says stale backup | No recent successful backups | Ensure host invokes backups on schedule |
-| Durability D.3 scenario skipped | Public backup endpoint absent | Expected until BL-023 is completed |
+| After a restore, reads fail with `SegmentFormatUnsupportedException` | The backup was taken by 0.2.x, whose segments this build cannot read (**architecture review, next train**) | Restore it with the 0.2.x build, export, and reload into this build || Durability D.3 scenario skipped | Public backup endpoint absent | Expected until BL-023 is completed |
 | S3 `AmazonServiceException` on first operation | Invalid bucket, region mismatch, or credential chain failure | Verify `Destination` URI, check IAM permissions, set `Region` or `ServiceUrl` explicitly |
 
 ## 2.15 Verification ledger
@@ -702,7 +705,7 @@ _Added 2026-06-07 (MemTiering S12 — closes Gap C)._
 An **exact backup** captures a point-in-time snapshot of every `DiskBacked` table that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
 
 - **Never-sealing mutable-tier tables** (those with `MemoryIntent = Mutable` that never exceed the seal threshold) are **fully covered** by an exact backup. Their data lives entirely in HRA, and a `.hra` snapshot file is written for each such table at the backup checkpoint.
-- **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism.
+- **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism. ⚠️ Until the **architecture review (next train)** this held for the backup only: a restore did not catalogue the `.hot` files, and their rows were lost (see [Restore exact backup](#b-restore-exact-backup)).
 - `BackupFileType.HraSnapshot` manifest entries identify these files; they are content-addressed (SHA-256 + CRC-32) and deduplicated between incremental backup runs.
 
 ### What is exempt

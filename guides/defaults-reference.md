@@ -30,6 +30,7 @@ explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
+| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB. **On in every resource mode** (**ColumnarRead, next train** — it was off in `Constrained`, the mode a database starts in) | `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
 | Bulk-load ingest buffer budget | `max(0.04 × yourDatabaseShare, 8 MB)`, growing with headroom in the server's shared memory governor instead of stopping at a fixed number (P45) | `Aouda:BulkLoad:IngestBufferBudgetFraction`, or `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` to pin an explicit ceiling (`268435456` reproduces the old fixed-256 MB behavior) |
 

@@ -127,7 +127,7 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 
 **Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
 
-**Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After`, code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
+**Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After` (readable cross-origin since the **architecture review, next train**), code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
 
 See [Direct client access](../guides/direct-client-access.md) for configuration, CORS, and Studio/Hub URL rules.
 
@@ -578,6 +578,10 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
+**`Retry-After` is readable from a browser (**architecture review, next train**).** Every CORS policy exposes it, so a
+browser client can honour it on a 429 or 503 as a server-side client does — the back-off the ingest and capacity
+design relies on. Before, it was not exposed and a browser read `null`.
+
 #### Named-query, streaming, and data-plane errors
 
 These also appear as WebSocket `error` `code` values where noted.
@@ -901,6 +905,8 @@ Execute a query against a table.
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
 | `crossPartitionAccess` | boolean | No | When `true`, queries on partitioned tables do not require a partition-key filter. Without this, queries on partitioned tables without a partition filter return `PARTITION_FILTER_REQUIRED`. Default: `false`. |
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
+| `aggregates` | object[] | No | (**ColumnarRead S16, next train**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
+| `groupBy` | object[] | No | (**ColumnarRead S16, next train**) GROUP BY keys; requires `aggregates`. |
 
 **Where Clause:**
 
@@ -943,6 +949,13 @@ Execute a query against a table.
 null `qty` (they compared as `0`), and `ne` does not return them either — nor does `nin` (**BL-734**), which
 returned every null row. To select nulls, use `isNull`
 (`{"op": "eq", "value": null}`, below), which is a null test rather than a comparison.
+
+**Strings (**BL-750, next train**):** `gt`, `gte`, `lt` and `lte` accept a string value against a `String` column and
+compare by **ordinal UTF-8 byte order** — Unicode code-point order, no locale collation, case-sensitive (`"Z"` sorts before
+`"a"`, `"é"` after `"z"`). Before, the server rejected a string value for these operators (and in-process `ColumnRef.Gt(string)`
+matched nothing). An `orderBy` on a `String` column sorts in the same order, with or without a `limit` and in joins too,
+and so do `min` / `max` of one (**ColumnarRead, next train**); with a `limit` it followed the server's culture before, and
+without one UTF-16 code units, which put a character at U+E000–U+FFFF after an emoji.
 
 **Case-insensitive comparison (`ignoreCase`, server 0.1.24+):**
 
@@ -1008,6 +1021,14 @@ storing a definition that could never execute.
 
 For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
 
+**Joins and authorization (**architecture review, next train**).** Every joined table needs the same grant as the base
+`table`. A join reads its targets **unfiltered** — the request's `where`, and the row- and partition-level security
+predicates the server adds to it, filter the base table only — so a join is allowed only onto tables the caller may read
+without restriction. A join onto a table the caller's RLS or PLS would filter (or that the caller may read nothing of) is
+refused with `403 AUTHORIZATION_DENIED`, naming the table (`details: table=<name>`); query that table directly instead.
+The same holds for a named query that joins, single and batch, and for `…/query/count`. **BL-818** tracks applying the
+restriction on the join side. Before, a joined table was read with no grant check and no RLS / PLS.
+
 **Join example:**
 ```json
 {
@@ -1025,6 +1046,64 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
   "limit": 100
 }
 ```
+
+#### Aggregates and GROUP BY
+
+(**ColumnarRead S16, next train.** Before this, `/query` had no aggregate except the `/query/count` route, and no GROUP BY.)
+
+```json
+{
+  "database": "mydb",
+  "table": "trades",
+  "where": {"and": [{"column": "Ticker", "op": "eq", "value": "AAPL"}]},
+  "groupBy": [
+    {"column": "Source"},
+    {"column": "DateTime", "bucket": "day", "alias": "d"}
+  ],
+  "aggregates": [
+    {"func": "count"},
+    {"func": "sum", "column": "Volume", "alias": "vol"},
+    {"func": "min", "column": "Price"},
+    {"func": "avg", "column": "Price"},
+    {"func": "countDistinct", "column": "Venue"}
+  ],
+  "orderBy": [{"column": "vol", "descending": true}],
+  "limit": 30
+}
+```
+
+| Field | Values |
+|---|---|
+| `aggregates[].func` | `count` (no `column`: the rows; with a `column`: its non-null values), `sum`, `min`, `max`, `avg`, `countDistinct` (the distinct non-null values). Case-insensitive. Every function but `count` needs a `column`. |
+| `aggregates[].alias` | The result column's name. Without it: `COUNT`, or `{FUNC}_{column}` — `COUNT_x`, `SUM_x`, `MIN_x`, `MAX_x`, `AVG_x`, `COUNT_DISTINCT_x`. |
+| `groupBy[].column` | The column grouped by. |
+| `groupBy[].bucket` | A time bucket of a `Timestamp` column: `minute`, `hour`, `day`, `week` (ISO, from Monday), `month`, `year`. The key is the bucket's start. |
+| `groupBy[].alias` | The key column's name (the column's name otherwise). |
+
+The answer is the ordinary query response (columnar, `format=rows`, or frames). It holds the group keys, then one column per
+aggregate in the order asked; without `groupBy` it is **one row**. `where` selects the rows aggregated, and `orderBy` (over the
+result's column names), `offset` and `limit` apply to the groups — **including `limit`'s default of 1000**, so a query that
+can make more groups than that sets `limit` (up to 10,000) and pages with `offset`. Groups come in key order (ascending, nulls
+last) unless `orderBy` says otherwise.
+
+**Types:** `count` / `countDistinct` are `Int64`. `sum` is an exact `Int64` over integers (overflow is an error, not a wrapped
+value), the column's own `Decimal(p,s)` over one, and a `Double` over floating point. `min` / `max` keep the column's type.
+`avg` is a `Double`; a `Decimal(p,s)` mean is divided in decimal first. Over no row, `count` is `0` and every other aggregate is
+`null`. A grouped query over no row answers no row.
+
+**Refused (`400 INVALID_REQUEST`):**
+
+- `groupBy` without `aggregates`;
+- `select`, `selectExpr`, `distinct` or `joins` together with either;
+- an unknown `func` or `bucket`, or a bucket of a non-`Timestamp` column;
+- `sum` / `avg` of a column that is not a number, or any vector column;
+- two result columns with the same name (give one an alias);
+- an `orderBy` that names no result column;
+- `/query/count` with either field.
+
+An unknown column is `400 COLUMN_NOT_FOUND`. A caller denied the table gets the zero-row answer with the aggregate result's
+columns. Named-query definitions do not carry these fields yet (**BL-796**): ⚠️ a definition that includes them is
+accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 
 **Columnar Response (default):**
 
@@ -1064,6 +1143,75 @@ For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-co
 }
 ```
 
+**`stats.routedTo` (**ColumnarRead S18, next train**):** the materialized query the answer was read from instead of the table,
+when it was — rows, columns, `aggregates` / `groupBy` and `…/query/count` are all routed to a current result that holds the
+answer ([routing](../guides/materialized.md#routing-a-read-to-a-maintained-result)); omitted when the table was read. The
+answer is the same either way. It is in the frame response's `X-Aouda-Stats` too.
+
+**JSON written from the columns (**ColumnarRead, next train**):** both JSON shapes are now written straight from the
+query's columns into the response and sent as they are written (chunked), instead of being built whole first. The bytes are
+the same as before for every type. One case changes: a `Double` / `Float32` result cell that is `NaN` or infinite, which JSON
+cannot represent, is now a clean `500 INTERNAL_ERROR` naming the column before anything is sent. Before, the response broke
+after its headers. Ask for the frame response below, which carries these values.
+
+**Column-batch frame response (**ColumnarRead, next train**):** a request whose `Accept` header lists
+`application/vnd.aouda.column-batch` gets the result as **column-batch frames**: the same binary format `POST …/rows`
+accepts, described under [`POST …/rows`](#post-apidatabasesdbtablesnamerows). Both SDKs ask for it by default.
+Send `Accept: application/vnd.aouda.column-batch, application/json;q=0.5` and **branch on the response's `Content-Type`**. A
+server older than this, or a result the frame cannot carry, answers JSON as before. A frame cannot carry a non-null
+vector cell, a computed or joined column whose values are not its declared type, more than 4,096 columns, a column name
+it cannot hold (empty, or over 1,024 UTF-8 bytes), a single row that would decode past half the reader's 256 MB frame
+budget, or a string value over 16 MB of UTF-8 (**architecture review, next train**: the last four were not listed
+before). Errors are JSON `ProtocolError`s with their status — as long as they happen before the response starts. A
+failure **after the response headers are sent** cannot turn into an error body: the server aborts the connection and
+sends no trailing error. Both SDKs report that as a retryable connection error (`AoudaConnectionException` in .NET,
+`AoudaConnectionError` in TypeScript).
+`format=columnar|rows` chooses the JSON shape only. The same applies to `POST …/named-queries/{name}/query`; the named-query
+batch stays JSON.
+
+- **Body:** one or more frames back to back, each at most 65,536 rows — fewer for a wide result, so that no frame decodes past
+  the reader's 256 MB a frame. There is always at least one frame: an empty result is one frame of 0 rows that still names
+  every column. Every frame carries every column, in result order. A result that names a column twice is answered as JSON.
+  A reader should check that the frames' rows add up to `X-Aouda-Row-Count`: a body cut between two frames is otherwise a
+  shorter, well-formed answer.
+- **Headers** carry the rest of the JSON envelope:
+
+| Header | Content |
+|---|---|
+| `X-Aouda-Column-Types` | JSON array of the logical type names, the JSON body's `types` (e.g. `["Int64","Decimal","Timestamp"]`) |
+| `X-Aouda-Row-Count` | Total rows across the frames (`rowCount`) |
+| `X-Aouda-Total-Matches` | `totalMatches`, when the query asked for it (a named query with `count: true`) |
+| `X-Aouda-Stats` | The JSON body's `stats` object |
+| `X-Aouda-Warnings` | The JSON body's `warnings` array, when there are any |
+| `X-Aouda-Token` | The consistency token, as on every response |
+
+Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a browser client reads them cross-origin —
+together with `X-Request-Id`, `X-Aouda-Protocol-Version`, `Accept-Post` and `Retry-After` (**architecture review, next
+train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
+
+- **Column kinds by logical type.** A null is the frame's null bit.
+
+| Logical type | Frame kind | Value |
+|---|---|---|
+| `Int64`, `Int32`, `Int16`, `Byte`, `UInt16`, `UInt32` | `Int64` (1) | The value, widened |
+| `UInt64` | `Int64` (1) | The value's 64 bits; read them as unsigned |
+| `Double`, `Float32` | `Double` (2) | The value, widened (exact) |
+| `Boolean` | `Bool` (3) | Bitmap |
+| `String` | `String` (4) | A dictionary per frame |
+| `Guid` | `String` (4) | The `D` form (`0f8fad5b-d9cb-469f-a165-70867728950e`) |
+| `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
+| `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
+| `Decimal` declared `Decimal(p,s)` | `ScaledDecimal` (8); `Decimal` (6) when the column is empty or every value is null | The unscaled value at scale `s` |
+| `Decimal` (undeclared) | `ScaledDecimal` (8) if every value has one scale and fits, else `Decimal` (6) | |
+| A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
+
+A decimal column's kind is chosen **from the values it holds**, not from its declaration: a reader takes the scale from
+the frame and accepts either kind for any `Decimal` column (**architecture review, next train** — the table above implied
+a `Decimal(p,s)` column was always `ScaledDecimal`).
+
+`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`.
+`GET /admin/capabilities` lists `queryColumnBatch: true`.
+
 ---
 
 ### Named queries
@@ -1076,7 +1224,7 @@ There is **no HTTP route that registers a definition** and **no inventory list**
 
 | Field | Notes |
 |---|---|
-| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). Directory-answerable PK distinct sets `stats.distinctServedFromPartitionMetadata` (omitted when false). |
+| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). A `distinct` over partition-key columns runs as a scan like any read (row groups the filter selects whole are answered from their statistics), so a deleted or truncated partition no longer appears; it was answered from the partition directories, which outlive their rows. `stats.distinctServedFromPartitionMetadata` is no longer set (**architecture review, next train**). |
 | `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
 | `freshness` | Declared on the named query: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Budget-only edits do not fire `named_query_body_changed`. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). |
 
@@ -1110,7 +1258,7 @@ Execute one named query by unique name.
 
 **Query parameters:** `format=columnar` (default) or `format=rows`. `readPreference` as on ad-hoc query. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`. The named query’s declared `freshness` is keyed by `{name}`. A name with no `freshness` block is fail-safe: primary-only + `readYourWrites`. Loosening (call site weaker than the declared budget, or non-`Primary` on fail-safe) is 400 `FRESHNESS_LOOSENED`.
 
-**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset). When the name is deprecated, `warnings` is present:
+**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset — counted by the same read as the page, over the same snapshot (**ColumnarRead, next train**)). When the name is deprecated, `warnings` is present:
 
 ```json
 {
@@ -1134,7 +1282,9 @@ Execute one named query by unique name.
 | 404 | `TABLE_NOT_FOUND` | Data-plane browser-tier and a touched table has `dataPlaneAccess: false` |
 | 429 | `IDENTITY_QUOTA_EXCEEDED` | Data-plane quota |
 
-Invoker ADRA always applies (PLS + RLS of the caller). There is no definer / `runAs` field.
+Invoker ADRA always applies (PLS + RLS of the caller). There is no definer / `runAs` field. A definition that joins a
+table the caller's PLS or RLS restricts is refused with `403 AUTHORIZATION_DENIED` naming the table, because a join
+cannot carry that restriction ([joins and authorization](#post-apidatabasesdbquery); **architecture review, next train**).
 
 #### `POST /api/databases/{db}/named-queries/batch`
 
@@ -1482,9 +1632,11 @@ The list route returns an array of the same object.
 **`state: Ready` means the query is *readable*. It does not mean it is *current*.** The two are
 deliberately separate, and reading `state` alone is the mistake this section exists to prevent.
 
-A materialized query that has fallen behind still holds real rows and still answers reads. Dropping
-it from routing would turn "slightly stale" into "unavailable", which is strictly worse — so it
-stays `Ready`, and its currency is reported by three other fields:
+A materialized query that has fallen behind still holds real rows and still answers reads **by its
+own name**. Making it unreadable would turn "slightly stale" into "unavailable", which is strictly
+worse — so it stays `Ready`. What it no longer does (**ColumnarRead S18, next train**) is answer a
+read of its **source table**: a query is routed to a result only while the result is current, and
+otherwise the table answers, with the same rows as ever. Its currency is reported by these fields:
 
 | Field | Meaning |
 |---|---|
@@ -1995,7 +2147,7 @@ materialized query's result table (whose name is the query's name).
 | `storageTemperature` | string | `Auto`, `HotOnly` or `ColdPreferred`. |
 | `memoryRowCap` | integer? | Cap on resident (hot) rows for this table. |
 | `targetMemoryBytes` | integer? | Per-table hot-byte budget. On a `HotOnly` table this is the **pin's reservation size**; on an `Auto` table it is a demotion target. |
-| `memoryFilter` | string? | JSON predicate naming which rows are preferred-hot. Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`. Affects demotion *ordering* only. |
+| `memoryFilter` | string? | JSON predicate naming which rows are preferred-hot. Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`. Affects demotion *ordering* only: a segment whose statistics rule out every row for the filter is demoted first. (**ColumnarRead S14, next train**: the server now applies it; before, the preference only ever took effect in the engine's tests.) |
 | `hotOnlyBackstop` | string? | What happens when honouring a `HotOnly` pin would breach the ceiling: `RefuseWrites` (default) or `DemoteAnyway`. |
 | `pinAllInMemory` | boolean? | ⚠️ **Retired — sending it is a `400`**, not a no-op. Use `storageTemperature: "HotOnly"`. |
 
@@ -3269,13 +3421,18 @@ Returns feature and provider capability metadata for Studio and MCP clients.
     "nodeInfo": true,
     "nodeLogs": true,
     "nodeLogStream": true,
-    "insertColumnBatch": true
+    "insertColumnBatch": true,
+    "queryColumnBatch": true
   }
 }
 ```
 
 `features.insertColumnBatch` (**ColumnarCore S06, 0.2.0**): `POST …/tables/{name}/rows` reads the column-batch
 frame as well as JSON (see [`POST …/rows`](#post-apidatabasesdbtablesnamerows)). Absent on a server that predates it.
+
+`features.queryColumnBatch` (**ColumnarRead S16, next train**): `POST …/query` and a named query's execute answer with
+column-batch frames when the request's `Accept` lists them (see [`POST …/query`](#post-apidatabasesdbquery)). Absent on a
+server that predates it.
 
 ---
 
@@ -3404,7 +3561,7 @@ Get cluster topology.
 
 The following features are not yet supported:
 
-1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC.
+1. **NULLS FIRST/LAST**: Custom null ordering is not supported. Nulls sort last for ASC, first for DESC — for every column type (**BL-755, next train**: a null in a numeric, `Date` or `Timestamp` sort column of an `orderBy` with a `limit` sorted as its type's default, `0`, so ascending pages began with the null rows; **ColumnarRead, next train**: without a `limit`, the default columnar response put a numeric, `Timestamp` or `Bool` null first ascending too).
 2. **Expression-based ORDER BY**: Only catalog column names of sortable types can be used for ordering, not expressions or `selectExpr` aliases. The sanctioned workaround is a stored [`derived`](../guides/insert-transforms.md#derived-columns) column. See [browser-tier read limits](../guides/browser-tier-read-limits.md#no-expression-orderby).
 
 **Note — WhereClause nesting:** Earlier versions of this document stated that nested AND/OR was not supported. This is no longer accurate. The `groups` field in `WhereClause` supports up to **5** levels of nesting (`ProtocolConstants.MaxWhereClauseNestingDepth = 5`). Each group is AND'd with the top-level conditions, enabling safe composition of independent filter layers (e.g., partition scope + row scope). See the `groups` field description in the [`POST /api/databases/{db}/query`](#post-apidatabasesdbquery) section for details.
@@ -4350,3 +4507,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.6 | 2026-08-29 | **Catalog GET/list auth linkage:** `auth.enabled` / `auth.database` on every database response (never `mk_*` on GET). GET `{name}` documented as metadata-only; 404 while `Dropping`. Health probe split (`/health` liveness vs `/ready` / GET `state=Active`). Create-role `permissions` optional; 400 `INVALID_REQUEST` with `suggestion`. |
 | 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections: 0`) — **not yet released**: BL-404 / BL-405 are on `Unreleased` and ship in the **next** server train, after 0.1.20. |
 | 2.8 | 2026-09-30 (0.2.0) | **ColumnarCore S06 / S13, BL-716 (additive on the wire):** `POST …/tables/{name}/rows` also accepts one column-batch frame (`Content-Type: application/vnd.aouda.column-batch`; database and table from the URL, `identityInsert` / `writeConcern` as query parameters), advertised by `Accept-Post: application/json, application/vnd.aouda.column-batch` on the endpoint's responses and by `features.insertColumnBatch` in `GET /admin/capabilities`; an older server answers a frame with `415`. Column-batch frames gain the `ScaledDecimal` kind (`8`). `Decimal` columns may declare `precision` / `scale` (`Decimal(p,s)`, `1 ≤ p ≤ 18`, `0 ≤ s ≤ p`) on create-table, add-column and column details. Insert errors: a body that is not valid JSON is `400 INVALID_REQUEST` (was MVC's validation problem), an empty body is `400 MISSING_DATABASE`; a string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is a `400`. |
+| 2.9 | next train (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is `403 AUTHORIZATION_DENIED` (BL-818); `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |

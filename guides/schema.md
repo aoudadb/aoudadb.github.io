@@ -902,7 +902,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer columns. Allowed values: `true`, `false`. On ordinary insert the column **must be present** in the row (and in a named-mutation `values` template); send `0` to auto-generate. Omitting it is `400 Missing required column`, not auto-generate — see [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows) (BL-429). |
 | `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. Allowed values: `true`, `false`. |
 | `references` | `references` | `string` | None | Foreign key reference in `"table.column"` format. |
-| `encoder` | `encoder` | `string` | None | Optional `EncoderPreference` name (e.g. `String_Dict`). Omit = Auto. |
+| `encoder` | `encoder` | `string` | None | Optional `EncoderPreference` name (e.g. `String_Dict`). Omit = Auto. Advisory since layout v2 (**BL-768, next train**): every value of a type maps to that type's one codec, which chooses an encoding per vector. |
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
@@ -922,7 +922,7 @@ both or neither:
 
 A declared decimal is stored, logged, compared, aggregated and encoded as a **64-bit integer scaled by 10^scale**
 (`123.45` is stored as `12345`) — as ClickHouse's and DuckDB's `Decimal(18,2)` are. It is 8 bytes instead of 16, its
-pages delta-compress like an `Int64`, and filters, sorts, keys, `min` / `max` / `sum` run as integer operations. An
+pages encode like an `Int64`, and filters, sorts, keys, `min` / `max` / `sum` run as integer operations. An
 undeclared `Decimal` is unchanged (a 128-bit `System.Decimal`, any scale per value); use it for more than 18 digits.
 
 | | Declared `Decimal(p,s)` |

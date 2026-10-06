@@ -204,11 +204,21 @@ Reads (**BL-647, 0.1.39**). When a query's filter pins full primary keys, the qu
 narrows its inputs before scanning:
 - The unflushed buffer contributes only the rows L2 locates for those keys, instead of being walked.
 - Every segment proven to hold none of the keys is skipped. The proof uses L2 hot partitions, zone
-  maps on each key column, page blooms and L3.
+  maps on each key column, page blooms and L3. Only a `Strict` table writes the leading-key page
+  bloom (**ColumnarRead, next train**: now also for a segment of fewer than 13 rows).
+- (**ColumnarRead S17, next train**) In a cold segment that may hold a key, the read decodes only the
+  rows the key map located, not the segment; the segment's bloom is held in memory rather than read
+  from its file on every read.
 
 The scan then runs as before, and the full filter is still evaluated on every row it reads. Results
 are therefore identical to an unnarrowed read; only the work changes. A segment that cannot be ruled
 out is always read.
+
+⚠️ **Fixed (**ColumnarRead S17, next train**): a keyed read could come back empty for a key updated
+while it ran.** The proof treated a key whose row in a segment had been deleted *after* the read fixed
+its view as absent from that segment, so an `UPDATE` committing in between made the read skip the old
+row and miss the new one. The proof no longer consults deletions; the read's own view decides which
+rows are live.
 
 Seal/open path:
 

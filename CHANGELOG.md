@@ -13,6 +13,161 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- ⚠️ **Joins onto a restricted table are refused, a 0.2.x data directory is refused at open, and a clean restore keeps hot
+  rows (ColumnarRead architecture review).** A join — ad hoc, `…/query/count` or in a named query — needs the base table's
+  grant on every joined table, and one onto a table the caller's row- or partition-level security would filter is
+  `403 AUTHORIZATION_DENIED` naming the table, because a join reads its targets unfiltered (it read them with no grant check
+  and no RLS / PLS before; BL-818 tracks filtering the join side). The catalog format is 5: a 0.2.x directory fails at open
+  with `CatalogFormatException` (export with 0.2.x and reload; its cold segments used to read as zero rows), a 0.2.x backup
+  restored here fails by segment on read, and a primary and its replicas must run the same build. A clean restore now
+  catalogues `.hot` segments, whose rows it lost. `DISTINCT` over partition-key columns is a scan, so deleted or truncated
+  partitions no longer appear (`stats.distinctServedFromPartitionMetadata` is no longer set; the directory-residue and
+  10,000-tuple refusals are gone). `Retry-After` is readable from a browser. The TypeScript `count()` posts `/query/count`
+  instead of downloading every row, and both SDKs' counts drop aggregates and GROUP BY. Docs corrected beside it: the
+  frame response's JSON fallbacks and its connection abort after the headers, the `Decimal` frame kind, latest-per-key
+  routing (embedded only), row views in both SDKs, and the `Timestamp` wire unit (ticks, not milliseconds; the storage
+  half is BL-808). See [HTTP API](reference/http-api.md#post-apidatabasesdbquery),
+  [Authorization](auth/authorization.md#196-combined-pls--rls) and [Storage](guides/storage.md#27-core-concepts-and-mental-model).
+- **Fixed: wrong answers in routed reads and cold point reads (ColumnarRead group-6 review).** A read of
+  a table answered from one of its materialized queries could disagree with the table: after a
+  `TRUNCATE`, a column dropped (and added back) or renamed, or a new column default (the result kept the
+  old rows; it is now marked stale and rebuilt); for a `SUM` whose group lost its last non-null value
+  (0 instead of null); for a string `MIN` / `MAX` (culture order instead of code point); for a
+  latest-per-key winner whose order value an update set to null; for a filter on a `Float32` or
+  `UInt64` column; and a routed `LatestPerKey` page came back in the result's order rather than key
+  order. Separately, a primary-key read of a cold segment holding an updated key twice (the old copy
+  deleted) could return no row. See
+  [Materialized queries](guides/materialized.md#routing-a-read-to-a-maintained-result).
+- **Reads no longer copy the write buffer (ColumnarRead S19).** A read that reached unflushed rows
+  flattened all of them into fresh arrays every time; it now reads the buffer where it is. Under a
+  steady 50,000 rows/s insert load, a `COUNT` / `SUM` over the table went from 4.4 to 1.5 ms at the
+  median, and the inserts' acknowledgement while reads run from 107 to 39 ms. Answers are unchanged.
+- ⚠️ **A materialized query answers for its table only while it is current; a stale one no longer
+  does (ColumnarRead S18).** A question a materialized query already holds the answer to — rows,
+  columns, aggregates, GROUP BY (rolled up from finer time buckets), `COUNT(*)`, `DISTINCT` — is read
+  from its result table on every read path and over HTTP (`POST …/query`, `…/query/count`), but only
+  when the result is `Ready`, not stale, has nothing queued and has incorporated every write the read
+  can see; otherwise the table answers. Before, only the embedded `ToResultAsync` routed, and a stale
+  result (a `skip` or `deferred` load, a dropped update) answered for its table without the rows it
+  was missing. A routed answer is the table's answer, and says so in `stats.routedTo`. See
+  [Materialized queries](guides/materialized.md#routing-a-read-to-a-maintained-result).
+- **The latest (or first) row per key, as a question (BL-450, ColumnarRead S18).**
+  `TableQuery.LatestPerKey(orderBy, keys…)` / `FirstPerKey(…)` in the embedded API, read from a
+  matching materialized query when one is current. Not over HTTP or in either SDK yet. See
+  [Query](guides/query.md).
+- **Point reads read what they return (ColumnarRead S17).** A filter that pins every series column
+  (`Ticker = 'X' AND Source = 'Y'`) reads only that series' rows from each segment's run directory, and
+  a primary-key read of a cold segment only the rows the key map located. Also fixed: a keyed read
+  could come back empty for a key updated while it ran. See
+  [Primary-key indexing](guides/pk-indexing.md).
+- **Query results as column-batch frames, and aggregates and GROUP BY over HTTP (ColumnarRead S16).**
+  `POST …/query` and a named query's execute answer with column-batch frames when `Accept` lists
+  `application/vnd.aouda.column-batch`, with the rest of the envelope in `X-Aouda-*` headers (exposed
+  to browsers by CORS); both SDKs ask for them and fall back to JSON. The query message gains
+  `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and
+  `Timestamp` buckets); `limit`, including its default of 1,000, applies to the groups. The C#
+  `RemoteTableQuery` gains `GroupBy`, `Sum`, `Avg`, `CountDistinct` … and `AggregateAsync()`, and the
+  TypeScript `sum()` / `min()` / `max()` / `groupBy()` now send them (the server ignored what they sent
+  before, and returned plain rows). JSON responses are written from the columns and streamed, with
+  the same bytes; a `NaN` or infinite `Double` cell is now a `500 INTERNAL_ERROR` naming the column,
+  before anything is sent. In `Aouda.Client`, `ClientColumnarResult.GetColumn<T>()` no longer returns
+  `default` for every cell of a JSON answer, and `ToDataTable()` no longer throws on one. See
+  [HTTP API](reference/http-api.md#aggregates-and-group-by).
+- **Total matches counted by the read itself (ColumnarRead S15).** A named query with `count: true`
+  counts `totalMatches` in the same read, over the same snapshot as its page; it ran a separate count
+  that could disagree with the page under concurrent writes. In the embedded API,
+  `TableQuery.WithTotalMatches()`, and `ToListAsync` rows are views over the result's columns rather
+  than dictionaries (the members are unchanged).
+- **A table query reads a vector column as null (ColumnarRead S14).** A `select`, `orderBy`,
+  `distinct` or `count` naming one failed, and so did a DELETE or UPDATE on a table with a non-nullable
+  vector column. Vectors are read by the nearest-neighbour operators. See
+  [Graph and vector](guides/graph-vector.md).
+- **A table's `memoryFilter` now orders demotion on a server (ColumnarRead S14).** It only ever took
+  effect in the engine's tests. See [Hot/cold](guides/hot-cold.md).
+- ⚠️ **Removed from the embedded .NET API (ColumnarRead S14, S16), unused:** `TableQuery.WhereJoined`,
+  `GroupByJoined`, `SelectAll`, `ToJsonAsync`, `ToColumnarJsonAsync`, `ColumnarQueryResult.ToJson()`,
+  `EngineInsertResult.FromRowCount` and `HotColdInspector`; `GroupAggregateAsync` on a join is refused.
+  The adaptive bloom path is gone: `bloomFilterBytes` in the memory report and
+  `bloom_filters.adaptiveBytes` in metrics read 0.
+- **`/api/admin/metrics`: five always-zero counters removed, and the deleted scans' counters read 0
+  (ColumnarRead S01, S14).** Gone: the `simd` subsystem, `query.fusedAggregateOps`,
+  `storage.pageCache.entries`, `io.totalMs`, `timeSeries.segmentSummaryCount`. The `query` subsystem
+  lists the read counters; `decodedValues`, `segmentsPrunedByPartitionKey` and `hotSegmentHits` /
+  `hotSegmentMisses` move, while `rowsScanned`, `hotScanRows`, `coldScanRows`, `parallelScans`,
+  `vectorizedOps` and the page-pruning counters stay at 0. See [Query](guides/query.md).
+- **The page cache is on in every resource mode (ColumnarRead S13).** It was off in `Constrained`, the
+  mode every database starts in; `Aouda:Memory:PageCacheEnabled = false` turns it off. Large scans
+  run on several workers within the query's CPU grant, and a GROUP BY's, top-K's or `DISTINCT`'s
+  growing state is charged to the query's budget as it grows. See
+  [Server configuration](guides/server-configuration.md) and [Sizing](guides/sizing.md).
+- ⚠️ **`SUM` over no value is `null` (BL-757, ColumnarRead S12)** — a filter that matched nothing, or a
+  column null in every matching row, on every path; it answered `0` whenever a segment was read. Also:
+  `MIN` / `MAX` of a `String` (code-point order) or `Bool` column answer the value instead of `null`;
+  `SUM` of a `String`, `Bool`, `Guid`, `Timestamp` or `Date` column is refused; `DISTINCT` keeps a null
+  apart from `0` / `false` / `""`; an `orderBy` without a `limit` puts nulls last ascending (a columnar
+  answer put them first) and orders strings by code point. GROUP BY in the embedded API:
+  `TableQuery.GroupBy(…)` with `GroupAggregateAsync()`; `AggregateAsync()` refuses a grouped query. See
+  [Query](guides/query.md).
+- **Every read runs on one scan that skips what its statistics rule out (ColumnarRead S11–S14).** Rows,
+  columns, `COUNT(*)`, aggregates, GROUP BY, `ORDER BY … LIMIT`, `DISTINCT`, joins' sides and DELETE /
+  UPDATE matching read through one pipeline that classifies each 8,192-row row group from its
+  statistics and decodes only what a selected row needs. On 1 M cold trades, a full-table aggregate
+  went from 74.1 ms to 0.72 ms. See [Query](guides/query.md).
+- **Reads, writes and background reorganisation no longer see rows twice, miss them or bring deleted
+  ones back (ColumnarRead S02–S17).** Dozens of windows during flushes, coalesces, promotions and
+  demotions are closed, each with a test, among them: rows returned two or more times after maintenance
+  (BL-751); an UPDATE or upsert that could durably lose its row; a DELETE that could durably delete a
+  row inserted again under the same key; a `Strict` table accepting a duplicate unsigned key; nulls read
+  as `0` after a promotion; a `Dedicated` partitioned table's partition-key column read as empty.
+- **String ranges and null ordering (BL-750, BL-755, ColumnarRead S02).** `gt` / `gte` / `lt` / `lte`
+  on a `String` column compare by code point (the server refused a string value; in process they
+  matched nothing), and a null sort key sorts last ascending and first descending with a `limit` (it
+  sorted as `0`). Also fixed: `COUNT(*)` of a table whose first column is a `Timestamp` (`0`), `MIN` /
+  `MAX` of a `Timestamp` or `Date` (`null`), `OR` filters that skipped matching cold pages, and
+  (BL-745) a query that met a corrupt page and truncated the column file: it now fails with
+  `ColumnPageCorruptException` and leaves the file alone. See [HTTP API](reference/http-api.md).
+- **Hot segments carry the same statistics footer, and a hot segment file from an earlier build is
+  not read (ColumnarRead S10).** A `.hot` file (now version 2) stores, per 8,192-row slice of every
+  column, the statistics a cold page records, plus the segment's sort-key index, series ranges and
+  key range, so a restart no longer loses them. A version-1 `.hot` file is refused by name and its
+  segment is rebuilt from its cold copy where one exists — as with S08 / S09, export with the earlier
+  build and reload. Merging small hot segments now keeps rows in the table's cluster order.
+- **A column whose type was widened is skipped by its page statistics again (ColumnarRead S10).**
+  Pages written before an order-preserving type change (a wider integer, integer → `Double`,
+  `Float32` → `Double`, `Date` → `Timestamp`) prune by their min / max converted to the new type,
+  instead of being read in full. A change to `String` still reads every page.
+- **Cold segments carry a statistics footer (ColumnarRead S09).** Every cold page records, besides
+  min / max and its null count, whether it is constant, sorted or all-null, its run count, first and
+  last value, an exact sum for integer and decimal columns, and up to 16 distinct values; every
+  segment's `segment.manifest` (v4) holds those for each page, the first and last sort-key value of
+  each 8,192-row group, and the row range of each series. Together they stay under 2 % of the
+  segment's bytes. The deletion mask (`_deleted.pages`) records its deleted count. Nothing answers
+  a query from them yet; later read-path work does. Footers, page headers and deletion masks written
+  by an earlier build are refused by name: export with that build and reload.
+- ⚠️ **Cold pages are layout v2, and a 0.2.x data directory does not open (ColumnarRead S08).** Every
+  cold column is cut into 8,192-row pages, encoded in 2,048-row vectors that each decode on their own
+  (frame-of-reference and delta bit-packing, run-length, constants; ALP for doubles; a sorted
+  dictionary or plain UTF-8 for strings). Page min / max no longer count nulls, so more pages are
+  skipped. Pages written by 0.2.x are refused by name ("a layout-v1 codec"): export with a 0.2.x
+  build and reload. A column's `encoder` option no longer changes the encoding (BL-768). Edge
+  tables no longer write `csc_*.col` mirror files (nothing read them; `StoreCsc` still enables
+  bidirectional `ShortestPath`). See [Sizing](guides/sizing.md).
+- ⚠️ **Delta segments are removed (ColumnarRead S07).** Late-arriving rows are flushed inline with
+  on-time rows; `LateArrivalPolicy.Delta`, still the default, behaves as `Inline`, and nothing writes
+  or reads a table's `data/_delta/`. **Rows an older build left under `data/_delta/` are no longer
+  read.** `AoudaEngine.SealOrphanedDeltaSegmentsAsync` is removed: a pre-0.1.5 database that still
+  needs it (BL-146) must run it before upgrading. `LateArrivalPolicy.Reject` is not enforced (BL-762).
+  See [Time-series](guides/time-series.md) and [Partitioning](guides/partitioning.md).
+- **A partition key's promotion to a dedicated directory no longer moves its earlier rows (ColumnarRead
+  S07).** They stay in the shared bucket and are still read. See
+  [Partitioning](guides/partitioning.md).
+- **A read is one view (ColumnarRead S07).** A read's segments, deletion masks and unflushed rows are
+  fixed at one instant: a concurrent MERGE, UPDATE, flush or coalesce is no longer seen half or
+  twice. A read takes its segments from the catalog and never lists a directory; a catalog change is
+  visible only once it is durable; and a read that cannot resolve a segment its catalog names fails
+  instead of returning short. A restored database whose catalog is rebuilt from `catalog.chk`
+  catalogues its segments at open. See [Query](guides/query.md) and [Backup](guides/backup.md).
+
 ## 0.2.0 — 2026-09-30
 
 **.NET 10, `Decimal(p,s)` columns, and writes that travel and land as columns.** Server **0.2.0**, `Aouda.Client` **0.2.0**, `@aouda/client` **0.2.0**, Studio **0.0.26** (pin stays **0.1.25** until Studio moves). See [Compatibility](clients/compatibility.md).

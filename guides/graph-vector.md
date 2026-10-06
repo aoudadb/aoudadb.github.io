@@ -135,7 +135,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 - `EdgeHraBuffer` — in-memory hot write area; freeze-and-swap flush to sealed CSR segments
 - `EdgeSegmentFlusher` — produces sealed segments with `(src, dst)` CSR layout
 - `CscMirrorWriter` — optional CSC companion segments (`csc_*` files) for bidirectional traversal
-- Edge late-arrival `_delta/` merge (`DeltaMerger.cs` edge-safe behavior)
+- Late-arriving edges are flushed inline; the edge `_delta/` merge is removed (**ColumnarRead, next train**)
 - Partition routing by source-node partition key
 - `CreateEdgeTableAsync`, `InsertEdgesAsync`, `DeleteEdgeAsync` on `AoudaEngine`
 - Graph traversal operators: `TraverseAsync` (BFS k-hop reachability), `KHopNeighborhoodAsync` (BFS with hop distance), `ShortestPathAsync` (bidirectional BFS with CSC; unidirectional without)
@@ -146,7 +146,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 - `VectorHraBuffer` — in-memory hot write area; freeze-and-swap flush per IVF cell
 - `IvfCentroidStore` — persists IVF centroids trained by `KMeansHelper`
 - `VectorSegmentFlusher` — seals vectors per IVF cell; writes raw fp32 pages + `*.rabitq` / `*.pq` companion files
-- Vector late-arrival `_delta/` merge: cell-aware delta classification
+- Late-arriving vectors are flushed inline; the cell-aware `_delta/` merge is removed (**ColumnarRead, next train**)
 - `InsertVectorsAsync`, `DeleteVectorAsync` on `AoudaEngine`
 - ANN search operator: `NearestNeighborsAsync` (IVF-pruned brute-force scan, Stage 1)
 - ADRA authorization for vector queries via `IVectorAccessFilter` / `AdraVectorAccessFilter` (wired in P24; ADR 0032)
@@ -217,7 +217,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 | Edge HRA buffer (`EdgeHraBuffer`) | Yes | — | — | `src/Aouda.Engine.Storage/Hra/EdgeHraBuffer.cs` | — |
 | Sealed CSR edge segments (`EdgeSegmentFlusher`) | Yes | — | — | `src/Aouda.Engine.Storage/Edge/EdgeSegmentFlusher.cs` | — |
 | CSC mirror segments (`CscMirrorWriter`) | Yes | — | — | `src/Aouda.Engine.Storage/Edge/CscMirrorWriter.cs` | Enabled by `EdgeTableConfig.StoreCsc = true` |
-| Edge delta merge (`_delta/`) | Yes | — | — | `src/Aouda.Engine.Storage/Compaction/DeltaMerger.cs`; P20-COMPLETION §2 #4 | — |
+| Edge delta merge (`_delta/`) | — | — | Yes | P20-COMPLETION §2 #4 | Removed with delta segments (**ColumnarRead, next train**) |
 | Edge partition routing by source key | Yes | — | — | `src/Aouda.Engine.Api/AoudaEngine.cs` `InsertEdgesAsync`; P20-COMPLETION §4.1 | — |
 | Vector column type (`DataType.Vector`) | Yes | — | — | `src/Aouda.Engine.Core/Schema/Types.cs`; P20-COMPLETION §2 #1 | — |
 | Vector WAL frames (insert/delete) | Yes | — | — | `src/Aouda.Engine.Wal/WalPayloads.cs`; P20-COMPLETION §4.1 | — |
@@ -226,7 +226,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 | Sealed vector segments per IVF cell (`VectorSegmentFlusher`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/VectorSegmentFlusher.cs` | — |
 | RaBitQ quantization companion (`*.rabitq`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/RaBitQEncoder.cs`; P20-COMPLETION §5.6 | — |
 | PQ quantization companion (`*.pq`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/PqEncoder.cs`; P20-COMPLETION §5.6 | — |
-| Vector delta merge (cell-aware) | Yes | — | — | `src/Aouda.Engine.Storage/Compaction/DeltaMerger.cs`; P20-COMPLETION §2 #7 | — |
+| Vector delta merge (cell-aware) | — | — | Yes | P20-COMPLETION §2 #7 | Removed with delta segments (**ColumnarRead, next train**) |
 | MdVector column storage (`col_{colId}_mdvec.bin`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/MdVectorColumnWriter.cs`; P20-COMPLETION §2 #7 | — |
 | MdVector FDE auto-derivation | — | — | Yes | ADR 0027 (columnar) §Stage-2 | Stage 2 — `MdVectorColumnConfig.Fde` field stored only |
 | `TraverseAsync` operator (BFS k-hop) | Yes | — | — | `src/Aouda.Engine.Query/Operators/TraverseOperator.cs`; P20-COMPLETION §2 #8 | — |
@@ -261,11 +261,12 @@ Aouda extends its columnar storage model with two new primitives alongside the e
 - Optionally maintains a CSC mirror (sorted by `(dst, src)`) for backward traversal.
 - Routes insert batches by source-node partition key (edges from the same source live in the same partition).
 - Builds and exposes adjacency-aware traversal operators over sealed CSR pages.
-- Late-arriving edges flow to `_delta/` segments (ADR 0014 pattern) and are merged in the background.
+- Late-arriving edges are flushed inline like any other edge; `_delta/` segments are removed (**ColumnarRead, next train**).
 
 Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, not separate tables. They may appear on any tabular table:
 - `DataType.Vector` — fixed-dimension dense float vectors. Each insert batch is WAL-framed, buffered in a per-column `VectorHraBuffer`, and flushed per IVF cell. Cold sealing optionally writes RaBitQ or PQ companion files.
 - `DataType.MdVector` — variable-length multi-vector storage (ColBERT / ColPali style). Written to `col_{colId}_mdvec.bin`. The companion FDE column for MaxSim retrieval is deferred to Stage 2.
+- **A table query does not return vectors.** A vector column is read by `NearestNeighborsAsync` (and the graph operators), not by `Where` / `Select` / `ToListAsync` / `ToColumnarAsync`, which read the table's own segments: there a vector column reads as **null in every row** (a projection, `ORDER BY`, `DISTINCT`, `COUNT(vec)` = 0, `WHERE vec IS NULL` matches every row). (**ColumnarRead, next train**) Before, a query that projected a vector column threw.
 
 **Key invariant:** Edge and vector storage reuse all existing engine primitives (column-per-file, HRA freeze-and-swap, WAL replay, hot/cold tiering, partition pruning, zone maps). They are not parallel subsystems.
 
@@ -802,13 +803,11 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 |---|---|---|---|---|
 | `EdgeHraBuffer` insert/delete/replay | `tests/Aouda.Engine.Storage.Tests/Hra/EdgeHraBufferTests.cs` | Pass | Strong | — |
 | Edge sealed CSR segments | `tests/Aouda.Engine.Storage.Tests/Edge/SealedEdgeSegmentTests.cs` | Pass | Strong | — |
-| Edge delta merge | `tests/Aouda.Engine.Storage.Tests/Edge/EdgeDeltaMergeTests.cs` | Pass | Strong | — |
 | `VectorHraBuffer` insert/delete | `tests/Aouda.Engine.Storage.Tests/Vector/VectorHraBufferTests.cs` | Pass | Strong | — |
 | Sealed vector segments per IVF cell | `tests/Aouda.Engine.Storage.Tests/Vector/SealedVectorSegmentTests.cs` | Pass | Strong | — |
 | IVF centroid store | `tests/Aouda.Engine.Storage.Tests/Vector/IvfCentroidStoreTests.cs` | Pass | Strong | — |
 | RaBitQ encoder | `tests/Aouda.Engine.Storage.Tests/Vector/RaBitQEncoderTests.cs` | Pass | Strong | — |
 | MdVector column storage format | `tests/Aouda.Engine.Storage.Tests/Vector/MdVectorStorageTests.cs` | Pass | Strong | Storage format only; no retrieval test |
-| Vector delta merge (cell-aware) | `tests/Aouda.Engine.Storage.Tests/Vector/VectorDeltaMergeTests.cs` | Pass | Strong | — |
 | k-means helper for IVF centroid training | `tests/Aouda.Engine.Storage.Tests/Vector/KMeansHelperTests.cs` | Pass | Medium | Unit-level; end-to-end centroid drift not tested |
 | `TraverseAsync` BFS | `tests/Aouda.Engine.Query.Tests/Operators/TraverseOperatorTests.cs` | Pass | Strong | — |
 | `KHopNeighborhoodAsync` BFS with hop distances | `tests/Aouda.Engine.Query.Tests/Operators/KHopNeighborhoodOperatorTests.cs` | Pass | Strong | — |
@@ -891,7 +890,6 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | `RaBitQEncoder` | `src/Aouda.Engine.Storage/Vector/RaBitQEncoder.cs` |
 | `PqEncoder` | `src/Aouda.Engine.Storage/Vector/PqEncoder.cs` |
 | `MdVectorColumnWriter`, `MdVectorColumnReader` | `src/Aouda.Engine.Storage/Vector/MdVectorColumnWriter.cs`, `MdVectorColumnReader.cs` |
-| `DeltaMerger` (edge/vector delta classification) | `src/Aouda.Engine.Storage/Compaction/DeltaMerger.cs` |
 | `SegmentManifest` (Stage-4 reservation fields) | `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs` (lines 71–83) |
 | `ManifestSerializer` | `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs` |
 | `TraverseOperator` | `src/Aouda.Engine.Query/Operators/TraverseOperator.cs` |
@@ -902,8 +900,8 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 
 ### Test suites
 
-- `tests/Aouda.Engine.Storage.Tests/Edge/` — edge flusher, delta merge
-- `tests/Aouda.Engine.Storage.Tests/Vector/` — vector HRA, IVF, quantization, delta merge, MdVector
+- `tests/Aouda.Engine.Storage.Tests/Edge/` — edge flusher
+- `tests/Aouda.Engine.Storage.Tests/Vector/` — vector HRA, IVF, quantization, MdVector
 - `tests/Aouda.Engine.Storage.Tests/Hra/EdgeHraBufferTests.cs`
 - `tests/Aouda.Engine.Query.Tests/Operators/` — all four query operators
 - `tests/Aouda.Engine.Api.Tests/InsertEdgesApiTests.cs`

@@ -290,7 +290,7 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 | `Aouda:Cpu:OversubscriptionFactor` | `2.0` | Ceiling on total granted parallelism as a multiple of schedulable cores. |
 | `Aouda:Memory:PerClassAdmissionEnabled` | `true` | Per-class entitlements. Off admits against the process ceiling alone, which is the pre-governance behaviour. Always off under `Advisory` enforcement (embedded, `aouda dev`). |
 | `Aouda:Memory:ForegroundQuiescenceWindow` | see `MemoryBudgetSection` | How long after the last foreground unit finishes before background work returns to full rate. |
-| `Aouda:Memory:PageCacheEnabled` | unset (three-valued) | Unset follows the measured resource mode — off in `Constrained`, on otherwise. An explicit `true`/`false` wins in every mode. |
+| `Aouda:Memory:PageCacheEnabled` | unset | Unset: **on in every resource mode**, `Constrained` included, within its `MaxPageCacheBytes` (`T12`) share (**ColumnarRead, next train** — it was off in `Constrained`, the mode every database starts in). `false` turns it off in every mode; `true` is the default said out loud. |
 | `Aouda:Memory:ResourceMode` | unset | Pins the resource state instead of measuring it. Normally leave unset. |
 | `Aouda:Query:MaxResultRows` | `1000000` | A query whose result exceeds this is refused with a typed retryable `503` rather than materialised. |
 | `residency.hotOnlyBackstop` | `RefuseWrites` | **Per table, not server config.** What a `HotOnly` pin does when honouring it would breach the ceiling — see [Hot/Cold](hot-cold.md#when-a-pin-cannot-be-honoured). |

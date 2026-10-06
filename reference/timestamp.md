@@ -8,6 +8,11 @@ parent: "Reference"
 
 **Single source of truth** for how `DataType.Timestamp` is stored and converted across the engine, API, and any client adapters.
 
+> ⚠️ **Under review (BL-808).** The [wire section](#usage-in-the-wire-protocol) below is correct: the wire carries ticks.
+> What this page says about **storage** — Unix milliseconds and `TimestampUnit` since P29 / ADR 0008 — disagrees with the
+> wire reference and the engine's readers and tests, which build `Timestamp` values from `DateTime.Ticks`. Which half of
+> ADR 0008 is current is open; until BL-808 settles it, rely on the wire section, not on the storage unit below.
+
 > **Breaking change notice (P29, June 2026):** Prior to P29, `DataType.Timestamp` was stored as .NET `DateTime.Ticks` (100 ns units). P29 migrated all internal storage to **Unix milliseconds**. All existing persisted timestamp data must be re-ingested. There is no in-place migration path. This is an explicit, accepted breaking change — see [ADR 0008](../decisions/0008-timestamp-unit.md).
 
 ---
@@ -63,17 +68,22 @@ API and wire consumers should assume **Timestamp = UTC instant**, not "SQL Serve
 
 ## Predicate pruning and precision
 
-Prior to P29, `SegmentPruner` converted Int64/Timestamp cluster keys to `double` for window extraction. Values above 2^53 lose precision as a `double`, causing incorrect segment pruning for unix-millisecond timestamps (which are well above 2^53 for any post-1970 date). P29 fixed this by switching Int64/Timestamp to a dedicated `LongWindows` path that avoids any floating-point conversion.
+Prior to P29, `SegmentPruner` converted Int64/Timestamp cluster keys to `double` for window extraction. Values above 2^53 lose precision as a `double`, causing incorrect segment pruning for unix-millisecond timestamps (which are well above 2^53 for any post-1970 date). P29 fixed this by switching Int64/Timestamp to a dedicated `LongWindows` path that avoids any floating-point conversion. Since **ColumnarRead** (next train) `SegmentPruner` is deleted: pruning is the scan's `RowGroupClassifier` over each row group's statistics, which compares integers and timestamps exactly, as `Int64`.
 
 ---
 
 ## Usage in the wire protocol
 
-The default wire format for `Timestamp` columns is an `Int64` unix millisecond value. When displaying or filtering timestamps via HTTP or SDK:
+The wire carries `Timestamp` as **ticks** (100 ns units, UTC), not Unix milliseconds (**corrected, architecture review, next
+train** — this section said milliseconds; the server sends and reads ticks):
 
-- **Insert:** Pass an ISO-8601 string (`"2026-06-23T14:00:00Z"`) or an `Int64` unix-ms value. Both are accepted by the server; ISO-8601 is converted to unix ms before storage.
-- **Query filter value:** Pass either ISO-8601 or unix-ms `Int64`. `QueryTranslator.NormalizeFilterValue` handles both.
-- **Result value:** Returned as `Int64` unix-ms in columnar results. Client SDKs convert to `DateTime`/`Date` at the application layer.
+- **JSON:** an `Int64` of .NET ticks since `0001-01-01T00:00:00Z` (`DateTime.Ticks`).
+- **Column-batch frames** (an insert body and a query response): an `Int64` of ticks since the Unix epoch — the JSON value
+  minus 621,355,968,000,000,000. See [HTTP API — column kinds](http-api.md#post-apidatabasesdbquery).
+- **Insert:** Pass an ISO-8601 string (`"2026-06-23T14:00:00Z"`) or, in JSON, a number, which is read as .NET ticks.
+- **Query filter value:** Pass either ISO-8601 or a number of .NET ticks. `QueryTranslator.NormalizeFilterValue` handles both.
+- **Result value:** .NET ticks in JSON results. The .NET SDK gives a UTC `DateTime`; the TypeScript SDK gives a row value as an
+  ISO 8601 string, and its `toColumnar().data` keeps the ticks (see [TypeScript](../clients/typescript.md)).
 
 ---
 
@@ -82,9 +92,9 @@ The default wire format for `Timestamp` columns is an `Int64` unix millisecond v
 - **Engine.Api (`AoudaEngine`):** `TimestampConversion.DateTimeToUnixUnits` converts `DateTime → Int64` at insert time.
 - **Engine.Api (`ResultTransformer`):** `TimestampConversion.UnixUnitsToDateTime` converts `Int64 → DateTime` in query results.
 - **Engine.Storage (hot segment builder):** Frame-of-Reference encoding computed from unix-ms deltas.
-- **Engine.Storage (`SegmentPruner`):** `LongWindows` path for timestamp range pruning (no double cast).
+- **Engine.Storage (`RowGroupClassifier`):** exact `Int64` comparison for timestamp range pruning (no double cast). `SegmentPruner` and its `LongWindows` path are deleted (**ColumnarRead, next train**).
 - **Catalog:** `TimestampUnit` persisted per column in `CatalogCheckpoint` (v4+). Tables without the field default to `Milliseconds`.
-- **Wire/JSON:** `Int64` unix-ms value over HTTP; ISO-8601 strings accepted on input and normalized.
+- **Wire/JSON:** `Int64` .NET ticks over HTTP JSON, ticks since the Unix epoch in column-batch frames; ISO-8601 strings accepted on input and normalized (see [above](#usage-in-the-wire-protocol)).
 - **Market data:** The unix-ms unit is the standard for financial timestamps; used by Aggregate MQ time-bucket functions (`TruncateToHour`, `TruncateToMinute`, etc.) which operate on unix-ms values and return bucket values as `Int64` unix-ms.
 
 ---
@@ -117,6 +127,6 @@ For microsecond financial data:
 - `src/Aouda.Engine.Core/Schema/Types.cs` — `DataType.Timestamp`, `TimestampUnit` enum
 - `src/Aouda.Engine.Core/Util/TimestampConversion.cs` — shared conversion helpers (`DateTimeToUnixUnits`, `UnixUnitsToDateTime`)
 - `src/Aouda.Engine.Storage/Hot/HotSegmentBuilder.cs` — FOR Timestamp encoding
-- `src/Aouda.Engine.Storage/Query/SegmentPruner.cs` — `LongWindows` precision path
+- `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` — exact timestamp range pruning (**ColumnarRead, next train**; `SegmentPruner.cs` is deleted)
 - `guides/market-data.md` — Stock-quote schema design using Timestamp columns
 - `guides/time-series.md` — Time-series clustering and range queries
