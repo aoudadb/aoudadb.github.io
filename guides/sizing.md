@@ -153,7 +153,8 @@ simply keeps checking keys by reading its segments — correct, and slower — a
 
 The map is also memory the server takes back when something else needs it (**WorkloadCore, next train**): under
 pressure it evicts the map's partitions — one per cold segment — **least recently used first, across every table of the
-database**, after the page cache, bloom filters and metadata and after demoting hot segments. A key in an evicted segment
+database**, after the page cache, bloom filters and metadata and before demoting hot segments (which writes data); a
+background load stops when that happens rather than evict what it has just loaded. A key in an evicted segment
 is checked by reading that segment, as before the map covered it, and the next check schedules the segment's partition to
 load again; `keyMapResident` reads `false` meanwhile. An upsert or a materialized-query update that meets one decodes the
 segment's key columns and covers it before it writes — a one-off cost per segment, much less than checking key by key.
