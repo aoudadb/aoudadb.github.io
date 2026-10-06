@@ -70,7 +70,9 @@ The strong arguments:
 | Identity of a definition | Unique name in `aouda.schema.json` | `^[A-Za-z][A-Za-z0-9_.]*$`. Same string on the wire, on disk, and in export. |
 | Versioning | Explicit names | `quoteByTicker` and `quoteByTickerV2` are two entries. |
 | Removal | Omit the name | Destructive `RemoveNamedQuery`. There is no `dropNamedQueries`. |
-| `select` / `selectExpr` | **Required** | `*` is refused (`NAMED_QUERY_PROJECTION_STAR`). |
+| `select` / `selectExpr` | **Required** — except beside `aggregates` | `*` is refused (`NAMED_QUERY_PROJECTION_STAR`). A definition with `aggregates` / `groupBy` answers its keys and aggregates and takes no `select` (**BL-796, next train**). |
+| `aggregates` / `groupBy` / `perKey` | Optional | As on `/query`, checked at apply under its rules; subscribe refuses them ([HTTP API, named-query definition](../reference/http-api.md)) (**BL-796, BL-801, next train**). |
+| `joins[i].where` | Optional | A filter on the joined table, ANDed with the caller's row security there (**BL-818, next train**). |
 | `limit` | Must be capped in the definition | Uncapped `$limit` fails schema apply. |
 | Parameter in identifier position | Illegal | Table, column, operator, sort, projection. |
 | Identity as a parameter | Illegal | `NAMED_QUERY_IDENTITY_PARAM` at apply. |
@@ -284,7 +286,7 @@ These fields exist on the definition. They were missing from this page.
 
 **`count: true`.** The response includes `totalMatches` (HTTP; omitted when the definition has no `count`) so a footer can render "1–25 of 412" from one round trip. Subscribe snapshots set `total_matches` on `snapshot_complete`. Count **ignores** limit/offset, and it is taken by the same read as the page, over the same snapshot, so the total and the rows always agree (**ColumnarRead, next train** — it used to be a second `COUNT` query). Apply rejects a count whose cost is not bounded (`NAMED_QUERY_COUNT_UNBOUNDED`) — joins, `distinct`, or a partitioned table whose WHERE does not cover every partition key with a **required** `eq`/`in`. `POST …/query/count` stays **404** on the data plane.
 
-**`distinct: true`.** Exists. Subscribe refuses it. When every distinct column is a raw partition key and the predicate touches only partition keys, one partition key constrained by `eq`/`in` is enough to pass the partition-filter rule — that is the "which sources exist for this ticker?" query. It runs as a scan like any read, pruned to the constrained keys, and row groups the filter selects whole are answered from their statistics (**architecture review, next train**). It used to be answered from the partition directories with no scan, and a partition whose rows were deleted or truncated kept appearing, because its directory outlives them. `stats.distinctServedFromPartitionMetadata` is no longer set, and the shape is no longer refused for directory residue or for more than 10 000 tuples. Full rule: [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule).
+**`distinct: true`.** Exists. Subscribe refuses it. When every distinct column is a raw partition key and the predicate touches only partition keys, one partition key constrained by `eq`/`in` is enough to pass the partition-filter rule — that is the "which sources exist for this ticker?" query. It is answered on the scan, pruned to the constrained keys, which skips row groups from their statistics and answers those the filter selects whole from them (**architecture review, ColumnarRead2 S04, next train**). The partition-directory answer is retired: a directory outlives the rows deleted or truncated from it, so such a partition kept appearing. With it go the `stats.distinctServedFromPartitionMetadata` flag and the refusals for directory residue or more than 10 000 tuples. Full rule: [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule).
 
 ---
 
@@ -566,7 +568,7 @@ Notes that bite:
 - **Pass no `filter`.** The predicate is the definition plus your `args`; there is no client-side filter on a named subscription. `client.table(t).subscribe(…)` still sends `target` and still works on the **admin** listener — it is refused on the data-plane.
 - An empty or whitespace name throws before anything is sent.
 - A deprecated name still subscribes. It adds `NAMED_QUERY_DEPRECATED` to `snapshot_complete.warnings`, which raises the named-artifact warning sink **once** and still delivers the snapshot.
-- Definitions using `joins`, `selectExpr`, `distinct`, or a non-zero offset are refused with `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of those still works — only the live path is restricted.
+- Definitions using `joins`, `selectExpr`, `distinct`, `aggregates` / `groupBy`, `perKey` (**next train**), or a non-zero offset are refused with `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of those still works — only the live path is restricted.
 - `conflate` on an insert-only stream is a no-op (see above).
 
 ---

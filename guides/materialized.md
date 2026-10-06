@@ -1173,7 +1173,7 @@ database's share.
 
 1. **It writes through first.** The working set is written into the query's own shadow result table
    and re-read on demand. This buys a **constant factor** — roughly 3× on an OHLC-shaped rollup —
-   not an unlimited budget. `MqBuildSpillReadBacks` growing tells you a build is paying for having
+   not an unlimited budget. `MqBuildRunBytesWritten` growing tells you a build is paying for having
    written through; if it grows a lot, raise the ceiling.
 2. **If that is still not enough, it retires one query at a time, largest first**, and re-checks.
    Dropping the biggest is often enough for the rest to fit.

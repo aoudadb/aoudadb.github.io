@@ -670,6 +670,19 @@ Monitor first:
   - Replication status endpoints for lag and per-db positions.
   - Admin metrics backup subsystem for operational signals.
 
+Cold-page integrity (**BL-815, next train**):
+
+- Every cold page carries a CRC. A reader checks it the first time it reads the page, and a **background scrubber** checks
+  every cold page again against the disk: the first pass 15 minutes after the database opens, then one every 24 hours, under
+  64 MiB/s of disk reads, yielding while queries are waiting. It covers the tables currently loaded (a table not yet touched since
+  open is checked by its first read instead).
+- A page whose CRC no longer matches is **reported** — an `Error` log line naming the table, segment, column and offset, repeated
+  on every pass until the segment is replaced — and is **never returned as data**: reads that need that page fail with a
+  corruption error, while the rest of the table reads normally. The scrubber does not repair; restore the table from a backup or
+  re-sync it from a replica.
+- Between two passes, a page corrupted after its first read can still be read from disk unchecked. Checking every read from disk
+  instead costs 51–75 % of the read, which is why it is not done.
+
 Recovery/restart expectations:
 
 - Restart should reload catalog and segment state and replay WAL deltas.
@@ -699,6 +712,7 @@ Suggested tuning sequence:
 | WAL file not growing for a table | Effective table durability has WAL disabled or DB WAL disabled | Check DB `enableWal` and table durability overrides |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
 | Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
+| An `Error` log line `[SegmentScrubber] corrupt page: table …, segment …, column …`, and reads of that table failing with a corruption error (**BL-815, next train**) | A cold page changed on disk after it was written (a media error, or something other than Aouda wrote to the data directory) | Check the disk. Restore the table from a backup or re-sync it from a replica. The line repeats every 24 hours until the segment is replaced |
 | PITR target fails | Window closed (write volume since last backup, or archive gap); backup not PITR-eligible (`walPosition` 0); or target at/before backup `createdUtc` | Take a newer backup, enable archiving, or pick a later `targetTime`. Exact restore (no `targetTime`) is unaffected |
 
 ## 2.15 Verification ledger

@@ -787,7 +787,6 @@ Monitor first:
   - `ReplicationHeartbeatsWithDbPositions`
 - Subscription and filtering:
   - `ReplicationDatabaseSubscriptions`
-  - `ReplicationFramesFilteredDatabase`
   - `ReplicationFramesFilteredTableSubscription`
 - Write concern outcomes:
   - `WriteConcernWaitsTotal`

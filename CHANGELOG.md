@@ -13,20 +13,84 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-- ⚠️ **Joins onto a restricted table are refused, a 0.2.x data directory is refused at open, and a clean restore keeps hot
+- **Time windows over bulk-loaded history read only the rows they can hold (ADR 0061).** A bulk load writes each series'
+  rows together, so a time window used to decode the time column of every row group. Segments now record each series'
+  time every 64 rows, and a filter that bounds the time column (`DateTime >= a AND DateTime < b`) reads only those
+  granules — hot and cold alike. Same answers; a two-hour window over 1 M trades ~2.3 → ~1.4 ms. See
+  [Bulk load](guides/bulk-load.md).
+- **A join onto a table you may read only part of is answered with that part (BL-818).** Your row- and partition-level
+  security for every joined table is applied on that join's side — exactly as on a direct read of the table — instead of the
+  join being refused with `403`. A join can also carry its own filter on the joined table, `joins[i].where` (`joinWhere()` in
+  both SDKs). Its values are read with the joined table's culture, and in a named-query definition its columns must be the
+  joined table's — a definition naming a base-table column there is refused when it is applied. See
+  [HTTP API — Join Clause](reference/http-api.md).
+- **A named query's `selectExpr` names its columns exactly as the table does (BL-799).** A definition whose expression names
+  `price` for a column `Price` is refused when it is applied; one stored before answers `400 COLUMN_NOT_FOUND`, as `/query`
+  does, instead of `500`.
+- **The latest (or first) row per key over HTTP (BL-801).** `/query` takes `perKey: { keys, orderBy, latest }` —
+  `LatestPerKey` / `FirstPerKey`, routed to a materialized query of the same shape when one answers it. `latestPerKey()` /
+  `firstPerKey()` in both SDKs.
+- **Named queries carry `aggregates`, `groupBy` and `perKey` (BL-796).** A definition with them answers its keys and
+  aggregates, as `/query` does, and is applied under `/query`'s rules (a shape `/query` would refuse fails `schema/apply`).
+  Before, the keys were silently dropped and the named query answered plain rows.
+- ⚠️ **`Aouda.Client`: `ClientColumnarResult.Data` holds the public values on both wires (BL-798).** A JSON answer's cells
+  were `JsonElement`s and a frame answer's `long` / `DateTime` / `Guid` / `decimal`; now both are the values.
+- ⚠️ **A computed column's `colRef` is case-sensitive (BL-799)**, as `where` and `select` are: a mis-cased name is `400
+  COLUMN_NOT_FOUND`. It used to read the column in the default answer and `null` with `format=rows`.
+- **`reference/timestamp.md` corrected (BL-808).** It said `Timestamp` is stored as Unix milliseconds with a per-column unit;
+  it is, and always was, .NET UTC ticks, as the HTTP reference says.
+- **Cold pages are checked again in the background (BL-815).** A scrubber re-reads every cold page and checks its CRC: 15
+  minutes after open, then daily, under 64 MiB/s. A page corrupted on disk after it was first read is reported in the log and
+  fails its reads with a corruption error instead of being returned as wrong values. See [Storage](guides/storage.md#213-operations-and-observability).
+- **`AVG` without `groupBy` is answered from the segments' statistics (BL-807).** The same answer as before, without reading
+  every row of the column.
+- **A schema change's validation reads the table as one snapshot (BL-819).** Adding a primary key or a `NOT NULL`, or narrowing
+  a column's type, checks the existing rows through the same read path as queries. A write landing during the check could
+  before make it refuse a key that was unique ("duplicate primary-key value"); it no longer can.
+- ⚠️ **The column `encoder` option is gone (BL-768).** It named an encoder preference that has changed nothing since columns
+  choose an encoding per vector. `PATCH …/columns/{c}` no longer takes it (a request carrying only `encoder` is a `400`),
+  column details no longer report it, and a schema file that still carries it applies with the key ignored. `@aouda/client`
+  drops it from its types.
+- **Removed: `stats.distinctServedFromPartitionMetadata`** on query responses, which no server has set since the
+  partition-directory `DISTINCT` was retired; and the `.NET`-only `PartitionOptions.LateArrivalPolicy` /
+  `LateArrivalThreshold` (BL-762), which did nothing — a late row is flushed like any other. The metrics endpoint's
+  `timeSeries` object keeps only `manifestsRead`, and `partitioning` loses the `autoModePartitions` counter that was always 0.
+- ⚠️ **Partition directory names are sanitised the same way on every platform.** A partition-key value containing `:` `*` `?`
+  `"` `<` `>` `|` `\` or a control character became a directory of that name on Linux and an underscore on Windows; the Windows
+  rule now applies everywhere. A **Linux** data directory written by an earlier build with such a character in a partition key is
+  not migrated: a partition-scoped read would miss those rows. Re-load such a table after upgrading.
+- **The embedded API refuses a string with an unpaired UTF-16 surrogate (BL-772)**, as HTTP's JSON parsing already did:
+  `InsertRowsAsync`, `UpsertRowsAsync`, `UpdateRowsAsync` and `BulkLoadAsync` throw `ArgumentException` naming the row and column.
+  Such a string has no UTF-8 form; it was stored as U+FFFD and could make a page's bounds skip a matching row. A valid surrogate
+  pair (an emoji) is unaffected.
+- **Rows are no longer lost or hidden after a restart beside coalesced, bulk-loaded or vector segments (BL-849).** In those
+  layouts the write buffer's row ids could restart at the wrong number: rows inserted after a restart were not returned until they
+  flushed, and rows still only in the write-ahead log could be lost in a crash (beside a bulk-loaded segment, or after a vector
+  flush ran ahead of the table's own). Fixed; a branch's own inserts after its parent's coalesce are read as well.
+- **An UPDATE racing a read no longer shows the old row beside the new one**, when the updated cold segment left memory between
+  the read's two steps.
+- **A range query no longer misses rows of a hot segment after a column was made derived (BL-770)**: the segment's statistics
+  kept the old values.
+- **The latest (or first) row per key, read without a materialized query, no longer sorts the table (BL-806).** `perKey` (and
+  `LatestPerKey` / `FirstPerKey` in the SDKs) keeps one row per key as it scans: TSBS's `lastpoint` over 1 M rows went from
+  3.2 s and 1.4 GB of allocation a query to ~36 ms. Same answers. A materialized query is still the way to keep it current for
+  subscribers.
+- **String filters (`=`, `IN`, `LIKE`, ranges) and string `groupBy` keys read cold pages without building a string per row.**
+  A contains-`LIKE` over a ClickBench column went from ~120 ms to ~19 ms. Same answers.
+- **An exported schema document uses LF line endings on every platform**, so the same schema exports as the same bytes on Linux
+  and Windows.
+- ⚠️ **Joins need a grant on every joined table, a 0.2.x data directory is refused at open, and a clean restore keeps hot
   rows (ColumnarRead architecture review).** A join — ad hoc, `…/query/count` or in a named query — needs the base table's
-  grant on every joined table, and one onto a table the caller's row- or partition-level security would filter is
-  `403 AUTHORIZATION_DENIED` naming the table, because a join reads its targets unfiltered (it read them with no grant check
-  and no RLS / PLS before; BL-818 tracks filtering the join side). The catalog format is 5: a 0.2.x directory fails at open
+  grant on every joined table (it read them with no grant check before); the caller's row- and partition-level security on
+  a joined table is applied on the join's side (BL-818, above). The catalog format is 5: a 0.2.x directory fails at open
   with `CatalogFormatException` (export with 0.2.x and reload; its cold segments used to read as zero rows), a 0.2.x backup
   restored here fails by segment on read, and a primary and its replicas must run the same build. A clean restore now
   catalogues `.hot` segments, whose rows it lost. `DISTINCT` over partition-key columns is a scan, so deleted or truncated
-  partitions no longer appear (`stats.distinctServedFromPartitionMetadata` is no longer set; the directory-residue and
-  10,000-tuple refusals are gone). `Retry-After` is readable from a browser. The TypeScript `count()` posts `/query/count`
+  partitions no longer appear (the directory-residue and 10,000-tuple refusals are gone, and the
+  `stats.distinctServedFromPartitionMetadata` flag is removed, above). `Retry-After` is readable from a browser. The TypeScript `count()` posts `/query/count`
   instead of downloading every row, and both SDKs' counts drop aggregates and GROUP BY. Docs corrected beside it: the
-  frame response's JSON fallbacks and its connection abort after the headers, the `Decimal` frame kind, latest-per-key
-  routing (embedded only), row views in both SDKs, and the `Timestamp` wire unit (ticks, not milliseconds; the storage
-  half is BL-808). See [HTTP API](reference/http-api.md#post-apidatabasesdbquery),
+  frame response's JSON fallbacks and its connection abort after the headers, the `Decimal` frame kind, row views in both
+  SDKs, and the `Timestamp` unit (ticks, not milliseconds; BL-808, above). See [HTTP API](reference/http-api.md#post-apidatabasesdbquery),
   [Authorization](auth/authorization.md#196-combined-pls--rls) and [Storage](guides/storage.md#27-core-concepts-and-mental-model).
 - **Fixed: wrong answers in routed reads and cold point reads (ColumnarRead group-6 review).** A read of
   a table answered from one of its materialized queries could disagree with the table: after a
@@ -53,7 +117,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   [Materialized queries](guides/materialized.md#routing-a-read-to-a-maintained-result).
 - **The latest (or first) row per key, as a question (BL-450, ColumnarRead S18).**
   `TableQuery.LatestPerKey(orderBy, keys…)` / `FirstPerKey(…)` in the embedded API, read from a
-  matching materialized query when one is current. Not over HTTP or in either SDK yet. See
+  matching materialized query when one is current. Over HTTP and in both SDKs too (BL-801, above). See
   [Query](guides/query.md).
 - **Point reads read what they return (ColumnarRead S17).** A filter that pins every series column
   (`Ticker = 'X' AND Source = 'Y'`) reads only that series' rows from each segment's run directory, and
@@ -149,14 +213,14 @@ Public, user-facing release notes. Engine phase status lives in the server
   (frame-of-reference and delta bit-packing, run-length, constants; ALP for doubles; a sorted
   dictionary or plain UTF-8 for strings). Page min / max no longer count nulls, so more pages are
   skipped. Pages written by 0.2.x are refused by name ("a layout-v1 codec"): export with a 0.2.x
-  build and reload. A column's `encoder` option no longer changes the encoding (BL-768). Edge
+  build and reload. A column's `encoder` option no longer changes the encoding, and is removed (BL-768, above). Edge
   tables no longer write `csc_*.col` mirror files (nothing read them; `StoreCsc` still enables
   bidirectional `ShortestPath`). See [Sizing](guides/sizing.md).
 - ⚠️ **Delta segments are removed (ColumnarRead S07).** Late-arriving rows are flushed inline with
-  on-time rows; `LateArrivalPolicy.Delta`, still the default, behaves as `Inline`, and nothing writes
+  on-time rows (`LateArrivalPolicy` is removed, BL-762, above), and nothing writes
   or reads a table's `data/_delta/`. **Rows an older build left under `data/_delta/` are no longer
   read.** `AoudaEngine.SealOrphanedDeltaSegmentsAsync` is removed: a pre-0.1.5 database that still
-  needs it (BL-146) must run it before upgrading. `LateArrivalPolicy.Reject` is not enforced (BL-762).
+  needs it (BL-146) must run it before upgrading.
   See [Time-series](guides/time-series.md) and [Partitioning](guides/partitioning.md).
 - **A partition key's promotion to a dedicated directory no longer moves its earlier rows (ColumnarRead
   S07).** They stay in the shared bucket and are still read. See
