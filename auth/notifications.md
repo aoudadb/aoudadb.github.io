@@ -278,8 +278,8 @@ Add to Aouda's server config (both URLs often point to the same page):
    ```json
    { "email": "user@example.com", "otp": "984094", "newPassword": "NewPassword123!" }
    ```
-3. On success, Aouda returns `aal1` tokens — sign the user in and redirect to your app.
-4. If MFA is enrolled, the login response will include `"mfaRequired": true` — redirect to your MFA challenge page.
+3. On success, Aouda returns a token pair — `aal2` when the user has no active MFA factor (**BL-795, next train**), `aal1` when they do. Sign the user in and redirect to your app.
+4. If MFA is enrolled, the token's `aal` claim is `aal1` — redirect to your MFA challenge page.
 
 The page does **not** need a service key or any secret. `reset-password` is a public endpoint authenticated only by the OTP.
 
