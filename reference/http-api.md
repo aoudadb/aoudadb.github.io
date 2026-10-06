@@ -1530,7 +1530,7 @@ Supplying both `names` and `sourceTable`, or neither, is a `400` naming the conf
   "sourceGroups": 1,
   "results": [
     { "name": "EquityTradeOhlc1H", "state": 1 },
-    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because the build exceeded its memory budget: …" }
+    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
   ]
 }
 ```

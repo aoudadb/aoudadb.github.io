@@ -1131,7 +1131,7 @@ Response — `200` when the wait completed, `202` when it is still running:
   "sourceGroups": 1,
   "results": [
     { "name": "EquityTradeOhlc1H", "state": 1 },
-    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because …" }
+    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
   ]
 }
 ```
@@ -1188,32 +1188,35 @@ group** while it does.
 group per minute per symbol, and that set is what has to fit in memory. An hourly or daily rollup
 over the same data is 60× or 1440× smaller.
 
-### The ceiling
+### Its memory: a grant, and what happens past it (**WorkloadCore S12, next train**)
+
+A rebuild asks for a **grant** of memory before it prepares anything — 1 MB to start — and holds it until it has published
+its result. While it scans, it grows the grant by doubling as its groups need, as long as no request of its class or a higher
+one is waiting for memory, up to **a quarter of the database's governed budget**. If the grant cannot be had at all, the
+rebuild does not start: the query stays readable and behind, and the rebuild waits for room (see 2.11c).
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `Aouda:MaterializedQueries:Rebuild:ReservationCeilingBytes` | `0` — no dedicated cap | The budget a rebuild's accumulators are held to. `0` means the database's memory governor is the only bound. |
-| `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` | `1048576` (1 MB) | The opening reservation, and the granularity it grows by. |
-| `Aouda:MaterializedQueries:Rebuild:SpillEnabled` | `true` | Whether an over-budget build writes its working set through to its shadow result table before giving up. |
+| `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` | `1048576` (1 MB) | The grant a rebuild asks for before it starts, and the step its growth doubles from. |
+| `Aouda:MaterializedQueries:Rebuild:MaxPartitions` | `64` | How many partitions a build that outgrows its grant splits its groups into. |
+| ~~`…:ReservationCeilingBytes`~~, ~~`…:SpillEnabled`~~, ~~`…:PartitioningEnabled`~~ | — | **Removed (WorkloadCore S12, next train).** The grant is the build's bound; a configuration that still sets them starts and ignores them. |
 
-With the default (`0`) nothing changes from earlier releases. Set a positive ceiling when you have a
-known-huge rollup and want it bounded deliberately rather than competing with everything else for the
-database's share.
+### What happens when a build outgrows its grant (**WorkloadCore S12, next train**)
 
-### What happens when a build goes over
+It **partitions and spills**, as often as it needs to, and finishes:
 
-1. **It writes through first.** The working set is written into the query's own shadow result table
-   and re-read on demand. This buys a **constant factor** — roughly 3× on an OHLC-shaped rollup —
-   not an unlimited budget. `MqBuildSpillReadBacks` growing tells you a build is paying for having
-   written through; if it grows a lot, raise the ceiling.
-2. **If that is still not enough, it retires one query at a time, largest first**, and re-checks.
-   Dropping the biggest is often enough for the rest to fit.
-3. **Retired queries land in `Error`. Their siblings complete.** A 1-minute rollup that cannot fit
-   does not take the 1-hour and 1-day rollups down with it.
+1. An `aggregate`, `latestPerKey`, `firstPerKey` or `topNPerGroup` build splits its groups into `MaxPartitions` partitions
+   (in place — nothing already read is read again) and writes the groups it holds to disk scratch (below). It carries on
+   scanning; each time its groups outgrow the grant again, it writes them out again.
+2. At publish it folds **one partition at a time** — the partition's scratch and what it still holds — into the result.
 
-`TopNPerGroup` **cannot** write through: its working set holds candidates below rank N that the
-published top-N result does not contain, so writing it out would lose exactly the rows it exists to
-keep. Its error message says so, rather than leaving you looking for a setting that would help.
+**A query is never retired for its size, and a build never starts over for memory.** Before this release a build was capped
+at 2 % of the database's share and, past that, partitioned only when a projection from the table's statistics said so;
+otherwise the largest query in the build was retired to `Error` until the cap rose. A 1-minute rollup of 8 M groups ended
+that way. The siblings of a large query are unaffected either way.
+
+Memory a build must hold that it cannot write out — a `filter` build whose result cannot be flushed during the build (an
+engine with no compaction) — is charged as working memory rather than refused.
 
 ### The disk a build borrows while it runs
 
@@ -1237,8 +1240,8 @@ Four things are worth knowing about it, because it is disk you did not ask for:
   the load is already streaming, so a load that commits 344 times prepares 344 builds per query. Most
   of them fit and spill nothing; the ones that do not each borrow a file for the length of the
   commit.
-- **The volume is bounded by the accumulator ceiling, not by the table.** What a build spills is what
-  its working set exceeds, and it reads all of it back at the end of the same commit.
+- **The volume is what the build's groups exceed its grant by** (**WorkloadCore S12, next train**: no longer an accumulator
+  ceiling). It reads all of it back at publish.
 - **A query whose state is bounded by its own definition no longer spills for a sibling's sake**
   (**BL-623, 0.1.38**). Every query on a table used to share one accumulator budget, so an
   aggregate grouped by a time bucket — whose key space grows for as long as rows arrive — could push
@@ -1257,11 +1260,13 @@ running now or already dead.
 
 | Counter | What it tells you |
 |---|---|
-| `MqRebuildBytesReserved` | Memory charged for a scan-fed rebuild's accumulators. |
-| `MqRebuildSinksRetiredByBudget` | Queries retired because the group could not fit. Non-zero means someone got an `Error`. |
+| `MqRebuildBytesReserved` | Memory a rebuild's grant grew by for its accumulators. |
+| `MqAccumulatorGrowthsRefused` | Times a build could not grow its grant and partitioned or spilled instead (**WorkloadCore S12, next train**). |
+| `MqAccumulatorExcessCharged` | Times a build held memory it could not write out, charged as working memory (**WorkloadCore S12, next train**). Zero is the expected value. |
+| ~~`MqRebuildSinksRetiredByBudget`~~ | **Removed (WorkloadCore S12, next train)**: nothing is retired for its size. |
 | `MqBuildSpills` / `MqBuildSpilledGroups` | How often, and how much, a build had to write through **to its shadow result table**. |
 | `MqBuildSpillReadBacks` | Groups re-read after writing through — the cost of having spilled. |
-| `MqBuildPartitioningAdopted` | Builds that split their group space rather than retiring the query. |
+| `MqBuildPartitioningAdopted` | Builds that outgrew their grant and split their group space. |
 | `MqBuildPartitionsEvicted` | Partitions written out to disk scratch under budget pressure. |
 | `MqBuildRunsWritten` / `MqBuildRunsFolded` | Runs written to a build's spill file, and read back at publish. |
 | `MqBuildRunBytesWritten` | Bytes of disk scratch a build borrowed — the disk this memory bound trades for. |
@@ -1281,27 +1286,12 @@ database's pending bulk-load jobs: loads whose table's pass has not yet run.
 
 ## 2.11c When a query lands in `Error`
 
-`GET /api/databases/{db}/materialized-queries/{name}` returns the reason in `errorMessage`. A
-memory-budget refusal names the query, the rows and groups it had accumulated, the bytes those cost,
-the ceiling in force, and the configuration key that changes it:
+`GET /api/databases/{db}/materialized-queries/{name}` returns the reason in `errorMessage`.
 
-```
-Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because the build
-exceeded its memory budget: 15300000 rows accumulated into 812000 groups, retaining an estimated
-532672000 bytes (…), against a ceiling of 268435456 bytes. Raise
-'Aouda:MaterializedQueries:Rebuild:ReservationCeilingBytes', give the database a larger memory
-share, or reduce the query's group cardinality.
-```
-
-Your options, in the order worth trying:
-
-1. **Reduce group cardinality** — a coarser time bucket, or fewer group-by columns. This is the only
-   one that makes the query cheaper rather than giving it more room.
-2. **Raise the ceiling**, or set it to `0` and let the database's memory governor be the bound.
-3. **Give the database a larger memory share.**
-
-Its siblings over the same source table are unaffected and will be `Ready`; re-running the refresh
-after changing a setting rebuilds only what you ask for.
+(**WorkloadCore S12, next train**) **A query no longer lands in `Error` because its build outgrew its memory** — the build
+partitions and spills instead (2.11b). The `Error` this section used to describe ("…was retired from its rebuild because the
+build exceeded its memory budget…", with the `ReservationCeilingBytes` key to raise) is gone with that key. A rebuild refused
+memory before it starts is deferred, below; what reaches `Error` is a failure that is not about memory.
 
 ### A rebuild refused memory outright is deferred, not failed (**IngestAtSpeed S03, 0.1.40**)
 
@@ -1309,8 +1299,8 @@ A rebuild can also be refused before any single query has been singled out: the 
 reservation is denied, for instance. That used to leave every query in the rebuild in `Error`, which
 nothing cleared. Those queries now stay **`Ready` and stale**, readable with the result they had, and
 their provenance (`lastRebuildSource`) reads `DeferredMemoryPressure`. The engine retries them when
-memory recovers, and `:refresh` rebuilds them at once. Retirement, described above, still ends in
-`Error`, because it names one query that cannot fit.
+memory recovers, and `:refresh` rebuilds them at once. (**WorkloadCore S12, next train**: there is no retirement any
+more; a build's own grant, refused before it starts, is deferred the same way.)
 
 (**WorkloadCore S10, next train**) **"When memory recovers" now means: when the memory budget has room of the size it
 was refused.** The rebuild is no longer re-driven on timers — a heap-recovered or resource-mode-rise edge, a 30 s look and
