@@ -201,6 +201,11 @@ If you create a materialized query with standard helpers and no special options:
 tier, obeys the same `storageTemperature`, and is charged against the same per-database and
 process-wide hot ceilings as any table you declared yourself.
 
+**A rebuild no longer holds its whole result in memory** (**WorkloadCore S14, next train**): the table a rebuild writes
+flushes into segments while it is written, for every query type (until 0.2.0 only a filter's did), so a large aggregate's
+rebuild fits a share far smaller than its result. A maintained result's own write buffer is still kept in memory between
+checkpoints, as in 0.2.0.
+
 **Residency is policy, not a property of the query type.** With no declaration, every result table —
 `aggregate`, `latestPerKey`, `firstPerKey`, `filter`, `topNPerGroup` alike — defaults to **`Auto`**:
 hot while the tier has room, cold when it does not, demoted and promoted by the ordinary sweep.
@@ -233,7 +238,7 @@ with `Invalid storageTemperature '…' on materialized query '…'`, not at quer
 | Your result is… | Declare | What you get |
 |---|---|---|
 | **Large, historical, append-shaped** — candles, rollups, daily aggregates, anything keyed by a time bucket | **`ColdPreferred`** | No hot segment is ever created, at any ceiling. The bytes are on disk; the page cache serves the recent end. This is the right default for most analytical results. |
-| **Genuinely small and read on every request** — a few thousand keys at most, a dashboard header, a per-user summary | **`HotOnly`** + `residency.targetMemoryBytes` | A *stated* reservation. Refused on its own budget rather than because an unrelated database filled the process, and caught at declaration time if your pins together over-subscribe. |
+| **Genuinely small and read on every request** — a few thousand keys at most, a dashboard header, a per-user summary | **`HotOnly`** + `residency.targetMemoryBytes` | A *stated* reservation, caught at declaration time if your pins together over-subscribe. A result's maintenance is **never refused** for its pin (**WorkloadCore S14, next train**; a refusal used to leave the query stale until a rebuild): past its budget it keeps being maintained, and under heap pressure its segments are demoted last, as `hotOnlyBackstop: DemoteAnyway` would. |
 | **Recent hot, historical cold** — a live feed whose tail is queried constantly and whose history is queried rarely | **`Auto`** + `residency.memoryRowCap` | The maintenance sweep demotes least-recently-accessed segments first, so the cap self-scales without your knowing the arrival rate. |
 | **You genuinely do not know** | **`Auto`** (or declare nothing) | Hot while the tier has room, cold when it does not. The engine decides per flush. |
 
