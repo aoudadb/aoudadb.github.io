@@ -151,6 +151,15 @@ of the key index, and more RAM means more tables answered from memory: when the 
 simply keeps checking keys by reading its segments — correct, and slower — and `keyMapResident: false` on
 `GET /api/tables` says so. The map is rebuilt in the background after a restart; nothing is stored on disk.
 
+The map is also memory the server takes back when something else needs it (**WorkloadCore, next train**): under
+pressure it evicts the map's partitions — one per cold segment — **least recently used first, across every table of the
+database**, after the page cache, bloom filters and metadata and after demoting hot segments. A key in an evicted segment
+is checked by reading that segment, as before the map covered it, and the next check schedules the segment's partition to
+load again; `keyMapResident` reads `false` meanwhile. An upsert or a materialized-query update that meets one decodes the
+segment's key columns and covers it before it writes — a one-off cost per segment, much less than checking key by key.
+The old limit that stopped a map growing once key maps and resident query state held 40 % of the database's budget is
+gone: what bounds the map is the memory budget itself.
+
 ### Declared decimals are half the size (**ColumnarCore S13, 0.2.0**)
 
 An undeclared `Decimal` costs 16 bytes per value in the write buffer, the hot tier and every materialized result

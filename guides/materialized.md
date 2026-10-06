@@ -440,6 +440,10 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
   stay in RAM between commits, so a commit takes the rows it changes from memory instead of reading them back
   (up to 262,144 keys per query, charged to the memory governor; a refusal falls back to reading back, correct
   and slower). A group that is not held — new, or evicted — is looked up in the key map and read only if it exists.
+  The copy is also given back when memory is needed (**WorkloadCore, next train**): the server drops whole copies, the
+  query applied least recently first (never one whose update is running), and the next commit reads back the rows it
+  needs. A top-N over another query's result keeps that result's rows resident the same way, and reloads them from the
+  result after a release.
 - Routing decision:
   - Planner result that says "serve from MQ result table" or "scan base table."
 - `GroupByExpression` (P28):

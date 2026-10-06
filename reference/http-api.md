@@ -1815,7 +1815,7 @@ List all tables with statistics.
 | `sizeBytes` | number | Approximate size in bytes across all segments |
 | `policy` | object | Storage policy |
 | `rowCountIsExact` | boolean | `false` when `rowCount` is a lower bound (a segment's count was unknown) |
-| `keyMapResident` | boolean, optional | (**ColumnarMerge S05, 0.2.0**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, or when the server's memory governor refused it — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
+| `keyMapResident` | boolean, optional | (**ColumnarMerge S05, 0.2.0**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, when the server's memory governor refused it, or when it evicted part of the map to make room (**WorkloadCore, next train**) — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
 
 #### `GET /api/tables/{name}`
 
