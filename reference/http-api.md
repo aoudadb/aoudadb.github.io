@@ -441,6 +441,10 @@ Admin replication `walPosition` on `GET /admin/replication/status` is lag observ
 
 MQ list/status and `POST …/materialized-queries/{name}/query` stamp `token` as the **maintenance watermark** (`D-9`), not a raw WAL offset. A token-bearing MQ read waits on that watermark.
 
+`POST …/materialized-queries/{name}/query` reads the whole result, held to `Aouda:Query:MaxResultRows` and the read budget like every
+materialising read (**BL-776, next train**): a result over either is `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`. Retrying does
+not help a result over the row ceiling — read it with a filtered `POST …/tables/{result}/query` and a `limit`, or its aggregates.
+
 Query parameter **wins** over the header when both are sent:
 
 ```http
@@ -1437,7 +1441,7 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, next train**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Access-surface diff
 
@@ -2396,6 +2400,7 @@ Update rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, next train**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 
 #### `DELETE /api/databases/{db}/tables/{name}/rows`
 
@@ -2446,6 +2451,7 @@ Delete rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing or empty WHERE clause |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, next train**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows` — Extended fields (P27)
 
@@ -2578,8 +2584,10 @@ authorization scope — `db_writer` alone is insufficient.
 #### `POST /api/databases/{db}/tables/{name}/rows/batch`
 
 Execute multiple update and/or delete operations against the same table in a single request.
-All operations are applied sequentially in the order given and committed in a single WAL
-transaction.
+All operations are applied sequentially in the order given. ⚠️ **Each operation commits on its own** — the batch is not one
+transaction (**BL-843**): when an operation fails (a duplicate key, a `503 MEMORY_BUDGET_EXCEEDED` refusal past the read
+budget, **next train**), the operations before it have been applied, so a retry of the whole batch applies them again. Make
+operations that a retry may repeat idempotent (literal `set`, not `setExpr` arithmetic), or retry from the failed operation.
 
 **Request Body:**
 

@@ -305,6 +305,11 @@ table is rebuilt by each pass, not folded — on a very large table, keep those 
 3. Multi-table jobs require `_table` discriminator on append payload rows.
 4. `ForceLogShipBulkLoad=true` disallows skip/snapshot replication modes.
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
+6. A load's segment files are fsynced before its frames name them, so a committed load survives a power loss. If the catalog
+   registration after the commit point still fails after its retries, the commit call returns an error but the load is **not**
+   lost: its rows become visible at the next restart, which catalogues it (`BulkLoadCommittedUncataloguedPinsHeld` counts such
+   jobs). Do not re-run such a load blindly: check `:status`, or use an idempotency key. Before this, such a load could be swept
+   at the next open. (**BL-765, BL-771, next train**)
 
 ### What a frame carries is what NDJSON carries
 

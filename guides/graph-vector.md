@@ -131,14 +131,15 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 
 **Edge tables:**
 - `TableKind.EdgeTable` catalog kind with `EdgeTableConfig` (`SrcColumn`, `DstColumn`, `EdgeLabel`, `StoreCsc`)
-- Edge WAL frames: `WalTag.EdgeInsert`, `WalTag.EdgeDelete`; replay produces `EdgeHraBuffer` state
+- Edge WAL frames: `WalTag.EdgeInsert`, `WalTag.EdgeDelete` — written, but **not replayed at open** (BL-837): an edge still in the write buffer when the process stops without a clean shutdown is lost, and so is a delete of a buffered edge. A clean shutdown seals the buffer, and an edge once sealed (and a delete of a sealed edge) is durable.
 - `EdgeHraBuffer` — in-memory hot write area; freeze-and-swap flush to sealed CSR segments
 - `EdgeSegmentFlusher` — produces sealed segments with `(src, dst)` CSR layout
 - `CscMirrorWriter` — optional CSC companion segments (`csc_*` files) for bidirectional traversal
 - Late-arriving edges are flushed inline; the edge `_delta/` merge is removed (**ColumnarRead, next train**)
 - Partition routing by source-node partition key
 - `CreateEdgeTableAsync`, `InsertEdgesAsync`, `DeleteEdgeAsync` on `AoudaEngine`
-- Graph traversal operators: `TraverseAsync` (BFS k-hop reachability), `KHopNeighborhoodAsync` (BFS with hop distance), `ShortestPathAsync` (bidirectional BFS with CSC; unidirectional without)
+- Graph traversal operators: `TraverseAsync` (BFS k-hop reachability), `KHopNeighborhoodAsync` (BFS with hop distance), `ShortestPathAsync` (bidirectional BFS with CSC; unidirectional without). (**BL-813, next train**) Each call reads one consistent view of the edge table — its sealed segments with their deletions, and the edges still in the write buffer — so an edge is traversable as soon as `InsertEdgesAsync` returns, and an edge deleted is gone from the next call, whether or not it had been sealed. Before, the operators read sealed segments only: a buffered edge was not found and a delete of a sealed edge was not applied.
+- `DeleteEdgeAsync(src, dst)` removes **every** copy of the edge `(src, dst)`, whatever its label, sealed or buffered; an edge inserted again afterwards is a new edge. (**BL-813, next train**) `SELECT` / `COUNT` over an edge table see the buffered edges too. A generic `DELETE` / `UPDATE` over an edge table does not reach its buffered edges yet (BL-838): delete edges with `DeleteEdgeAsync`.
 
 **Vector columns:**
 - `DataType.Vector` column type with `VectorColumnConfig` (`Dimensions`, `Distance`, `Quantization`, `IvfCells`, `EmbeddingModel`, `EmbeddingModelVersion`, `MatryoshkaDims`)
@@ -260,7 +261,7 @@ Aouda extends its columnar storage model with two new primitives alongside the e
 - Enforces cluster ordering by `(src, dst)` at seal time, producing CSR-shaped segment pages.
 - Optionally maintains a CSC mirror (sorted by `(dst, src)`) for backward traversal.
 - Routes insert batches by source-node partition key (edges from the same source live in the same partition).
-- Builds and exposes adjacency-aware traversal operators over sealed CSR pages.
+- Builds and exposes adjacency-aware traversal operators over the table — its sealed CSR segments (pruned by their `src` / `dst` statistics) and its write buffer, on one snapshot per traversal (**BL-813, next train**).
 - Late-arriving edges are flushed inline like any other edge; `_delta/` segments are removed (**ColumnarRead, next train**).
 
 Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, not separate tables. They may appear on any tabular table:

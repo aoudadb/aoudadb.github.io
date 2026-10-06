@@ -188,7 +188,9 @@ If you do nothing:
 
 ### Reserved / not yet wired
 
-- Full per-database checkpoint sync (current checkpoint path uses first available DB engine).
+- Catch-up from the primary's WAL files: a replica receives frames broadcast while it is connected, so frames written while it is
+  disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). Streamed rows are held in memory on the
+  replica and are not re-applied after a replica restart (**BL-839**).
 - Public admin API for WAL slot inspection/listing (proposed in task follow-up notes).
 - Per-replica slot-lag metrics endpoint (proposed in task follow-up notes).
 - TS/.NET first-class write concern request API (protocol field exists; SDK convenience surface incomplete).
@@ -211,7 +213,7 @@ If you do nothing:
 | Replica set roles and write gating | Yes | No | No | P4 E0 report + `WriteGuardFilter` + server tests | Secondary/hidden/backup reject writes |
 | Heartbeat, election, fencing failover loop | Yes | No | No | P4 E4 report + election tests | Election port is replication port + 1 |
 | WAL stream replication (steady-state) | Yes | No | No | P4 E1 report + streaming tests | HMAC + CRC + ACK paths |
-| Too-far-behind checkpoint bootstrap | Yes | Yes | No | P4 E2 report + checkpoint tests | Per-db checkpoint still partial |
+| Too-far-behind checkpoint bootstrap | Yes | Yes | No | P4 E2 report + checkpoint tests; `ReplicaCheckpointBootstrapTests` (two nodes) | Every open database, per-database positions (**BL-763, next train**) |
 | Replica WAL replay into storage/catalog | Yes | No | No | P4 E3 report + replica state machine code/tests | Includes DDL and Tx frame handling |
 | Hidden replica read preference behavior | Yes | No | No | P4 E6 report + `HiddenReplicaQueryTests` | Non-hidden cannot serve `Hidden` preference |
 | Per-database replication subscriptions | Yes | No | No | P6 E1 report + multi-db tests | v1/v2 protocol compatibility retained |
@@ -293,9 +295,14 @@ Key implementation anchors:
    - Server compares requested position with minimum streamable WAL position.
    - If too far behind, server responds with `TooFarBehind`.
 3. State mutations and persistence:
-   - Secondary requests checkpoint transfer and stages files.
-   - `CheckpointApplier` verifies CRC and atomically swaps staged files.
-   - Secondary reconnects to continue WAL tail streaming from checkpoint position.
+   - Secondary requests checkpoint transfer. The primary writes an **image** of every open database — its catalog (tables with
+     their keys, partitioning and policy, and every catalogued segment) and exactly the files of those segments, after flushing
+     every buffered row — and serves it; the image is deleted when the transfer ends (**BL-763, next train**).
+   - `CheckpointApplier` verifies every CRC, then, database by database, closes the database's engine, replaces its directory
+     with the image's and opens it again (registering a database the secondary did not have).
+   - Secondary reconnects; each database continues streaming from **its own** position in the checkpoint. Every write
+     acknowledged before the checkpoint began is on the secondary; frames written during the transfer are not (**BL-839**).
+   - ⚠️ Primary and secondaries must run the same version: the checkpoint manifest carries each database's position.
 4. Observability:
    - Checkpoint transfer logs and replication lag position transitions.
 5. Proving tests:
@@ -876,7 +883,7 @@ _Updated 2026-04-08 after P16 completion._
 ### Remaining gaps
 
 - BL-024 is stale relative to current server capabilities: treat as harness/process-testing debt.
-- Per-database checkpoint sync remains partial (first available engine for checkpoint transfer).
+- No catch-up from the primary's WAL files, and replica rows held in memory only (**BL-839**); the checkpoint covers every database since **BL-763 (next train)**.
 - API parity gaps:
   - TS query read preference support missing.
   - `.NET`/TS write concern request ergonomics missing.
