@@ -48,6 +48,17 @@ workers (and its fold chunks) and the number of queries an insert writes side by
 at 16 / 8. A server given four cores no longer schedules sixteen workers on them, and one given sixteen of twenty uses
 them.
 
+**Background work shares one scheduler per server, and takes its share of that budget, not all of it (**WorkloadCore S15,
+next train**).** Flushes, cold merges, the hot tier's demotion, WAL and result checkpoints, WAL retention and archiving, the
+segment scrubber, and every materialized-query pass and rebuild run as jobs of one scheduler per server process — shared by
+all its databases — in six classes, each with half the CPU budget's cores (at least two) as concurrent slots. A running job
+holds a degree of parallelism from the same CPU admission queries use, so a deferred pass no longer takes every core of the
+budget: an `Auto` load's pass, which the client's `:commit` waits on, gets ingest's share (half the cores); a pass nobody
+waits on gets background's (three quarters of the cores when the server is otherwise idle, one while client requests are
+running). Background work yields to client requests in proportion to its own cost, and work that frees memory or log —
+flushes, demotion, checkpoints — is never slowed by memory pressure. Many databases on one server therefore no longer each
+run their own background loops at full width; nothing needs configuring.
+
 ### Garbage collection (**ColumnarCore S14, 0.2.0**)
 
 The server runs .NET's **Server GC with DATAS** (dynamic adaptation) and a heap hard limit of 85 % of the memory it may
