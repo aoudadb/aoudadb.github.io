@@ -203,8 +203,9 @@ process-wide hot ceilings as any table you declared yourself.
 
 **A rebuild no longer holds its whole result in memory** (**WorkloadCore S14, next train**): the table a rebuild writes
 flushes into segments while it is written, for every query type (until 0.2.0 only a filter's did), so a large aggregate's
-rebuild fits a share far smaller than its result. A maintained result's own write buffer is still kept in memory between
-checkpoints, as in 0.2.0.
+rebuild fits a share far smaller than its result. **A maintained result's own write buffer flushes on the same triggers as
+any table's** (**WorkloadCore S17a, next train**): in 0.2.0 the maintenance pinned it in memory between checkpoints, whatever
+its `storageTemperature`, so a large result held its rows in the buffer until the next checkpoint.
 
 **Residency is policy, not a property of the query type.** With no declaration, every result table —
 `aggregate`, `latestPerKey`, `firstPerKey`, `filter`, `topNPerGroup` alike — defaults to **`Auto`**:
