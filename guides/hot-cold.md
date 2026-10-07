@@ -140,7 +140,7 @@ If you do nothing beyond default server config:
 | Segment temperature on creation | `Hot` | New data is queried on hot path first |
 | `Aouda:Memory:MaxTotalRamBytes` | ~70% of detected RAM | Process RSS ceiling (set explicitly to pin a number) |
 | `Aouda:Memory:MaxHotBytes` | `0` | Auto-computes effective hot budget (`T10`) as 45% of the governed budget, floor 32 MB |
-| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes effective cache budget (`T12`) as 10% of the governed budget, floor 8 MB. The cache is on in every resource mode (**ColumnarRead, next train**); `Aouda:Memory:PageCacheEnabled = false` turns it off |
+| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes effective cache budget (`T12`) as 10% of the governed budget, floor 8 MB. The cache is on (**ColumnarRead, next train**); `Aouda:Memory:PageCacheEnabled = false` turns it off |
 | `MemoryBudgetOptions.TargetRamBytes` | `0` | Effective target is 90% of max total |
 | Database `DefaultTemperature` | `Auto` | New tables inherit `Auto` unless table policy overrides |
 | `HotColdMaintenanceWorkerOptions` | `SweepInterval=5s`, `AutoHotByteBudgetBytes=64MiB`, `PromotionAccessThreshold=3` | Internal maintenance defaults when worker is active |
@@ -531,7 +531,7 @@ Primary proving tests:
 |---|---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | long | ~70% of detected RAM | `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
-| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of the governed budget (floor 8 MB); on in every resource mode (**ColumnarRead, next train**) |
+| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of the governed budget (floor 8 MB); on (**ColumnarRead, next train**) |
 | `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or positive | startup config | Per-database cap when set |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |

@@ -43,7 +43,8 @@ CPU budget derivation: machine=28, quota=none, configured=none, schedulable=28,
 Aouda's Helm chart sets `limits.cpu` and is therefore safe by default; `docker-compose` sets nothing, so a compose deployment on a shared host should set `--cpus` or `ConfiguredCores`.
 
 **Materialized-query maintenance follows the same budget (**ColumnarCore S15, 0.2.0**).** The deferred pass's
-workers (and its fold chunks) and the number of queries an insert writes side by side come from this CPU budget —
+workers (and its fold chunks) come from this CPU budget (**WorkloadCore S09, next train**: an insert no longer writes
+queries side by side — its queries are maintained in the background, after its commit) —
 `Aouda:Cpu:ConfiguredCores` or the probed quota, read when the work starts — instead of the machine's core count capped
 at 16 / 8. A server given four cores no longer schedules sixteen workers on them, and one given sixteen of twenty uses
 them.
@@ -127,10 +128,11 @@ inside its own commit, which is removed (next bullet).
   nobody reads still costs its share.
 - **A load, not a stream, is better done as a bulk load.** Bulk loads fold their rows into the queries
   in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
-  rows/s end to end *with the queries current*. (**ColumnarCore S12, 0.2.0**) An `Auto` load into a table of
-  aggregates and latest / first-per-key queries folds them while it writes its segments. (**WorkloadCore S09, next train**) The table's pass
-  writes them from that fold right after the commit, and `:commit` waits for them up to `mqWaitMs` (30 s by default);
-  in 0.2.0 the load returned with them written.
+  rows/s end to end *with the queries current*. (**WorkloadCore S10, next train**) An `Auto` load's queries are brought
+  current by the table's pass, started at the commit — the load itself does no materialized-query work while it
+  streams — and `:commit` waits for them up to `mqWaitMs` (30 s by default); in 0.2.0 (**ColumnarCore S12**) the load
+  folded them while it wrote its segments and returned with them written. A query the pass cannot fold or replay is
+  rebuilt by a background job after the pass (**WorkloadCore S17, next train**).
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
   uniqueness probe per stored segment per row: since BatchFirst S13 a batch's key range is checked
   against each segment once. (**ColumnarMerge S02, 0.2.0**) An id the engine allocates is not
@@ -180,55 +182,33 @@ that carries it, and compresses poorly on disk. A `Decimal(p,s)` column (`"preci
 segments — frame-of-reference or delta bit-packing chosen per 2,048-row vector (**ColumnarRead, next train**) (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
 that have a fixed number of places this way; keep the undeclared `Decimal` for values that need more than 18 digits.
 
-## What headroom buys
+## The buffering thresholds are one formula in every deployment (**WorkloadCore S17, next train**)
 
-Aouda measures its own headroom — governed budget against sustained working-set high water — and moves between three states: **`Constrained`**, **`Balanced`** and **`Abundant`**. A host with real headroom does not merely get a larger Aouda; several buffering thresholds move, so it gets a **faster** one. Measured on an 8 GB budget loading 1.2 M rows: the per-table flush trigger rose from 64 MB to 307 MB, the load produced 5 segments instead of 6, and wall clock fell from 5 496 ms to 4 630 ms — about 16%.
+A server's buffering is sized by the same formulas on every host:
 
-The state is reported as `resourceMode` on `GET /api/server/memory`, with the `headroomRatio` that produced it and a `resourceModeTransitions` count. Transitions require sustained agreement in both directions, so a burst does not move a threshold; if `resourceModeTransitions` is climbing, that is the signal to investigate rather than a normal reading.
+| Threshold | Formula |
+|---|---|
+| `T15` — the transient pool | `clamp(0.04 × governed, 4 MB, T9)` |
+| `T16` — a table's flush trigger | `clamp(T11 / max(n, 4), min(1 MB, T11 / n), 64 MB)` |
+| `T18` — a table's hot budget | `clamp(T10 / max(n, 4), min(8 MB, T10 / n), 1 GB)` |
 
-### What `headroomRatio` is a ratio of (**BL-622, 0.1.37**)
+`n` is the number of tables sharing the budget, `T9` the target RAM (90 % of the governed budget), `T10` the hot ceiling
+(45 %) and `T11` the write buffer's ceiling (15 %).
 
-```
-headroom  =  the server's governed budget
-             ───────────────────────────────────────────────
-             a decayed maximum of the PROCESS's resident set
-```
+Until this change Aouda measured its own headroom — the governed budget over a decayed maximum of the process's resident
+set — and moved between three **resource modes**, `Constrained`, `Balanced` and `Abundant`; `Abundant` raised the transient
+pool to 15 % of the governed budget, the flush trigger's ceiling to 1 GB and a table's hot budget's to 16 GB. That
+second, host-driven sizing is **deleted**: the grants work asks for and the memory broker's weights size memory now (see
+*Memory is granted before work starts* below), and a host with headroom no longer gets larger buffers. Gone from `GET /api/server/memory` with it: `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the
+whole `headroom` block; from the `memory` health component's details: `resourceMode`, `headroomRatio`,
+`headroomGovernedBytes`, `workingSetHighWaterBytes` and `workingSetSource`; and the `Aouda:Memory:ResourceMode` key, which
+pinned the mode. A dashboard or alert reading any of them reads nothing now.
 
-(**IngestAtSpeed S08, 0.1.40**) The resident set in the denominator no longer counts **managed
-garbage**, meaning memory the GC holds committed beyond what is live. RSS counts it and the host does
-see it as used, but it is not load, and taking it as load kept a server doing a fast bulk load in
-`Balanced` or `Constrained` with its live heap at a tenth of the box. `workingSetSource` still reads
-`ProcessRss`. When the mode rises, a materialized query whose rebuild was refused memory gets a retry
-without a `:refresh`. Every such refusal is also retried 30 seconds later, and at most three times.
-(**WorkloadCore S10, next train**) Those retries are gone: a refused rebuild waits in the memory grant queue, in the
-lowest class, for room of the size it was refused, asks twice as much each time it is refused again, and stops (logged,
-the query left behind and readable) once that exceeds the database's governed budget — see
-[Materialized queries](materialized.md#a-rebuild-refused-memory-outright-is-deferred-not-failed-ingestatspeed-s03-0140).
+🔎 **What to read instead**, when the server seems to have more room than it is using: `reservedBytes` and `ledgerBytes`
+(what the ledger holds), `managedHeapBytes` and `untrackedHeadroomBytes` (the live heap, and what of it the ledger does not
+hold), `rssBytes`, and `grants` (what is waiting for memory).
 
-Since **BL-622** both operands are on the endpoint, as a `headroom` block beside `headroomRatio` —
-`governedBytes`, `workingSetHighWaterBytes`, `workingSetSource` and `scope`, plus the four
-thresholds the ratio is tested against.
-
-⚠️ **Neither operand is a per-database quantity, and neither is the reservation ledger.** This is
-the most common misdiagnosis of this number. A real example: a database granted a 2.3–2.4 GB
-elastic ceiling, with a **~120 MB** reservation peak, zero heap reclaims and zero admission sheds —
-every figure saying there was room — reported `headroom 1.45x` and ran a whole 15 M-row load in
-`Constrained`, with its page cache off (the page cache is now on in every mode — **ColumnarRead, next train**). All of those numbers were correct. The process's resident
-set was ~1.9 GB against a 2.76 GB governed budget, and the ~1.78 GB between the ledger and RSS is
-resident data that Aouda **reports but never reserves**: hot segments, HRA buffers, PK index caches
-and materialized-query build state. It is kept out of the ledger on purpose, so that resident data
-cannot make the governor refuse transient work that genuinely fits.
-
-⚠️ **The mode is a property of the process, not of a database.** Two databases on one host are in
-the same mode by definition. The startup log names a database only because the mode is applied to
-each open database in turn.
-
-**What to read together**, when the mode looks wrong for the room you think you have:
-`headroom.workingSetHighWaterBytes` (the denominator), `rssBytes` (the instantaneous version of it),
-`reservedBytes` (the ledger) and `untrackedHeadroomBytes` (the gap between them, which is usually
-most of the answer).
-
-### Where the budget itself came from (**BL-611, 0.1.37**)
+## Where the budget itself came from (**BL-611, 0.1.37**)
 
 `GET /api/server/memory` now carries a `budgetDerivation` block recording how `MaxTotalRamBytes` was
 arrived at: `source`, `isCgroupBounded`, the `fractionApplied`, both host readings, whether the
@@ -259,10 +239,6 @@ deliberate — you chose the new number, so there is no host derivation to recor
 differ. `isStillInForce` is `false` when they do, and the `explanation` says `Superseded:`. Gate any
 alert on `availabilityClampBound` behind `isStillInForce`, or you will keep alerting on how a
 budget was sized before you replaced it.
-
-A database picks the new thresholds up **live**, on the transition — it does not need a restart, and it does not need to have been opened while the host was roomy.
-
-⚠️ **RSS on such a host is higher than it was at the same data volume.** That is the feature, it is still inside the ceiling by construction, and anyone alerting on absolute RSS rather than on RSS-versus-configured will see it. Alert on the ratio.
 
 ## Is the hot tier filling faster than it empties?
 
@@ -297,7 +273,7 @@ Aouda answers hot-tier pressure in cost order, and **the first answer costs the 
 
 | Rung | What it does | Cost to the writer | Default | Key |
 |---|---|---|---|---|
-| **0 — drain harder** | Sweeps more often, demotes to a lower target | **None.** Disk I/O only | **on**, inert below 60 % | `Aouda:Memory:HotDrainAccelerationEnabled` |
+| ~~**0 — drain harder**~~ | (**WorkloadCore S17, next train**) **Removed** — see below | — | — | ~~`Aouda:Memory:HotDrainAccelerationEnabled`~~ |
 | **0.5 — seal cold** | The flush writes a cold segment instead of a hot one | A read of those rows comes from disk | **on** | `Aouda:Memory:HotAdmissionEnabled` |
 | **1 — pace the writer** | (**WorkloadCore S16, next train**) The ingest stall curve: hot bytes past 80 % of the ceiling are one of its debts | Latency, bounded (≤ 10 s a write; never for a write of 64 KiB or less) | **on**, inert below 80 % | `Aouda:Memory:HotPacingWaterMark` |
 | **2 — refuse** | Typed retryable `503` with `Retry-After` | The write fails and must be retried | **on** | — |
@@ -306,25 +282,15 @@ Aouda answers hot-tier pressure in cost order, and **the first answer costs the 
 Each rung is tried before the one below it, and a rung that is off is skipped rather than substituted
 for. (Rung 1 can no longer be turned off (**WorkloadCore S16, next train**); it is inert below its line.)
 
-Above **60 %** of a database's hot ceiling the engine simply drains harder: the hot/cold maintenance
-sweep runs more often and demotes to a lower per-table target, bringing the tier back toward that
-mark rather than merely under the ceiling (**WorkloadCore, next train**: the reclaim ladder that also
-aimed at it is replaced by a memory broker, which demotes when the database's whole ledger or the heap
-is over, not the hot tier alone). It spends disk I/O — which is rarely
-the scarce resource — to buy back memory, which is. No write is delayed, refused or rerouted by it,
-at any occupancy.
-
-The response is **proportional**: exactly nothing happens at 60 %, and it rises smoothly to a
-four-times-faster sweep with a halved target as the tier approaches its ceiling. It is bounded there,
-so a busy server does not end up spending a core on maintenance.
-
-`hotDrainAccelerationSweeps` and `hotDrainAccelerationDemotions` on the performance counters say how
-often it engaged and how often it changed the outcome. The pair to watch on
-`GET /api/server/memory` is still `hotArrivalBytesPerSecond` against `hotDrainBytesPerSecond`: if the
-drain now keeps up where it previously did not, this is why.
-
-Set `Aouda:Memory:HotDrainAccelerationWaterMark` to move the mark, or
-`Aouda:Memory:HotDrainAccelerationEnabled=false` to restore the previous fixed-cadence sweep exactly.
+(**WorkloadCore S17, next train**) **Rung 0, drain acceleration, is deleted.** Above 60 % of a database's hot ceiling
+(`T42`) it ran the hot/cold maintenance sweep up to four times as often and demoted to a lower per-table target. The hot
+tier is now drained by two things only: the **memory broker**, which demotes hot segments when the database's ledger, the
+process's, or the live heap is over its line, and the **demotion sweep** at its plain interval. What slows a writer while
+the tier is filling is rung 1's `hot` signal, from `HotPacingWaterMark` (`T43`, 80 %). Its keys
+`Aouda:Memory:HotDrainAccelerationEnabled` and `Aouda:Memory:HotDrainAccelerationWaterMark`, and the
+`hotDrainAccelerationSweeps` / `hotDrainAccelerationDemotions` counters, are gone; a server still configured with either
+key logs a warning for it at boot (see [Defaults Reference](defaults-reference.md#hot-tier-and-ingest-admission)). The
+pair to watch is still `hotArrivalBytesPerSecond` against `hotDrainBytesPerSecond`, and `hotDrainStalled`.
 
 ## Where flushed rows go
 
@@ -515,7 +481,7 @@ expects.
 
 ⚠️ **A pin here costs what any pin costs.** If you declare `HotOnly` on a result table, its bytes
 come off the ceiling everything else is admitted against, the table is skipped for demotion, and its
-cold segments are re-promoted — so rung 0 has nothing it is allowed to drain there. That is the
+cold segments are re-promoted — so the drain has nothing it is allowed to demote there. That is the
 bargain a declared pin makes, and it is worth making deliberately on a small result and not by
 accident on a large one.
 
@@ -563,6 +529,10 @@ Full treatment, including the amplification counters that say what a query costs
 Work asks for memory before it starts — at least what it needs, at most what it can use — and waits in its class's queue if it
 does not fit, instead of being refused part-way. A client's insert or upsert waits at most one 10-second sampling tick, and
 then is refused with a `Retry-After` that the queue estimates. `grants` on `GET /api/server/memory` shows what is waiting.
+(**WorkloadCore S17, next train**) **A memory refusal's `Retry-After` is never a constant 1 s**, wherever it is raised —
+a read growing past its budget, a write decided under a lock, a heap exhausted mid-request included: it is the queue's
+estimate for the refused bytes at its measured service rate, or **10 s** (the memory broker's next look, `T6`) before any
+rate has been measured or when the refusal carries no estimate.
 
 The top **`max(32 MB, 3 %)` of the budget** (at most an eighth of it) is **held** for small writes (≤ 64 KiB) and sign-ins.
 Everything else is admitted against the budget less that reserve, so a budget of 512 MB gives ordinary work 480 MB. Size for
@@ -646,7 +616,7 @@ threshold you choose; a log line is gone from a polling system the moment it scr
 Writes that do not fit **wait** for memory — before they take any lock, for up to one 10-second sampling tick — and then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` and a `Retry-After` estimated from the queue they waited in (**WorkloadCore S06, next train**), or `WAL_CAPACITY_EXCEEDED` and `Retry-After` from the WAL. Retry; the process stays up. Small writes (≤ 64 KiB) and sign-ins are admitted from a held reserve whatever else holds the memory. After flush and checkpoint, WAL segments below every consumer slot are deleted. The local point-in-time-recovery window is that same bound — **write volume** since the last backup (`MaxSlotWalKeepBytes`), not a number of days; enable WAL archiving to recover further back. Studio Inspect shows bytes on disk versus reclaimable, and `earliestRecoverablePitrPosition`. A database that cannot open (including leftover `insert.wal`) is **quarantined** — inspect or run `aouda wal convert`, then drop if you do not need it. The rest of the server keeps serving.
 (**WorkloadCore S06, next train**) A refusal no longer names a **class** that hit its own entitlement: the per-class ceilings and `Aouda:Memory:PerClassAdmissionEnabled` are removed. A refusal now says how long the request waited, what was queued ahead of it, and the budget less the held reserve it was measured against. `reservedByClass` on `GET /api/server/memory` still says who was holding the budget, and `grants` what was waiting.
 
-Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed the class ceiling is refused, where it previously succeeded while holding far more memory than it had reserved. Both are the same typed retryable `503`.
+Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed its read budget (the transient pool `T15`, less what other reads hold — the class ceiling it was measured against is gone, **WorkloadCore S06, next train**) is refused, where it previously succeeded while holding far more memory than it had reserved. Both are the same typed retryable `503`.
 (**ColumnarRead, next train**) A large scan's decode buffers and a GROUP BY's, top-K's or `DISTINCT`'s growing state are now
 charged to the query's read budget as they grow, so a GROUP BY with more groups than its budget holds fails with the typed
 retryable error while it grows, rather than after.
@@ -657,12 +627,16 @@ Every rung above has a config key, and the server prints the ladder **as it is a
 one startup line:
 
 ```
-Memory ladder: admission=on, rung0=on (T42=60 %), rung1=off (T43=80 %, T44=00:01:00,
-  T45=00:00:30), processHotCeiling=on, flushAlwaysHotFirst=off
+Memory ladder: admission=on, stall curve (T43=80 %, T44=00:01:00, T45=00:00:30),
+  processHotCeiling=on, flushAlwaysHotFirst=off
 ```
 
+(**WorkloadCore S17, next train**: `rung0=…` and `T42` are gone with rung 0, and the stall curve is always on, so it has
+no on/off.)
+
 ⚠️ **Read the effective values here, not the ones you set.** Every non-boolean on this line
-**self-clamps** — `T43` against `T42`, both durations against their own floors and ceilings — so a
+**self-clamps** — `T43` to `[0.10, 1.0]` (**WorkloadCore S17, next train**; it was `[T42, 1.0]`), both durations against
+their own floors and ceilings — so a
 value you configured can be silently replaced by a different one. That is exactly why the line prints
 the effective number rather than the configured one.
 

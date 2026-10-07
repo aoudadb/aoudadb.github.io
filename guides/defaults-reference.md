@@ -30,8 +30,11 @@ explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
-| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB. **On in every resource mode** (**ColumnarRead, next train** — it was off in `Constrained`, the mode a database starts in) | `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
+| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB. **On** (**ColumnarRead, next train** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, next train**) | `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
+| Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host (**WorkloadCore S17, next train** — `Abundant` raised the fraction to 0.15) | derived |
+| Per-table flush trigger (`T16`) | `clamp(T11 / max(n, 4), min(1 MB, T11 / n), 64 MB)` — `T11` the write buffer's ceiling (15 % of governed, floor 16 MB), `n` the tables sharing it (**WorkloadCore S17, next train** — `Abundant` raised the ceiling to 1 GB) | derived |
+| Per-table hot budget (`T18`) | `clamp(T10 / max(n, 4), min(8 MB, T10 / n), 1 GB)` — `T10` the hot ceiling (45 % of governed, floor 32 MB) (**WorkloadCore S17, next train** — `Abundant` raised the ceiling to 16 GB) | `Aouda:Memory:MaxHotBytes` sets `T10` |
 | Bulk-load ingest buffer budget | `max(0.04 × yourDatabaseShare, 8 MB)`, growing with headroom in the server's shared memory governor instead of stopping at a fixed number (P45) | `Aouda:BulkLoad:IngestBufferBudgetFraction`, or `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` to pin an explicit ceiling (`268435456` reproduces the old fixed-256 MB behavior) |
 
 Worked at three detected host sizes, both branches (all figures in MB unless marked GB; rounded to the
@@ -78,9 +81,9 @@ your own configuration, because every non-boolean here self-clamps.
 | Setting | Default | Config key | Notes |
 |---|---|---|---|
 | Hot admission seam | `true` | `Aouda:Memory:HotAdmissionEnabled` | Whether a flush asks the ceiling before creating a hot segment. `false` stops consulting it altogether — every flush writes hot first, as it did before P53. |
-| Rung 0 — drain acceleration | `true` | `Aouda:Memory:HotDrainAccelerationEnabled` | Sweeps more often and demotes to a lower target above the water mark. Costs disk I/O only; **no writer is ever delayed by it**. `false` restores the previous fixed-cadence sweep exactly. |
-| `T42` — rung 0 water mark | `0.60` | `Aouda:Memory:HotDrainAccelerationWaterMark` | Hot-occupancy fraction at which rung 0 begins. `0` means the default. The response is proportional: nothing at all at the mark, rising to a 4× sweep with a halved target near the ceiling. |
-| `T43` — hot debt's soft line | `0.80` | `Aouda:Memory:HotPacingWaterMark` | (**WorkloadCore S16, next train**) The fraction of the hot ceiling above which hot bytes count as debt for the ingest stall curve (its hard line is the ceiling). `0` means the default. **Clamped to `[T42, 1.0]` by the engine**, so the drain is always accelerated before a writer is paced. |
+| ~~Rung 0 — drain acceleration~~ | — | ~~`Aouda:Memory:HotDrainAccelerationEnabled`~~ | **Removed (WorkloadCore S17, next train)** with rung 0: the hot tier is drained by the memory broker's hot-segment demotion under pressure and the demotion sweep at its plain interval. It ran the sweep up to 4× as often, to a lower target, above `T42`. |
+| ~~`T42` — rung 0 water mark~~ | — | ~~`Aouda:Memory:HotDrainAccelerationWaterMark`~~ | **Removed (WorkloadCore S17, next train)** with rung 0. It was `0.60`. |
+| `T43` — hot debt's soft line | `0.80` | `Aouda:Memory:HotPacingWaterMark` | (**WorkloadCore S16, next train**) The fraction of the hot ceiling above which hot bytes count as debt for the ingest stall curve (its hard line is the ceiling). `0` means the default. **Clamped to `[0.10, 1.0]` by the engine** (**WorkloadCore S17, next train**; it was `[T42, 1.0]`). |
 | `T44` — stall horizon | `60 s` | `Aouda:Memory:IngestStallHorizon` | (**WorkloadCore S16, next train**) The ingest stall curve's horizon: a paced writer is never held below *(hard line − soft line) / T44*. Was `Aouda:Memory:HotControlHorizon`. Unset means the default. |
 | `T45` — rate EWMA half-life | `30 s` | `Aouda:Memory:HotRateEwmaHalfLife` | Half-life of the arrival- and drain-rate averages. A time constant, not a share — every database samples on the same tick and must decay on the same half-life, or two databases' rates are not comparable. |
 | `T41` — process hot ceiling | `true` | `Aouda:Memory:ProcessHotCeilingEnabled` | Bounds the **sum** of every database's hot tier, not only each one. Inert wherever the per-database ceilings already sum correctly; binds only where the 32 MB per-database floor has broken the sum. `false` bounds each database by its own ceiling alone. |
@@ -98,6 +101,13 @@ slowed by it (300 000 rows on a healthy server: **0 waits**).
 
 🔎 **Two keys are absent on purpose**, not missing: `ProcessHotCeilingAggregateBytes` and
 `ProcessHotCeilingShareBytes`, for the reason in the first warning above.
+
+⚠️ **An unknown key under `Aouda:Memory` is logged at boot** (**WorkloadCore S17, next train**). The configuration binder
+ignores a key nothing reads, so a deployment still carrying a removed key — `HotDrainAccelerationEnabled`,
+`HotDrainAccelerationWaterMark`, `ResourceMode`, `HotPacingEnabled`, `HotControlHorizon`, `PerClassAdmissionEnabled`,
+`ElasticShares` — or a misspelt one would believe it governed something. The server now logs one warning per such key,
+naming its full path (`Aouda:Memory:HotDrainAccelerationEnabled is not a known setting and is ignored: nothing reads it. …`).
+The server starts as before; remove the key.
 
 ---
 
@@ -147,21 +157,18 @@ See [Partitioning and Multi-tenancy](partitioning.md) for the full storage-mode 
 
 ---
 
-## Class entitlements
+## Work classes
 
-Every memory reservation carries a work class, and each class has a share of the transient budget. The fractions differ by resource mode because `Abundant` puts the extra where headroom buys speed — buffering.
+Every memory reservation carries a work class — `Interactive`, `Streaming`, `Ingest`, `Background`, `Maintenance` — and
+that is the order the memory grant queue serves them in: first in, first out within a class, and a running unit's next step
+is taken only if nothing of the same or a higher class is waiting (see
+[Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-next-train)).
 
-| Class | `Constrained` / `Balanced` | `Abundant` | What it covers |
-|---|---|---|---|
-| `Interactive` | 0.35 | 0.30 | Query result materialisation, grouped-aggregate state, sort buffers |
-| `Streaming` | 0.05 | 0.05 | Fan-out projections. High preference, low entitlement |
-| `Ingest` | 0.25 | 0.30 | Bulk-load and insert buffering |
-| `Background` | 0.25 | 0.25 | Materialized-query rebuilds, index rebuilds |
-| `Maintenance` | 0.10 | 0.10 | Compaction and cold-merge buffers |
-
-Each column sums to 1.00, which is a contract rather than a coincidence: a table summing to less silently strands budget, and one summing to more silently over-commits.
-
-**A class may borrow idle headroom.** A sole claimant's ceiling is the whole governed budget, so nothing is stranded when only one kind of work is running. From the second claimant onward each borrower takes at most half the idle remainder, so a second borrower can always start and no claimant faces a cliff on its first byte.
+(**WorkloadCore S06, next train**) **Classes no longer have entitlements.** The per-class shares of the transient budget
+(`Interactive` 0.35, `Streaming` 0.05, `Ingest` 0.25, `Background` 0.25, `Maintenance` 0.10, with different fractions in
+the `Abundant` resource mode), borrowing of idle headroom between classes, and `Aouda:Memory:PerClassAdmissionEnabled` are
+removed; a class orders the queue and does not cap what it may hold. The resource modes those fractions differed by are
+deleted too (**WorkloadCore S17, next train**).
 
 ## Logging defaults
 
