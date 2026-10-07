@@ -175,15 +175,13 @@ If you create a partitioned time-series table and do not set advanced controls:
 ### Planned / proposed
 
 - Broader end-user API knobs for clustering internals (for example full metadata cache controls and merge/size policies) are not exposed on HTTP/TypeScript surfaces yet.
-- Additional ergonomics for retrospective partition migration operations remain iterative.
+- Retrospective partition migration: the never-started migration workers and `MigrationOptions` were removed (**WorkloadCore S17, next train**).
 - ADR-level performance comparisons and guidance remain directional; production tuning still depends on workload-specific testing.
 
 ### Reserved / not yet wired
 
 - ADR examples using integer divide partition functions (`DivideBy*`) are not present in the current `PartitionFunction` enum/runtime.
-- `MigrationStrategy.Eager` and `MigrationStrategy.Blocking` are defined but marked phase-2 intent in policy comments.
-- `MigrationOptions.MaxParallelism` and `MigrationOptions.BlockingTimeout` are defined but phase-2 only.
-- Public HTTP/TS API does not currently expose `SortOnSeal`, `LateArrivalPolicy`, `LateArrivalThreshold`, `Migration`, or `MetadataCaching`.
+- Public HTTP/TS API does not currently expose `SortOnSeal`, `LateArrivalPolicy`, `LateArrivalThreshold`, or `MetadataCaching`.
 
 ## 2.5 Phase coverage matrix
 
@@ -359,13 +357,7 @@ Primary tests:
 | `PartitionOptions.InitialBucketCount` | int | `16` | `>=1` | .NET engine/catalog | Shared bucket count |
 | `PartitionOptions.LateArrivalPolicy` | enum | `Delta` | `Delta`, `Reject`, `Inline` | .NET engine/catalog | `Delta` behaves as `Inline` (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) |
 | `PartitionOptions.LateArrivalThreshold` | `TimeSpan` | `1h` | Positive duration | .NET engine/catalog | Lateness cutoff |
-| `PartitionOptions.Migration` | object? | `null` | `MigrationOptions` | .NET engine/catalog | Retrospective partition migration controls |
-| `MigrationOptions.Strategy` | enum | `None` | `None`, `Background`, `Eager`, `Blocking` | .NET engine/catalog | `Eager`/`Blocking` marked phase-2 |
-| `MigrationOptions.BatchSize` | int | `100000` | `>0` | .NET engine/catalog | Background migration chunking |
-| `MigrationOptions.BatchDelay` | `TimeSpan` | `10s` | Positive duration | .NET engine/catalog | Background migration pacing |
-| `MigrationOptions.MaxIoBandwidthPercent` | int | `15` | `1..100` | .NET engine/catalog | Migration pressure cap |
-| `MigrationOptions.MaxParallelism` | int | `2` | `>=1` | .NET engine/catalog | Phase-2 property |
-| `MigrationOptions.BlockingTimeout` | `TimeSpan` | `1h` | Positive duration | .NET engine/catalog | Phase-2 property |
+| ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, next train**) with `MigrationOptions` and its strategies: the workers were never started. An old catalog's property is ignored on load |
 | `TableOptions.SortOnSeal` | bool | `true` | `true/false` | Core runtime option | No HTTP/TS toggle today |
 | `TablePolicy.MetadataCaching` | enum | `Auto` | `Auto`, `InMemory`, `OnDemand` | .NET/catalog policy | No effect since the summary caches were deleted (**ColumnarRead, next train**); no HTTP/TS create-table field |
 
@@ -379,8 +371,8 @@ Configuration precedence and operational notes:
   - Manifest/cache behavior is runtime and adapts during normal execution.
 - Safety-gated:
   - Invalid cluster/partition order and incompatible partition functions are rejected at API boundary.
-- Deprecated/reserved:
-  - Migration phase-2 properties are intentionally documented but not promoted as fully wired behavior.
+- Removed:
+  - `PartitionOptions.Migration` and its phase-2 strategies (**WorkloadCore S17, next train**).
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
@@ -469,7 +461,6 @@ Common mistake: sending unsupported fields like `lateArrivalPolicy` and expectin
 | Configure late-arrival policy and threshold over HTTP/TS | No fields in `CreateTableRequest` DTO/TS types | Use .NET engine/catalog API path | Future protocol/SDK expansion | High |
 | Configure `SortOnSeal` over HTTP/TS | No DTO fields | Runtime default currently on | Future protocol/SDK expansion | Medium |
 | Configure metadata cache policy over HTTP/TS | No public API field | Internal policy defaults / .NET policy path | Follow-up API surfacing | Medium |
-| Expose migration strategy controls in HTTP/TS | No create/update endpoint fields | .NET internal configuration path | Future admin/schema API work | Medium |
 
 ## 2.12 Scenario playbooks (minimum three)
 
@@ -542,7 +533,7 @@ Suggested tuning sequence:
 1. Start with cluster + partition function declarations only.
 2. Observe pruning counters.
 3. Tune partition storage mode and late-arrival settings in .NET paths if needed.
-4. Adjust migration and caching policy only after baseline behavior is stable.
+4. Adjust caching policy only after baseline behavior is stable.
 
 | Question | Practical answer |
 |---|---|
@@ -583,7 +574,7 @@ Last verification date (UTC): `2026-03-31`.
 | Segment manifest serialization | `ManifestSerializerTests.cs`, `CatalogPersistenceTests.cs` | Pass | Medium/Strong | Focused on metadata correctness and compatibility |
 | Segment-level prune mechanics | `SegmentPrunerTests.cs` (deleted (**ColumnarRead, next train**); the read-rule oracle and fuzzer cover the classifier), `HotSegmentClusterStatsTests.cs` | Pass (existing) | Medium | Behavior validated with clustered statistics |
 | Late-arrival routing | `LateArrivalRouterTests.cs` | Pass | Weak | The router has no production caller since delta segments were removed (**ColumnarRead, next train**); `Reject` is not enforced (**BL-762, next train**) |
-| Retrospective partition migration behavior | `RetrospectivePartitioningTests.cs`, `EagerBlockingMigrationTests.cs` | Pass | Medium | Includes strategy behavior and constraints |
+| Retrospective partitioning (manual route) | `RetrospectivePartitioningTests.cs` | Pass | Medium | The migration workers and `EagerBlockingMigrationTests.cs` were removed (**WorkloadCore S17, next train**) |
 | Schema apply/export handling for cluster/partition functions | `SchemaApplyEngineTests.cs`, `SchemaExporterTests.cs`, `SchemaDiffEngineTests.cs` | Pass (existing) | Medium | Confirms schema model handling boundaries |
 
 ## 2.17 Testing gaps and proposed tests
@@ -605,9 +596,8 @@ Last verification date (UTC): `2026-03-31`.
 - Partition function scope gap:
   - ADR examples mention `DivideBy*` variants; current runtime enum does not include these values.
   - User impact: integer bucketing options are narrower than ADR narrative examples.
-- Migration strategy caveat:
-  - `Eager`/`Blocking` strategy members and associated options are documented as phase-2 in policy comments.
-  - User impact: treat these as limited/conditional rather than universally available production defaults.
+- Migration strategies removed (**WorkloadCore S17, next train**):
+  - `MigrationOptions` (`Background`/`Eager`/`Blocking`) configured workers no production path started; they are gone, and an old catalog's setting is ignored.
 
 ## 2.19 References
 

@@ -57,7 +57,9 @@ holds a degree of parallelism from the same CPU admission queries use, so a defe
 budget: an `Auto` load's pass, which the client's `:commit` waits on, gets ingest's share (half the cores); a pass nobody
 waits on gets background's (three quarters of the cores when the server is otherwise idle, one while client requests are
 running). Background work yields to client requests in proportion to its own cost, and work that frees memory or log —
-flushes, demotion, checkpoints — is never slowed by memory pressure. Many databases on one server therefore no longer each
+flushes, demotion, checkpoints — is never slowed by memory pressure. Cold merges and WAL archiving run in the housekeeping
+class, so a long merge or upload on one database never holds up another database's flushes or checkpoints, and a checkpoint
+waits only for flushes already running (**WorkloadCore group 5 review, next train**). Many databases on one server therefore no longer each
 run their own background loops at full width; nothing needs configuring.
 
 ### Garbage collection (**ColumnarCore S14, 0.2.0**)
@@ -343,7 +345,7 @@ not at all. Each database now has **one stall curve** fed by all four, each with
 | **Hot bytes** — the hot tier | 80 % of the hot ceiling (`HotPacingWaterMark`) | the ceiling | flushes seal cold |
 
 Below every soft line **nothing is paced**: the curve does not compute a rate there. Past one, client
-writes — inserts, updates, upserts, `MERGE`, and each batch of a bulk load's `:append` — are admitted
+writes — inserts, upserts, and each batch of a bulk load's `:append` — are admitted
 through a per-database token bucket whose rate starts at the writer's own recent rate and falls toward
 zero as the worst debt approaches its hard line (never below what would carry the debt from soft to
 hard line over `Aouda:Memory:IngestStallHorizon`, 60 s). Ingest then settles at the rate the debt
@@ -352,8 +354,12 @@ drains, between the lines, instead of running into the refusal or the rebuild be
 - **The wait happens before the write takes any lock**, so a paced write never holds up another writer
   of the same table. (The WAL's old 85 % throttle was a fixed delay *inside* the commit.)
 - **One write waits at most 10 s** and is never refused by the curve.
+- **An `UPDATE` or `DELETE` is not paced** (**WorkloadCore group 5 review, next train**) — the curve does not see a statement's size before
+  it scans, so a very large update still runs into the WAL's refusal line rather than slowing (BL-904).
 - **A write of 64 KiB or less is never paced** — the small writes and auth requests the held reserve
   keeps admitted.
+- **Every batch of a bulk load's `:append` is paced whatever its size** (**WorkloadCore group 5 review, next train**): the 64 KiB exemption is
+  for single small writes, and a load sent as small frames was never slowed.
 - **Maintenance, flushes and rebuilds are never paced**: they are what clears the debt.
 
 `GET /api/server/memory` shows each database's curve under `ingestStall`: `engaged`, `pressure` (0 below
@@ -443,7 +449,9 @@ things that can meaningfully narrow the elastic tier.
 `_audit_log` is deliberately **not** pinned. It is never read to authorize a request, it is the
 fastest-growing table in the database, and it pages to disk like ordinary data.
 
-⚠️ **`Aouda:Memory:EnableEmergencyDemotion=true` does not reach an auth database.** That switch is a
+⚠️ **The embedded engine's `EnableEmergencyDemotion` option does not reach an auth database.** (A server
+has no such key: `Aouda:Memory:EnableEmergencyDemotion` is not read, and is warned about at boot as an
+unknown key (**WorkloadCore S17, next train**); use a table's `hotOnlyBackstop` instead.) That switch is a
 process-wide answer to heap pressure; applying it to credential tables trades an out-of-memory risk
 for a cluster-wide loss of authentication, which is not a trade an operator is making knowingly when
 they set it. There is no setting that turns the auth rule off. A per-table
