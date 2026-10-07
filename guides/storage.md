@@ -419,15 +419,20 @@ it is neither, and the sections were never separated. They are now.
    redo start position. This horizon lets crash recovery **fast-forward** past already-flushed WAL
    — it never by itself authorizes **deletion**; deletion is always `MIN(all slots)` (previous
    point), a distinction that matters because it is easy to conflate the two.
-5. **Retention worker cycle**, every `RetentionCheckInterval` (default 5 minutes): compute the safe
-   delete boundary; apply an archive-before-delete constraint if configured; invalidate (delete)
-   any non-system slot whose lag from the current WAL head exceeds `MaxSlotWalKeepBytes`; recompute
+5. **Retention worker cycle** — (**WorkloadCore S16, next train**) on demand: when the log crosses 85 % of `MaxWalBytes`
+   (`T26`), when an append is refused at 95 %, and after every checkpoint; it used to run every
+   `RetentionCheckInterval` (5 minutes), which is gone. It computes the safe
+   delete boundary; applies an archive-before-delete constraint if configured; invalidates (deletes)
+   any slot but `system` whose lag from the current WAL head exceeds `MaxSlotWalKeepBytes`; recompute
    the boundary; prune whole segment files below it, always keeping the active segment; publish the
    reduced manifest before deleting files (a crash between the two leaves unmanifested files, which
    open reconciles); update WAL-on-disk / WAL-reclaimable inventory metrics.
 6. **The size ladder** (`WalSizeGovernor`, one per WAL root) is the backstop: `MaxWalBytes` derived
-   from free disk space, a force-checkpoint rung at 70% of it, an insert-throttle rung at 85%, an
-   insert-refusal rung (`WAL_CAPACITY_EXCEEDED`, HTTP 503 + `Retry-After`) at 95%, and a
+   from free disk space, a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, next train**)
+   (it was an insert-throttle rung: a fixed delay inside the commit; the writer is now slowed before
+   it takes any lock, by the ingest stall curve — see the sizing guide), an
+   insert-refusal rung (`WAL_CAPACITY_EXCEEDED`, HTTP 503 + a `Retry-After` estimated from the rate
+   retention frees log) at 95%, and a
    slot-keep-bytes rung (`MaxSlotWalKeepBytes`, roughly half of `MaxWalBytes`, clamped to 128 MB–2
    GB) — the **only** mechanism that ever forces a slot to give up WAL it has not consumed. This is
    also the local PITR window's true shape: a bound on **write volume since the

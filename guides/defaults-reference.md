@@ -80,9 +80,8 @@ your own configuration, because every non-boolean here self-clamps.
 | Hot admission seam | `true` | `Aouda:Memory:HotAdmissionEnabled` | Whether a flush asks the ceiling before creating a hot segment. `false` stops consulting it altogether — every flush writes hot first, as it did before P53. |
 | Rung 0 — drain acceleration | `true` | `Aouda:Memory:HotDrainAccelerationEnabled` | Sweeps more often and demotes to a lower target above the water mark. Costs disk I/O only; **no writer is ever delayed by it**. `false` restores the previous fixed-cadence sweep exactly. |
 | `T42` — rung 0 water mark | `0.60` | `Aouda:Memory:HotDrainAccelerationWaterMark` | Hot-occupancy fraction at which rung 0 begins. `0` means the default. The response is proportional: nothing at all at the mark, rising to a 4× sweep with a halved target near the ceiling. |
-| Rung 1 — ingest pacing | **`false`** | `Aouda:Memory:HotPacingEnabled` | ⚠️ **Ships off.** See the note below. |
-| `T43` — rung 1 water mark | `0.80` | `Aouda:Memory:HotPacingWaterMark` | `0` means the default. **Clamped to `[T42, 1.0]` by the engine**, so you cannot invert the ladder and make pacing the first answer to pressure. |
-| `T44` — control horizon | `60 s` | `Aouda:Memory:HotControlHorizon` | The horizon the admissible arrival rate is computed over: *drain rate + (ceiling − resident) / T44*. Unset means the default. |
+| `T43` — hot debt's soft line | `0.80` | `Aouda:Memory:HotPacingWaterMark` | (**WorkloadCore S16, next train**) The fraction of the hot ceiling above which hot bytes count as debt for the ingest stall curve (its hard line is the ceiling). `0` means the default. **Clamped to `[T42, 1.0]` by the engine**, so the drain is always accelerated before a writer is paced. |
+| `T44` — stall horizon | `60 s` | `Aouda:Memory:IngestStallHorizon` | (**WorkloadCore S16, next train**) The ingest stall curve's horizon: a paced writer is never held below *(hard line − soft line) / T44*. Was `Aouda:Memory:HotControlHorizon`. Unset means the default. |
 | `T45` — rate EWMA half-life | `30 s` | `Aouda:Memory:HotRateEwmaHalfLife` | Half-life of the arrival- and drain-rate averages. A time constant, not a share — every database samples on the same tick and must decay on the same half-life, or two databases' rates are not comparable. |
 | `T41` — process hot ceiling | `true` | `Aouda:Memory:ProcessHotCeilingEnabled` | Bounds the **sum** of every database's hot tier, not only each one. Inert wherever the per-database ceilings already sum correctly; binds only where the 32 MB per-database floor has broken the sum. `false` bounds each database by its own ceiling alone. |
 | Legacy hot-first flush | `false` | `Aouda:Memory:FlushAlwaysHotFirst` | `true` restores the pre-P53 flush whole, including hot-first flush for `ColdPreferred` tables. Measured on a 400 000-row load against a 2 MB hot ceiling: default produced 3 segments holding **0 B** resident hot; this flag produced 3 segments holding **17 700 000 B** — 8.8× the ceiling, unbudgeted. |
@@ -92,14 +91,10 @@ your own configuration, because every non-boolean here self-clamps.
 are computed by the server's budget manager from the governed budget; an operator setting them by
 hand could contradict the arithmetic the ceiling exists to enforce.
 
-⚠️ **Rung 1 ships off, and that is a decision rather than an oversight.** It is the first rung that
-can make a *healthy* workload slower if a constant is wrong, and two of its three constants (`T43`,
-`T44`) are carried from Apache Kudu rather than derived from Aouda's own arithmetic. The safety case
-is made — it cannot engage below `T43` **by construction** (the controller returns before the rate is
-computed), and a healthy server ingesting 300 000 rows in 1.4 s with the flag on took **0 delays and
-0 refusals**. The sizing case is not: nothing in the engine's own suites derives `T43` or `T44` from a
-sustained production ingest. Turn it on deliberately if your drain is not keeping up; leave it off if
-you have not measured.
+(**WorkloadCore S16, next train**) **`Aouda:Memory:HotPacingEnabled` is gone**, with the hot-only pacer it switched: the ingest
+stall curve (sizing guide, *Debt slows the writer*) paces on hot bytes and on three other debts, is
+always on, and is inert below every soft line — nothing is computed there, so a healthy server is never
+slowed by it (300 000 rows on a healthy server: **0 waits**).
 
 🔎 **Two keys are absent on purpose**, not missing: `ProcessHotCeilingAggregateBytes` and
 `ProcessHotCeilingShareBytes`, for the reason in the first warning above.

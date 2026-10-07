@@ -299,13 +299,12 @@ Aouda answers hot-tier pressure in cost order, and **the first answer costs the 
 |---|---|---|---|---|
 | **0 — drain harder** | Sweeps more often, demotes to a lower target | **None.** Disk I/O only | **on**, inert below 60 % | `Aouda:Memory:HotDrainAccelerationEnabled` |
 | **0.5 — seal cold** | The flush writes a cold segment instead of a hot one | A read of those rows comes from disk | **on** | `Aouda:Memory:HotAdmissionEnabled` |
-| **1 — pace the writer** | Delays the writer to a measured admissible rate | Latency, bounded | **off**, inert below 80 % | `Aouda:Memory:HotPacingEnabled` |
+| **1 — pace the writer** | (**WorkloadCore S16, next train**) The ingest stall curve: hot bytes past 80 % of the ceiling are one of its debts | Latency, bounded (≤ 10 s a write; never for a write of 64 KiB or less) | **on**, inert below 80 % | `Aouda:Memory:HotPacingWaterMark` |
 | **2 — refuse** | Typed retryable `503` with `Retry-After` | The write fails and must be retried | **on** | — |
 | **3 — break a pin** | Demotes a `HotOnly` table's segments anyway | Only if you asked for it | per table | `residency.hotOnlyBackstop` |
 
 Each rung is tried before the one below it, and a rung that is off is skipped rather than substituted
-for — turning rung 1 off does not make rung 2 fire sooner, it means a tier that rung 0 cannot drain
-fast enough reaches the ceiling and refuses instead of slowing down first.
+for. (Rung 1 can no longer be turned off (**WorkloadCore S16, next train**); it is inert below its line.)
 
 Above **60 %** of a database's hot ceiling the engine simply drains harder: the hot/cold maintenance
 sweep runs more often and demotes to a lower per-table target, bringing the tier back toward that
@@ -365,33 +364,40 @@ previous behaviour; the bytes are still checked against the ceiling.
 
 🔎 Ordinary **tabular** bulk loads were always cold-only and are unaffected.
 
-## Pacing ingest against the drain (opt-in)
+## Debt slows the writer: the ingest stall curve (**WorkloadCore S16, next train**)
 
-If accelerating the drain and sealing cold are not enough — a pinned table, a promotion-heavy
-workload — Aouda can **pace the writer** above 80 % of a database's hot ceiling. It is **off by
-default**: set `Aouda:Memory:HotPacingEnabled=true`.
+Four kinds of **debt** can build up behind a fast writer, and each used to be answered on its own or
+not at all. Each database now has **one stall curve** fed by all four, each with a soft and a hard line:
 
-The rate a writer is paced to is measured, not configured:
+| Debt | Soft line | Hard line | What lies past the hard line |
+|---|---|---|---|
+| **WAL fill** — the database's log on disk | 70 % of `MaxWalBytes` (a checkpoint is forced) | 95 % | writes refused, `WAL_CAPACITY_EXCEEDED` |
+| **Maintenance lag** — the fullest materialized-query maintenance lane's backlog | half the backlog bound (32 MiB) | the bound (64 MiB) | a query marked behind, rebuilt from its source |
+| **Flush debt** — the write buffer's unflushed bytes | `T11` (15 % of the database's budget) | 2 × `T11` | the memory budget's queue |
+| **Hot bytes** — the hot tier | 80 % of the hot ceiling (`HotPacingWaterMark`) | the ceiling | flushes seal cold |
 
-```
-admissible arrival = drain rate + (hot ceiling − resident hot) / control horizon
-```
+Below every soft line **nothing is paced**: the curve does not compute a rate there. Past one, client
+writes — inserts, updates, upserts, `MERGE`, and each batch of a bulk load's `:append` — are admitted
+through a per-database token bucket whose rate starts at the writer's own recent rate and falls toward
+zero as the worst debt approaches its hard line (never below what would carry the debt from soft to
+hard line over `Aouda:Memory:IngestStallHorizon`, 60 s). Ingest then settles at the rate the debt
+drains, between the lines, instead of running into the refusal or the rebuild behind the hard line.
 
-*You may create hot bytes as fast as they are leaving, plus fast enough to consume the remaining
-headroom over the horizon* (`Aouda:Memory:HotControlHorizon`, default 60 s). At the ceiling this
-reduces to exactly the drain rate, so ingest settles on what the tier can actually absorb.
+- **The wait happens before the write takes any lock**, so a paced write never holds up another writer
+  of the same table. (The WAL's old 85 % throttle was a fixed delay *inside* the commit.)
+- **One write waits at most 10 s** and is never refused by the curve.
+- **A write of 64 KiB or less is never paced** — the small writes and auth requests the held reserve
+  keeps admitted.
+- **Maintenance, flushes and rebuilds are never paced**: they are what clears the debt.
 
-⚠️ **Below the 80 % mark nothing is paced — and that is structural, not a matter of the numbers
-being large enough.** The controller does not compute a rate at all below the water mark, so a
-healthy server cannot be slowed by it.
+`GET /api/server/memory` shows each database's curve under `ingestStall`: `engaged`, `pressure` (0 below
+every soft line, 1 at a hard line), `binding` (which debt), `rateBytesPerSecond`, `waits`, `waitedMs`,
+and every signal with its `value`, `soft` and `hard`. A curve that stays engaged on `wal` means the log
+is not being freed — look at the slots holding it; on `maintenance`, materialized queries are not keeping
+up with ingest; on `hot`, the drain (`hotDrainStalled`, `hotDrainLatencyP90Ms`).
 
-**Each database has its own bucket.** A busy database's backlog never delays a quiet one's writes.
-
-If a bounded wait would not be enough, the write is refused with a retryable `503` that names the
-arrival rate, the drain rate, the demotion latency, the resident hot bytes and the ceiling — and a
-`Retry-After` derived from how long the drain actually needs. **If you see these, the number to
-investigate is the drain**, not the ceiling: check `hotDrainStalled` and
-`hotDrainLatencyP90Ms` on `GET /api/server/memory`.
+Removed with it: `Aouda:Memory:HotPacingEnabled` and the hot-only pacer it switched, its "Hot ingest rate
+exceeded" refusal, and a bulk load's fixed 10 ms pause per 10,000 rows under heap pressure.
 
 ## The hot tier is bounded across databases, not only within one
 

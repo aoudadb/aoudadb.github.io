@@ -4472,6 +4472,7 @@ Content-Type: application/x-ndjson
 |---|---|---|
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
+| `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, next train**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `"_table"`. |
 | `BULK_LOAD_CURSOR_MISMATCH` | 409 | Client resumed from an incorrect cursor (sent rows below `rowsDurablyCommitted`). |
 
@@ -4509,7 +4510,7 @@ Commit the session. All sealed segments become queryable.
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
 | `progress` | object? | Present only when `waitForDeferredWork: true`. Fields: `ivfAssignmentsCompleted`, `ivfAssignmentsTotal`, `raBitQEncodingsCompleted`, `raBitQEncodingsTotal`, `cscMirrorsCompleted`, `cscMirrorsTotal`, `pkIndexRebuildCompleted`, `pkIndexRebuildTotal`. |
 | `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. For an `"auto"` load that reaches any query it is `"pending"` or `"inProgress"`, never `"completed"` from the commit itself (**WorkloadCore S09, next train**); it was `"completed"` for an `"auto"` load whose queries were written in its own commit (**ColumnarCore S12, 0.2.0**). Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
-| `mqStatus` | string | (**WorkloadCore S09, next train**) Whether the materialized queries the load's rows reach (over the loaded tables, and every query built on them) were current for the load when `:commit` returned: `"current"` all of them were, within `mqWaitMs`; `"behind"` the wait ended first, and their maintenance is still running; `"skipped"` a `"skip"` load — the queries are behind until refreshed; `"deferred"` a `"deferred"` load — a later pass owes them; `"none"` no query reads the loaded tables. |
+| `mqStatus` | string | (**WorkloadCore S09, next train**) Whether the materialized queries the load's rows reach (over the loaded tables, and every query built on them) were current for the load when `:commit` returned: `"current"` all of them were, within `mqWaitMs`; `"behind"` the wait ended first, and their maintenance is still running — or (**WorkloadCore S16, next train**) one of them can only be brought current by a rebuild (it is holed, in `Error`, or its rebuild is waiting for memory), which `:commit` does not wait for: it answers `"behind"` as soon as the others are current; `"skipped"` a `"skip"` load — the queries are behind until refreshed; `"deferred"` a `"deferred"` load — a later pass owes them; `"none"` no query reads the loaded tables. |
 | `mqFrontierToken` | string? | (**WorkloadCore S09, next train**) The lowest frontier among the load's queries when `:commit` returned, as a consistency token: a read of those queries with it is served at once. Absent when the load reaches no query. |
 | `mqWaitedMs` | number | (**WorkloadCore S09, next train**) How long `:commit` waited for the load's queries, in milliseconds. |
 
@@ -4524,7 +4525,7 @@ queries current, read with the commit's `token` (which waits for them, as for an
 | Code | Status | When |
 |---|---|---|
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, next train**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit. `Retry-After` is set. |
-| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, next train**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. |
 
 The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the
 same `errorCode`. A repeated `:commit` of that job answers the same 503 rather than a 409. Wait `Retry-After`, then run the
