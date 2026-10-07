@@ -161,7 +161,8 @@ See [Partitioning and Multi-tenancy](partitioning.md) for the full storage-mode 
 
 Every memory reservation carries a work class — `Interactive`, `Streaming`, `Ingest`, `Background`, `Maintenance` — and
 that is the order the memory grant queue serves them in: first in, first out within a class, and a running unit's next step
-is taken only if nothing of the same or a higher class is waiting (see
+is taken only if nothing of the same or a higher class is waiting — a read's only if nothing of a higher class is, and a
+request blocked by its own database's cap holds back only that database (**BL-861, WorkloadCore S18, next train**; see
 [Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-next-train)).
 
 (**WorkloadCore S06, next train**) **Classes no longer have entitlements.** The per-class shares of the transient budget

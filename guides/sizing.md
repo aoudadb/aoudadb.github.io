@@ -556,6 +556,10 @@ locks and waits there (up to its lock-acquisition timeout, 30 s by default), so 
 inserts into its tables. Once work is running, its next step — a load's buffer doubling, a read growing past 1 MiB, a
 materialized-query build's accumulators, a deferred pass's wave — is taken only if nothing of the same or a higher class is
 waiting: a load spills sooner, a build spills, a pass takes smaller waves, a read is refused with the queue's `Retry-After`.
+(**BL-861, WorkloadCore S18, next train**) Two narrowings: a request waiting only because **its own database** has reached its
+memory cap holds back that database alone, not the others; and a **read**, which cannot adapt to a refused step, yields only
+to a waiting request of a *higher* class than its own — so an `Interactive` read that has started is not refused part-way
+because an `Interactive` write queued after it. A read is still refused (503 + `Retry-After`) when its bytes do not fit.
 A bulk load's segment writes take their working memory (about twice the bucket being written) from the load's memory and
 run one at a time when it has no more, and a flush charges the page builders it encodes with — both used to be invisible to
 the budget. Recovery after a crash waits up to 10 s for its replay window rather than quarantining the database at once.
