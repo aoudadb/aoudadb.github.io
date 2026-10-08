@@ -531,6 +531,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
 | `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-850, next train**) Sign-in, sign-up, password set / change / reset and an admin's create-user: the password hash (Argon2id, 64 MiB while it runs) could not get its memory from the server's queue within 10 s. Nothing was changed; `Retry-After` is the queue's estimate. Hashes queue for memory rather than run unbounded, so a burst of sign-ins waits instead of exhausting the heap (it answered `500` before). An admin's user edit, API-key revoke or RLS-resolver create refused for capacity answers this (or `WAL_CAPACITY_EXCEEDED`) too, where it used to read as a 400 or a 409 "email exists" (WorkloadCore group 6 review). |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic message to prevent information leakage) |
 | `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is disabled for this database (`allowSelfSignup` is false) |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is invalid, expired, or revoked |
@@ -597,6 +598,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_MUTATION_VALUE_NODE_INVALID` | 400 (schema apply) | A `values` / `set` entry is an object node that is neither `{ "param": "<name>" }` nor `{ "value": <literal> }` |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
 | `DUPLICATE_PRIMARY_KEY` | 409 | *BL-636, 0.1.37.* An insert named a primary key a live row already holds. `details` carries the offending key. Use `op: "upsert"` (named mutation) or `mode: "upsert"` (write-stream) when the write is meant to replace. Previously surfaced as `500 INTERNAL_ERROR` |
+| `WRITE_CONFLICT` | 409 | (**BL-881, next train**) A DELETE or UPDATE (table `PATCH` / `DELETE` rows, `rows/batch`, a named mutation) did not commit: it re-checks the rows it matched at its commit and runs again from its scan when another writer changed one, and another writer kept deleting or rewriting them through all 16 of its attempts. Nothing of it was applied (in `rows/batch`, the operations before it were). Retry the request with backoff. Previously surfaced as `500 INTERNAL_ERROR` |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |

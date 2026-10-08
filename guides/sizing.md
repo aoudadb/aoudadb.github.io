@@ -15,7 +15,9 @@ Give the process only what remains after the OS. Flush and hot-tier thresholds s
 Two costs do not scale with the budget (**WorkloadCore, next train**). The server itself — the runtime, ASP.NET, pooled buffers —
 holds 10–20 MB of managed heap that no reservation covers. And **every sign-in or password change holds 64 MiB while its
 password hash runs** (Argon2id, a few hundred milliseconds): a burst of sign-ins on a 512 MB container is a real share of its
-heap. Both are visible on `GET /api/server/memory` (`chargedByConsumer.PasswordHashing`; the rest of the gap in
+heap. (**BL-850, next train**) Each hash now asks the memory queue for its 64 MiB before it runs: as many run at once as there
+is room for, the rest wait, and one that waits 10 s is refused with `503 MEMORY_BUDGET_EXCEEDED` and `Retry-After` instead of
+exhausting the heap. Both are visible on `GET /api/server/memory` (`chargedByConsumer.PasswordHashing`; the rest of the gap in
 `untrackedAtLastGen2Bytes`). Token refreshes do not hash.
 
 ## Typical (~2 GB)
