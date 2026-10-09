@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Named queries and mutations"
 nav_order: 8
 parent: "Guides"

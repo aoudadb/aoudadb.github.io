@@ -32,7 +32,7 @@ Agents standing up a throwaway local engine: [Local CLI testing (agents)](ai/loc
 
 ## Updating docs
 
-Edit markdown **in this repository** with UTF-8-safe tools (not PowerShell `Set-Content`). Match live `Aouda.Protocol` DTOs and controller routes. After HTTP-surface changes, update `reference/http-api.md` in the same change.
+Edit markdown **in this repository** with UTF-8-safe tools (not PowerShell `Set-Content`). **Save every page as UTF-8 without a BOM.** Jekyll does not recognise front matter that starts with a BOM, so the page is published as a raw `.md` file and its URL is a 404 — it happened twice (stripped 2026-05-21 and again 2026-10-09). The `aouda` repo's "UTF-8 with BOM" rule (its `AGENTS.md` §2.10) does **not** apply here. Match live `Aouda.Protocol` DTOs and controller routes. After HTTP-surface changes, update `reference/http-api.md` in the same change.
 
 ## Local preview
 
