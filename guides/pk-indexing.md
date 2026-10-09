@@ -257,6 +257,9 @@ Seal/open path:
 2. L2 keeps frozen partition entries addressable via `FrozenSentinel`.
 3. Insert in freeze window still sees those keys via `LookupKeyLocation`.
 4. `CompleteFreezeFlush` clears frozen partition after persistence/registration.
+5. A hot segment a flush has registered but not yet published is not counted by the `Strict` check; until the publish the
+   frozen copy answers, so a key deleted there can be inserted again at once. A frozen hit is judged against the buffer it
+   came from, and looked up again if that flush completed in between (**BL-899, next train**).
 
 **Path C: Startup preload**
 1. `AoudaEngine.OpenAsync` obtains snapshot.
