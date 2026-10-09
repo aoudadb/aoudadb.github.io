@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Bulk Load"
 nav_order: 17
 parent: "Guides"

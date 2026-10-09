@@ -1,4 +1,4 @@
-﻿---
+---
 title: "SDK Compatibility"
 nav_order: 3
 parent: "Clients"

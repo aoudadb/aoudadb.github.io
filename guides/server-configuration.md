@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Server configuration"
 parent: Guides
 nav_order: 2
