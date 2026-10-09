@@ -74,6 +74,10 @@ larger governed budget than 32 GB affords at these weights.
 
 ## Hot tier and ingest admission
 
+(**BL-914, next train**) The memory broker frees memory when the live heap passes **0.80 × the heap limit (`T4`)** — and now
+also when what the GC has committed after a compacting full collection passes **0.90 × `T4`**. Neither is configurable, and
+neither refuses a write: both evict (key maps first). See [Sizing — when the GC heap gets tight](sizing.md#what-happens-when-the-gc-heap-gets-tight).
+
 The reclaim ladder from [Sizing](sizing.md#what-happens-when-the-hot-tier-fills), key by key. The
 server prints the ladder **as it is actually in force** in one startup line — read that rather than
 your own configuration, because every non-boolean here self-clamps.
@@ -108,6 +112,26 @@ ignores a key nothing reads, so a deployment still carrying a removed key — `H
 `ElasticShares` — or a misspelt one would believe it governed something. The server now logs one warning per such key,
 naming its full path (`Aouda:Memory:HotDrainAccelerationEnabled is not a known setting and is ignored: nothing reads it. …`).
 The server starts as before; remove the key.
+
+---
+
+## WAL size ladder
+
+Per WAL root, derived — none of these is a configuration key. See [Sizing — the WAL's cap](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-next-train)
+and [Storage](storage.md) (walk-through D).
+
+| Value | Formula | Notes |
+|---|---|---|
+| `MaxWalBytes` (`T23`) at open | `clamp(free / 10, min(256 MB, free / 4), 4 GiB)`, `free` the WAL volume's free bytes (256 MB when it cannot be read) | The opening cap. |
+| `MaxWalBytes` (`T23`) after a reclaim | `max(clamp(A / 10, min(256 MB, A / 4), 4 GiB), min(2 × W, A / 2))`, `A` = free bytes + the WAL's own, `W` = the largest log size seen when retention reclaimed | (**BL-787, next train**) Recomputed at most once a minute, applied when it moves more than 5 %, and logged (`[WAL] MaxWalBytes … -> …`). Before, the open's value held for the life of the process. |
+| `T24` — segment size | `clamp(T23 / 16, 8 MB, 64 MB)` | Fixed at open. |
+| `T25` — force checkpoint | `0.70 × T23` | Also the WAL debt's soft line for the ingest stall curve. Moves with `T23`. |
+| `T26` — run retention now | `0.85 × T23` | Moves with `T23`. |
+| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate. Moves with `T23`. |
+| `T28` — `MaxSlotWalKeepBytes` | `clamp(T23 / 2, 128 MB, 2 GiB)` | Fixed at open: a slot lagging further behind the head is invalidated. |
+
+(**BL-787, next train**) Each crossing of `T25`, `T26` and `T27`, in either direction, and the end of a refuse episode (its
+length and how many writes it refused) is one line in the server log, prefixed `[WAL]`.
 
 ---
 

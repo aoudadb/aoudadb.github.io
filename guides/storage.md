@@ -432,7 +432,9 @@ it is neither, and the sections were never separated. They are now.
    reduced manifest before deleting files (a crash between the two leaves unmanifested files, which
    open reconciles); update WAL-on-disk / WAL-reclaimable inventory metrics.
 6. **The size ladder** (`WalSizeGovernor`, one per WAL root) is the backstop: `MaxWalBytes` derived
-   from free disk space, a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, next train**)
+   from free disk space at open and (**BL-787, next train**) recomputed after reclaims from the disk and the largest working set
+   the log has held — see [Sizing](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-next-train), whose `[WAL]` log
+   lines show each crossing — a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, next train**)
    (it was an insert-throttle rung: a fixed delay inside the commit; the writer is now slowed before
    it takes any lock, by the ingest stall curve — see the sizing guide), an
    insert-refusal rung (`WAL_CAPACITY_EXCEEDED`, HTTP 503 + a `Retry-After` estimated from the rate

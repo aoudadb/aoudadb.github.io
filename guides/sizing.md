@@ -384,6 +384,38 @@ up with ingest; on `hot`, the drain (`hotDrainStalled`, `hotDrainLatencyP90Ms`).
 Removed with it: `Aouda:Memory:HotPacingEnabled` and the hot-only pacer it switched, its "Hot ingest rate
 exceeded" refusal, and a bulk load's fixed 10 ms pause per 10,000 rows under heap pressure.
 
+### The WAL's cap follows the disk and the workload (**BL-787, next train**)
+
+The WAL-fill debt above is measured against `MaxWalBytes` (`T23`), and its rungs are fractions of it: `T25` = 0.70 (a
+checkpoint is forced, and the stall curve starts slowing writers), `T26` = 0.85 (retention runs now), `T27` = 0.95 (source
+writes are refused, `503 WAL_CAPACITY_EXCEEDED`). The cap is not configurable; it is derived:
+
+- **At open:** a tenth of the volume's free space, at least `min(256 MB, free / 4)` and at most 4 GiB.
+- **After a reclaim** (at most once a minute): the larger of that bootstrap — now over the free space **plus the WAL's own
+  files** — and **twice the largest working set** the log has held when retention reclaimed it, never more than half that
+  space. A change of more than 5 % is applied, with `T25`–`T27`, and logged. The segment size (`T24`) and the slot keep
+  (`MaxSlotWalKeepBytes`, `T28`) stay as they were opened.
+
+The basis: in steady state the log grows by what is appended between two reclaims. A working set above `T25` forces a
+checkpoint every cycle, and one near `T27` refuses writes every cycle **with the disk free** (a lab ran 2 h 52 min of refused
+commits with 86 GB free behind a fixed 4 GiB cap). Twice the working set keeps it at half the cap, below `T25`; the half-of-the-
+volume ceiling leaves the rest of the disk to the tables. Before, the cap was computed once at open, a tenth of the free disk
+up to 4 GiB.
+
+**The ladder is in the server log** — one line per crossing, in each direction, never one per write:
+
+```
+[WAL] Crossed T25 upward: 2,912 MiB on disk of MaxWalBytes 4,096 MiB (T25 2,867 MiB, T26 3,482 MiB, T27 3,891 MiB). A checkpoint is forced; the ingest stall curve starts slowing writers.
+[WAL] Crossed T26 upward: … Retention runs now.
+[WAL] Refusing source writes: … Each is answered 503 WAL_CAPACITY_EXCEEDED with Retry-After 12 s (reclaim rate 41.0 MiB/s); retention is running. …
+[WAL] Accepting writes again: …, after 95 s at the refuse rung, 1,204 write(s) refused.
+[WAL] Back under T25: ….
+[WAL] MaxWalBytes 4,096 MiB -> 6,144 MiB: the larger of a tenth of the … MiB the WAL can use (free + its own, 256 MiB-4 GiB) and twice the largest working set at a reclaim (3,072 MiB), at most half of it. T27 (refuse) is now 5,837 MiB.
+```
+
+The upward crossings, the refuse episode and a resize are Warnings; "Back under" is Information. A refusal used to be
+visible only in the HTTP answer. (The figures above are illustrative.)
+
 ## The hot tier is bounded across databases, not only within one
 
 Each database has its own hot ceiling, derived from its share of the memory budget. **On a small
@@ -606,6 +638,15 @@ back memory granted to background work that can checkpoint and resume. Writes ar
 30-second `Retry-After`, the 60-second grace window it had under `HotPacingEnabled`, and `heapPressureGraceExpired` are gone.
 Sustained heap pressure (90 % for three samples) still slows a bulk load's row loop and holds back a post-load rebuild, as
 before. The exhaustion watchdog's last line (98 %) is unchanged.
+
+(**BL-914, next train**) **The broker also watches what the GC has committed.** The heap limit (`T4`) binds on committed
+bytes, and the GC keeps its allocation budget committed above the live heap — 280–400 MB on a 2 GB soak, where allocations
+failed at 73 % live with 93 % committed while the broker, reading the live heap only, never acted. It now also keeps the
+committed bytes measured after a **compacting** full collection under **0.90 × `T4`** (the live-heap line stays 0.80 × `T4`),
+evicting reload-cost memory — key maps first — when they pass it. It never refuses on that figure. The headroom is sized for the
+largest single allocations seen: a tenth of `T4` is about 141 MB at 2 GB. In the same fix, a key map is charged by its arrays'
+capacity and gives the slack back when a partition is evicted, and its first-copy dictionary is split into 64 shards, so no
+single growth step allocates hundreds of MB.
 
 ### The state between "within budget" and "terminate"
 
