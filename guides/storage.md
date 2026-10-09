@@ -295,7 +295,7 @@ High-level path:
 4. Flush/compaction persists table segments and updates catalog state.
 5. Restart path loads catalog/segments and replays WAL deltas.
 6. WAL lifecycle workers and slot manager coordinate retention/archive safety.
-7. Backup/restore engines use catalog checkpoint + file hashing + WAL position semantics.
+7. Backup/restore engines use an image of the catalog store (**BL-840, next train**; a catalog checkpoint before) + file hashing + WAL position semantics.
 
 Key implementation anchors:
 
@@ -370,7 +370,11 @@ Primary tests:
 ### Walk-through C: Backup engine full/incremental backup flow
 
 1. Caller invokes `BackupEngine.CreateBackupAsync(...)`.
-2. Engine writes catalog checkpoint first, then captures WAL position/fencing token.
+2. Engine takes one image of the catalog store — every table and segment entry, with keys, partitioning, cluster order,
+   nullability and policies — pins the segments it names until they are uploaded, then captures WAL position/fencing token
+   (**BL-840, next train**; it wrote a catalog checkpoint, `catalog.chk`, which held only column ids, names, types and encoders).
+   The backup format is 3; a restore puts the catalog store back as it was and refuses an older format before it touches the
+   target.
 3. Manifest builder computes SHA256 across eligible files and compares against base manifest for incremental mode.
 4. New blobs are uploaded (parallelism-limited), dedup by content hash.
 5. Manifest/index is written.
@@ -718,6 +722,9 @@ Suggested tuning sequence:
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
 | Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
 | An `Error` log line `[SegmentScrubber] corrupt page: table …, segment …, column …`, and reads of that table failing with a corruption error (**BL-815, next train**) | A cold page changed on disk after it was written (a media error, or something other than Aouda wrote to the data directory) | Check the disk. Restore the table from a backup or re-sync it from a replica. The line repeats every 24 hours until the segment is replaced |
+| Restore refused: "backup format version N; this build restores format version 3 only" (**BL-840, next train**) | The backup was taken by an older build (format 1 or 2), whose catalog copy lacks keys, partitioning and nullability. Nothing was restored | Restore it with the build that took it; then take a new backup with this build. See [Backup](backup.md#b-restore-exact-backup) |
+| Open refused: "WAL frame … (… format 1) at position …: this build replays … in format 2 … only" (**BL-823, BL-837, BL-923, next train**) | The log holds, past its checkpoint, a frame an older build wrote and this build no longer replays: an edge insert (`EdgeInsert`, tag 40 → `EdgeInsertV2`), a vector insert (`VectorInsert` → `VectorInsertV2`), or a keyed delete / merge / delete by identity (`HraRowDelete` 23 → 70, `MergeBatch` 66 → 71, `HraRowDeleteById` 67 → 72). It happens only when the older build stopped **without** a clean close while such writes were not yet checkpointed | Open the database once with the build that wrote it and close it cleanly — its rows, edges and vectors are then in segments and the frame is not replayed — then open it with this build. Or restore from a backup taken by this build. A cleanly closed database is unaffected |
+| Open refused with a `JsonException` loading an empty `wal/slots.json` after a clean close, or over an empty materialized-query `definition.json` after two coalescing-window changes at once or a cancelled one | Fixed (**BL-933, BL-935, next train**): two writers' saves of one file could overlap through a shared temp file and leave it empty. Every file an open reads is now written whole (its own temp file, fsync, rename, directory fsync), one writer at a time | Upgrade. A database already left that way: restore from a backup. An empty or unreadable slot file is still refused at open — it is a bug if it happens, not a state to tolerate |
 | PITR target fails | Window closed (write volume since last backup, or archive gap); backup not PITR-eligible (`walPosition` 0); or target at/before backup `createdUtc` | Take a newer backup, enable archiving, or pick a later `targetTime`. Exact restore (no `targetTime`) is unaffected |
 
 ## 2.15 Verification ledger
