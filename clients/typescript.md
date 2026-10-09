@@ -326,6 +326,20 @@ All standard operations work after joins:
 - `limit(n)` / `offset(n)` — pagination
 - Aggregates — sum, min, max, count, groupBy
 
+### Filtering a joined table — `joinWhere` (**next train**)
+
+`where()` filters the base table. `joinWhere(column, op, value)` filters the **last** join's table, by that table's column
+names, before it joins: a joined row it rejects takes part in no match (an inner join drops it, a left join answers the base
+row with nulls on that side). The server applies your row- and partition-level security for each joined table the same way,
+so a join onto a table you may read only part of is answered with that part.
+
+```typescript
+const euOrders = await client.table('orders')
+  .leftJoin('owners', 'ownerId', 'id')
+  .joinWhere('region', '=', 'EU')
+  .execute();
+```
+
 ---
 
 ## 6) Aggregates
@@ -368,6 +382,19 @@ const { rows } = await client.table('trades')
 aggregates and `groupBy` and posts the query to `/query/count`, so no row is transferred — the filter and joins
 count, `select`, `orderBy`, `limit`, `offset` and `distinct` do not (**architecture review, next train**; it used to
 download every matching row through `/query`).
+
+### The latest (or first) row per key — `latestPerKey` / `firstPerKey` (**next train**)
+
+```typescript
+// One row per ticker: the one with the greatest ts (ties: the lowest primary key).
+const latest = await client.table('quotes')
+  .latestPerKey('ts', 'ticker')
+  .select('ticker', 'price', 'ts')
+  .execute();
+```
+
+`select`, `orderBy` and the page apply to the collapsed rows. A `LatestPerKey` materialized query of the same shape answers it
+when it is current (`stats.routedTo`). It does not combine with aggregates, `groupBy`, `distinct`, `selectExpr` or joins.
 
 ---
 

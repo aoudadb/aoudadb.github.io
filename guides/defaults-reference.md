@@ -171,6 +171,16 @@ the `Abundant` resource mode), borrowing of idle headroom between classes, and `
 removed; a class orders the queue and does not cap what it may hold. The resource modes those fractions differed by are
 deleted too (**WorkloadCore S17, next train**).
 
+## Background page scrubber
+
+The cold-page CRC scrubber (**BL-815, next train**) is maintenance work: it takes the `Maintenance` class above and yields while queries are waiting. Not configurable. See [Storage](storage.md#213-operations-and-observability) for what it reports.
+
+| Setting | Default | What it means |
+|---|---|---|
+| First pass | 15 minutes after the database opens | Open and recovery are left alone, and a short-lived process does no scrubbing |
+| Pass interval | 24 hours, start to start | Each pass reads every cold page of the tables currently loaded |
+| Read rate | at most 64 MiB/s | A 100 GB database is checked in about half an hour |
+
 ## Logging defaults
 
 ⚠️ **Aouda's default log level is `Warning`.** Nothing below that is emitted unless you ask for it — so on a server with no `appsettings.json` and no `Logging__LogLevel__*` environment variable, `Information` and `Debug` lines simply are not there.

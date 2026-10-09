@@ -162,7 +162,7 @@ Out of scope for this functionality:
 | L3 startup preload | Yes | No | No | `AoudaEngine.PreloadPrimaryKeyIndexes` | Strict tables only. |
 | Latent duplicate counter for phase-1 gate | Yes | No | No | `_pkLatentDuplicates`, `HandleDuplicate`, playbook | Exposed in diagnostics. |
 | Zone maps on every PK column, and the leading value checked against every page's bloom (**BL-663, 0.1.39**) | Yes | No | No | `AoudaEngine.KeyProbe.cs` | Sealed-segment lookups exclude a segment when **any** key column is outside that column's min/max, not only the first. So a table clustered on time prunes old segments by time. A leading value that no page's bloom contains excludes the whole segment for all keys with that value. |
-| Key reads use the PK structures (**BL-647, 0.1.39**) | Yes | Partial | No | `TableQuery.KeyNarrowing.cs` | A query whose filter is a full-key equality, or an `OR` of them (≤ 256), reads only the buffered rows the L2 index locates and only segments that can hold a key. Applies to row and columnar reads on `Strict` and `Recent` tables that are not partitioned. Not yet applied to streaming, `DISTINCT`, joins, aggregates, or updates and deletes that match several keys. |
+| Key reads use the PK structures (**BL-647, 0.1.39**) | Yes | Partial | No | `TableQuery.KeyNarrowing.cs` | A query whose filter is a full-key equality, or an `OR` of them (≤ 256), reads only the buffered rows the L2 index locates and only segments that can hold a key. Applies to row and columnar reads on `Strict` and `Recent` tables that are not partitioned, and to aggregates, `DISTINCT` and `GROUP BY` (**BL-666, next train**). Not yet applied to streaming, joins, or updates and deletes that match several keys. |
 | Open-path preload to avoid first-write rebuild | Yes | No | No | P17 completion, `PreloadPrimaryKeyIndexes` | Extended by P18 with L1/L3 load. |
 | User-level automated duplicate remediation | No | No | Yes | Playbook only | Operator-driven process. |
 
@@ -180,6 +180,10 @@ Invariants:
 - PK checks are always policy-aware, but within-batch duplicates are always rejected.
 - Strict policy checks both mutable and sealed data tiers.
 - BestEffort disables cross-tier checks, but does not disable in-batch duplicate detection.
+- A key names one logical row on a `Strict` table only (**BL-791, next train**). On `Recent` and `BestEffort` a table can hold
+  two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
+  `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
+  every copy of a matched key held in a segment.) On a `Strict` table a key cannot have two live copies, and the behaviour is unchanged.
 - Preload runs before first insert after open to reduce first-write latency spikes.
 
 ---

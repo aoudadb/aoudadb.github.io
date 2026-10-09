@@ -141,7 +141,7 @@ If you create a table/database without tuning partition or multidb options:
 
 - Partitioning:
   - No partition key means standard non-partitioned storage path.
-  - If partitioned, `PartitionOptions` defaults are active (`StorageMode = Auto`, `RequirePartitionFilter = true`, promotion thresholds enabled, late-arrival defaults set).
+  - If partitioned, `PartitionOptions` defaults are active (`StorageMode = Auto`, `RequirePartitionFilter = true`, promotion thresholds enabled). Out-of-order (late) rows need no setting: they are flushed like any other row and visible at once.
 - Query safety:
   - Partition-filter enforcement is on by default for partitioned tables unless explicitly disabled.
   - Cross-partition reads require explicit opt-in (`crossPartitionAccess` / `.WithCrossPartitionAccess()` in supported clients). That flag is **admin-tier**. It is not a named-query field and is unreachable from `mk_pub_*` on the data-plane. Browser-tier rule: [partition-filter rule](#partition-filter-rule-p40).
@@ -158,8 +158,7 @@ If you create a table/database without tuning partition or multidb options:
 | `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Non-negative integer (bytes) | Auto-promotion can trigger at high byte volume. Declarable on the schema (`promotionByteThreshold`) and mutable after table creation. |
 | `PartitionOptions.InitialBucketCount` | `16` when every partition-key column carries a bounded time-truncation `partitionFunction`; **`128`** otherwise (P45) | Integer ≥ 1 | Shared-partition hashing starts with this many buckets. Declarable on the schema (`initialBucketCount`, `Auto`/`Shared` tables only) but **fixed for the life of the table** — see [Choosing `initialBucketCount` at scale](#choosing-initialbucketcount-at-scale-p45). |
 | `TableOptions.PkUniqueness` | `Strict` | `Strict`, `Recent`, `BestEffort` | Not a `PartitionOptions` field, but declarable on the schema (`pkUniqueness`, any table) and mutable after creation as of P45 — previously only reachable per bulk-load job. |
-| `PartitionOptions.LateArrivalPolicy` | `Delta` | `Delta`, `Reject`, `Inline` | Late-arriving rows are flushed inline with on-time rows: delta segments are removed and `Delta` behaves as `Inline` (**ColumnarRead, next train**). `Reject` is not enforced (**BL-762, next train**) |
-| `PartitionOptions.LateArrivalThreshold` | `1 hour` | Any positive `TimeSpan` | Defines "late" cutoff when policy needs it; no policy uses it while `Reject` is unenforced (**BL-762, next train**) |
+| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | Deleted (**BL-762, next train**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other |
 | ~~`MigrationOptions.Strategy`~~ | — | — | Removed (**WorkloadCore S17, next train**): the retrospective migration workers it configured were never started by any production path. A catalog that still carries `"Migration"` loads; the property is ignored |
 | `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
 | `DatabaseOptions.EnableWal` | `true` | `true`, `false` | DB has WAL enabled unless explicitly disabled |
@@ -621,8 +620,7 @@ Core modules:
 | `PartitionOptions.PromotionRowThreshold` | long | `10_000_000` | `>= 0` | catalog policy | Auto-promotion row trigger |
 | `PartitionOptions.PromotionByteThreshold` | long | `1_000_000_000` | `>= 0` | catalog policy | Auto-promotion byte trigger |
 | `PartitionOptions.InitialBucketCount` | int | `16` (engine-level constant; see the row above for the value a new table actually gets) | `>= 1` | catalog policy | Shared mode initial bucket fanout. Resolved to `16` or `128` at table-create time per the rule in `2.7` before this field is ever persisted. |
-| `PartitionOptions.LateArrivalPolicy` | enum | `Delta` | `Delta`, `Reject`, `Inline` | catalog policy | Late-arrival strategy. `Delta` behaves as `Inline`: delta segments are removed (**ColumnarRead, next train**). `Reject` is not enforced (**BL-762, next train**) |
-| `PartitionOptions.LateArrivalThreshold` | `TimeSpan` | `1h` | positive | catalog policy | Late-arrival time boundary |
+| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, next train**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
 | ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, next train**) with `MigrationOptions` (its workers were never started by a production path); an old catalog's property is ignored on load |
 | `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default table temperature in DB |

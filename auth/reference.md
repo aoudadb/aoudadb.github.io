@@ -137,8 +137,8 @@ The following fields are returned only when they apply. Consumers must handle th
 
 | Field | Type | When present | Notes |
 |-------|------|-------------|-------|
-| `requiresPasswordChange` | bool | Only when `true` | User must change their password before the app grants full access. User still receives a fully valid `aal1` JWT — the app is responsible for blocking access to protected areas until the password is changed. |
-| `aal` | string | Only when user has enrolled MFA factors | `"aal1"` — password only. The full signin response also includes `mfaRequired` and `mfaFactors` when this field is present. |
+| `requiresPasswordChange` | bool | Only when `true` | User must change their password before the app grants full access. User still receives a fully valid JWT (`aal2` when the user has no active MFA factor, `aal1` otherwise) — the app is responsible for blocking access to protected areas until the password is changed. |
+| `aal` | string | Always on password signin (**BL-795, next train**; before it, only when the user had active MFA factors) | `"aal1"` when the user has an active MFA factor — the response also includes `mfaRequired` and `mfaFactors`. `"aal2"` when the user has no active factor: there is nothing left to verify, so the session is already complete and refresh keeps it `aal2`. |
 | `mfaRequired` | bool | Only when user has enrolled active MFA factors | `true` — the app should prompt the user to complete an MFA challenge before granting access to sensitive areas. |
 | `mfaFactors` | array | Only when user has enrolled active MFA factors | Short list of enrolled factors: `[{ "id": "...", "type": "totp"\|"phone", "phone": "+44***5678" (masked) }]`. **Use this list directly** — do not make a separate `GET .../auth/mfa/factors` call if `mfaFactors` is already present here. |
 
@@ -448,6 +448,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_MFA_FACTOR_NOT_FOUND` | 404 | MFA factor ID does not exist or belongs to another user | Re-fetch via `GET .../auth/mfa/factors` (signed-in user) or `GET .../admin/users/{id}/mfa/factors` (operator) |
+| `AUTH_MFA_STEP_UP_REQUIRED` | 403 | `POST .../auth/mfa/enroll` or `DELETE .../auth/mfa/factors/{id}` was called with a token that is not `aal2` — the user has an enrolled factor and has not completed it this session (**BL-795, next train**) | Run `POST .../auth/mfa/challenge` then `.../mfa/verify` and retry with the new token, or have an operator call `DELETE .../auth/admin/users/{id}/mfa/factors/{factorId}` |
 | `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | 409 | A phone factor is already active or pending for this user. The existing factor id is in the `detail` field. Enroll does not overwrite the number. | The signed-in user calls `DELETE .../auth/mfa/factors/{id}`. An operator calls `DELETE .../admin/users/{id}/mfa/factors/{factorId}`, then enrolls the new number |
 | `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user | Show "Invalid code"; prompt user to try again or re-request a challenge |
 | `AUTH_MFA_CHALLENGE_EXPIRED` | 400 | Challenge window has passed (10 minutes for both TOTP and phone) | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
@@ -621,7 +622,11 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 
 ### 24.1 — The `aal` Claim: Enforcing MFA Gates
 
-`aal1` means the user authenticated with password only. `aal2` means the user completed a successful MFA challenge after signin. A user with enrolled MFA factors will always receive `aal1` at signin; they must call `POST .../auth/mfa/challenge` then `POST .../auth/mfa/verify` to receive an `aal2` token.
+`aal1` means the user authenticated with a password and has an active MFA factor they have not yet used. `aal2` means the session has completed every second factor the user has enrolled — **which is trivially true for a user with no active factor** (**BL-795, next train**). A user with an active MFA factor always receives `aal1` at signin; they must call `POST .../auth/mfa/challenge` then `POST .../auth/mfa/verify` to receive an `aal2` token. Pending (not yet verified) factors do not count.
+
+> **`aal2` is not proof that a second factor was used.** If you need to know that, check that the user has an enrolled factor (`GET .../auth/mfa/factors`, or the admin list) as well as `aal2`. Removing a user's last factor (an operator calls `DELETE .../auth/admin/users/{id}/mfa/factors/{factorId}`) makes their next password signin `aal2` with no OTP step.
+>
+> An `aal2` refresh family keeps `aal2` until it expires or is revoked, including if the user enrols a factor later; revoke the user's sessions if that matters to you.
 
 **MFA gate enforcement — ASP.NET Core (C#):**
 

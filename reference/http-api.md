@@ -290,11 +290,11 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
 | `/api/databases/{db}/auth/request-password-reset` | POST | API key (Layer 1) | Request 6-digit OTP emailed to user; always 200 (anti-enumeration) |
 | `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set |
-| `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor. Phone: 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; delete existing factor then re-enroll to replace number |
+| `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor. Phone: 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; delete existing factor then re-enroll to replace number. Needs an `aal2` token, else 403 `AUTH_MFA_STEP_UP_REQUIRED` (**BL-795, next train**) |
 | `/api/databases/{db}/auth/mfa/challenge` | POST | User JWT | Create MFA challenge; sends SMS OTP for phone factors |
 | `/api/databases/{db}/auth/mfa/verify` | POST | User JWT | Submit OTP/TOTP/backup code; returns `aal2` token pair on success |
 | `/api/databases/{db}/auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
-| `/api/databases/{db}/auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
+| `/api/databases/{db}/auth/mfa/factors/{id}` | DELETE | User JWT (`aal2`) | Delete an enrolled MFA factor. A token that is not `aal2` gets 403 `AUTH_MFA_STEP_UP_REQUIRED` (**BL-795, next train**); an operator uses the admin delete |
 | `/api/databases/{db}/auth/admin/users` | GET | API key (`db_admin`) | List app users |
 | `/api/databases/{db}/auth/admin/users` | POST | API key (`db_admin`) | Create user; supports `sendInviteEmail` + `forcePasswordChange` flags |
 | `/api/databases/{db}/auth/admin/users/{id}` | GET/PATCH/DELETE | API key (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
@@ -339,7 +339,7 @@ Content-Type: application/json
 | `email` | User email |
 | `iss` | `{base_url}/api/databases/{db}` |
 | `aud` | Auth database name (e.g. `"_auth"`) |
-| `aal` | Authentication assurance level: `"aal1"` (password only) or `"aal2"` (MFA verified) |
+| `aal` | Authentication assurance level: `"aal1"` (password signin by a user who has an active MFA factor, not yet verified) or `"aal2"` (MFA verified, **or a password signin by a user with no active factor** — **BL-795, next train**) |
 | `tenant_id` | Tenant ID for PLS partition scoping |
 | `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_reader"] }`. Values are always arrays. Scope key for unscoped roles is the auth DB name (e.g. `"_auth"`). |
 | `permissions` | Fine-grained table permissions (if custom role) |
@@ -441,6 +441,10 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 Admin replication `walPosition` on `GET /admin/replication/status` is lag observability, not this token.
 
 MQ list/status and `POST …/materialized-queries/{name}/query` stamp `token` as the **maintenance watermark** (`D-9`), not a raw WAL offset. A token-bearing MQ read waits on that watermark.
+
+`POST …/materialized-queries/{name}/query` reads the whole result, held to `Aouda:Query:MaxResultRows` and the read budget like every
+materialising read (**BL-776, next train**): a result over either is `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`. Retrying does
+not help a result over the row ceiling — read it with a filtered `POST …/tables/{result}/query` and a `limit`, or its aggregates.
 
 Query parameter **wins** over the header when both are sent:
 
@@ -911,6 +915,7 @@ Execute a query against a table.
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
 | `aggregates` | object[] | No | (**ColumnarRead S16, next train**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
 | `groupBy` | object[] | No | (**ColumnarRead S16, next train**) GROUP BY keys; requires `aggregates`. |
+| `perKey` | object | No | `{ "keys": [...], "orderBy": "col", "latest": true }` — one row per distinct `keys` tuple, the one with the greatest (`latest: false`: least) `orderBy` value, ties to the lowest primary key. `select`, `orderBy` and the page apply to the collapsed rows; a `LatestPerKey` / `FirstPerKey` materialized query of the same shape answers it when current (`stats.routedTo`). Not with `aggregates`, `groupBy`, `distinct`, `selectExpr` or `joins` (400); `/query/count` refuses it (**BL-801, next train**). |
 
 **Where Clause:**
 
@@ -1022,16 +1027,21 @@ storing a definition that could never execute.
 | `rightColumn` | string | No | Right key column for single-column joins. |
 | `leftColumns` | string[] | No | Left key columns for multi-column joins. |
 | `rightColumns` | string[] | No | Right key columns for multi-column joins. |
+| `where` | object | No | A filter on the joined table, in the `where` format; its column names are that table's, and its values are read with that table's culture (a slash date on its `Date` column is read the way a `where` on that table reads it). It applies to the joined table's rows before they join (**BL-818, next train**). |
 
 For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
 
-**Joins and authorization (**architecture review, next train**).** Every joined table needs the same grant as the base
-`table`. A join reads its targets **unfiltered** — the request's `where`, and the row- and partition-level security
-predicates the server adds to it, filter the base table only — so a join is allowed only onto tables the caller may read
-without restriction. A join onto a table the caller's RLS or PLS would filter (or that the caller may read nothing of) is
-refused with `403 AUTHORIZATION_DENIED`, naming the table (`details: table=<name>`); query that table directly instead.
-The same holds for a named query that joins, single and batch, and for `…/query/count`. **BL-818** tracks applying the
-restriction on the join side. Before, a joined table was read with no grant check and no RLS / PLS.
+**The query's `where` filters the base table; a join's `where` filters its joined table.** A joined row the join's `where`
+rejects takes part in no match: an inner or cross join drops it, a left join answers the base row with `null` in that table's
+columns.
+
+**Row- and partition-level security on a joined table (BL-818, next train).** The caller's RLS and PLS for every joined
+table are applied on that join's side, exactly as on a direct read of the table: a join onto a table the caller may read only
+part of answers with that part. (From the 2026-10 architecture review until this change such a join was refused with `403`
+`AUTHORIZATION_DENIED`.) An RLS rule that denies the caller the whole table joins against no rows of it. Still `403`: a
+joined table the caller has no read grant on, a joined table whose partition-level security refuses the caller (no grant),
+and a joined materialized-query result whose source security cannot be applied to it. The same holds for a named query that joins, single and batch,
+and for `…/query/count`.
 
 **Join example:**
 ```json
@@ -1228,9 +1238,12 @@ There is **no HTTP route that registers a definition** and **no inventory list**
 
 | Field | Notes |
 |---|---|
-| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). A `distinct` over partition-key columns runs as a scan like any read (row groups the filter selects whole are answered from their statistics), so a deleted or truncated partition no longer appears; it was answered from the partition directories, which outlive their rows. `stats.distinctServedFromPartitionMetadata` is no longer set (**architecture review, next train**). |
+| `distinct` | Boolean. Subscribe refuses it (`NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`). A `distinct` over partition-key columns runs as a scan like any read (row groups the filter selects whole are answered from their statistics), so a deleted or truncated partition no longer appears; it was answered from the partition directories, which outlive their rows (**architecture review, next train**). The never-set `stats.distinctServedFromPartitionMetadata` flag is gone from the response (**ColumnarRead2 S04, next train**). |
 | `count` | Boolean. When true, execute returns `totalMatches`; subscribe snapshot returns `total_matches`. Apply rejects unbounded count (`NAMED_QUERY_COUNT_UNBOUNDED`). |
 | `freshness` | Declared on the named query: `readYourWrites`, `maxLagBytes`, `maxStalenessMs`, `waitMs`, `onExceeded`. See [Freshness](../guides/freshness.md). Budget-only edits do not fire `named_query_body_changed`. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). |
+| `aggregates` / `groupBy` | As on `/query`: the definition answers its keys and aggregates (no `select` then). Applied under `/query`'s rules — a shape `/query` would refuse, an unknown column, `sum` / `avg` of a non-number, a bucket of a non-`Timestamp`, or `count: true` beside them fails `schema/apply`. Until now these keys were silently dropped and the query answered plain rows (**BL-796, next train**). Subscribe refuses them. |
+| `perKey` | As on `/query` (**BL-801, next train**). Subscribe refuses it. |
+| `joins[i].where` | A filter on the joined table, with `{ "param": … }` values bound like the base `where` (**BL-818, next train**). |
 
 There is no `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`. Freshness is keyed by the path, batch, or subscribe **name**.
 
@@ -1441,7 +1454,7 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, next train**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Access-surface diff
 
@@ -1961,7 +1974,6 @@ This endpoint is optimized for schema exploration tools like Aouda Studio.
 | `primaryKeyOrder` / `partitionKeyOrder` / `clusterOrder` | number? | 1-based position in the respective key; omitted when not part of it |
 | `partitionFunction` | string? | Partition function, when the column is part of a partition key |
 | `reference` | object? | Foreign-key target (`targetTable`, `targetColumn`, `source`) |
-| `encoder` | string? | Explicit encoder; omitted when `Auto` |
 | `precision` / `scale` | number? | A `Decimal(p,s)` column's declaration; omitted for every other column (**ColumnarCore S13, 0.2.0**) |
 
 **Why `id` matters.** Storage, the write-ahead log and engine diagnostics identify columns by id, not
@@ -2197,7 +2209,9 @@ Add a column to a table.
 
 #### `PATCH /api/databases/{db}/tables/{name}/columns/{columnName}`
 
-Rename a column.
+Alter a column: `type`, `nullable`, `autoIncrement`, `references`, and/or `newName` (rename) — at least one, or `400`. The
+`encoder` field is gone (**BL-768, next train**): it changed nothing since columns choose an encoding per vector, and a
+request carrying only `encoder` is now refused as having nothing to alter. The example renames a column.
 
 **Request:**
 
@@ -2406,6 +2420,7 @@ Update rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, next train**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 
 #### `DELETE /api/databases/{db}/tables/{name}/rows`
 
@@ -2456,6 +2471,7 @@ Delete rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing or empty WHERE clause |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, next train**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows` — Extended fields (P27)
 
@@ -2588,8 +2604,10 @@ authorization scope — `db_writer` alone is insufficient.
 #### `POST /api/databases/{db}/tables/{name}/rows/batch`
 
 Execute multiple update and/or delete operations against the same table in a single request.
-All operations are applied sequentially in the order given and committed in a single WAL
-transaction.
+All operations are applied sequentially in the order given. ⚠️ **Each operation commits on its own** — the batch is not one
+transaction (**BL-843**): when an operation fails (a duplicate key, a `503 MEMORY_BUDGET_EXCEEDED` refusal past the read
+budget, **next train**), the operations before it have been applied, so a retry of the whole batch applies them again. Make
+operations that a retry may repeat idempotent (literal `set`, not `setExpr` arithmetic), or retry from the failed operation.
 
 **Request Body:**
 
@@ -2687,6 +2705,10 @@ result — they are never stored.
   "limit": 100
 }
 ```
+
+A `colRef` names its column exactly as the table does — case-sensitively, as `where` and `select` do. A mis-cased name is
+`400 COLUMN_NOT_FOUND`; before, it read the column through the default (columnar) answer and `null` through `format=rows`
+(**BL-799, next train**).
 
 **Response** — computed columns appear at the end of `columns` and `types`:
 
@@ -3616,7 +3638,7 @@ Get cluster topology.
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [`docs/dev/Timestamp-Type.md`](../dev/Timestamp-Type.md). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, next train**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
@@ -4599,5 +4621,5 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.6 | 2026-08-29 | **Catalog GET/list auth linkage:** `auth.enabled` / `auth.database` on every database response (never `mk_*` on GET). GET `{name}` documented as metadata-only; 404 while `Dropping`. Health probe split (`/health` liveness vs `/ready` / GET `state=Active`). Create-role `permissions` optional; 400 `INVALID_REQUEST` with `suggestion`. |
 | 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections: 0`) — **not yet released**: BL-404 / BL-405 are on `Unreleased` and ship in the **next** server train, after 0.1.20. |
 | 2.8 | 2026-09-30 (0.2.0) | **ColumnarCore S06 / S13, BL-716 (additive on the wire):** `POST …/tables/{name}/rows` also accepts one column-batch frame (`Content-Type: application/vnd.aouda.column-batch`; database and table from the URL, `identityInsert` / `writeConcern` as query parameters), advertised by `Accept-Post: application/json, application/vnd.aouda.column-batch` on the endpoint's responses and by `features.insertColumnBatch` in `GET /admin/capabilities`; an older server answers a frame with `415`. Column-batch frames gain the `ScaledDecimal` kind (`8`). `Decimal` columns may declare `precision` / `scale` (`Decimal(p,s)`, `1 ≤ p ≤ 18`, `0 ≤ s ≤ p`) on create-table, add-column and column details. Insert errors: a body that is not valid JSON is `400 INVALID_REQUEST` (was MVC's validation problem), an empty body is `400 MISSING_DATABASE`; a string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is a `400`. |
-| 2.9 | next train (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is `403 AUTHORIZATION_DENIED` (BL-818); `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |
+| 2.9 | next train (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is answered with that security applied on the joined side, not refused (BL-818; it was `403 AUTHORIZATION_DENIED` until ColumnarRead2 S05), with `joins[i].where` to filter the joined table; `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |
 | 2.10 | next train (WorkloadCore) | **WorkloadCore S09:** materialized-query maintenance is off the commit — an insert's `200` and an `"auto"` load's `:commit` no longer wait for their queries to be written. Bulk-load `:commit` gains `mqWaitMs` (a bounded wait for the load's queries, default 30000) and answers `mqStatus`, `mqFrontierToken` and `mqWaitedMs`; `mqRebuildStatus` is never `"completed"` from the commit itself; a single-node load's `token` is the WAL head at its commit. **WorkloadCore S10:** every load but a `"skip"` one is a pending job brought in by the table's pass (`"auto"` starts it at the commit); the ingest-fed path is gone; a query owing a load reports `isStale: true`, `pendingDeferredJobs` ≥ 1 and `current: false` with a new `staleReason` wording, and is not selected by `staleOnly`; a rebuild refused memory waits for room instead of being retried on timers. No field added or removed. **WorkloadCore S17:** `GET /api/server/memory` loses `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the `headroom` block (the resource mode is deleted); a memory refusal's `Retry-After` is the queue's estimate, or 10 s, never a constant 1 s. |

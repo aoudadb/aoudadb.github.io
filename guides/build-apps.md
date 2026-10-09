@@ -684,14 +684,14 @@ If you are an AI agent writing an application against Aouda, this section is you
 | State that `conflate` is a no-op on insert-only streams | Recommend `conflate` for a tick feed or event log |
 | Read an aggregate MQ by its `outputName` (`high`, `open`) | Read internal state columns (`_max_bid`, `_first_open_val`) |
 | Run `schema diff --access` and `policy inspect` before declaring done | Widen a `select` without re-running the gate |
-| Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, `groupBy` on the data plane, a SQL surface, PKCE, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, `computed` MQ outputs, `topNPerGroup`, and `firstPerKey` **are** shipped — do not list them as absent) |
+| Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, a SQL surface, PKCE, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, `computed` MQ outputs, `topNPerGroup`, `firstPerKey`, and a named query's declared `aggregates` / `groupBy` / `perKey` (**BL-796, next train**) **are** shipped — do not list them as absent) |
 
 ### Per-screen decision procedure
 
 For each screen or feature, in order:
 
 1. **Is the data already in a table?** If not, step 1 of the build sequence.
-2. **Can the read be expressed as one definition** — one table plus ≤ 3 joins, an explicit `select`, a capped `limit`, values as parameters? If yes, write a named query. If it needs a groupBy or a rollup, write a materialized query and read *that*. If it needs a lookup, a loop, or an outbound call, it is a service.
+2. **Can the read be expressed as one definition** — one table plus ≤ 3 joins, an explicit `select`, a capped `limit`, values as parameters? If yes, write a named query. If it needs a groupBy, declare `aggregates` / `groupBy` in the definition (**BL-796, next train**); if the rollup must stay current as rows arrive, or be subscribed to, write a materialized query and read *that*. If it needs a lookup, a loop, or an outbound call, it is a service.
 3. **Does the screen need a total?** Add `count: true`. If apply rejects it with `NAMED_QUERY_COUNT_UNBOUNDED`, the definition's cost is not bounded — cover the partition keys or drop the count. Do not add a count endpoint.
 4. **Does it need to update live?** Subscribe by name, collection-shaped. If the table is insert-only, do not reach for `conflate` — it holds value updates only. Model a `latestPerKey` MQ and subscribe to that: it bounds the grid to one row per key, which is the shape you want, though it does not throttle the event rate today.
 5. **Is the data user-scoped?** Set `authMode` and verify with `policy inspect`. Never filter by identity through a parameter — identity is injected from the validated principal and is never an argument. Stamp it with `"derived": { "identity": "subject" }` and, when read scope and write scope differ, `writeCheckRules`.
@@ -828,7 +828,7 @@ Two lists. The first is *not yet*; the second is *not ever*, on purpose.
 | Cursor / keyset paging (BL-182) | `offset` / `offsetParam` for page-by-offset today |
 | Expression `orderBy` on runtime columns (BL-183) | A `computed` output on an `aggregate` MQ, or a stored `derived` column — both are physically stored and orderable |
 | `topNPerGroup` / `firstPerKey` materialized queries | Shipped — declare them in `materializedQueries` or HTTP create. `firstPerKey` is MIN(`orderBy`), not arrival order. Top-N working set is in-memory; query the result by name |
-| `groupBy` and ad-hoc aggregates on the data plane | An aggregate MQ, read through a named query |
+| Ad-hoc aggregates built by the caller on the data plane | Declare `aggregates` / `groupBy` in the named query (**BL-796, next train**), or an aggregate MQ read through a named query when it must be live or subscribed |
 | Subscribe by name for definitions using joins, `selectExpr`, or `distinct` | HTTP execute plus polling, or split the view |
 | The failing row index on a rejected batch | The error names the check; pre-validate or quarantine |
 | OAuth 2.0 authorization code + PKCE; token introspection | Aouda email/password (+ MFA), or a backend holding `mk_svc_*` |

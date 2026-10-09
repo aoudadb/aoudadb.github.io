@@ -142,13 +142,13 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 ---
 
-## No `groupBy` / ad-hoc aggregates on the data plane
+## Aggregates on the data plane: declared in the definition, not built by the caller
 
-**Rule.** A named query is a parameterized `QueryMessage`. There is no `groupBy` field on that template. `.Aggregate(...)` on the fluent client is an **engine / admin** API. (Ad-hoc `POST …/query` gains `aggregates` / `groupBy` on the admin listener (**ColumnarRead S16, next train**); that route stays 404 on the data plane, and named-query definitions do not carry the fields (**BL-796**).)
+**Rule.** A named query is a parameterized `QueryMessage`. A definition may declare `aggregates` / `groupBy` (and `perKey`), checked at `schema/apply` under `/query`'s rules ([HTTP API](../reference/http-api.md)); the browser passes parameters, never a new aggregate (**BL-796, next train** — until then these keys were silently dropped and the definition answered plain rows). Subscribe refuses an aggregate or per-key definition. Ad-hoc `POST …/query` takes `aggregates` / `groupBy` on the admin listener (**ColumnarRead S16, next train**); that route stays 404 on the data plane. `.Aggregate(...)` on the fluent client stays an **engine / admin** API.
 
-**Why.** Unbounded cost. Pre-aggregation belongs on a materialized query (`D-24`).
+**Why.** The cost is the definition's, reviewed at apply — not the caller's.
 
-**Instead:** an `aggregate` MQ whose public columns are the declared `outputName`s, then a named query over that result table. For a **count of matches** on a paged list, set `count: true` on the named query and read `totalMatches` (see below) — that is a count, not a `groupBy` DSL.
+**Instead, when the answer must stay current as rows arrive:** an `aggregate` MQ whose public columns are the declared `outputName`s, then a named query over that result table (`D-24`). For a **count of matches** on a paged list, set `count: true` on the named query and read `totalMatches` (see below) — `count: true` beside `aggregates` is refused.
 
 ---
 
@@ -252,7 +252,7 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 | `latestPerKey` without an imperative create | `materializedQueries` map, `type: "latestPerKey"` |
 | Browser-tier read of an MQ result table | `"dataPlaneAccess": true` on the **MQ entry** (default `false`). No table-options PATCH |
 | Candle columns named `high` / `open` | Aggregate MQ public shape is `outputName` on every read path (`D-31`) |
-| Distinct source list | `distinct: true` over partition-key columns with one key constrained ([key-only DISTINCT](#partition-filter-rule)). A scan since the **architecture review, next train**, so deleted partitions no longer appear; `stats.distinctServedFromPartitionMetadata` is no longer set |
+| Distinct source list | `distinct: true` over partition-key columns with one key constrained ([key-only DISTINCT](#partition-filter-rule)). Answered on the scan, which skips row groups from their statistics (**architecture review, next train**). The partition-directory answer was retired — a directory outlives rows deleted from it — so deleted partitions no longer appear and `stats.distinctServedFromPartitionMetadata` is gone |
 | Paging | `limit` (required cap) + `limitParam` / `offsetParam` (param names; still need a numeric cap). Non-zero offset **disqualifies subscribe** |
 | "1–25 of 412" | `"count": true` on the definition → `totalMatches` on HTTP (omitted when false) and `total_matches` on `snapshot_complete`. Unbounded count fails apply (`NAMED_QUERY_COUNT_UNBOUNDED`). Ad-hoc `/query/count` stays 404 on the data plane |
 | Optional facets in one definition | `"whenParamPresent": true` on `and`-clause conditions (`D-34`). Omitted arg skips the predicate; unmarked omission throws. `or` conditions cannot carry the marker. |

@@ -322,6 +322,17 @@ only arises when the alternative was approaching the hot ceiling.
 Promotions and restart-time segment loads ask the same question. A promotion that would not fit is
 simply not made — the rows are already readable from cold, so nothing is lost but the speed-up.
 
+**Every published segment is on disk before it is visible** (**BL-771, next train**). A flush, a coalesce, a demotion and a
+bulk-load segment fsync their files and directory entries before the catalog names them, so a power loss cannot leave the
+catalog naming a segment whose pages were never written. That costs each flush the device's fsync time: on d03's virtual
+disk, a few milliseconds per hot flush and up to tens of milliseconds per cold one. A DELETE or UPDATE that marks rows in a
+segment adds one fsync of a small mask file. Inserts are unaffected. On a slow or network-backed volume this is the cost to
+watch: `SegmentPublishFsyncMicros` in the engine's counters is the total.
+
+An eager open (lazy residency off) that finds the hot tier too small for a Hot segment now **demotes** that segment to a
+cold copy; it used to leave the table unreadable until a restart. A `HotOnly` table is exempt and keeps the old behaviour,
+with a warning. (**BL-767, next train**)
+
 Set `Aouda:Memory:FlushAlwaysHotFirst=true` to restore the previous unconditional hot-first flush, or
 `Aouda:Memory:HotAdmissionEnabled=false` to stop consulting the ceiling altogether.
 
@@ -634,6 +645,14 @@ Two refusals are new in this release and are worth knowing before you meet them.
 (**ColumnarRead, next train**) A large scan's decode buffers and a GROUP BY's, top-K's or `DISTINCT`'s growing state are now
 charged to the query's read budget as they grow, so a GROUP BY with more groups than its budget holds fails with the typed
 retryable error while it grows, rather than after.
+
+Two more join them in the next train (**BL-817, BL-776, next train**). A `DELETE` or `UPDATE` whose matched rows do not fit the read
+budget is refused with the same `503` / `MEMORY_BUDGET_EXCEEDED` and changes nothing — it used to hold every matched row, charged to
+nothing (691 MB for a 300,000-row delete under a 64 MB budget that refused the same `SELECT`); narrow the predicate and delete or
+update in pieces. And `POST …/materialized-queries/{name}/query` is held to `MaxResultRows` and the read budget like every other
+read; page a large result through `/query` with a filter and a limit. Embedded hosting (`Advisory`) records both and refuses
+neither. The cold-metadata figure in `/server/memory` now also counts the read path's segment handles (each cold segment's footer,
+page indexes and deletion mask), which its eviction rung releases under pressure (**BL-816, next train**).
 
 ## Which rungs are actually running
 

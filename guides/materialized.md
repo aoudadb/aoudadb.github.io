@@ -510,10 +510,18 @@ written to the log but not yet routed, each left a moment in which a token read 
 the bigger change: it compared the frontier alone, so a query that had **lost an update** answered any token its frozen
 frontier covered. Now it waits for the query to be current, or answers `TOKEN_UNSATISFIED` as for any behind node.
 
+After a log record that no commit follows (a flush, a column added to another table) a result reads as behind until it is
+claimed current again: by the next commit anywhere, or by the next result-checkpoint round (every 15 s). (**BL-607, next train**)
+A commit the change dispatcher failed to route marks the source's results stale and rebuilds them, rather than letting a
+result be read as current past it. (**next train**)
+
 A change no maintenance sees — a **TRUNCATE**, a source column **dropped** or **renamed**, a new column **default** — marks every
 result of the table stale and schedules its rebuild (**ColumnarRead group-6 review, next train**). Before, a result kept the
 rows as they were, and once its watermark moved past the change a routed read answered with them: a truncated table's rows,
 a dropped column's old values under a new column of the same name.
+DROP COLUMN, RENAME COLUMN and a changed column default mark the results stale **before** the change and rebuild them
+after it, so a crash in between cannot bring the old column back (**BL-810, next train**). A new expression for a derived
+column, and a column's new type, do the same: both rewrite stored values no change event carries. (**next train**)
 
 The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
 `stats.routedTo` over HTTP (JSON and the frame response's `X-Aouda-Stats`), `ClientQueryStats.RoutedTo` in the C# SDK,
@@ -604,8 +612,7 @@ Key implementation anchors:
    - no such result (none matches, or the match is stale, has work queued or is behind the WAL position) -> record the
      not-routed reason and scan the table.
 4. Observability:
-   - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`,
-   - `MaterializedQueryMatchTimeNs`.
+   - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`.
 5. Tests:
    - `MaterializedQueryAutoRoutingTests.cs`
    - `MaterializedQueryMatcherTests.cs`.
@@ -989,7 +996,7 @@ The `mqRebuildStatus` field is returned in `GET /api/databases/appdb/bulk-load/{
 | Create filter MQ | `CreateFilterQueryAsync(...)` | `client.materializedQueries.create(spec)` with `type: 4` | Same endpoint | Implemented | TS and HTTP shipped in P16 |
 | Declare MQs in schema file | `schema apply` of `materializedQueries` | `npx @aouda/client schema apply` (raw JSON) | `POST /schema/diff` and `/schema/apply` | Implemented (BL-174) | Name identity; omit map = unmanaged; `{}` drops all; replace is drop+create |
 | Generic create/drop/list/status | `CreateMaterializedQueryAsync`, `DropMaterializedQueryAsync`, `ListMaterializedQueriesAsync`, `GetMaterializedQueryStatusAsync` | `client.materializedQueries.create/drop/list/status` | `GET/POST/DELETE /api/databases/{db}/materialized-queries[/{name}]` | Implemented | Full TS + HTTP surface shipped in P16 |
-| Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute()` or `client.materializedQueries.query(name)` | `POST /api/databases/{db}/query` or `POST /api/databases/{db}/materialized-queries/{name}/query` | Implemented | Two paths: normal table query or dedicated MQ query endpoint |
+| Query MQ results | `TableAsync(queryName)` and `QueryMaterializedAsync(...)` | `client.table(queryName).execute()` or `client.materializedQueries.query(name)` | `POST /api/databases/{db}/query` or `POST /api/databases/{db}/materialized-queries/{name}/query` | Implemented | Two paths: normal table query or dedicated MQ query endpoint. The MQ endpoint reads the whole result: it is refused past `Aouda:Query:MaxResultRows` or the read budget (`503`, **BL-776, next train**) — filter large results through `/query` |
 | Subscribe MQ results | `GetTable(queryName).SubscribeAsync()` pattern in client tests | `client.table(queryName).subscribe(...)` | standard `subscribe` message `target=queryName` | Implemented | No MQ-specific target type |
 | Auto-routing base query to MQ | `TableQuery` matcher + `WithDirectScan()`; `ClientQueryStats.RoutedTo` | No bypass; `result.stats.routedTo` reports a route | `POST …/query` and `…/query/count` route automatically; `stats.routedTo` (**ColumnarRead S18, next train**) | Partial | Routing logic is server-side engine behavior; no route flag to bypass it over HTTP |
 | Explain routing decision | `ExplainRoutingAsync(...)` | Missing | Missing | Partial | .NET diagnostic API only |
@@ -1284,8 +1291,6 @@ running now or already dead.
 | `MqAccumulatorGrowthsRefused` | Times a build could not grow its grant and partitioned or spilled instead (**WorkloadCore S12, next train**). |
 | `MqAccumulatorExcessCharged` | Times a build held memory it could not write out, charged as working memory (**WorkloadCore S12, next train**). Zero is the expected value. |
 | ~~`MqRebuildSinksRetiredByBudget`~~ | **Removed (WorkloadCore S12, next train)**: nothing is retired for its size. |
-| `MqBuildSpills` / `MqBuildSpilledGroups` | How often, and how much, a build had to write through **to its shadow result table**. |
-| `MqBuildSpillReadBacks` | Groups re-read after writing through — the cost of having spilled. |
 | `MqBuildPartitioningAdopted` | Builds that outgrew their grant and split their group space. |
 | `MqBuildPartitionsEvicted` | Partitions written out to disk scratch under budget pressure. |
 | `MqBuildRunsWritten` / `MqBuildRunsFolded` | Runs written to a build's spill file, and read back at publish. |
@@ -1495,7 +1500,7 @@ Monitor first:
   - `SubscriptionUpdatesEnqueued`, `SubscriptionUpdatesProcessed`, `SubscriptionDroppedUpdates`, `SubscriptionUpdateErrors`
   - `SubscriptionQueueDepth`, `SubscriptionLagMs`
 - Routing outcomes:
-  - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`, `MaterializedQueryMatchTimeNs`
+  - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`
 - Per-query cost — `amplification` on the status route, not a counter. `writeAmplification` and
   `readAmplification`, plus the totals behind them. See [2.11d](#amplification).
 - What the results are holding in RAM — `pinnedHotBytes` on `GET /api/server/memory` is the

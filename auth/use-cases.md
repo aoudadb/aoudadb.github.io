@@ -346,7 +346,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signin \
 }
 ```
 
-The user receives a valid `aal1` JWT but the app must redirect them to a change-password page and block access to protected areas until they change their password. Use this pattern for batch migrations. After a successful password change, subsequent signins no longer include `requiresPasswordChange`.
+The user receives a valid JWT (`aal2` when they have no active MFA factor, `aal1` otherwise) but the app must redirect them to a change-password page and block access to protected areas until they change their password. Use this pattern for batch migrations. After a successful password change, subsequent signins no longer include `requiresPasswordChange`.
 
 ### Pattern 3 — Direct Password Set (Admin Override)
 
@@ -429,7 +429,7 @@ On success, returns a full token pair — the user is signed in immediately:
 
 ## 21. Use Case: Two-Factor Authentication (MFA)
 
-MFA adds a second verification step after password signin. Aouda supports TOTP (e.g. Google Authenticator, Authy) and SMS phone OTP. After a successful MFA verify the user receives an `aal2` JWT; apps can enforce `aal2` on sensitive endpoints (see §24.1).
+MFA adds a second verification step after password signin. Aouda supports TOTP (e.g. Google Authenticator, Authy) and SMS phone OTP. After a successful MFA verify the user receives an `aal2` JWT; apps can enforce `aal2` on sensitive endpoints (see §24.1). A user with no active factor is `aal2` from password signin (**BL-795, next train**), so `aal2` alone does not prove a second factor was used.
 
 **SMS prerequisite:** Phone-factor challenges require **GatewayAPI** or the **`console` provider** on the Aouda server. TOTP and recovery codes do not. See [Email, SMS & Notifications](notifications.md).
 

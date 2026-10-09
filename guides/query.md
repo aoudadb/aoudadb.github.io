@@ -532,22 +532,21 @@ Expected checks:
 What to monitor first:
 
 - Query throughput and latency: `Perf.QueryApiCalls`, `Perf.QueryApiMs`.
+- Data-temperature scan mix: `Perf.HotScanRows`, `Perf.ColdScanRows`.
 - Decode pressure: `Perf.DecodeCount`, `Perf.DecodeMs`, `Perf.DecodedValues`.
+- Pruning effectiveness: `Perf.PagesPrunedByMinMax` (row groups skipped by their statistics), `Perf.SegmentsPrunedFully`, bloom counters.
 - Partition pruning and hot-tier hits: `Perf.SegmentsPrunedByPartitionKey`, `Perf.HotSegmentHits` / `HotSegmentMisses`.
-- ⚠️ **Counters of the deleted scans read 0 (**ColumnarRead, next train**):** `HotScanRows`, `ColdScanRows`,
-  `DeltaRowsQueried`, `PagesPrunedByMinMax`, `PagesPrunedByJoint`, `PagesAfterPruning`, `PruningBytesSaved`,
-  `SegmentsPrunedFully`, the bloom counters, `ParallelSegmentScans`, `ParallelScanMs`, `ParallelEarlyTerminations`. They
-  stay in the CSV and in `/api/admin/metrics` (the `query` subsystem's `rowsScanned`, `hotScanRows`, `coldScanRows`,
-  `hotAggregateOps`, `coldAggregateOps`, `parallelScans`, `vectorizedOps`, `pagesPrunedByMinMax`, `pagesAfterPruning`, `pruningBytesSaved`, `segmentsPrunedFully`)
-  and no longer move. A query's own `stats` (`rowsScanned`, `executionMs`) are unaffected.
+- Parallel execution behavior: `Perf.ParallelSegmentScans`.
+- ⚠️ The `query` subsystem of `/api/admin/metrics` still carries `hotAggregateOps` and `coldAggregateOps`; nothing has
+  moved them since the old scans were deleted (**ColumnarRead, next train**).
 
 Quick-answer matrix:
 
 | Question | Practical answer |
 |---|---|
 | Are queries CPU-bound on decode? | Check `DecodeMs`/`DecodeCount` against row volume. |
-| Is pruning helping? | The min/max/joint/bloom prune counters read 0 since **ColumnarRead** (next train); compare `DecodedValues` with the rows the queries return. |
-| Are we decoding unexpected cold volume? | Compare `DecodedValues` / `DecodeMs` trends (`ColdScanRows` reads 0 since **ColumnarRead**, next train). |
+| Is pruning helping? | Watch the min/max and bloom prune counters over representative traffic. |
+| Are we scanning unexpected cold volume? | Compare `ColdScanRows` and `HotScanRows` trends, and `DecodedValues` / `DecodeMs`. |
 | Are query API calls increasing but rows flat? | Inspect query shape defaults (limit/order/filter) and client behavior. |
 
 ## 2.14 Troubleshooting by symptom

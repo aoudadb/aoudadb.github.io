@@ -109,7 +109,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 ### Diff warnings vs applyable column changes
 
-**Column evolution (P36):** changing a column's `type`, `nullable`, `primaryKey`, `references`, `encoder`, `default`, `description`, rename, or reorder is now an applyable **change** (not a warning). Safe type widening (e.g. `Int32` → `Int64`) is an instant metadata flip with read-time coercion; lossy conversions validate all values first, then flip and rewrite column files in the background (`GET …/jobs`).
+**Column evolution (P36):** changing a column's `type`, `nullable`, `primaryKey`, `references`, `default`, `description`, rename, or reorder is now an applyable **change** (not a warning). Safe type widening (e.g. `Int32` → `Int64`) is an instant metadata flip with read-time coercion; lossy conversions validate all values first, then flip and rewrite column files in the background (`GET …/jobs`).
 
 **Still warnings only:** changing table `partitionKey` or `clusterColumns` (and Vector/MdVector type changes). Those require dropping and re-creating the table (or a future migration phase).
 
