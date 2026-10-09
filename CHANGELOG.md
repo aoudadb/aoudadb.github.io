@@ -13,6 +13,46 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- ⚠️ **Replication is not supported in this release (BL-839).** A replica cannot catch up after a disconnect: frames the
+  primary writes while it is away are never sent to it. Run single-node. See [Replication](guides/replication.md).
+- **Every refusal is answered as one (BL-921, BL-881).** A capacity refusal on any endpoint is `503` with `Retry-After`
+  (`MEMORY_BUDGET_EXCEEDED`, or `WAL_CAPACITY_EXCEEDED` for a full log) and a write conflict is `409 WRITE_CONFLICT` — some
+  endpoints answered `400`, `409` or `500`. A DELETE or UPDATE whose matched rows other writers keep changing gives up after 16
+  attempts with nothing applied (`409 WRITE_CONFLICT`; retry); overlapping DELETEs and UPDATEs now commit as if one ran after
+  the other, so a DELETE whose row a concurrent upsert moved out of its `WHERE` leaves that row. See
+  [HTTP API — error codes](reference/http-api.md#error-codes).
+- **A query over the result ceiling is `400 RESULT_TOO_LARGE`, with no `Retry-After`.** It was a `503` that a retry could never
+  pass. Narrow or page the query, or raise `Aouda:Query:MaxResultRows`.
+- **Token refresh (BL-841, BL-850).** A refresh refused for capacity is `503` + `Retry-After` and leaves the refresh token
+  live — retry with the same token (it was a `500` that spent the token and signed the user out). Two refreshes with one token
+  at once: exactly one succeeds, the other revokes the token family — refresh a shared session from one place. Sign-in, sign-up
+  and password changes wait for their hash's memory and answer `503` + `Retry-After` when they cannot get it. See
+  [Auth setup](auth/setup.md).
+- **Bulk load (BL-831, BL-928, BL-924).** A column-batch `:append` is refused `503` before it decodes when memory is short (the
+  session stays open; resume from the cursor). A `:commit` whose merge runs out of memory is `503`, never a `500` or a
+  misaligned segment. `mqWaitMs` no longer waits on a query that is behind only because its upstream is being rebuilt. A key
+  bulk loaded after its delete survives a crash. See [Bulk load](guides/bulk-load.md).
+- **Materialized queries (BL-917, BL-882, BL-884, BL-927, BL-935).** A query over another query's result is stale when that
+  upstream is dropped or its routing failed. A rebuild refused by a full WAL is behind and requeued, never `Error`, and a create
+  whose first build is refused succeeds with the query behind. A rebuild no longer loses rows to a cold coalesce running under
+  it, and a coalescing-window change is durable and safe to run concurrently. See [Materialized queries](guides/materialized.md).
+- **Crash recovery (BL-823, BL-891, BL-837, BL-923).** On `Recent` / `BestEffort` tables a delete, update or upsert is replayed
+  onto exactly the copies it matched; a deleted row stays deleted in every tier; buffered graph edges and vectors, and a
+  branch's edges and vectors, survive a crash. ⚠️ **Clean cut:** the WAL's delete, merge, edge-insert and vector-insert frames
+  are a new format, and a log holding an older build's such frames past its checkpoint (a crash with them unflushed) is refused at
+  open — open it once with the build that wrote it and close it cleanly, or restore from a backup. A cleanly closed database is
+  unaffected. See [Storage — troubleshooting](guides/storage.md#214-troubleshooting-by-symptom).
+- ⚠️ **Backups are format 3 and restore the whole catalog (BL-840).** Keys, partitioning, cluster order, nullability and table
+  and database policy survive a restore (a restored `Strict` table accepted duplicate keys). A backup taken by an older build
+  is refused before the target is touched, naming the version found and 3: restore it with the build that took it. See
+  [Backup](guides/backup.md).
+- **The WAL's cap follows the disk and the workload, and its ladder is logged (BL-787).** `MaxWalBytes` is recomputed after
+  reclaims as the larger of a tenth of the space the WAL can use and twice its largest working set, at most half that space;
+  each `T25` / `T26` / `T27` crossing is one `[WAL]` log line. The memory broker also keeps the GC's committed bytes under
+  0.90 × the heap limit (BL-914). See [Sizing](guides/sizing.md).
+- **Files read at open are written whole (BL-933, BL-935).** A clean close can no longer leave `wal/slots.json`, or a
+  materialized query's `definition.json`, empty and the database unopenable.
+
 - **Time windows over bulk-loaded history read only the rows they can hold (ADR 0061).** A bulk load writes each series'
   rows together, so a time window used to decode the time column of every row group. Segments now record each series'
   time every 64 rows, and a filter that bounds the time column (`DateTime >= a AND DateTime < b`) reads only those
@@ -229,8 +269,8 @@ Public, user-facing release notes. Engine phase status lives in the server
   fixed at one instant: a concurrent MERGE, UPDATE, flush or coalesce is no longer seen half or
   twice. A read takes its segments from the catalog and never lists a directory; a catalog change is
   visible only once it is durable; and a read that cannot resolve a segment its catalog names fails
-  instead of returning short. A restored database whose catalog is rebuilt from `catalog.chk`
-  catalogues its segments at open. See [Query](guides/query.md) and [Backup](guides/backup.md).
+  instead of returning short. A restored database's catalog is the backup's own catalog image (BL-840, above);
+  the open no longer rebuilds one from `catalog.chk`. See [Query](guides/query.md) and [Backup](guides/backup.md).
 
 ## 0.2.0 — 2026-09-30
 
