@@ -430,6 +430,10 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
     by the knob plus one commit; a flush (and a clean shutdown) applies what is held at once. Set it on the query in
     `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
     query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
+  - (**BL-935, next train**) A change in place is durable and safe to run concurrently: the query's `definition.json` is
+    written whole to a temp file of its own, fsynced and renamed into place, one writer at a time. Before, two changes of
+    one query at once failed one of them, and a cancelled change could leave the definition empty — and the next open
+    refused the database.
   - Measured: 150 commits of 10 rows into 5 groups wrote 134× fewer result rows with a 500 ms window; at 50,000 rows/s across the nine Equity queries a 100 ms window cut maintenance CPU by a third (111 → 76 CPU-s per million rows) and the worst staleness p99 from 23 s to 13 s.
 - Maintenance off the commit (**WorkloadCore S09, next train**): every commit — insert, upsert, update, delete, merge — hands its change
   batch to its queries' maintainers at the commit, in the table's commit order and without waiting, and they apply it in
@@ -512,8 +516,11 @@ frontier covered. Now it waits for the query to be current, or answers `TOKEN_UN
 
 After a log record that no commit follows (a flush, a column added to another table) a result reads as behind until it is
 claimed current again: by the next commit anywhere, or by the next result-checkpoint round (every 15 s). (**BL-607, next train**)
-A commit the change dispatcher failed to route marks the source's results stale and rebuilds them, rather than letting a
-result be read as current past it. (**next train**)
+A commit the change dispatcher failed to route to a query marks that query stale and puts it in `Error`, rather than letting
+it be read as current past the commit (**next train**) — and (**BL-882, next train**) every query built over its result is
+marked stale too: before, the stale mark was missing, so the queries over it kept reading current. Dropping a query marks the
+queries built over its result stale the same way (**BL-917, next train**); they read current over a source that no longer
+existed. Refresh them to bring them back.
 
 A change no maintenance sees — a **TRUNCATE**, a source column **dropped** or **renamed**, a new column **default** — marks every
 result of the table stale and schedules its rebuild (**ColumnarRead group-6 review, next train**). Before, a result kept the
@@ -1044,6 +1051,11 @@ upstream stale, except a [deferred load](#deferred-loads), whose pass feeds the 
 rebuilt when the upstream's rebuild publishes; a `:refresh` of it alone, while the upstream is still
 stale, leaves it stale. Refresh the upstream first.
 
+Two more causes mark such a query stale (**BL-917, BL-882, next train**): its upstream query was **dropped**, or a commit's
+routing to the upstream **failed** (the upstream is then in `Error`). The `staleReason` names the upstream; the stale mark
+cascades through every level above it. Before, both left the queries above `Ready` and current over a result that was gone or
+missing a commit.
+
 Staleness is durable. If the server restarts before you refresh, the query is **rebuilt from source
 after startup** rather than being restored with the loaded rows missing (a query that is behind has no
 checkpoint — **ColumnarMerge S08**; (**WorkloadCore S11, next train**) the rebuild runs once the database is open, not
@@ -1337,6 +1349,14 @@ behind — `:refresh` still rebuilds it, for instance once the budget is larger.
 prepared (the result's prior state read back) is handled the same way; it used to put the query in `state: "error"`, where
 reads of it threw and nothing cleared it.
 
+(**BL-884, next train**) **A rebuild refused by a full WAL is behind and requeued, never `Error`.** When the log is at its
+refusal line (`T27`), a build's or a deferred pass's writes are refused like any source write. That used to put the query in
+`Error` (reads threw, routing dropped it, nothing cleared it), where a memory refusal of the same write was a deferral. Both are
+capacity refusals now: the query stays readable and behind, and its rebuild is requeued. A WAL-refused rebuild waits for the
+log to fall back under `T26` before it runs again, and does not double its memory ask. A **create** whose first build is
+refused this way (memory or WAL) succeeds: the definition is durable, so the query exists behind and is built once there is
+room — it used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists".
+
 ### Only a rebuild from the source clears "stale" (**IngestAtSpeed S03, 0.1.40**)
 
 A query marked stale is missing rows that are not in its result: a load that was deferred for
@@ -1538,6 +1558,11 @@ Monitor first:
   partial state already holds. A rebuild interrupted by a crash, a shutdown or a memory refusal continues from its last
   chunk — provided none of those segments changed (a compaction that merged them, or a delete in them, starts it over). A
   group that includes a filter or a top-N query rebuilds from the start, as before.
+- (**BL-927, next train**) **A rebuild no longer loses source rows to a cold coalesce running under it.** A rebuild reads one
+  pinned view of its source; segments a coalesce merges meanwhile keep their files until the rebuild's read ends. Before, when
+  memory pressure had released the table's catalog shard and it was loaded again, those files could be deleted under the
+  rebuild, which then published short and reported current. A read that finds a segment of its view with rows but no pages
+  now fails instead of returning nothing.
 - The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
   log is never pruned under it.
 - A database created before this release has no checkpoints, so it rebuilds its results once, at the first open.
