@@ -6,6 +6,13 @@ parent: "Guides"
 
 # Aouda Functionality: Replication and Cluster Behavior
 
+{: .warning }
+**Replication is not supported in the next train (BL-839).** A replica receives only the WAL frames the primary broadcasts
+while it is connected: frames written while it is disconnected — a network blip, a replica restart, the time a checkpoint
+takes to transfer — are never sent to it, so **a replica cannot catch up after a disconnect** and misses those
+writes. Run single-node (`ReplicationMode: DoNotReplicate`, see [Single-Node Deployment](single-node-deployment.md)) and protect
+data with [backups](backup.md). This page describes the replication code as it stands, for when catch-up ships.
+
 Document status: Approved baseline
 Primary owner: Aouda maintainers
 Last updated: 2026-05-22
@@ -189,7 +196,8 @@ If you do nothing:
 ### Reserved / not yet wired
 
 - Catch-up from the primary's WAL files: a replica receives frames broadcast while it is connected, so frames written while it is
-  disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). Streamed rows are held in memory on the
+  disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). This is why replication is not
+  supported in the next train (see the note at the top of this page). Streamed rows are held in memory on the
   replica and are not re-applied after a replica restart (**BL-839**).
 - Public admin API for WAL slot inspection/listing (proposed in task follow-up notes).
 - Per-replica slot-lag metrics endpoint (proposed in task follow-up notes).
