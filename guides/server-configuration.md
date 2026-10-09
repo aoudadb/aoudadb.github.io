@@ -292,7 +292,7 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 | `Aouda:Memory:ForegroundQuiescenceWindow` | see `MemoryBudgetSection` | How long after the last foreground unit finishes before background work returns to full rate. |
 | `Aouda:Memory:PageCacheEnabled` | unset | Unset: **on**, within its `MaxPageCacheBytes` (`T12`) share (**ColumnarRead, next train** — it was off in `Constrained`, the resource mode every database started in; the modes are deleted, **WorkloadCore S17, next train**). `false` turns it off; `true` is the default said out loud. |
 | ~~`Aouda:Memory:ResourceMode`~~ | — | **Removed (WorkloadCore S17, next train)** with the resource mode: the engine no longer classifies itself `Constrained` / `Balanced` / `Abundant`, and its buffering thresholds are one formula on every host (see [Sizing](sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-next-train)). A server still configured with it logs a warning at boot. Was: pinned the resource state instead of measuring it. |
-| `Aouda:Query:MaxResultRows` | `1000000` | A query whose result exceeds this is refused with a typed retryable `503` rather than materialised. |
+| `Aouda:Query:MaxResultRows` | `1000000` | A query whose result exceeds this is refused rather than materialised: `400 RESULT_TOO_LARGE`, no `Retry-After` (**release blockers, next train**; it was a retryable `503`, which a retry could never pass). |
 | `residency.hotOnlyBackstop` | `RefuseWrites` | **Per table, not server config.** What a `HotOnly` pin does when honouring it would breach the ceiling — see [Hot/Cold](hot-cold.md#when-a-pin-cannot-be-honoured). |
 
 ## 11) Auth maintenance
