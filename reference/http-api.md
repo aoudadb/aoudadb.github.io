@@ -524,7 +524,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `AUTH_TOKEN_MISSING` | 401 | Missing or empty `Authorization: Bearer` header. Exception: data-plane listed named-artifact execute / batch is 404 `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` instead (admin listener still 401). |
-| `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`) |
+| `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, next train**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
 | `AUTH_API_KEY_INVALID` | 401 | API key invalid, revoked, or expired |
@@ -595,6 +595,12 @@ design relies on. Before, it was not exposed and a browser read `null`.
 #### Named-query, streaming, and data-plane errors
 
 These also appear as WebSocket `error` `code` values where noted.
+
+(**BL-944, next train**) **A refusal on a WebSocket is its own code.** A `stream_rows` write, a subscription's snapshot and a
+subscription's permission read that the server refused for capacity answer `MEMORY_BUDGET_EXCEEDED` or `WAL_CAPACITY_EXCEEDED`
+(message ending "retry after N s"), and a write conflict `WRITE_CONFLICT` — wherever the refusal arose. Before, a wrapped refusal
+or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED` and a refused permission read `PERMISSION_REVOKED`
+(the subscription is still denied when its permissions cannot be read; only the code changed).
 
 | Code | HTTP / WS | Description |
 |------|-----------|-------------|
@@ -3066,8 +3072,9 @@ Trigger an immediate backup of all active databases. Runs concurrently across da
 | Status | When |
 |--------|------|
 | 409 Conflict | A backup or restore is already in progress |
-| 503 Service Unavailable | Cloud destination not yet supported (S3/Azure/GCS), or engine not ready |
+| 503 Service Unavailable | Cloud destination not yet supported (S3/Azure/GCS), or engine not ready; (**BL-944, next train**) or the backup was refused for capacity (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, with `Retry-After`) |
 | 400 Bad Request | Destination path cannot be created or accessed |
+| 500 Internal Server Error | (**BL-944, next train**) The backup failed for another reason (an I/O error in the checkpoint, say). Before, every failure was answered 400 as if the destination were wrong |
 
 #### `GET /admin/backup/list`
 

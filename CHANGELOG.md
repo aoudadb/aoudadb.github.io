@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Refusals on the auth and WebSocket paths are answered as refusals, and leave the retry its token (BL-944).** A JWT check the
+  server could not finish for capacity is `503` + `Retry-After` (it was `401 AUTH_TOKEN_INVALID`, which signs a browser user out);
+  a password reset refused at the hash, or answered 400 for a weak password, keeps its OTP; an MFA verify refused after its code
+  was accepted keeps its challenge (and backup code); WebSocket writes and subscriptions carry `MEMORY_BUDGET_EXCEEDED` /
+  `WAL_CAPACITY_EXCEEDED` / `WRITE_CONFLICT` instead of `INVALID_REQUEST`, `SNAPSHOT_FAILED` or `PERMISSION_REVOKED`; the backup
+  trigger answers a refusal 503 and other failures 500 (it answered 400). The C# SDK raises `AoudaCapacityException` with the
+  server's `Retry-After` for a refused sign-in, sign-up or refresh, keeping the refresh token.
 - **`aouda wal convert` is removed (BL-934).** A data directory holding a single-file `insert.wal` (written before the segmented
   WAL) is refused at open with a message that names the way out: restore from a backup taken by this version, or delete
   `insert.wal` to discard the writes it holds that were never checkpointed. The undocumented `POST /api/databases/{db}/wal/convert`
