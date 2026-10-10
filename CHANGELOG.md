@@ -13,6 +13,10 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **`aouda wal convert` is removed (BL-934).** A data directory holding a single-file `insert.wal` (written before the segmented
+  WAL) is refused at open with a message that names the way out: restore from a backup taken by this version, or delete
+  `insert.wal` to discard the writes it holds that were never checkpointed. The undocumented `POST /api/databases/{db}/wal/convert`
+  is gone too.
 - **A capacity refusal's `Retry-After` is at most 30 s (BL-956).** One bulk-load refusal in the 0.3.0 `scale` soak said
   `Retry-After: 300`, and a client that honoured it waited 310 s where the server needed ~15 s. Every `503`
   (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`) now asks for at most 30 s, and a WAL refusal before the server has measured

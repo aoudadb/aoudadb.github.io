@@ -118,7 +118,7 @@ When you do not set durability knobs explicitly:
 - WAL:
   - Database default `EnableWal = true` (`DatabaseOptions`).
   - Table-level `Durability.EnableWal` is nullable; null inherits database default.
-  - On disk: segmented `{db}/wal/wal_%09d.log`. Crash recovery fast-forwards from `{db}/wal/CHECKPOINT`. A leftover monolithic `insert.wal` is refused until `aouda wal convert`.
+  - On disk: segmented `{db}/wal/wal_%09d.log`. Crash recovery fast-forwards from `{db}/wal/CHECKPOINT`. A leftover monolithic `insert.wal` is refused at open (**BL-934, next train**: `aouda wal convert` is removed — restore from a backup taken by this version, or delete the file to discard its unreplayed writes).
 - Replication mode:
   - Database default `ReplicationMode = Replicate`.
 - Write concern:
