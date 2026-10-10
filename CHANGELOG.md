@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A capacity refusal's `Retry-After` is at most 30 s (BL-956).** One bulk-load refusal in the 0.3.0 `scale` soak said
+  `Retry-After: 300`, and a client that honoured it waited 310 s where the server needed ~15 s. Every `503`
+  (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`) now asks for at most 30 s, and a WAL refusal before the server has measured
+  how fast it frees log says 10 s. Ask again then; the next answer carries a fresh estimate. No client change is needed.
+
 ## 0.3.0 — 2026-10-10
 
 Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.

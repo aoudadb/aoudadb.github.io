@@ -127,7 +127,7 @@ and [Storage](storage.md) (walk-through D).
 | `T24` — segment size | `clamp(T23 / 16, 8 MB, 64 MB)` | Fixed at open. |
 | `T25` — force checkpoint | `0.70 × T23` | Also the WAL debt's soft line for the ingest stall curve. Moves with `T23`. |
 | `T26` — run retention now | `0.85 × T23` | Moves with `T23`. |
-| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate. Moves with `T23`. |
+| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate — (**BL-956, next train**) at most 30 s, 10 s before any reclaim is measured. Moves with `T23`. |
 | `T28` — `MaxSlotWalKeepBytes` | `clamp(T23 / 2, 128 MB, 2 GiB)` | Fixed at open: a slot lagging further behind the head is invalidated. |
 
 (**BL-787, 0.3.0**) Each crossing of `T25`, `T26` and `T27`, in either direction, and the end of a refuse episode (its
