@@ -174,7 +174,7 @@ High-level flow:
 
 ### A) Create incremental backup
 - `BackupEngine.CreateBackupAsync(...)`
-- (**BL-840, next train**) Takes one image of the **catalog store** — every table entry (keys, partitioning, cluster order,
+- (**BL-840, 0.3.0**) Takes one image of the **catalog store** — every table entry (keys, partitioning, cluster order,
   nullability, table policy) and every segment entry, plus the database policy — and ships its files under `_catalog/`. The
   segments that image names are pinned on disk until the upload has read them. It no longer writes a catalog checkpoint
   (`catalog.chk`) for the backup, which held only each column's id, name, type and encoder.
@@ -185,17 +185,17 @@ High-level flow:
 ### B) Restore exact backup
 - `RestoreEngine.RestoreAsync(...)` with `TargetTime = null`.
 - Rehydrates files, verifies hashes (default), returns restore stats.
-- (**BL-840, next train**) **The restore puts the catalog store back as it was backed up**, on a fresh target and in place alike
+- (**BL-840, 0.3.0**) **The restore puts the catalog store back as it was backed up**, on a fresh target and in place alike
   (exact restore and PITR): primary keys, partitioning, cluster order, nullability, and each table's and the database's policy
   all survive. Before, a restore rebuilt every column from `catalog.chk` as a nullable non-key and every policy as a default (or
   the live catalog's): a restored `Strict` table accepted duplicate keys, and a partitioned table lost its partitioning. The open
   no longer bootstraps a catalog from a lone `catalog.chk`; reads use the restored catalog's segment list and never list a
-  directory (**ColumnarRead, next train**).
-- ⚠️ **The backup format is 3 (BL-840, next train; clean cut).** A restore refuses a backup of format 1 or 2 — any backup taken by
+  directory (**ColumnarRead, 0.3.0**).
+- ⚠️ **The backup format is 3 (BL-840, 0.3.0; clean cut).** A restore refuses a backup of format 1 or 2 — any backup taken by
   an older build — **before it touches the target**, with an error naming the version it found and version 3. Restore such a
   backup with the build that took it (then take a new backup with this build). A format-3 backup that lists no catalog root is
   refused the same way, as incomplete.
-- ⚠️ **Rows in hot segments come back** (**architecture review, next train**; since **BL-840** the restored catalog image carries their entries). The open catalogues every restored `.hot` file as a Hot segment (a promoted segment once), with the partition key a hot-only segment's `hot_segment.marker` records; backups now carry those markers, and no longer carry a retired segment's `.hot` file. Before, `.hot` files were backed up and restored but never catalogued, and the restore resets the WAL, so **every row still in a hot segment at backup time was lost** by a clean restore.
+- ⚠️ **Rows in hot segments come back** (**architecture review, 0.3.0**; since **BL-840** the restored catalog image carries their entries). The open catalogues every restored `.hot` file as a Hot segment (a promoted segment once), with the partition key a hot-only segment's `hot_segment.marker` records; backups now carry those markers, and no longer carry a retired segment's `.hot` file. Before, `.hot` files were backed up and restored but never catalogued, and the restore resets the WAL, so **every row still in a hot segment at backup time was lost** by a clean restore.
 - **A 0.2.x backup** is refused by this build's restore (backup format 3, above), before it touches the target; this build could not read its pages either. To move 0.2.x data to this build, restore with the 0.2.x build, export, and reload — see [Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model).
 - Counters: `RestoreOperations*`, `RestoreBlobsDownloaded`, verification counters.
 
@@ -649,8 +649,8 @@ Health behavior:
 | Missing blob during restore | Archive inconsistency or aggressive lifecycle policy | Run `VerifyBackupAsync`, review retention/GC decisions |
 | `PitrWindowException` | Target time outside the local WAL window and the archive (or no PITR-eligible backup) | Take a newer backup, enable archiving, or pick a later `targetTime`. The local window is write volume since the last backup, not a duration |
 | Health says stale backup | No recent successful backups | Ensure host invokes backups on schedule |
-| A restore is refused: "backup format version 1" (or 2) "… restores format version 3 only" | The backup was taken by an older build — 0.2.x or earlier (**BL-840, next train**) | Restore it with the build that took it; to move 0.2.x data to this build, export and reload into this build, then take a new backup |
-| Restore refused: "Backup '…' is backup format version 2; this build restores format version 3 only" (or version 1) | The backup was taken by an older build (**BL-840, next train**): formats 1 and 2 hold the catalog without keys, partitioning or nullability. Nothing was restored; the target is untouched | Restore it with the build that took it, then take a new backup with this build |
+| A restore is refused: "backup format version 1" (or 2) "… restores format version 3 only" | The backup was taken by an older build — 0.2.x or earlier (**BL-840, 0.3.0**) | Restore it with the build that took it; to move 0.2.x data to this build, export and reload into this build, then take a new backup |
+| Restore refused: "Backup '…' is backup format version 2; this build restores format version 3 only" (or version 1) | The backup was taken by an older build (**BL-840, 0.3.0**): formats 1 and 2 hold the catalog without keys, partitioning or nullability. Nothing was restored; the target is untouched | Restore it with the build that took it, then take a new backup with this build |
 | Durability D.3 scenario skipped | Public backup endpoint absent | Expected until BL-023 is completed |
 | S3 `AmazonServiceException` on first operation | Invalid bucket, region mismatch, or credential chain failure | Verify `Destination` URI, check IAM permissions, set `Region` or `ServiceUrl` explicitly |
 
@@ -720,7 +720,7 @@ _Added 2026-06-07 (MemTiering S12 — closes Gap C)._
 An **exact backup** captures a point-in-time snapshot of every `DiskBacked` table that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
 
 - **Never-sealing mutable-tier tables** (those with `MemoryIntent = Mutable` that never exceed the seal threshold) are **fully covered** by an exact backup. Their data lives entirely in HRA, and a `.hra` snapshot file is written for each such table at the backup checkpoint.
-- **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism. ⚠️ Until the **architecture review (next train)** this held for the backup only: a restore did not catalogue the `.hot` files, and their rows were lost (see [Restore exact backup](#b-restore-exact-backup)).
+- **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism. ⚠️ Until the **architecture review (0.3.0)** this held for the backup only: a restore did not catalogue the `.hot` files, and their rows were lost (see [Restore exact backup](#b-restore-exact-backup)).
 - `BackupFileType.HraSnapshot` manifest entries identify these files; they are content-addressed (SHA-256 + CRC-32) and deduplicated between incremental backup runs.
 
 ### What is exempt
@@ -736,7 +736,7 @@ After blobs are downloaded, `RestoreEngine` writes a synthetic `clean_shutdown.m
 For a `targetTime` restore, the HRA snapshot is the state at the backup WAL position — before the
 target. `RestoreEngine` **deletes** the restored `.hra` files and stages a `PITR_TARGET`; the next
 open replays `HraRowBatch` WAL through crash recovery to the last commit `<= targetTime`. No
-`clean_shutdown.marker` is written for the PITR path. (**BL-840, next train**) Both restore the backup's catalog image, so a
+`clean_shutdown.marker` is written for the PITR path. (**BL-840, 0.3.0**) Both restore the backup's catalog image, so a
 restore onto a foreign empty target carries the Hot segment metadata too (before, only an in-place restore kept the live
 catalog's, BL-334).
 

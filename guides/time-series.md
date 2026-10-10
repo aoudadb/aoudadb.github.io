@@ -49,7 +49,7 @@ For a table too small to justify a partition key — the common case, see
   - Partition directly from timestamp semantics without redundant bucket columns.
 - Operational outcomes:
   - Better segment and page pruning from cluster-aware metadata.
-  - Better write/read balance via bounded sort-on-seal; late rows are flushed inline, with no delta merge path (**ColumnarRead, next train**).
+  - Better write/read balance via bounded sort-on-seal; late rows are flushed inline, with no delta merge path (**ColumnarRead, 0.3.0**).
   - Scalable startup through per-segment manifest metadata.
 - Scope boundaries:
   - This document focuses on cluster declaration, partition functions, manifests, segment pruning, sort-on-seal, out-of-order data, and metadata caching tiers.
@@ -108,7 +108,7 @@ For a table too small to justify a partition key — the common case, see
   - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
   - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
   - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, next train**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
+  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`
@@ -136,8 +136,8 @@ If you create a partitioned time-series table and do not set advanced controls:
 - `PartitionOptions` defaults apply:
   - `StorageMode = Auto`
   - `RequirePartitionFilter = true`
-- Late (out-of-order) rows need no configuration: they are buffered and flushed like any other row and are visible to queries as soon as they are inserted. Heavily out-of-order data only widens segment statistics (min/max), which costs pruning, never correctness. (`LateArrivalPolicy` / `LateArrivalThreshold` are deleted (**BL-762, next train**); they never changed behaviour.)
-- Metadata caching policy defaults to `Auto` at table policy level. `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted (**ColumnarRead, next train**).
+- Late (out-of-order) rows need no configuration: they are buffered and flushed like any other row and are visible to queries as soon as they are inserted. Heavily out-of-order data only widens segment statistics (min/max), which costs pruning, never correctness. (`LateArrivalPolicy` / `LateArrivalThreshold` are deleted (**BL-762, 0.3.0**); they never changed behaviour.)
+- Metadata caching policy defaults to `Auto` at table policy level. `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted (**ColumnarRead, 0.3.0**).
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -146,7 +146,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 | `TableOptions.SortOnSeal` | `true` | Clustered writes are sorted on seal by default |
 | `PartitionOptions.StorageMode` | `Auto` | Shared buckets first, with possible dedicated promotion |
 | `PartitionOptions.RequirePartitionFilter` | `true` | Partitioned queries require key filters unless bypassed |
-| `TablePolicy.MetadataCaching` | `Auto` | No effect: the summary caches it governed are deleted (**ColumnarRead, next train**) |
+| `TablePolicy.MetadataCaching` | `Auto` | No effect: the summary caches it governed are deleted (**ColumnarRead, 0.3.0**) |
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -157,17 +157,17 @@ If you create a partitioned time-series table and do not set advanced controls:
   - `None`, `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`.
 - Nested partition paths under `partitions/` with shared bucket support.
 - Segment manifest persistence with cluster stats and per-page metadata.
-- Statistics-based skipping on every read: the one scan (`TableScan`) skips 8,192-row row groups whose min/max statistics in the segment footer rule the predicate out (`RowGroupClassifier`), and a filter that pins every series column reads only that series' rows, from the segment's run directory (**ColumnarRead, next train**); `SegmentPruner` is deleted.
-- Time windows over `(series, time)`-ordered segments (a bulk load's order): each series' time every 64 rows is kept in the segment's footer, so a window reads only the rows of each series that can fall in it (**ADR 0061, next train**).
+- Statistics-based skipping on every read: the one scan (`TableScan`) skips 8,192-row row groups whose min/max statistics in the segment footer rule the predicate out (`RowGroupClassifier`), and a filter that pins every series column reads only that series' rows, from the segment's run directory (**ColumnarRead, 0.3.0**); `SegmentPruner` is deleted.
+- Time windows over `(series, time)`-ordered segments (a bulk load's order): each series' time every 64 rows is kept in the segment's footer, so a window reads only the rows of each series that can fall in it (**ADR 0061, 0.3.0**).
 - Sort-on-seal behavior in storage pipeline for clustered data.
-- Out-of-order rows with no special path: flushed like any other row, query-visible at once. Delta segments, their background merge, and the `data/_delta/` directory are removed, and rows an older build left under `data/_delta/` are no longer read (**ColumnarRead, next train**).
-- ~~Tiered metadata caching (`SegmentSummaryCache` and `PageSummaryCache`) with pressure-aware eviction~~ — removed (**ColumnarRead, next train**): the page summary cache was never filled and the segment summary cache never constructed. A segment's footer is read once and held by its segment handle.
+- Out-of-order rows with no special path: flushed like any other row, query-visible at once. Delta segments, their background merge, and the `data/_delta/` directory are removed, and rows an older build left under `data/_delta/` are no longer read (**ColumnarRead, 0.3.0**).
+- ~~Tiered metadata caching (`SegmentSummaryCache` and `PageSummaryCache`) with pressure-aware eviction~~ — removed (**ColumnarRead, 0.3.0**): the page summary cache was never filled and the segment summary cache never constructed. A segment's footer is read once and held by its segment handle.
 - Schema file support for partition functions and cluster column lists (`partitionKey.function`, `clusterColumns`).
 
 ### Planned / proposed
 
 - Broader end-user API knobs for clustering internals (for example full metadata cache controls and merge/size policies) are not exposed on HTTP/TypeScript surfaces yet.
-- Retrospective partition migration: the never-started migration workers and `MigrationOptions` were removed (**WorkloadCore S17, next train**).
+- Retrospective partition migration: the never-started migration workers and `MigrationOptions` were removed (**WorkloadCore S17, 0.3.0**).
 - ADR-level performance comparisons and guidance remain directional; production tuning still depends on workload-specific testing.
 
 ### Reserved / not yet wired
@@ -183,7 +183,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 | P4 follow-ups | BL-004/005/005b reports | Metadata caching tiers, retrospective partitioning framework | Some migration strategy paths remain phase-2 scoped | `docs/BACKLOG.md` BL-005 phase-2 notes |
 | P8 | Declarative schema management tasks | Schema format carries `partitionKey.function` and `clusterColumns`; apply/export/diff paths include these fields | Schema apply set no part of the partition options block at P8. Since P45 it sets `partitionStorage`, `initialBucketCount`, `promotionRowThreshold`, `promotionByteThreshold` and `pkUniqueness` — migration options are still not declarable. See [Partitioning `2.10`](partitioning.md#210-configuration-and-settings-reference-complete-surface) | `docs/tasks/P8/P8-DeclarativeSchemaManagement-Tasks.md`, `docs/tasks/P45/` |
 | P28 (S1) | `docs/tasks/P28/` | `TruncateToMinute` partition function (`PartitionFunction = 6`); minute-level time partitioning; TypeScript `partitionFunction` string union extended | None | P28-COMPLETION |
-| ColumnarRead / ColumnarRead2 | ColumnarRead S07, S14; ColumnarRead2 S04 | Removed: P4's late-arrival delta segments (G.6, BL-006/007/008) — the catalog is the only visibility authority and late rows flush like any other (S07); the old read engines — every read runs on one scan (S14); `LateArrivalPolicy` / `LateArrivalThreshold` (**BL-762, next train**) | None | — |
+| ColumnarRead / ColumnarRead2 | ColumnarRead S07, S14; ColumnarRead2 S04 | Removed: P4's late-arrival delta segments (G.6, BL-006/007/008) — the catalog is the only visibility authority and late rows flush like any other (S07); the old read engines — every read runs on one scan (S14); `LateArrivalPolicy` / `LateArrivalThreshold` (**BL-762, 0.3.0**) | None | — |
 
 ## 2.6 Capability coverage matrix
 
@@ -194,10 +194,10 @@ If you create a partitioned time-series table and do not set advanced controls:
 | `TruncateToMinute` partition function | Yes | No | No | P28 S1, `PartitionFunction = 6`, `PartitionKeyExtractor.TruncateToMinute` | Produces `YYYY-MM-DD-HH-mm` partition key; TypeScript union includes `"TruncateToMinute"` |
 | Nested partition directory structure | Yes | No | No | G.3 report + `PartitionRouter.cs` + nested partition tests | Dedicated paths nested under `partitions/` |
 | Segment manifest persistence at seal | Yes | No | No | G.4a report + `SegmentManifest.cs` + serializer tests | Fallback compatibility behavior preserved |
-| Segment / row-group skipping via statistics | Yes | No | No | G.4b report + `RowGroupClassifier.cs` (**ColumnarRead, next train**; `SegmentPruner.cs` deleted) + read oracle tests | One classifier for every read: per row group, and per series through the run directory; counter `SegmentsPrunedFully` updates |
+| Segment / row-group skipping via statistics | Yes | No | No | G.4b report + `RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**; `SegmentPruner.cs` deleted) + read oracle tests | One classifier for every read: per row group, and per series through the run directory; counter `SegmentsPrunedFully` updates |
 | Sort-on-seal for clustered pages | Yes | No | No | G.5 report + `ClusterSorter.cs` + sort tests | Runtime default is on; effect only with cluster columns |
-| Out-of-order (late) rows | Yes | No | No | ColumnarRead S07 | No special path or setting: flushed like any other row, visible at once. Delta segments, their query-time union and the K-way delta merge are removed (**ColumnarRead, next train**) |
-| Metadata caching tiers | No | No | Yes | BL-004 report | Removed (**ColumnarRead, next train**): the summary caches were never filled; `MetadataCaching` is accepted and changes nothing |
+| Out-of-order (late) rows | Yes | No | No | ColumnarRead S07 | No special path or setting: flushed like any other row, visible at once. Delta segments, their query-time union and the K-way delta merge are removed (**ColumnarRead, 0.3.0**) |
+| Metadata caching tiers | No | No | Yes | BL-004 report | Removed (**ColumnarRead, 0.3.0**): the summary caches were never filled; `MetadataCaching` is accepted and changes nothing |
 | Retrospective partitioning strategies | No | Yes | No | BL-005/005b reports + `Policies.cs` | Foundation shipped; phase-2 strategy caveats remain |
 | Public API control for sort-on-seal | No | No | Yes | `TableMessages.cs` + `types.ts` + controller create path | Not exposed in HTTP DTOs/TS typed API |
 
@@ -214,8 +214,8 @@ If you create a partitioned time-series table and do not set advanced controls:
 - Sort-on-seal:
   - Bounded sorting at seal/flush stages, not full historical re-sorting.
 - Out-of-order (late) rows:
-  - Not a separate path. A late row sits in the write buffer, then in a segment, like any other row, and queries see it as soon as it is inserted. The catalog is the only visibility authority. Out-of-order data can widen a segment's min/max statistics, which only costs pruning. There is no delta path and no delta merge (**ColumnarRead, next train**).
-- Metadata caching tiers: removed (**ColumnarRead, next train**). `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted.
+  - Not a separate path. A late row sits in the write buffer, then in a segment, like any other row, and queries see it as soon as it is inserted. The catalog is the only visibility authority. Out-of-order data can widen a segment's min/max statistics, which only costs pruning. There is no delta path and no delta merge (**ColumnarRead, 0.3.0**).
+- Metadata caching tiers: removed (**ColumnarRead, 0.3.0**). `TablePolicy.MetadataCaching` is still accepted and stored, and changes nothing: the summary caches it governed are deleted.
 
 ### A materialized query's result table clusters too, and you do not declare it {#mq-result-clustering}
 
@@ -250,8 +250,8 @@ High-level runtime flow:
 2. Partition key extraction applies declared partition functions for routing.
 3. Writes are flushed/sealed; clustered batches are sorted on seal.
 4. Segment manifests are persisted with page metadata and optional cluster stats.
-5. Every read takes the table's segments from the catalog (no directory is listed) and runs on one scan (`TableScan`), which skips segments and row groups whose footer statistics rule the predicate out (`RowGroupClassifier`) and, for a filter that pins every series column, reads only that series' run from the segment's run directory (**ColumnarRead, next train**).
-6. A segment's footer is read once and held by its segment handle until the segment changes (**ColumnarRead, next train**; the summary caches are deleted).
+5. Every read takes the table's segments from the catalog (no directory is listed) and runs on one scan (`TableScan`), which skips segments and row groups whose footer statistics rule the predicate out (`RowGroupClassifier`) and, for a filter that pins every series column, reads only that series' run from the segment's run directory (**ColumnarRead, 0.3.0**).
+6. A segment's footer is read once and held by its segment handle until the segment changes (**ColumnarRead, 0.3.0**; the summary caches are deleted).
 
 Key implementation anchors:
 
@@ -266,12 +266,12 @@ Key implementation anchors:
   - `src/Aouda.Engine.Storage/Partition/PartitionRouter.cs`
 - Pruning and discovery:
   - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, next train**); `SegmentPruner.cs` is deleted
+  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**); `SegmentPruner.cs` is deleted
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
 - Manifest and caching:
   - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
   - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
-  - (`SegmentSummaryCache.cs` and `PageSummaryCache.cs` are deleted (**ColumnarRead, next train**))
+  - (`SegmentSummaryCache.cs` and `PageSummaryCache.cs` are deleted (**ColumnarRead, 0.3.0**))
 - Merge and compaction:
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
 
@@ -309,10 +309,10 @@ Primary tests:
 
 ### Walk-through C: Query with segment and row-group skipping
 
-1. The read takes the table's segments from the catalog (`SegmentDiscoveryService.FromCatalog(...)`); no directory is listed, so a segment the catalog does not name is never read, and `_delta` segments no longer exist (**ColumnarRead, next train**).
+1. The read takes the table's segments from the catalog (`SegmentDiscoveryService.FromCatalog(...)`); no directory is listed, so a segment the catalog does not name is never read, and `_delta` segments no longer exist (**ColumnarRead, 0.3.0**).
 2. Every read runs on one scan (`TableScan`) with one predicate evaluator.
-3. `RowGroupClassifier` decides each segment / row group from its min/max statistics: none can match (skipped), all match, or some (decoded and evaluated). Missing statistics mean "some", so skipping is always conservative. A segment whose every row group is ruled out reads no page. For a filter that pins every series column, only that series' run is read, from the segment's run directory (**ColumnarRead, next train**; `SegmentPruner.PruneByClusterStats` is deleted).
-   A "some" row group of a segment in `(series, time)` order is narrowed further when the predicate bounds the time column: each series' run keeps only the 64-row granules whose recorded times can meet the bound, and only those are decoded and evaluated (**ADR 0061, next train**).
+3. `RowGroupClassifier` decides each segment / row group from its min/max statistics: none can match (skipped), all match, or some (decoded and evaluated). Missing statistics mean "some", so skipping is always conservative. A segment whose every row group is ruled out reads no page. For a filter that pins every series column, only that series' run is read, from the segment's run directory (**ColumnarRead, 0.3.0**; `SegmentPruner.PruneByClusterStats` is deleted).
+   A "some" row group of a segment in `(series, time)` order is narrowed further when the predicate bounds the time column: each series' run keeps only the 64-row granules whose recorded times can meet the bound, and only those are decoded and evaluated (**ADR 0061, 0.3.0**).
 4. Rows still in the write buffer are read in the same pass, so a just-inserted row (late or not) is visible at once.
 
 Primary tests:
@@ -322,9 +322,9 @@ Primary tests:
 
 ### Walk-through D: Late-arrival flush
 
-1. A late row is flushed like any other row, into the table's normal segments (**ColumnarRead, next train**).
-2. The delta path, its routing and `DeltaMerger` are removed (**ColumnarRead, next train**), and the options that configured
-   them, `LateArrivalPolicy` / `LateArrivalThreshold`, are deleted (**BL-762, next train**).
+1. A late row is flushed like any other row, into the table's normal segments (**ColumnarRead, 0.3.0**).
+2. The delta path, its routing and `DeltaMerger` are removed (**ColumnarRead, 0.3.0**), and the options that configured
+   them, `LateArrivalPolicy` / `LateArrivalThreshold`, are deleted (**BL-762, 0.3.0**).
 
 ## 2.9 Why Aouda is different (differentiators)
 
@@ -332,7 +332,7 @@ Primary tests:
 |---|---|---|---|
 | Must users add redundant time bucket columns? | Common in many setups | Partition functions derive bucket keys from original columns | Cleaner schemas and less duplicate write logic |
 | Is clustering always full-table sort/merge heavy? | Often yes for maximal ordering | Bounded sort-on-seal plus manifest-aware pruning | Lower write amplification with strong pruning gains |
-| Are late arrivals "invisible until compaction"? | Sometimes delayed | Late rows take the normal write path and are query-visible as soon as they are inserted (**ColumnarRead, next train**) | Better freshness for out-of-order event streams, with nothing to configure |
+| Are late arrivals "invisible until compaction"? | Sometimes delayed | Late rows take the normal write path and are query-visible as soon as they are inserted (**ColumnarRead, 0.3.0**) | Better freshness for out-of-order event streams, with nothing to configure |
 | Is startup metadata loading page-scan heavy? | Can be expensive at scale | Segment manifest metadata with tiered caching | Faster startup and better memory control |
 | Is feature intent and implementation split explicit? | Often mixed in docs | This doc separates shipped/proposed/reserved with code-backed claims | Safer operational and product decisions |
 
@@ -347,10 +347,10 @@ Primary tests:
 | `PartitionOptions.PromotionRowThreshold` | long | `10000000` | `>=0` | .NET engine/catalog | Auto-promotion tuning |
 | `PartitionOptions.PromotionByteThreshold` | long | `1000000000` | `>=0` | .NET engine/catalog | Auto-promotion tuning |
 | `PartitionOptions.InitialBucketCount` | int | `16` | `>=1` | .NET engine/catalog | Shared bucket count |
-| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, next train**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
-| ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, next train**) with `MigrationOptions` and its strategies: the workers were never started. An old catalog's property is ignored on load |
+| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
+| ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, 0.3.0**) with `MigrationOptions` and its strategies: the workers were never started. An old catalog's property is ignored on load |
 | `TableOptions.SortOnSeal` | bool | `true` | `true/false` | Core runtime option | No HTTP/TS toggle today |
-| `TablePolicy.MetadataCaching` | enum | `Auto` | `Auto`, `InMemory`, `OnDemand` | .NET/catalog policy | No effect since the summary caches were deleted (**ColumnarRead, next train**); no HTTP/TS create-table field |
+| `TablePolicy.MetadataCaching` | enum | `Auto` | `Auto`, `InMemory`, `OnDemand` | .NET/catalog policy | No effect since the summary caches were deleted (**ColumnarRead, 0.3.0**); no HTTP/TS create-table field |
 
 Configuration precedence and operational notes:
 
@@ -363,7 +363,7 @@ Configuration precedence and operational notes:
 - Safety-gated:
   - Invalid cluster/partition order and incompatible partition functions are rejected at API boundary.
 - Removed:
-  - `PartitionOptions.Migration` and its phase-2 strategies (**WorkloadCore S17, next train**).
+  - `PartitionOptions.Migration` and its phase-2 strategies (**WorkloadCore S17, 0.3.0**).
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 
@@ -438,7 +438,7 @@ Common mistake: sending unsupported fields like `sortOnSeal` and expecting serve
 | Set partition storage mode | `PartitionOptions.StorageMode` | No typed field | `partitionStorage` field on create table | Partial | TS type gap |
 | Set sort-on-seal | Core `TableOptions.SortOnSeal` | No typed field | No field | Partial | Runtime default applies |
 | Set metadata cache policy | `TablePolicy.MetadataCaching` | No typed field | No field | Partial | Internal/.NET policy surface |
-| Query sees late rows at once | Engine query path | Indirect (normal query APIs) | Query endpoints unchanged | Implemented | Transparent to callers; nothing to configure. Late rows are flushed into normal segments; delta segments are removed (**ColumnarRead, next train**) |
+| Query sees late rows at once | Engine query path | Indirect (normal query APIs) | Query endpoints unchanged | Implemented | Transparent to callers; nothing to configure. Late rows are flushed into normal segments; delta segments are removed (**ColumnarRead, 0.3.0**) |
 | Schema carries cluster columns and partition functions | Schema models/export/apply | Schema CLI paths | `/api/.../schema` introspection | Implemented | Partition options not carried in schema apply create path |
 
 ### B) Missing API matrix
@@ -477,12 +477,12 @@ Steps:
 3. Query the historical range straight away.
 
 Expected result checks:
-- Late rows are visible in query results immediately (from the write buffer, then from a segment); no delta segment is written (**ColumnarRead, next train**).
+- Late rows are visible in query results immediately (from the write buffer, then from a segment); no delta segment is written (**ColumnarRead, 0.3.0**).
 - If the stream is heavily out of order, segments' min/max ranges widen and range queries skip fewer segments; results stay correct.
 
 ### Scenario 3: Scale read path with manifest and metadata caches
 
-(**ColumnarRead, next train:** the summary caches and their counters are gone, and so is `SegmentsPrunedByClusterStats`; check
+(**ColumnarRead, 0.3.0:** the summary caches and their counters are gone, and so is `SegmentsPrunedByClusterStats`; check
 `SegmentsPrunedFully`, a query's latency and `DecodedValues` instead. Kept for its history.)
 
 When to use:
@@ -508,7 +508,7 @@ Monitor first:
   - `PagesSortedOnSeal`
 - Manifests:
   - `manifestsRead` — the only field left in the metrics endpoint's `timeSeries` object (`deltaSegmentsCreated` and `lateArrivalsRouted` were removed with the features they counted).
-- Metadata cache health: no longer applies; the summary caches are deleted (**ColumnarRead, next train**).
+- Metadata cache health: no longer applies; the summary caches are deleted (**ColumnarRead, 0.3.0**).
 
 Recovery/restart expectations:
 
@@ -534,9 +534,9 @@ Suggested tuning sequence:
 |---|---|---|
 | `400` on create-table with cluster columns | Non-consecutive `clusterOrder` values | Use contiguous order (`1,2,3...`) |
 | `400` for partition function | Unsupported function name or incompatible type | Use valid enum values and compatible timestamp/date/int type |
-| Code setting `LateArrivalPolicy` / `LateArrivalThreshold` no longer compiles | Both options are deleted (**BL-762, next train**); they never changed behaviour | Remove them: late rows need no configuration and are flushed like any other row |
+| Code setting `LateArrivalPolicy` / `LateArrivalThreshold` no longer compiles | Both options are deleted (**BL-762, 0.3.0**); they never changed behaviour | Remove them: late rows need no configuration and are flushed like any other row |
 | Range query scans too much | Missing/weak clustering metadata, broad predicate, or heavily out-of-order data widening segment min/max | Validate cluster declaration and predicate shape; inspect prune counters |
-| Rows under a table's `data/_delta/` are missing after upgrading | An older build left them there; delta segments are removed and that directory is no longer read (**ColumnarRead, next train**) | Before upgrading, check each table for a non-empty `data/_delta/`: this build does not read it |
+| Rows under a table's `data/_delta/` are missing after upgrading | An older build left them there; delta segments are removed and that directory is no longer read (**ColumnarRead, 0.3.0**) | Before upgrading, check each table for a non-empty `data/_delta/`: this build does not read it |
 | TS createTable cannot set partition storage | Type surface gap | Use HTTP or .NET path for now; track parity follow-up |
 
 ## 2.15 Verification ledger
@@ -559,8 +559,8 @@ Last verification date (UTC): `2026-03-31`.
 | Partition function extraction/compatibility | `PartitionFunctionIntegrationTests.cs`, `PartitionFunctionTests.cs`, `PartitionKeyExtractorTests.cs` | Pass | Strong | Covers function parsing and key generation |
 | Sort-on-seal behavior | `SortOnSealIntegrationTests.cs`, `ClusterSorterTests.cs` | Pass | Strong | Includes row reordering and conditions |
 | Segment manifest serialization | `ManifestSerializerTests.cs`, `CatalogPersistenceTests.cs` | Pass | Medium/Strong | Focused on metadata correctness and compatibility |
-| Segment / row-group skipping from statistics | `ColumnarRead/ReadRuleOracle*Tests.cs`, `ColumnarRead/ReadFuzzTests.cs`, `HotSegmentClusterStatsTests.cs` (`SegmentPrunerTests.cs` is deleted (**ColumnarRead, next train**)) | Pass (existing) | Strong | Every skipping rule has an oracle case against an unpruned read |
-| Retrospective partitioning (manual route) | `RetrospectivePartitioningTests.cs` | Pass | Medium | The migration workers and `EagerBlockingMigrationTests.cs` were removed (**WorkloadCore S17, next train**) |
+| Segment / row-group skipping from statistics | `ColumnarRead/ReadRuleOracle*Tests.cs`, `ColumnarRead/ReadFuzzTests.cs`, `HotSegmentClusterStatsTests.cs` (`SegmentPrunerTests.cs` is deleted (**ColumnarRead, 0.3.0**)) | Pass (existing) | Strong | Every skipping rule has an oracle case against an unpruned read |
+| Retrospective partitioning (manual route) | `RetrospectivePartitioningTests.cs` | Pass | Medium | The migration workers and `EagerBlockingMigrationTests.cs` were removed (**WorkloadCore S17, 0.3.0**) |
 | Schema apply/export handling for cluster/partition functions | `SchemaApplyEngineTests.cs`, `SchemaExporterTests.cs`, `SchemaDiffEngineTests.cs` | Pass (existing) | Medium | Confirms schema model handling boundaries |
 
 ## 2.17 Testing gaps and proposed tests
@@ -582,7 +582,7 @@ Last verification date (UTC): `2026-03-31`.
 - Partition function scope gap:
   - ADR examples mention `DivideBy*` variants; current runtime enum does not include these values.
   - User impact: integer bucketing options are narrower than ADR narrative examples.
-- Migration strategies removed (**WorkloadCore S17, next train**):
+- Migration strategies removed (**WorkloadCore S17, 0.3.0**):
   - `MigrationOptions` (`Background`/`Eager`/`Blocking`) configured workers no production path started; they are gone, and an old catalog's setting is ignored.
 
 ## 2.19 References
@@ -614,7 +614,7 @@ Last verification date (UTC): `2026-03-31`.
   - `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs`
   - `src/Aouda.Engine.Storage/Manifest/ManifestSerializer.cs`
   - `src/Aouda.Engine.Storage/Query/Scan/TableScan.cs`
-  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, next train**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
+  - `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` (**ColumnarRead, 0.3.0**) — `SegmentSummaryCache`, `PageSummaryCache` and `SegmentPruner` are deleted
   - `src/Aouda.Engine.Storage/Query/SegmentDiscoveryService.cs`
   - `src/Aouda.Engine.Storage/Compaction/KWayMergeExecutor.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`

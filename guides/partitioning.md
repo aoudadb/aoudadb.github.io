@@ -158,8 +158,8 @@ If you create a table/database without tuning partition or multidb options:
 | `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Non-negative integer (bytes) | Auto-promotion can trigger at high byte volume. Declarable on the schema (`promotionByteThreshold`) and mutable after table creation. |
 | `PartitionOptions.InitialBucketCount` | `16` when every partition-key column carries a bounded time-truncation `partitionFunction`; **`128`** otherwise (P45) | Integer ≥ 1 | Shared-partition hashing starts with this many buckets. Declarable on the schema (`initialBucketCount`, `Auto`/`Shared` tables only) but **fixed for the life of the table** — see [Choosing `initialBucketCount` at scale](#choosing-initialbucketcount-at-scale-p45). |
 | `TableOptions.PkUniqueness` | `Strict` | `Strict`, `Recent`, `BestEffort` | Not a `PartitionOptions` field, but declarable on the schema (`pkUniqueness`, any table) and mutable after creation as of P45 — previously only reachable per bulk-load job. |
-| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | Deleted (**BL-762, next train**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other |
-| ~~`MigrationOptions.Strategy`~~ | — | — | Removed (**WorkloadCore S17, next train**): the retrospective migration workers it configured were never started by any production path. A catalog that still carries `"Migration"` loads; the property is ignored |
+| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other |
+| ~~`MigrationOptions.Strategy`~~ | — | — | Removed (**WorkloadCore S17, 0.3.0**): the retrospective migration workers it configured were never started by any production path. A catalog that still carries `"Migration"` loads; the property is ignored |
 | `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
 | `DatabaseOptions.EnableWal` | `true` | `true`, `false` | DB has WAL enabled unless explicitly disabled |
 | `DatabaseOptions.ReplicationMode` | `Replicate` | `Replicate`, `DoNotReplicate` | DB participates in replication by default |
@@ -179,7 +179,7 @@ On a partitioned table the guard defaults **on**. A query must include `eq` or `
 | Watchlist `Ticker in […] AND Source eq '…'` | Passes — **one** named query |
 | `nin`, range (`gt`/`lt`), `between`, `like` | Fails |
 | Composite **prefix** on a query that reads rows | Fails |
-| Key-only `distinct` (PK columns only, ≥1 key constrained) | Passes without the missing keys — answered by a scan since the **architecture review, next train** (the directory answer, its completeness check and its 10 000-tuple cap are gone) |
+| Key-only `distinct` (PK columns only, ≥1 key constrained) | Passes without the missing keys — answered by a scan since the **architecture review, 0.3.0** (the directory answer, its completeness check and its 10 000-tuple cap are gone) |
 
 Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Error `PARTITION_FILTER_REQUIRED` names the **missing** columns and the satisfying operators.
 
@@ -304,7 +304,7 @@ or `in` (including a constrained prefix of a composite partition key):
 - **A key that is promoted to its own dedicated directory while a query is already running is still
   found.** Pruning always consults the table's current routing state, never a value fixed when the query
   started.
-- **A promoted key's earlier rows stay in its shared bucket** (**ColumnarRead, next train**). Promotion
+- **A promoted key's earlier rows stay in its shared bucket** (**ColumnarRead, 0.3.0**). Promotion
   no longer migrates a key's historical rows into its dedicated directory; only rows written after the
   promotion land there. The bucket's rows are still read, so a query on that key returns both.
 - This is a distinct mechanism from cluster-column pruning (physical column statistics on non-partition
@@ -357,7 +357,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 
 - Full ADRA/RLS deepening beyond current shipped baseline is still tracked under P14 follow-ups.
 - Broader SDK parity for advanced partition-security admin and complex query-shape helpers remains iterative.
-- Retrospective partition migration: the never-started migration workers and `MigrationOptions` were removed (**WorkloadCore S17, next train**); the supported route is the manual one (BL-300).
+- Retrospective partition migration: the never-started migration workers and `MigrationOptions` were removed (**WorkloadCore S17, 0.3.0**); the supported route is the manual one (BL-300).
 
 ### Reserved / not yet wired
 
@@ -560,7 +560,7 @@ Core modules:
 4. `CompletePromotionAsync(...)` persists completion via callback and updates counters.
 5. State mutation outcome: partition can be treated as dedicated in catalog/router. Rows the key received before
    the promotion stay in the shared bucket and are still read; the historical row migration is removed
-   (**ColumnarRead, next train**).
+   (**ColumnarRead, 0.3.0**).
 6. Test anchors: partition promotion behavior covered by P4 Task3 report and storage/path integration tests including `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs`.
 
 ### Walk-through C: Database-scoped query HTTP path with PLS controls
@@ -620,8 +620,8 @@ Core modules:
 | `PartitionOptions.PromotionRowThreshold` | long | `10_000_000` | `>= 0` | catalog policy | Auto-promotion row trigger |
 | `PartitionOptions.PromotionByteThreshold` | long | `1_000_000_000` | `>= 0` | catalog policy | Auto-promotion byte trigger |
 | `PartitionOptions.InitialBucketCount` | int | `16` (engine-level constant; see the row above for the value a new table actually gets) | `>= 1` | catalog policy | Shared mode initial bucket fanout. Resolved to `16` or `128` at table-create time per the rule in `2.7` before this field is ever persisted. |
-| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, next train**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
-| ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, next train**) with `MigrationOptions` (its workers were never started by a production path); an old catalog's property is ignored on load |
+| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
+| ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, 0.3.0**) with `MigrationOptions` (its workers were never started by a production path); an old catalog's property is ignored on load |
 | `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default table temperature in DB |
 | `Aouda:Databases:{db}:EnableWal` | bool | `true` | `true/false` | startup config | Per-db WAL default |
@@ -651,7 +651,7 @@ Precedence and operational notes:
   - Route/body database mismatch is rejected.
   - Partitioned query without required filter is rejected unless explicit bypass.
 - Deprecated/reserved:
-  - `PartitionOptions.Migration` and its phase-2 fields were removed (**WorkloadCore S17, next train**).
+  - `PartitionOptions.Migration` and its phase-2 fields were removed (**WorkloadCore S17, 0.3.0**).
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 

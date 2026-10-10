@@ -7,7 +7,7 @@ parent: "Guides"
 # Aouda Functionality: Replication and Cluster Behavior
 
 {: .warning }
-**Replication is not supported in the next train (BL-839).** A replica receives only the WAL frames the primary broadcasts
+**Replication is not supported in 0.3.0 (BL-839).** A replica receives only the WAL frames the primary broadcasts
 while it is connected: frames written while it is disconnected — a network blip, a replica restart, the time a checkpoint
 takes to transfer — are never sent to it, so **a replica cannot catch up after a disconnect** and misses those
 writes. Run single-node (`ReplicationMode: DoNotReplicate`, see [Single-Node Deployment](single-node-deployment.md)) and protect
@@ -197,7 +197,7 @@ If you do nothing:
 
 - Catch-up from the primary's WAL files: a replica receives frames broadcast while it is connected, so frames written while it is
   disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). This is why replication is not
-  supported in the next train (see the note at the top of this page). Streamed rows are held in memory on the
+  supported in 0.3.0 (see the note at the top of this page). Streamed rows are held in memory on the
   replica and are not re-applied after a replica restart (**BL-839**).
 - Public admin API for WAL slot inspection/listing (proposed in task follow-up notes).
 - Per-replica slot-lag metrics endpoint (proposed in task follow-up notes).
@@ -221,7 +221,7 @@ If you do nothing:
 | Replica set roles and write gating | Yes | No | No | P4 E0 report + `WriteGuardFilter` + server tests | Secondary/hidden/backup reject writes |
 | Heartbeat, election, fencing failover loop | Yes | No | No | P4 E4 report + election tests | Election port is replication port + 1 |
 | WAL stream replication (steady-state) | Yes | No | No | P4 E1 report + streaming tests | HMAC + CRC + ACK paths |
-| Too-far-behind checkpoint bootstrap | Yes | Yes | No | P4 E2 report + checkpoint tests; `ReplicaCheckpointBootstrapTests` (two nodes) | Every open database, per-database positions (**BL-763, next train**) |
+| Too-far-behind checkpoint bootstrap | Yes | Yes | No | P4 E2 report + checkpoint tests; `ReplicaCheckpointBootstrapTests` (two nodes) | Every open database, per-database positions (**BL-763, 0.3.0**) |
 | Replica WAL replay into storage/catalog | Yes | No | No | P4 E3 report + replica state machine code/tests | Includes DDL and Tx frame handling |
 | Hidden replica read preference behavior | Yes | No | No | P4 E6 report + `HiddenReplicaQueryTests` | Non-hidden cannot serve `Hidden` preference |
 | Per-database replication subscriptions | Yes | No | No | P6 E1 report + multi-db tests | v1/v2 protocol compatibility retained |
@@ -258,7 +258,7 @@ Invariants:
 - Hidden members do not serve default reads; they require explicit `Hidden` preference.
 - `w:1` does not register pending tracker waits.
 - ACK position updates advance slot positions; disconnect does not auto-delete replication slots.
-- **A primary and its replicas run the same build** (**architecture review, next train**). A replica checkpoint now
+- **A primary and its replicas run the same build** (**architecture review, 0.3.0**). A replica checkpoint now
   carries each segment's footer and its deletion masks — a new checkpoint file type, `DeletionMask`, which an older
   build does not know — and the two builds cannot read each other's segments. Upgrade every
   member together; a 0.2.x replica set moves by export and reload ([Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model)).
@@ -305,7 +305,7 @@ Key implementation anchors:
 3. State mutations and persistence:
    - Secondary requests checkpoint transfer. The primary writes an **image** of every open database — its catalog (tables with
      their keys, partitioning and policy, and every catalogued segment) and exactly the files of those segments, after flushing
-     every buffered row — and serves it; the image is deleted when the transfer ends (**BL-763, next train**).
+     every buffered row — and serves it; the image is deleted when the transfer ends (**BL-763, 0.3.0**).
    - `CheckpointApplier` verifies every CRC, then, database by database, closes the database's engine, replaces its directory
      with the image's and opens it again (registering a database the secondary did not have).
    - Secondary reconnects; each database continues streaming from **its own** position in the checkpoint. Every write
@@ -837,7 +837,7 @@ Suggested tuning sequence:
 | Hidden node does not serve default reads | Expected behavior (`Hidden` requires explicit preference) | Query with `readPreference=Hidden` only for hidden workloads |
 | `writeConcern=majority` frequently degrades | Insufficient ACK quorum or timeout too short | Check subscriber counts, lag, timeout config |
 | Secondary repeatedly reboots/catches up via checkpoint | WAL retention boundary too aggressive or prolonged disconnect | Inspect slots/retention settings and replica stability |
-| A rolling upgrade from 0.2.x: members on different builds | Not supported (**architecture review, next train**: the checkpoint carries deletion masks as a new file type, and 0.2.x segments are not readable by this build) | Run the same build on every member; move a 0.2.x replica set by export and reload |
+| A rolling upgrade from 0.2.x: members on different builds | Not supported (**architecture review, 0.3.0**: the checkpoint carries deletion masks as a new file type, and 0.2.x segments are not readable by this build) | Run the same build on every member; move a 0.2.x replica set by export and reload |
 | Coverage warns "replicated but no subscriber" | Table is replicated but all secondaries filtered it out | Adjust `Subscriptions` include/exclude rules |
 | Health endpoint marks replication degraded | Lag exceeds configured threshold | Check per-db lag, network path, and replica load |
 
@@ -890,7 +890,7 @@ _Updated 2026-04-08 after P16 completion._
 ### Remaining gaps
 
 - BL-024 is stale relative to current server capabilities: treat as harness/process-testing debt.
-- No catch-up from the primary's WAL files, and replica rows held in memory only (**BL-839**); the checkpoint covers every database since **BL-763 (next train)**.
+- No catch-up from the primary's WAL files, and replica rows held in memory only (**BL-839**); the checkpoint covers every database since **BL-763 (0.3.0)**.
 - API parity gaps:
   - TS query read preference support missing.
   - `.NET`/TS write concern request ergonomics missing.

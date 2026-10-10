@@ -162,7 +162,7 @@ Out of scope for this functionality:
 | L3 startup preload | Yes | No | No | `AoudaEngine.PreloadPrimaryKeyIndexes` | Strict tables only. |
 | Latent duplicate counter for phase-1 gate | Yes | No | No | `_pkLatentDuplicates`, `HandleDuplicate`, playbook | Exposed in diagnostics. |
 | Zone maps on every PK column, and the leading value checked against every page's bloom (**BL-663, 0.1.39**) | Yes | No | No | `AoudaEngine.KeyProbe.cs` | Sealed-segment lookups exclude a segment when **any** key column is outside that column's min/max, not only the first. So a table clustered on time prunes old segments by time. A leading value that no page's bloom contains excludes the whole segment for all keys with that value. |
-| Key reads use the PK structures (**BL-647, 0.1.39**) | Yes | Partial | No | `TableQuery.KeyNarrowing.cs` | A query whose filter is a full-key equality, or an `OR` of them (≤ 256), reads only the buffered rows the L2 index locates and only segments that can hold a key. Applies to row and columnar reads on `Strict` and `Recent` tables that are not partitioned, and to aggregates, `DISTINCT` and `GROUP BY` (**BL-666, next train**). Not yet applied to streaming, joins, or updates and deletes that match several keys. |
+| Key reads use the PK structures (**BL-647, 0.1.39**) | Yes | Partial | No | `TableQuery.KeyNarrowing.cs` | A query whose filter is a full-key equality, or an `OR` of them (≤ 256), reads only the buffered rows the L2 index locates and only segments that can hold a key. Applies to row and columnar reads on `Strict` and `Recent` tables that are not partitioned, and to aggregates, `DISTINCT` and `GROUP BY` (**BL-666, 0.3.0**). Not yet applied to streaming, joins, or updates and deletes that match several keys. |
 | Open-path preload to avoid first-write rebuild | Yes | No | No | P17 completion, `PreloadPrimaryKeyIndexes` | Extended by P18 with L1/L3 load. |
 | User-level automated duplicate remediation | No | No | Yes | Playbook only | Operator-driven process. |
 
@@ -180,15 +180,15 @@ Invariants:
 - PK checks are always policy-aware, but within-batch duplicates are always rejected.
 - Strict policy checks both mutable and sealed data tiers.
 - BestEffort disables cross-tier checks, but does not disable in-batch duplicate detection.
-- A key names one logical row on a `Strict` table only (**BL-791, next train**). On `Recent` and `BestEffort` a table can hold
+- A key names one logical row on a `Strict` table only (**BL-791, 0.3.0**). On `Recent` and `BestEffort` a table can hold
   two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
   `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
   every copy of a matched key held in a segment.) On a `Strict` table a key cannot have two live copies, and the behaviour is unchanged.
-- Crash recovery honours the same rule (**BL-823, next train**). On `Recent` and `BestEffort` tables a DELETE, UPDATE or upsert logs
+- Crash recovery honours the same rule (**BL-823, 0.3.0**). On `Recent` and `BestEffort` tables a DELETE, UPDATE or upsert logs
   the rows it marked — a buffered row by its logged id, a sealed one by segment and row — and the replay after a crash marks exactly
   those copies. Before, the log held only keys, so with two live copies of a key, deleting or updating one of them (or upserting the
   key) and crashing before the next checkpoint removed the other copy too. A `Strict` table still logs its deletes by key.
-- A deleted or updated row stays deleted after a crash, in every tier (**BL-891, next train**). Replay re-marks a keyed delete's
+- A deleted or updated row stays deleted after a crash, in every tier (**BL-891, 0.3.0**). Replay re-marks a keyed delete's
   copies in hot segments as well as in the write buffer and cold segments (a hot copy used to come back), and only in segments
   that existed when the delete committed — so a key deleted and then written again, or bulk loaded again (**BL-924**), keeps its
   new row.
@@ -217,8 +217,8 @@ narrows its inputs before scanning:
 - The unflushed buffer contributes only the rows L2 locates for those keys, instead of being walked.
 - Every segment proven to hold none of the keys is skipped. The proof uses L2 hot partitions, zone
   maps on each key column, page blooms and L3. Only a `Strict` table writes the leading-key page
-  bloom (**ColumnarRead, next train**: now also for a segment of fewer than 13 rows).
-- (**ColumnarRead S17, next train**) In a cold segment that may hold a key, the read decodes only the
+  bloom (**ColumnarRead, 0.3.0**: now also for a segment of fewer than 13 rows).
+- (**ColumnarRead S17, 0.3.0**) In a cold segment that may hold a key, the read decodes only the
   rows the key map located, not the segment; the segment's bloom is held in memory rather than read
   from its file on every read.
 
@@ -226,7 +226,7 @@ The scan then runs as before, and the full filter is still evaluated on every ro
 are therefore identical to an unnarrowed read; only the work changes. A segment that cannot be ruled
 out is always read.
 
-⚠️ **Fixed (**ColumnarRead S17, next train**): a keyed read could come back empty for a key updated
+⚠️ **Fixed (**ColumnarRead S17, 0.3.0**): a keyed read could come back empty for a key updated
 while it ran.** The proof treated a key whose row in a segment had been deleted *after* the read fixed
 its view as absent from that segment, so an `UPDATE` committing in between made the read skip the old
 row and miss the new one. The proof no longer consults deletions; the read's own view decides which
@@ -259,7 +259,7 @@ Seal/open path:
 4. `CompleteFreezeFlush` clears frozen partition after persistence/registration.
 5. A hot segment a flush has registered but not yet published is not counted by the `Strict` check; until the publish the
    frozen copy answers, so a key deleted there can be inserted again at once. A frozen hit is judged against the buffer it
-   came from, and looked up again if that flush completed in between (**BL-899, next train**).
+   came from, and looked up again if that flush completed in between (**BL-899, 0.3.0**).
 
 **Path C: Startup preload**
 1. `AoudaEngine.OpenAsync` obtains snapshot.
@@ -402,7 +402,7 @@ Key counters/signals:
 Recovery expectations:
 - L1/L3 files are loaded at open when present.
 - Missing/corrupt files are warning-logged; lookup falls back where possible.
-- (**BL-823, next train**) The WAL's keyed-delete, merge and delete-by-identity frames are format 2. A log holding an older build's
+- (**BL-823, 0.3.0**) The WAL's keyed-delete, merge and delete-by-identity frames are format 2. A log holding an older build's
   frame of those kinds past its checkpoint (a crash with deletes or upserts not yet checkpointed) is refused at open, naming both
   formats: open it once with the build that wrote it and close it cleanly, or restore from a backup. A cleanly closed database is
   unaffected. See [Storage — troubleshooting](storage.md#214-troubleshooting-by-symptom).

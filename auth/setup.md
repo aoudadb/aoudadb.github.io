@@ -245,12 +245,12 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/refresh \
 
 Each refresh rotates the refresh token. The old one is immediately invalidated. If a revoked refresh token is reused, the entire token family is invalidated (theft detection).
 
-**A refresh refused for capacity does not spend the token (**BL-841, next train**).** When the server is out of
+**A refresh refused for capacity does not spend the token (**BL-841, 0.3.0**).** When the server is out of
 memory for the refresh's writes it answers `503` `MEMORY_BUDGET_EXCEEDED` with `Retry-After`, and the refresh token
 you sent is still live: retry **with the same token** after `Retry-After`. (Before, the refusal was a `500` and the
 token was already spent, so the retry read as reuse and signed the user out.)
 
-**Refresh from one place at a time (**BL-841, next train**).** Two refreshes presenting the same token at once:
+**Refresh from one place at a time (**BL-841, 0.3.0**).** Two refreshes presenting the same token at once:
 exactly one succeeds. The other is treated as reuse — it answers `401` `AUTH_REFRESH_TOKEN_INVALID` and revokes the
 whole token family, **including the refresh token the winning call just returned**, so both callers end up signed
 out. The C# SDK runs one refresh at a time per client, but two clients sharing one token — two browser tabs, two
@@ -258,7 +258,7 @@ processes — can still race. Give a shared session a single refresher (one tab 
 tokens to the others), or give each client its own sign-in.
 
 Sign-in, sign-up and password changes hash the password, and the hash waits for its memory first; under load they
-can answer `503` with `Retry-After` too. Retry them as any capacity refusal (**BL-850, next train**).
+can answer `503` with `Retry-After` too. Retry them as any capacity refusal (**BL-850, 0.3.0**).
 
 ### Session Validation Modes
 

@@ -42,7 +42,7 @@ If a named-mutation call 404s and the name is definitely right, check the caller
 
 Both `auth-db-pls` and `auth-db-rls` use a **session cache** as the hot path: resolved permissions are cached in the session record at sign-in. The vast majority of requests read from the session cache (~0.001ms), not the auth DB (~0.01ms). The auth DB itself is always memory-first — even the cold path is sub-millisecond.
 
-**No resolved permissions means no access** (**BL-950, next train**). An `auth-db-pls` or `auth-db-rls` table is enforced
+**No resolved permissions means no access** (**BL-950, 0.3.0**). An `auth-db-pls` or `auth-db-rls` table is enforced
 from the caller's resolved permissions, and a request that has none is denied, never let through: an anonymous caller, a
 database with **no linked auth database**, and a permission lookup that failed all read no row of such a table and may
 write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table answers an empty result and refuses writes).
@@ -445,7 +445,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
 
 PLS and RLS are **conjunctive** (AND). There is no cross-layer OR.
 
-**Joins onto a restricted table are refused** (**architecture review, next train**). PLS and RLS are applied as predicates
+**Joins onto a restricted table are refused** (**architecture review, 0.3.0**). PLS and RLS are applied as predicates
 on the queried (base) table, and a join reads its targets unfiltered — so a query or named query that joins a table the
 caller's PLS or RLS would filter (or that the caller may read nothing of) is refused with `403 AUTHORIZATION_DENIED`,
 naming the table. A join is allowed only onto tables the caller may read without restriction (an RLS rule that adds no

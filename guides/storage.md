@@ -243,19 +243,19 @@ If you run server defaults and do not set per-database overrides:
     is the whole bitmap followed by those records, rewritten whole when the records outgrow the bitmap. That is its only
     layout. A mask that exists but cannot be read fails the read, naming the table and segment, instead of being taken
     as nothing deleted (**BL-725, 0.2.0**). Its header records how many rows the bitmap deletes, and a mask whose
-    count disagrees with its bitmap is unreadable (**ColumnarRead, next train**).
-  - `segment.manifest` — a cold segment's footer (**ColumnarRead, next train**): every page's location and statistics
+    count disagrees with its bitmap is unreadable (**ColumnarRead, 0.3.0**).
+  - `segment.manifest` — a cold segment's footer (**ColumnarRead, 0.3.0**): every page's location and statistics
     (min / max, null count, sortedness, run count, first / last value, sums, small value sets), the first and last
     sort-key value of each 8,192-row group, each series' row range, and the primary-key range. CRC-checked; a footer
     written by an earlier build is refused.
 - **Table segment layout**
   - Table path is name-based.
   - Default non-partitioned path uses `data/seg_*`.
-  - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, next train**).
+  - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, 0.3.0**).
   - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
-    catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, next train**).
-- **Upgrading from 0.2.x: export and reload** (**architecture review, next train**)
-  - The catalog format is **6** (**RR-A2-4, next train**; 5 before WorkloadCore added segment fields, 4 in 0.2.x). A data
+    catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, 0.3.0**).
+- **Upgrading from 0.2.x: export and reload** (**architecture review, 0.3.0**)
+  - The catalog format is **6** (**RR-A2-4, 0.3.0**; 5 before WorkloadCore added segment fields, 4 in 0.2.x). A data
     directory in any other catalog format — 0.2.x's 4, a development build's 5, a newer build's — is **refused at open**
     with `CatalogFormatException` naming the version found and version 6; there is no migration from any older format,
     the flat format-1 `catalog.json` included. For 0.2.x: export the data with the 0.2.x build that wrote it and load it into a fresh
@@ -265,7 +265,7 @@ If you run server defaults and do not set per-database overrides:
     this build supports").
   - A cold segment whose footer is another version fails the read that reaches it with
     `SegmentFormatUnsupportedException`, naming the table, the segment and the version — never an empty read. A 0.2.x
-    **backup** does not get that far: the restore refuses it as backup format 1 or 2 (**BL-840, next train**), before it
+    **backup** does not get that far: the restore refuses it as backup format 1 or 2 (**BL-840, 0.3.0**), before it
     touches the target ([Backup](backup.md#214-troubleshooting-by-symptom)).
   - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
     taken with the older build is what carries them over.
@@ -297,7 +297,7 @@ High-level path:
 4. Flush/compaction persists table segments and updates catalog state.
 5. Restart path loads catalog/segments and replays WAL deltas.
 6. WAL lifecycle workers and slot manager coordinate retention/archive safety.
-7. Backup/restore engines use an image of the catalog store (**BL-840, next train**; a catalog checkpoint before) + file hashing + WAL position semantics.
+7. Backup/restore engines use an image of the catalog store (**BL-840, 0.3.0**; a catalog checkpoint before) + file hashing + WAL position semantics.
 
 Key implementation anchors:
 
@@ -374,7 +374,7 @@ Primary tests:
 1. Caller invokes `BackupEngine.CreateBackupAsync(...)`.
 2. Engine takes one image of the catalog store — every table and segment entry, with keys, partitioning, cluster order,
    nullability and policies — pins the segments it names until they are uploaded, then captures WAL position/fencing token
-   (**BL-840, next train**; it wrote a catalog checkpoint, `catalog.chk`, which held only column ids, names, types and encoders).
+   (**BL-840, 0.3.0**; it wrote a catalog checkpoint, `catalog.chk`, which held only column ids, names, types and encoders).
    The backup format is 3; a restore puts the catalog store back as it was and refuses an older format before it touches the
    target.
 3. Manifest builder computes SHA256 across eligible files and compares against base manifest for incremental mode.
@@ -425,7 +425,7 @@ it is neither, and the sections were never separated. They are now.
    redo start position. This horizon lets crash recovery **fast-forward** past already-flushed WAL
    — it never by itself authorizes **deletion**; deletion is always `MIN(all slots)` (previous
    point), a distinction that matters because it is easy to conflate the two.
-5. **Retention worker cycle** — (**WorkloadCore S16, next train**) on demand: when the log crosses 85 % of `MaxWalBytes`
+5. **Retention worker cycle** — (**WorkloadCore S16, 0.3.0**) on demand: when the log crosses 85 % of `MaxWalBytes`
    (`T26`), when an append is refused at 95 %, and after every checkpoint; it used to run every
    `RetentionCheckInterval` (5 minutes), which is gone. It computes the safe
    delete boundary; applies an archive-before-delete constraint if configured; invalidates (deletes)
@@ -434,9 +434,9 @@ it is neither, and the sections were never separated. They are now.
    reduced manifest before deleting files (a crash between the two leaves unmanifested files, which
    open reconciles); update WAL-on-disk / WAL-reclaimable inventory metrics.
 6. **The size ladder** (`WalSizeGovernor`, one per WAL root) is the backstop: `MaxWalBytes` derived
-   from free disk space at open and (**BL-787, next train**) recomputed after reclaims from the disk and the largest working set
+   from free disk space at open and (**BL-787, 0.3.0**) recomputed after reclaims from the disk and the largest working set
    the log has held — see [Sizing](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-next-train), whose `[WAL]` log
-   lines show each crossing — a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, next train**)
+   lines show each crossing — a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, 0.3.0**)
    (it was an insert-throttle rung: a fixed delay inside the commit; the writer is now slowed before
    it takes any lock, by the ingest stall curve — see the sizing guide), an
    insert-refusal rung (`WAL_CAPACITY_EXCEEDED`, HTTP 503 + a `Retry-After` estimated from the rate
@@ -683,7 +683,7 @@ Monitor first:
   - Replication status endpoints for lag and per-db positions.
   - Admin metrics backup subsystem for operational signals.
 
-Cold-page integrity (**BL-815, next train**):
+Cold-page integrity (**BL-815, 0.3.0**):
 
 - Every cold page carries a CRC. A reader checks it the first time it reads the page, and a **background scrubber** checks
   every cold page again against the disk: the first pass 15 minutes after the database opens, then one every 24 hours, under
@@ -719,16 +719,16 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Data path exists but DB cannot open | Invalid/partial directory state or config mismatch | Check server startup logs, validate `DataPath`, verify required DB subdirectories |
-| `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 6 only" | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, a newer build writes more (**architecture review, RR-A2-4, next train**). A shard or journal naming another version under a format-6 root is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
+| `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 6 only" | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, a newer build writes more (**architecture review, RR-A2-4, 0.3.0**). A shard or journal naming another version under a format-6 root is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
 | A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#214-troubleshooting-by-symptom)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | Effective table durability has WAL disabled or DB WAL disabled | Check DB `enableWal` and table durability overrides |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
 | Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
-| An `Error` log line `[SegmentScrubber] corrupt page: table …, segment …, column …`, and reads of that table failing with a corruption error (**BL-815, next train**) | A cold page changed on disk after it was written (a media error, or something other than Aouda wrote to the data directory) | Check the disk. Restore the table from a backup or re-sync it from a replica. The line repeats every 24 hours until the segment is replaced |
-| Restore refused: "backup format version N; this build restores format version 3 only" (**BL-840, next train**) | The backup was taken by an older build (format 1 or 2), whose catalog copy lacks keys, partitioning and nullability. Nothing was restored | Restore it with the build that took it; then take a new backup with this build. See [Backup](backup.md#b-restore-exact-backup) |
-| Open refused: "WAL frame … (… format 1) at position …: this build replays … in format 2 … only" (**BL-823, BL-837, BL-923, next train**) | The log holds, past its checkpoint, a frame an older build wrote and this build no longer replays: an edge insert (`EdgeInsert`, tag 40 → `EdgeInsertV2`), a vector insert (`VectorInsert` → `VectorInsertV2`), or a keyed delete / merge / delete by identity (`HraRowDelete` 23 → 70, `MergeBatch` 66 → 71, `HraRowDeleteById` 67 → 72). It happens only when the older build stopped **without** a clean close while such writes were not yet checkpointed | Open the database once with the build that wrote it and close it cleanly — its rows, edges and vectors are then in segments and the frame is not replayed — then open it with this build. Or restore from a backup taken by this build. A cleanly closed database is unaffected |
-| Open refused with a `JsonException` loading an empty `wal/slots.json` after a clean close, or over an empty materialized-query `definition.json` after two coalescing-window changes at once or a cancelled one | Fixed (**BL-933, BL-935, next train**): two writers' saves of one file could overlap through a shared temp file and leave it empty. Every file an open reads is now written whole (its own temp file, fsync, rename, directory fsync), one writer at a time | Upgrade. A database already left that way: restore from a backup. An empty or unreadable slot file is still refused at open — it is a bug if it happens, not a state to tolerate |
+| An `Error` log line `[SegmentScrubber] corrupt page: table …, segment …, column …`, and reads of that table failing with a corruption error (**BL-815, 0.3.0**) | A cold page changed on disk after it was written (a media error, or something other than Aouda wrote to the data directory) | Check the disk. Restore the table from a backup or re-sync it from a replica. The line repeats every 24 hours until the segment is replaced |
+| Restore refused: "backup format version N; this build restores format version 3 only" (**BL-840, 0.3.0**) | The backup was taken by an older build (format 1 or 2), whose catalog copy lacks keys, partitioning and nullability. Nothing was restored | Restore it with the build that took it; then take a new backup with this build. See [Backup](backup.md#b-restore-exact-backup) |
+| Open refused: "WAL frame … (… format 1) at position …: this build replays … in format 2 … only" (**BL-823, BL-837, BL-923, 0.3.0**) | The log holds, past its checkpoint, a frame an older build wrote and this build no longer replays: an edge insert (`EdgeInsert`, tag 40 → `EdgeInsertV2`), a vector insert (`VectorInsert` → `VectorInsertV2`), or a keyed delete / merge / delete by identity (`HraRowDelete` 23 → 70, `MergeBatch` 66 → 71, `HraRowDeleteById` 67 → 72). It happens only when the older build stopped **without** a clean close while such writes were not yet checkpointed | Open the database once with the build that wrote it and close it cleanly — its rows, edges and vectors are then in segments and the frame is not replayed — then open it with this build. Or restore from a backup taken by this build. A cleanly closed database is unaffected |
+| Open refused with a `JsonException` loading an empty `wal/slots.json` after a clean close, or over an empty materialized-query `definition.json` after two coalescing-window changes at once or a cancelled one | Fixed (**BL-933, BL-935, 0.3.0**): two writers' saves of one file could overlap through a shared temp file and leave it empty. Every file an open reads is now written whole (its own temp file, fsync, rename, directory fsync), one writer at a time | Upgrade. A database already left that way: restore from a backup. An empty or unreadable slot file is still refused at open — it is a bug if it happens, not a state to tolerate |
 | PITR target fails | Window closed (write volume since last backup, or archive gap); backup not PITR-eligible (`walPosition` 0); or target at/before backup `createdUtc` | Take a newer backup, enable archiving, or pick a later `targetTime`. Exact restore (no `targetTime`) is unaffected |
 
 ## 2.15 Verification ledger

@@ -219,7 +219,7 @@ if (restoreResult is RestoreBackupResult.Success s)
 > [Backup and Restore](../guides/backup.md#24-availability-status)
 > and [HTTP API](../reference/http-api.md#post-adminbackuprestoreid).
 
-> **Restore with the build that took the backup** (**architecture review, next train**). A 0.2.x
+> **Restore with the build that took the backup** (**architecture review, 0.3.0**). A 0.2.x
 > backup restored into this build opens, but its segments fail by name on read
 > (`SegmentFormatUnsupportedException`): restore it with 0.2.x, export, and reload. A clean restore
 > now brings back rows that were in hot segments; before, they were lost. See
