@@ -207,6 +207,36 @@ shares.
 ⚠️ **Nothing re-derives the budget.** `derivedAtUtc` is always startup. On an unbounded host that
 means the ceiling is fixed from a reading that has since moved; restart to re-derive it.
 
+(**BL-784, next train**) **A restart can raise the derived budget, but cannot lower it.** Each
+derivation is remembered in the data directory (`memory-budget-derived.json`). A later boot on a host
+of the same size takes the larger of today's sample and that memory, never more than 40 % of the
+host. Before this, a restart while a neighbour was busy started the next process smaller. On one host
+three restarts gave 3.25, 3.11 and 1.99 GB, so each restart under load made the server more fragile
+than the last. When the memory sets the budget, `budgetDerivation` reports `rememberedBound: true` and
+the `explanation` says so. To lower the budget, set `Aouda:Memory:MaxTotalRamBytes`, PATCH it, or
+delete the file. A host that genuinely fills up is still answered at run time by tightening (T7).
+
+(**BL-784, next train**) **The RSS term of tightening reads the working set:** RSS less the managed
+garbage the next collection reclaims. It used to tighten on garbage. A **runtime shrink** is now
+refused when its heap limit would put the live heap above 85 % of it, and a shrink that cannot drain
+within 10 minutes is rejected and the budget restored. Before, such a shrink stayed `Pending` for
+ever. **A settings PATCH no longer pins the budget it did not set:** a logging-only or hot-only PATCH
+persisted the derived total, and the next boot replayed it as an operator pin.
+
+(**BL-783 / BL-782, next train**) **Memory nothing releases is now bounded.** Key maps and the materialized
+queries' resident state may together hold at most 40 % of a database's governed share. That is below the
+line the write refusal clears at, so they can no longer keep a database refusing writes on their own. A key
+map that would pass it is not loaded, and its segments are probed instead. A materialized query's result
+buffer is flushed a batch at a time once it passes 8 × its table's byte trigger. The bloom-index cache now
+shows in `bloomFilterBytes` and counts in the database's usage, and its size scales with the budget.
+
+(**BL-781, next train**) **The write refusals have a way out.** Under heap pressure, ordinary writes are refused from
+90 % of the heap limit. An **auth database's** small writes (sign-in, token refresh, MFA) are still admitted up to 96 %,
+from a reserve kept for exactly those writes, so clients can still authenticate while the server sheds load. A
+database's reservation-ledger refusal now clears once the memory that can be released has been. Key maps and the
+materialized queries' resident state, which nothing releases, no longer hold it shut. A heap refusal's "outside any
+reservation category" figure now subtracts every database's reservations, not only the refusing one's.
+
 ⚠️ **If you resize `MaxTotalRamBytes` at runtime, the block keeps describing startup.** That is
 deliberate — you chose the new number, so there is no host derivation to record — but it means
 `effectiveBytes` (the startup decision) and `currentEffectiveBytes` (the budget running now) can
