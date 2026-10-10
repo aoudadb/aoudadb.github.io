@@ -2790,6 +2790,13 @@ Readiness probe. 200 when `DatabaseManager` is initialized and **critical** comp
 
 `/ready` does **not** fail because an operator database is `Creating` or `Dropping` — that would take the whole node out of a load balancer for a long drop. Per-database readiness is `GET /api/databases/{name}` (`state=Active`) and `/health/detailed`.
 
+The `memory` component is critical too. Either of these makes `/ready` return 503: the managed heap at 75 % or more of its
+limit, or a database holding more than 110 % of what it was granted. A database's grant is its **governed ceiling** — the
+process's budget, or its hard cap where it has one — not its nominal share, so using room it was given never fails readiness
+(**BL-788, next train**; WorkloadCore S06 deleted elastic lending and the "tightened" verdict). Before that, a database inside
+its ceiling could hold `/ready` at 503 for as long as it used it. The `reason` names the database, its usage and its grant, and the `memory` component's details carry them as
+`overBudgetDatabase`, `overBudgetUsedBytes` and `overBudgetGrantBytes`.
+
 Use as a Kubernetes `readinessProbe`.
 
 #### `GET /startup`

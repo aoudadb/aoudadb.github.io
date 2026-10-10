@@ -237,6 +237,13 @@ consequence of running without a grant, and the warning is there so it is not a 
 refusal inside Aouda rather than a kernel OOM kill. `Advisory` enforcement (embedded, `aouda dev`) enforces nothing and does
 not warn.
 
+(**BL-784, next train**) **A runtime shrink checks the live heap first.** A shrink is refused when its heap limit would put
+the live heap above 85 % of it, and a shrink that cannot drain within 10 minutes is rejected and the budget restored. Before,
+such a shrink stayed `Pending` for ever.
+
+(**BL-783, next train**) The bloom-index cache shows in `bloomFilterBytes`, counts in the database's usage, and its size scales
+with the budget.
+
 ⚠️ **If you resize `MaxTotalRamBytes` at runtime, the block keeps describing startup.** That is
 deliberate — you chose the new number, so there is no host derivation to record — but it means
 `effectiveBytes` (the startup decision) and `currentEffectiveBytes` (the budget running now) can

@@ -1357,6 +1357,24 @@ log to fall back under `T26` before it runs again, and does not double its memor
 refused this way (memory or WAL) succeeds: the definition is durable, so the query exists behind and is built once there is
 room — it used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists".
 
+(**BL-785, next train**) The same holds when a [deferred pass](#deferred-loads) is refused memory part-way
+through writing a query. The query is deferred, not rebuilt in the same pass: it stays readable and stale, and later
+passes leave it alone until the retry rebuilds it. A refused rebuild no longer fails the pass for the
+other queries. (**WorkloadCore S10, next train**) The retry is a **grant wait**, not a timer: the refused rebuild waits in the
+lowest work class (`Maintenance`) for a grant of the room its refusal lacked, and rebuilds once the memory broker can serve it.
+Refused again, it asks for twice as much; once the ask exceeds the governed budget it stops, and the query stays behind (stale,
+readable) for a `:refresh` or a larger budget, with the reason in the log. So it is retried only when the room exists, at most
+log₂(budget ÷ floor) times, never from row 0 on a schedule.
+
+### After a restart, a query is stale until it is rebuilt (**BL-786, next train**)
+
+When a restart finds no checkpoint it can use for a query's result, it rebuilds the result from the
+source, and the query reports **stale** until that rebuild finishes. If the rebuild is refused memory,
+the query stays stale and readable and is retried like any deferred rebuild. A load in the meantime
+adds its rows but does not make the query current. A stale query is never used to answer a query on
+its source table (automatic routing) and never checkpointed. Before this, a refused rebuild at open
+could leave a query reporting `Ready` and current while missing most of its rows.
+
 ### Only a rebuild from the source clears "stale" (**IngestAtSpeed S03, 0.1.40**)
 
 A query marked stale is missing rows that are not in its result: a load that was deferred for
@@ -1564,7 +1582,12 @@ Monitor first:
   rebuild, which then published short and reported current. A read that finds a segment of its view with rows but no pages
   now fails instead of returning nothing.
 - The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
-  log is never pruned under it.
+  log is never pruned under it. (**BL-787, next train**) Only checkpoints that still exist and can be folded forward
+  hold it. A query that goes stale, rebuilds or errors has its checkpoint dropped, and from the next round
+  (15 seconds) it holds no log. A checkpoint that falls more than `T28` behind the log head is dropped too, so that
+  query is rebuilt at the next startup instead. That is the bound every other WAL slot has. Before, a stale query's
+  old position kept the whole log until the query was dropped, and could fill the WAL to its cap so that every
+  bulk-load commit was refused.
 - A database created before this release has no checkpoints, so it rebuilds its results once, at the first open.
 
 Suggested tuning sequence:
