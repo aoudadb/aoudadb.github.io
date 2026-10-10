@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **An insert of a deleted key is no longer refused as a duplicate after the server evicts and rebuilds segment metadata (BL-954).**
+  The duplicate check now follows a segment's replacements, so a delete recorded on the replacement is seen. Nothing was ever
+  written wrongly; the insert succeeds now.
+- **A large UPDATE or DELETE racing other writers gives up less readily (BL-920).** Its up-to-16 re-runs before
+  `409 WRITE_CONFLICT` now pause briefly between them (under a second in all) instead of running back to back.
 - **Refusals on the auth and WebSocket paths are answered as refusals, and leave the retry its token (BL-944).** A JWT check the
   server could not finish for capacity is `503` + `Retry-After` (it was `401 AUTH_TOKEN_INVALID`, which signs a browser user out);
   a password reset refused at the hash, or answered 400 for a weak password, keeps its OTP; an MFA verify refused after its code
