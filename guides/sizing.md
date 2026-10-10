@@ -648,6 +648,15 @@ largest single allocations seen: a tenth of `T4` is about 141 MB at 2 GB. In the
 capacity and gives the slack back when a partition is evicted, and its first-copy dictionary is split into 64 shards, so no
 single growth step allocates hundreds of MB.
 
+(**release blockers, next train**) **The governed budget is capped at runtime by the GC's measured overhead.** Under a hard
+heap limit, each broker pass measures the GC's overhead — the bytes it holds committed above the live heap at the last
+compacting full collection — and caps the governed budget at **`T4` minus the largest of its last 12 readings** (about a
+minute's worth), never below half the configured budget. So the ledger can no longer approve memory the heap cannot hold. At
+2 GB, with 302 MB of measured overhead, the governed budget goes from about 1.28 GB to about 1.11 GB, and every derived share
+and pool scales with it. Nothing changes until a hard limit is bound and a compacting collection has been seen, so an embedded
+host without a heap limit is unaffected. `governedBudgetBytes` on `GET /api/server/memory` reports the capped value, and can
+therefore sit below the configured budget; the broker logs each change.
+
 ### The state between "within budget" and "terminate"
 
 A heap can be tight for hours without ever satisfying the termination rule. The watchdog arms
