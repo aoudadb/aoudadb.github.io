@@ -276,7 +276,7 @@ Authorization: Bearer <service-key>
 }
 ```
 
-No `updateMode` makes an insert wait for its queries (**WorkloadCore S09, next train**): `sync` and `async` queries alike are applied by
+No `updateMode` makes an insert wait for its queries (**WorkloadCore S09, 0.3.0**): `sync` and `async` queries alike are applied by
 their maintainer after the commit, so read with the insert's consistency token to see its rows in them. For bulk loads, `updateMode: "async"` + an explicit refresh call after the load completes is more efficient (see [§11 — Bulk loading historical data](#bulk-loading-historical-data)).
 
 ---
@@ -699,10 +699,10 @@ Authorization: Bearer <admin-token>
 Bulk-loaded rows bypass **incremental** MQ maintenance by design. What happens instead is decided by
 `postLoadMqBehavior`, and the two settings want opposite follow-up calls.
 
-**`auto` (the default) — the table's pass, started at the commit.** (**WorkloadCore S10, next train**) The load
+**`auto` (the default) — the table's pass, started at the commit.** (**WorkloadCore S10, 0.3.0**) The load
 records a pending job and the table's pass brings its queries current right after the commit, from the load's segments;
 before S10 the queries accumulated during the load's own pass and were published after the commit. `:commit` waits
-for that up to `mqWaitMs` (30 s) and says in `mqStatus` whether it finished (**WorkloadCore S09, next train**); wait for it; **do not also call `:refresh`.** A `:refresh` either runs the pass
+for that up to `mqWaitMs` (30 s) and says in `mqStatus` whether it finished (**WorkloadCore S09, 0.3.0**); wait for it; **do not also call `:refresh`.** A `:refresh` either runs the pass
 that was starting anyway or, once it has run, re-scans the whole source table, so it buys nothing and can cost a
 second full pass.
 

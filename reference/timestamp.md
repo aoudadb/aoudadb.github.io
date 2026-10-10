@@ -9,7 +9,7 @@ parent: "Reference"
 **Single source of truth** for how `DataType.Timestamp` is stored, sent and read across the engine, the HTTP API and the client
 SDKs.
 
-> **Corrected (BL-808, next train):** earlier versions of this page said that `Timestamp` was migrated to **Unix
+> **Corrected (BL-808, 0.3.0):** earlier versions of this page said that `Timestamp` was migrated to **Unix
 > milliseconds** in P29, with a per-column `TimestampUnit`, and cited an ADR "0008-timestamp-unit". None of that is or was
 > the engine's behaviour, and that ADR does not exist: a `Timestamp` is, and has always been, **.NET UTC ticks** — as the
 > [HTTP API reference](./http-api.md) says. There is no `timestampUnit` column property.
@@ -75,7 +75,7 @@ A `Timestamp` column is stored as its `Int64` ticks and encoded like any 64-bit 
 frame-of-reference, delta or run-length encoding, whichever is smallest). Its statistics (minimum, maximum, null count) are
 ticks too, and range predicates are compared as exact 64-bit integers — never through a `double`, which cannot tell two
 ticks apart above 2^53. Pruning is the scan's `RowGroupClassifier` over each row group's statistics; `SegmentPruner` and its
-`LongWindows` path are deleted (**ColumnarRead, next train**).
+`LongWindows` path are deleted (**ColumnarRead, 0.3.0**).
 
 ---
 
@@ -95,7 +95,7 @@ ticks apart above 2^53. Pruning is the scan's `RowGroupClassifier` over each row
 - [HTTP API reference](./http-api.md) — the wire forms of every type.
 - `src/Aouda.Engine.Core/Schema/Types.cs` — `DataType.Timestamp` (`Int64` = .NET `DateTime.Ticks`, UTC).
 - `src/Aouda.Engine.Core/Util/TimestampConversion.cs` — the shared conversion helpers.
-- `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` — exact timestamp range pruning (**ColumnarRead, next train**;
+- `src/Aouda.Engine.Storage/Query/Scan/RowGroupClassifier.cs` — exact timestamp range pruning (**ColumnarRead, 0.3.0**;
   `SegmentPruner.cs` is deleted).
 - `guides/market-data.md` — stock-quote schema design using `Timestamp` columns.
 - `guides/time-series.md` — time-series clustering and range queries.

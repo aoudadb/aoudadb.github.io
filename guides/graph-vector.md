@@ -131,24 +131,24 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 
 **Edge tables:**
 - `TableKind.EdgeTable` catalog kind with `EdgeTableConfig` (`SrcColumn`, `DstColumn`, `EdgeLabel`, `StoreCsc`)
-- Edge WAL frames: `WalTag.EdgeInsertV2`, `WalTag.EdgeDelete` — **replayed at open** (**BL-837, next train**): an edge still in the write buffer when the process stops without a clean shutdown, and a delete of a buffered edge, survive the crash. Each edge buffer holds the WAL checkpoint below its oldest unflushed frame, every edge takes an edge row id in its frame, and replay skips the frames whose edges a sealed segment already holds. Before, edge frames were written but not replayed, and a crash lost every buffered edge. ⚠️ **Format change (clean cut):** the edge-insert frame is format 2 (`EdgeInsertV2`, tag 68; it was `EdgeInsert`, tag 40). A log holding a format-1 edge-insert frame past its checkpoint — an older build that crashed with edges buffered — is refused at open, naming both formats: open it once with the build that wrote it and close it cleanly, or restore from a backup. A cleanly closed database is unaffected. See [Storage — troubleshooting](storage.md#214-troubleshooting-by-symptom).
+- Edge WAL frames: `WalTag.EdgeInsertV2`, `WalTag.EdgeDelete` — **replayed at open** (**BL-837, 0.3.0**): an edge still in the write buffer when the process stops without a clean shutdown, and a delete of a buffered edge, survive the crash. Each edge buffer holds the WAL checkpoint below its oldest unflushed frame, every edge takes an edge row id in its frame, and replay skips the frames whose edges a sealed segment already holds. Before, edge frames were written but not replayed, and a crash lost every buffered edge. ⚠️ **Format change (clean cut):** the edge-insert frame is format 2 (`EdgeInsertV2`, tag 68; it was `EdgeInsert`, tag 40). A log holding a format-1 edge-insert frame past its checkpoint — an older build that crashed with edges buffered — is refused at open, naming both formats: open it once with the build that wrote it and close it cleanly, or restore from a backup. A cleanly closed database is unaffected. See [Storage — troubleshooting](storage.md#214-troubleshooting-by-symptom).
 - `EdgeHraBuffer` — in-memory hot write area; freeze-and-swap flush to sealed CSR segments
 - `EdgeSegmentFlusher` — produces sealed segments with `(src, dst)` CSR layout
 - `CscMirrorWriter` — optional CSC companion segments (`csc_*` files) for bidirectional traversal
-- Late-arriving edges are flushed inline; the edge `_delta/` merge is removed (**ColumnarRead, next train**)
+- Late-arriving edges are flushed inline; the edge `_delta/` merge is removed (**ColumnarRead, 0.3.0**)
 - Partition routing by source-node partition key
 - `CreateEdgeTableAsync`, `InsertEdgesAsync`, `DeleteEdgeAsync` on `AoudaEngine`
-- Graph traversal operators: `TraverseAsync` (BFS k-hop reachability), `KHopNeighborhoodAsync` (BFS with hop distance), `ShortestPathAsync` (bidirectional BFS with CSC; unidirectional without). (**BL-813, next train**) Each call reads one consistent view of the edge table — its sealed segments with their deletions, and the edges still in the write buffer — so an edge is traversable as soon as `InsertEdgesAsync` returns, and an edge deleted is gone from the next call, whether or not it had been sealed. Before, the operators read sealed segments only: a buffered edge was not found and a delete of a sealed edge was not applied.
-- `DeleteEdgeAsync(src, dst)` removes **every** copy of the edge `(src, dst)`, whatever its label, sealed or buffered; an edge inserted again afterwards is a new edge. (**BL-813, next train**) `SELECT` / `COUNT` over an edge table see the buffered edges too. A generic `DELETE` / `UPDATE` over an edge table does not reach its buffered edges yet (BL-838): delete edges with `DeleteEdgeAsync`.
+- Graph traversal operators: `TraverseAsync` (BFS k-hop reachability), `KHopNeighborhoodAsync` (BFS with hop distance), `ShortestPathAsync` (bidirectional BFS with CSC; unidirectional without). (**BL-813, 0.3.0**) Each call reads one consistent view of the edge table — its sealed segments with their deletions, and the edges still in the write buffer — so an edge is traversable as soon as `InsertEdgesAsync` returns, and an edge deleted is gone from the next call, whether or not it had been sealed. Before, the operators read sealed segments only: a buffered edge was not found and a delete of a sealed edge was not applied.
+- `DeleteEdgeAsync(src, dst)` removes **every** copy of the edge `(src, dst)`, whatever its label, sealed or buffered; an edge inserted again afterwards is a new edge. (**BL-813, 0.3.0**) `SELECT` / `COUNT` over an edge table see the buffered edges too. A generic `DELETE` / `UPDATE` over an edge table does not reach its buffered edges yet (BL-838): delete edges with `DeleteEdgeAsync`.
 
 **Vector columns:**
 - `DataType.Vector` column type with `VectorColumnConfig` (`Dimensions`, `Distance`, `Quantization`, `IvfCells`, `EmbeddingModel`, `EmbeddingModelVersion`, `MatryoshkaDims`)
-- Vector WAL frames: `WalTag.VectorInsertV2`, `WalTag.VectorDelete`; replay produces `VectorHraBuffer` state. (**BL-923, next train**) Vectors still in the write buffer now survive a crash: before, the open never replayed vector frames and nothing kept the checkpoint from passing them, so every vector not yet flushed was lost. Each vector buffer holds the checkpoint below its oldest unflushed frame, and replay skips what a segment already holds. ⚠️ **Format change (clean cut):** the vector-insert frame is format 2 (`VectorInsertV2`, tag 69; it was `VectorInsert`, tag 50); a format-1 frame past the checkpoint is refused at open as for edges above. A vector segment's catalog entry now records its column (`vectorColumn`) — part of catalog format 6 (**RR-A2-4, next train**), so a directory an older build wrote is refused at open rather than read with the field absent.
-- **Branches (BL-923, next train):** a branch's edges and vectors survive a crash and a clean close. A branch's open replays its edge and vector frames, and a branch flushes its edge and vector buffers like the main database. Before, nothing flushed them — not even a clean close — so a branch's edges and vectors were lost on any restart, and its flushed vectors were not searched after a reopen.
+- Vector WAL frames: `WalTag.VectorInsertV2`, `WalTag.VectorDelete`; replay produces `VectorHraBuffer` state. (**BL-923, 0.3.0**) Vectors still in the write buffer now survive a crash: before, the open never replayed vector frames and nothing kept the checkpoint from passing them, so every vector not yet flushed was lost. Each vector buffer holds the checkpoint below its oldest unflushed frame, and replay skips what a segment already holds. ⚠️ **Format change (clean cut):** the vector-insert frame is format 2 (`VectorInsertV2`, tag 69; it was `VectorInsert`, tag 50); a format-1 frame past the checkpoint is refused at open as for edges above. A vector segment's catalog entry now records its column (`vectorColumn`) — part of catalog format 6 (**RR-A2-4, 0.3.0**), so a directory an older build wrote is refused at open rather than read with the field absent.
+- **Branches (BL-923, 0.3.0):** a branch's edges and vectors survive a crash and a clean close. A branch's open replays its edge and vector frames, and a branch flushes its edge and vector buffers like the main database. Before, nothing flushed them — not even a clean close — so a branch's edges and vectors were lost on any restart, and its flushed vectors were not searched after a reopen.
 - `VectorHraBuffer` — in-memory hot write area; freeze-and-swap flush per IVF cell
 - `IvfCentroidStore` — persists IVF centroids trained by `KMeansHelper`
 - `VectorSegmentFlusher` — seals vectors per IVF cell; writes raw fp32 pages + `*.rabitq` / `*.pq` companion files
-- Late-arriving vectors are flushed inline; the cell-aware `_delta/` merge is removed (**ColumnarRead, next train**)
+- Late-arriving vectors are flushed inline; the cell-aware `_delta/` merge is removed (**ColumnarRead, 0.3.0**)
 - `InsertVectorsAsync`, `DeleteVectorAsync` on `AoudaEngine`
 - ANN search operator: `NearestNeighborsAsync` (IVF-pruned brute-force scan, Stage 1)
 - ADRA authorization for vector queries via `IVectorAccessFilter` / `AdraVectorAccessFilter` (wired in P24; ADR 0032)
@@ -219,7 +219,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 | Edge HRA buffer (`EdgeHraBuffer`) | Yes | — | — | `src/Aouda.Engine.Storage/Hra/EdgeHraBuffer.cs` | — |
 | Sealed CSR edge segments (`EdgeSegmentFlusher`) | Yes | — | — | `src/Aouda.Engine.Storage/Edge/EdgeSegmentFlusher.cs` | — |
 | CSC mirror segments (`CscMirrorWriter`) | Yes | — | — | `src/Aouda.Engine.Storage/Edge/CscMirrorWriter.cs` | Enabled by `EdgeTableConfig.StoreCsc = true` |
-| Edge delta merge (`_delta/`) | — | — | Yes | P20-COMPLETION §2 #4 | Removed with delta segments (**ColumnarRead, next train**) |
+| Edge delta merge (`_delta/`) | — | — | Yes | P20-COMPLETION §2 #4 | Removed with delta segments (**ColumnarRead, 0.3.0**) |
 | Edge partition routing by source key | Yes | — | — | `src/Aouda.Engine.Api/AoudaEngine.cs` `InsertEdgesAsync`; P20-COMPLETION §4.1 | — |
 | Vector column type (`DataType.Vector`) | Yes | — | — | `src/Aouda.Engine.Core/Schema/Types.cs`; P20-COMPLETION §2 #1 | — |
 | Vector WAL frames (insert/delete) | Yes | — | — | `src/Aouda.Engine.Wal/WalPayloads.cs`; P20-COMPLETION §4.1 | — |
@@ -228,7 +228,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 | Sealed vector segments per IVF cell (`VectorSegmentFlusher`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/VectorSegmentFlusher.cs` | — |
 | RaBitQ quantization companion (`*.rabitq`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/RaBitQEncoder.cs`; P20-COMPLETION §5.6 | — |
 | PQ quantization companion (`*.pq`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/PqEncoder.cs`; P20-COMPLETION §5.6 | — |
-| Vector delta merge (cell-aware) | — | — | Yes | P20-COMPLETION §2 #7 | Removed with delta segments (**ColumnarRead, next train**) |
+| Vector delta merge (cell-aware) | — | — | Yes | P20-COMPLETION §2 #7 | Removed with delta segments (**ColumnarRead, 0.3.0**) |
 | MdVector column storage (`col_{colId}_mdvec.bin`) | Yes | — | — | `src/Aouda.Engine.Storage/Vector/MdVectorColumnWriter.cs`; P20-COMPLETION §2 #7 | — |
 | MdVector FDE auto-derivation | — | — | Yes | ADR 0027 (columnar) §Stage-2 | Stage 2 — `MdVectorColumnConfig.Fde` field stored only |
 | `TraverseAsync` operator (BFS k-hop) | Yes | — | — | `src/Aouda.Engine.Query/Operators/TraverseOperator.cs`; P20-COMPLETION §2 #8 | — |
@@ -262,13 +262,13 @@ Aouda extends its columnar storage model with two new primitives alongside the e
 - Enforces cluster ordering by `(src, dst)` at seal time, producing CSR-shaped segment pages.
 - Optionally maintains a CSC mirror (sorted by `(dst, src)`) for backward traversal.
 - Routes insert batches by source-node partition key (edges from the same source live in the same partition).
-- Builds and exposes adjacency-aware traversal operators over the table — its sealed CSR segments (pruned by their `src` / `dst` statistics) and its write buffer, on one snapshot per traversal (**BL-813, next train**).
-- Late-arriving edges are flushed inline like any other edge; `_delta/` segments are removed (**ColumnarRead, next train**).
+- Builds and exposes adjacency-aware traversal operators over the table — its sealed CSR segments (pruned by their `src` / `dst` statistics) and its write buffer, on one snapshot per traversal (**BL-813, 0.3.0**).
+- Late-arriving edges are flushed inline like any other edge; `_delta/` segments are removed (**ColumnarRead, 0.3.0**).
 
 Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, not separate tables. They may appear on any tabular table:
 - `DataType.Vector` — fixed-dimension dense float vectors. Each insert batch is WAL-framed, buffered in a per-column `VectorHraBuffer`, and flushed per IVF cell. Cold sealing optionally writes RaBitQ or PQ companion files.
 - `DataType.MdVector` — variable-length multi-vector storage (ColBERT / ColPali style). Written to `col_{colId}_mdvec.bin`. The companion FDE column for MaxSim retrieval is deferred to Stage 2.
-- **A table query does not return vectors.** A vector column is read by `NearestNeighborsAsync` (and the graph operators), not by `Where` / `Select` / `ToListAsync` / `ToColumnarAsync`, which read the table's own segments: there a vector column reads as **null in every row** (a projection, `ORDER BY`, `DISTINCT`, `COUNT(vec)` = 0, `WHERE vec IS NULL` matches every row). (**ColumnarRead, next train**) Before, a query that projected a vector column threw.
+- **A table query does not return vectors.** A vector column is read by `NearestNeighborsAsync` (and the graph operators), not by `Where` / `Select` / `ToListAsync` / `ToColumnarAsync`, which read the table's own segments: there a vector column reads as **null in every row** (a projection, `ORDER BY`, `DISTINCT`, `COUNT(vec)` = 0, `WHERE vec IS NULL` matches every row). (**ColumnarRead, 0.3.0**) Before, a query that projected a vector column threw.
 
 **Key invariant:** Edge and vector storage reuse all existing engine primitives (column-per-file, HRA freeze-and-swap, WAL replay, hot/cold tiering, partition pruning, zone maps). They are not parallel subsystems.
 
@@ -349,7 +349,7 @@ NearestNeighborsAsync
 2. Engine resolves table entry; validates `Kind == EdgeTable`.
 3. `AwaitBulkLoadLockReleaseAsync` blocks if a bulk-load job holds the table lock (Stage 1 defensive; bulk-load on edge tables gated by BL-071).
 4. Edges grouped by source-node partition key (if partitioned); each group dispatched to its `EdgeHraBuffer`.
-5. WAL frame `WalTag.EdgeInsertV2` written before buffer mutation (each edge with its edge row id; **BL-837, next train**).
+5. WAL frame `WalTag.EdgeInsertV2` written before buffer mutation (each edge with its edge row id; **BL-837, 0.3.0**).
 6. `EdgeHraBuffer.InsertEdges` appends `(src, dst)` pairs.
 7. `HraManager` checks row/byte thresholds; when threshold met → freeze-and-swap.
 8. `EdgeSegmentFlusher` sorts by `(src, dst)`, writes CSR column pages; if `StoreCsc = true`, `CscMirrorWriter` writes CSC companion (`csc_*`).
@@ -365,7 +365,7 @@ Relevant tests: `tests/Aouda.Engine.Storage.Tests/Edge/SealedEdgeSegmentTests.cs
 
 1. Caller invokes `AoudaEngine.InsertVectorsAsync("documents", "embedding", rowKeys, vectorData, embeddingModelVersion: "text-embedding-3-large@v1")`.
 2. Engine resolves table; validates column `DataType == Vector`; confirms `vectorData.Length == rowKeys.Length * dimensions`.
-3. WAL frame `WalTag.VectorInsertV2` written (**BL-923, next train**; row keys, float data, model version, partition key).
+3. WAL frame `WalTag.VectorInsertV2` written (**BL-923, 0.3.0**; row keys, float data, model version, partition key).
 4. `VectorHraBuffer.InsertVectors` buffers rows.
 5. `HraManager` threshold trigger → freeze-and-swap.
 6. `IvfCentroidStore` assigns each vector to nearest centroid by declared distance metric.
@@ -380,8 +380,8 @@ Relevant tests: `tests/Aouda.Engine.Storage.Tests/Vector/SealedVectorSegmentTest
 **Walk-through 3: WAL replay after crash**
 
 1. On `AoudaEngine.OpenAsync`, WAL log is replayed frame by frame.
-2. `WalTag.EdgeInsertV2` and `EdgeDelete` frames re-feed `EdgeHraBuffer` (restores in-flight hot edge data; frames a sealed segment already holds are skipped) — (**BL-837, next train**) before, edge frames were not replayed.
-3. `WalTag.VectorInsertV2` and `VectorDelete` frames re-feed `VectorHraBuffer` (restores in-flight hot vector data) — (**BL-923, next train**) before, vector frames were not replayed. A branch replays its own edge and vector frames too. A format-1 `EdgeInsert` / `VectorInsert` frame past the checkpoint is refused at open.
+2. `WalTag.EdgeInsertV2` and `EdgeDelete` frames re-feed `EdgeHraBuffer` (restores in-flight hot edge data; frames a sealed segment already holds are skipped) — (**BL-837, 0.3.0**) before, edge frames were not replayed.
+3. `WalTag.VectorInsertV2` and `VectorDelete` frames re-feed `VectorHraBuffer` (restores in-flight hot vector data) — (**BL-923, 0.3.0**) before, vector frames were not replayed. A branch replays its own edge and vector frames too. A format-1 `EdgeInsert` / `VectorInsert` frame past the checkpoint is refused at open.
 4. Sealed segments already on disk are registered via cold segment registry (not replayed).
 5. After replay, HRA and cold registry both reflect the last durable state.
 

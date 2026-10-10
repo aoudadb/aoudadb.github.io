@@ -13,6 +13,10 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-10
+
+Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
+
 - ⚠️ **Replication is not supported in this release (BL-839).** A replica cannot catch up after a disconnect: frames the
   primary writes while it is away are never sent to it. Run single-node. See [Replication](guides/replication.md).
 - **Every refusal is answered as one (BL-921, BL-881).** A capacity refusal on any endpoint is `503` with `Retry-After`

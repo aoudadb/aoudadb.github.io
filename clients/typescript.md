@@ -166,7 +166,7 @@ const count = await client.table('users')
   .count();
 ```
 
-`count()` posts to `/query/count`: the server counts and returns only the number (**architecture review, next train**).
+`count()` posts to `/query/count`: the server counts and returns only the number (**architecture review, 0.3.0**).
 
 ### All Filter Operators
 
@@ -326,7 +326,7 @@ All standard operations work after joins:
 - `limit(n)` / `offset(n)` — pagination
 - Aggregates — sum, min, max, count, groupBy
 
-### Filtering a joined table — `joinWhere` (**next train**)
+### Filtering a joined table — `joinWhere` (**0.3.0**)
 
 `where()` filters the base table. `joinWhere(column, op, value)` filters the **last** join's table, by that table's column
 names, before it joins: a joined row it rejects takes part in no match (an inner join drops it, a left join answers the base
@@ -344,7 +344,7 @@ const euOrders = await client.table('orders')
 
 ## 6) Aggregates
 
-(**ColumnarRead S16, next train.** Before this, `sum` / `min` / `max` / `groupBy` sent a field the server ignored, and
+(**ColumnarRead S16, 0.3.0.** Before this, `sum` / `min` / `max` / `groupBy` sent a field the server ignored, and
 `execute()` returned the table's plain rows. They now send the query message's `aggregates` / `groupBy`; see
 [`POST …/query`](../reference/http-api.md#post-apidatabasesdbquery).)
 
@@ -380,10 +380,10 @@ const { rows } = await client.table('trades')
 `where`, `orderBy`, `offset` and `limit` combine with aggregates; `select`, `selectExpr`, `distinct` and joins do not
 (the server answers `400`). `count()` returns the number of matching rows, not an aggregate column: it drops the
 aggregates and `groupBy` and posts the query to `/query/count`, so no row is transferred — the filter and joins
-count, `select`, `orderBy`, `limit`, `offset` and `distinct` do not (**architecture review, next train**; it used to
+count, `select`, `orderBy`, `limit`, `offset` and `distinct` do not (**architecture review, 0.3.0**; it used to
 download every matching row through `/query`).
 
-### The latest (or first) row per key — `latestPerKey` / `firstPerKey` (**next train**)
+### The latest (or first) row per key — `latestPerKey` / `firstPerKey` (**0.3.0**)
 
 ```typescript
 // One row per ticker: the one with the greatest ts (ties: the lowest primary key).
@@ -989,7 +989,7 @@ const finished = await client.materializedQueries.refreshAndWait('active_users_s
 
 **Do not** call `refresh()` for a table you just bulk-loaded with the default
 `postLoadMqBehavior: "auto"` — the engine brings those queries current after the commit, in the background, with the
-table's pass over the load's segments (**WorkloadCore S10, next train**; before, it accumulated them during the load).
+table's pass over the load's segments (**WorkloadCore S10, 0.3.0**; before, it accumulated them during the load).
 The bulk-load handle can wait on it directly instead (BL-419, 0.1.22):
 
 ```typescript
@@ -1000,7 +1000,7 @@ const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 20
 // Throws if the rebuild status reaches "failed".
 ```
 
-(**WorkloadCore S09, next train**) `:commit` itself waits, bounded, for the load's queries to be current, and the handle says how that ended:
+(**WorkloadCore S09, 0.3.0**) `:commit` itself waits, bounded, for the load's queries to be current, and the handle says how that ended:
 
 ```typescript
 const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 30000; 0 = no wait
@@ -1035,7 +1035,7 @@ const columnar = await client.table('events')
 
 `columnar.types` contains the server-declared Aouda type names (`'Int64'`, `'String'`, `'Timestamp'`, `'Double'`, etc.). Timestamp values arrive as Int64 .NET ticks — use `coerceColumnarValue(value, typeName)` (exported from `@aouda/client`) to convert them to ISO 8601 strings if needed.
 
-### Query responses are column-batch frames (**ColumnarRead S16, next train**)
+### Query responses are column-batch frames (**ColumnarRead S16, 0.3.0**)
 
 A query (`execute()`, `toColumnar()`, `namedQueries.execute()`) asks for the binary
 [column-batch frame](../reference/http-api.md#post-apidatabasesdbquery)

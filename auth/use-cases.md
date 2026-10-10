@@ -429,7 +429,7 @@ On success, returns a full token pair — the user is signed in immediately:
 
 ## 21. Use Case: Two-Factor Authentication (MFA)
 
-MFA adds a second verification step after password signin. Aouda supports TOTP (e.g. Google Authenticator, Authy) and SMS phone OTP. After a successful MFA verify the user receives an `aal2` JWT; apps can enforce `aal2` on sensitive endpoints (see §24.1). A user with no active factor is `aal2` from password signin (**BL-795, next train**), so `aal2` alone does not prove a second factor was used.
+MFA adds a second verification step after password signin. Aouda supports TOTP (e.g. Google Authenticator, Authy) and SMS phone OTP. After a successful MFA verify the user receives an `aal2` JWT; apps can enforce `aal2` on sensitive endpoints (see §24.1). A user with no active factor is `aal2` from password signin (**BL-795, 0.3.0**), so `aal2` alone does not prove a second factor was used.
 
 **SMS prerequisite:** Phone-factor challenges require **GatewayAPI** or the **`console` provider** on the Aouda server. TOTP and recovery codes do not. See [Email, SMS & Notifications](notifications.md).
 
