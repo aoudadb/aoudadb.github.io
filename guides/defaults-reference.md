@@ -26,12 +26,15 @@ explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical
 | Value | Formula | Restoring key |
 |---|---|---|
 | `MaxTotalRamBytes` (cgroup-bounded) | `0.70 × detected`, floor 256 MB | `Aouda:Memory:MaxTotalRamBytes` (set explicitly to skip detection) |
-| `MaxTotalRamBytes` (fallback) | `0.40 × detected`, floor 256 MB | same |
+| `MaxTotalRamBytes` (fallback) | `min(0.40 × detected, 0.70 × available)` at this boot, floor 256 MB. No grant: every boot under `BackPressure` logs one warning, and nothing is remembered across boots (**WorkloadCore, next train**) | same — or a container memory limit, which makes it the cgroup row |
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
-| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB. **On in every resource mode** (**ColumnarRead, next train** — it was off in `Constrained`, the mode a database starts in) | `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
+| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB. **On** (**ColumnarRead, next train** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, next train**) | `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
+| Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host (**WorkloadCore S17, next train** — `Abundant` raised the fraction to 0.15) | derived |
+| Per-table flush trigger (`T16`) | `clamp(T11 / max(n, 4), min(1 MB, T11 / n), 64 MB)` — `T11` the write buffer's ceiling (15 % of governed, floor 16 MB), `n` the tables sharing it (**WorkloadCore S17, next train** — `Abundant` raised the ceiling to 1 GB) | derived |
+| Per-table hot budget (`T18`) | `clamp(T10 / max(n, 4), min(8 MB, T10 / n), 1 GB)` — `T10` the hot ceiling (45 % of governed, floor 32 MB) (**WorkloadCore S17, next train** — `Abundant` raised the ceiling to 16 GB) | `Aouda:Memory:MaxHotBytes` sets `T10` |
 | Bulk-load ingest buffer budget | `max(0.04 × yourDatabaseShare, 8 MB)`, growing with headroom in the server's shared memory governor instead of stopping at a fixed number (P45) | `Aouda:BulkLoad:IngestBufferBudgetFraction`, or `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` to pin an explicit ceiling (`268435456` reproduces the old fixed-256 MB behavior) |
 
 Worked at three detected host sizes, both branches (all figures in MB unless marked GB; rounded to the
@@ -71,6 +74,10 @@ larger governed budget than 32 GB affords at these weights.
 
 ## Hot tier and ingest admission
 
+(**BL-914, next train**) The memory broker frees memory when the live heap passes **0.80 × the heap limit (`T4`)** — and now
+also when what the GC has committed after a compacting full collection passes **0.90 × `T4`**. Neither is configurable, and
+neither refuses a write: both evict (key maps first). See [Sizing — when the GC heap gets tight](sizing.md#what-happens-when-the-gc-heap-gets-tight).
+
 The reclaim ladder from [Sizing](sizing.md#what-happens-when-the-hot-tier-fills), key by key. The
 server prints the ladder **as it is actually in force** in one startup line — read that rather than
 your own configuration, because every non-boolean here self-clamps.
@@ -78,11 +85,10 @@ your own configuration, because every non-boolean here self-clamps.
 | Setting | Default | Config key | Notes |
 |---|---|---|---|
 | Hot admission seam | `true` | `Aouda:Memory:HotAdmissionEnabled` | Whether a flush asks the ceiling before creating a hot segment. `false` stops consulting it altogether — every flush writes hot first, as it did before P53. |
-| Rung 0 — drain acceleration | `true` | `Aouda:Memory:HotDrainAccelerationEnabled` | Sweeps more often and demotes to a lower target above the water mark. Costs disk I/O only; **no writer is ever delayed by it**. `false` restores the previous fixed-cadence sweep exactly. |
-| `T42` — rung 0 water mark | `0.60` | `Aouda:Memory:HotDrainAccelerationWaterMark` | Hot-occupancy fraction at which rung 0 begins. `0` means the default. The response is proportional: nothing at all at the mark, rising to a 4× sweep with a halved target near the ceiling. |
-| Rung 1 — ingest pacing | **`false`** | `Aouda:Memory:HotPacingEnabled` | ⚠️ **Ships off.** See the note below. |
-| `T43` — rung 1 water mark | `0.80` | `Aouda:Memory:HotPacingWaterMark` | `0` means the default. **Clamped to `[T42, 1.0]` by the engine**, so you cannot invert the ladder and make pacing the first answer to pressure. |
-| `T44` — control horizon | `60 s` | `Aouda:Memory:HotControlHorizon` | The horizon the admissible arrival rate is computed over: *drain rate + (ceiling − resident) / T44*. Unset means the default. |
+| ~~Rung 0 — drain acceleration~~ | — | ~~`Aouda:Memory:HotDrainAccelerationEnabled`~~ | **Removed (WorkloadCore S17, next train)** with rung 0: the hot tier is drained by the memory broker's hot-segment demotion under pressure and the demotion sweep at its plain interval. It ran the sweep up to 4× as often, to a lower target, above `T42`. |
+| ~~`T42` — rung 0 water mark~~ | — | ~~`Aouda:Memory:HotDrainAccelerationWaterMark`~~ | **Removed (WorkloadCore S17, next train)** with rung 0. It was `0.60`. |
+| `T43` — hot debt's soft line | `0.80` | `Aouda:Memory:HotPacingWaterMark` | (**WorkloadCore S16, next train**) The fraction of the hot ceiling above which hot bytes count as debt for the ingest stall curve (its hard line is the ceiling). `0` means the default. **Clamped to `[0.10, 1.0]` by the engine** (**WorkloadCore S17, next train**; it was `[T42, 1.0]`). |
+| `T44` — stall horizon | `60 s` | `Aouda:Memory:IngestStallHorizon` | (**WorkloadCore S16, next train**) The ingest stall curve's horizon: a paced writer is never held below *(hard line − soft line) / T44*. Was `Aouda:Memory:HotControlHorizon`. Unset means the default. |
 | `T45` — rate EWMA half-life | `30 s` | `Aouda:Memory:HotRateEwmaHalfLife` | Half-life of the arrival- and drain-rate averages. A time constant, not a share — every database samples on the same tick and must decay on the same half-life, or two databases' rates are not comparable. |
 | `T41` — process hot ceiling | `true` | `Aouda:Memory:ProcessHotCeilingEnabled` | Bounds the **sum** of every database's hot tier, not only each one. Inert wherever the per-database ceilings already sum correctly; binds only where the 32 MB per-database floor has broken the sum. `false` bounds each database by its own ceiling alone. |
 | Legacy hot-first flush | `false` | `Aouda:Memory:FlushAlwaysHotFirst` | `true` restores the pre-P53 flush whole, including hot-first flush for `ColdPreferred` tables. Measured on a 400 000-row load against a 2 MB hot ceiling: default produced 3 segments holding **0 B** resident hot; this flag produced 3 segments holding **17 700 000 B** — 8.8× the ceiling, unbudgeted. |
@@ -92,17 +98,40 @@ your own configuration, because every non-boolean here self-clamps.
 are computed by the server's budget manager from the governed budget; an operator setting them by
 hand could contradict the arithmetic the ceiling exists to enforce.
 
-⚠️ **Rung 1 ships off, and that is a decision rather than an oversight.** It is the first rung that
-can make a *healthy* workload slower if a constant is wrong, and two of its three constants (`T43`,
-`T44`) are carried from Apache Kudu rather than derived from Aouda's own arithmetic. The safety case
-is made — it cannot engage below `T43` **by construction** (the controller returns before the rate is
-computed), and a healthy server ingesting 300 000 rows in 1.4 s with the flag on took **0 delays and
-0 refusals**. The sizing case is not: nothing in the engine's own suites derives `T43` or `T44` from a
-sustained production ingest. Turn it on deliberately if your drain is not keeping up; leave it off if
-you have not measured.
+(**WorkloadCore S16, next train**) **`Aouda:Memory:HotPacingEnabled` is gone**, with the hot-only pacer it switched: the ingest
+stall curve (sizing guide, *Debt slows the writer*) paces on hot bytes and on three other debts, is
+always on, and is inert below every soft line — nothing is computed there, so a healthy server is never
+slowed by it (300 000 rows on a healthy server: **0 waits**).
 
 🔎 **Two keys are absent on purpose**, not missing: `ProcessHotCeilingAggregateBytes` and
 `ProcessHotCeilingShareBytes`, for the reason in the first warning above.
+
+⚠️ **An unknown key under `Aouda:Memory` is logged at boot** (**WorkloadCore S17, next train**). The configuration binder
+ignores a key nothing reads, so a deployment still carrying a removed key — `HotDrainAccelerationEnabled`,
+`HotDrainAccelerationWaterMark`, `ResourceMode`, `HotPacingEnabled`, `HotControlHorizon`, `PerClassAdmissionEnabled`,
+`ElasticShares` — or a misspelt one would believe it governed something. The server now logs one warning per such key,
+naming its full path (`Aouda:Memory:HotDrainAccelerationEnabled is not a known setting and is ignored: nothing reads it. …`).
+The server starts as before; remove the key.
+
+---
+
+## WAL size ladder
+
+Per WAL root, derived — none of these is a configuration key. See [Sizing — the WAL's cap](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-next-train)
+and [Storage](storage.md) (walk-through D).
+
+| Value | Formula | Notes |
+|---|---|---|
+| `MaxWalBytes` (`T23`) at open | `clamp(free / 10, min(256 MB, free / 4), 4 GiB)`, `free` the WAL volume's free bytes (256 MB when it cannot be read) | The opening cap. |
+| `MaxWalBytes` (`T23`) after a reclaim | `max(clamp(A / 10, min(256 MB, A / 4), 4 GiB), min(2 × W, A / 2))`, `A` = free bytes + the WAL's own, `W` = the largest log size seen when retention reclaimed | (**BL-787, next train**) Recomputed at most once a minute, applied when it moves more than 5 %, and logged (`[WAL] MaxWalBytes … -> …`). Before, the open's value held for the life of the process. |
+| `T24` — segment size | `clamp(T23 / 16, 8 MB, 64 MB)` | Fixed at open. |
+| `T25` — force checkpoint | `0.70 × T23` | Also the WAL debt's soft line for the ingest stall curve. Moves with `T23`. |
+| `T26` — run retention now | `0.85 × T23` | Moves with `T23`. |
+| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate. Moves with `T23`. |
+| `T28` — `MaxSlotWalKeepBytes` | `clamp(T23 / 2, 128 MB, 2 GiB)` | Fixed at open: a slot lagging further behind the head is invalidated. |
+
+(**BL-787, next train**) Each crossing of `T25`, `T26` and `T27`, in either direction, and the end of a refuse episode (its
+length and how many writes it refused) is one line in the server log, prefixed `[WAL]`.
 
 ---
 
@@ -115,9 +144,11 @@ you have not measured.
 | Single-node WAL frame emission | `false` (elided) | `Aouda:BulkLoad:EmitFramesOnSingleNode` | On a detected single-node topology, `LogShipSegments` no longer re-reads/hashes segment files or appends a WAL frame. See [Single-Node Deployment](single-node-deployment.md). |
 | Job-shape warning — segment count | `64` | `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | Advisory only, never blocks a commit. See [Bulk Load — Reading `:commit completed`](bulk-load.md#reading-commit-completed-and-the-job-shape-warning). |
 | Job-shape warning — median rows/segment | `1000` | `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | Same. |
-| Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | `Auto` accumulates affected MQs of all four types during the load and publishes at commit — for a table whose every query is an aggregate or latest / first per key, writes them in the load's own commit, before it returns (**ColumnarCore S12, 0.2.0**). Wait on `mqRebuildStatus` / `MqRebuildCompleted`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |
-| Ingest-fed MQ reservation floor | 1 MB | `Aouda:BulkLoad:MqIngestReservationFloorBytes` | Opening `Transient` reservation per destination table, and the size growth doubles from. Unconfigured = the S04 constant. |
-| Ingest-fed MQ reservation ceiling | `0` (no dedicated cap) | `Aouda:BulkLoad:MqIngestReservationCeilingBytes` | `0` = the `Transient` governor is the bound. A positive value that live accumulator bytes would exceed falls those queries back to a scan-fed rebuild; the load still commits. |
+| Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | (**WorkloadCore S10, next train**) Every load but a `Skip` one records a pending job, and the table's pass brings its queries current: `Auto` starts it at the commit (multi-table and transform loads included), `Deferred` after the quiet period (2 s quiet, at most 60 s). A load does no materialized-query work while it streams. Before S10, `Auto` accumulated affected MQs of all four types during the load and published after the commit, or, for a table whose every query is an aggregate or latest / first per key, the table's pass wrote them from a fold the load built (**WorkloadCore S09**); in 0.2.0 they were written in the load's own commit, before it returned (**ColumnarCore S12**). Wait on `mqRebuildStatus` / `MqRebuildCompleted`, or read with the commit's `token`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |
+| `:commit`'s wait for the load's queries | `30000` ms | `mqWaitMs` on `:commit` (`BulkLoadOptions.MqWait` in `Aouda.Client`) | (**WorkloadCore S09, next train**) How long `:commit` waits, after the load is durable and its locks are released, for the load's materialized queries to be current; `0` does not wait, at most `600000`. Holds no lock and refuses nothing; the response's `mqStatus` says whether they were current. |
+| ~~Ingest-fed MQ reservation floor~~ | — | ~~`Aouda:BulkLoad:MqIngestReservationFloorBytes`~~ | **Removed (WorkloadCore S10, next train)** with the ingest-fed feed: a load's queries are brought current by the table's pass, which reserves its own waves. It was the opening `Transient` reservation per destination table (1 MB). |
+| ~~Ingest-fed MQ reservation ceiling~~ | — | ~~`Aouda:BulkLoad:MqIngestReservationCeilingBytes`~~ | **Removed (WorkloadCore S10, next train)** with the ingest-fed feed. It capped the feed's live accumulator bytes (`0` = no dedicated cap). |
+| ~~Ingest-fed MQ accumulator budget~~ | — | ~~`Aouda:Memory:MqIngestAccumulatorBytes`~~ | **Removed (WorkloadCore S10, next train)** with the ingest-fed feed; it was meaningful only to the feed's accumulators. |
 
 ---
 
@@ -125,12 +156,14 @@ you have not measured.
 
 | Setting | Default | Config key | Notes |
 |---|---|---|---|
-| In-commit maintenance of an insert | on | — | An insert writes its table's aggregate and latest / first-per-key queries before it returns (**ColumnarMerge S11, 0.2.0**). Not configurable; a query with `maxCoalesceMs` above 0 is left to the queue. |
+| ~~In-commit maintenance of an insert~~ | — | — | **Removed (WorkloadCore S09, next train)**: every commit hands its batch to its queries' maintainers and they apply it in the background; read with the write's consistency token to wait for them. In 0.2.0 (**ColumnarMerge S11**) an insert wrote its table's aggregate and latest / first-per-key queries before it returned. |
+| Maintenance backlog bound | 64 MiB per update lane | — (`SubscriptionManagerOptions.MaintenanceBacklogMaxBytes`, engine wiring) | (**WorkloadCore S09, next train**) A lagging query's batches wait in a backlog charged on the memory budget, never dropped below this bound; past it the query is marked stale (`Maintenance backlog past its bound …`) and rebuilt. Replaces the 250 ms wait and drop at a full queue (BL-427). |
 | Freshness window | `0` ms | `maxCoalesceMs` on the query (`aouda.schema.json`) | 0–60000. How long an `Async` query's batches may wait to be applied together (**ColumnarMerge S10, 0.2.0**). See [Materialized queries](materialized.md#27-core-concepts-and-mental-model). |
 | Resident result rows | 262,144 keys per query | — | An aggregate's or latest / first-per-key query's rows kept in RAM between commits, charged to the memory governor, least recently touched evicted (**ColumnarMerge S10, 0.2.0**). |
 | Result checkpoint | every 15 s, and at clean shutdown | — | What a restart restores a current result from (**ColumnarMerge S08, 0.2.0**). |
+| Rebuild grant | 1 MB to start, doubling to at most ¼ of the database's governed budget | `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` (the start) | (**WorkloadCore S12, next train**) A rebuild's memory; past it the build splits into `Aouda:MaterializedQueries:Rebuild:MaxPartitions` (64) partitions and spills. `ReservationCeilingBytes`, `SpillEnabled` and `PartitioningEnabled` are removed. See [Materialized queries](materialized.md#211b-what-a-rebuild-costs-and-what-bounds-it). |
 | Deferred-pass quiet window | 2 s with no load in flight or committed; 60 s bound | — | (**ColumnarMerge S01, 0.2.0** — a load still streaming no longer counts as quiet.) |
-| Deferred-pass workers; queries an insert writes side by side | the CPU budget | `Aouda:Cpu:ConfiguredCores` (or the probed quota) | Read when the work starts (**ColumnarCore S15, 0.2.0**); was the machine's core count capped at 16 / 8. See [Sizing CPU](sizing.md#sizing-cpu). |
+| Deferred-pass workers | the CPU budget | `Aouda:Cpu:ConfiguredCores` (or the probed quota) | Read when the work starts (**ColumnarCore S15, 0.2.0**); was the machine's core count capped at 16 / 8. An insert no longer writes queries side by side: in-commit maintenance is deleted (**WorkloadCore S09, next train**). See [Sizing CPU](sizing.md#sizing-cpu). |
 
 ---
 
@@ -148,21 +181,19 @@ See [Partitioning and Multi-tenancy](partitioning.md) for the full storage-mode 
 
 ---
 
-## Class entitlements
+## Work classes
 
-Every memory reservation carries a work class, and each class has a share of the transient budget. The fractions differ by resource mode because `Abundant` puts the extra where headroom buys speed — buffering.
+Every memory reservation carries a work class — `Interactive`, `Streaming`, `Ingest`, `Background`, `Maintenance` — and
+that is the order the memory grant queue serves them in: first in, first out within a class, and a running unit's next step
+is taken only if nothing of the same or a higher class is waiting — a read's only if nothing of a higher class is, and a
+request blocked by its own database's cap holds back only that database (**BL-861, WorkloadCore S18, next train**; see
+[Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-next-train)).
 
-| Class | `Constrained` / `Balanced` | `Abundant` | What it covers |
-|---|---|---|---|
-| `Interactive` | 0.35 | 0.30 | Query result materialisation, grouped-aggregate state, sort buffers |
-| `Streaming` | 0.05 | 0.05 | Fan-out projections. High preference, low entitlement |
-| `Ingest` | 0.25 | 0.30 | Bulk-load and insert buffering |
-| `Background` | 0.25 | 0.25 | Materialized-query rebuilds, index rebuilds |
-| `Maintenance` | 0.10 | 0.10 | Compaction and cold-merge buffers |
-
-Each column sums to 1.00, which is a contract rather than a coincidence: a table summing to less silently strands budget, and one summing to more silently over-commits.
-
-**A class may borrow idle headroom.** A sole claimant's ceiling is the whole governed budget, so nothing is stranded when only one kind of work is running. From the second claimant onward each borrower takes at most half the idle remainder, so a second borrower can always start and no claimant faces a cliff on its first byte.
+(**WorkloadCore S06, next train**) **Classes no longer have entitlements.** The per-class shares of the transient budget
+(`Interactive` 0.35, `Streaming` 0.05, `Ingest` 0.25, `Background` 0.25, `Maintenance` 0.10, with different fractions in
+the `Abundant` resource mode), borrowing of idle headroom between classes, and `Aouda:Memory:PerClassAdmissionEnabled` are
+removed; a class orders the queue and does not cap what it may hold. The resource modes those fractions differed by are
+deleted too (**WorkloadCore S17, next train**).
 
 ## Background page scrubber
 

@@ -434,6 +434,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Wait | `waitMs` / `X-Aouda-Wait-Ms` (default 250, cap 30 000) |
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
+| Materialized query | (**WorkloadCore, next train**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
 
@@ -442,8 +443,9 @@ Admin replication `walPosition` on `GET /admin/replication/status` is lag observ
 MQ list/status and `POST …/materialized-queries/{name}/query` stamp `token` as the **maintenance watermark** (`D-9`), not a raw WAL offset. A token-bearing MQ read waits on that watermark.
 
 `POST …/materialized-queries/{name}/query` reads the whole result, held to `Aouda:Query:MaxResultRows` and the read budget like every
-materialising read (**BL-776, next train**): a result over either is `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`. Retrying does
-not help a result over the row ceiling — read it with a filtered `POST …/tables/{result}/query` and a `limit`, or its aggregates.
+materialising read (**BL-776, next train**): a result over the read budget is `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`; a
+result over the row ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (**release blockers, next train**; it was a `503`), because
+retrying is refused the same way — read it with a filtered `POST …/tables/{result}/query` and a `limit`, or its aggregates.
 
 Query parameter **wins** over the header when both are sent:
 
@@ -482,6 +484,7 @@ All errors return a JSON body with this structure:
 | `INVALID_OPERATOR` | 400 | Invalid comparison operator in where clause |
 | `INVALID_COLUMN` | 400 | Invalid column name or reference |
 | `INVALID_VALUE` | 400 | Invalid value type or format |
+| `RESULT_TOO_LARGE` | 400 | (**release blockers, next train**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour |
 
 #### Resource Errors (4xx)
 
@@ -534,9 +537,10 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
 | `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-850, next train**) Sign-in, sign-up, password set / change / reset and an admin's create-user: the password hash (Argon2id, 64 MiB while it runs) could not get its memory from the server's queue within 10 s. Nothing was changed; `Retry-After` is the queue's estimate. Hashes queue for memory rather than run unbounded, so a burst of sign-ins waits instead of exhausting the heap (it answered `500` before). An admin's user edit, API-key revoke or RLS-resolver create refused for capacity answers this (or `WAL_CAPACITY_EXCEEDED`) too, where it used to read as a 400 or a 409 "email exists" (WorkloadCore group 6 review). A token **refresh** refused for capacity answers this too (**BL-841, next train**; it was a `500`), and the refresh token stays live: retry with the same token. |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic message to prevent information leakage) |
 | `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is disabled for this database (`allowSelfSignup` is false) |
-| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is invalid, expired, or revoked |
+| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is invalid, expired, or revoked. Also the losing call of two concurrent refreshes presenting one token (**BL-841, next train**): exactly one refresh succeeds, and the other revokes the token family — including the token the winner just received. Refresh a shared session from one place |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email is already registered in this auth database |
 | `AUTH_PASSWORD_TOO_WEAK` | 400 | Password does not meet the minimum password policy |
 | `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format |
@@ -579,6 +583,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 |------|-------------|-------------|
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, next train**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**WorkloadCore S07, next train**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, next train**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-921, next train**) Answered as this on every endpoint, where some answered `400` or `500` before. |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -599,6 +605,7 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_MUTATION_VALUE_NODE_INVALID` | 400 (schema apply) | A `values` / `set` entry is an object node that is neither `{ "param": "<name>" }` nor `{ "value": <literal> }` |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows` (execute-time; fail closed) |
 | `DUPLICATE_PRIMARY_KEY` | 409 | *BL-636, 0.1.37.* An insert named a primary key a live row already holds. `details` carries the offending key. Use `op: "upsert"` (named mutation) or `mode: "upsert"` (write-stream) when the write is meant to replace. Previously surfaced as `500 INTERNAL_ERROR` |
+| `WRITE_CONFLICT` | 409 | (**BL-881, next train**) A DELETE or UPDATE (table `PATCH` / `DELETE` rows, `rows/batch`, a named mutation) did not commit: it re-checks the rows it matched at its commit and runs again from its scan when another writer changed one, and another writer kept deleting or rewriting them through all 16 of its attempts. Nothing of it was applied (in `rows/batch`, the operations before it were). Retry the request with backoff. Previously surfaced as `500 INTERNAL_ERROR`. The C# SDK raises it as `AoudaRequestException` (`StatusCode` 409, `ErrorCode` `WRITE_CONFLICT`) and does not retry it itself. An admin auth write that keeps conflicting answers it in the auth payload shape |
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |
@@ -1450,7 +1457,7 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, next train**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, next train**), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, next train**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Access-surface diff
 
@@ -1492,7 +1499,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 |--------|------|------------------------------|-------------|
 | GET | `/` | Read | List all materialized queries (array of status objects). |
 | GET | `/{name}` | Read | Status for one query; `404` if missing. |
-| POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. |
+| POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. (**BL-884, next train**) A create whose first build is refused for capacity (memory, or a full WAL) still answers `204`: the definition is durable, the query exists **behind** (`current: false`) and is built once there is room. It used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists". |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
 | POST | `/{name}/query` | Read | Return materialized rows as JSON objects (see response). |
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
@@ -1518,8 +1525,8 @@ Queries over one source table are built from a **single traversal** of it, so th
 `EquityTrade` decode it once between them rather than three times. Use this instead of calling
 `{name}:refresh` once per query.
 
-> With `postLoadMqBehavior: "auto"` (the default) a bulk load already materializes its affected
-> queries during its own pass — do not refresh at all. Pooled refresh is for the case where you
+> With `postLoadMqBehavior: "auto"` (the default) a bulk load already brings its affected
+> queries current — after its commit, in the background (**WorkloadCore S09, next train**) — do not refresh at all. Pooled refresh is for the case where you
 > loaded with `"skip"` deliberately.
 
 **Request:**
@@ -1541,7 +1548,7 @@ Supplying both `names` and `sourceTable`, or neither, is a `400` naming the conf
   "sourceGroups": 1,
   "results": [
     { "name": "EquityTradeOhlc1H", "state": 1 },
-    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because the build exceeded its memory budget: …" }
+    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
   ]
 }
 ```
@@ -1607,6 +1614,7 @@ The list route returns an array of the same object.
   "errorMessage": null,
   "isStale": false,
   "staleReason": null,
+  "current": true,
   "amplification": {
     "sourceRowsIngested": 1000000,
     "keysPlanned": 1000000,
@@ -1635,10 +1643,12 @@ The list route returns an array of the same object.
 | `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
-| `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (a `"deferred"` load, or an `"auto"` load folded by the pass). `0` when none; absent on older servers. While it is above zero the query is also `isStale`. `:refresh` of the query runs the table's pass at once. |
+| `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (a `"deferred"` load, or an `"auto"` load folded by the pass; **WorkloadCore S10, next train**: every load but a `"skip"` one). `0` when none; absent on older servers. While it is above zero the query is also `isStale` (behind) and not `current`, with a `staleReason` like "2 bulk load(s) into its source are pending the table's pass…"; it is owed work, not holed, so `staleOnly` does not select it and `currentLag` counts from the oldest owed load's commit (**WorkloadCore S10**). `:refresh` of the query runs the table's pass at once. |
 | `stalenessMs` | integer? | (**ColumnarMerge S01, 0.2.0**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
+| `current` | boolean | (**WorkloadCore, next train**) **Whether the result is current for a reader starting now** — the one rule the server uses to route a source-table read to this result and to decide whether a consistency token is covered by it: no lost update (`isStale` for that reason), nothing queued or in flight for it or for a query it is built on (an incremental update, a bulk-load publish, a load past its commit point), no commit to its source still being routed, and its frontier (`token`) at the WAL head. `false` on older servers. |
+| `frontierLagBytes` | integer? | (**WorkloadCore, next train**) How many WAL bytes the query's frontier is behind the head. **Omitted** when it is at the head. A size, not a position: positions are only ever on the wire as tokens. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
-| `token` | string? | The maintenance watermark, as above. |
+| `token` | string? | The query's **frontier** (**WorkloadCore, next train**; the maintenance watermark before): the WAL position its result incorporates, encoded as a consistency token. A position to wait for, not a claim that the result is current — `current` is the claim. |
 
 #### ⚠️ Is this query current? Read `isStale`, `staleReason` and `currentLag` — not `state`
 
@@ -1653,10 +1663,11 @@ otherwise the table answers, with the same rows as ever. Its currency is reporte
 
 | Field | Meaning |
 |---|---|
-| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. |
+| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. (**WorkloadCore S09, next train**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). |
 | `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
 | `currentLag` | How long the query has **been behind** without a break. `null` when it is not behind — including for a caught-up query that has been idle for days. |
 | `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is. Omitted when current. |
+| `current` | (**WorkloadCore, next train**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. |
 
 ⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLag`.** Under a steady stream of
 inserts that never lets a query's queue empty, `currentLag` grows for as long as the stream runs — it is
@@ -1678,12 +1689,13 @@ read stale data as current. A client that polls `state` and nothing else will st
 **Recommended check:**
 
 ```jsonc
-// current
-{ "state": 1, "isStale": false, "currentLag": null }
+// current (WorkloadCore, next train: read `current`; older servers: `isStale: false` and `currentLag: null`)
+{ "state": 1, "isStale": false, "currentLag": null, "current": true }
 
-// readable, but behind — act on this
-{ "state": 1, "isStale": true,
-  "staleReason": "3 bulk-load publish(es) for this query have been queued and have not finished. The result is readable but is not current.",
+// readable, but behind — act on this (WorkloadCore S10, next train: a load's queries are owed the table's pass;
+// before, this read "3 bulk-load publish(es) for this query have been queued and have not finished. …")
+{ "state": 1, "isStale": true, "pendingDeferredJobs": 3, "current": false,
+  "staleReason": "3 bulk load(s) into its source are pending the table's pass. The result is readable but is not current; refresh the query, or update the table, to bring it current now.",
   "currentLag": "00:00:12.4310000", "stalenessMs": 4120 }
 ```
 
@@ -1821,7 +1833,7 @@ List all tables with statistics.
 | `sizeBytes` | number | Approximate size in bytes across all segments |
 | `policy` | object | Storage policy |
 | `rowCountIsExact` | boolean | `false` when `rowCount` is a lower bound (a segment's count was unknown) |
-| `keyMapResident` | boolean, optional | (**ColumnarMerge S05, 0.2.0**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, or when the server's memory governor refused it — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
+| `keyMapResident` | boolean, optional | (**ColumnarMerge S05, 0.2.0**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, when the server's memory governor refused it, or when it evicted part of the map to make room (**WorkloadCore, next train**) — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
 
 #### `GET /api/tables/{name}`
 
@@ -2279,11 +2291,12 @@ Insert one or more rows into a table.
 | `generatedValues` | object? | Generated values for auto-increment columns. Keys are row indices (as strings), values are objects mapping column names to generated values. Only present when the server allocated IDs. Absent or empty for that row/column under `identityInsert: true` (client-supplied values are stored as-is). |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"` (no replication wait). See `WriteConcernStatus` below. |
 
-**Materialized queries are current when the insert returns (**ColumnarMerge S11, 0.2.0**).** An insert maintains
-the table's aggregate and latest / first-per-key queries inside its own commit, so the `200` comes after they are
-written — a read right after it sees the rows — and the insert takes longer by their share. Filters, top-Ns,
-cascades and queries with a `maxCoalesceMs` window still follow asynchronously. See
-[Materialized queries](../guides/materialized.md#27-core-concepts-and-mental-model).
+**Materialized queries follow the insert, off its commit (**WorkloadCore S09, next train**).** An insert hands its change batch to its
+table's queries' maintainers at its commit, in the table's commit order and without waiting, and they apply it in the
+background. The `200` does not wait for them, so right after it a query may be a moment behind: read with the insert's
+consistency token (`token` / `X-Aouda-Token`) to wait for them, as for any other write. In 0.2.0 (**ColumnarMerge
+S11**) an insert wrote its table's aggregate and latest / first-per-key queries inside its own commit, before the
+`200`. See [Materialized queries](../guides/materialized.md#27-core-concepts-and-mental-model).
 
 **Identity-insert (`identityInsert: true`):**
 
@@ -2411,6 +2424,7 @@ Update rows matching a WHERE filter.
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, next train**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
+| `WRITE_CONFLICT` | 409 | (**BL-881, next train**) Other writers kept changing the matched rows through all 16 attempts (each re-checks its matches at commit and rescans if one changed). Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
 #### `DELETE /api/databases/{db}/tables/{name}/rows`
 
@@ -2462,6 +2476,12 @@ Delete rows matching a WHERE filter.
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing or empty WHERE clause |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, next train**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
+| `WRITE_CONFLICT` | 409 | (**BL-881, next train**) Other writers kept changing the matched rows through all 16 attempts. Nothing is deleted; retry with backoff. |
+
+**Concurrent writers (**BL-881, next train**).** A DELETE or UPDATE that overlaps another write to the same rows commits as if the
+two ran one after the other: at its commit it re-checks every row it matched and, if one was deleted or rewritten meanwhile, runs
+again from its scan. One answer changes with it: a DELETE whose `WHERE` a concurrent upsert moved a row out of (`WHERE k = 'a'`, the
+upsert set `k = 'b'`) now **leaves that row**, where it used to delete it.
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows` — Extended fields (P27)
 
@@ -2597,7 +2617,8 @@ Execute multiple update and/or delete operations against the same table in a sin
 All operations are applied sequentially in the order given. ⚠️ **Each operation commits on its own** — the batch is not one
 transaction (**BL-843**): when an operation fails (a duplicate key, a `503 MEMORY_BUDGET_EXCEEDED` refusal past the read
 budget, **next train**), the operations before it have been applied, so a retry of the whole batch applies them again. Make
-operations that a retry may repeat idempotent (literal `set`, not `setExpr` arithmetic), or retry from the failed operation.
+operations that a retry may repeat idempotent (literal `set`, not `setExpr` arithmetic), or retry from the failed operation. The same
+holds for a `409 WRITE_CONFLICT` (**BL-881, next train**): the refused operation applied nothing, the ones before it stand.
 
 **Request Body:**
 
@@ -2769,11 +2790,11 @@ Readiness probe. 200 when `DatabaseManager` is initialized and **critical** comp
 
 `/ready` does **not** fail because an operator database is `Creating` or `Dropping` — that would take the whole node out of a load balancer for a long drop. Per-database readiness is `GET /api/databases/{name}` (`state=Active`) and `/health/detailed`.
 
-The `memory` component is critical too. Any of these makes `/ready` return 503: the managed heap at 75 % or more of its limit,
-the budget tightened below its grant, or a database holding more than 110 % of what it was granted. A database that is
-borrowing unused headroom is judged against its **elastic grant**, not its nominal share, so borrowing alone never fails
-readiness (**BL-788, next train**). Before that, a database inside its grant could hold `/ready` at 503 for as long as it
-borrowed. The `reason` names the database, its usage and its grant, and the `memory` component's details carry them as
+The `memory` component is critical too. Either of these makes `/ready` return 503: the managed heap at 75 % or more of its
+limit, or a database holding more than 110 % of what it was granted. A database's grant is its **governed ceiling** — the
+process's budget, or its hard cap where it has one — not its nominal share, so using room it was given never fails readiness
+(**BL-788, next train**; WorkloadCore S06 deleted elastic lending and the "tightened" verdict). Before that, a database inside
+its ceiling could hold `/ready` at 503 for as long as it used it. The `reason` names the database, its usage and its grant, and the `memory` component's details carry them as
 `overBudgetDatabase`, `overBudgetUsedBytes` and `overBudgetGrantBytes`.
 
 Use as a Kubernetes `readinessProbe`.
@@ -2785,6 +2806,8 @@ Startup probe. 200 when bootstrap is complete (`DatabaseManager` initialized). 5
 #### `GET /health/detailed`
 
 Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane).
+
+The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, next train** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, next train**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, or a database holding more than 110 % of its ceiling. (**WorkloadCore S06, next train**: the budget is never tightened in-process any more, so there is no "tightening" verdict; a database's ceiling is the server's budget unless it has a hard cap.)
 
 **Operator wait (create / schema apply):** wait for `GET /ready` 200 **and** `GET /api/databases/{name}` 200 with `state=Active`. After `DELETE`, GET `{name}` 404 means the database is gone from serving.
 
@@ -2837,10 +2860,10 @@ component's `details`, so an orchestrator can key on them without polling this r
 ⚠️ **`hotDrainBytesPerSecond == 0` is not a problem on its own.** A server with nothing to demote drains nothing, which is the healthy resting state. The condition worth alerting on is `hotDrainStalled`: demotions were attempted across the interval and none released a segment. Sustained `hotArrivalBytesPerSecond` above `hotDrainBytesPerSecond` says the hot tier is being filled faster than it empties, while there is still headroom to act in.
 
 
-**Provenance: where the budget came from, and what `headroomRatio` divided** (**BL-611 / BL-622, 0.1.37**)
+**Provenance: where the budget came from** (**BL-611, 0.1.37**)
 
-Two additive blocks. Neither changes a threshold, a default or a byte count — they say where the
-numbers beside them came from.
+An additive block. It changes no threshold, default or byte count — it says where the numbers beside it came from.
+(**WorkloadCore S17, next train**: its companion, the `headroom` block, is removed — below.)
 
 `budgetDerivation` answers *"is this budget a grant or a guess?"*, the way the `cpu` block already
 answers it for cores. It is `null` under embedded hosting, where nothing derived one.
@@ -2881,38 +2904,88 @@ carries the figure actually running, and `explanation` appends a `Superseded:` c
 differ. If you are alerting on `availabilityClampBound`, gate it on `isStillInForce` as well:
 a clamp that bound at startup says nothing about a budget you have since set by hand.
 
-`headroom` is `headroomRatio` with both of its operands, so you can see what it divided.
+**Removed: the resource mode and its headroom** (**WorkloadCore S17, next train**). `resourceMode`, `headroomRatio`,
+`resourceModeTransitions` and the whole `headroom` block (`ratio`, `scope`, `governedBytes`, `workingSetHighWaterBytes`,
+`workingSetSource`, `mode`, `transitions` and the four entry / exit ratios) are gone, with the `Constrained` / `Balanced` /
+`Abundant` classification they reported: the engine no longer sizes its pools from the process's measured headroom, and
+`Abundant` no longer raises them. The transient pool, the per-table flush trigger and the per-table hot budget are one
+formula in every deployment — see [Sizing](../guides/sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-next-train).
+To see room the ledger does not hold, read `managedHeapBytes`, `ledgerBytes`, `untrackedHeadroomBytes` and `rssBytes`.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `ratio` | number | `governedBytes / workingSetHighWaterBytes`. Identical to the flat `headroomRatio`, which is kept. |
-| `scope` | string | Always `Process`. See the warning below. |
-| `governedBytes` | integer | The numerator: the **server's** governed budget. |
-| `workingSetHighWaterBytes` | integer | The denominator: a decayed maximum of the process's working set (half-life ~11 minutes). (**IngestAtSpeed S08, 0.1.40**) The working set is RSS less the managed garbage the GC holds committed beyond the live heap. |
-| `workingSetSource` | string | `ProcessRss`, `ReservationLedger` (the fallback when RSS is unreadable), or `Unknown` before the first sample. Names the quantity that actually supplied the denominator: the high water is a decayed *maximum*, so a smaller reading that loses to the previous one does not relabel it. |
-| `mode` | string | The `resourceMode` this ratio produced. |
-| `transitions` | integer | Mode changes since start. |
-| `balancedEntryRatio` / `balancedExitRatio` | number | `2.0` / `1.5`. |
-| `abundantEntryRatio` / `abundantExitRatio` | number | `3.0` / `2.0`. |
+#### The ledger: leases and consumer charges (**WorkloadCore, next train**)
 
-🔎 **The whole block is read from one sample**, so `ratio`, `governedBytes` and
-`workingSetHighWaterBytes` always reconcile — you can divide them and get the ratio printed beside
-them, on a live server under load.
+The governor's ledger covers every holder the engine keeps on purpose. Besides the reservations (`reservedBytes`, by category
+in `reservedByCategory`), each database charges its caches, registries and queues to it as **consumers**: the page cache, the
+bloom store, segment handles, cold segment metadata, catalog shards, flushed hot segments, change rings, materialized-query
+update queues, the sparse primary-key index, the L3 key map, graph and vector buffers, and what a table keeps between merges.
+Consumer charges are sampled on the governor's reconciliation tick (every 10 s) and on every pass of the memory broker.
 
-⚠️ **The resource mode is a property of the *process*, not of a database.** Two databases on one
-host are in the same mode by definition. Aouda's log line names a database —
-`Resource mode for database 'X' is now Constrained` — only because it is emitted once per open
-database as the mode is applied to each.
+Each consumer also reports what it could **release** on request — the page cache, bloom indexes, segment handles, cold segment
+metadata, catalog shards and cold sparse-PK entries by dropping them (they are re-read from disk on next use), hot segments by
+demoting them — and the broker frees those bytes, cheapest first, when a database's ledger passes its target, when the
+process's does, or when the live heap passes 80 % of the GC hard limit. **A reservation is refused when
+`reservedBytes + chargedBytes − releasableBytes` would pass the ceiling**: a full cache makes room instead of refusing work; a
+full queue, which nothing can release, refuses it. Ordinary work meets the ceiling **less the held reserve** (below)
+(**WorkloadCore S06, next train**: the budget is no longer tightened under host pressure, and `tighteningActive` is removed).
 
-⚠️ **Do not compare `headroom.ratio` against a database's `reservedBytes`.** They are ratios of
-different things, and reading them as though they were the same is the most common misdiagnosis on
-this endpoint. `reservedBytes` is the **reservation ledger**; the denominator here is the whole
-process's **resident set**, which also holds hot segments, HRA buffers, PK index caches and
-materialized-query build state — all of which are *reported but never reserved*, deliberately, so
-that resident data cannot make the governor refuse transient work that fits. A database reserving
-120 MB inside a 2.4 GB ceiling, in a process whose RSS high water is 1.9 GB against a 2.76 GB
-governed budget, is at `1.45x` headroom and `Constrained`. Every one of those numbers is correct.
-Read `workingSetHighWaterBytes`, `rssBytes`, `reservedBytes` and `untrackedHeadroomBytes` together.
+| Field | Where | Type | Meaning |
+|---|---|---|---|
+| `chargedBytes` | top level, per database | integer | Consumer charges at the last sample — at the top level, every database's. |
+| `chargedByConsumer` | top level, per database | object | `chargedBytes` by consumer: `PageCache`, `BloomFilters`, `SegmentHandles`, `ColdMetadata`, `CatalogShards`, `HotSegments`, `ChangeRings`, `MqUpdateQueues`, `SparsePkIndex`, `L3KeyMap`, `GraphVectorBuffers`, `HraScratch`, `BulkLoadQueues` (bulk-load slices queued past a refused reservation), `PasswordHashing` (password hashes running now: Argon2id holds 64 MiB per sign-in or password set while it runs), `UnitWorkingMemory` (a unit of work's own working memory while it runs: a cold segment's keys read back to index it, an update's copy of the table's buffered rows; counted when a reservation is decided since **WorkloadCore S06**) (both **WorkloadCore, next train**). Zero entries are omitted. |
+| `ledgerBytes` | top level, per database | integer | `reservedBytes + chargedBytes`: the whole ledger. |
+| `releasableBytes` | top level, per database | integer | What the consumers could release now by dropping cached data or demoting (re-read from disk on next use), at the last sample. Part of `ledgerBytes` (it may cover a loaded hot segment's reservation). |
+| `liveHeapAtLastGen2Bytes` | top level | integer | The live heap of the most recent gen-2 collection (below), recorded when it ended (**WorkloadCore, next train**). `0` before the first. |
+| `ledgerAtLastGen2Bytes` | top level | integer | `ledgerBytes` as it stood when that collection ended, consumer charges sampled then. |
+| `untrackedAtLastGen2Bytes` | top level | integer | `liveHeapAtLastGen2Bytes − ledgerAtLastGen2Bytes`, never negative: the live heap the ledger did not hold, both read at the same collection. |
+| `lastGen2Index` | top level | integer | The collection's index (`runtime.lastGen2.index`), so a reader can keep one row per collection. |
+
+#### Grants, the queue and the held reserve (**WorkloadCore S06, next train**)
+
+Work asks for memory **before it starts**. A request that does not fit waits in its class's queue — first in, first out
+within a class; `Interactive`, `Streaming`, `Ingest`, `Background`, `Maintenance` in that order — and is served the moment
+memory frees. A client's insert or upsert is admitted this way **before it takes any lock**: one that does not fit waits up
+to one sampling tick (10 s), and is then refused with **503 `MEMORY_BUDGET_EXCEEDED`** and a `Retry-After` the queue
+estimates (the bytes ahead of it over the rate the queue has been served at, never less than it already waited) — never a
+constant. (**WorkloadCore S17, next train**) The same holds for every other memory refusal — a read growing past its
+budget, a write decided under a lock: its `Retry-After` is the queue's estimate for the refused bytes, or 10 s (the
+broker's next look, `T6`) before any service rate has been measured or when the refusal has no estimate. None is a
+constant 1 s any more. A write that runs under a lock (an update, a write inside a named-query batch) is decided at once and never waits.
+
+The top `max(32 MB, 3 %)` of each database's and the server's budget (at most an eighth of it) is a **held reserve**: small
+(≤ 64 KiB, `Aouda:Memory:SmallRequestBytes`) `Interactive` and `Ingest` writes, and any small request on the auth database,
+are admitted from it when everything else is full. Nothing else draws on it, so the write and the token refresh that let a
+client recover are admitted while the rest waits.
+
+| Field | Where | Type | Meaning |
+|---|---|---|---|
+| `grants.waiting` | top level | object | Requests waiting for memory now, per class (non-zero only). |
+| `grants.queuedBytes` | top level | object | The minimums they wait for, per class. |
+| `grants.served` / `grants.timedOut` / `grants.revoked` | top level | integer | Since start: waiters served from the queue; refused after their wait (each a 503 with the queue's `Retry-After`); grants the memory broker took back because the heap was over its line. |
+| `grants.serviceRateBytesPerSecond` | top level | number | The rate the queue has been served at recently — what its `Retry-After` estimates divide by. |
+| `reserve.bytes` / `reserve.heldBytes` / `reserve.admissions` | top level | integer | The server's held reserve, what small writes hold from it now, and how many were admitted from it since start. |
+
+**Removed** (**WorkloadCore S06, next train**): `tighteningActive`, `admissionDenials`, `admissionThrottles`,
+`heapPressureDenials`, `ceilingCountedByClass`, and per database `elasticCeilingBytes`. A database's `governedCeilingBytes` is
+the server's governed budget unless it has a hard cap (a budget it was registered with, or `MaxMemoryShare`);
+`nominalShareBytes` is its weighted share, which is now the memory broker's weight — when the server needs memory back, it
+is taken first from the database furthest over its share — and no longer a limit.
+
+Two fields **changed meaning**:
+
+- `managedHeapBytes` is the **live heap after the last gen-2 collection** — what that collection traced live, never more than
+  the heap less its free space — the one reading memory decisions take, as of the last reconciliation (every 10 s). It used to
+  be the heap after the most recent collection of any kind, which counted every object that died since the last gen-2 as
+  live. A **background** gen-2's heap less free space also counts everything allocated while it ran, untraced; the traced
+  figure leaves that out (**WorkloadCore, next train**). For a blocking gen-2 the two are equal.
+- `untrackedHeadroomBytes` is `managedHeapBytes − ledgerBytes` (never negative): the live heap the ledger does not account
+  for. It used to subtract `reservedBytes` only.
+
+🔎 **The completeness of the ledger** is `untrackedAtLastGen2Bytes / liveHeapAtLastGen2Bytes`, taken at the collections with
+the largest live heap. A large share is worth reporting: it is memory held outside anything the engine can release or refuse.
+⚠️ Not `untrackedHeadroomBytes / managedHeapBytes`: that compares the heap at the last gen-2 with the ledger now. Under load
+the gen-2 is usually a full collection forced at a peak, while work held its reservations, and seconds later the work has
+released them; the difference reads two to three times the real gap (**WorkloadCore, next train**). Expect a share of
+10–20 MB that no reservation can own on any server: the runtime, ASP.NET's caches and pooled buffers.
 
 #### `runtime` — the process's own counters (**IngestAtSpeed S01, 0.1.40**)
 
@@ -2926,15 +2999,16 @@ million rows, bytes allocated per row, share of wall time paused for GC.
 | `allocatedBytesTotal` | integer | Managed bytes allocated since start. |
 | `gcPauseTotalMs` | number | Total time the runtime paused threads for garbage collection. |
 | `gen0Collections` / `gen1Collections` / `gen2Collections` | integer | Collections of each generation since start. |
-| `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Unlike `managedHeapBytes`, it does not count garbage that has not been collected yet. Under a fast ingest the two can differ by gigabytes. |
+| `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Read when the response is built; `managedHeapBytes` is the same reading as of the last reconciliation (**WorkloadCore, next train**: before, `managedHeapBytes` counted garbage not yet collected, and under a fast ingest the two differed by gigabytes). |
 | `heapSizeBytes` | integer | Heap size as of the most recent collection of any generation. |
+| `lastGen2` | object | The most recent gen-2 collection as the runtime reports it (**WorkloadCore, next train**): `index`, `kind` (`Background` or `FullBlocking`), `compacted`, `concurrent`, `heapSizeBytes`, `fragmentedBytes`, `promotedBytes` (what it traced live), `totalCommittedBytes`, `pinnedObjectsCount`, `finalizationPendingCount`, and per generation — 0, 1, 2, the large-object heap, the pinned-object heap — `generationSizeAfterBytes`, `generationFragmentationAfterBytes` and `generationSizeBeforeBytes`. `null` before the first. |
 
 🔎 All six provenance fields also appear in the `memory` health component's `details` —
 `budgetIsDerived`, `budgetSource`, `budgetIsCgroupBounded`, `budgetFractionApplied`,
 `budgetAvailabilityClampBound`, `budgetStartupEffectiveBytes`, `budgetIsStillInForce` and
-`budgetDerivation`, alongside `resourceMode`, `headroomRatio`,
-`headroomGovernedBytes`, `workingSetHighWaterBytes` and `workingSetSource` — so an orchestrator can
-key on them without polling this route.
+`budgetDerivation` — so an orchestrator can key on them without polling this route. (**WorkloadCore S17, next train**)
+`resourceMode`, `headroomRatio`, `headroomGovernedBytes`, `workingSetHighWaterBytes` and `workingSetSource` are removed from
+those details with the resource mode.
 
 ---
 
@@ -4237,9 +4311,9 @@ All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append`
 | `POST` | `/api/databases/{db}/bulk-load:begin` | Begin a new session. Returns `jobId`. |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (NDJSON or column-batch body). |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:commit` | Commit the session. |
-| `GET` | `/api/databases/{db}/bulk-load/{jobId}:status` | Get session status and progress. |
+| `GET` | `/api/databases/{db}/bulk-load/{jobId}` | Get session status and progress. (Listed as `{jobId}:status` until **WorkloadCore, next train**; the route has always been `{jobId}`.) |
 | `GET` | `/api/databases/{db}/bulk-load:list` | List all sessions for this database. |
-| `POST` | `/api/databases/{db}/bulk-load/{jobId}:force-abort` | Operator abort. |
+| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. (Listed under `{jobId}` until **WorkloadCore, next train**; the route has always been this.) |
 
 ---
 
@@ -4266,7 +4340,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
 | `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
-| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"`, `"deferred"` | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it queues behind that publication via the server's per-name lock and then re-scans the whole source table. How `"auto"` does it depends on the table: when every query over the table is an `aggregate` or a `latestPerKey`/`firstPerKey` (**ColumnarCore S12, 0.2.0**), the load folds its rows as it writes its segments and writes those queries and the queries built on them before `:commit` returns, with `mqRebuildStatus: "completed"` — so `:commit` takes longer; if the fold's memory is refused, it spilled, or a query was created or dropped during the load, the table's **deferred pass** folds its rows in right after the commit instead (the queries read as behind, `isStale` with a reason, until it ends). On any other table the queries accumulate during the load's own pass and publish by shadow-swap at commit. `"skip"`: no ingest-fed sinks and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`, as `"skip"` does), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. Use it for very large or many back-to-back loads: many loads, one pass. An older server answers `"deferred"` with `400 BULK_LOAD_INVALID_OPTIONS`. See [Deferred loads](../guides/materialized.md#deferred-loads). |
+| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"`, `"deferred"` | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it runs the table's pass that was starting anyway or, once that has run, re-scans the whole source table. (**WorkloadCore S10, next train**) `"auto"` records a pending job, as `"deferred"` does, and starts the table's **deferred pass** for each table it wrote right after the commit (multi-table and transform loads included): a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, next train**: by a background rebuild job after the pass, so the other queries on the table are not held behind one long rebuild), and the queries built on them caught up. The load does no materialized-query work while its rows stream and is not paced to a drain. Until the pass ends its queries read as behind (`isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false`). Before S10, how `"auto"` did it depended on the table: a table of only `aggregate` and `latestPerKey`/`firstPerKey` queries was folded as the load wrote its segments and written by the table's pass after the commit; on any other table the queries accumulated during the load's own pass and published by shadow-swap after the commit (the ingest-fed path). (**WorkloadCore S09, next train**) Every `"auto"` load's maintenance runs after the commit point, in the background, and `:commit` waits for it only as long as `mqWaitMs` allows (below): on a table of only aggregates and latest / first per key the load used to write its queries before `:commit` returned, with `mqRebuildStatus: "completed"` (**ColumnarCore S12, 0.2.0**). `"skip"`: no pending job, no pass and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`; **WorkloadCore S10, next train**: owed the pass, not marked stale as `"skip"` leaves them), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. Use it for very large or many back-to-back loads: many loads, one pass. An older server answers `"deferred"` with `400 BULK_LOAD_INVALID_OPTIONS`. See [Deferred loads](../guides/materialized.md#deferred-loads). |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
 | `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. |
@@ -4418,6 +4492,8 @@ Content-Type: application/x-ndjson
 |---|---|---|
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
+| `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, next train**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, next train**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume from `rowsDurablyCommitted` as on any reconnect. It used to fail on the heap mid-frame and answer `500`. |
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `"_table"`. |
 | `BULK_LOAD_CURSOR_MISMATCH` | 409 | Client resumed from an incorrect cursor (sent rows below `rowsDurablyCommitted`). |
 
@@ -4436,6 +4512,7 @@ Commit the session. All sealed segments become queryable.
 | `waitForDeferredWork` | bool | No | `false` | If `true`, the response is held until all post-processing (PK index rebuild, CSC mirror, RaBitQ encodings) completes. |
 | `writeConcern` | string? | No | `"acknowledged"` | Replication barrier. Allowed: `"acknowledged"`, `"majority"`, `"all"`. |
 | `writeConcernTimeoutMs` | number? | No | `300000` (5 min) | Max wait for the write-concern barrier. On timeout, returns 200 OK with `writeConcernTimedOut: true`. The data is durable; replicas catch up at their own pace. |
+| `mqWaitMs` | number? | No | `30000` | (**WorkloadCore S09, next train**) How long `:commit` waits, after the load is durable and its table locks are released, for every materialized query the load's rows reach to be current for the load. `0` = do not wait. `0`–`600000`; outside that, `400 BULK_LOAD_INVALID_OPTIONS`, checked before anything is committed. The answer is `mqStatus` below. |
 
 **Response body:**
 
@@ -4448,16 +4525,43 @@ Commit the session. All sealed segments become queryable.
 | `segmentsCreated` | number | Total segments created. |
 | `committedAtUtc` | string | ISO 8601 UTC commit timestamp. |
 | `deferredWorkCompleted` | boolean | Whether deferred work completed before this response was sent. |
-| `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load. |
+| `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load. (**WorkloadCore S09, next train**) On a single node, where a load writes no closing frame, it is the WAL head at the load's commit (it used to carry position 0): a read with it requires the load, and so waits for the load's materialized queries. |
 | `writeConcernRequested` | string | Echo of `writeConcern` from request. |
 | `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
 | `progress` | object? | Present only when `waitForDeferredWork: true`. Fields: `ivfAssignmentsCompleted`, `ivfAssignmentsTotal`, `raBitQEncodingsCompleted`, `raBitQEncodingsTotal`, `cscMirrorsCompleted`, `cscMirrorsTotal`, `pkIndexRebuildCompleted`, `pkIndexRebuildTotal`. |
-| `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. `"completed"` for an `"auto"` load whose queries were written in its own commit (**ColumnarCore S12, 0.2.0**). Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
+| `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. For an `"auto"` load that reaches any query it is `"pending"` or `"inProgress"`, never `"completed"` from the commit itself (**WorkloadCore S09, next train**); it was `"completed"` for an `"auto"` load whose queries were written in its own commit (**ColumnarCore S12, 0.2.0**). Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
+| `mqStatus` | string | (**WorkloadCore S09, next train**) Whether the materialized queries the load's rows reach (over the loaded tables, and every query built on them) were current for the load when `:commit` returned: `"current"` all of them were, within `mqWaitMs`; `"behind"` the wait ended first, and their maintenance is still running — or (**WorkloadCore S16, next train**) one of them can only be brought current by a rebuild (it is holed, in `Error`, or its rebuild is waiting for memory), which `:commit` does not wait for: it answers `"behind"` as soon as the others are current — (**release blockers, next train**) and so is a query that is behind only because a query it is built on is being rebuilt; and if the wait itself fails (the heap, say) the commit is still answered as committed, `"behind"`; `"skipped"` a `"skip"` load — the queries are behind until refreshed; `"deferred"` a `"deferred"` load — a later pass owes them; `"none"` no query reads the loaded tables. |
+| `mqFrontierToken` | string? | (**WorkloadCore S09, next train**) The lowest frontier among the load's queries when `:commit` returned, as a consistency token: a read of those queries with it is served at once. Absent when the load reaches no query. |
+| `mqWaitedMs` | number | (**WorkloadCore S09, next train**) How long `:commit` waited for the load's queries, in milliseconds. |
+
+**`:commit` waits for the load's queries, bounded** (**WorkloadCore S09, next train**). After the load is durable and its table locks are released,
+`:commit` waits up to `mqWaitMs` for the load's materialized queries to be current for it, then answers either way. The wait
+holds no lock and refuses nothing: the load is durable whatever `mqStatus` says, and `"behind"` is not an error. To read the
+queries current, read with the commit's `token` (which waits for them, as for any write), or wait on `mqRebuildStatus`.
+
+
+**Errors** (**WorkloadCore, next train**):
+
+| Code | Status | When |
+|---|---|---|
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, next train**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, next train**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, next train**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. |
+
+The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the
+same `errorCode`. A repeated `:commit` of that job answers the same 503 rather than a 409. Wait `Retry-After`, then run the
+load again from `:begin`. Before this change both refusals answered **500 `INTERNAL_ERROR`** with no `Retry-After`.
+
+⚠️ **A failure after the load's commit point is never a 503** (**WorkloadCore, next train**). Once a load's rows are durable,
+whatever fails after that — the managed heap included — answers **500 `INTERNAL_ERROR`** with the message *"Bulk-load committed,
+but work after its commit point failed. The rows are durable: do not send the load again."* and no `Retry-After`. Do not run that
+load again: its rows are in the table, and a second load would add them twice.
 
 ---
 
-### `GET {jobId}:status`
+### `GET {jobId}`
+
+_The route is `GET /api/databases/{db}/bulk-load/{jobId}` (no `:status` suffix)._
 
 Get current session state and progress.
 
@@ -4537,3 +4641,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.7 | 2026-09-07 | **BL-406 (documentation only, no wire change):** bulk-load `:begin` options table gains `applyTransforms` / `preTransformed`, with the rule that a table carrying any write-time compute requires exactly one of them, and guidance on which to pick. Adds the bulk-load deadline, append-size and admission-lane settings (`Aouda:BulkLoad:StreamingRequestTimeoutMs`, `SessionIdleTimeoutMinutes`, `MaxConcurrentStreamingRequests`, `StreamingRequestQueueLimit`, `Aouda:MaxConnections: 0`) — **not yet released**: BL-404 / BL-405 are on `Unreleased` and ship in the **next** server train, after 0.1.20. |
 | 2.8 | 2026-09-30 (0.2.0) | **ColumnarCore S06 / S13, BL-716 (additive on the wire):** `POST …/tables/{name}/rows` also accepts one column-batch frame (`Content-Type: application/vnd.aouda.column-batch`; database and table from the URL, `identityInsert` / `writeConcern` as query parameters), advertised by `Accept-Post: application/json, application/vnd.aouda.column-batch` on the endpoint's responses and by `features.insertColumnBatch` in `GET /admin/capabilities`; an older server answers a frame with `415`. Column-batch frames gain the `ScaledDecimal` kind (`8`). `Decimal` columns may declare `precision` / `scale` (`Decimal(p,s)`, `1 ≤ p ≤ 18`, `0 ≤ s ≤ p`) on create-table, add-column and column details. Insert errors: a body that is not valid JSON is `400 INVALID_REQUEST` (was MVC's validation problem), an empty body is `400 MISSING_DATABASE`; a string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is a `400`. |
 | 2.9 | next train (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is answered with that security applied on the joined side, not refused (BL-818; it was `403 AUTHORIZATION_DENIED` until ColumnarRead2 S05), with `joins[i].where` to filter the joined table; `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |
+| 2.10 | next train (WorkloadCore) | **WorkloadCore S09:** materialized-query maintenance is off the commit — an insert's `200` and an `"auto"` load's `:commit` no longer wait for their queries to be written. Bulk-load `:commit` gains `mqWaitMs` (a bounded wait for the load's queries, default 30000) and answers `mqStatus`, `mqFrontierToken` and `mqWaitedMs`; `mqRebuildStatus` is never `"completed"` from the commit itself; a single-node load's `token` is the WAL head at its commit. **WorkloadCore S10:** every load but a `"skip"` one is a pending job brought in by the table's pass (`"auto"` starts it at the commit); the ingest-fed path is gone; a query owing a load reports `isStale: true`, `pendingDeferredJobs` ≥ 1 and `current: false` with a new `staleReason` wording, and is not selected by `staleOnly`; a rebuild refused memory waits for room instead of being retried on timers. No field added or removed. **WorkloadCore S17:** `GET /api/server/memory` loses `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the `headroom` block (the resource mode is deleted); a memory refusal's `Retry-After` is the queue's estimate, or 10 s, never a constant 1 s. **Release blockers:** every endpoint answers a capacity refusal `503` + `Retry-After` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) and a write conflict `409 WRITE_CONFLICT` — some answered `400`, `409` or `500` before (BL-921, BL-881); the result ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (it was `503`); a token refresh refused for capacity is `503` and keeps its token, and of two concurrent refreshes with one token exactly one succeeds (BL-841); a materialized-query create whose first build is refused for capacity answers `204` with the query behind (BL-884); bulk-load `:append` is refused `503` before it decodes when memory is short (BL-831). No field added or removed. |

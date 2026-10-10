@@ -1815,7 +1815,7 @@ Control the total memory Aouda uses:
 }
 ```
 
-When `MaxHotBytes` and `MaxPageCacheBytes` are 0, the engine derives them from the governed budget: 45% for the hot tier (floor 32 MB) and 10% for the page cache (floor 8 MB). The page cache is on in every resource mode (**ColumnarRead, next train**; it was off in `Constrained`, the mode a database starts in); `Aouda:Memory:PageCacheEnabled = false` turns it off. See [Defaults reference](../guides/defaults-reference.md).
+When `MaxHotBytes` and `MaxPageCacheBytes` are 0, the engine derives them from the governed budget: 45% for the hot tier (floor 32 MB) and 10% for the page cache (floor 8 MB). The page cache is on (**ColumnarRead, next train**; it was off in `Constrained`, the resource mode a database started in — the modes are deleted, **WorkloadCore S17, next train**); `Aouda:Memory:PageCacheEnabled = false` turns it off. See [Defaults reference](../guides/defaults-reference.md).
 
 ### Per-Table Memory
 

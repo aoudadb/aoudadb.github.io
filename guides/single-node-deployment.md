@@ -70,6 +70,9 @@ matters, rather than leaving it on everywhere.
 
 ## What changes when a second node joins
 
+⚠️ **Replication is not supported in the next train (BL-839):** a replica cannot catch up after a disconnect. Keep databases
+single-node for now; see the note at the top of [Replication and Clustering](replication.md).
+
 1. Configure `Aouda:ReplicaSet` with the joining node(s) — see [Replication and Clustering](replication.md)
    for cluster setup. This is independent of the setting below.
 2. Set `ReplicationMode: Replicate` for the database — `PATCH` its options, or update config and restart.

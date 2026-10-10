@@ -158,7 +158,8 @@ If you create a table/database without tuning partition or multidb options:
 | `PartitionOptions.PromotionByteThreshold` | `1_000_000_000` | Non-negative integer (bytes) | Auto-promotion can trigger at high byte volume. Declarable on the schema (`promotionByteThreshold`) and mutable after table creation. |
 | `PartitionOptions.InitialBucketCount` | `16` when every partition-key column carries a bounded time-truncation `partitionFunction`; **`128`** otherwise (P45) | Integer ≥ 1 | Shared-partition hashing starts with this many buckets. Declarable on the schema (`initialBucketCount`, `Auto`/`Shared` tables only) but **fixed for the life of the table** — see [Choosing `initialBucketCount` at scale](#choosing-initialbucketcount-at-scale-p45). |
 | `TableOptions.PkUniqueness` | `Strict` | `Strict`, `Recent`, `BestEffort` | Not a `PartitionOptions` field, but declarable on the schema (`pkUniqueness`, any table) and mutable after creation as of P45 — previously only reachable per bulk-load job. |
-| `MigrationOptions.Strategy` | `None` | `None`, `Background`, `Eager`, `Blocking` | Retrospective migration is off unless configured |
+| ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | Deleted (**BL-762, next train**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other |
+| ~~`MigrationOptions.Strategy`~~ | — | — | Removed (**WorkloadCore S17, next train**): the retrospective migration workers it configured were never started by any production path. A catalog that still carries `"Migration"` loads; the property is ignored |
 | `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
 | `DatabaseOptions.EnableWal` | `true` | `true`, `false` | DB has WAL enabled unless explicitly disabled |
 | `DatabaseOptions.ReplicationMode` | `Replicate` | `Replicate`, `DoNotReplicate` | DB participates in replication by default |
@@ -356,12 +357,10 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 
 - Full ADRA/RLS deepening beyond current shipped baseline is still tracked under P14 follow-ups.
 - Broader SDK parity for advanced partition-security admin and complex query-shape helpers remains iterative.
-- Additional ergonomics around retrospective partition migration operations are expected after initial BL-005 delivery.
+- Retrospective partition migration: the never-started migration workers and `MigrationOptions` were removed (**WorkloadCore S17, next train**); the supported route is the manual one (BL-300).
 
 ### Reserved / not yet wired
 
-- `MigrationStrategy.Eager` and `MigrationStrategy.Blocking` are defined as phase-2 strategy intents in policy types but not claimed as fully wired end-to-end production behavior.
-- `MigrationOptions.MaxParallelism` and `MigrationOptions.BlockingTimeout` are explicitly marked phase-2 properties.
 - TypeScript fluent query builder currently has no first-class cross-partition toggle method; it cannot set `crossPartitionAccess` directly even though protocol and server support it.
 - PLS helper awareness for `WhereClause.Groups` is still backlog-tracked (`BL-044`), not complete.
 - Service-key PLS bypass audit logging for DML (insert/update/delete) is implemented in `TablesController` (BL-041, 2026-04-04).
@@ -622,13 +621,7 @@ Core modules:
 | `PartitionOptions.PromotionByteThreshold` | long | `1_000_000_000` | `>= 0` | catalog policy | Auto-promotion byte trigger |
 | `PartitionOptions.InitialBucketCount` | int | `16` (engine-level constant; see the row above for the value a new table actually gets) | `>= 1` | catalog policy | Shared mode initial bucket fanout. Resolved to `16` or `128` at table-create time per the rule in `2.7` before this field is ever persisted. |
 | ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, next train**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
-| `PartitionOptions.Migration` | `MigrationOptions?` | `null` | object/null | catalog policy | Retrospective partition migration config |
-| `MigrationOptions.Strategy` | enum | `None` | `None`, `Background`, `Eager`, `Blocking` | migration config | `Eager`/`Blocking` are phase-2 strategy intents |
-| `MigrationOptions.BatchSize` | int | `100_000` | positive | migration config | Background migration batch size |
-| `MigrationOptions.BatchDelay` | `TimeSpan` | `10s` | non-negative | migration config | Delay between background batches |
-| `MigrationOptions.MaxIoBandwidthPercent` | int | `15` | positive | migration config | Background migration IO pressure cap |
-| `MigrationOptions.MaxParallelism` | int | `2` | positive | migration config | Marked phase-2 only |
-| `MigrationOptions.BlockingTimeout` | `TimeSpan` | `1h` | positive | migration config | Marked phase-2 only |
+| ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, next train**) with `MigrationOptions` (its workers were never started by a production path); an old catalog's property is ignored on load |
 | `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default table temperature in DB |
 | `Aouda:Databases:{db}:EnableWal` | bool | `true` | `true/false` | startup config | Per-db WAL default |
@@ -658,7 +651,7 @@ Precedence and operational notes:
   - Route/body database mismatch is rejected.
   - Partitioned query without required filter is rejected unless explicit bypass.
 - Deprecated/reserved:
-  - Migration phase-2 fields (`MaxParallelism`, `BlockingTimeout`) are defined but not fully wired behavior.
+  - `PartitionOptions.Migration` and its phase-2 fields were removed (**WorkloadCore S17, next train**).
 
 ## 2.11 API and CLI coverage reference (complete + gap-aware)
 

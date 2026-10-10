@@ -184,6 +184,14 @@ Invariants:
   two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
   `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
   every copy of a matched key held in a segment.) On a `Strict` table a key cannot have two live copies, and the behaviour is unchanged.
+- Crash recovery honours the same rule (**BL-823, next train**). On `Recent` and `BestEffort` tables a DELETE, UPDATE or upsert logs
+  the rows it marked — a buffered row by its logged id, a sealed one by segment and row — and the replay after a crash marks exactly
+  those copies. Before, the log held only keys, so with two live copies of a key, deleting or updating one of them (or upserting the
+  key) and crashing before the next checkpoint removed the other copy too. A `Strict` table still logs its deletes by key.
+- A deleted or updated row stays deleted after a crash, in every tier (**BL-891, next train**). Replay re-marks a keyed delete's
+  copies in hot segments as well as in the write buffer and cold segments (a hot copy used to come back), and only in segments
+  that existed when the delete committed — so a key deleted and then written again, or bulk loaded again (**BL-924**), keeps its
+  new row.
 - Preload runs before first insert after open to reduce first-write latency spikes.
 
 ---
@@ -249,6 +257,9 @@ Seal/open path:
 2. L2 keeps frozen partition entries addressable via `FrozenSentinel`.
 3. Insert in freeze window still sees those keys via `LookupKeyLocation`.
 4. `CompleteFreezeFlush` clears frozen partition after persistence/registration.
+5. A hot segment a flush has registered but not yet published is not counted by the `Strict` check; until the publish the
+   frozen copy answers, so a key deleted there can be inserted again at once. A frozen hit is judged against the buffer it
+   came from, and looked up again if that flush completed in between (**BL-899, next train**).
 
 **Path C: Startup preload**
 1. `AoudaEngine.OpenAsync` obtains snapshot.
@@ -391,6 +402,10 @@ Key counters/signals:
 Recovery expectations:
 - L1/L3 files are loaded at open when present.
 - Missing/corrupt files are warning-logged; lookup falls back where possible.
+- (**BL-823, next train**) The WAL's keyed-delete, merge and delete-by-identity frames are format 2. A log holding an older build's
+  frame of those kinds past its checkpoint (a crash with deletes or upserts not yet checkpointed) is refused at open, naming both
+  formats: open it once with the build that wrote it and close it cleanly, or restore from a backup. A cleanly closed database is
+  unaffected. See [Storage — troubleshooting](storage.md#214-troubleshooting-by-symptom).
 
 ---
 

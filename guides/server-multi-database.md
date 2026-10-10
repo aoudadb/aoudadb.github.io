@@ -111,7 +111,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Database layout | `./data/Databases/{name}/…` | Per-db subtree created on first `POST /api/databases` |
 | Memory ceiling | ~70% of detected RAM | One process RSS ceiling, shared as **weighted shares** across databases |
 | Hot segment budget | Auto (45% of the governed budget, floor 32 MB) | Allocated from total RAM |
-| Page cache budget | Auto (10% of the governed budget, floor 8 MB); on in every resource mode (**ColumnarRead, next train**) | Allocated from total RAM |
+| Page cache budget | Auto (10% of the governed budget, floor 8 MB); on (**ColumnarRead, next train**) | Allocated from total RAM |
 | Request timeout | `30 000 ms` | Returns HTTP 504 on breach |
 | Max concurrent requests | `50` | Returns HTTP 503 when exceeded; queue up to 100 |
 | HTTP/2 | `true` | Kestrel serves HTTP/1.1 and HTTP/2 simultaneously |
@@ -536,7 +536,6 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "M
 | `Aouda:Health:CheckTimeoutMs` | `int` | `5000` | Per-component check timeout |
 | `Aouda:Health:Thresholds:ReplicationLagDegradedSeconds` | `int` | `10` | |
 | `Aouda:Health:Thresholds:WalQueueDegradedPercent` | `int` | `80` | |
-| `Aouda:Health:Thresholds:MemoryDegradedPercent` | `int` | `80` | |
 
 ### Per-database settings (`Aouda:Databases:<name>`)
 

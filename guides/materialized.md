@@ -80,7 +80,8 @@ What is different in Aouda vs many systems:
   difference between the old and new result as ordinary `Insert` / `Update` / `Delete` events on the result table,
   instead of seeing the changed rows only through a later event.
   **A maintained `sum` carries the column's type in update events too (**ColumnarCore S10, 0.2.0**):** an
-  in-commit update event's `sum` of an integer column is an `Int64`, as its insert event and every read already were
+  update event's `sum` of an integer column (the maintainer's event since **WorkloadCore S09, next train**; the
+  insert's in-commit event before) is an `Int64`, as its insert event and every read already were
   (the JSON is the same, `12`), and a `sum` of a `Double` column is a `double` — `3` where it was `3.0`.
 
 - User problem solved:
@@ -179,6 +180,7 @@ If you create a materialized query with standard helpers and no special options:
   - `MaxLag = 1s`
   - `MaxQueueDepth = 10000`
   - `ProcessingBatchSize = 100`
+  - `MaintenanceBacklogMaxBytes = 64 MiB` per update lane (**WorkloadCore S09, next train**)
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -188,15 +190,22 @@ If you create a materialized query with standard helpers and no special options:
 | `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates and GROUP BY, over HTTP too, and latest-per-key in the embedded API only (HTTP and TypeScript: **BL-801**) — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan()` is used ([routing](#routing-a-read-to-a-maintained-result)) |
 | Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
-| `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing |
+| `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing; past it a query's batches go to its lane's backlog (**WorkloadCore S09, next train**) |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
-| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server (on a table of only aggregates / latest / first per key, written in the load's own commit, before `:commit` returns — `mqRebuildStatus: completed`; the table's deferred pass runs after the commit only if that fold is refused memory, spills to disk, or a query on the table is created or dropped during the load — **ColumnarCore S12, 0.2.0**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
+| `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | `64 MiB` per update lane | (**WorkloadCore S09, next train**) The backlog a lagging query's batches wait in, charged on the memory budget. Only past it is an update lost: the query is marked stale and rebuilt |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background, by the table's deferred pass, started at the commit (**WorkloadCore S10, next train**; a query the pass cannot fold or replay is rebuilt by a background job after it, **WorkloadCore S17, next train**); `:commit` waits for them up to `mqWaitMs` (30 s) and reports `mqStatus` (**WorkloadCore S09, next train**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
 
 ### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
 
 **A result table is an ordinary table** (that is the whole point of P50), so it lives in the same hot
 tier, obeys the same `storageTemperature`, and is charged against the same per-database and
 process-wide hot ceilings as any table you declared yourself.
+
+**A rebuild no longer holds its whole result in memory** (**WorkloadCore S14, next train**): the table a rebuild writes
+flushes into segments while it is written, for every query type (until 0.2.0 only a filter's did), so a large aggregate's
+rebuild fits a share far smaller than its result. **A maintained result's own write buffer flushes on the same triggers as
+any table's** (**WorkloadCore S17a, next train**): in 0.2.0 the maintenance pinned it in memory between checkpoints, whatever
+its `storageTemperature`, so a large result held its rows in the buffer until the next checkpoint.
 
 **Residency is policy, not a property of the query type.** With no declaration, every result table —
 `aggregate`, `latestPerKey`, `firstPerKey`, `filter`, `topNPerGroup` alike — defaults to **`Auto`**:
@@ -230,7 +239,7 @@ with `Invalid storageTemperature '…' on materialized query '…'`, not at quer
 | Your result is… | Declare | What you get |
 |---|---|---|
 | **Large, historical, append-shaped** — candles, rollups, daily aggregates, anything keyed by a time bucket | **`ColdPreferred`** | No hot segment is ever created, at any ceiling. The bytes are on disk; the page cache serves the recent end. This is the right default for most analytical results. |
-| **Genuinely small and read on every request** — a few thousand keys at most, a dashboard header, a per-user summary | **`HotOnly`** + `residency.targetMemoryBytes` | A *stated* reservation. Refused on its own budget rather than because an unrelated database filled the process, and caught at declaration time if your pins together over-subscribe. |
+| **Genuinely small and read on every request** — a few thousand keys at most, a dashboard header, a per-user summary | **`HotOnly`** + `residency.targetMemoryBytes` | A *stated* reservation, caught at declaration time if your pins together over-subscribe. A result's maintenance is **never refused** for its pin (**WorkloadCore S14, next train**; a refusal used to leave the query stale until a rebuild): past its budget it keeps being maintained, and under heap pressure its segments are demoted last, as `hotOnlyBackstop: DemoteAnyway` would. |
 | **Recent hot, historical cold** — a live feed whose tail is queried constantly and whose history is queried rarely | **`Auto`** + `residency.memoryRowCap` | The maintenance sweep demotes least-recently-accessed segments first, so the cap self-scales without your knowing the arrival rate. |
 | **You genuinely do not know** | **`Auto`** (or declare nothing) | Hot while the tier has room, cold when it does not. The engine decides per flush. |
 
@@ -312,7 +321,7 @@ results are keyed by identity rather than time, and are not clustered.
   - No protocol-level MQ target-kind required.
 - MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
   - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
-  - Auto after `BulkLoadAsync`: when `PostLoadMqBehavior.Auto` (the default), affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) accumulate during the load's own pass over rows and are published by shadow-swap at commit. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load is folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — and (**ColumnarCore S12, 0.2.0**) in the ordinary case folded while its segments are written and its queries written before the load returns (`mqRebuildStatus` is `completed` on the handle), the pass after the commit remaining for a load whose fold the memory governor refuses, that spilled, or whose table's queries changed during it; `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`) until it is done. The work under `MqRebuildStatus.InProgress` is a per-group materialize, not a second full scan of what was just written. Some queries still fall back to a scan (edge or vector-bearing source, prior result not wholly in HRA, governor or reservation-ceiling refusal). `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - Auto after `BulkLoadAsync`: (**WorkloadCore S10, next train**) when `PostLoadMqBehavior.Auto` (the default), the load records a pending job and the table's [deferred pass](#deferred-loads) starts at its commit and brings affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) current: a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, next train**: a background rebuild job, started after the pass, not inside it). Multi-table and transform loads take the same path. The load does no materialized-query work while its rows stream and is not paced to a drain. Before S10 the queries accumulated during the load's own pass over rows and were published by shadow-swap at commit (the ingest-fed path, P46), with the exception that follows. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load was folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written (gone in **WorkloadCore S10**: the pass reads the load's segments), or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, next train**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`, `current: false`) until it is done. The work under `MqRebuildStatus.InProgress` reads only the load's segments, not a second full scan of the table; a query the pass can neither fold nor apply is rebuilt, by a background rebuild job after the pass (**WorkloadCore S17, next train**), and `MqRebuildCompleted` waits for that rebuild too. `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
   - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
   - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
   - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
@@ -327,9 +336,9 @@ results are keyed by identity rather than time, and are not clustered.
     `aouda mq refresh --source-table <table> [--stale-only]`. See
     [§2.11a](#211a-refreshing-several-queries-at-once-pooled-refresh). No TypeScript client surface
     yet.
-  - **Memory budget**: a rebuild holds one in-memory entry per output group. An over-budget build
-    writes its working set through to the query's shadow result table and, if that is still not
-    enough, retires the largest query with a diagnosable error while its siblings complete. See
+  - **Memory budget**: a rebuild holds one grant. A build that outgrows it partitions and spills
+    through its build table instead of being retired (**WorkloadCore S12, next train**); a rebuild
+    refused for capacity leaves the query readable, stale and requeued, never in `Error`. See
     [§2.11b](#211b-what-a-rebuild-costs-and-what-bounds-it).
 
 ### Planned / proposed
@@ -369,7 +378,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | P11 | R8 fix report (handoff) | Honest documentation of unresolved duplicate-row issue; test-relaxation reverted | Engine-side fix still pending | `docs/BACKLOG.md` BL-019 |
 | P28 (S2) | `docs/tasks/P28/MarketData-Gaps-S2-MQ-OHLC-Candles.md` | `FIRST`/`LAST` aggregate functions with `orderByColumn`; derived time-bucket group-by expressions (`TruncateToHour`, `TruncateToMinute`); `AggregateConfig` v2 (backward-compatible); `TimeBucketTruncator` | OHLC quantile/volume aggregates deferred | P28-COMPLETION |
 | P31 (S1+S2) | `docs/tasks/P31/` | `RefreshMaterializedQueryAsync`, shadow-build, auto-trigger after `BulkLoadAsync`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, replica rebuild hook, HTTP refresh endpoint, C# + TS + CLI surfaces | Incremental rebuild from cold-segment arrival outside a bulk load; cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
-| P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` bulk loads accumulate all four MQ types during the load's own pass; scan-fed path retained for `:refresh`, fallback, restore | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
+| P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` bulk loads accumulate all four MQ types during the load's own pass; scan-fed path retained for `:refresh`, fallback, restore (**WorkloadCore S10, next train**: replaced by the table's pass) | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
 
 ## 2.6 Capability coverage matrix
 
@@ -391,7 +400,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
 | `AggregateConfig` v1 backward compatibility | Yes | No | No | P28 S2, implicit string → `GroupByExpression` conversion | Existing v1 definitions parse without migration |
 | Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
-| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, ingest-fed feed | All four MQ types accumulate during the load; some queries still fall back to a scan. `MemoryOnly` sources skipped |
+| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, the table's pass (WorkloadCore S10) | All four MQ types brought current by the table's pass, started at the commit (**WorkloadCore S10, next train**; they accumulated during the load before); queries it cannot fold or apply are rebuilt. `MemoryOnly` sources skipped |
 | `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Failed; awaitable Task |
 | Replica MQ rebuild after bulk-load | Yes | No | No | P31 S1, `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched; factory via `engine.CreateReplicaMqRebuildScheduler()` |
 | HTTP `POST .../materialized-queries/{name}:refresh` | Yes | No | No | P31 S2, `MaterializedQueriesController` | `?await=true` waits; `?await=false` fire-and-forget |
@@ -411,33 +420,40 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 - Maintainer:
   - Pattern-specific logic that builds initial state and applies incremental updates.
 - Update mode:
-  - `Async`: enqueue and apply later — except an insert's aggregates and latest/first-per-key queries, which the
-    insert maintains inside its own commit (**ColumnarMerge S11, 0.2.0**; see below).
-  - `Sync`: apply in commit path.
+  - `Async`: enqueue and apply later — every commit, insert included (**WorkloadCore S09, next train**); in 0.2.0 an insert's
+    aggregates and latest/first-per-key queries were maintained inside its own commit (**ColumnarMerge S11**; see below).
+  - `Sync`: fed exactly as `Async` (**WorkloadCore S09, next train**): both are queued at the commit and neither is dropped below the backlog's
+    bound. A `Sync` query only ignores `maxCoalesceMs`.
 - Freshness knob, `maxCoalesceMs` (**ColumnarMerge S10, 0.2.0**):
   - How long an `Async` query's incremental batches may wait so that they are applied together — one write per
     changed group instead of one per commit. `0` (the default) applies each batch as it comes. Staleness is bounded
     by the knob plus one commit; a flush (and a clean shutdown) applies what is held at once. Set it on the query in
     `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
     query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
+  - (**BL-935, next train**) A change in place is durable and safe to run concurrently: the query's `definition.json` is
+    written whole to a temp file of its own, fsynced and renamed into place, one writer at a time. Before, two changes of
+    one query at once failed one of them, and a cancelled change could leave the definition empty — and the next open
+    refused the database.
   - Measured: 150 commits of 10 rows into 5 groups wrote 134× fewer result rows with a 500 ms window; at 50,000 rows/s across the nine Equity queries a 100 ms window cut maintenance CPU by a third (111 → 76 CPU-s per million rows) and the worst staleness p99 from 23 s to 13 s.
-- Maintenance inside the insert's commit (**ColumnarMerge S11, 0.2.0**): an insert into a table maintains its
-  aggregate and latest/first-per-key queries **before the insert returns** — the insert's rows are folded once, typed,
-  for all of them, and each query's changed groups are written as one batch. Those queries are current when the insert
-  is acknowledged (their watermark is at the insert's commit), so a read right after an insert sees it. What this costs:
-  the insert takes longer by its queries' share, and inserts into one table are applied to its queries one commit at a
-  time. (**ColumnarCore S15, 0.2.0**) The next commit's own work (plan, key check, commit, log) now overlaps this
-  commit's query writes, while every query still sees the table's commits in commit order, and how many queries an
-  insert writes side by side follows the server's CPU budget ([sizing](sizing.md#sizing-cpu)). What still goes through the asynchronous queue: upserts, updates and deletes; filters and top-N queries;
-  queries over another query's result (cascades); a query with a freshness window (`maxCoalesceMs` above 0 — it asked
-  to coalesce); and a query that is being refreshed at that moment. A write that fails inside the commit leaves the
-  query visibly stale and rebuilds it; the insert itself still succeeds. Measured on the Equity insert benchmark (nine
-  queries, 50,000 rows/s offered, 4 cores): the worst query staleness p99 went from 23 s to about 0.1 s, maintenance CPU
-  from 111 to ~75 CPU-s per million rows.
+- Maintenance off the commit (**WorkloadCore S09, next train**): every commit — insert, upsert, update, delete, merge — hands its change
+  batch to its queries' maintainers at the commit, in the table's commit order and without waiting, and they apply it in
+  the background. A query is current for a reader only once its maintainer has applied every commit the reader may see
+  ([the one rule](#routing-a-read-to-a-maintained-result)), so right after an insert returns its queries may be a moment
+  behind: read with the insert's consistency token (`token` / `X-Aouda-Token`) to wait for them, as for any other write.
+  A lagging query's batches are not dropped: what its queue cannot take waits in a backlog charged on the memory budget,
+  and only past the backlog's bound (64 MiB an update lane) is the query marked behind (`isStale`, reason "Maintenance
+  backlog past its bound …") and rebuilt. Before, an update waited 250 ms for room in a full queue and was then dropped,
+  leaving the query stale until a rebuild (BL-427). This replaces maintenance inside the insert's commit (**ColumnarMerge
+  S11, 0.2.0**), in which an insert wrote its table's aggregate and latest/first-per-key queries before it returned —
+  current at the acknowledgement, paid for in the insert's own latency and in one commit at a time per table.
 - Resident state (**ColumnarMerge S10, 0.2.0**): an aggregate's and a latest/first-per-key query's result rows
   stay in RAM between commits, so a commit takes the rows it changes from memory instead of reading them back
   (up to 262,144 keys per query, charged to the memory governor; a refusal falls back to reading back, correct
   and slower). A group that is not held — new, or evicted — is looked up in the key map and read only if it exists.
+  The copy is also given back when memory is needed (**WorkloadCore, next train**): the server drops whole copies, the
+  query applied least recently first (never one whose update is running), and the next commit reads back the rows it
+  needs. A top-N over another query's result keeps that result's rows resident the same way, and reloads them from the
+  result after a release.
 - Routing decision:
   - Planner result that says "serve from MQ result table" or "scan base table."
 - `GroupByExpression` (P28):
@@ -476,8 +492,9 @@ and the cases below are what is provable:
 | **LatestPerKey / FirstPerKey** | `TableQuery.LatestPerKey(orderBy, keys…)` / `FirstPerKey(…)` with the same keys, order column and direction | the predicate only on the keys (filtering anything else does not commute with "the latest row per key"), the table has a primary key the result breaks ties by, and neither the order column nor a key part is a `String`. The rows come back in key order, as from the table (**group-6 review, next train**: a routed page was in the result's own order) |
 | **TopNPerGroup** | — | never routed; read it by name |
 
-**Only a current result is read.** A result is written after its source's commit becomes visible — inside the insert after
-the table's lock, on the update queue later, after a bulk load's publish later still. A query is routed to a result only when
+**Only a current result is read.** A result is written after its source's commit becomes visible — by its maintainer, off the
+commit (**WorkloadCore S09, next train**; an insert used to write some inside its own commit) — and after a bulk load's
+publish later still. A query is routed to a result only when
 the result is `Ready`, not stale, has nothing queued, and has incorporated every WAL record that can change a table's rows up
 to the moment the read starts. A result that is behind is not read — **the table is** — so a routed read never misses a commit
 another read could see. On a database without a WAL nothing is routed (there is no position to prove a result current by).
@@ -487,10 +504,23 @@ check, not an answer.
 A **stale** result (a `Skip` or deferred load, a dropped update) is readable by name and is **no longer routed to** until a
 refresh clears the mark (it was before: a stale result answered for its source without the rows it was missing).
 
+**One rule, and the status says its answer** (**WorkloadCore, next train**). Routing, a consistency token on a read of the
+query (`at_least`), and the status's `current` field all ask the same question: is the result current for a reader at this
+position? It is when the result is `Ready` and not stale; nothing is queued or in flight for it or for a query it is built on
+(an incremental update, a bulk-load publish, **a load past its commit point whose maintenance has not finished**); **no commit
+to its source is still being routed**; and its **frontier** — the WAL position the result incorporates, the status's `token` —
+is at or past the reader's. The two bolded conditions are new: a load between its commit point and its publish, and a commit
+written to the log but not yet routed, each left a moment in which a token read was answered without them. The token check is
+the bigger change: it compared the frontier alone, so a query that had **lost an update** answered any token its frozen
+frontier covered. Now it waits for the query to be current, or answers `TOKEN_UNSATISFIED` as for any behind node.
+
 After a log record that no commit follows (a flush, a column added to another table) a result reads as behind until it is
 claimed current again: by the next commit anywhere, or by the next result-checkpoint round (every 15 s). (**BL-607, next train**)
-A commit the change dispatcher failed to route marks the source's results stale and rebuilds them, rather than letting a
-result be read as current past it. (**next train**)
+A commit the change dispatcher failed to route to a query marks that query stale and puts it in `Error`, rather than letting
+it be read as current past the commit (**next train**) — and (**BL-882, next train**) every query built over its result is
+marked stale too: before, the stale mark was missing, so the queries over it kept reading current. Dropping a query marks the
+queries built over its result stale the same way (**BL-917, next train**); they read current over a source that no longer
+existed. Refresh them to bring them back.
 
 A change no maintenance sees — a **TRUNCATE**, a source column **dropped** or **renamed**, a new column **default** — marks every
 result of the table stale and schedules its rebuild (**ColumnarRead group-6 review, next train**). Before, a result kept the
@@ -612,13 +642,13 @@ Key implementation anchors:
 
 ### Walk-through E: Full rebuild of an Aggregate MQ (shadow-build)
 
-1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` — the scan-fed path, also used on fallback. A bulk load with `PostLoadMqBehavior.Auto` does **not** take this path for eligible queries: it accumulates during ingest and publishes the same shadow swap at commit.
+1. Entry point: `engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct)` — the scan-fed path, also used on fallback. A bulk load with `PostLoadMqBehavior.Auto` does **not** take this path for queries the table's pass can fold or apply (**WorkloadCore S10, next train**; before, it accumulated during ingest and published the same shadow swap at commit); the rest are rebuilt this way, by a background rebuild job the pass schedules once it has finished (**WorkloadCore S17, next train**; the pass used to rebuild them itself, inline).
 2. State transition:
    - MQ state immediately changes to `Rebuilding`.
    - The current result table remains readable throughout with stale data.
 3. Shadow build:
    - A new `MaterializedQueryMaintainer` is constructed from scratch.
-   - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and ingest-fed fallback). An `Auto` bulk load that stayed ingest-fed never opens this scan.
+   - A full-table scan of the source populates the new result table (`:refresh`, restart restore, and a fallback rebuild). A query an `Auto` bulk load's pass folds or applies never opens this scan.
 4. Atomic swap:
    - New maintainer atomically replaces the old one.
    - MQ state transitions to `Ready`.
@@ -648,11 +678,12 @@ Key implementation anchors:
 |---|---|---|---|---|---|
 | `MaterializedQueryDefinition.Type` | enum | none (required) | `LatestPerKey`, `FirstPerKey`, `Aggregate`, `Filter`, `TopNPerGroup` | .NET definition/helper APIs | Only `LatestPerKey`/`Aggregate`/`Filter` are shipped end-to-end |
 | `MaterializedQueryDefinition.ConfigJson` | JSON string | none (required) | type-specific schema | .NET definition/helper APIs | Serialized pattern config |
-| `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | Controls commit-path vs queued maintenance |
+| `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | (**WorkloadCore S09, next train**) No longer changes how updates are fed: both are queued at the commit and never dropped below the backlog's bound. A `Sync` query ignores `maxCoalesceMs` |
 | `MaterializedQueryDefinition.MaxCoalesceMs` (`maxCoalesceMs`) | int | `0` | `0`–`60000` | `aouda.schema.json`; `SetMaterializedQueryMaxCoalesceMsAsync` | **ColumnarMerge S10, 0.2.0.** Batches of an `Async` query coalesce this long before one apply |
 | `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` | .NET definition/helper APIs | Optional override; else defaults by type |
 | `SubscriptionManagerOptions.MaxLag` | `TimeSpan` | `1s` | positive | Engine wiring | Lag threshold/backpressure signal |
-| `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound |
+| `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound; past it, a lane's backlog (**WorkloadCore S09, next train**) |
+| `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | long | `64 MiB` | positive | Engine wiring | (**WorkloadCore S09, next train**) Per update lane; charged on the memory budget. Past it a commit's batch is lost and the query is marked stale and rebuilt |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | int | `100` | positive | Engine wiring | Async queue processing granularity |
 | `TableQuery.WithDirectScan()` | query option | off | enabled/disabled per query | .NET query API | Disables auto-routing for a query |
 | `TablesController includeSystemTables` | query flag | `false` | `true/false` | HTTP table list request | MQ result tables hidden by default |
@@ -788,12 +819,12 @@ A named query over `barsWithChange` can then `orderBy: [{ "column": "changePct",
 
 ```csharp
 // Explicit on-demand rebuild (a scan). Use this when you changed the definition,
-// not after a bulk load — Auto already built the affected queries during the load.
+// not after a bulk load — Auto starts the table's pass at the commit.
 await engine.RefreshMaterializedQueryAsync("candles_bid_1h", ct);
 
 // Bulk-load with automatic materialization (default Auto). Wait; do not :refresh.
 var handle = await engine.BulkLoadAsync(options, ct);
-await handle.MqRebuildCompleted; // usually short: the work happened during the load
+await handle.MqRebuildCompleted; // the table's pass, over the load's segments
 
 Console.WriteLine(handle.MqRebuildStatus); // Completed
 ```
@@ -999,8 +1030,8 @@ three times.
 
 ### First: check whether you need to refresh at all
 
-With `PostLoadMqBehavior.Auto` — the default — a bulk load materializes its affected queries
-**during the load's own pass**. You do not need to call refresh, and calling it makes the engine do
+With `PostLoadMqBehavior.Auto` — the default — a bulk load brings its affected queries current
+itself, after its commit, in the background (**WorkloadCore S09, next train**), by the table's pass (**WorkloadCore S10, next train**; until S10 most of the work happened during the load's own pass). You do not need to call refresh, and calling it makes the engine do
 the work twice. Wait on `MqRebuildCompleted` / `mqRebuildStatus` instead. See
 [Bulk load — do not hand-refresh](bulk-load.md).
 
@@ -1014,9 +1045,21 @@ A `Skip` load marks every affected query **stale**: `GET …/materialized-querie
 behind, not broken — and `staleOnly` selects exactly this set. It is not routed to while it is stale
 (**ColumnarRead S18, next train**): a read of the table reads the table.
 
+(**WorkloadCore S03, next train**) A query over another query's result (a `TopNPerGroup` over an
+aggregate, say) is stale whenever that result is, with a `staleReason` naming it — whatever made the
+upstream stale, except a [deferred load](#deferred-loads), whose pass feeds the queries above it. It is
+rebuilt when the upstream's rebuild publishes; a `:refresh` of it alone, while the upstream is still
+stale, leaves it stale. Refresh the upstream first.
+
+Two more causes mark such a query stale (**BL-917, BL-882, next train**): its upstream query was **dropped**, or a commit's
+routing to the upstream **failed** (the upstream is then in `Error`). The `staleReason` names the upstream; the stale mark
+cascades through every level above it. Before, both left the queries above `Ready` and current over a result that was gone or
+missing a commit.
+
 Staleness is durable. If the server restarts before you refresh, the query is **rebuilt from source
-at startup** rather than being restored with the loaded rows missing (a query that is behind has no
-checkpoint — **ColumnarMerge S08**). That is deliberate: serving
+after startup** rather than being restored with the loaded rows missing (a query that is behind has no
+checkpoint — **ColumnarMerge S08**; (**WorkloadCore S11, next train**) the rebuild runs once the database is open, not
+inside the open — see [recovery](#recovery-restart)). That is deliberate: serving
 a result that silently omits a committed load is worse than doing the rebuild you deferred. If you
 would rather control when that work happens, refresh before restarting — which is what `staleOnly`
 is for.
@@ -1027,9 +1070,18 @@ is for.
 large enough that keeping every query current during the load costs more than the load: the load
 writes only its table, fast, and the queries catch up afterwards.
 
-- Every query over the loaded table is marked **stale**, exactly as a `Skip` load leaves it — readable by
-  name (not routed to while stale, **ColumnarRead S18**), `isStale: true` with a `staleReason`, and rebuilt at
-  startup if the server restarts first.
+(**WorkloadCore S10, next train**) Every load but a `Skip` one now works this way: it records a pending job, and the
+table's pass below is its maintenance. `Auto` starts the pass for each table it wrote as soon as it commits (multi-table and
+transform loads included), and `:commit` waits for it up to `mqWaitMs`; `Deferred` leaves it to the quiet period. So
+everything in this section applies to an `Auto` load too, except when its pass runs.
+
+- Every query over the loaded table is **behind** — readable by name (not routed to while behind, **ColumnarRead S18**),
+  `isStale: true` with a `staleReason`, `pendingDeferredJobs` at least 1, `current: false` — and rebuilt at startup if the
+  server restarts first. (**WorkloadCore S11, next train**) Not rebuilt any more: a query that owes a load is restored from its
+  checkpoint at startup with the load still owed, and the table's pass brings the load in once the database is open. (**WorkloadCore S10, next train**) It is **owed work, not holed**: the query is not marked stale
+  the way a `Skip` load leaves it, so `staleOnly` does not select it, and the reason reads "N bulk load(s) into its source
+  are pending the table's pass…" (before: "A bulk load committed with PostLoadMqBehavior.Deferred; its rows are pending the
+  deferred pass…"). `currentLag` counts from the commit of the oldest load it owes.
 - The job is recorded as **pending**: which load, which table, which segments. Those segments are not
   merged by compaction while the job is pending, so the rows a query still owes stay where the load put
   them.
@@ -1045,7 +1097,10 @@ maintenance path, so a query downstream of it (a top-N over an aggregate) follow
 write. A filter, or a top-N directly over the table, takes the jobs' rows as the inserts they are through its own
 maintenance (**ColumnarMerge S09, 0.2.0** — it used to be refreshed, a scan of the whole table on every pass);
 a query neither path handles (an extreme or ordering over a string column), or one the replay cannot serve
-exactly, is refreshed in the same pass. Every write a pass makes to a result is one batch in the log
+exactly, is rebuilt from the table. So is a query that was already behind for another reason when the load committed — a
+`Skip` load, an update dropped under back-pressure, a refused rebuild, a query in `Error` or mid-rebuild — because folding the
+load's rows cannot bring back what it is missing (**WorkloadCore, next train**: the pass used to fold such a query and report
+it current without those rows). Every write a pass makes to a result is one batch in the log
 (**ColumnarMerge S09**), not a user write per row. The pass runs on its own once bulk loading into the table has been
 quiet for 2 seconds — no load in flight, and none committed in that time (**ColumnarMerge S01,
 0.2.0**: a load still streaming used to count as quiet once 2 seconds had passed since the last commit, so
@@ -1056,13 +1111,28 @@ Many jobs, one pass. Each query's status reports `pendingDeferredJobs` until it 
 budget (`Aouda:Cpu:ConfiguredCores` or the probed quota), not the machine's core count (**ColumnarCore S15,
 0.2.0** — see [sizing](sizing.md#sizing-cpu)).
 
+(**WorkloadCore S17, next train**) **Those rebuilds run after the pass, not inside it.** The pass folds and replays what it
+can, releases the table and its memory grant, and hands the queries it could not bring current to a background rebuild job —
+one scan of the source table for all of them. Each such query keeps owing its loads (`pendingDeferredJobs`, `current: false`)
+until its rebuild publishes, so nothing reads as current early; the table's other queries are current as soon as the pass
+ends, instead of waiting behind one long rebuild. `:refresh` and an `Auto` load's `MqRebuildCompleted` still wait for the
+rebuilds; `:commit`'s `mqWaitMs` wait is unchanged (it never waited for a query only a rebuild can bring current,
+**WorkloadCore S16**). A later pass that finds a query still mid-rebuild for the same loads joins that rebuild rather than
+starting another. A rebuild refused memory waits for room, as any refused rebuild does (2.11c).
+
 **What the pass holds in memory** (**BL-690, 0.2.0**). The pass folds its jobs in waves of about a million rows,
 and each wave's folded state is now reserved with the memory governor while its queries are written — before, the pass
 reserved nothing, so the governor never saw it. A refusal does not fail the pass: the wave already folded is written,
-and every wave after it is half the size, down to a sixteenth. An `Auto` load's own in-commit fold is reserved the same
-way; when it is given up (refused, or a bucket spilled) its state and reservations are released at once rather than at
-the end of the load. On an embedded engine with no governor, a load's fold gives up past 256 MB and the pass folds that
-load in waves instead.
+and every wave after it is half the size, down to a sixteenth. (**WorkloadCore S10, next train**) An `Auto` load's
+pass folds in the same waves: the fold an `Auto` load used to build as its segments were written — reserved the same way,
+given up when refused or spilled, and past 256 MB on an embedded engine with no governor — is gone, and the load holds no
+materialized-query memory while it streams.
+
+(**WorkloadCore S09, next train**) **Maintenance asks for its memory before it takes a lock** (BL-859). Each maintenance unit — a queued
+apply, an ingest-fed drain (gone in **WorkloadCore S10**), a deferred pass — asks the memory budget for a grant (a queued apply in the `Streaming` class,
+ahead of waiting loads whose memory its backlog holds; a load's drain or pass in `Background`) before it takes its
+queries' locks, and waits in the queue; it is never refused part-way through an apply. A load's maintenance that cannot
+get memory within 30 s is refused before it starts, and its queries are left behind and rebuilt.
 
 If a pass fails while writing a query, that query is left behind and owes nothing further (it is not
 folded twice); refresh it, or a restart rebuilds it.
@@ -1100,7 +1170,7 @@ Response — `200` when the wait completed, `202` when it is still running:
   "sourceGroups": 1,
   "results": [
     { "name": "EquityTradeOhlc1H", "state": 1 },
-    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because …" }
+    { "name": "EquityTradeOhlc1M", "state": 3, "error": "Source table 'EquityTrade' column 'Px' was not found …" }
   ]
 }
 ```
@@ -1113,8 +1183,14 @@ traversed — the ratio of `results` to `sourceGroups` is what the pooled call s
 request was carried out; one query that could not be built does not deny you the news that its
 siblings succeeded. Check the `results` list rather than relying on the status code.
 
-A genuine capacity refusal — the server could not start the work at all — is a `503` with
-`Retry-After`, as elsewhere.
+**A rebuild refused for capacity is a `503` with `Retry-After`, never a `200`** (**WorkloadCore
+release review, next train**). When the server refuses a rebuild for memory, WAL capacity or a
+full heap (`MEMORY_BUDGET_EXCEEDED` or `WAL_CAPACITY_EXCEEDED`), on this route and on
+`{name}:refresh`, the refused query is not in `Error`: it stays readable with the result it had,
+is reported stale, and its rebuild is requeued for when there is room. The `503` tells you the
+refresh you asked for did not happen; retry after the `Retry-After` interval. A refusal anywhere in
+the request answers the whole request with `503`, even if other queries in it were rebuilt, because
+refreshing is safe to repeat.
 
 ### C# client
 
@@ -1157,32 +1233,35 @@ group** while it does.
 group per minute per symbol, and that set is what has to fit in memory. An hourly or daily rollup
 over the same data is 60× or 1440× smaller.
 
-### The ceiling
+### Its memory: a grant, and what happens past it (**WorkloadCore S12, next train**)
+
+A rebuild asks for a **grant** of memory before it prepares anything — 1 MB to start — and holds it until it has published
+its result. While it scans, it grows the grant by doubling as its groups need, as long as no request of its class or a higher
+one is waiting for memory, up to **a quarter of the database's governed budget**. If the grant cannot be had at all, the
+rebuild does not start: the query stays readable and behind, and the rebuild waits for room (see 2.11c).
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `Aouda:MaterializedQueries:Rebuild:ReservationCeilingBytes` | `0` — no dedicated cap | The budget a rebuild's accumulators are held to. `0` means the database's memory governor is the only bound. |
-| `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` | `1048576` (1 MB) | The opening reservation, and the granularity it grows by. |
-| `Aouda:MaterializedQueries:Rebuild:SpillEnabled` | `true` | Whether an over-budget build writes its working set through to its shadow result table before giving up. |
+| `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` | `1048576` (1 MB) | The grant a rebuild asks for before it starts, and the step its growth doubles from. |
+| `Aouda:MaterializedQueries:Rebuild:MaxPartitions` | `64` | How many partitions a build that outgrows its grant splits its groups into. |
+| ~~`…:ReservationCeilingBytes`~~, ~~`…:SpillEnabled`~~, ~~`…:PartitioningEnabled`~~ | — | **Removed (WorkloadCore S12, next train).** The grant is the build's bound; a configuration that still sets them starts and ignores them. |
 
-With the default (`0`) nothing changes from earlier releases. Set a positive ceiling when you have a
-known-huge rollup and want it bounded deliberately rather than competing with everything else for the
-database's share.
+### What happens when a build outgrows its grant (**WorkloadCore S12, next train**)
 
-### What happens when a build goes over
+It **partitions and spills**, as often as it needs to, and finishes:
 
-1. **It writes through first.** The working set is written into the query's own shadow result table
-   and re-read on demand. This buys a **constant factor** — roughly 3× on an OHLC-shaped rollup —
-   not an unlimited budget. `MqBuildRunBytesWritten` growing tells you a build is paying for having
-   written through; if it grows a lot, raise the ceiling.
-2. **If that is still not enough, it retires one query at a time, largest first**, and re-checks.
-   Dropping the biggest is often enough for the rest to fit.
-3. **Retired queries land in `Error`. Their siblings complete.** A 1-minute rollup that cannot fit
-   does not take the 1-hour and 1-day rollups down with it.
+1. An `aggregate`, `latestPerKey`, `firstPerKey` or `topNPerGroup` build splits its groups into `MaxPartitions` partitions
+   (in place — nothing already read is read again) and writes the groups it holds to disk scratch (below). It carries on
+   scanning; each time its groups outgrow the grant again, it writes them out again.
+2. At publish it folds **one partition at a time** — the partition's scratch and what it still holds — into the result.
 
-`TopNPerGroup` **cannot** write through: its working set holds candidates below rank N that the
-published top-N result does not contain, so writing it out would lose exactly the rows it exists to
-keep. Its error message says so, rather than leaving you looking for a setting that would help.
+**A query is never retired for its size, and a build never starts over for memory.** Before this release a build was capped
+at 2 % of the database's share and, past that, partitioned only when a projection from the table's statistics said so;
+otherwise the largest query in the build was retired to `Error` until the cap rose. A 1-minute rollup of 8 M groups ended
+that way. The siblings of a large query are unaffected either way.
+
+Memory a build must hold that it cannot write out — a `filter` build whose result cannot be flushed during the build (an
+engine with no compaction) — is charged as working memory rather than refused.
 
 ### The disk a build borrows while it runs
 
@@ -1206,8 +1285,8 @@ Four things are worth knowing about it, because it is disk you did not ask for:
   the load is already streaming, so a load that commits 344 times prepares 344 builds per query. Most
   of them fit and spill nothing; the ones that do not each borrow a file for the length of the
   commit.
-- **The volume is bounded by the accumulator ceiling, not by the table.** What a build spills is what
-  its working set exceeds, and it reads all of it back at the end of the same commit.
+- **The volume is what the build's groups exceed its grant by** (**WorkloadCore S12, next train**: no longer an accumulator
+  ceiling). It reads all of it back at publish.
 - **A query whose state is bounded by its own definition no longer spills for a sibling's sake**
   (**BL-623, 0.1.38**). Every query on a table used to share one accumulator budget, so an
   aggregate grouped by a time bucket — whose key space grows for as long as rows arrive — could push
@@ -1226,9 +1305,11 @@ running now or already dead.
 
 | Counter | What it tells you |
 |---|---|
-| `MqRebuildBytesReserved` | Memory charged for a scan-fed rebuild's accumulators. |
-| `MqRebuildSinksRetiredByBudget` | Queries retired because the group could not fit. Non-zero means someone got an `Error`. |
-| `MqBuildPartitioningAdopted` | Builds that split their group space rather than retiring the query. |
+| `MqRebuildBytesReserved` | Memory a rebuild's grant grew by for its accumulators. |
+| `MqAccumulatorGrowthsRefused` | Times a build could not grow its grant and partitioned or spilled instead (**WorkloadCore S12, next train**). |
+| `MqAccumulatorExcessCharged` | Times a build held memory it could not write out, charged as working memory (**WorkloadCore S12, next train**). Zero is the expected value. |
+| ~~`MqRebuildSinksRetiredByBudget`~~ | **Removed (WorkloadCore S12, next train)**: nothing is retired for its size. |
+| `MqBuildPartitioningAdopted` | Builds that outgrew their grant and split their group space. |
 | `MqBuildPartitionsEvicted` | Partitions written out to disk scratch under budget pressure. |
 | `MqBuildRunsWritten` / `MqBuildRunsFolded` | Runs written to a build's spill file, and read back at publish. |
 | `MqBuildRunBytesWritten` | Bytes of disk scratch a build borrowed — the disk this memory bound trades for. |
@@ -1241,33 +1322,19 @@ running now or already dead.
 `MqBuildRunBytesWritten` only goes up. **How much scratch is on disk right now** is
 `mqSpillOutstandingBytes` on `GET /api/server/metrics`, with `mqSpillCeilingBytes`,
 `mqSpillCeilingExceeded`, and `mqPublishBacklog` beside it (**BL-624, 0.1.38**). Crossing the
-ceiling is logged and counted. It does not fail the load.
+ceiling is logged and counted. It does not fail the load. (**WorkloadCore S10, next train**) `mqPublishBacklog` counts the
+database's pending bulk-load jobs: loads whose table's pass has not yet run.
 
 ---
 
 ## 2.11c When a query lands in `Error`
 
-`GET /api/databases/{db}/materialized-queries/{name}` returns the reason in `errorMessage`. A
-memory-budget refusal names the query, the rows and groups it had accumulated, the bytes those cost,
-the ceiling in force, and the configuration key that changes it:
+`GET /api/databases/{db}/materialized-queries/{name}` returns the reason in `errorMessage`.
 
-```
-Materialized query 'EquityTradeOhlc1M' (Aggregate) was retired from its rebuild because the build
-exceeded its memory budget: 15300000 rows accumulated into 812000 groups, retaining an estimated
-532672000 bytes (…), against a ceiling of 268435456 bytes. Raise
-'Aouda:MaterializedQueries:Rebuild:ReservationCeilingBytes', give the database a larger memory
-share, or reduce the query's group cardinality.
-```
-
-Your options, in the order worth trying:
-
-1. **Reduce group cardinality** — a coarser time bucket, or fewer group-by columns. This is the only
-   one that makes the query cheaper rather than giving it more room.
-2. **Raise the ceiling**, or set it to `0` and let the database's memory governor be the bound.
-3. **Give the database a larger memory share.**
-
-Its siblings over the same source table are unaffected and will be `Ready`; re-running the refresh
-after changing a setting rebuilds only what you ask for.
+(**WorkloadCore S12, next train**) **A query no longer lands in `Error` because its build outgrew its memory** — the build
+partitions and spills instead (2.11b). The `Error` this section used to describe ("…was retired from its rebuild because the
+build exceeded its memory budget…", with the `ReservationCeilingBytes` key to raise) is gone with that key. A rebuild refused
+memory before it starts is deferred, below; what reaches `Error` is a failure that is not about memory.
 
 ### A rebuild refused memory outright is deferred, not failed (**IngestAtSpeed S03, 0.1.40**)
 
@@ -1275,14 +1342,35 @@ A rebuild can also be refused before any single query has been singled out: the 
 reservation is denied, for instance. That used to leave every query in the rebuild in `Error`, which
 nothing cleared. Those queries now stay **`Ready` and stale**, readable with the result they had, and
 their provenance (`lastRebuildSource`) reads `DeferredMemoryPressure`. The engine retries them when
-memory recovers, and `:refresh` rebuilds them at once. Retirement, described above, still ends in
-`Error`, because it names one query that cannot fit.
+memory recovers, and `:refresh` rebuilds them at once. (**WorkloadCore S12, next train**: there is no retirement any
+more; a build's own grant, refused before it starts, is deferred the same way.)
+
+(**WorkloadCore S10, next train**) **"When memory recovers" now means: when the memory budget has room of the size it
+was refused.** The rebuild is no longer re-driven on timers — a heap-recovered or resource-mode-rise edge, a 30 s look and
+a 15 min slow look, up to an attempt cap, each a full rescan whatever memory had done meanwhile. Instead the query stays
+readable and behind, and its rebuild waits in the memory grant queue, in the lowest class (`Maintenance`), for room of the
+size it was refused. When it is served, the rebuild runs; refused again, it asks for twice as much next time. Once that
+exceeds the database's governed budget it stops asking, logs a Warning naming the query and the budget, and the query stays
+behind — `:refresh` still rebuilds it, for instance once the budget is larger. A rebuild refused while it was being
+prepared (the result's prior state read back) is handled the same way; it used to put the query in `state: "error"`, where
+reads of it threw and nothing cleared it.
+
+(**BL-884, next train**) **A rebuild refused by a full WAL is behind and requeued, never `Error`.** When the log is at its
+refusal line (`T27`), a build's or a deferred pass's writes are refused like any source write. That used to put the query in
+`Error` (reads threw, routing dropped it, nothing cleared it), where a memory refusal of the same write was a deferral. Both are
+capacity refusals now: the query stays readable and behind, and its rebuild is requeued. A WAL-refused rebuild waits for the
+log to fall back under `T26` before it runs again, and does not double its memory ask. A **create** whose first build is
+refused this way (memory or WAL) succeeds: the definition is durable, so the query exists behind and is built once there is
+room — it used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists".
 
 (**BL-785, next train**) The same holds when a [deferred pass](#deferred-loads) is refused memory part-way
 through writing a query. The query is deferred, not rebuilt in the same pass: it stays readable and stale, and later
 passes leave it alone until the retry rebuilds it. A refused rebuild no longer fails the pass for the
-other queries. The retry is tried three times, 30 seconds apart, and then **every 15 minutes until it succeeds**. A
-memory budget held by a running load frees up only when the load stops, and nothing signals that moment.
+other queries. (**WorkloadCore S10, next train**) The retry is a **grant wait**, not a timer: the refused rebuild waits in the
+lowest work class (`Maintenance`) for a grant of the room its refusal lacked, and rebuilds once the memory broker can serve it.
+Refused again, it asks for twice as much; once the ask exceeds the governed budget it stops, and the query stays behind (stale,
+readable) for a `:refresh` or a larger budget, with the reason in the log. So it is retried only when the room exists, at most
+log₂(budget ÷ floor) times, never from row 0 on a schedule.
 
 ### After a restart, a query is stale until it is rebuilt (**BL-786, next train**)
 
@@ -1300,7 +1388,7 @@ memory, a `Skip` load, a maintenance apply that failed part-way. A later bulk lo
 adds exactly its own rows and does not repair that. It therefore **no longer clears the mark**.
 Before this release it did, and the query then read as current while missing whole loads. Only a
 rebuild that scans the source table clears it: `:refresh`, a fallback rebuild, or the automatic retry
-of a deferred query. If a query stays stale after a load, that is the reason, and `:refresh` (pooled
+of a deferred query (**WorkloadCore S10, next train**: the requeued rebuild, served when the memory budget has room). If a query stays stale after a load, that is the reason, and `:refresh` (pooled
 with `staleOnly`) is the remedy.
 
 ## 2.11d What a query costs to maintain: the `amplification` object {#amplification}
@@ -1463,7 +1551,7 @@ Monitor first:
   per-database total of declared residency pins, including any result table you declared `HotOnly`.
   See [2.3.1](#where-a-materialized-querys-result-lives).
 
-Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
+<a id="recovery-restart"></a>Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
 
 - Definitions are persisted and restored through catalog/store.
 - Result tables are normal catalog tables and survive restart. Their changes are logged as one batch per
@@ -1473,12 +1561,32 @@ Recovery/restart expectations (**ColumnarMerge S08, 0.2.0**):
   since then are folded in from the log. Recovery work is therefore proportional to what was written since the
   last checkpoint, not to the size of the source. (Measured: 200,000 rows since the checkpoint over a
   400,000-row source, four queries — 5.7 s to open against 8.0 s rebuilding them.)
-- A query is **rebuilt from its source** at startup instead when that cannot be exact: it has no checkpoint
+- A query is **rebuilt from its source** instead when that cannot be exact: it has no checkpoint
   yet (created, or rebuilt, less than one checkpoint ago), it was behind when the server stopped, the source took
   a delete, a replacing upsert, a truncate, a bulk load or a schema change since the checkpoint, or the result's own
-  stored rows changed since it (a flush or a compaction). A query over another query's result is rebuilt from that
-  result whenever its upstream took writes after the checkpoint. A database without a log restores results only
-  after a clean shutdown.
+  stored rows changed since it (a compaction, or a stored row replaced since; (**WorkloadCore S11, next train**) a flush
+  alone no longer counts — the checkpoint is retaken when the result's segments move). A query over another query's result
+  is rebuilt from that result whenever its upstream took writes after the checkpoint. A database without a log restores
+  results only after a clean shutdown.
+- (**WorkloadCore S11, next train**) **Opening a database never rebuilds a query.** Before, the open rebuilt every query it
+  could not restore, one after another, before the database came up — so a restart took as long as scanning every
+  source once per query. Now the open restores what it can and returns; the others come back **behind and `Building`**
+  (`state: "Building"`, `current: false`, not routed; a read by name or a read with a consistency token answers
+  `MQ_NOT_READY`) and are rebuilt **after** the open, one source table at a time (one scan per source for all its
+  queries), each once memory for it is free. Watch `state` and `current` on the status endpoint; a client that needs the
+  result waits for `current` (or passes a consistency token and retries `MQ_NOT_READY`).
+- (**WorkloadCore S11, next train**) **A query that owes a bulk load restores from its checkpoint** (the load's pending job
+  says which rows it lacks) and the table's pass brings the load in after the open — instead of a rebuild.
+- (**WorkloadCore S11, next train**) **A rebuild of aggregate, latest-per-key and first-per-key queries resumes where it
+  stopped.** It reads its source in chunks of about 2 million rows and records, after each, which source segments its
+  partial state already holds. A rebuild interrupted by a crash, a shutdown or a memory refusal continues from its last
+  chunk — provided none of those segments changed (a compaction that merged them, or a delete in them, starts it over). A
+  group that includes a filter or a top-N query rebuilds from the start, as before.
+- (**BL-927, next train**) **A rebuild no longer loses source rows to a cold coalesce running under it.** A rebuild reads one
+  pinned view of its source; segments a coalesce merges meanwhile keep their files until the rebuild's read ends. Before, when
+  memory pressure had released the table's catalog shard and it was loaded again, those files could be deleted under the
+  rebuild, which then published short and reported current. A read that finds a segment of its view with rows but no pages
+  now fails instead of returning nothing.
 - The log is kept from the oldest checkpoint forward (a system WAL slot, `mq-checkpoints`), so a checkpoint's
   log is never pruned under it. (**BL-787, next train**) Only checkpoints that still exist and can be folded forward
   hold it. A query that goes stale, rebuilds or errors has its checkpoint dropped, and from the next round
