@@ -196,7 +196,7 @@ High-level flow:
   backup with the build that took it (then take a new backup with this build). A format-3 backup that lists no catalog root is
   refused the same way, as incomplete.
 - ⚠️ **Rows in hot segments come back** (**architecture review, next train**; since **BL-840** the restored catalog image carries their entries). The open catalogues every restored `.hot` file as a Hot segment (a promoted segment once), with the partition key a hot-only segment's `hot_segment.marker` records; backups now carry those markers, and no longer carry a retired segment's `.hot` file. Before, `.hot` files were backed up and restored but never catalogued, and the restore resets the WAL, so **every row still in a hot segment at backup time was lost** by a clean restore.
-- **A 0.2.x backup** restored into this build opens, but each of its cold segments fails the read that reaches it with `SegmentFormatUnsupportedException`, naming the segment (this build cannot read 0.2.x pages). To move 0.2.x data to this build, restore with the 0.2.x build, export, and reload — see [Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model).
+- **A 0.2.x backup** is refused by this build's restore (backup format 3, above), before it touches the target; this build could not read its pages either. To move 0.2.x data to this build, restore with the 0.2.x build, export, and reload — see [Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model).
 - Counters: `RestoreOperations*`, `RestoreBlobsDownloaded`, verification counters.
 
 ### C) PITR (HTTP or engine)
@@ -649,7 +649,7 @@ Health behavior:
 | Missing blob during restore | Archive inconsistency or aggressive lifecycle policy | Run `VerifyBackupAsync`, review retention/GC decisions |
 | `PitrWindowException` | Target time outside the local WAL window and the archive (or no PITR-eligible backup) | Take a newer backup, enable archiving, or pick a later `targetTime`. The local window is write volume since the last backup, not a duration |
 | Health says stale backup | No recent successful backups | Ensure host invokes backups on schedule |
-| After a restore, reads fail with `SegmentFormatUnsupportedException` | The backup was taken by 0.2.x, whose segments this build cannot read (**architecture review, next train**) | Restore it with the 0.2.x build, export, and reload into this build |
+| A restore is refused: "backup format version 1" (or 2) "… restores format version 3 only" | The backup was taken by an older build — 0.2.x or earlier (**BL-840, next train**) | Restore it with the build that took it; to move 0.2.x data to this build, export and reload into this build, then take a new backup |
 | Restore refused: "Backup '…' is backup format version 2; this build restores format version 3 only" (or version 1) | The backup was taken by an older build (**BL-840, next train**): formats 1 and 2 hold the catalog without keys, partitioning or nullability. Nothing was restored; the target is untouched | Restore it with the build that took it, then take a new backup with this build |
 | Durability D.3 scenario skipped | Public backup endpoint absent | Expected until BL-023 is completed |
 | S3 `AmazonServiceException` on first operation | Invalid bucket, region mismatch, or credential chain failure | Verify `Destination` URI, check IAM permissions, set `Region` or `ServiceUrl` explicitly |

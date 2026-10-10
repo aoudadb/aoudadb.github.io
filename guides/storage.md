@@ -262,9 +262,9 @@ If you run server defaults and do not set per-database overrides:
     **zero rows, with no error**. The reverse holds too: a 0.2.x build refuses a directory this build wrote ("newer than
     this build supports").
   - A cold segment whose footer is another version fails the read that reaches it with
-    `SegmentFormatUnsupportedException`, naming the table, the segment and the version — never an empty read. That is
-    what a 0.2.x **backup** restored into this build does: it opens, and its segments fail by name when read
-    ([Backup](backup.md#214-troubleshooting-by-symptom)).
+    `SegmentFormatUnsupportedException`, naming the table, the segment and the version — never an empty read. A 0.2.x
+    **backup** does not get that far: the restore refuses it as backup format 1 or 2 (**BL-840, next train**), before it
+    touches the target ([Backup](backup.md#214-troubleshooting-by-symptom)).
   - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
     taken with the older build is what carries them over.
   - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
@@ -718,7 +718,7 @@ Suggested tuning sequence:
 |---|---|---|
 | Data path exists but DB cannot open | Invalid/partial directory state or config mismatch | Check server startup logs, validate `DataPath`, verify required DB subdirectories |
 | `CatalogFormatException` at open: "catalog root declares format version 4" | The directory was written by 0.2.x or earlier (**architecture review, next train**) | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
-| A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — typically a 0.2.x backup restored into this one | Restore the backup with the build that wrote it, export, and reload |
+| A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#214-troubleshooting-by-symptom)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | Effective table durability has WAL disabled or DB WAL disabled | Check DB `enableWal` and table durability overrides |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
