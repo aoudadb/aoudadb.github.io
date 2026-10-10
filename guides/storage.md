@@ -255,8 +255,10 @@ If you run server defaults and do not set per-database overrides:
   - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
     catalog does not name is litter for the open-time sweep, never data (**ColumnarRead, next train**).
 - **Upgrading from 0.2.x: export and reload** (**architecture review, next train**)
-  - The catalog format is **5**. A data directory written by 0.2.x (catalog format 4) is **refused at open** with
-    `CatalogFormatException`, saying so: export the data with the 0.2.x build that wrote it and load it into a fresh
+  - The catalog format is **6** (**RR-A2-4, next train**; 5 before WorkloadCore added segment fields, 4 in 0.2.x). A data
+    directory in any other catalog format — 0.2.x's 4, a development build's 5, a newer build's — is **refused at open**
+    with `CatalogFormatException` naming the version found and version 6; there is no migration from any older format,
+    the flat format-1 `catalog.json` included. For 0.2.x: export the data with the 0.2.x build that wrote it and load it into a fresh
     data directory with this build. There is no in-place upgrade — this build cannot read 0.2.x cold pages, footers or
     `.hot` files. Before, the catalog version had not moved, so a 0.2.x directory opened and its cold segments read as
     **zero rows, with no error**. The reverse holds too: a 0.2.x build refuses a directory this build wrote ("newer than
@@ -717,7 +719,7 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Data path exists but DB cannot open | Invalid/partial directory state or config mismatch | Check server startup logs, validate `DataPath`, verify required DB subdirectories |
-| `CatalogFormatException` at open: "catalog root declares format version 4" | The directory was written by 0.2.x or earlier (**architecture review, next train**) | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
+| `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 6 only" | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, a newer build writes more (**architecture review, RR-A2-4, next train**). A shard or journal naming another version under a format-6 root is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
 | A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#214-troubleshooting-by-symptom)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | Effective table durability has WAL disabled or DB WAL disabled | Check DB `enableWal` and table durability overrides |

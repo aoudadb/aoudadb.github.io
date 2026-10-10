@@ -122,9 +122,10 @@ Public, user-facing release notes. Engine phase status lives in the server
 - ⚠️ **Joins need a grant on every joined table, a 0.2.x data directory is refused at open, and a clean restore keeps hot
   rows (ColumnarRead architecture review).** A join — ad hoc, `…/query/count` or in a named query — needs the base table's
   grant on every joined table (it read them with no grant check before); the caller's row- and partition-level security on
-  a joined table is applied on the join's side (BL-818, above). The catalog format is 5: a 0.2.x directory fails at open
-  with `CatalogFormatException` (export with 0.2.x and reload; its cold segments used to read as zero rows), a 0.2.x backup
-  restored here fails by segment on read, and a primary and its replicas must run the same build. A clean restore now
+  a joined table is applied on the join's side (BL-818, above). The catalog format is 6 (5 until the WorkloadCore release review,
+  RR-A2-4): a directory of any other catalog format fails at open with `CatalogFormatException` naming the version found and
+  version 6 (a 0.2.x directory's cold segments used to read as zero rows), a 0.2.x backup is refused at restore (backup format
+  3, BL-840), and a primary and its replicas must run the same build. A clean restore now
   catalogues `.hot` segments, whose rows it lost. `DISTINCT` over partition-key columns is a scan, so deleted or truncated
   partitions no longer appear (the directory-residue and 10,000-tuple refusals are gone, and the
   `stats.distinctServedFromPartitionMetadata` flag is removed, above). `Retry-After` is readable from a browser. The TypeScript `count()` posts `/query/count`
