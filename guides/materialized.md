@@ -336,9 +336,9 @@ results are keyed by identity rather than time, and are not clustered.
     `aouda mq refresh --source-table <table> [--stale-only]`. See
     [§2.11a](#211a-refreshing-several-queries-at-once-pooled-refresh). No TypeScript client surface
     yet.
-  - **Memory budget**: a rebuild holds one in-memory entry per output group. An over-budget build
-    writes its working set through to the query's shadow result table and, if that is still not
-    enough, retires the largest query with a diagnosable error while its siblings complete. See
+  - **Memory budget**: a rebuild holds one grant. A build that outgrows it partitions and spills
+    through its build table instead of being retired (**WorkloadCore S12, next train**); a rebuild
+    refused for capacity leaves the query readable, stale and requeued, never in `Error`. See
     [§2.11b](#211b-what-a-rebuild-costs-and-what-bounds-it).
 
 ### Planned / proposed
@@ -1183,8 +1183,14 @@ traversed — the ratio of `results` to `sourceGroups` is what the pooled call s
 request was carried out; one query that could not be built does not deny you the news that its
 siblings succeeded. Check the `results` list rather than relying on the status code.
 
-A genuine capacity refusal — the server could not start the work at all — is a `503` with
-`Retry-After`, as elsewhere.
+**A rebuild refused for capacity is a `503` with `Retry-After`, never a `200`** (**WorkloadCore
+release review, next train**). When the server refuses a rebuild for memory, WAL capacity or a
+full heap (`MEMORY_BUDGET_EXCEEDED` or `WAL_CAPACITY_EXCEEDED`), on this route and on
+`{name}:refresh`, the refused query is not in `Error`: it stays readable with the result it had,
+is reported stale, and its rebuild is requeued for when there is room. The `503` tells you the
+refresh you asked for did not happen; retry after the `Retry-After` interval. A refusal anywhere in
+the request answers the whole request with `503`, even if other queries in it were rebuilt, because
+refreshing is safe to repeat.
 
 ### C# client
 
