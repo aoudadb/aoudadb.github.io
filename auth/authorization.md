@@ -42,6 +42,13 @@ If a named-mutation call 404s and the name is definitely right, check the caller
 
 Both `auth-db-pls` and `auth-db-rls` use a **session cache** as the hot path: resolved permissions are cached in the session record at sign-in. The vast majority of requests read from the session cache (~0.001ms), not the auth DB (~0.01ms). The auth DB itself is always memory-first — even the cold path is sub-millisecond.
 
+**No resolved permissions means no access** (**BL-950, next train**). An `auth-db-pls` or `auth-db-rls` table is enforced
+from the caller's resolved permissions, and a request that has none is denied, never let through: an anonymous caller, a
+database with **no linked auth database**, and a permission lookup that failed all read no row of such a table and may
+write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table answers an empty result and refuses writes).
+That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a service key bypasses it. So link
+the auth database before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable, not open.
+
 ---
 
 ## 19.2 Which Mode Should I Use?
