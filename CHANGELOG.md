@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A bulk load's `:commit` does not wait for its materialized queries unless asked (LoadSpeed M.2).** `mqWaitMs` defaults to
+  `0` (it was 30000): the commit answers as soon as the load is durable, and a load whose queries are still catching up says
+  `mqStatus: "behind"` with `mqFrontierToken`. To go on only once they are current, send `mqWaitMs` (`MqWait` in `Aouda.Client`,
+  `mqWaitMs` in `@aouda/client`), or read with the commit's `token`. Neither SDK's code changes; only what the server does when the
+  field is left out.
+- **Guidance for loading a lot of data into tables with queries (LoadSpeed M.1).** [Bulk load](guides/bulk-load.md#loading-a-lot-of-data-into-tables-with-queries)
+  now says, with 0.3.0's measurements: for a migration or initial load, `postLoadMqBehavior: "skip"` and one pooled refresh per
+  source table at the end (all queries current 32 % sooner than `auto`, with 42 % less CPU); bulk-load jobs of 10 000 rows or more;
+  `InsertMany` for trickles below about 2 000 rows per call. The bulk-load guide's old warning that a refresh after a `skip` load is
+  not bounded by the memory governor is corrected: since 0.3.0 it is.
 ## 0.3.0 — 2026-10-10
 
 Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.

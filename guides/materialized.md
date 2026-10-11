@@ -193,7 +193,7 @@ If you create a materialized query with standard helpers and no special options:
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing; past it a query's batches go to its lane's backlog (**WorkloadCore S09, 0.3.0**) |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
 | `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | `64 MiB` per update lane | (**WorkloadCore S09, 0.3.0**) The backlog a lagging query's batches wait in, charged on the memory budget. Only past it is an update lost: the query is marked stale and rebuilt |
-| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background, by the table's deferred pass, started at the commit (**WorkloadCore S10, 0.3.0**; a query the pass cannot fold or replay is rebuilt by a background job after it, **WorkloadCore S17, 0.3.0**); `:commit` waits for them up to `mqWaitMs` (30 s) and reports `mqStatus` (**WorkloadCore S09, 0.3.0**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background, by the table's deferred pass, started at the commit (**WorkloadCore S10, 0.3.0**; a query the pass cannot fold or replay is rebuilt by a background job after it, **WorkloadCore S17, 0.3.0**); `:commit` waits for them up to `mqWaitMs` (30 s in 0.3.0; **0 — no wait — from the next train**, LoadSpeed M.2) and reports `mqStatus` (**WorkloadCore S09, 0.3.0**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
 
 ### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
 
@@ -1037,6 +1037,17 @@ the work twice. Wait on `MqRebuildCompleted` / `mqRebuildStatus` instead. See
 
 Pooled refresh is for the case where you deliberately loaded with `PostLoadMqBehavior.Skip`, because
 you wanted ingestion to finish fast and will materialize later.
+
+**That is the recommended shape for a migration or an initial load** (**LoadSpeed M.1, next train**): load every job with
+`skip`, then, once the last job has committed, one pooled refresh per source table (`{ "sourceTable": "…", "staleOnly": true }`).
+Measured on 0.3.0 (2 GB, 15.3 M trades and 30 M quotes, 13 queries): all 13 queries current 441 s after the load started against
+650 s with `auto`, 42 % less CPU, 42 % fewer bytes written, the load itself at the rate it has with no queries, and identical results.
+Most of `auto`'s extra cost is memory pressure: while results do not fit in memory, groups that each new job touches are written
+again. A table you keep loading into stays on `auto`, since each refresh reads the whole source table. Below about 2 000 rows per
+call, write with `InsertMany` rather than bulk load; from about 10 000 rows per job, bulk load. The numbers and the reasoning are in
+[Bulk load — loading a lot of data into tables with queries](bulk-load.md#loading-a-lot-of-data-into-tables-with-queries).
+A refresh, single or pooled, runs under the memory governor (since 0.3.0): it takes a grant before it starts, spills an aggregate's
+groups when the grant is full, and is refused `503` with `Retry-After` — its queries left readable and behind — when memory is short.
 
 ### What a `Skip` load leaves behind
 

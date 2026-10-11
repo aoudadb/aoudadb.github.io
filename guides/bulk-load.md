@@ -149,7 +149,7 @@ Scope boundaries:
   - `aouda table bulk-load`
   - `aouda bulk-load`
 - **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036, ingest-fed path P46):**
-  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulated, until **WorkloadCore S10** (next bullet), every affected MQ of all four types **during** the load's own pass and published at commit — except (**BatchFirst S12, 0.1.40**) when every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold: then the load writes only the table, and the table's pass (the one a `Deferred` load waits for) starts at the commit and folds the load into every query at once. (**ColumnarCore S12, 0.2.0**) Such a load was maintained **in its own commit**: its queries, and the queries built on them, were written before the load returned, with `mqRebuildStatus` already `completed`. (**WorkloadCore S09, 0.3.0**) That is gone: the load still folded its rows as its segments were written, but the table's pass wrote its queries from that fold **after** the commit, in the background, as for every other `Auto` load (**WorkloadCore S10, 0.3.0**: the load no longer folds anything; see the next bullet). What you see: the handle (and the `:commit` response) comes back with `mqRebuildStatus` `pending` or `inProgress`; the server's `:commit` waits for the queries up to `mqWaitMs` (default 30 s; `MqWait` in `Aouda.Client`) and says in `mqStatus` whether they were current by then. `MqRebuildCompleted` still resolves only when the queries **and the queries built on them** are current; until then each reports `isStale`, a reason naming the pending load, `currentLag` and `pendingDeferredJobs`. Loads that commit while a pass runs are taken together by the next one. A table with any other query (a filter, a direct top-N) kept the accumulate-during-the-load path until **WorkloadCore S10** (next bullet); `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind). `Deferred` (**BatchFirst S08, 0.1.40**) is `Skip` with a record: the load writes only the table, the queries are marked behind, and the job is kept as pending so the engine can bring every query on the table current in one pass over the load's segments — see [Deferred loads and the table's pass](#deferred-loads-and-the-tables-pass) below and [Deferred loads](materialized.md#deferred-loads).
+  - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulated, until **WorkloadCore S10** (next bullet), every affected MQ of all four types **during** the load's own pass and published at commit — except (**BatchFirst S12, 0.1.40**) when every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold: then the load writes only the table, and the table's pass (the one a `Deferred` load waits for) starts at the commit and folds the load into every query at once. (**ColumnarCore S12, 0.2.0**) Such a load was maintained **in its own commit**: its queries, and the queries built on them, were written before the load returned, with `mqRebuildStatus` already `completed`. (**WorkloadCore S09, 0.3.0**) That is gone: the load still folded its rows as its segments were written, but the table's pass wrote its queries from that fold **after** the commit, in the background, as for every other `Auto` load (**WorkloadCore S10, 0.3.0**: the load no longer folds anything; see the next bullet). What you see: the handle (and the `:commit` response) comes back with `mqRebuildStatus` `pending` or `inProgress`; the server's `:commit` waits for the queries up to `mqWaitMs` (`MqWait` in `Aouda.Client`; default 30 s in 0.3.0, **0 — no wait — from the next train**, LoadSpeed M.2) and says in `mqStatus` whether they were current by then. `MqRebuildCompleted` still resolves only when the queries **and the queries built on them** are current; until then each reports `isStale`, a reason naming the pending load, `currentLag` and `pendingDeferredJobs`. Loads that commit while a pass runs are taken together by the next one. A table with any other query (a filter, a direct top-N) kept the accumulate-during-the-load path until **WorkloadCore S10** (next bullet); `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind). `Deferred` (**BatchFirst S08, 0.1.40**) is `Skip` with a record: the load writes only the table, the queries are marked behind, and the job is kept as pending so the engine can bring every query on the table current in one pass over the load's segments — see [Deferred loads and the table's pass](#deferred-loads-and-the-tables-pass) below and [Deferred loads](materialized.md#deferred-loads).
   - (**WorkloadCore S10, 0.3.0**) **One maintenance path.** Every load into a table with materialized queries, except a `Skip` load, records a pending job, and the table's pass is its maintenance: a fold of the job's segments for every query the fold can plan, the job's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the table's other queries are not held behind it). `Auto` starts each written table's pass as soon as the load commits — multi-table and transform loads included — and `:commit` waits for it up to `mqWaitMs` and answers `mqStatus` as before; `Deferred` leaves the pass to the quiet period (2 s quiet, at most 60 s). A load does no materialized-query work while its rows stream, so its segment writes cost what they cost on a table without queries, and it is no longer paced to a materialized-query drain. The accumulate-during-the-load ("ingest-fed") path is gone, and with it the fold built inside the load's segment writes, the merging of waiting publishes, the heap-pressure deferral and the drain pacer. `:refresh`, restore and a fallback rebuild read the table, as before. Until its pass has run, a query the load reaches is readable and behind — `isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false` — but not marked stale: the load owes it work, it does not leave a hole.
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
@@ -158,7 +158,8 @@ Scope boundaries:
   - Ordinary insert identity-insert is documented in [HTTP API insert](../reference/http-api.md) and [Getting Started](../getting-started/index.md) (BL-130).
   - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Failed`; C#/TS clients also expose `Unknown` — see below, **BL-419, 0.1.22**).
   - `BulkLoadJobHandle.MqRebuildCompleted`: `Task` that resolves when all dependent MQ rebuilds finish.
-  - (**WorkloadCore S09, 0.3.0**) `:commit`'s bounded wait for the load's queries: `BulkLoadOptions.MqWait` (`TimeSpan?`; null = the server's default, 30 s) / wire `mqWaitMs`, and `BulkLoadJobHandle.MqStatus` (`MqCommitStatus`: `Unknown`, `None`, `Current`, `Behind`, `Skipped`, `Deferred`) and `MqFrontierToken` in `Aouda.Client`; `mqWaitMs`, `handle.mqStatus`, `handle.mqFrontierToken` and `handle.mqWaitedMs` in `@aouda/client`. `Unknown` is an older server's answer. See [HTTP API — `:commit`](../reference/http-api.md#post-jobidcommit).
+  - (**WorkloadCore S09, 0.3.0**) `:commit`'s bounded wait for the load's queries: `BulkLoadOptions.MqWait` (`TimeSpan?`; null = the server's default: 30 s in 0.3.0, no wait (**LoadSpeed M.2, next train**)) / wire `mqWaitMs`, and `BulkLoadJobHandle.MqStatus` (`MqCommitStatus`: `Unknown`, `None`, `Current`, `Behind`, `Skipped`, `Deferred`) and `MqFrontierToken` in `Aouda.Client`; `mqWaitMs`, `handle.mqStatus`, `handle.mqFrontierToken` and `handle.mqWaitedMs` in `@aouda/client`. `Unknown` is an older server's answer. See [HTTP API — `:commit`](../reference/http-api.md#post-jobidcommit).
+  - (**LoadSpeed M.2, next train**) **`mqWaitMs` defaults to `0`**: `:commit` answers as soon as the load is durable and does not wait for its queries unless the request says how long (it waited up to 30 s). A load whose queries are still catching up answers `mqStatus: "behind"` with `mqFrontierToken`; that is not an error. To go on only once they are current, send `mqWaitMs` (up to `600000`), or read with the commit's `token`, which waits for them.
   - (**WorkloadCore S16, 0.3.0**) The wait does not wait for a query only a rebuild can bring current (holed, in `Error`, or waiting for memory to rebuild): `mqStatus` is `"behind"` as soon as the others are current, instead of after the whole `mqWaitMs`.
   - (**WorkloadCore S16, 0.3.0**) **`:append` can be paced.** When the database's debt — WAL fill, materialized-query maintenance lag, unflushed rows or hot bytes — is past its soft line, each batch of an `:append` waits (at most 10 s) before it is queued — whatever the batch's size (**WorkloadCore group 5 review, 0.3.0**) — so the load settles at the rate the debt drains; see the sizing guide, *Debt slows the writer*. An `:append` whose load already failed for capacity answers `503` with `Retry-After`, as `:commit` does, rather than `409`. A load's buffer growth refused for a moment's queue no longer caps the buffer for the rest of the load.
   - (**BL-831, 0.3.0**) **A column-batch `:append` asks for its memory before it decodes.** Each column's array is a grant from the memory queue first (waiting at most one sampling tick), so when memory is short the `:append` is refused `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` **before** the frame is decoded, instead of failing on the heap part-way through it (`500`). The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume from `rowsDurablyCommitted`. NDJSON bodies decode in small batches and take no such grant.
@@ -176,8 +177,8 @@ Scope boundaries:
 > affected materialized queries are brought current after the commit, in the background, by the
 > table's pass, which starts at the commit (**WorkloadCore S10, 0.3.0**; until S10 most were
 > accumulated during the load's own pass and published, and in 0.2.0 a table of aggregates and
-> latest / first-per-key queries was written before the load returned, **ColumnarCore S12**) — there is nothing left to trigger. `:commit` waits for them up to `mqWaitMs` and
-> says in `mqStatus` whether they were current; read with the commit's `token` to wait for them. Calling `POST .../materialized-queries/{name}:refresh` yourself
+> latest / first-per-key queries was written before the load returned, **ColumnarCore S12**) — there is nothing left to trigger. `:commit` waits for them up to `mqWaitMs`
+> (by default not at all, **LoadSpeed M.2, next train**) and says in `mqStatus` whether they were current; read with the commit's `token` to wait for them. Calling `POST .../materialized-queries/{name}:refresh` yourself
 > for a just-loaded table either runs the pass the query is owed (which was starting anyway) or, once
 > it has run, re-scans the whole source table. The wait after commit is usually short. Wait on `mqRebuildStatus` instead — the C# client's
 > `BulkLoadJobHandle.WaitForMaterializedQueriesAsync()` and the TypeScript client's
@@ -189,17 +190,18 @@ Scope boundaries:
 > and `MqRebuildCompleted` waits for it; that rebuild is still the load's own, not a reason to call `:refresh`.
 >
 > **`postLoadMqBehavior: "skip"` opts out of this entirely, not partially.** With `skip`, the load
-> records no pending job and its tables get no pass — every affected MQ is left exactly as stale as it was before
-> the load, stamped `MqRebuildStatus.Skipped`. If your own code still calls `:refresh` afterward
-> (a pattern from before this section's `auto` behavior existed), that call does the **full**
-> pre-auto rebuild: an unbounded, unwatermarked scan of the **entire** source table's history, not
-> just the newly loaded rows. For an `Aggregate` MQ this can exhaust server memory rather than
-> merely take longer — the per-group accumulator has no spill-to-disk and, on this manually
-> triggered path, no governor reservation bounds its growth (unlike the table's pass an `auto`
-> load starts, which does). A fine-granularity aggregate over a long or high-cardinality history (e.g. an
-> OHLC bar at 1-minute resolution across many symbols) is the shape most likely to hit this. If
-> you are still setting `skip`, switch to `auto` (or leave `postLoadMqBehavior` unset) and delete
-> the manual refresh call — do not keep both.
+> records no pending job and its tables get no pass — every affected MQ is left stale, stamped
+> `MqRebuildStatus.Skipped`, until you refresh it. Refresh **once per source table, pooled**, at the end —
+> `POST .../materialized-queries:refresh` with `{ "sourceTable": "…", "staleOnly": true }` — not once per query and
+> not after every load: each refresh rebuilds from a scan of the **entire** source table, not just the newly loaded
+> rows. That is the right trade for a migration or an initial load (see
+> [Loading a lot of data into tables with queries](#loading-a-lot-of-data-into-tables-with-queries) below) and the
+> wrong one for a table you load into every few minutes, which should stay on `auto`.
+> (Corrected, **next train** docs.) Earlier versions of this page said such a refresh had no memory governor bound
+> and could exhaust server memory on a fine-grained aggregate. That has not been true since 0.3.0: a refresh, single
+> or pooled, takes a memory grant before it starts (it can grow to a quarter of the database's budget), spills an
+> aggregate's groups to disk when the grant is full, and is refused `503` with `Retry-After` — the queries left
+> readable and behind — when memory is short at the start.
 
 ### Deferred loads and the table's pass
 
@@ -398,6 +400,50 @@ story.** As of P45, a table fed continuous streaming writes no longer accumulate
 a background process merges and re-clusters small cold segments as steady-state maintenance, not as an
 occasional repair. See [Partitioning and Multi-tenancy](partitioning.md#choosing-initialbucketcount-at-scale-p45)
 for how segment shape and bucket count interact for that path.
+
+### Loading a lot of data into tables with queries
+
+(**LoadSpeed M.1, next train** — guidance from measurements on 0.3.0; the numbers below are from one 16-vCPU machine with the
+server on 4 CPUs, so read them as ratios, not as what your hardware will do.)
+
+Most of what a load into a table with materialized queries costs is the queries' maintenance, not the load. On a
+2 GB server loading 15.3 M trades and 30 M quotes with 13 queries over them, `postLoadMqBehavior: "auto"` took the trade load
+from 266 k rows/s (no queries) to 67 k rows/s and the CPU per million rows from 7.6 to 48.2 CPU-seconds. Most of that is memory
+pressure: when the results do not fit in memory, groups a later job touches again are written again. The same load at 8 GB
+cost 34 % more CPU than with no queries, not 6.3× more. Three rules follow.
+
+**1. A migration or an initial load: `skip`, then one pooled refresh per source table.** Load every job with
+`postLoadMqBehavior: "skip"`, and when the last one has committed, refresh each source table once:
+
+```http
+POST /api/databases/{db}/materialized-queries:refresh
+{ "sourceTable": "EquityTrade", "staleOnly": true }
+```
+
+On the load above, that had all 13 queries current **441 s** after the load started, against **650 s** with `auto`; it used
+42 % less CPU (28.1 against 48.2 CPU-s per million rows) and wrote 42 % fewer bytes; the load itself ran at the no-query rate
+(265 k rows/s); and the results were identical (0 mismatches over 9.9 M rows compared). The pooled refresh reads each source
+table **once** for all of its queries (see [pooled refresh](materialized.md#211a-refreshing-several-queries-at-once-pooled-refresh)).
+Until it has run, the queries are readable and **stale**, and a read of the table does not route to them — so do it before you
+open the database to readers, and, if the server may restart in between, before the restart (a stale query is rebuilt at
+startup otherwise). For a table you keep loading into, stay on `auto`: it keeps the queries current as you go, and a refresh
+re-reads the whole table each time.
+
+**2. Bulk load at 10 000 rows per job or more.** A job has a fixed cost — about 20–30 ms per `:begin` … `:commit` with no
+queries, about 90 ms with 13 — so tiny jobs are expensive. Measured on 2 M rows, one job per batch: at 100 rows per job a bulk load
+costs 681 CPU-s per million rows with 13 queries; at 10 000 rows, 41; at 200 000 rows, 25. The crossover with `InsertMany` is a
+batch of about **10 000 rows**, with or without queries: from there bulk load is faster (1.2× with no queries, 1.9–3.6× with 13).
+Better still, one long session (see [Sizing a session](#sizing-a-session-fewer-longer-one-commit)).
+
+**3. Day-to-day trickles below ~2 000 rows per call: `InsertMany`** (`POST /api/databases/{db}/tables/{table}/rows`). Below 2 000
+rows per call it is faster than a bulk-load job (6× at 100 rows with no queries). Between 2 000 and 10 000 the two are close;
+measure your own shape. One limit to know: with queries over the table, the insert path's maintenance kept the queries current at
+**17–23 k rows/s at most**, whatever the batch size. Inserts are acknowledged faster than that (up to 82 k rows/s), the queries fall
+behind, and at 100- and 500-row batches they never caught up within the run. A loader that writes more than that into a table with
+queries should use bulk load, which keeps them current at its own rate and costs 2–4× less CPU per row from 2 000 rows per job up.
+
+**And `:commit` no longer waits for the queries by default** (**LoadSpeed M.2, next train**): `mqWaitMs` defaults to `0`. A
+loader that needs the queries current before its next step sends `mqWaitMs`, or reads with the commit's `token`.
 
 ### Choosing partition storage mode
 
