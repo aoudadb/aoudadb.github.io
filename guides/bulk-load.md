@@ -155,9 +155,13 @@ Scope boundaries:
     in flight on it, an earlier load's job on it still pending, or a load into it committed in the last 2 s — does not start the
     table's pass at its commit: its job waits with the others, and the table is caught up in **one** pass (a fold of every waiting
     job's segments, in waves of bounded memory) once loading into it has been **quiet for 2 s**, or once its oldest waiting job has
-    waited **60 s** while loads keep coming. Meanwhile the queries are readable and report behind (`isStale`, `pendingDeferredJobs`,
-    `current: false`; `:commit` answers `mqStatus: "behind"`), and `MqRebuildCompleted` resolves when the catch-up has brought the
-    load in. A load into a quiet table still starts its pass at its commit, as before. Measured on a 2 GB server (15.3 M trades and
+    waited **60 s** while loads keep coming. The 60 s count from the oldest load no pass has taken in yet, not from the last pass, so
+    however long a migration runs, its last loads are caught up 2 s after it stops. Meanwhile the queries are readable and report
+    behind (`isStale`, `pendingDeferredJobs`, `current: false`; `:commit` answers `mqStatus: "behind"`), and `MqRebuildCompleted`
+    resolves when the catch-up has brought the load in. If a query the load reaches is in `error` — its rebuild failed — it cannot take
+    the load in: once a pass after the commit has left the load owed only by queries in `error`, the load's `mqRebuildStatus` becomes
+    `failed` (as a load maintained at its commit always reported), and those queries go on being retried, or are brought back by
+    `:refresh`. A load into a quiet table still starts its pass at its commit, as before. Measured on a 2 GB server (15.3 M trades and
     30 M quotes, 13 queries): the trade load ran at **253 k rows/s** (67 k on 0.3.0; 266 k with no queries), at **37.4 CPU-s per
     million rows** (48.2), and all 13 queries were current **440.5 s** after the load started (650 s on 0.3.0) — the time of the
     `skip` + pooled-refresh recipe below (441.5 s), with identical results.

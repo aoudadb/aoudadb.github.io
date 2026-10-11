@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **`auto`'s catch-up, two details (LoadSpeed group 2 review).** A load held while its table was loading reported `pending` for
+  ever when a query it reaches was in `error`: it now reports `failed` once a pass after its commit has left it owed only by such
+  queries, as a load maintained at its commit always did. And the 60 s bound counts from the oldest load no pass has taken in, so the
+  last loads of a long migration are caught up 2 s after it stops, not up to a minute later.
+  [Bulk load](guides/bulk-load.md#loading-a-lot-of-data-into-tables-with-queries).
 - **A materialized query built on another query's result says when it is behind because of it (BL-989).** Its status reports
   `isStale: true` and a `staleReason` naming the query it is built on while that one is behind — for instance while `auto` holds a
   loading table's queries for the catch-up. It used to read `isStale: false` beside `current: false`.

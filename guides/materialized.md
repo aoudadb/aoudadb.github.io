@@ -1101,8 +1101,11 @@ everything in this section applies to an `Auto` load too, except when its pass r
 in flight on it, an earlier load's job still pending, or a load into it committed within the quiet period (2 s) — leaves its job to
 the table's pass as a `Deferred` one did: the queries report behind (`mqStatus: "behind"` at `:commit`) and are caught up in one pass
 once the table has been quiet for 2 s, or when the oldest waiting job has waited 60 s while loads keep arriving (the server logs
-such a pass as caught up at the bound). `MqRebuildCompleted` resolves when that pass has brought the load in. A load into a quiet
-table starts its pass at its commit as before. On a 2 GB server loading 15.3 M trades and 30 M quotes with 13 queries, the trade load
+such a pass as caught up at the bound). The 60 s count from the oldest load no pass has taken in, so the last loads of a long
+migration are caught up 2 s after it stops, not up to 60 s later. `MqRebuildCompleted` resolves when that pass has brought the load
+in — or fails, with `mqRebuildStatus: "failed"`, once a pass after the commit has left the load owed only by queries in `Error` (a
+failed rebuild): they cannot take it in until they are rebuilt, which the server goes on retrying, or `:refresh` does. A load into a
+quiet table starts its pass at its commit as before. On a 2 GB server loading 15.3 M trades and 30 M quotes with 13 queries, the trade load
 ran at 253 k rows/s (67 k on 0.3.0) and all 13 queries were current 440.5 s after it started (650 s on 0.3.0).
 
 - Every query over the loaded table is **behind** — readable by name (not routed to while behind, **ColumnarRead S18**),
