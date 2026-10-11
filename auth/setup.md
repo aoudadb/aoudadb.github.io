@@ -260,6 +260,13 @@ tokens to the others), or give each client its own sign-in.
 Sign-in, sign-up and password changes hash the password, and the hash waits for its memory first; under load they
 can answer `503` with `Retry-After` too. Retry them as any capacity refusal (**BL-850, 0.3.0**).
 
+**The SDKs treat such a refusal as retryable (**BL-944, next train**).** A sign-in, sign-up or refresh refused for capacity is
+`AoudaCapacityException` (with `RetryAfter`) in `Aouda.Client` and `AoudaServerError` (with `retryAfterSeconds`; `AoudaApiError` for
+a `429 SERVER_AT_CAPACITY`) in `@aouda/client` — not an authentication error. A refused refresh keeps the refresh token for the
+retry, and a request that needed it fails with the refusal rather than with its `401`; an early refresh refused while the current
+access token is still valid does not fail the request — the valid token is used and a later call refreshes. (Before, both SDKs
+reported such a refusal as an authentication failure, which an app reads as "sign in again".)
+
 ### Session Validation Modes
 
 | Mode | How It Works | Revocation | Best For |

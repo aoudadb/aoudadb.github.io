@@ -13,6 +13,10 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **`@aouda/client` treats a sign-in, sign-up or refresh refused for capacity as retryable (BL-944).** A `503`
+  `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` (or `429 SERVER_AT_CAPACITY`) from an auth call is the data calls' error with
+  `retryAfterSeconds`, not `AoudaAuthenticationError`; a refused refresh keeps its refresh token and the request that needed it fails
+  with the refusal, not its `401`; a refused early refresh keeps using the still-valid token. The C# SDK's equivalent fix is above.
 - **A bulk load's `:commit` does not wait for its materialized queries unless asked (LoadSpeed M.2).** `mqWaitMs` defaults to
   `0` (it was 30000): the commit answers as soon as the load is durable, and a load whose queries are still catching up says
   `mqStatus: "behind"` with `mqFrontierToken`. To go on only once they are current, send `mqWaitMs` (`MqWait` in `Aouda.Client`,
