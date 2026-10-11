@@ -14,7 +14,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 ## Unreleased
 
 - **Sizing: a known gap in the memory ceiling is documented (BL-983).** [Sizing](guides/sizing.md) now says that the process can
-  sit 3–5 % above `MaxTotalRamBytes` under load — the memory outside the .NET heap is larger than the server sets aside for it — and
+  sit 2–5 % above `MaxTotalRamBytes` under load — the memory outside the .NET heap is larger than the server sets aside for it — and
   what to do until it is fixed: a container limit about 10 % above the setting, and `MALLOC_ARENA_MAX=2` on Linux.
 - **`@aouda/client` treats a sign-in, sign-up or refresh refused for capacity as retryable (BL-944).** A `503`
   `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` (or `429 SERVER_AT_CAPACITY`) from an auth call is the data calls' error with
