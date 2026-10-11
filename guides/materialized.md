@@ -193,7 +193,7 @@ If you create a materialized query with standard helpers and no special options:
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing; past it a query's batches go to its lane's backlog (**WorkloadCore S09, 0.3.0**) |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
 | `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | `64 MiB` per update lane | (**WorkloadCore S09, 0.3.0**) The backlog a lagging query's batches wait in, charged on the memory budget. Only past it is an update lost: the query is marked stale and rebuilt |
-| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background, by the table's deferred pass, started at the commit (**WorkloadCore S10, 0.3.0**; a query the pass cannot fold or replay is rebuilt by a background job after it, **WorkloadCore S17, 0.3.0**); `:commit` waits for them up to `mqWaitMs` (30 s in 0.3.0; **0 — no wait — from the next train**, LoadSpeed M.2) and reports `mqStatus` (**WorkloadCore S09, 0.3.0**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background, by the table's deferred pass, started at the commit — while the table is loading, once it is quiet (2 s) or at the 60 s bound (**LoadSpeed M.3, next train**) (**WorkloadCore S10, 0.3.0**; a query the pass cannot fold or replay is rebuilt by a background job after it, **WorkloadCore S17, 0.3.0**); `:commit` waits for them up to `mqWaitMs` (30 s in 0.3.0; **0 — no wait — from the next train**, LoadSpeed M.2) and reports `mqStatus` (**WorkloadCore S09, 0.3.0**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` leaves them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)) |
 
 ### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
 
@@ -1038,8 +1038,11 @@ the work twice. Wait on `MqRebuildCompleted` / `mqRebuildStatus` instead. See
 Pooled refresh is for the case where you deliberately loaded with `PostLoadMqBehavior.Skip`, because
 you wanted ingestion to finish fast and will materialize later.
 
-**That is the recommended shape for a migration or an initial load** (**LoadSpeed M.1, next train**): load every job with
+**That was the recommended shape for a migration or an initial load on 0.3.0** (**LoadSpeed M.1, next train**): load every job with
 `skip`, then, once the last job has committed, one pooled refresh per source table (`{ "sourceTable": "…", "staleOnly": true }`).
+(**LoadSpeed M.3, next train**) `auto` now coalesces while a table loads and reaches the same time on the same load — all 13 queries
+current 440.5 s after the start, against the recipe's 441.5 s — so keep `auto` unless you want maintenance off for the whole load;
+the recipe still uses less CPU (28.1 against 37.4 CPU-s per million rows).
 Measured on 0.3.0 (2 GB, 15.3 M trades and 30 M quotes, 13 queries): all 13 queries current 441 s after the load started against
 650 s with `auto`, 42 % less CPU, 42 % fewer bytes written, the load itself at the rate it has with no queries, and identical results.
 Most of `auto`'s extra cost is memory pressure: while results do not fit in memory, groups that each new job touches are written
@@ -1085,6 +1088,14 @@ writes only its table, fast, and the queries catch up afterwards.
 table's pass below is its maintenance. `Auto` starts the pass for each table it wrote as soon as it commits (multi-table and
 transform loads included), and `:commit` waits for it up to `mqWaitMs`; `Deferred` leaves it to the quiet period. So
 everything in this section applies to an `Auto` load too, except when its pass runs.
+
+(**LoadSpeed M.3, next train**) **`Auto` coalesces while its table loads.** An `Auto` load into a table that is busy — another load
+in flight on it, an earlier load's job still pending, or a load into it committed within the quiet period (2 s) — leaves its job to
+the table's pass like a `Deferred` one: the queries report behind (`mqStatus: "behind"` at `:commit`) and are caught up in one pass
+once the table has been quiet for 2 s, or when the oldest waiting job has waited 60 s while loads keep arriving (the server logs
+such a pass as caught up at the bound). `MqRebuildCompleted` resolves when that pass has brought the load in. A load into a quiet
+table starts its pass at its commit as before. On a 2 GB server loading 15.3 M trades and 30 M quotes with 13 queries, the trade load
+ran at 253 k rows/s (67 k on 0.3.0) and all 13 queries were current 440.5 s after it started (650 s on 0.3.0).
 
 - Every query over the loaded table is **behind** — readable by name (not routed to while behind, **ColumnarRead S18**),
   `isStale: true` with a `staleReason`, `pendingDeferredJobs` at least 1, `current: false` — and rebuilt at startup if the

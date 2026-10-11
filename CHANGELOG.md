@@ -28,6 +28,13 @@ Public, user-facing release notes. Engine phase status lives in the server
   `retryAfterSeconds`, not `AoudaAuthenticationError`; a refused refresh keeps its refresh token and the request that needed it fails
   with the refusal, not its `401`; a refused early refresh keeps using the still-valid token. `Aouda.Client` gets the same fix in
   this train (`AoudaCapacityException`).
+- **`postLoadMqBehavior: "auto"` coalesces while a table is loading (LoadSpeed M.3).** A load into a table that is busy (another
+  load in flight, an earlier load still owed, or one committed in the last 2 s) no longer starts its queries' maintenance at its
+  commit: they report behind and are caught up in one pass once loading has been quiet for 2 s, or at a 60 s bound while loads keep
+  coming. On a 2 GB server with 13 queries the trade load ran at 253 k rows/s (67 k on 0.3.0) and every query was current 440.5 s
+  after the load started (650 s) — as fast as the `skip` + pooled-refresh recipe (441.5 s), which the guidance now keeps for when
+  you want maintenance off. [Bulk load](guides/bulk-load.md#loading-a-lot-of-data-into-tables-with-queries),
+  [defaults](guides/defaults-reference.md).
 - **A bulk load's `:commit` does not wait for its materialized queries unless asked (LoadSpeed M.2).** `mqWaitMs` defaults to
   `0` (it was 30000): the commit answers as soon as the load is durable, and a load whose queries are still catching up says
   `mqStatus: "behind"` with `mqFrontierToken`. To go on only once they are current, send `mqWaitMs` (`MqWait` in `Aouda.Client`,
