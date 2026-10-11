@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **`postLoadMqBehavior: "deferred"` is gone; use `"auto"` (LoadSpeed K31; breaking).** With `auto` catching a loading table up in
+  one pass and `:commit` not waiting by default (`mqWaitMs` 0), `deferred` differed only in never waiting at `:commit` and in not
+  starting a quiet table's maintenance at once. A server from 0.4.0 refuses it at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS`
+  (the message says to use `auto`); `mqStatus` and `mqRebuildStatus` are never `deferred`. `Aouda.Client` drops
+  `ClientPostLoadMqBehavior.Deferred`, `MqRebuildStatus.Deferred` and `MqCommitStatus.Deferred`; `@aouda/client` drops `"deferred"`
+  from `postLoadMqBehavior`, `MqCommitStatus` and `MqRebuildStatusWire`. [Bulk load — deferred loads](guides/bulk-load.md#deferred-loads-and-the-tables-pass).
 - **Only a service key bypasses partition- and row-level security (BL-944; breaking).** Up to 0.3.x a server API key
   (`mk_srv_…`) read and wrote past PLS (`jwt-claim`, `auth-db-pls`) and RLS (`auth-db-rls`) on every database it could reach.
   From 0.4.0 only an app's `service_role` key (`mk_svc_…`) does. A server key — and any other key without a user — gets its

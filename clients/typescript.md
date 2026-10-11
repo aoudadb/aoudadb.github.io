@@ -1004,7 +1004,7 @@ const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 20
 
 ```typescript
 const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 30000; 0 = no wait
-loaded.mqStatus;        // "current" | "behind" | "skipped" | "deferred" | "none"; "unknown" from an older server
+loaded.mqStatus;        // "current" | "behind" | "skipped" | "none"; "unknown" from an older server
 loaded.mqFrontierToken; // the lowest frontier among the load's queries, as a consistency token (absent: no query)
 loaded.mqWaitedMs;      // how long :commit waited for them
 ```
