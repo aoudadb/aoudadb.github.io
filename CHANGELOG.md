@@ -13,6 +13,9 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A materialized query built on another query's result says when it is behind because of it (BL-989).** Its status reports
+  `isStale: true` and a `staleReason` naming the query it is built on while that one is behind — for instance while `auto` holds a
+  loading table's queries for the catch-up. It used to read `isStale: false` beside `current: false`.
 - **`postLoadMqBehavior: "deferred"` is gone; use `"auto"` (LoadSpeed K31; breaking).** With `auto` catching a loading table up in
   one pass and `:commit` not waiting by default (`mqWaitMs` 0), `deferred` differed only in never waiting at `:commit` and in not
   starting a quiet table's maintenance at once. A server from 0.4.0 refuses it at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS`

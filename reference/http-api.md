@@ -1664,11 +1664,11 @@ otherwise the table answers, with the same rows as ever. Its currency is reporte
 
 | Field | Meaning |
 |---|---|
-| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. (**WorkloadCore S09, 0.3.0**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). |
+| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. (**WorkloadCore S09, 0.3.0**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). (**BL-989, next train**) A query built on another query's result is also `isStale` while that query is behind — its `staleReason` names it ("The query it is built on, 'x', is behind…") and its own `pendingDeferredJobs` stays `0`; before, it read `isStale: false` with `current: false`. |
 | `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
 | `currentLag` | How long the query has **been behind** without a break. `null` when it is not behind — including for a caught-up query that has been idle for days. |
 | `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is. Omitted when current. |
-| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. |
+| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. (A query behind only because the query it is built on is behind reports `isStale` too since **BL-989, next train**.) |
 
 ⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLag`.** Under a steady stream of
 inserts that never lets a query's queue empty, `currentLag` grows for as long as the stream runs — it is
