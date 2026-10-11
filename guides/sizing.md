@@ -8,6 +8,14 @@ parent: "Guides"
 
 Aouda treats `MaxTotalRamBytes` as a **process RSS ceiling**, not an advisory subtotal. Leave it unset and the server derives it from detected host (or cgroup) memory: **70%** when detection found a real cgroup isolation boundary, **40%** when it fell back to physical RAM (a fallback result proves nothing about how much of the host Aouda actually owns). Set it explicitly when you need a pinned number. Resize live from Studio (Settings → Server), `PATCH /admin/config`, or `aouda budget`. See the [Defaults Reference](defaults-reference.md) for every downstream number this derives (governed budget, per-database shares, the L2 cache ceiling, the bulk-load ingest buffer budget) worked at several host sizes.
 
+> **Known gap (BL-983, open):** the ceiling is held for the .NET heap, but the process's memory **outside** that heap (the
+> runtime's own native allocations, JIT code, thread stacks) is only estimated, and the estimate is low: measured at
+> 150–200 MiB under a bulk load with materialized queries, against the 77 MiB (1 GiB ceiling) to 123 MiB (2 GiB) the server
+> sets aside for it. With the heap near its limit, the process can therefore sit **3–5 % above** `MaxTotalRamBytes` — at 2 GiB
+> one load was killed at 2.05 GiB by a container limit of exactly 2 GiB. Until this is fixed, give a container or cgroup limit
+> about **10 % above** `MaxTotalRamBytes` (or set `MaxTotalRamBytes` about 10 % below the limit), and on Linux set
+> `MALLOC_ARENA_MAX=2` in the server's environment, which measured removes about 95 MiB of that native memory.
+
 ## Small hosts (under 1 GB)
 
 Give the process only what remains after the OS. Flush and hot-tier thresholds scale with the budget, so many tables do not each assume a large in-memory buffer. Prefer `ColdPreferred` for archival tables. Ingest will throttle sooner than on a large box — that is the process staying up, not a crash.
