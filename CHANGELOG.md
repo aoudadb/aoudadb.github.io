@@ -28,6 +28,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   source table at the end (all queries current 32 % sooner than `auto`, with 42 % less CPU); bulk-load jobs of 10 000 rows or more;
   `InsertMany` for trickles below about 2 000 rows per call. The bulk-load guide's old warning that a refresh after a `skip` load is
   not bounded by the memory governor is corrected: since 0.3.0 it is.
+
 ## 0.3.0 — 2026-10-10
 
 Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
