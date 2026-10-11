@@ -49,6 +49,37 @@ write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table ans
 That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a service key bypasses it. So link
 the auth database before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable, not open.
 
+### What changed in 0.4.0: only a service key bypasses PLS and RLS (**next train**)
+
+Up to 0.3.x a **server API key** (`mk_srv_…`) was treated as a service key: on every database it could reach, it read and
+wrote past partition-level security (`jwt-claim` and `auth-db-pls`) and row-level security (`auth-db-rls`). From 0.4.0
+**only an app's service key (`mk_svc_…`, kind `service_role`) bypasses them**, over HTTP, WebSocket and long-poll alike.
+
+**Which keys lost the bypass.** Server API keys (`mk_srv_…`, kind `server_admin`). The same rule now covers every other
+credential without a user — `custom` keys not linked to a user, `anon` and `public` keys: those already got no bypass from the
+keys the server issues, and the rule is now one rule rather than a list of exceptions.
+
+**What such a request gets now.** Its role's grants (RBAC is unchanged: a server key's `db_admin` still lets it create tables,
+apply schema and manage the database), and on a protected table only what a request with **no user** may see:
+
+| Table | A key without a user (not a service key) |
+|---|---|
+| `auth-db-rls` | Only rows the table's RLS rule shows to a request with no user — with `UserId` or `PartitionGrant` rules, **none**. Writes are refused. |
+| `auth-db-pls` | `403 AUTH_PLS_GRANT_NOT_FOUND`. A key whose role is `db_admin` on the database may still **read** across partitions by asking for it (`"crossPartitionAccess": true`), which is audited. |
+| `jwt-claim` | `403` — the key carries no partition claim. The same `db_admin` + `crossPartitionAccess` read applies. |
+| No auth mode | Unchanged: its role's grants. |
+
+The server-admin endpoints (`/api/auth/admin/*`, database management, backups) are unchanged: they answer from the key's role.
+
+**What to use instead.**
+
+- **Server-side code that must see a whole database:** that database's service key (`mk_svc_…`, returned once when the
+  database is created with auth enabled). Keep it on the server.
+- **Access on behalf of one user:** the user's own JWT (sign them in), or a service key **or server API key** with
+  `X-User-Token: <the user's JWT>` — the request then gets that user's grants ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)).
+- **A service limited to some partitions:** a `custom` key linked to a user ([§19.4.5](#1945-durable-credentials-for-non-interactive-services)).
+- **An operator's cross-partition read:** a `db_admin` key or JWT with `"crossPartitionAccess": true` (`auth-db-pls`, `jwt-claim`).
+
 ---
 
 ## 19.2 Which Mode Should I Use?
@@ -121,7 +152,7 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 | `mk_anon_` API key | `anonymous` role — no data access by default |
 | `mk_svc_` service key (no X-User-Token) | PLS **bypassed** — sees all partitions |
 | `mk_svc_` + X-User-Token | PLS enforced using user JWT claims |
-| `mk_srv_` server key | PLS **not enforced** (server-level access) |
+| `mk_srv_` server key | PLS **enforced** (**0.4.0, next train**; [what changed](#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)): `403` without the claim; a `db_admin` key may read with `crossPartitionAccess` (audited). Up to 0.3.x: not enforced |
 | `db_admin` user JWT | Can use cross-partition access |
 
 **When to use:** Simple SaaS where each user belongs to exactly one organization and should only see that organization's data.
@@ -277,7 +308,7 @@ curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
 # → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
 ```
 
-**Do not** reach for `mk_svc_`/`mk_srv_` for this instead. Both are a full, audited bypass of PLS on every table (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to `quote_source=oslo_bors`.
+**Do not** reach for `mk_svc_` for this instead. It is a full, audited bypass of PLS and RLS on every table of its database (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to `quote_source=oslo_bors`.
 
 `userId` is only accepted on `kind: "custom"` keys — `anon`, `service_role`, `public`, and `server_admin` stay singleton, system-managed credentials and reject it with `400 INVALID_REQUEST`. Revoke the key (`DELETE .../admin/api-keys/{id}`) to cut the service off immediately, or delete the specific partition grant to narrow its access without rotating the credential.
 

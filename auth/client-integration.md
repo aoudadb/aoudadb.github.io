@@ -223,7 +223,7 @@ Aouda has **four** API key types. Understanding when to use each is critical.
 | **App `public` key** | `mk_pub_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **data** — named queries, mutations, subscriptions (plus auth) |
 | **App `service_role` key** | `mk_svc_` | Auto-generated on `auth.enabled` | One database | `_auth` | Per-database backend access, admin tools |
 
-Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control. A `custom` key can optionally be **linked to a user** (`userId` at creation) — the key then inherits that user's `auth-db-pls` partition-grants and RBAC roles, giving a non-interactive service a durable credential scoped to exactly the partitions it needs, without the full-database bypass of `mk_svc_`/`mk_srv_`. See [Data Authorization §19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services) and the [`POST .../admin/api-keys` reference](reference.md).
+Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control. A `custom` key can optionally be **linked to a user** (`userId` at creation) — the key then inherits that user's `auth-db-pls` partition-grants and RBAC roles, giving a non-interactive service a durable credential scoped to exactly the partitions it needs, without the full-database bypass of `mk_svc_`. See [Data Authorization §19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services) and the [`POST .../admin/api-keys` reference](reference.md).
 
 `mk_pub_` arrived with the data-plane listener in server `0.1.7`. Signup/signin/refresh/password-reset are **keyless**. `mk_anon_` is **denied on data routes** — if you are giving a frontend read access before login, that is `mk_pub_`, on the data-plane, through [named queries](../guides/named-queries.md). Full rules: [Direct client access](../guides/direct-client-access.md).
 
@@ -237,7 +237,7 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 | Frontend that only signs users in (data goes through your backend) | None — `new AoudaClient({ serverUrl, database })` | Signup/signin are public POSTs |
 | Backend accessing one database (app auth enabled) | App `service_role` key (`mk_svc_`) | Full access to that database, PLS bypassed |
 | Non-interactive service that should see only specific partitions (a feeder job, a scoped integration) | `custom` key linked to a user (`userId`) | Durable like `mk_svc_`, but genuinely scoped via `auth-db-pls` partition-grants — not a bypass |
-| Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases |
+| Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases; from 0.4.0 PLS / RLS apply to it (send `X-User-Token`, or use each database's `mk_svc_`, to read protected tables) |
 | CI/CD pipeline | Server API key (`mk_srv_`) | Scoped to test databases |
 | Admin tooling | Server admin JWT or server API key | Full control |
 
@@ -248,9 +248,15 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 | **Created by** | Server admin | Auto-generated when app auth is enabled |
 | **Stored in** | `_serverauth` database | `_auth` database (linked to the app) |
 | **Scope** | One or more databases (via `databaseRoles`) | One specific database |
-| **PLS** | Never enforced (server-level access) | `mk_anon_` / `mk_pub_`: enforced; `mk_svc_`: bypassed |
+| **PLS / RLS** | **Enforced** from 0.4.0 (**next train**); up to 0.3.x never enforced | `mk_anon_` / `mk_pub_` / `custom`: enforced; `mk_svc_`: bypassed |
 | **Listener** | Admin | `mk_pub_`: data-plane only (admin → `AUTH_KEY_LISTENER_MISMATCH`); others: either |
 | **Use case** | Backend services, CI/CD, cross-database | Frontend clients, per-database backend access |
+
+**What changed in 0.4.0** (**next train**). Only an app's service key (`mk_svc_`) bypasses partition- and row-level security.
+A server API key (`mk_srv_`) did too up to 0.3.x; it now gets its role's grants and, on a protected table, only what a request
+with no user may see — with the usual RLS rules, no row; on a PLS table `403`, unless its role is `db_admin` and the read asks
+for `"crossPartitionAccess": true` (audited). For a whole database use that database's `mk_svc_` key; for one user's data send
+`X-User-Token` with either key. Details: [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
 
 ### Creating Server API Keys
 
@@ -300,7 +306,8 @@ The middleware:
 - `X-User-Token` is only accepted when the primary credential is a **service-level key** (`mk_svc_` or `mk_srv_`).
 - If the primary credential is an `anon` key or a user JWT, `X-User-Token` is ignored.
 - If `X-User-Token` is present but invalid (expired, revoked), the request returns 401 with a clear error about the user token.
-- If `X-User-Token` is absent, the service key grants full access with PLS bypassed.
+- If `X-User-Token` is absent, an app service key (`mk_svc_`) grants full access with PLS / RLS bypassed. A server API key
+  (`mk_srv_`) gets its role's grants with PLS / RLS enforced (**0.4.0, next train**; up to 0.3.x it bypassed them too).
 
 ### Example: Backend Querying on Behalf of a User
 

@@ -1641,9 +1641,9 @@ If a database has Application Auth enabled (see [Getting-Started-Auth.md](Gettin
 | **Stored in** | `_serverauth` | `_auth` (app auth database) |
 | **Scope** | One or more databases (via `databaseRoles`) | One specific database |
 | **Use case** | Backend services, CI/CD, cross-database access | Frontend clients, per-database backend access |
-| **PLS** | Never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
+| **PLS / RLS** | Enforced from 0.4.0 (**next train**); up to 0.3.x never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
 
-For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use server API keys (`mk_srv_`).
+For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use server API keys (`mk_srv_`). From 0.4.0 a server API key no longer bypasses partition- or row-level security: on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)).
 
 ### Common Auth Error Codes
 

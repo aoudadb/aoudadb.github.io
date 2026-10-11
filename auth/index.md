@@ -251,8 +251,11 @@ If you enable auth and keep defaults:
   - application auth database (`AuthDatabaseKind.Application`) for app user auth;
   - server auth database (`AuthDatabaseKind.Server`) for server-admin plane.
 - API key kinds:
-  - `anon`, `service_role`, and custom.
+  - `anon`, `service_role`, `public`, custom, and `server_admin` (server keys).
   - system-managed keys reserve key kinds for default app connection models.
+  - **only `service_role` bypasses PLS / RLS** (**0.4.0, next train**): every other key without a user — custom, `server_admin`,
+    `anon`, `public` — gets its role's grants and, on a protected table, what a request with no user may see. Up to 0.3.x a
+    `server_admin` key bypassed them too. [What changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
 - RBAC:
   - role memberships + permission rows define baseline operation rights.
 - PLS:
@@ -269,6 +272,8 @@ Invariants:
 - App auth endpoints require API key when app auth database is linked.
 - `auth-db-pls` requires `permissionDimension`; `auth-db-rls` requires `rlsResolverName`.
 - Service-key + `X-User-Token` impersonation flow must still validate/revocation-check user token.
+- Only a `service_role` key bypasses PLS / RLS; a principal without a user id gets the deny-by-default context (no partition
+  grants, a missing RLS key denies) on HTTP, WebSocket and long-poll alike (0.4.0).
 - Empty or unsupported complex resolver shapes fail closed instead of broadening access.
 
 ## 2.8 How Aouda implements it

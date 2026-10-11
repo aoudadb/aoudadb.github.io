@@ -85,9 +85,9 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 |--------|------|--------|-------------|
 | `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
-| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access. Ad-hoc query is allowed on the **admin** listener. |
-| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. |
-| `mk_` (other) | Custom app key | Application Auth | Granular custom key created via admin API. |
+| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. |
+| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0, next train**; up to 0.3.x bypassed): no user's grants, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. |
+| `mk_` (other) | Custom app key | Application Auth | Granular custom key created via admin API. PLS / RLS enforced; linked to a user (`userId`), it gets that user's grants. |
 | `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. Application end-user JWTs on the data-plane listener are browser-tier (named artifacts only). Operator JWTs via Studio use the admin listener (ad-hoc allowed). |
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
@@ -165,7 +165,8 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
    mk_anon_ → Resolve as app anon key → anonymous role; **auth endpoints only**
    mk_pub_  → Resolve as browser-tier public key → data-plane listener only; named artifacts
    mk_svc_  → Resolve as app service key → full access, PLS bypassed (audited)
-   mk_srv_  → Resolve as server API key → check db_roles claim for this database
+   mk_srv_  → Resolve as server API key → check db_roles claim for this database;
+              PLS/RLS enforced, no bypass (0.4.0, next train)
    mk_*     → Resolve as custom app key → check permissions
    eyJ*     → Validate JWT signature and claims → extract roles
 

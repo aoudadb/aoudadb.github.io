@@ -148,8 +148,11 @@ Who is making the request?
 Case A: Server credential (from _serverauth)
   → JWT or mk_srv_ API key from the _serverauth database
   → db_roles checked for "myapp"
-  → Full access at the granted role level
-  → No PLS enforcement (server credentials see all data)
+  → Access at the granted role level
+  → PLS / RLS enforced (0.4.0, next train): no user's grants, so protected
+    tables show it nothing unless it sends X-User-Token (a db_admin key may
+    read a PLS table with crossPartitionAccess, audited). Up to 0.3.x an
+    mk_srv_ key saw all data.
   → Used by: DBAs, CI/CD, cross-database backend services
 
 Case B: App API key (from _auth, auto-generated)
@@ -368,6 +371,12 @@ When you create a database with auth enabled, Aouda still auto-generates keys. T
 | **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | Enforced | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
 | **`public`** | `mk_pub_` | `public` | Enforced | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
 | **`service_role`** | `mk_svc_` | `db_admin` (full access) | **Bypassed** | Backend servers, admin tools | **Must keep secret** |
+
+**What changed in 0.4.0** (**next train**): the `service_role` key is the **only** credential that bypasses partition- and
+row-level security. A server API key (`mk_srv_`) bypassed them too up to 0.3.x; it now gets its role's grants and, on a
+protected table, what a request with no user may see (with the usual RLS rules, no row; a PLS table answers `403`). Use the
+database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with either key for one user's data —
+[what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
 
 ```bash
 # Enable self-service signup (app-admin) — default is off

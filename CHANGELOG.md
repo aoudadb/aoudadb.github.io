@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Only a service key bypasses partition- and row-level security (BL-944; breaking).** Up to 0.3.x a server API key
+  (`mk_srv_…`) read and wrote past PLS (`jwt-claim`, `auth-db-pls`) and RLS (`auth-db-rls`) on every database it could reach.
+  From 0.4.0 only an app's `service_role` key (`mk_svc_…`) does. A server key — and any other key without a user — gets its
+  role's grants and, on a protected table, what a request with no user may see: with the usual RLS rules no row (writes
+  refused), on a PLS table `403` unless its role is `db_admin` and the read asks for `crossPartitionAccess` (audited). Use the
+  database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with a service or server key for one user's
+  data. [What changed](auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
 - **Sizing: a known gap in the memory ceiling is documented (BL-983).** [Sizing](guides/sizing.md) now says that the process can
   sit 2–5 % above `MaxTotalRamBytes` under load — the memory outside the .NET heap is larger than the server sets aside for it — and
   what to do until it is fixed: a container limit about 10 % above the setting, and `MALLOC_ARENA_MAX=2` on Linux.
