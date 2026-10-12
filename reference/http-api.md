@@ -3233,7 +3233,7 @@ Get the current backup schedule.
 
 #### `PUT /admin/backup/schedule`
 
-Update (or disable) the backup schedule. Persisted to `{DataPath}/backup-config.json`.
+Update (or disable) the backup schedule. Saved to the server's `_settings` database before it is applied (**BL-1016, next train**): a refused save is `503` and nothing changes.
 
 **Request body:**
 ```json
@@ -3253,6 +3253,7 @@ Set `cronExpression` to null to disable scheduled backups.
 | Status | When |
 |--------|------|
 | 400 Bad Request | `cronExpression` is not a valid 5-field cron expression |
+| 503 Service Unavailable | (**BL-1016, next train**) The save was refused (`WAL_CAPACITY_EXCEEDED`, `MEMORY_BUDGET_EXCEEDED`); `Retry-After` is set and the schedule is unchanged — retry. (0.3.0 answered `200` and the schedule reverted at the next start.) |
 
 ---
 
@@ -3508,6 +3509,7 @@ Patch mutable runtime config values.
 | Status | When |
 |--------|------|
 | `400 Bad Request` | Unsupported/immutable fields, invalid values (e.g., non-positive memory cap), invalid log level |
+| `503 Service Unavailable` | (**BL-1016, next train**) A save was refused (`WAL_CAPACITY_EXCEEDED`, `MEMORY_BUDGET_EXCEEDED`); `Retry-After` is set. Every section the request sets is saved before any is applied, and one saved before a later refusal is put back, so nothing changes — retry. (0.3.0 applied the change, answered `200` and lost it at the next start; a refused save of `memory.maxTotalRamBytes` was a `409`.) |
 
 #### `GET /admin/config/schema`
 
@@ -4025,7 +4027,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**

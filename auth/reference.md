@@ -519,7 +519,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_RESET_TOKEN_INVALID` | 400 | OTP is wrong, email is not registered, or no valid reset token exists | Show a generic "Invalid or expired code" message; do not indicate whether the email exists |
+| `AUTH_RESET_TOKEN_INVALID` | 400 | OTP is wrong, email is not registered, or no valid reset token exists. (**Next train**) Also the second of two concurrent resets with one OTP: it is spent once | Show a generic "Invalid or expired code" message; do not indicate whether the email exists |
 | `AUTH_RESET_TOKEN_EXPIRED` | 400 | OTP was correct but the 15-minute window has passed | Ask the user to request a new reset code |
 | `AUTH_RESET_TOKEN_EXHAUSTED` | 400 | Five consecutive wrong OTP attempts on the same token; token is now permanently invalid | Ask the user to request a new reset code |
 
@@ -530,7 +530,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_MFA_FACTOR_NOT_FOUND` | 404 | MFA factor ID does not exist or belongs to another user | Re-fetch via `GET .../auth/mfa/factors` (signed-in user) or `GET .../admin/users/{id}/mfa/factors` (operator) |
 | `AUTH_MFA_STEP_UP_REQUIRED` | 403 | `POST .../auth/mfa/enroll` or `DELETE .../auth/mfa/factors/{id}` was called with a token that is not `aal2` — the user has an enrolled factor and has not completed it this session (**BL-795, 0.3.0**) | Run `POST .../auth/mfa/challenge` then `.../mfa/verify` and retry with the new token, or have an operator call `DELETE .../auth/admin/users/{id}/mfa/factors/{factorId}` |
 | `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | 409 | A phone factor is already active or pending for this user. The existing factor id is in the `detail` field. Enroll does not overwrite the number. | The signed-in user calls `DELETE .../auth/mfa/factors/{id}`. An operator calls `DELETE .../admin/users/{id}/mfa/factors/{factorId}`, then enrolls the new number |
-| `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user | Show "Invalid code"; prompt user to try again or re-request a challenge |
+| `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user. (**Next train**) Also the second of two concurrent verifies of one challenge (or of one backup code): it is spent once | Show "Invalid code"; prompt user to try again or re-request a challenge |
 | `AUTH_MFA_CHALLENGE_EXPIRED` | 400 | Challenge window has passed (10 minutes for both TOTP and phone) | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
 | `AUTH_MFA_CHALLENGE_EXHAUSTED` | 400 | Five consecutive wrong codes on the same challenge; challenge is permanently invalid | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
 

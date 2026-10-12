@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Release 0.4.0 preparation: what the integration of NativeClients and its security review changed.** An RLS rule's literal is
+  bound to its column's type wherever it is applied — subscriptions, materialized-query rows and the write check, as queries already
+  did (BL-1015; [authorization](auth/authorization.md#1951-setup-define-a-resolver)). `PUT /admin/backup/schedule` and
+  `PATCH /admin/config` answer `503` + `Retry-After` when their save is refused and change nothing (BL-1016;
+  [HTTP API](reference/http-api.md)). A WebSocket or long-poll token check refused for capacity is the refusal's code, not
+  `AUTH_TOKEN_INVALID` ([`auth_error`](reference/http-api.md#auth_error)). An MFA challenge, a backup code and a reset OTP are spent
+  once, by the first of two concurrent requests ([auth error codes](auth/reference.md)). A native sign-in's `POST …/auth/token`
+  refused for capacity leaves the code redeemable. The server's database registry is version 2: an older one is refused at startup,
+  as a 0.3.0 data directory is.
+
 - **0.4.0 does not open a data directory, backup or replica checkpoint written by 0.3.0 or earlier (catalog format 7;
   breaking).** 0.3.0 wrote catalog format 6. This train deleted every reader of an older shape and added columns to an auth
   database's sessions table, so a 0.3.0 directory would have been half read; it is now refused at open (and a 0.3.0 backup at

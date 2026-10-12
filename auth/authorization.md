@@ -358,7 +358,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 
 This resolver produces the compound predicate: `owner_id = '<userId>' OR team_id IN ('<team1>', '<team2>', ...)`.
 
-**Literal comparison is a string.** A Bool column does **not** match Literal `"true"` (`true.ToString()` is `"True"`). Prefer a String column (`"true"` / `"false"`), as in the [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side).
+**A literal is bound to its column's type** (**BL-1015, next train**). `valueConfig` is a string, and the rule's value is read as the column's type wherever the rule is applied — a query, a subscription's change events, a materialized query's rows and the write check alike: `"true"` matches a `Bool` column's `true`, `"05"` an integer 5, `"2026-10-12T21:00:00Z"` a `Timestamp`, `"2026-10-12"` a `Date`, `"10.5"` a `Decimal(p,s)` 10.50, a `Guid` in either case. A literal that does not convert to the column's type (`"yes"` for a `Bool`) denies — the rule matches nothing, for `ne` too. (0.3.0 compared a literal with a row as text outside the query path, so a `Bool` column never matched `"true"` there, and a subscriber could receive events its rule hid from a query; the [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a `String` column, which works either way.)
 
 ### 19.5.2 Setup: Create the RLS Table
 
