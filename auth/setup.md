@@ -242,7 +242,9 @@ const { codeVerifier, codeChallenge } = await createPkcePair();
 const redirectUri = `http://127.0.0.1:${port}/callback`;
 openBrowser(`https://app.example.com/native-sign-in?challenge=${codeChallenge}&redirect=${encodeURIComponent(redirectUri)}&state=${state}`);
 
-// 2. In the web front (signed in): ask for the code and send the browser on.
+// 2. In the web front (signed in): ask the user first — Aouda shows no consent screen, so this is where they see it — then ask for
+//    the code and send the browser on.
+if (!(await confirmDialog(`Sign in to MyApp on this device as ${user.email}?`))) return;
 const { redirectTo } = await web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state });
 window.location.assign(redirectTo);   // → http://127.0.0.1:<port>/callback?code=…&state=…
 
@@ -254,7 +256,9 @@ await app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceI
 
 **Phone app — private-use scheme or claimed link** (RFC 8252 §7.1 / §7.2). Register `com.example.myapp:/oauth` (a reverse-DNS
 scheme the app owns) or an `https://` link the OS routes to the app (Universal Links / App Links). The flow is the same; the browser
-lands on the app instead of a loopback port. A claimed `https` link is the stronger choice: another app cannot register it. On
+lands on the app instead of a loopback port. **A claimed `https` link is the stronger choice:** another app on the phone can register
+the same private-use scheme and receive the code — with its own PKCE pair, it could redeem it (RFC 8252 §8.6) — while a claimed
+link reaches only your app. Either way, the web front must ask the user before it calls `createAuthorizationCode` (step 2). On
 React Native, import `react-native-get-random-values` before `@aouda/client` so `createPkcePair()` has a random source
 ([React Native](../clients/typescript.md#react-native-nativeclients-next-train)).
 

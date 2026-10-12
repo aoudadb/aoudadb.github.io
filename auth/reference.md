@@ -163,15 +163,24 @@ already signed in — MFA included — and comes back with a session of its own.
 1. An administrator registers the native client once: `POST .../admin/native-clients` `{ name, redirectUris }`. A redirect URI is one of:
    a **loopback** URL `http://127.0.0.1/path` or `http://[::1]/path` (matched on any port, the path exactly — RFC 8252 §7.3; `localhost`
    is refused), a **private-use scheme** in reverse-DNS form `com.example.app:/oauth`, or a claimed **`https`** link. No fragment,
-   wildcard or user info. `GET` lists, `DELETE .../admin/native-clients/{id}` removes.
+   wildcard or user info. A loopback URI is registered **without a port** (any port matches, so a registered one would read as pinned)
+   and in that one form — `127.1`, `0x7f000001` and the like are refused; at `authorize` and `token` too, only the canonical text
+   matches (no `..`, no escaped path characters, no empty port). `GET` lists, `DELETE .../admin/native-clients/{id}` removes — and
+   its outstanding codes stop redeeming (`AUTH_NATIVE_CLIENT_UNKNOWN`).
 2. The native app makes a PKCE pair — a random `codeVerifier` (43–128 characters) and `codeChallenge` = base64url(SHA-256(verifier)) —
    and opens the web front in the browser with the challenge and its redirect URI.
-3. The web front, signed in, calls `POST .../auth/authorize` and sends the browser to the `redirectTo` it gets back
+3. The web front, signed in, **asks the user** ("Sign in to *MyApp* on this device?") and only on their click calls
+   `POST .../auth/authorize`, then sends the browser to the `redirectTo` it gets back
    (`redirectUri?code=…&state=…`). The code is single use, valid for **60 seconds**, stored only as its hash, and carries the web
    session's `aal` (never more).
 4. The native app receives the code at its redirect URI and calls `POST .../auth/token` with the code, its verifier, the same
    `clientId` and `redirectUri`, and its `deviceInfo`. It gets the usual token response — a new session, listed under the user's
    devices.
+
+⚠️ **Do not let the web front approve without asking.** Aouda shows no consent screen, so the web front is the only place the user
+can see that an app is about to get their session. A page that calls `authorize` as soon as it loads hands a session — at `aal2` if
+they did MFA — to whatever app opened it with its own challenge: on a phone, another app can register the same private-use scheme
+(RFC 8252 §8.6). Prefer a claimed `https` link for phone apps; no other app can receive it.
 
 Every refusal says which: `AUTH_PKCE_VERIFIER_INVALID`, `AUTH_CODE_EXPIRED`, `AUTH_CODE_REUSED` (the session the first redemption
 opened is ended too), `AUTH_REDIRECT_URI_MISMATCH`, `AUTH_CODE_INVALID` (unknown, or the web session that issued it has signed out or

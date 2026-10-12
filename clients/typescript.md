@@ -87,6 +87,10 @@ client.auth.onTokensChanged((t) => SecureStore.setItemAsync("aouda", JSON.string
 `fetch` (every HTTP call: data, auth, the long-poll fallback) and `streaming.wsFactory` (the streaming socket) work on every
 platform; both default to the platform's own.
 
+`streaming.wireMode: "msgpack"` needs a global `TextDecoder` (the MessagePack codec builds one when it loads): install a polyfill such
+as `fast-text-encoding`, or keep the default `"json"` — without one, connecting fails with an `AoudaConnectionError` that says so.
+Nothing else needs a polyfill: the client brings its own UTF-8, base64 and SHA-256.
+
 What does not work on React Native, because its `fetch` has no streaming response body: `client.admin.node` log tailing. Iterating a
 subscription with `for await` needs `Symbol.asyncIterator`, which Hermes may not define — use the `onSnapshot` / `onChange`
 callbacks there. CI runs a smoke on Hermes (sign in, a named query, a subscription, a refresh, PKCE) against every change.

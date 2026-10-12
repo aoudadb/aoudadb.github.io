@@ -184,11 +184,14 @@ Application end users today:
 
 ### What is not shipped
 
-**OAuth 2.0 authorization code flow with PKCE is not available** (tracked as BL-043). Token introspection (BL-042) is not available. Do not implement a SPA that redirects to an IdP and expects Aouda to complete the code exchange.
+**A hosted OAuth 2.0 authorization server is not available** — no `/authorize` login page, social login or third-party consent
+(tracked as BL-043). Token introspection (BL-042) is not available. Do not implement a SPA that redirects to an IdP and expects Aouda
+to complete the code exchange. **Native apps** can sign in through the browser: the signed-in web front issues a single-use PKCE code
+and the app redeems it for its own session (**NativeClients, next train**) — [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
 
 OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. That is not a federated login.
 
-Until PKCE exists, the supported browser pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)) with **no API key**, or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
+For the browser itself, the supported pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)) with **no API key**, or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
 
 The **application** holds the consistency token (cookie or header **you** name). The SDK captures `X-Aouda-Token` in memory and **never** `Set-Cookie`. Recreating the client without a shared store loses read-your-writes. See [Freshness](freshness.md).
 
@@ -250,7 +253,8 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 ## Not in this release
 
 - Bare internet exposure (no edge).
-- PKCE / OAuth authorization code / token introspection.
+- A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
+  browser with a PKCE code ships in the next train — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
 - Extending `mk_anon_*` to read data.
 
