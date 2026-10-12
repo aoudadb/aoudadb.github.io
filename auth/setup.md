@@ -260,7 +260,7 @@ lands on the app instead of a loopback port. **A claimed `https` link is the str
 the same private-use scheme and receive the code — with its own PKCE pair, it could redeem it (RFC 8252 §8.6) — while a claimed
 link reaches only your app. Either way, the web front must ask the user before it calls `createAuthorizationCode` (step 2). On
 React Native, import `react-native-get-random-values` before `@aouda/client` so `createPkcePair()` has a random source
-([React Native](../clients/typescript.md#react-native-nativeclients-next-train)).
+([React Native](../clients/typescript.md#react-native-nativeclients-040)).
 
 C#: `Pkce.CreatePair()`, `client.Auth.CreateAuthorizationCodeAsync(...)`, `client.Auth.ExchangeCodeAsync(...)`.
 

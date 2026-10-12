@@ -310,7 +310,7 @@ Aouda supports many different deployment configurations. This section maps each 
 **Which key sees past PLS / RLS** (**0.4.0**): only an app's `mk_svc_` key. A server API key (`mk_srv_`) runs the
 server — databases, schema, backups, keys — but on a table with a PLS or RLS mode it now gets only what a request with no user
 may see (up to 0.3.x it bypassed them). A backend that reads protected tables uses the database's `mk_svc_` key, or sends the
-user's JWT as `X-User-Token` — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
+user's JWT as `X-User-Token` — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 
 ### Scenario 1: Embedded Mode (Zero Auth)
 

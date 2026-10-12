@@ -406,7 +406,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 | `roles` | array | No | RBAC roles for this key: `[{ "role": "db_writer", "scope": null }]`. `scope` is a database name or `null` for all databases — same shape as user role assignments. |
 | `expiresAt` | string? | No | ISO-8601 timestamp. Omit for a non-expiring key. |
 | `kind` | string | No | Defaults to `"custom"`. `"anon"`, `"service_role"`, `"public"`, and `"server_admin"` are reserved — they are singleton, system-managed keys and this endpoint rejects creating them (`400 INVALID_REQUEST`). |
-| `userId` | string? | No | Links this key to an existing user. The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
+| `userId` | string? | No | Links this key to an existing user. The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
 
 ```json
 {
@@ -623,7 +623,7 @@ try {
   row-level security. Every other key without a user — `custom` (not linked to a user), `server_admin` (`mk_srv_`), `anon`,
   `public` — gets its role's grants, and on a PLS / RLS table only what a request with no user may see (with the usual
   rules, no row; a PLS table answers `403`). Up to 0.3.x a server key bypassed them too. Use `X-User-Token` with a service or
-  server key for one user's data — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
+  server key for one user's data — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 - Auto-generated keys are shown only once at creation time. Store them securely.
 - Rotate keys periodically via the regeneration endpoint.
 

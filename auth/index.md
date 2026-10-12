@@ -261,7 +261,7 @@ If you enable auth and keep defaults:
   - system-managed keys reserve key kinds for default app connection models.
   - **only `service_role` bypasses PLS / RLS** (**0.4.0**): every other key without a user — custom, `server_admin`,
     `anon`, `public` — gets its role's grants and, on a protected table, what a request with no user may see. Up to 0.3.x a
-    `server_admin` key bypassed them too. [What changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
+    `server_admin` key bypassed them too. [What changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 - RBAC:
   - role memberships + permission rows define baseline operation rights.
 - PLS:

@@ -300,7 +300,7 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 A server API key (`mk_srv_`) did too up to 0.3.x; it now gets its role's grants and, on a protected table, only what a request
 with no user may see — with the usual RLS rules, no row; on a PLS table `403`, unless its role is `db_admin` and the read asks
 for `"crossPartitionAccess": true` (audited). For a whole database use that database's `mk_svc_` key; for one user's data send
-`X-User-Token` with either key. Details: [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
+`X-User-Token` with either key. Details: [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 
 ### Creating Server API Keys
 

@@ -376,7 +376,7 @@ When you create a database with auth enabled, Aouda still auto-generates keys. T
 row-level security. A server API key (`mk_srv_`) bypassed them too up to 0.3.x; it now gets its role's grants and, on a
 protected table, what a request with no user may see (with the usual RLS rules, no row; a PLS table answers `403`). Use the
 database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with either key for one user's data —
-[what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
+[what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 
 ```bash
 # Enable self-service signup (app-admin) — default is off

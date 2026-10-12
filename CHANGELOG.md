@@ -155,7 +155,7 @@ Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's sec
   role's grants and, on a protected table, what a request with no user may see: with the usual RLS rules no row (writes
   refused), on a PLS table `403` unless its role is `db_admin` and the read asks for `crossPartitionAccess` (audited). Use the
   database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with a service or server key for one user's
-  data. [What changed](auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train).
+  data. [What changed](auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 - **Sizing: a known gap in the memory ceiling is documented (BL-983).** [Sizing](guides/sizing.md) now says that the process can
   sit 2–5 % above `MaxTotalRamBytes` under load — the memory outside the .NET heap is larger than the server sets aside for it — and
   what to do until it is fixed: a container limit about 10 % above the setting, and `MALLOC_ARENA_MAX=2` on Linux.
@@ -224,7 +224,7 @@ Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's sec
   `@aouda/client` (any number of listeners; the WebSocket transport is now one of them) and `client.Auth.TokensChanged` in
   `Aouda.Client`, on sign-in, every refresh — the automatic ones included — and sign-out. Persist the refresh token on each change:
   the server rotates it, and an app restarted with a spent one loses its session.
-  [Keeping tokens across restarts](auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-next-train).
+  [Keeping tokens across restarts](auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-040).
 
 - **Sessions are devices; sign-out signs out this device** (NativeClients S04, Derive ask AQ-5, ADR 0062). A session is one sign-in
   on one device: a refresh updates it instead of adding a row, and it carries the client's `deviceInfo` (≤ 512 UTF-8 bytes) beside
