@@ -94,7 +94,7 @@ ticks apart above 2^53. Pruning is the scan's `RowGroupClassifier` over each row
 
 A `Timestamp` column declared `derived: { "serverTime": "insert" | "write" }` is stamped by the primary with its own UTC
 clock (full tick precision, one reading per write request) and refuses any caller value. See
-[Insert transforms — server-time stamp](../guides/insert-transforms.md#server-time-stamp--servertime-insert--write-nativeclients-next-train).
+[Insert transforms — server-time stamp](../guides/insert-transforms.md#server-time-stamp-servertime).
 
 ## References
 

@@ -129,6 +129,17 @@ A named query over a non-opted-in table is still **allowed to apply** — operat
 
 **Runtime (data-plane only):** per-identity sliding window, default 60 permits / 60 seconds. One permit per execute, per **batch envelope**, per mutation execute, per subscribe attempt. Exceed → `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After`. Disabled on admin-only deployments. Config: `Aouda:IdentityQuota:PermitLimit` / `WindowSeconds` / `Enabled`.
 
+**Several devices, one identity.** The quota and the subscription caps (`Aouda:WebSocket:MaxSubscriptionsPerConnection`,
+default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not the device, so a user on a browser, a desktop
+agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
+minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
+subscriptions. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
+(**NativeClients, next train**).
+
+**Server clock.** Every response carries a `Date` header that a browser can read cross-origin (**NativeClients, next
+train**); the SDKs keep the offset from it (`serverClockOffsetMs` / `ServerClockOffset`) so a client can judge a
+server-stamped lease against the server's clock.
+
 Signup 5/min and signin 20/min per IP still apply. An optional failed-signin ceiling (`Aouda:Auth:FailedSigninCeiling`, off by default) caps **failed** sign-ins per auth database — the attack shape per-IP limiting cannot see. It is per process. A tripped ceiling is a full login outage on that database until the window drains (correct passwords included); see [Auth reference](../auth/reference.md#rate-limiting).
 
 ---

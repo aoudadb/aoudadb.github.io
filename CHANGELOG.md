@@ -13,10 +13,20 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Server-time read bounds** (NativeClients S02, Derive ask AQ-2). A named-query parameter declared
+  `{ "serverTime": { "offsetSeconds": -75 } }` is bound by the server to its clock at execute — a presence lease read against
+  one clock. One-shot reads only: subscribe refuses it (`NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE`).
+  [Named queries](guides/named-queries.md#server-time-bounds-servertime-parameters).
+- **`Date` readable cross-origin**, and both SDKs keep the server-clock offset (`serverClockOffsetMs` / `ServerClockOffset`).
+- **`returning` on `insert` and `upsert` named mutations** (AQ-10, BL-639): the rows written — an upsert's one row per key,
+  as stored. It was accepted and ignored.
+- **Subscription caps and the per-identity quota for several devices** are now in
+  [Defaults reference](guides/defaults-reference.md#data-plane-subscriptions-and-the-identity-quota) (AQ-9).
+
 - **Server-time stamps** (NativeClients S01, Derive ask AQ-1). A `Timestamp` column declared
   `derived: { "serverTime": "insert" | "write" }` is stamped by the server's clock on every write path and refuses any
   caller value, so sent-at and last-seen times no longer depend on device clocks.
-  [Insert transforms](guides/insert-transforms.md#server-time-stamp--servertime-insert--write-nativeclients-next-train).
+  [Insert transforms](guides/insert-transforms.md#server-time-stamp-servertime).
   The presence example in [Named queries](guides/named-queries.md) now uses it.
 - **Fixed: an upsert of a key that had left the write buffer** (sealed to a hot or cold segment, or any key of a table
   with a `unique` column) **failed with `TRANSFORM_DERIVED_READONLY` on a table with a derived or identity column** (BL-994).

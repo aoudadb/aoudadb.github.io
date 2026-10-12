@@ -107,7 +107,9 @@ Unknown sources (`claim:…` on a derived identity column that is not bindable, 
 
 Worked schema: [write-side fixture](../examples/p43-write-side/aouda.schema.json). Authorization for that stamp: [Data authorization](../auth/authorization.md#worked-example--public-or-member--identity-stamp).
 
-### Server-time stamp (`{ "serverTime": "insert" | "write" }`) (**NativeClients, next train**)
+### Server-time stamp (`serverTime`)
+
+(**NativeClients, next train**)
 
 A third sibling of `derived`: a `Timestamp` column the **server** stamps with its own UTC clock, so a sent-at or last-seen
 time never comes from a device's clock.

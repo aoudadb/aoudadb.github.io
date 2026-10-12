@@ -88,6 +88,20 @@ const rows = await client.table('orders').atLeast(store.get('mydb')!).execute();
 const current = await client.getConsistencyToken();
 ```
 
+### The server's clock (**NativeClients, next train**)
+
+Every response's `Date` header tells the client how far the server's clock is from the device's. `client.serverClockOffsetMs`
+holds the last difference (undefined before the first response; about one second of resolution) and `client.serverNow()`
+applies it. Use it to judge a lease the server stamped — a `derived: { serverTime: "write" }` column such as `lastSeen` —
+against the server's clock, not the device's:
+
+```typescript
+const online = rows.filter((r) => client.serverNow().getTime() - Date.parse(r.lastSeen) < 75_000);
+```
+
+`namedMutations.execute()` returns `op: "upsert"` (and `rowsAffected` = inserted + replaced) for an upsert, and `returning`
+rows for `insert` and `upsert` definitions that declare them (**NativeClients, next train**).
+
 ### With Authentication
 
 ```typescript
