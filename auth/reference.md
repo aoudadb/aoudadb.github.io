@@ -118,6 +118,8 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens. Optional `deviceInfo`: your description of the device, at most 512 UTF-8 bytes, shown in the session list (**NativeClients, next train**) |
 | `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token |
 | `.../auth/signout` | POST | User JWT | End **this** session (**NativeClients, next train**) — it ended every session of the user. Optional body `{ "scope": "local" \| "others" \| "global" }`: `others` ends every other session and keeps this one, `global` ends all. See [Sessions are devices](#sessions-are-devices) |
+| `.../auth/authorize` | POST | User JWT | Native sign-in, step 1 (**NativeClients, next train**): issue a single-use code for a registered native client. Body `{ clientId, redirectUri, codeChallenge, codeChallengeMethod: "S256", state? }` → `{ code, state, redirectTo, expiresIn: 60, aal }`. See [Native sign-in](#native-sign-in-through-the-browser) |
+| `.../auth/token` | POST | None (public) | Native sign-in, step 2 (**NativeClients, next train**): redeem the code. Body `{ grantType: "authorization_code", code, codeVerifier, clientId, redirectUri, deviceInfo? }` → the sign-in response, a **new session** at the code's `aal` |
 | `.../auth/sessions` | GET | User JWT | The caller's sessions, one per device (**NativeClients, next train**): `{ "sessions": [{ id, deviceInfo, userAgent, ipAddress, createdAt, lastSeenAt, aal, current }] }`, most recently used first |
 | `.../auth/sessions/{id}` | DELETE | User JWT | End one of the caller's sessions — sign another device out (204) (**NativeClients, next train**). Another user's session, or an unknown id: `404 AUTH_SESSION_NOT_FOUND` |
 | `.../auth/me` | GET | User JWT | Get current user profile |
@@ -152,6 +154,30 @@ This applies to connections opened with a user's token; one opened with an API k
 
 > **Signing out is per device now.** A client that called `signout` to sign the user out *everywhere* must send
 > `{ "scope": "global" }`.
+
+#### Native sign-in through the browser
+
+(**NativeClients, next train**) A native app (a desktop app, a phone app) signs a user in by handing off to the browser, where the app's own web front is
+already signed in — MFA included — and comes back with a session of its own. Aouda hosts no login page: the web front does the asking.
+
+1. An administrator registers the native client once: `POST .../admin/native-clients` `{ name, redirectUris }`. A redirect URI is one of:
+   a **loopback** URL `http://127.0.0.1/path` or `http://[::1]/path` (matched on any port, the path exactly — RFC 8252 §7.3; `localhost`
+   is refused), a **private-use scheme** in reverse-DNS form `com.example.app:/oauth`, or a claimed **`https`** link. No fragment,
+   wildcard or user info. `GET` lists, `DELETE .../admin/native-clients/{id}` removes.
+2. The native app makes a PKCE pair — a random `codeVerifier` (43–128 characters) and `codeChallenge` = base64url(SHA-256(verifier)) —
+   and opens the web front in the browser with the challenge and its redirect URI.
+3. The web front, signed in, calls `POST .../auth/authorize` and sends the browser to the `redirectTo` it gets back
+   (`redirectUri?code=…&state=…`). The code is single use, valid for **60 seconds**, stored only as its hash, and carries the web
+   session's `aal` (never more).
+4. The native app receives the code at its redirect URI and calls `POST .../auth/token` with the code, its verifier, the same
+   `clientId` and `redirectUri`, and its `deviceInfo`. It gets the usual token response — a new session, listed under the user's
+   devices.
+
+Every refusal says which: `AUTH_PKCE_VERIFIER_INVALID`, `AUTH_CODE_EXPIRED`, `AUTH_CODE_REUSED` (the session the first redemption
+opened is ended too), `AUTH_REDIRECT_URI_MISMATCH`, `AUTH_CODE_INVALID` (unknown, or the web session that issued it has signed out or
+was ended). A failed redemption spends the code — start again. At `authorize`: `AUTH_NATIVE_CLIENT_UNKNOWN`,
+`AUTH_REDIRECT_URI_NOT_REGISTERED`, `AUTH_PKCE_METHOD_UNSUPPORTED` (`S256` only), `AUTH_PKCE_CHALLENGE_INVALID`. Both endpoints share
+sign-in's rate limit.
 
 > **MFA endpoints require a user JWT** — the access token returned from sign-in. Send `Authorization: Bearer <accessToken>` directly; no API key is required or expected. If you are building a BFF that proxies MFA requests, forward the user JWT unchanged in `Authorization` — do not replace it with your service key. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints).
 
@@ -210,6 +236,8 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}/disable` | POST | Disable user. Ends every session at once (**NativeClients, next train**): each live access token is revoked (refused on the next request in Hybrid and Stateful modes, an open WebSocket closed within a heartbeat with `AUTH_TOKEN_REVOKED`), every refresh token is revoked, and a refresh answers `423 AUTH_ACCOUNT_DISABLED`. Sign-in answers `AUTH_INVALID_CREDENTIALS`. Enable lets the user sign in again; it brings no session back |
 | `.../admin/users/{id}/enable` | POST | Enable user |
 | `.../admin/users/{id}/mfa/factors/{factorId}` | DELETE | Remove one of a user's MFA factors (an MFA reset). Ends every session of the user (**NativeClients, next train**), so they sign in again and enrol afresh |
+| `.../admin/native-clients` | POST / GET | Register a native client `{ name, redirectUris }` (201) / list them (**NativeClients, next train**) |
+| `.../admin/native-clients/{id}` | DELETE | Remove a native client (204; `404 AUTH_NATIVE_CLIENT_UNKNOWN`) (**NativeClients, next train**) |
 | `.../admin/sessions` | GET | List sessions (`?userId=`, `limit`, `offset`) — one per device, with `userAgent`, `lastSeenAt` and `aal` (**NativeClients, next train**) |
 | `.../admin/sessions/{id}` | DELETE | End one session: its refresh family is revoked and every access token it issued is revoked (**NativeClients, next train** — it deleted the row only, and the session kept refreshing). The user's other sessions are untouched |
 | `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |
@@ -451,6 +479,16 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live | Retry the **same** request (the same refresh token) after `Retry-After` |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) An admin write kept conflicting with a concurrent change to the same record and was not applied | Retry the same request |
 | `UNAUTHORIZED` | 401 | Unrecognised path when server auth is configured (deny-by-default) | Ensure request targets a valid path with a valid credential |
+| `AUTH_CODE_INVALID` | 400 | (**NativeClients, next train**) Native sign-in: the code is unknown, or the session that issued it has ended | Start the sign-in again |
+| `AUTH_CODE_EXPIRED` | 400 | (**NativeClients, next train**) The code is older than 60 s | Start the sign-in again |
+| `AUTH_CODE_REUSED` | 400 | (**NativeClients, next train**) The code was already redeemed; the session that redemption opened has been ended | Start the sign-in again; investigate a copied code |
+| `AUTH_PKCE_VERIFIER_INVALID` | 400 | (**NativeClients, next train**) `codeVerifier` does not answer the code's challenge. The code is spent | Start again with a fresh pair |
+| `AUTH_REDIRECT_URI_MISMATCH` | 400 | (**NativeClients, next train**) `clientId` / `redirectUri` differ from the ones the code was issued for. The code is spent | Send the same values as at `authorize` |
+| `AUTH_UNSUPPORTED_GRANT_TYPE` | 400 | (**NativeClients, next train**) `.../auth/token` serves `grantType: "authorization_code"` only | Use `.../auth/signin` / `.../auth/refresh` for the others |
+| `AUTH_NATIVE_CLIENT_UNKNOWN` | 400 / 404 | (**NativeClients, next train**) No native client with that `clientId` | Register it (`.../admin/native-clients`) |
+| `AUTH_REDIRECT_URI_NOT_REGISTERED` | 400 | (**NativeClients, next train**) `authorize`: the redirect URI is not one of the client's | Register it, or send a registered one |
+| `AUTH_REDIRECT_URI_INVALID` | 400 | (**NativeClients, next train**) Registration: not a loopback, reverse-DNS scheme or `https` URI | See [Native sign-in](#native-sign-in-through-the-browser) |
+| `AUTH_PKCE_METHOD_UNSUPPORTED` / `AUTH_PKCE_CHALLENGE_INVALID` | 400 | (**NativeClients, next train**) `codeChallengeMethod` is not `S256`, or the challenge is not 43 base64url characters | Use S256 |
 | `AUTH_SESSION_NOT_FOUND` | 404 | (**NativeClients, next train**) `DELETE .../auth/sessions/{id}` named a session that is not the caller's, or none | Refresh the session list |
 
 ### Signup / Signin Errors

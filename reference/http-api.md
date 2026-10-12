@@ -290,6 +290,8 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token |
 | `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT |
 | `/api/databases/{db}/auth/signout` | POST | API key + user JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/authorize` | POST | user JWT | Native sign-in: issue a single-use PKCE code for a registered native client (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/token` | POST | none | Native sign-in: redeem the code (`grantType: "authorization_code"`) for a new session (**NativeClients, next train**) |
 | `/api/databases/{db}/auth/sessions` | GET | user JWT | The caller's sessions, one per device (**NativeClients, next train**) |
 | `/api/databases/{db}/auth/sessions/{id}` | DELETE | user JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, next train**) |
 | `/api/databases/{db}/auth/me` | GET | API key + user JWT | Current user profile |

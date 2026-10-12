@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Native apps sign in through the browser** (NativeClients S06, Derive ask AQ-7). A signed-in web front issues a single-use PKCE
+  code (`POST .../auth/authorize`); the native app redeems it (`POST .../auth/token`) for its own session at the web session's `aal`
+  — MFA done in the browser carries over. Native clients and their redirect URIs (loopback, reverse-DNS scheme, `https`) are registered
+  by an administrator. [Native sign-in](auth/reference.md#native-sign-in-through-the-browser).
+
 - **An idle device can still be signed out** (NativeClients group 2 review). A session stays listed, and is ended by `others`,
   `global`, a `DELETE` by id or an admin action, for as long as its refresh token lives — it vanished after 15 idle minutes and kept
   refreshing. An access token from before an MFA step-up is refused once the user's sessions end; a long-poll connection is dropped
