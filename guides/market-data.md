@@ -702,7 +702,8 @@ Bulk-loaded rows bypass **incremental** MQ maintenance by design. What happens i
 **`auto` (the default) — the table's pass, started at the commit.** (**WorkloadCore S10, 0.3.0**) The load
 records a pending job and the table's pass brings its queries current right after the commit, from the load's segments;
 before S10 the queries accumulated during the load's own pass and were published after the commit. `:commit` waits
-for that up to `mqWaitMs` (30 s) and says in `mqStatus` whether it finished (**WorkloadCore S09, 0.3.0**); wait for it; **do not also call `:refresh`.** A `:refresh` either runs the pass
+for that up to `mqWaitMs` and says in `mqStatus` whether it finished (**WorkloadCore S09, 0.3.0**; the default wait was 30 s in
+0.3.0 and is **0 — no wait — from the next train**, LoadSpeed M.2: send `mqWaitMs`, or read with the commit's `token`); wait for it; **do not also call `:refresh`.** A `:refresh` either runs the pass
 that was starting anyway or, once it has run, re-scans the whole source table, so it buys nothing and can cost a
 second full pass.
 

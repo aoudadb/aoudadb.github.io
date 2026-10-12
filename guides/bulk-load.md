@@ -172,7 +172,7 @@ Scope boundaries:
   - Ordinary insert identity-insert is documented in [HTTP API insert](../reference/http-api.md) and [Getting Started](../getting-started/index.md) (BL-130).
   - `BulkLoadJobHandle.MqRebuildStatus`: tracks rebuild state (`Pending / InProgress / Completed / Skipped / Failed`; C#/TS clients also expose `Unknown` — see below, **BL-419, 0.1.22**).
   - `BulkLoadJobHandle.MqRebuildCompleted`: `Task` that resolves when all dependent MQ rebuilds finish.
-  - (**WorkloadCore S09, 0.3.0**) `:commit`'s bounded wait for the load's queries: `BulkLoadOptions.MqWait` (`TimeSpan?`; null = the server's default: 30 s in 0.3.0, no wait (**LoadSpeed M.2, next train**)) / wire `mqWaitMs`, and `BulkLoadJobHandle.MqStatus` (`MqCommitStatus`: `Unknown`, `None`, `Current`, `Behind`, `Skipped`, `Deferred`) and `MqFrontierToken` in `Aouda.Client`; `mqWaitMs`, `handle.mqStatus`, `handle.mqFrontierToken` and `handle.mqWaitedMs` in `@aouda/client`. `Unknown` is an older server's answer. See [HTTP API — `:commit`](../reference/http-api.md#post-jobidcommit).
+  - (**WorkloadCore S09, 0.3.0**) `:commit`'s bounded wait for the load's queries: `BulkLoadOptions.MqWait` (`TimeSpan?`; null = the server's default: 30 s in 0.3.0, no wait (**LoadSpeed M.2, next train**)) / wire `mqWaitMs`, and `BulkLoadJobHandle.MqStatus` (`MqCommitStatus`: `Unknown`, `None`, `Current`, `Behind`, `Skipped`; `Deferred` until the next train, **LoadSpeed K31**) and `MqFrontierToken` in `Aouda.Client`; `mqWaitMs`, `handle.mqStatus`, `handle.mqFrontierToken` and `handle.mqWaitedMs` in `@aouda/client`. `Unknown` is an older server's answer. See [HTTP API — `:commit`](../reference/http-api.md#post-jobidcommit).
   - (**LoadSpeed M.2, next train**) **`mqWaitMs` defaults to `0`**: `:commit` answers as soon as the load is durable and does not wait for its queries unless the request says how long (it waited up to 30 s). A load whose queries are still catching up answers `mqStatus: "behind"` with `mqFrontierToken`; that is not an error. To go on only once they are current, send `mqWaitMs` (up to `600000`), or read with the commit's `token`, which waits for them.
   - (**WorkloadCore S16, 0.3.0**) The wait does not wait for a query only a rebuild can bring current (holed, in `Error`, or waiting for memory to rebuild): `mqStatus` is `"behind"` as soon as the others are current, instead of after the whole `mqWaitMs`.
   - (**WorkloadCore S16, 0.3.0**) **`:append` can be paced.** When the database's debt — WAL fill, materialized-query maintenance lag, unflushed rows or hot bytes — is past its soft line, each batch of an `:append` waits (at most 10 s) before it is queued — whatever the batch's size (**WorkloadCore group 5 review, 0.3.0**) — so the load settles at the rate the debt drains; see the sizing guide, *Debt slows the writer*. An `:append` whose load already failed for capacity answers `503` with `Retry-After`, as `:commit` does, rather than `409`. A load's buffer growth refused for a moment's queue no longer caps the buffer for the rest of the load.
@@ -233,8 +233,8 @@ loads large enough — or frequent enough — that paying for the materialized q
 is the wrong trade. The load writes only the table (the fastest path the engine has) and records a
 **pending job**: which segments it wrote and which queries owe them. Its queries stay readable and
 say they are behind: `isStale: true` with a reason, `pendingDeferredJobs` above zero.
-(**WorkloadCore S10, 0.3.0**) Every load but a `skip` one now records such a job; `deferred` differs from
-`auto` only in when its pass starts. The queries it reaches are not marked stale: they are owed work, not holed,
+(**WorkloadCore S10, 0.3.0**) Every load but a `skip` one now records such a job; `deferred` differed from
+`auto` only in when its pass started. The queries it reaches are not marked stale: they are owed work, not holed,
 so `current` is `false` and the reason reads "N bulk load(s) into its source are pending the table's pass…"
 (before: "a bulk load committed with PostLoadMqBehavior.Deferred; its rows are pending the deferred pass…"), and
 `staleOnly` on a pooled refresh no longer selects them. While they are
@@ -245,9 +245,9 @@ The table's **deferred pass** then brings them current: one read of every pendin
 every foldable query (`aggregate`, `latestPerKey`/`firstPerKey`) folded in the same read and written
 onto its result, a filter or direct `topNPerGroup` given the jobs' rows as inserts, any other query
 rebuilt (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, not inside it — the table's
-other queries are current without waiting for it), and queries cascaded from them (a `topNPerGroup` over a rollup) caught up. A `deferred` load's pass runs
+other queries are current without waiting for it), and queries cascaded from them (a `topNPerGroup` over a rollup) caught up. A pass that does not start at a load's commit runs
 (an `auto` load's starts at its commit, **WorkloadCore S10, 0.3.0** — while its table is quiet; while it is loading, an `auto`
-load's pass waits the same way, **LoadSpeed M.3, next train**):
+load's pass waits like this, **LoadSpeed M.3, next train**, as a `deferred` load's always did until the next train):
 
 - once bulk ingest into the table has been **quiet for 2 s**, or the oldest pending job has waited
   **60 s**, whichever comes first — many back-to-back loads, one pass;
@@ -261,10 +261,10 @@ refresh, and not lost across compaction (a pending job's segments are not merged
 incorporated) or a restart (pending jobs are durable; a query that still owes one has no ready
 marker, so the restart rebuilds it).
 
-**When to choose it.** (Until the next train.) `auto` keeps queries current as each load commits; choose `deferred` when you
-load a lot at once (an initial import, a backfill, a nightly batch) and can let the queries catch
-up a few seconds after the last load. (**LoadSpeed M.3 / K31, next train**: `auto` makes that choice per table as it loads — a
-stream of loads is caught up once, a single load at its commit — so there is nothing left to choose.) Both run the same pass over the same segments
+**When it was the choice** (0.1.40 to 0.3.x; refused `400` from the next train — use `auto`). `auto` kept queries current as each
+load committed; `deferred` was for loading a lot at once (an initial import, a backfill, a nightly batch) and letting the queries
+catch up a few seconds after the last load. (**LoadSpeed M.3 / K31, next train**: `auto` makes that choice per table as it loads — a
+stream of loads is caught up once, a single load at its commit — so there is nothing left to choose.) Both ran the same pass over the same segments
 (**WorkloadCore S10, 0.3.0**: `auto` starts it at each commit; before S10, `auto` folded a table of aggregates and
 latest-per-key queries as its segments were written, and accumulated other queries during the load), so the
 difference is *when* the work is paid — per load, or once for many — not how much there is.

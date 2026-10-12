@@ -1105,7 +1105,7 @@ writes only its table, fast, and the queries catch up afterwards.
 
 (**WorkloadCore S10, 0.3.0**) Every load but a `Skip` one now works this way: it records a pending job, and the
 table's pass below is its maintenance. `Auto` starts the pass for each table it wrote as soon as it commits (multi-table and
-transform loads included), and `:commit` waits for it up to `mqWaitMs`; `Deferred` leaves it to the quiet period. So
+transform loads included), and `:commit` waits for it up to `mqWaitMs`; `Deferred` left it to the quiet period. So
 everything in this section applies to an `Auto` load too, except when its pass runs (and, since **LoadSpeed K31**, only to `Auto`).
 
 (**LoadSpeed M.3, next train**) **`Auto` coalesces while its table loads.** An `Auto` load into a table that is busy — another load

@@ -142,7 +142,8 @@ inside its own commit, which is removed (next bullet).
   in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
   rows/s end to end *with the queries current*. (**WorkloadCore S10, 0.3.0**) An `Auto` load's queries are brought
   current by the table's pass, started at the commit — the load itself does no materialized-query work while it
-  streams — and `:commit` waits for them up to `mqWaitMs` (30 s by default); in 0.2.0 (**ColumnarCore S12**) the load
+  streams — and `:commit` waits for them up to `mqWaitMs` (30 s by default in 0.3.0; **no wait — `0` — by default from the
+  next train**, LoadSpeed M.2); in 0.2.0 (**ColumnarCore S12**) the load
   folded them while it wrote its segments and returned with them written. A query the pass cannot fold or replay is
   rebuilt by a background job after the pass (**WorkloadCore S17, 0.3.0**).
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
@@ -611,7 +612,8 @@ then is refused with a `Retry-After` that the queue estimates. `grants` on `GET 
 (**WorkloadCore S17, 0.3.0**) **A memory refusal's `Retry-After` is never a constant 1 s**, wherever it is raised —
 a read growing past its budget, a write decided under a lock, a heap exhausted mid-request included: it is the queue's
 estimate for the refused bytes at its measured service rate, or **10 s** (the memory broker's next look, `T6`) before any
-rate has been measured or when the refusal carries no estimate.
+rate has been measured or when the refusal carries no estimate. (**BL-956, next train**) Whichever it is, it is at most **30 s**
+(it was up to 300 s): ask again then, and the next answer carries a fresh estimate.
 
 The top **`max(32 MB, 3 %)` of the budget** (at most an eighth of it) is **held** for small writes (≤ 64 KiB) and sign-ins.
 Everything else is admitted against the budget less that reserve, so a budget of 512 MB gives ordinary work 480 MB. Size for
