@@ -8,8 +8,8 @@
         "ticker": { "type": "String" },
         "source": { "type": "String" },
         "time":   { "type": "Timestamp" },
-        "bid":    { "type": "Decimal", "nullable": true },
-        "ask":    { "type": "Decimal", "nullable": true }
+        "bid":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true },
+        "ask":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true }
       },
       "partitionKey":  [{ "column": "ticker" }, { "column": "source" }],
       "clusterColumns": ["time"],

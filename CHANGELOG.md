@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Market-data guide: declared `Decimal(p,s)` for quote prices.** The worked `quotes` schema (and the P40 conformance fixture) now declare `bid` / `ask` as `"type": "Decimal"` with `"precision": 18` and `"scale": 2` — the wire form, not a type string `"Decimal(18,2)"`. The named-queries guide's equity-quote example matches. Bare undeclared `Decimal` remains valid; see [schema](guides/schema.md).
+
 ## 0.3.0 — 2026-10-10
 
 Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
