@@ -206,8 +206,7 @@ High-level flow:
   (**BL-980, next train**) A backup that records none — one of a database without a WAL, or one taken by an older build — is
   **refused** for a point-in-time restore (`PitrWindowException` naming what the manifest holds; nothing is staged). Up to 0.3.x
   the server inferred the epoch from the archive and fell back to byte-offset coverage, which a recreated WAL root could pass.
-  An **exact** restore of such a backup (no `targetTime`) is unchanged. `pitrEligible` on the backup list checks only the WAL
-  position, not the incarnation.
+  An **exact** restore of such a backup (no `targetTime`) is unchanged, and `pitrEligible` on the backup list is `false` for it.
 - A replay that meets a WAL frame this build does not read is refused, not skipped (**BL-980, next train**): a frame of the
   retired page-append family, or a catalog-DDL record with an unknown opcode or payload version, aborts the point-in-time
   replay (the database is quarantined, as for any failed replay).

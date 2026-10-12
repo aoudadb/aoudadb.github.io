@@ -3107,7 +3107,7 @@ List all backups at the configured destination, ordered newest-first.
 
 `warning` is non-null when no destination is configured or when the destination is unavailable.
 
-`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0. Position `0` means *unknown* (ADR 0044 D-2) — that backup is exact-restore-only. (**BL-980, next train**) A point-in-time restore also needs the WAL-root incarnation the manifest records; a backup without one (a database without a WAL, or a backup taken by an older build) is refused at staging even when `pitrEligible` is `true` — restore it exactly instead.
+`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0 and (**BL-980, next train**) the WAL-root incarnation (epoch and root id) a point-in-time restore needs. Position `0` means *unknown* (ADR 0044 D-2); a backup without the incarnation is one of a database without a WAL, or one taken by an older build. Either way the backup is exact-restore-only, and a point-in-time restore of it is refused.
 
 #### `POST /admin/backup/restore/{id}`
 
