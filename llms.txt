@@ -43,7 +43,7 @@
 - [Named queries and mutations](https://aoudadb.github.io/guides/named-queries/): Name identity, optional Args/Row types, subscribe-by-name
 - [Freshness and replica consistency](https://aoudadb.github.io/guides/freshness/): Consistency token (`AtLeast`), named-query alias `freshness`, `GET …/token`, caveats (scale-out store, clock skew, `MaxLagSeconds`, `w:1` failover). Wire: [HTTP API — Consistency tokens](https://aoudadb.github.io/reference/http-api/#consistency-tokens-and-freshness)
 - [What a browser-tier read cannot do](https://aoudadb.github.io/guides/browser-tier-read-limits/): Operators, data-plane allowlist, partition-filter rule, conflation caveat
-- [Direct client access](https://aoudadb.github.io/guides/direct-client-access/): Admin vs data-plane listeners, `mk_pub_*`, quotas, thin edge. PKCE is not shipped.
+- [Direct client access](https://aoudadb.github.io/guides/direct-client-access/): Admin vs data-plane listeners, `mk_pub_*`, quotas, thin edge. A hosted OAuth authorization server is not shipped; native apps sign in through the browser with a PKCE code (NativeClients, next train): [Native apps](https://aoudadb.github.io/auth/setup/#native-apps-sign-in-through-the-browser).
 - [Division of responsibility](https://aoudadb.github.io/guides/division-of-responsibility/): What belongs in Aouda vs a service; decision test; latency caveat
 - [Insert-time transforms](https://aoudadb.github.io/guides/insert-transforms/): derived columns, checks, route/tee, bulk-load intent, unique/references
 - [Access-surface diff](https://aoudadb.github.io/guides/access-surface/): `aouda schema diff --access` CI gate on widening

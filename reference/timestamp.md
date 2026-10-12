@@ -90,6 +90,12 @@ ticks apart above 2^53. Pruning is the scan's `RowGroupClassifier` over each row
 
 ---
 
+## Server-stamped columns (**NativeClients, next train**)
+
+A `Timestamp` column declared `derived: { "serverTime": "insert" | "write" }` is stamped by the primary with its own UTC
+clock (full tick precision, one reading per write request) and refuses any caller value. See
+[Insert transforms — server-time stamp](../guides/insert-transforms.md#server-time-stamp-servertime).
+
 ## References
 
 - [HTTP API reference](./http-api.md) — the wire forms of every type.

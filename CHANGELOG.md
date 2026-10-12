@@ -178,6 +178,63 @@ Public, user-facing release notes. Engine phase status lives in the server
   (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`) now asks for at most 30 s, and a WAL refusal before the server has measured
   how fast it frees log says 10 s. Ask again then; the next answer carries a fresh estimate. No client change is needed.
 
+- **Native sign-in in both SDKs** (NativeClients S07, Derive ask AQ-7). `createPkcePair()` / `Pkce.CreatePair()`,
+  `auth.createAuthorizationCode(...)` for the web front and `auth.exchangeCode(...)` for the native app; recipes for a desktop app
+  (loopback) and a phone app (private-use scheme or claimed link) in [Native apps](auth/setup.md#native-apps-sign-in-through-the-browser).
+  `guides/build-apps.md` now says what shipped (native sign-in) and what did not (a hosted authorization server, social login, consent).
+
+- **Native apps sign in through the browser** (NativeClients S06, Derive ask AQ-7). A signed-in web front issues a single-use PKCE
+  code (`POST .../auth/authorize`); the native app redeems it (`POST .../auth/token`) for its own session at the web session's `aal`
+  — MFA done in the browser carries over. Native clients and their redirect URIs (loopback, reverse-DNS scheme, `https`) are registered
+  by an administrator. [Native sign-in](auth/reference.md#native-sign-in-through-the-browser).
+
+- **An idle device can still be signed out** (NativeClients group 2 review). A session stays listed, and is ended by `others`,
+  `global`, a `DELETE` by id or an admin action, for as long as its refresh token lives — it vanished after 15 idle minutes and kept
+  refreshing. An access token from before an MFA step-up is refused once the user's sessions end; a long-poll connection is dropped
+  on its next request after a revoke (it was never checked); in Stateful mode a WebSocket opened with an API key is no longer closed
+  after a heartbeat; deleting a user refuses every access token they hold; an administrator's MFA factor removal ends the user's
+  sessions. SDKs: a refresh refused because the session is over clears the stored tokens (`signedOut`); `signOut` with `others` /
+  `global` rejects when nothing was ended; sign-out refreshes an expired token first; TS `auth.refresh()` no longer races an
+  automatic refresh into a token reuse.
+
+- **The SDKs tell the app every token change** (NativeClients S05, Derive ask AQ-6). `client.auth.onTokensChanged(listener)` in
+  `@aouda/client` (any number of listeners; the WebSocket transport is now one of them) and `client.Auth.TokensChanged` in
+  `Aouda.Client`, on sign-in, every refresh — the automatic ones included — and sign-out. Persist the refresh token on each change:
+  the server rotates it, and an app restarted with a spent one loses its session.
+  [Keeping tokens across restarts](auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-next-train).
+
+- **Sessions are devices; sign-out signs out this device** (NativeClients S04, Derive ask AQ-5, ADR 0062). A session is one sign-in
+  on one device: a refresh updates it instead of adding a row, and it carries the client's `deviceInfo` (≤ 512 UTF-8 bytes) beside
+  the user agent and IP the server saw. **`signout` now ends only the calling session** — send `{ "scope": "global" }` to sign out
+  everywhere, `"others"` to keep this device. Users list and end their own sessions with `GET` / `DELETE .../auth/sessions`.
+  Ending a session refuses its access tokens at once, and a reused refresh token now ends its whole session. Both SDKs:
+  `signIn(…, { deviceInfo })`, `signOut({ scope })`, `listSessions()`, `revokeSession(id)`.
+  [Sessions are devices](auth/reference.md#sessions-are-devices).
+
+- **Disabling a user ends what they hold** (NativeClients S03, Derive ask AQ-4). Refresh answers `423 AUTH_ACCOUNT_DISABLED`; every
+  live access token is refused on the next request, and an open WebSocket closes with `AUTH_TOKEN_REVOKED` within a heartbeat. An
+  admin's `DELETE .../admin/sessions/{id}` ends that session's refresh family and access tokens (it deleted the row only), and
+  "revoke all", a password change or reset end every session the same way. Each access token is now unique (`jti`): two
+  sign-ins in the same second no longer share a token, so ending one session cannot end another.
+
+- **Server-time read bounds** (NativeClients S02, Derive ask AQ-2). A named-query parameter declared
+  `{ "serverTime": { "offsetSeconds": -75 } }` is bound by the server to its clock at execute — a presence lease read against
+  one clock. One-shot reads only: subscribe refuses it (`NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE`).
+  [Named queries](guides/named-queries.md#server-time-bounds-servertime-parameters).
+- **`Date` readable cross-origin**, and both SDKs keep the server-clock offset (`serverClockOffsetMs` / `ServerClockOffset`).
+- **`returning` on `insert` and `upsert` named mutations** (AQ-10, BL-639): the rows written — an upsert's one row per key,
+  as stored. It was accepted and ignored.
+- **Subscription caps and the per-identity quota for several devices** are now in
+  [Defaults reference](guides/defaults-reference.md#data-plane-subscriptions-and-the-identity-quota) (AQ-9).
+
+- **Server-time stamps** (NativeClients S01, Derive ask AQ-1). A `Timestamp` column declared
+  `derived: { "serverTime": "insert" | "write" }` is stamped by the server's clock on every write path and refuses any
+  caller value, so sent-at and last-seen times no longer depend on device clocks.
+  [Insert transforms](guides/insert-transforms.md#server-time-stamp-servertime).
+  The presence example in [Named queries](guides/named-queries.md) now uses it.
+- **Fixed: an upsert of a key that had left the write buffer** (sealed to a hot or cold segment, or any key of a table
+  with a `unique` column) **failed with `TRANSFORM_DERIVED_READONLY` on a table with a derived or identity column** (BL-994).
+
 ## 0.3.0 — 2026-10-10
 
 Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.

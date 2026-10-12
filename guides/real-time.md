@@ -157,7 +157,7 @@ If you do nothing:
 | .NET `WebSocketTransportOptions.ReconnectBaseDelay` | `1s` | Reconnect exponential backoff base |
 | .NET `WebSocketTransportOptions.ReconnectMaxDelay` | `30s` | Reconnect backoff cap |
 | TypeScript `streaming.wireMode` | `"json"` | Uses JSON frames unless MessagePack is selected |
-| TypeScript `streaming.enableCompression` | `true` | Enables compression option on Node transport path |
+| TypeScript `streaming.wsFactory` | the platform `WebSocket` | Makes the socket; compression is the socket's own (**NativeClients, next train**: replaces `streaming.enableCompression`, which reached only the `ws` package) |
 | TypeScript `streaming.enableLongPollFallback` | `true` | Uses fallback transport wrapper by default |
 | TypeScript `streaming.longPollWaitMs` | `25000` | Long-poll wait on TS fallback transport |
 
@@ -428,7 +428,7 @@ Primary proving tests:
 | `.NET WebSocketTransportOptions.KeepAliveInterval` | timespan | `30s` | positive | client options | Client WS keepalive |
 | `.NET WebSocketTransportOptions.ReceiveBufferSize` | int | `65536` | positive | client options | Receive buffer |
 | `.NET WebSocketTransportOptions.LongPollWaitTimeout` | timespan | `25s` | positive | client options | Long-poll wait in fallback |
-| `TS streaming.enableCompression` | bool | `true` | `true/false` | `AoudaClientOptions.streaming` | Node transport option |
+| `TS streaming.wsFactory` | function | platform `WebSocket` | `(url) => WebSocket` | `AoudaClientOptions.streaming` | Makes the socket (**NativeClients, next train**; `enableCompression` removed) |
 | `TS streaming.wireMode` | string | `"json"` | `"json"`, `"msgpack"` | `AoudaClientOptions.streaming` | WS wire mode |
 | `TS streaming.enableLongPollFallback` | bool | `true` | `true/false` | `AoudaClientOptions.streaming` | Enables fallback wrapper |
 | `TS streaming.longPollWaitMs` | number | `25000` | positive | `AoudaClientOptions.streaming` | TS long-poll wait |

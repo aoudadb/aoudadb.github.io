@@ -129,6 +129,9 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 
 **Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After` (readable cross-origin since the **architecture review, 0.3.0**), code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
 
+**`Date`** is on every response and readable cross-origin (**NativeClients, next train**): a browser client can compare a
+server-stamped time with the server's clock rather than its own.
+
 See [Direct client access](../guides/direct-client-access.md) for configuration, CORS, and Studio/Hub URL rules.
 
 #### Auth Enforcement Rules
@@ -228,7 +231,9 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/setup` | POST | No (setup mode, localhost only) | Bootstrap first admin |
 | `/api/auth/signin` | POST | No | Sign in → JWT + refresh token |
 | `/api/auth/refresh` | POST | No | Exchange refresh token → new JWT |
-| `/api/auth/signout` | POST | Bearer JWT | Revoke session |
+| `/api/auth/signout` | POST | Bearer JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, next train**) |
+| `/api/auth/sessions` | GET | Bearer JWT | The caller's sessions, one per device (**NativeClients, next train**) |
+| `/api/auth/sessions/{id}` | DELETE | Bearer JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, next train**) |
 | `/api/auth/me` | GET | Bearer JWT | Current user profile |
 | `/api/auth/me` | PATCH | Bearer JWT | Update profile metadata |
 | `/api/auth/password` | PUT | Bearer JWT | Change password |
@@ -285,7 +290,11 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/signup` | POST | API key (Layer 1) | Register new user |
 | `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token |
 | `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT |
-| `/api/databases/{db}/auth/signout` | POST | API key + user JWT | Revoke session |
+| `/api/databases/{db}/auth/signout` | POST | API key + user JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/authorize` | POST | user JWT | Native sign-in: issue a single-use PKCE code for a registered native client (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/token` | POST | none | Native sign-in: redeem the code (`grantType: "authorization_code"`) for a new session (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/sessions` | GET | user JWT | The caller's sessions, one per device (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/sessions/{id}` | DELETE | user JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, next train**) |
 | `/api/databases/{db}/auth/me` | GET | API key + user JWT | Current user profile |
 | `/api/databases/{db}/auth/me` | PATCH | API key + user JWT | Update profile metadata |
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
@@ -519,6 +528,7 @@ All errors return a JSON body with this structure:
 | `SNAPSHOT_OVERFLOW` | 400 | Change-event buffer overflowed while paging the snapshot; subscribe fails (not a mid-snapshot `gap`) |
 | `BULK_LOAD_TRANSFORM_INTENT_REQUIRED` | 400 | Bulk load into a table with derived columns, checks, or transforms without `applyTransforms` or `preTransformed` |
 | `BULK_LOAD_TRANSFORM_INTENT_CONFLICT` | 400 | Both transform-intent flags set |
+| `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` | 400 | `preTransformed` load into a table with a server-time column; use `applyTransforms` (**NativeClients, next train**) |
 
 #### Authentication Errors (4xx)
 
@@ -562,7 +572,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `IDENTITY_SOURCE_UNRESOLVABLE` | 400 | Identity derived source could not be resolved from the principal |
 | `IDENTITY_STAMP_REQUIRED` | 400 | Service role omitted a required identity-stamped column |
 | `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | `plsClaimBinding` / identity source is not a bindable spelling (`subject` or `claim:<name>`) |
-| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including identity stamp) |
+| `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE` | 400 | A named mutation's `values` / `set` / `setExpr` names a server-time column (**NativeClients, next train**) |
+| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp) |
 
 #### State Errors (4xx)
 
@@ -631,6 +642,8 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
 | `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
+| `NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE` | WS error | Definition has a `serverTime` parameter; only one-shot reads bind the server's clock (**NativeClients, next train**) |
+| `NAMED_QUERY_SERVER_TIME_INVALID` | 400 | A `serverTime` parameter supplied in `args`, or (schema apply) declared where only a `Timestamp` comparison may use it (**NativeClients, next train**) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
 | `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
@@ -1470,7 +1483,7 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 **Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the row array; every other field is unchanged.
 
-**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound.
+**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound. `insert` and `upsert` return `rows` too when the definition declares `returning` — the rows written, an upsert's one per key as stored (**NativeClients, next train**; BL-639).
 
 **Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, 0.3.0**), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 

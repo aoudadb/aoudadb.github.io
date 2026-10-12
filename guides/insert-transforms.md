@@ -107,6 +107,50 @@ Unknown sources (`claim:…` on a derived identity column that is not bindable, 
 
 Worked schema: [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/blob/main/examples/p43-write-side/aouda.schema.json). Authorization for that stamp: [Data authorization](../auth/authorization.md#worked-example--public-or-member--identity-stamp).
 
+### Server-time stamp (`serverTime`)
+
+(**NativeClients, next train**)
+
+A third sibling of `derived`: a `Timestamp` column the **server** stamps with its own UTC clock, so a sent-at or last-seen
+time never comes from a device's clock.
+
+```json
+"Messages": {
+  "columns": {
+    "Id":       { "type": "Int64", "primaryKey": 1 },
+    "Body":     { "type": "String" },
+    "SentAt":   { "type": "Timestamp", "derived": { "serverTime": "insert" } },
+    "EditedAt": { "type": "Timestamp", "derived": { "serverTime": "write" } }
+  }
+}
+```
+
+| Mode | Insert | Update | Upsert, key exists | Upsert, new key |
+|---|---|---|---|---|
+| `insert` | stamped | kept | kept | stamped |
+| `write` | stamped | stamped | stamped | stamped |
+
+- **Every write path stamps it**: insert, named mutations (`insert` / `update` / `upsert`), the row and batch HTTP
+  endpoints, the write stream, route / tee targets (each target stamps its own), and bulk load with `applyTransforms`.
+- **No caller value, ever.** A write that names the column — with a value or `null`, from a user token or a service key —
+  fails with `TRANSFORM_DERIVED_READONLY` (400) and writes nothing; `update` `set` / `setExpr` the same. A named mutation
+  whose `values` / `set` / `setExpr` names it fails at apply with `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE`. A
+  `preTransformed` bulk load into the table is refused with `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` — load
+  historical times into an ordinary `Timestamp` column instead.
+- **No expression reads a stamp.** A `derived` expression that names a server-time column is refused at apply: its value
+  would disagree with the stamp on some write paths. Read the stamp itself.
+- **One reading per request.** Every row of a batch, every route / tee hop and every row of a bulk-load job hold the same
+  value. It is the primary's wall clock: **not monotonic** — two writes can read the same time, and a clock step backwards
+  shows. Order by your key or a sequence, not by the stamp, when order matters.
+- **Stored, not recomputed.** The value is written like any other cell (the WAL carries it), so a restart, a replay or a
+  replica reads exactly what was stamped.
+- **Declared on a `Timestamp` column only**, which is not a primary or partition key, not `unique` or `autoIncrement`,
+  and has no `default`. An existing column cannot be turned into a stamp (its values were not the server's); add a new
+  one. A stamp column added to a table that has rows must be `nullable: true`: the rows that predate it read `null`, and
+  an update of such a row keeps it `null` for an `insert` stamp.
+
+The presence pattern in [Named queries](named-queries.md) uses a `write` stamp for `LastHeartbeat`.
+
 ### `call` — string and rounding functions
 
 `type: "call"` invokes a function from a **closed allowlist**. Names are lowercase and case-sensitive — `Upper` is unknown, `upper` is the function.

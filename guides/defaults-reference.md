@@ -253,6 +253,23 @@ Logging__LogLevel__Aouda.Engine.Storage=Debug
 
 Aouda logs to the console, structured as JSON. Under systemd that is `journalctl -u aouda`; under Docker it is `docker logs`; under the Windows SCM it is the service's stdout. There is no file sink by default and no log rotation to configure, because there is no file.
 
+## Data-plane subscriptions and the identity quota
+
+| Value | Default | Key |
+|---|---|---|
+| Live subscriptions on one WebSocket connection | `32` | `Aouda:WebSocket:MaxSubscriptionsPerConnection` |
+| Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
+| Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
+| The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
+
+Both limits are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
+quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch
+envelope, one named-mutation execute or one subscribe attempt; a live subscription costs no permits after it is
+established. A heartbeat every 30 s is 2 permits a minute per device, so three devices heartbeating spend 6 of the default
+60 — leave room for page loads (batch them), typing indicators and reconnect storms (each resubscribe is a permit), and
+measure before raising. See [Direct client access](direct-client-access.md) (**NativeClients, next train** — the keys were
+in no guide before).
+
 ## Related docs
 
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into

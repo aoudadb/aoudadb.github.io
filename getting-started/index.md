@@ -1505,7 +1505,7 @@ All server auth endpoints are under `/api/auth/...` and resolve to the internal 
 | `/api/auth/setup` | POST | No (setup mode only) | Bootstrap first admin |
 | `/api/auth/signin` | POST | No | Sign in, get JWT |
 | `/api/auth/refresh` | POST | No | Refresh access token |
-| `/api/auth/signout` | POST | Yes | Revoke session |
+| `/api/auth/signout` | POST | Yes | End this session (`scope`: `others`, `global` for more) |
 | `/api/auth/me` | GET | Yes | Current user profile |
 | `/api/auth/me` | PATCH | Yes | Update profile metadata |
 | `/api/auth/password` | PUT | Yes | Change password |
