@@ -134,6 +134,12 @@ const admin = new AoudaClient({
 await admin.connect();
 ```
 
+**Keeping tokens across restarts** (**NativeClients, next train**): `client.auth.onTokensChanged(({ accessToken, refreshToken,
+reason }) => …)` is called on sign-in, on every refresh (automatic ones too) and on sign-out (`reason`: `"signedIn"` /
+`"refreshed"` / `"signedOut"`); it returns the unsubscribe, and any number of listeners may subscribe. Persist the pair each time
+and seed a restarted client with `appAuth: { token, refreshToken }` — the server rotates the refresh token on every refresh, and a
+spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-next-train).
+
 **Auth option rules:**
 - `appAuth` and `serverAuth` are mutually exclusive. Omitting both still exposes `client.auth` for keyless browser login.
 - Within each, `apiKey` and `token` are mutually exclusive.

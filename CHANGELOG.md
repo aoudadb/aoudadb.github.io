@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **The SDKs tell the app every token change** (NativeClients S05, Derive ask AQ-6). `client.auth.onTokensChanged(listener)` in
+  `@aouda/client` (any number of listeners; the WebSocket transport is now one of them) and `client.Auth.TokensChanged` in
+  `Aouda.Client`, on sign-in, every refresh — the automatic ones included — and sign-out. Persist the refresh token on each change:
+  the server rotates it, and an app restarted with a spent one loses its session.
+  [Keeping tokens across restarts](auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-next-train).
+
 - **Sessions are devices; sign-out signs out this device** (NativeClients S04, Derive ask AQ-5, ADR 0062). A session is one sign-in
   on one device: a refresh updates it instead of adding a row, and it carries the client's `deviceInfo` (≤ 512 UTF-8 bytes) beside
   the user agent and IP the server saw. **`signout` now ends only the calling session** — send `{ "scope": "global" }` to sign out

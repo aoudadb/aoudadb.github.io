@@ -218,6 +218,34 @@ await client.auth.revokeSession(sessions.find((s) => !s.current)!.id);
 C#: `SignInAsync(email, password, deviceInfo)`, `SignOutAsync(SignOutScope.Others)`, `ListSessionsAsync()`, `RevokeSessionAsync(id)`.
 What a session is, and what ends one: [Sessions are devices](reference.md#sessions-are-devices).
 
+### Keeping tokens across restarts (**NativeClients, next train**)
+
+Each refresh **rotates** the refresh token, and presenting a spent one again ends the whole session (it is treated as stolen). An
+app that persists only the token it got at sign-in therefore signs the user out on its first restart after a refresh. Persist the
+pair on every change — both SDKs tell you each one (sign-in, every refresh including the automatic ones, sign-out) — and seed the
+restarted client from what you stored:
+
+```typescript
+const stop = client.auth.onTokensChanged(({ accessToken, refreshToken, reason }) => {
+  if (reason === "signedOut") secureStore.delete("aouda");
+  else secureStore.set("aouda", JSON.stringify({ accessToken, refreshToken }));
+});
+
+// On the next start
+const saved = JSON.parse(secureStore.get("aouda"));
+const client = new AoudaClient({ serverUrl, database, appAuth: { token: saved.accessToken, refreshToken: saved.refreshToken } });
+```
+
+```csharp
+client.Auth.TokensChanged += (_, e) => store.Save(e.AccessToken, e.RefreshToken);   // e.Reason: SignedIn, Refreshed, SignedOut
+var restarted = new AoudaClient(new AoudaClientOptions { ServerUrl = url, DatabaseName = db,
+    AppAuth = new AppAuthOptions { Token = saved.AccessToken, RefreshToken = saved.RefreshToken } });
+```
+
+Listeners run synchronously, before the new tokens are used; any number may subscribe (`onTokensChanged` returns the
+unsubscribe). A listener that throws is ignored — store failures are the app's to handle — and a listener must not refresh.
+Where to keep them is the app's choice (Keychain, Android Keystore / SecureStore, DPAPI); never `localStorage` for a native app.
+
 ---
 
 ## 12. API Keys and Credential Types
