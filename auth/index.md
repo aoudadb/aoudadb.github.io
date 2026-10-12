@@ -140,7 +140,13 @@ If you enable auth and keep defaults:
 
 - access token lifetime defaults to 15 minutes;
 - refresh token lifetime defaults to 30 days;
-- JWT issuer defaults to `"aouda"` unless base URL/issuer override path sets a different runtime issuer context;
+- each auth database's tokens carry one issuer, and only that one is accepted: an application auth database's tokens carry its
+  URL issuer `{base}/api/databases/{db}` (`Aouda:BaseUrl`, else the request's scheme and host); the server auth database's own
+  tokens (`/api/auth/signin`, setup) carry `TokenOptions.Issuer`, `"aouda"`. (**BL-980, next train**) An application
+  database no longer accepts a token issued as `"aouda"` beside its URL issuer — such a token is `401`; sign in again;
+- an auth database is created with every table and column it needs; (**BL-980, next train**) nothing adds tables or columns to
+  an existing auth database at startup any more, nor back-fills `_users.email`'s uniqueness — **an auth database made by an
+  older build is not upgraded**. Pre-1.0 there is no migration: recreate it (or restore a backup taken by this version);
 - token validation mode defaults to `Hybrid` in server middleware;
 - password policy defaults to min length 8, max length 128;
 - user lockout threshold defaults to 10 failed attempts with 15-minute lockout;
@@ -153,7 +159,7 @@ If you enable auth and keep defaults:
 |---|---|---|---|
 | `TokenOptions.AccessTokenLifetime` | `15 minutes` | Any positive `TimeSpan` | Short-lived bearer tokens reduce exposure window |
 | `TokenOptions.RefreshTokenLifetime` | `30 days` | Any positive `TimeSpan` | Long-lived session continuity with rotation |
-| `TokenOptions.Issuer` | `"aouda"` | Any non-empty string | Default `iss` when explicit issuer context not overridden |
+| `TokenOptions.Issuer` | `"aouda"` | Any non-empty string | `iss` of the server auth database's tokens. An application auth database's tokens carry its URL issuer instead, and (**BL-980, next train**) only that is accepted for them |
 | `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | `SignatureOnly`, `Hybrid`, `Stateful` | Signature + revocation checks by default |
 | `PasswordPolicy.MinLength` | `8` | Integer ≥ 1 | Minimum user password length |
 | `PasswordPolicy.MaxLength` | `128` | Integer ≥ `MinLength` | Upper bound for password size |
@@ -406,7 +412,7 @@ Primary evidence:
 | `AuthenticationMiddlewareOptions.ValidationMode` | enum | `Hybrid` | `SignatureOnly`, `Hybrid`, `Stateful` | middleware options | Token validation strictness |
 | `TokenOptions.AccessTokenLifetime` | timespan | `15m` | positive timespan | auth engine service config | Access token expiry window |
 | `TokenOptions.RefreshTokenLifetime` | timespan | `30d` | positive timespan | auth engine service config | Refresh token validity window |
-| `TokenOptions.Issuer` | string | `"aouda"` | non-empty | auth engine service config | JWT issuer claim default |
+| `TokenOptions.Issuer` | string | `"aouda"` | non-empty | auth engine service config | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}` |
 | `PasswordPolicy.MinLength` | int | `8` | >= 1 | auth engine service config | Password policy minimum |
 | `PasswordPolicy.MaxLength` | int | `128` | >= MinLength | auth engine service config | Password policy maximum |
 | `UserService.LockoutThreshold` | int | `10` | positive | auth engine code-level options | Failed-attempt lockout trigger |

@@ -13,6 +13,15 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Auth databases and tokens from an older build are not upgraded (BL-980, LoadSpeed K41; breaking).** Pre-1.0 nothing is
+  kept compatible. An application database's access tokens must carry its URL issuer, `{base}/api/databases/{db}`; the default
+  issuer `"aouda"` is no longer accepted beside it (a token carrying it is `401` — sign in again). `"aouda"` stays the issuer
+  of the server auth database's own tokens. A refresh token whose stored `aal` is missing or not `aal1` / `aal2` is an invalid
+  token (`401`), not an `aal1` session. An RLS resolver rule with no kind denies (fail closed) instead of acting as a read rule.
+  Nothing adds tables or columns to an existing auth database at startup, or back-fills `_users.email`'s uniqueness, any more:
+  an auth database made by an older build is not upgraded — re-create it. The server JWT's `iss` was documented as
+  `{base_url}/api/auth`; it is `"aouda"`.
+  [Auth defaults](auth/index.md#23-defaults-and-zero-config-behavior), [OIDC discovery](auth/reference.md#discovery-endpoints).
 - **A materialized query's result stays in the write buffer while memory allows (BL-910).** A result is rewritten by every load
   that reaches its groups, and sealing it at the small seal size made it a run of small segments, each one more flush and more
   key-index work. While the database's write buffers hold less than half of the write buffer's ceiling (`T11`), a result's buffer

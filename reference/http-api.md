@@ -268,7 +268,7 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `{base_url}/api/auth` |
+| `iss` | `"aouda"` (`TokenOptions.Issuer`) — the server auth database's issuer. Accepted where the server auth database authenticates: the server-scoped paths (`/admin`, `/api/admin`, `/api/server`, the `/api/databases` collection) and as the server credential on a database's paths |
 | `aud` | Server auth database name (e.g. `"_serverauth"`) |
 | `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_writer"], "analytics": ["db_reader"] }`. Read directly as an object; no `JSON.parse()` needed. |
 | `is_admin` | `true` for server admins (implicit `db_admin` on all databases) |
@@ -338,7 +338,7 @@ Content-Type: application/json
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `{base_url}/api/databases/{db}` |
+| `iss` | `{base_url}/api/databases/{db}` (`Aouda:BaseUrl`, else the request's scheme and host). (**BL-980, next train**) The only issuer accepted for this database's tokens (with, for a linked auth database, that database's URL issuer); up to 0.3.x `"aouda"` was accepted beside it, and a token carrying it is now `401` |
 | `aud` | Auth database name (e.g. `"_auth"`) |
 | `aal` | Authentication assurance level: `"aal1"` (password signin by a user who has an active MFA factor, not yet verified) or `"aal2"` (MFA verified, **or a password signin by a user with no active factor** — **BL-795, 0.3.0**) |
 | `tenant_id` | Tenant ID for PLS partition scoping |

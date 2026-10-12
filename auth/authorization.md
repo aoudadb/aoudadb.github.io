@@ -620,6 +620,11 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 
 **`writeCheckRules`:** optional second rule list. Present ⇒ write-check **replaces** read. Absent ⇒ write-check = read.
 
+**A stored rule is either a read rule or a write-check rule** — the admin API records which list it came from. A rule with no
+kind, or a kind the server does not know, **denies** reads and writes (fail closed). (**BL-980, next train**) Up to 0.3.x a
+rule stored with no kind — only an auth database from before write-check rules had them — was read as a read rule; such a
+database is not upgraded any more (see [defaults](index.md#23-defaults-and-zero-config-behavior)), so re-create its resolvers.
+
 ### List Resolvers
 
 ```bash

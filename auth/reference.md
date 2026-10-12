@@ -413,12 +413,12 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_TOKEN_MISSING` | 401 | No `Authorization` header on a protected endpoint | Add `Authorization: Bearer <token>` header |
-| `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature | Discard token; force re-sign-in |
+| `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature — or (**BL-980, next train**) an application database's token whose `iss` is not the database's URL issuer (the `"aouda"` issuer is no longer accepted beside it) | Discard token; force re-sign-in |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
 | `AUTH_TOKEN_REVOKED` | 401 | Token was revoked (session signed out) | Redirect to sign-in |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
 | `AUTH_API_KEY_INVALID` | 401 | API key is invalid, revoked, or expired | Regenerate via the admin regenerate-keys endpoint |
-| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only |
+| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only. (**BL-980, next train**) Also a refresh token whose stored `aal` is missing or not `aal1` / `aal2` — only an older build left one; it is not read as an `aal1` session |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live. (**BL-944, next train**) Also a bearer JWT whose check was refused (it was `401 AUTH_TOKEN_INVALID`), a password reset refused at the hash and an MFA verify refused after its code was accepted: the reset OTP and the MFA challenge (and a backup code) stay usable — and a reset whose new password is too weak no longer spends its OTP | Retry the **same** request (the same refresh token, OTP or challenge) after `Retry-After` |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) An admin write kept conflicting with a concurrent change to the same record and was not applied | Retry the same request |
 | `UNAUTHORIZED` | 401 | Unrecognised path when server auth is configured (deny-by-default) | Ensure request targets a valid path with a valid credential |
@@ -608,6 +608,8 @@ Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any
 | JWKS (public keys) | `GET /api/databases/{db}/auth/.well-known/jwks.json` |
 
 Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database.
+
+> **Only that issuer is accepted** (**BL-980, next train**). A request on a database path validates a JWT against the database's URL issuer (and, for a database linked to a separate auth database, that auth database's URL issuer) — nothing else. Builds up to 0.3.x also accepted the default issuer `"aouda"` beside it; a token carrying it on a database path is now `401 AUTH_TOKEN_INVALID`, so a client holding one signs in again. `"aouda"` remains the issuer of the **server** auth database's tokens (`/api/auth/signin`, setup).
 
 > **Non-standard discovery path — read before using `AddJwtBearer`.**
 > The OIDC discovery document is served at `…/auth/.well-known/openid-configuration`, which is one path segment deeper than the OIDC convention of `{issuer}/.well-known/openid-configuration`. Because the `issuer` is `{base_url}/api/databases/{db}`, any library that auto-constructs the metadata URL from `Authority` alone will try the wrong path and get a 404, causing JWT validation to fail on every request.
