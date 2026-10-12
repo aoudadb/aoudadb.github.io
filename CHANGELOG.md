@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **0.4.0 does not open a data directory, backup or replica checkpoint written by 0.3.0 or earlier (catalog format 7;
+  breaking).** 0.3.0 wrote catalog format 6. This train deleted every reader of an older shape and added columns to an auth
+  database's sessions table, so a 0.3.0 directory would have been half read; it is now refused at open (and a 0.3.0 backup at
+  restore) with `CatalogFormatException`, naming the version found and the one this build reads, like every older format before
+  it. There is no migration: reload the data from its source with 0.4.0, and have users sign in again (their sessions and keys lived
+  in the old auth database).
+
 - **Links between pages work on the published site (LoadSpeed K55).** The site was built without `jekyll-relative-links`, so
   every link written as a relative `.md` file — about a thousand, on nearly every page — was published as that file name and
   answered 404 (`/guides/defaults-reference/sizing.md`); a directory-style link (`../getting-started/`) resolved one level too
