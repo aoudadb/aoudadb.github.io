@@ -111,7 +111,11 @@ const client = new AoudaClient({
   database: 'mydb',
 });
 await client.connect();
-await client.auth.signIn('user@example.com', 'secret');
+await client.auth.signIn('user@example.com', 'secret', { deviceInfo: 'Ann’s laptop — MyApp' });
+
+// Sessions are devices (NativeClients, next train): signOut() ends this one; listSessions / revokeSession manage the others
+await client.auth.signOut({ scope: 'others' });
+const devices = await client.auth.listSessions();
 
 // App auth with service key (backend service acting on behalf of users)
 const backend = new AoudaClient({

@@ -13,6 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Sessions are devices; sign-out signs out this device** (NativeClients S04, Derive ask AQ-5, ADR 0062). A session is one sign-in
+  on one device: a refresh updates it instead of adding a row, and it carries the client's `deviceInfo` (≤ 512 UTF-8 bytes) beside
+  the user agent and IP the server saw. **`signout` now ends only the calling session** — send `{ "scope": "global" }` to sign out
+  everywhere, `"others"` to keep this device. Users list and end their own sessions with `GET` / `DELETE .../auth/sessions`.
+  Ending a session refuses its access tokens at once, and a reused refresh token now ends its whole session. Both SDKs:
+  `signIn(…, { deviceInfo })`, `signOut({ scope })`, `listSessions()`, `revokeSession(id)`.
+  [Sessions are devices](auth/reference.md#sessions-are-devices).
+
 - **Disabling a user ends what they hold** (NativeClients S03, Derive ask AQ-4). Refresh answers `423 AUTH_ACCOUNT_DISABLED`; every
   live access token is refused on the next request, and an open WebSocket closes with `AUTH_TOKEN_REVOKED` within a heartbeat. An
   admin's `DELETE .../admin/sessions/{id}` ends that session's refresh family and access tokens (it deleted the row only), and

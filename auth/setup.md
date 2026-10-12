@@ -211,7 +211,10 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signout \
   -H "Authorization: Bearer <user-access-token>"
 ```
 
-Revokes the session and invalidates the refresh token.
+Ends **this** session — its refresh token and access token stop working; the user's other devices stay signed in
+(**NativeClients, next train**). To sign out everywhere, send `-d '{"scope":"global"}'` (and `-H "Content-Type: application/json"`);
+`"others"` signs every other device out and keeps this one. A user lists their devices with `GET .../auth/sessions` and ends one with
+`DELETE .../auth/sessions/{id}` — see [Sessions are devices](reference.md#sessions-are-devices).
 
 ---
 
@@ -232,7 +235,7 @@ Revokes the session and invalidates the refresh token.
 3. App sends accessToken → on every API call (Authorization: Bearer)
 4. Token expires (15 min) → App calls /refresh with refreshToken
 5. Aouda returns         → new accessToken + new refreshToken (rotation)
-6. User signs out       → App calls /signout, discards tokens
+6. User signs out       → App calls /signout (this device), discards tokens
 ```
 
 ### Refreshing the Access Token

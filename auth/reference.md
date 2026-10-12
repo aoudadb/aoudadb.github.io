@@ -115,9 +115,11 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | Endpoint | Method | Auth Required | Description |
 |----------|--------|---------------|-------------|
 | `.../auth/signup` | POST | None (public POST; 403 `AUTH_SIGNUP_DISABLED` unless `allowSelfSignup`) | Register a new user |
-| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens |
+| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens. Optional `deviceInfo`: your description of the device, at most 512 UTF-8 bytes, shown in the session list (**NativeClients, next train**) |
 | `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token |
-| `.../auth/signout` | POST | User JWT | Revoke session |
+| `.../auth/signout` | POST | User JWT | End **this** session (**NativeClients, next train**) — it ended every session of the user. Optional body `{ "scope": "local" \| "others" \| "global" }`: `others` ends every other session and keeps this one, `global` ends all. See [Sessions are devices](#sessions-are-devices) |
+| `.../auth/sessions` | GET | User JWT | The caller's sessions, one per device (**NativeClients, next train**): `{ "sessions": [{ id, deviceInfo, userAgent, ipAddress, createdAt, lastSeenAt, aal, current }] }`, most recently used first |
+| `.../auth/sessions/{id}` | DELETE | User JWT | End one of the caller's sessions — sign another device out (204) (**NativeClients, next train**). Another user's session, or an unknown id: `404 AUTH_SESSION_NOT_FOUND` |
 | `.../auth/me` | GET | User JWT | Get current user profile |
 | `.../auth/me` | PATCH | User JWT | Update user metadata |
 | `.../auth/password` | PUT | User JWT | Change password |
@@ -125,9 +127,26 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success |
 | `.../auth/mfa/enroll` | POST | User JWT | Enrol a TOTP or phone MFA factor. Phone enrol is idempotent per-user: a second call returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists (same or different number). To replace a number: `DELETE .../auth/mfa/factors/{id}` then enrol again |
 | `.../auth/mfa/challenge` | POST | User JWT | Create a challenge for an enrolled factor; sends SMS for phone factors |
-| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success |
+| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success. The `aal2` session **replaces** the one verified from (**NativeClients, next train**): the same device, its `deviceInfo` kept unless the request gives `deviceInfo` |
 | `.../auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
 | `.../auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
+
+#### Sessions are devices
+
+(**NativeClients, next train**) A **session** is one sign-in on one device: its refresh tokens are one family, and every access token
+minted in it carries the session's id as the `sid` claim. A refresh updates the session — last seen, IP, user agent — and does not
+create a new one, so `GET .../auth/sessions` lists one entry per device. `deviceInfo` is whatever the client sent at sign-in (stored as
+given, never trusted; over 512 UTF-8 bytes is `400 AUTH_DEVICE_INFO_TOO_LONG`); `userAgent` and `ipAddress` are what the server saw.
+
+**Ending a session** revokes its refresh tokens and refuses its access tokens at once (Hybrid and Stateful validation alike). A
+session ends when it signs out, when the user ends it from another device (`DELETE .../auth/sessions/{id}`) or signs out with
+`others` / `global`, when an administrator ends it, and when its refresh token is **reused** — a spent refresh token presented again is
+treated as stolen, and the whole session ends, its current access token included — so a client must keep the refresh token each
+refresh returns, not the one it first stored. A password change or reset, an MFA reset, disabling and deleting the user end every
+session.
+
+> **Signing out is per device now.** A client that called `signout` to sign the user out *everywhere* must send
+> `{ "scope": "global" }`.
 
 > **MFA endpoints require a user JWT** — the access token returned from sign-in. Send `Authorization: Bearer <accessToken>` directly; no API key is required or expected. If you are building a BFF that proxies MFA requests, forward the user JWT unchanged in `Authorization` — do not replace it with your service key. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints).
 
@@ -185,7 +204,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}` | DELETE | Delete user by id (204; 404 if missing). Cascades that user's roles, claims, grants, credentials, sessions, tokens, MFA, and API keys. Leaves `_audit_log`.|
 | `.../admin/users/{id}/disable` | POST | Disable user. Ends every session at once (**NativeClients, next train**): each live access token is revoked (refused on the next request in Hybrid and Stateful modes, an open WebSocket closed within a heartbeat with `AUTH_TOKEN_REVOKED`), every refresh token is revoked, and a refresh answers `423 AUTH_ACCOUNT_DISABLED`. Sign-in answers `AUTH_INVALID_CREDENTIALS`. Enable lets the user sign in again; it brings no session back |
 | `.../admin/users/{id}/enable` | POST | Enable user |
-| `.../admin/sessions` | GET | List sessions (`?userId=`, `limit`, `offset`) |
+| `.../admin/sessions` | GET | List sessions (`?userId=`, `limit`, `offset`) — one per device, with `userAgent`, `lastSeenAt` and `aal` (**NativeClients, next train**) |
 | `.../admin/sessions/{id}` | DELETE | End one session: its refresh family is revoked and every access token it issued is revoked (**NativeClients, next train** — it deleted the row only, and the session kept refreshing). The user's other sessions are untouched |
 | `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
@@ -422,10 +441,11 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
 | `AUTH_API_KEY_INVALID` | 401 | API key is invalid, revoked, or expired | Regenerate via the admin regenerate-keys endpoint |
 | `AUTH_ACCOUNT_DISABLED` | 423 | (**NativeClients, next train**) A refresh for an account an administrator disabled. Nothing the account held refreshes | Sign out locally; tell the user the account is disabled |
-| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only |
+| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received. A reuse ends the whole session (**NativeClients, next train**): its access tokens are refused too (`AUTH_TOKEN_REVOKED`) | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live | Retry the **same** request (the same refresh token) after `Retry-After` |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) An admin write kept conflicting with a concurrent change to the same record and was not applied | Retry the same request |
 | `UNAUTHORIZED` | 401 | Unrecognised path when server auth is configured (deny-by-default) | Ensure request targets a valid path with a valid credential |
+| `AUTH_SESSION_NOT_FOUND` | 404 | (**NativeClients, next train**) `DELETE .../auth/sessions/{id}` named a session that is not the caller's, or none | Refresh the session list |
 
 ### Signup / Signin Errors
 
@@ -435,6 +455,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts (default: 10) | Wait for the lockout window (default: 15 min) or re-enable via admin |
 | `AUTH_ACCOUNT_DISABLED` | 423 | Not returned by sign-in: a disabled account's sign-in answers `AUTH_INVALID_CREDENTIALS`, as an unknown one does. Returned by **refresh** (above) | Re-enable via `POST .../admin/users/{id}/enable` |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email already registered | Show "Account exists" |
+| `AUTH_DEVICE_INFO_TOO_LONG` | 400 | (**NativeClients, next train**) `deviceInfo` (sign-in, sign-up, MFA verify) is over 512 UTF-8 bytes. Nothing was minted | Send a shorter description |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic; prevents info leakage) | Check server logs; try again |
 | `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is off for this database | Enable via `PUT …/admin/signup-settings` |
 | `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format | Prompt the user to correct the email field |
@@ -625,6 +646,8 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 | `exp` | expiry timestamp |
 | `db_roles` | Native JSON object — role map keyed by scope (see below) |
 | `aal` | Authentication Assurance Level: `"aal1"` (password-only signin) or `"aal2"` (MFA-verified). Present on all tokens minted by Aouda AppAuth. |
+| `sid` | (**NativeClients, next train**) The session (device) the token belongs to — the `id` in `GET .../auth/sessions` |
+| `jti` | (**NativeClients, next train**) A unique id per token |
 
 ### 24.1 — The `aal` Claim: Enforcing MFA Gates
 

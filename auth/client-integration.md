@@ -195,8 +195,8 @@ const orders = await aouda.table("orders")
 // Sign up
 const result = await client.auth.signUp("newuser@example.com", "Password123!");
 
-// Sign in
-const session = await client.auth.signIn("alice@example.com", "SecurePass123!");
+// Sign in — deviceInfo names this device in the user's session list (NativeClients, next train)
+const session = await client.auth.signIn("alice@example.com", "SecurePass123!", { deviceInfo: "Alice's iPhone — MyApp 2.1" });
 
 // Profile
 const me = await client.auth.me();
@@ -204,9 +204,19 @@ const me = await client.auth.me();
 // Change password
 await client.auth.changePassword("OldPass123!", "NewPass456!");
 
-// Sign out
+// Sign out — this device only (NativeClients, next train; before, every session of the user)
 await client.auth.signOut();
+// … or every other device (this one stays signed in), or everywhere
+await client.auth.signOut({ scope: "others" });
+await client.auth.signOut({ scope: "global" });
+
+// The user's devices, and signing one of them out
+const sessions = await client.auth.listSessions();   // [{ id, deviceInfo, userAgent, ipAddress, createdAt, lastSeenAt, aal, current }]
+await client.auth.revokeSession(sessions.find((s) => !s.current)!.id);
 ```
+
+C#: `SignInAsync(email, password, deviceInfo)`, `SignOutAsync(SignOutScope.Others)`, `ListSessionsAsync()`, `RevokeSessionAsync(id)`.
+What a session is, and what ends one: [Sessions are devices](reference.md#sessions-are-devices).
 
 ---
 

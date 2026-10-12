@@ -230,7 +230,9 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/setup` | POST | No (setup mode, localhost only) | Bootstrap first admin |
 | `/api/auth/signin` | POST | No | Sign in → JWT + refresh token |
 | `/api/auth/refresh` | POST | No | Exchange refresh token → new JWT |
-| `/api/auth/signout` | POST | Bearer JWT | Revoke session |
+| `/api/auth/signout` | POST | Bearer JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, next train**) |
+| `/api/auth/sessions` | GET | Bearer JWT | The caller's sessions, one per device (**NativeClients, next train**) |
+| `/api/auth/sessions/{id}` | DELETE | Bearer JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, next train**) |
 | `/api/auth/me` | GET | Bearer JWT | Current user profile |
 | `/api/auth/me` | PATCH | Bearer JWT | Update profile metadata |
 | `/api/auth/password` | PUT | Bearer JWT | Change password |
@@ -287,7 +289,9 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/signup` | POST | API key (Layer 1) | Register new user |
 | `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token |
 | `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT |
-| `/api/databases/{db}/auth/signout` | POST | API key + user JWT | Revoke session |
+| `/api/databases/{db}/auth/signout` | POST | API key + user JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/sessions` | GET | user JWT | The caller's sessions, one per device (**NativeClients, next train**) |
+| `/api/databases/{db}/auth/sessions/{id}` | DELETE | user JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, next train**) |
 | `/api/databases/{db}/auth/me` | GET | API key + user JWT | Current user profile |
 | `/api/databases/{db}/auth/me` | PATCH | API key + user JWT | Update profile metadata |
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
