@@ -422,7 +422,7 @@ Common mistake: assuming schema commands can run without server/database context
 |---|---|---|---|---|---|
 | Install embedded package | NuGet (`Aouda.Embedded`) + `AoudaEmbedded` | N/A | N/A | Implemented | In-process only |
 | Install remote .NET client | NuGet (`Aouda.Client`) + `AoudaClient` | N/A | N/A | Implemented | Depends on server URL availability |
-| Install TS client package | N/A | npm `@aouda/client` + `createAoudaClient` | N/A | Implemented | Node 20+ |
+| Install TS client package | N/A | npm `@aouda/client` + `createAoudaClient` | N/A | Implemented | Node 22+, browsers, React Native (**NativeClients, next train**; 0.3.0: Node 20+) |
 | Start local server | `aouda` tool command path from .NET ecosystem | via process execution | Server HTTP endpoints | Implemented | `aouda start` |
 | In-process test server package | `Aouda.Testing` (`AoudaTestServer`) | N/A | Test-hosted HTTP | Implemented | MIT tool package |
 | Unified auto client mode selection | No stable public API in current snapshot | N/A | N/A | Missing | Reports mention prior work, symbols absent now |

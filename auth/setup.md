@@ -254,7 +254,9 @@ await app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceI
 
 **Phone app — private-use scheme or claimed link** (RFC 8252 §7.1 / §7.2). Register `com.example.myapp:/oauth` (a reverse-DNS
 scheme the app owns) or an `https://` link the OS routes to the app (Universal Links / App Links). The flow is the same; the browser
-lands on the app instead of a loopback port. A claimed `https` link is the stronger choice: another app cannot register it.
+lands on the app instead of a loopback port. A claimed `https` link is the stronger choice: another app cannot register it. On
+React Native, import `react-native-get-random-values` before `@aouda/client` so `createPkcePair()` has a random source
+([React Native](../clients/typescript.md#react-native-nativeclients-next-train)).
 
 C#: `Pkce.CreatePair()`, `client.Auth.CreateAuthorizationCodeAsync(...)`, `client.Auth.ExchangeCodeAsync(...)`.
 

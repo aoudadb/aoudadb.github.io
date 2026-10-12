@@ -56,6 +56,41 @@ _Repo: `aouda-client-ts`_
 npm install @aouda/client
 ```
 
+Runs in browsers, on React Native (below) and on Node 22+ (**NativeClients, next train**: Node 22 is the floor, because the client
+uses the platform's `WebSocket` and no longer ships the `ws` package; on an older Node, pass `streaming.wsFactory`).
+
+### React Native (**NativeClients, next train**)
+
+`@aouda/client` runs on React Native with Hermes — no Node built-in is reachable from it, and it assumes nothing Hermes lacks
+(`TextDecoder`, `crypto.subtle`, `AbortSignal.timeout`). Install it as on the web; Metro bundles it as it is. One thing the app
+supplies:
+
+- **`crypto.getRandomValues`, for `createPkcePair()`** (native sign-in): install
+  [`react-native-get-random-values`](https://github.com/LinusU/react-native-get-random-values) (or use `expo-crypto`) and import it
+  once, before `@aouda/client`. Without it the pair is refused with an error that says so — the verifier is never made from
+  `Math.random`. The S256 hash needs nothing: where `crypto.subtle` is missing, the client hashes in JavaScript.
+
+```typescript
+import "react-native-get-random-values";
+import { AoudaClient } from "@aouda/client";
+
+const client = new AoudaClient({
+  serverUrl: "https://db.example.com",
+  database: "myapp",
+  // Optional on React Native, which has both globally — pass your own to pin certificates or to test:
+  fetch: pinnedFetch,
+  streaming: { wsFactory: (url) => new WebSocket(url) },
+});
+client.auth.onTokensChanged((t) => SecureStore.setItemAsync("aouda", JSON.stringify(t)));   // keep the rotated refresh token
+```
+
+`fetch` (every HTTP call: data, auth, the long-poll fallback) and `streaming.wsFactory` (the streaming socket) work on every
+platform; both default to the platform's own.
+
+What does not work on React Native, because its `fetch` has no streaming response body: `client.admin.node` log tailing. Iterating a
+subscription with `for await` needs `Symbol.asyncIterator`, which Hermes may not define — use the `onSnapshot` / `onChange`
+callbacks there. CI runs a smoke on Hermes (sign in, a named query, a subscription, a refresh, PKCE) against every change.
+
 ### Basic Connection
 
 ```typescript
@@ -140,7 +175,8 @@ reason }) => …)` is called on sign-in, on every refresh (automatic ones too) a
 and seed a restarted client with `appAuth: { token, refreshToken }` — the server rotates the refresh token on every refresh, and a
 spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-next-train).
 
-**Native sign-in through the browser** (**NativeClients, next train**): `createPkcePair()` (needs Web Crypto), then
+**Native sign-in through the browser** (**NativeClients, next train**): `createPkcePair()` (needs `crypto.getRandomValues` — on
+React Native, `react-native-get-random-values`; see [React Native](#react-native-nativeclients-next-train)), then
 `web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state })` in the signed-in web front and
 `app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
 session's `aal`. Recipes: [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
