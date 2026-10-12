@@ -127,7 +127,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
     "columns": [
       { "name": "id", "type": "Int64", "isPrimaryKey": true },
       { "name": "tenant_id", "type": "String", "isPartitionKey": true },
-      { "name": "amount", "type": "Decimal" },
+      { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 },
       { "name": "status", "type": "String" }
     ],
     "security": {
@@ -373,7 +373,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
       { "name": "company_id", "type": "String", "isPartitionKey": true },
       { "name": "owner_id", "type": "String" },
       { "name": "team_id", "type": "String" },
-      { "name": "amount", "type": "Decimal" }
+      { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 }
     ],
     "security": {
       "partitionLevelSecurity": true,
@@ -457,7 +457,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
       { "name": "portfolio_group_id", "type": "String", "isPartitionKey": true },
       { "name": "owner_id", "type": "String" },
       { "name": "instrument", "type": "String" },
-      { "name": "value", "type": "Decimal" }
+      { "name": "value", "type": "Decimal", "precision": 18, "scale": 2 }
     ],
     "security": {
       "partitionLevelSecurity": true,
@@ -914,8 +914,8 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
       { "name": "id", "type": "Int64", "isPrimaryKey": true },
       { "name": "quote_source", "type": "String", "isPartitionKey": true },
       { "name": "instrument_id", "type": "String" },
-      { "name": "bid", "type": "Decimal" },
-      { "name": "ask", "type": "Decimal" },
+      { "name": "bid", "type": "Decimal", "precision": 18, "scale": 6 },
+      { "name": "ask", "type": "Decimal", "precision": 18, "scale": 6 },
       { "name": "timestamp", "type": "Timestamp" }
     ],
     "security": {

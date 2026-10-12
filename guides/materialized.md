@@ -826,6 +826,15 @@ An aggregate materialized query may declare `computed` columns — physical, alw
 
 A named query over `barsWithChange` can then `orderBy: [{ "column": "changePct", "descending": true }]` with `limit: 20`. That is a catalog column, not a read-path expression. For sorts on a **base** table, use a stored `derived` column instead.
 
+**Decimals in an aggregate result** (**LoadSpeed S13, next train**). A computed output's `type` has no `precision` /
+`scale` beside it, so a decimal is spelled with them: `"type": "Decimal(18,6)"`. Plain `"Decimal"` is refused, as it is
+for a column. The expression is computed exactly and then rounded half away from zero to that scale: `+` / `-` at the
+larger scale, `*` at the sum of the scales, `/` at max(6, either scale) — an integer `SUM / COUNT` is at 6 places — and a
+result past 18 digits is an error, never a `Double` (see [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)).
+The aggregates themselves: `sum` of a `Decimal(p,s)` column is an exact `Decimal(18,s)`, and a sum of 18 digits or more is
+refused as an overflow (*A Decimal sum does not fit Decimal(18,s).*), the same as in a query; `min`, `max`, `first` and
+`last` are exact at the column's scale; `avg` is a `Double`.
+
 ### .NET example (wait for bulk-load materialization — P31 / P46)
 
 ```csharp

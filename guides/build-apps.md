@@ -246,7 +246,7 @@ Steps 1–4 are load-bearing: everything after them assumes the schema file exis
         "customerId": { "type": "Int64",  "references": "Customer.id" },
         "reference":  { "type": "String", "unique": true },
         "status":     { "type": "String" },
-        "total":      { "type": "Decimal" },
+        "total":      { "type": "Decimal", "precision": 18, "scale": 2 },
         "createdAt":  { "type": "Timestamp" }
       },
       "partitionKey":   [{ "column": "tenantId" }],

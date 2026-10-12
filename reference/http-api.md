@@ -1116,9 +1116,11 @@ can make more groups than that sets `limit` (up to 10,000) and pages with `offse
 last) unless `orderBy` says otherwise.
 
 **Types:** `count` / `countDistinct` are `Int64`. `sum` is an exact `Int64` over integers (overflow is an error, not a wrapped
-value), the column's own `Decimal(p,s)` over one, and a `Double` over floating point. `min` / `max` keep the column's type.
-`avg` is a `Double`; a `Decimal(p,s)` mean is divided in decimal first. Over no row, `count` is `0` and every other aggregate is
-`null`. A grouped query over no row answers no row.
+value), an exact `Decimal(18,s)` over a `Decimal(p,s)` column, and a `Double` over floating point. `min` / `max` keep the
+column's type (exact at its scale). `avg` is a `Double` (**LoadSpeed S13, next train**: for a `Decimal(p,s)`, the exact sum
+÷ 10^s ÷ count; it was divided in decimal first). (**LoadSpeed S13, next train**) A decimal `sum` of 18 digits or more is
+refused as an overflow — *A Decimal sum does not fit Decimal(18,s).* — the same as in a materialized query. Over no row,
+`count` is `0` and every other aggregate is `null`. A grouped query over no row answers no row.
 
 **Refused (`400 INVALID_REQUEST`):**
 
@@ -1230,13 +1232,13 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 | `Guid` | `String` (4) | The `D` form (`0f8fad5b-d9cb-469f-a165-70867728950e`) |
 | `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
 | `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
-| `Decimal` declared `Decimal(p,s)` | `ScaledDecimal` (8); `Decimal` (6) when the column is empty or every value is null | The unscaled value at scale `s` |
-| `Decimal` (undeclared) | `ScaledDecimal` (8) if every value has one scale and fits, else `Decimal` (6) | |
+| `Decimal` (`Decimal(p,s)`) | `ScaledDecimal` (8) | The unscaled value at the column's declared scale `s` |
 | A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
 
-A decimal column's kind is chosen **from the values it holds**, not from its declaration: a reader takes the scale from
-the frame and accepts either kind for any `Decimal` column (**architecture review, 0.3.0** — the table above implied
-a `Decimal(p,s)` column was always `ScaledDecimal`).
+(**LoadSpeed S13, next train**) A decimal column always goes out as `ScaledDecimal` at its declared scale; the 128-bit
+`Decimal` kind (6) is retired and never sent. (A computed decimal column — a `selectExpr` — goes at its largest value's
+scale; one whose values no 64-bit integer holds at one scale goes as JSON.) Up to 0.3.x a decimal column's kind was chosen from the values it held, and
+an empty or all-null `Decimal(p,s)` column, or an undeclared `Decimal`, could come as kind 6.
 
 `X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`.
 `GET /admin/capabilities` lists `queryColumnBatch: true`.
@@ -2131,9 +2133,11 @@ Create a new table.
 }
 ```
 
-A `Decimal` column may carry `"precision"` and `"scale"` — both or neither, `1 ≤ precision ≤ 18`,
-`0 ≤ scale ≤ precision` — to declare `Decimal(p,s)` (**ColumnarCore S13, 0.2.0**; see [Data types](#data-types)).
-A `Decimal(p,s)` partition key is refused.
+A `Decimal` column carries `"precision"` and `"scale"` — `1 ≤ precision ≤ 18`, `0 ≤ scale ≤ precision` — to declare
+`Decimal(p,s)` (**ColumnarCore S13, 0.2.0**; see [Data types](#data-types)). (**LoadSpeed S13, next train; breaking**)
+Both are required: `"type": "Decimal"` without them is `400` — *A Decimal column declares its precision and scale
+(Decimal(p,s), 1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* — and a precision above 18 is `400`
+*Decimal precision above 18 is not supported (got N).* A `Decimal(p,s)` partition key is refused.
 
 **Response:** `201 Created` with table detail
 
@@ -2217,7 +2221,8 @@ Add a column to a table.
 ```
 
 `"precision"` / `"scale"` beside `"type": "Decimal"` add a `Decimal(p,s)` column, as on create (**ColumnarCore S13,
-0.2.0**). A column cannot be changed to or from `Decimal(p,s)`, or to another precision or scale: add a new column and copy.
+0.2.0**); (**LoadSpeed S13, next train**) they are required, and a `Decimal` without them is refused `400` as on create. A
+column cannot be changed to or from `Decimal(p,s)`, or to another precision or scale: add a new column and copy.
 
 **Response:** `201 Created` with column detail
 
@@ -2335,7 +2340,9 @@ The same endpoint also accepts **one column-batch frame** — `Content-Type: app
 binary layout bulk-load [`:append`](#post-jobidappend) takes. The rows
 insert exactly as the same rows sent as JSON would: the same values, defaults, generated ids, errors and messages. A
 frame carries values, not JSON text, so where the text matters the server reads the frame's rows as JSON: a number sent
-into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50`), whatever the server's culture. A client
+into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50`), whatever the server's culture.
+(**LoadSpeed S13, next train**) A frame's decimal column has one scale, its largest, so such a number is stored at that
+scale: `3` sent beside `2.50` is stored as `3.00`. A client
 that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
 cannot say which text it had.
 
@@ -2377,7 +2384,7 @@ like every other error of this endpoint, and an empty body is `400 MISSING_DATAB
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), or a string cell that is not valid UTF-8 (**BL-716, 0.2.0**) |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, next train**; see [the frame](#post-jobidappend)) |
 | — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch` |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
@@ -2739,11 +2746,14 @@ A `colRef` names its column exactly as the table does — case-sensitively, as `
 {
   "columns": ["id", "name", "price", "discountedPrice"],
   "types":   ["Int64", "String", "Decimal", "Decimal"],
-  "data":    [[1], ["Widget"], [99.0], [89.1]],
+  "data":    [[1], ["Widget"], [99.00], [89.100]],
   "rowCount": 1,
   "stats": { "executionMs": 4 }
 }
 ```
+
+With `price` a `Decimal(18,2)` column, `price * 0.9` is exact at scale 3, the sum of the two scales (**LoadSpeed S13, next
+train**: a fractional JSON literal is a decimal at the scale it is written with, and a decimal expression is exact).
 
 Computed column types are inferred where the expression permits (`"Unknown"` otherwise) and are always nullable. See [browser-tier read limits](../guides/browser-tier-read-limits.md#selectexpr-result-types).
 
@@ -3660,8 +3670,8 @@ Get cluster topology.
 | `UInt64` | 64-bit unsigned integer |
 | `Float32` | 32-bit floating point |
 | `Double` | 64-bit floating point |
-| `Decimal` | 128-bit decimal (`System.Decimal`, any scale per value) |
-| `Decimal` with `precision` / `scale` | `Decimal(p,s)`, p ≤ 18: a 64-bit integer scaled by 10^s (**ColumnarCore S13, 0.2.0**). Declared with `"precision"` and `"scale"` beside `"type": "Decimal"` in create-table / add-column bodies and schema documents; reported with the same two fields in column details. Values are written and read as decimal numbers with exactly `s` places; more places or more than `p − s` integer digits is a `400`; `avg` returns a `Double`. See the [schema guide](../guides/schema.md) |
+| `Decimal` with `precision` / `scale` | `Decimal(p,s)`, 1 ≤ p ≤ 18, 0 ≤ s ≤ p: a 64-bit integer scaled by 10^s (**ColumnarCore S13, 0.2.0**). Declared with `"precision"` and `"scale"` beside `"type": "Decimal"` in create-table / add-column bodies and schema documents; reported with the same two fields in column details. Where a type is a name alone (a computed output's `type`, `cast`'s target) it is spelled `"Decimal(18,6)"`. Values are written and read as decimal numbers with exactly `s` places; more places or more than `p − s` integer digits is a `400`; `sum` is an exact `Decimal(18,s)`; `avg` returns a `Double`. See the [schema guide](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020) |
+| ~~`Decimal`~~ (undeclared) | (**LoadSpeed S13, next train; breaking**) Retired: the 128-bit `System.Decimal` of any scale. `"type": "Decimal"` without `precision` and `scale` is refused `400`, plain `"Decimal"` as a type name is refused, and a data directory holding a column of it (type 13) is refused at open, naming the column — export it with the build that wrote it |
 | `String` | UTF-8 string |
 | `Timestamp` | UTC instant (see note below) |
 | `Date` | Date only |
@@ -4447,11 +4457,10 @@ frame   := "ACB1" rowCount:u32 columnCount:u16 column*
 column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
 flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
 bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
-kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 6 Decimal · 8 ScaledDecimal
+kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 8 ScaledDecimal   (6: retired, refused)
 values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
          | Double          : rowCount × f64
          | Bool            : bitmap
-         | Decimal         : rowCount × 4 × i32 (the .NET decimal layout)
          | ScaledDecimal   : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
 ```
@@ -4467,8 +4476,13 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   `maxRowsPerAppend` applies across all the frames of one `:append`, as it does to NDJSON lines.
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
   earlier, well-formed frames in the same body are kept and counted, as NDJSON lines before a bad line are.
+- (**LoadSpeed S13, next train; breaking**) **Kind 6, the 128-bit `Decimal`, is retired.** It was
+  `rowCount × 4 × i32` in the .NET decimal layout. A frame that carries it — on `:append` or on
+  `POST …/tables/{name}/rows` — is refused `400`: `Column '<name>': kind 6, the 128-bit Decimal, is retired
+  (LoadSpeed S13); send a decimal as ScaledDecimal (kind 8).` Send decimals as `ScaledDecimal`: 64-bit
+  unscaled integers and one scale per column.
 
-**A frame loads the same values as the NDJSON body of the same rows.** Decimals travel as the 16-byte `Decimal` kind or, since **ColumnarCore S13 (0.2.0)**, as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores. The TypeScript SDK sends a decimal column that fits 64 bits at its largest scale that way, and the server reads each value as its JSON text says (`101`, not `101.00`) into any column type. The C# SDK sends a .NET `decimal` as the 16-byte kind (a `decimal` keeps its trailing zeros, which an undeclared `Decimal` column stores); a caller building a `ColumnBatch` can add a scaled column directly. The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
+**A frame loads the same values as the NDJSON body of the same rows.** Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, next train**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a .NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's NDJSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as NDJSON. A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
 
 **NDJSON is still fully supported**, for curl and for any client without the frame. From the same train
 the server decodes it straight into column batches, so it is faster too. A column whose lines mix
@@ -4657,4 +4671,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.8 | 2026-09-30 (0.2.0) | **ColumnarCore S06 / S13, BL-716 (additive on the wire):** `POST …/tables/{name}/rows` also accepts one column-batch frame (`Content-Type: application/vnd.aouda.column-batch`; database and table from the URL, `identityInsert` / `writeConcern` as query parameters), advertised by `Accept-Post: application/json, application/vnd.aouda.column-batch` on the endpoint's responses and by `features.insertColumnBatch` in `GET /admin/capabilities`; an older server answers a frame with `415`. Column-batch frames gain the `ScaledDecimal` kind (`8`). `Decimal` columns may declare `precision` / `scale` (`Decimal(p,s)`, `1 ≤ p ≤ 18`, `0 ≤ s ≤ p`) on create-table, add-column and column details. Insert errors: a body that is not valid JSON is `400 INVALID_REQUEST` (was MVC's validation problem), an empty body is `400 MISSING_DATABASE`; a string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is a `400`. |
 | 2.9 | 0.3.0 (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is answered with that security applied on the joined side, not refused (BL-818; it was `403 AUTHORIZATION_DENIED` until ColumnarRead2 S05), with `joins[i].where` to filter the joined table; `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |
 | 2.10 | 0.3.0 (WorkloadCore) | **WorkloadCore S09:** materialized-query maintenance is off the commit — an insert's `200` and an `"auto"` load's `:commit` no longer wait for their queries to be written. Bulk-load `:commit` gains `mqWaitMs` (a bounded wait for the load's queries, default 30000) and answers `mqStatus`, `mqFrontierToken` and `mqWaitedMs`; `mqRebuildStatus` is never `"completed"` from the commit itself; a single-node load's `token` is the WAL head at its commit. **WorkloadCore S10:** every load but a `"skip"` one is a pending job brought in by the table's pass (`"auto"` starts it at the commit); the ingest-fed path is gone; a query owing a load reports `isStale: true`, `pendingDeferredJobs` ≥ 1 and `current: false` with a new `staleReason` wording, and is not selected by `staleOnly`; a rebuild refused memory waits for room instead of being retried on timers. No field added or removed. **WorkloadCore S17:** `GET /api/server/memory` loses `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the `headroom` block (the resource mode is deleted); a memory refusal's `Retry-After` is the queue's estimate, or 10 s, never a constant 1 s. **Release blockers:** every endpoint answers a capacity refusal `503` + `Retry-After` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) and a write conflict `409 WRITE_CONFLICT` — some answered `400`, `409` or `500` before (BL-921, BL-881); the result ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (it was `503`); a token refresh refused for capacity is `503` and keeps its token, and of two concurrent refreshes with one token exactly one succeeds (BL-841); a materialized-query create whose first build is refused for capacity answers `204` with the query behind (BL-884); bulk-load `:append` is refused `503` before it decodes when memory is short (BL-831). No field added or removed. |
-| 2.11 | next train (LoadSpeed) | **LoadSpeed M.2:** bulk-load `:commit`'s `mqWaitMs` defaults to `0` (it was `30000`) — a commit with queries answers `mqStatus: "behind"` at once unless the request asks to wait. No field added or removed. **LoadSpeed K31 (breaking):** `postLoadMqBehavior: "deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` (use `"auto"`); `mqStatus` and `mqRebuildStatus` lose `"deferred"`. **LoadSpeed K5 (BL-980, BL-944; breaking):** `GET /api/tables` drops `rowCountIsExact` (`rowCount` is always exact) and always carries `createdAt` / `lastModifiedAt`; an aggregate materialized query whose `groupByColumns` are plain strings is `400`; an application database accepts only its URL issuer on access tokens; a point-in-time restore of a backup without a WAL-root incarnation fails at staging. Refusals: a refusal no other code names is `503 SERVICE_UNAVAILABLE` + `Retry-After`, `SERVER_STARTING` carries `Retry-After: 5`, a refused notification-provider `DELETE` is `503`, and a wrapped refusal on `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE`), not `400 INVALID_REQUEST`. |
+| 2.11 | next train (LoadSpeed) | **LoadSpeed M.2:** bulk-load `:commit`'s `mqWaitMs` defaults to `0` (it was `30000`) — a commit with queries answers `mqStatus: "behind"` at once unless the request asks to wait. No field added or removed. **LoadSpeed K31 (breaking):** `postLoadMqBehavior: "deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` (use `"auto"`); `mqStatus` and `mqRebuildStatus` lose `"deferred"`. **LoadSpeed K5 (BL-980, BL-944; breaking):** `GET /api/tables` drops `rowCountIsExact` (`rowCount` is always exact) and always carries `createdAt` / `lastModifiedAt`; an aggregate materialized query whose `groupByColumns` are plain strings is `400`; an application database accepts only its URL issuer on access tokens; a point-in-time restore of a backup without a WAL-root incarnation fails at staging. Refusals: a refusal no other code names is `503 SERVICE_UNAVAILABLE` + `Retry-After`, `SERVER_STARTING` carries `Retry-After: 5`, a refused notification-provider `DELETE` is `503`, and a wrapped refusal on `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE`), not `400 INVALID_REQUEST`. **LoadSpeed S13 (breaking):** `Decimal(p,s)` is the only decimal type — `"type": "Decimal"` without `precision` / `scale` is `400`, as is a precision above 18; a computed output's `type` and `cast`'s target spell it `"Decimal(p,s)"`; the column-batch frame's 128-bit `Decimal` kind (6) is deleted and refused `400`, and query results send a decimal column as `ScaledDecimal` at its declared scale; a decimal `sum` past 18 digits is refused in a query as in a materialized query. |

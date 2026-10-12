@@ -428,9 +428,11 @@ A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a 
 refuses it, whichever body the client would have sent. A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
 fraction as a decimal, digit for digit (**BL-704, 0.2.0**) — so the inserted rows are the same either way. A
 decimal column whose every value in the batch fits 64 bits at the column's largest scale goes as the frame's
-`ScaledDecimal` kind — what a server `Decimal(p,s)` column stores — and otherwise as the 16-byte `Decimal` kind; the
-server reads each value as its JSON text says (`101`, not `101.00`) (**ColumnarCore S13, 0.2.0**; a server
-from an earlier train refuses that kind with a `400`, so pair this client with a server of the same train). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
+`ScaledDecimal` kind — what a server `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**; a server
+from an earlier train refuses that kind with a `400`, so pair this client with a server of the same train). (**LoadSpeed
+S13, next train**) It is the only decimal kind the client writes: a batch whose decimals do not fit that way goes as JSON,
+where it was sent as the 16-byte `Decimal` kind, which the server now refuses. A frame carries one scale per decimal
+column, so a number sent into a `String` column is stored at the column's largest scale (`3` beside `2.50` is `3.00`). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
 #### Identity-insert (explicit autoIncrement IDs)
 
@@ -505,7 +507,7 @@ await client.tables.createTable({
 // Add a column
 await client.tables.addColumn('users', { database: 'mydb', name: 'phone', type: 'String' });
 
-// Add a Decimal(p,s) column — precision and scale, both or neither (server 0.2.0, @aouda/client 0.2.0)
+// Add a Decimal(p,s) column — precision and scale, both required from the next train (server 0.2.0, @aouda/client 0.2.0)
 await client.tables.addColumn('users', { database: 'mydb', name: 'balance', type: 'Decimal', precision: 18, scale: 2 });
 
 // Rename a column
@@ -1042,7 +1044,9 @@ A query (`execute()`, `toColumnar()`, `namedQueries.execute()`) asks for the bin
 (`Accept: application/vnd.aouda.column-batch, application/json;q=0.5`) and reads whatever the server sends by its
 `Content-Type`. An older server, or a result a frame cannot carry, answers JSON as before. The values are the same either
 way: integers, `Date` (days since 1970-01-01), decimals and `UInt64` as numbers, `Guid` as a string, and a `Timestamp`
-row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks.
+row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks. (**LoadSpeed S13, next train**) A
+decimal column arrives as `ScaledDecimal` at the column's scale and is read as a number as before; a frame carrying the
+retired 128-bit `Decimal` kind (6) throws.
 
 From frames, the columns are held as typed arrays (`result.typedColumns`) and `result.rows` are **views** over them
 rather than one object per row. Property access, `Object.keys`, spread, `JSON.stringify`, assignment and `delete` behave

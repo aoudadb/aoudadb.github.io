@@ -95,7 +95,11 @@ While `@aouda/client` is `0.x`:
   v1 / v2 / v3 handshake unanswered, so every node runs the same build; an application database accepts only access tokens
   carrying its URL issuer (`{base}/api/databases/{db}`) — a token issued as `"aouda"` is `401`, while `"aouda"` remains
   the issuer of the server auth database's own tokens; `GET /api/tables` drops `rowCountIsExact`;
-  and `Aouda.Client` treats a `415` on an insert frame as an error rather than re-sending JSON.
+  `Aouda.Client` treats a `415` on an insert frame as an error rather than re-sending JSON; and `Decimal(p,s)` is the only
+  decimal type (LoadSpeed S13) — a data directory with an undeclared `Decimal` column is refused at open, a `Decimal`
+  column or C# `decimal` property that does not declare its precision and scale is refused, and the column-batch frame's 128-bit
+  `Decimal` kind (6) is refused, so an older `Aouda.Client` or `@aouda/client` that sends it gets a `400` on that insert
+  (see [`Decimal(p,s)`](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)).
 
 ---
 

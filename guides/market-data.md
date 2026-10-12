@@ -59,8 +59,8 @@ All tables, materialized queries, and named queries for the market-data fixture 
         "ticker": { "type": "String" },
         "source": { "type": "String" },
         "time":   { "type": "Timestamp" },
-        "bid":    { "type": "Decimal", "nullable": true },
-        "ask":    { "type": "Decimal", "nullable": true }
+        "bid":    { "type": "Decimal", "precision": 18, "scale": 6, "nullable": true },
+        "ask":    { "type": "Decimal", "precision": 18, "scale": 6, "nullable": true }
       },
       "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
       "clusterColumns": ["time"],

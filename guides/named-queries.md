@@ -113,9 +113,9 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1 },
         "ticker": { "type": "String" },
-        "bid": { "type": "Decimal" },
-        "ask": { "type": "Decimal" },
-        "internalSpread": { "type": "Decimal" },
+        "bid": { "type": "Decimal", "precision": 18, "scale": 6 },
+        "ask": { "type": "Decimal", "precision": 18, "scale": 6 },
+        "internalSpread": { "type": "Decimal", "precision": 18, "scale": 6 },
         "asOf": { "type": "Timestamp" }
       }
     },
@@ -434,7 +434,7 @@ HTTP **200** means the envelope was accepted. A missing name or a bind/ADRA fail
 ```json
 {
   "results": [
-    { "columns": ["ticker", "bid"], "types": ["String", "Decimal"], "data": [["AAPL", 189.2]], "rowCount": 1 },
+    { "columns": ["ticker", "bid"], "types": ["String", "Decimal"], "data": [["AAPL", 189.200000]], "rowCount": 1 },
     { "code": "NAMED_QUERY_NOT_FOUND", "error": "Named query 'equity.unknown' was not found." }
   ]
 }

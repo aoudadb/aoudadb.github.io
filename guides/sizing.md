@@ -193,7 +193,12 @@ An undeclared `Decimal` costs 16 bytes per value in the write buffer, the hot ti
 that carries it, and compresses poorly on disk. A `Decimal(p,s)` column (`"precision"` / `"scale"`, p ≤ 18 — see the
 [schema guide](schema.md)) is a scaled 64-bit integer: 8 bytes in memory, and encoded like an `Int64` in
 segments — frame-of-reference or delta bit-packing chosen per 2,048-row vector (**ColumnarRead, 0.3.0**) (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
-that have a fixed number of places this way; keep the undeclared `Decimal` for values that need more than 18 digits.
+that have a fixed number of places this way.
+
+(**LoadSpeed S13, next train**) It is the only decimal: the undeclared 16-byte `Decimal` is retired and refused, so every
+decimal column now costs 8 bytes a value in memory. A decimal also travels as 8 bytes a value in a column-batch frame and
+loads without a per-value allocation: a bulk load's decimal column takes as much of the ingest buffer as an `Int64`
+column.
 
 ## The buffering thresholds are one formula in every deployment (**WorkloadCore S17, 0.3.0**)
 

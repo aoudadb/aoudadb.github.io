@@ -316,10 +316,13 @@ await db.GetTable("users").InsertAsync(new Dictionary<string, object?>
 Instead of dictionaries, you can use C# classes. Aouda infers the schema from the type:
 
 ```csharp
+using Aouda.Abstractions.Attributes;
+
 public class Order
 {
     public long Id { get; set; }
     public string Customer { get; set; } = "";
+    [AoudaDecimal(18, 2)]              // a decimal declares its precision and scale
     public decimal Total { get; set; }
     public DateTime CreatedAt { get; set; }
 }
@@ -722,7 +725,7 @@ await client.tables.createTable({
     { name: "id", type: "Int64", isPrimaryKey: true },
     { name: "product_id", type: "Int64" },
     { name: "quantity", type: "Int32" },
-    { name: "total", type: "Decimal" },
+    { name: "total", type: "Decimal", precision: 18, scale: 2 },
   ],
 });
 
@@ -1022,7 +1025,8 @@ against the model), so a mismatch here is what a reconcile failure is reporting.
 | `byte` | `Byte` |
 | `short` / `int` / `long` | `Int16` / `Int32` / `Int64` |
 | `ushort` / `uint` / `ulong` | `UInt16` / `UInt32` / `UInt64` |
-| `float` / `double` / `decimal` | `Float32` / `Double` / `Decimal` |
+| `float` / `double` | `Float32` / `Double` |
+| `decimal` | `Decimal(p,s)` from the property's `[AoudaDecimal(p, s)]`, which it must carry (**LoadSpeed S13, next train**: a `decimal` property without it is refused, naming the property — see [`Decimal(p,s)`](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)) |
 | `string` | `String` |
 | `DateTime` / `DateTimeOffset` | `Timestamp` |
 | `DateOnly` | `Date` |
@@ -1136,14 +1140,19 @@ Rules of thumb:
 For production use, you often want explicit control over data types, primary keys, partition keys, and auto-increment:
 
 ```csharp
-await engine.CreateTableAsync("orders", new[]
+// The same request in the .NET client (client.Schema) and the embedded engine (db.Schema)
+await client.Schema.CreateTableAsync(new CreateTableRequest
 {
-    new ColumnDef("order_id", DataType.Int64, isPrimaryKey: true, isAutoIncrement: true),
-    new ColumnDef("tenant_id", DataType.String, isPartitionKey: true),
-    new ColumnDef("customer", DataType.String),
-    new ColumnDef("amount", DataType.Decimal),
-    new ColumnDef("status", DataType.String),
-    new ColumnDef("created_at", DataType.Timestamp)
+    Name = "orders",
+    Columns =
+    [
+        new() { Name = "order_id", Type = "Int64", PrimaryKeyOrder = 1, IsAutoIncrement = true },
+        new() { Name = "tenant_id", Type = "String", PartitionKeyOrder = 1 },
+        new() { Name = "customer", Type = "String" },
+        new() { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2 },   // Decimal(18,2)
+        new() { Name = "status", Type = "String" },
+        new() { Name = "created_at", Type = "Timestamp" },
+    ],
 });
 ```
 
@@ -1174,7 +1183,7 @@ Aouda supports a declarative schema file that serves as the source of truth. Def
       "columns": [
         { "name": "order_id", "type": "Int64", "isPrimaryKey": true, "autoIncrement": true },
         { "name": "tenant_id", "type": "String", "isPartitionKey": true },
-        { "name": "amount", "type": "Decimal" },
+        { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 },
         { "name": "created_at", "type": "Timestamp" }
       ]
     }

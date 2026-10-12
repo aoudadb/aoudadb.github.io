@@ -13,6 +13,26 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **One decimal: `Decimal(p,s)` only; the undeclared `Decimal` is retired (LoadSpeed S13; breaking).** `Decimal(p,s)`
+  (1 ≤ p ≤ 18, 0 ≤ s ≤ p), a scaled 64-bit integer on disk and on the wire, is the only decimal type; the 128-bit
+  `System.Decimal` of any scale is gone. `"type": "Decimal"` without `precision` and `scale` — schema documents,
+  `POST …/tables`, `POST …/tables/{t}/columns` — is `400` ("A Decimal column declares its precision and scale …"), as is a
+  precision above 18. A computed output's `type` and `cast`'s target spell it `"Decimal(18,6)"`; plain `"Decimal"` is
+  refused there too. A C# `decimal` property needs `[AoudaDecimal(p, s)]` (`Aouda.Abstractions.Attributes`) for
+  `CreateTableAsync<T>()` and the embedded engine, and a table created from its first row no longer infers a decimal column
+  from a C# `decimal`. A data directory holding a column of the old type (type 13) is refused at open, naming the column —
+  export it with the build that wrote it; there is no migration. On the wire, the column-batch frame's 128-bit `Decimal`
+  kind (6) is deleted and refused `400`; decimals travel only as `ScaledDecimal` (kind 8), one scale per column, which the
+  C# SDK, `@aouda/client` and the server's NDJSON reader now use throughout, and query results send a decimal column as
+  `ScaledDecimal` at its declared scale (JSON gives exactly that many places). Compute is exact: `sum` of a decimal is
+  `Decimal(18,s)` and refused past 18 digits in a query as in a materialized query, `avg` is a `Double`, `min` / `max`
+  keep the column's scale, and expressions compute at fixed scales (`*` adds them, `/` gives at least 6 places, a literal
+  keeps the scale it is written with, `round(x, n)` is scale `n`) with an overflow an error, never a wrap or a silent
+  `Double`. [Schema — `Decimal(p,s)`](guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020),
+  [HTTP API — data types](reference/http-api.md#data-types), [the frame](reference/http-api.md#post-jobidappend),
+  [Insert-time transforms](guides/insert-transforms.md), [Materialized queries](guides/materialized.md),
+  [Query](guides/query.md), [.NET client](clients/index.md), [TypeScript client](clients/typescript.md),
+  [Compatibility](clients/compatibility.md).
 - **A refusal is answered as one everywhere it was not yet (BL-944, LoadSpeed K46).** A refusal no other code names is
   `503 SERVICE_UNAVAILABLE` with `Retry-After`, never a `500`. `SERVER_STARTING` now carries `Retry-After: 5`;
   `SETUP_REQUIRED` and `SERVER_AUTH_NOT_CONFIGURED` deliberately carry none — an operator ends them, not time. A refused
