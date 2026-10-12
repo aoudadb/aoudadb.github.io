@@ -142,8 +142,13 @@ given, never trusted; over 512 UTF-8 bytes is `400 AUTH_DEVICE_INFO_TOO_LONG`); 
 session ends when it signs out, when the user ends it from another device (`DELETE .../auth/sessions/{id}`) or signs out with
 `others` / `global`, when an administrator ends it, and when its refresh token is **reused** — a spent refresh token presented again is
 treated as stolen, and the whole session ends, its current access token included — so a client must keep the refresh token each
-refresh returns, not the one it first stored. A password change or reset, an MFA reset, disabling and deleting the user end every
-session.
+refresh returns, not the one it first stored. A password change or reset, an administrator's removal of an MFA factor
+(`DELETE .../admin/users/{id}/mfa/factors/{factorId}`), disabling and deleting the user end every session. A session stays listed —
+and can be ended — for as long as its refresh token lives (30 days by default), however long the device has been idle.
+
+An open realtime connection is held to the same rule: a WebSocket is closed with `AUTH_TOKEN_REVOKED` within a heartbeat (20 s), and
+a long-poll session answers its next `send` or `poll` with `401 AUTH_TOKEN_REVOKED` (checked at most once per heartbeat interval).
+This applies to connections opened with a user's token; one opened with an API key is unaffected by session changes.
 
 > **Signing out is per device now.** A client that called `signout` to sign the user out *everywhere* must send
 > `{ "scope": "global" }`.
@@ -204,6 +209,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}` | DELETE | Delete user by id (204; 404 if missing). Cascades that user's roles, claims, grants, credentials, sessions, tokens, MFA, and API keys. Leaves `_audit_log`.|
 | `.../admin/users/{id}/disable` | POST | Disable user. Ends every session at once (**NativeClients, next train**): each live access token is revoked (refused on the next request in Hybrid and Stateful modes, an open WebSocket closed within a heartbeat with `AUTH_TOKEN_REVOKED`), every refresh token is revoked, and a refresh answers `423 AUTH_ACCOUNT_DISABLED`. Sign-in answers `AUTH_INVALID_CREDENTIALS`. Enable lets the user sign in again; it brings no session back |
 | `.../admin/users/{id}/enable` | POST | Enable user |
+| `.../admin/users/{id}/mfa/factors/{factorId}` | DELETE | Remove one of a user's MFA factors (an MFA reset). Ends every session of the user (**NativeClients, next train**), so they sign in again and enrol afresh |
 | `.../admin/sessions` | GET | List sessions (`?userId=`, `limit`, `offset`) — one per device, with `userAgent`, `lastSeenAt` and `aal` (**NativeClients, next train**) |
 | `.../admin/sessions/{id}` | DELETE | End one session: its refresh family is revoked and every access token it issued is revoked (**NativeClients, next train** — it deleted the row only, and the session kept refreshing). The user's other sessions are untouched |
 | `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |

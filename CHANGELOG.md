@@ -13,6 +13,15 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **An idle device can still be signed out** (NativeClients group 2 review). A session stays listed, and is ended by `others`,
+  `global`, a `DELETE` by id or an admin action, for as long as its refresh token lives — it vanished after 15 idle minutes and kept
+  refreshing. An access token from before an MFA step-up is refused once the user's sessions end; a long-poll connection is dropped
+  on its next request after a revoke (it was never checked); in Stateful mode a WebSocket opened with an API key is no longer closed
+  after a heartbeat; deleting a user refuses every access token they hold; an administrator's MFA factor removal ends the user's
+  sessions. SDKs: a refresh refused because the session is over clears the stored tokens (`signedOut`); `signOut` with `others` /
+  `global` rejects when nothing was ended; sign-out refreshes an expired token first; TS `auth.refresh()` no longer races an
+  automatic refresh into a token reuse.
+
 - **The SDKs tell the app every token change** (NativeClients S05, Derive ask AQ-6). `client.auth.onTokensChanged(listener)` in
   `@aouda/client` (any number of listeners; the WebSocket transport is now one of them) and `client.Auth.TokensChanged` in
   `Aouda.Client`, on sign-in, every refresh — the automatic ones included — and sign-out. Persist the refresh token on each change:

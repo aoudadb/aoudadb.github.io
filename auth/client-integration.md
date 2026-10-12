@@ -242,6 +242,12 @@ var restarted = new AoudaClient(new AoudaClientOptions { ServerUrl = url, Databa
     AppAuth = new AppAuthOptions { Token = saved.AccessToken, RefreshToken = saved.RefreshToken } });
 ```
 
+When a refresh is refused because the session is over — `AUTH_REFRESH_TOKEN_INVALID` (ended, or a reused token) or
+`AUTH_ACCOUNT_DISABLED` — the SDKs clear their tokens and report `signedOut` / `SignedOut`, so the app deletes what it stored rather than
+re-seeding a dead pair on every start. An explicit `refresh()` / `RefreshAsync()` rejects with that code; a transient refusal (`503`)
+keeps the tokens for a retry. Sign-out refreshes an expired access token first; `signOut({ scope: "others" | "global" })` rejects
+when the server ended nothing, while a plain `signOut()` stays best-effort.
+
 Listeners run synchronously, before the new tokens are used; any number may subscribe (`onTokensChanged` returns the
 unsubscribe). A listener that throws is ignored — store failures are the app's to handle — and a listener must not refresh.
 Where to keep them is the app's choice (Keychain, Android Keystore / SecureStore, DPAPI); never `localStorage` for a native app.
