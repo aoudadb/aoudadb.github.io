@@ -120,7 +120,7 @@ These map onto the same `call` allowlist the schema uses for [derived columns](i
 
 `$upper`, `$lower`, and `$trim` take `true` to operate on the column itself. The unary and single-argument forms default to the column being set, so `{ price: { $round: 2 } }` means "round `price` to 2 places".
 
-Null propagates: if any argument is null the result is null. `$cast` accepts only the numeric types plus `String` — not `Timestamp`, `Date`, `Guid`, `Bool`, or vectors; a decimal is named with its precision and scale, `{ price: { $cast: "Decimal(18,2)" } }` (**LoadSpeed S13, next train**: plain `"Decimal"` is refused). An unknown operator throws client-side before any request is sent.
+Null propagates: if any argument is null the result is null. `$cast` accepts only the numeric types plus `String` — not `Timestamp`, `Date`, `Guid`, `Bool`, or vectors; a decimal is named with its precision and scale, `{ price: { $cast: "Decimal(18,2)" } }` (**LoadSpeed S13, 0.4.0**: plain `"Decimal"` is refused). An unknown operator throws client-side before any request is sent.
 
 Operators can be combined with literal values in the same `.update()` call. Literal values
 (unchanged keys) continue to use the existing `set` wire field and are unaffected by the new
@@ -784,7 +784,7 @@ Content-Type: application/json
 ```
 
 With `price` a `Decimal(18,2)` column, `price * 0.9` is computed exactly at scale 3 — the sum of the two scales — and
-answered with three places (**LoadSpeed S13, next train**; see [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)).
+answered with three places (**LoadSpeed S13, 0.4.0**; see [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)).
 
 ### How Expression SELECT works
 

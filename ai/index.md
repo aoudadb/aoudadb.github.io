@@ -139,7 +139,7 @@ If you do nothing beyond starting local dev:
 | `DevServerOptions.EnableAuth` | `false` | Auth is opt-in in dev mode unless explicitly enabled |
 | `TokenOptions.AccessTokenLifetime` | `15m` | Short-lived user access tokens |
 | `TokenOptions.RefreshTokenLifetime` | `30d` | Long-lived sessions for app flows |
-| `TokenOptions.Issuer` | `"aouda"` | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}`, and (**next train**) only that issuer is accepted for them |
+| `TokenOptions.Issuer` | `"aouda"` | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}`, and (**0.4.0**) only that issuer is accepted for them |
 | `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | Signature + revocation checking by default |
 | `PasswordPolicy` | Min `8`, Max `128` | NIST-aligned baseline policy |
 | App auth endpoint gate | API key required | Prevents unauthenticated direct auth route calls |

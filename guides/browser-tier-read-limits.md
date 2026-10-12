@@ -195,13 +195,13 @@ Calling with `{}` omits both predicates and returns all rows. Calling with `{ "s
 | Node | Result |
 |------|--------|
 | `colRef` | That column's catalog type; missing → Unknown |
-| literal | `int`/`short`/`byte` → Int32; `long` and in-range `ulong` → Int64; `float` → Float32; `double` → Double; `decimal` → Decimal at its own scale; `string` → String; `bool` → Bool. JSON numbers: no fraction and fits Int64 → Int64; (**LoadSpeed S13, next train**) a fraction of at most 18 digits → Decimal at the scale it is written with (`0.005` is `Decimal(18,3)`); otherwise Double |
-| arithmetic | Same widen as insert-time `NumericOp`: any Double/Float32 → Double; otherwise any Decimal → Decimal at the operator's scale (`+` / `-` the larger, `*` the sum, `/` at least 6 — see [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020); **LoadSpeed S13, next train**); both integer family → Int64 |
+| literal | `int`/`short`/`byte` → Int32; `long` and in-range `ulong` → Int64; `float` → Float32; `double` → Double; `decimal` → Decimal at its own scale; `string` → String; `bool` → Bool. JSON numbers: no fraction and fits Int64 → Int64; (**LoadSpeed S13, 0.4.0**) a fraction of at most 18 digits → Decimal at the scale it is written with (`0.005` is `Decimal(18,3)`); otherwise Double |
+| arithmetic | Same widen as insert-time `NumericOp`: any Double/Float32 → Double; otherwise any Decimal → Decimal at the operator's scale (`+` / `-` the larger, `*` the sum, `/` at least 6 — see [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020); **LoadSpeed S13, 0.4.0**); both integer family → Int64 |
 | coalesce / conditional | Common type of inferable arms; mixed or an uninferable arm → Unknown |
-| `call` | `upper`/`lower`/`trim`/`concat`/`substring` → String; `round`/`roundTo` → Decimal (at scale `n` for `round(x, n)`, the larger scale for `roundTo`), Double when the value is Double, Int64 for an integer `round` (**LoadSpeed S13, next train**); `cast` → the named type (`"Decimal(p,s)"` for a decimal) |
+| `call` | `upper`/`lower`/`trim`/`concat`/`substring` → String; `round`/`roundTo` → Decimal (at scale `n` for `round(x, n)`, the larger scale for `roundTo`), Double when the value is Double, Int64 for an integer `round` (**LoadSpeed S13, 0.4.0**); `cast` → the named type (`"Decimal(p,s)"` for a decimal) |
 | unbound `param` | Unknown |
 
-A JSON literal such as `0.9` is a decimal (`Decimal(18,1)`, **LoadSpeed S13, next train**; it was Double), so `price * 0.9` over HTTP is exact when `price` is a `Decimal(p,s)` and Double when `price` is Double. A CLR `decimal` literal stays Decimal.
+A JSON literal such as `0.9` is a decimal (`Decimal(18,1)`, **LoadSpeed S13, 0.4.0**; it was Double), so `price * 0.9` over HTTP is exact when `price` is a `Decimal(p,s)` and Double when `price` is Double. A CLR `decimal` literal stays Decimal.
 
 A definition using `selectExpr` also cannot be subscribed (table above; **BL-170**). HTTP execute still works.
 

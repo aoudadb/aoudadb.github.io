@@ -149,7 +149,7 @@ Case A: Server credential (from _serverauth)
   → JWT or mk_srv_ API key from the _serverauth database
   → db_roles checked for "myapp"
   → Access at the granted role level
-  → PLS / RLS enforced (0.4.0, next train): no user's grants, so protected
+  → PLS / RLS enforced (0.4.0): no user's grants, so protected
     tables show it nothing unless it sends X-User-Token (a db_admin key may
     read a PLS table with crossPartitionAccess, audited). Up to 0.3.x an
     mk_srv_ key saw all data.
@@ -372,7 +372,7 @@ When you create a database with auth enabled, Aouda still auto-generates keys. T
 | **`public`** | `mk_pub_` | `public` | Enforced | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
 | **`service_role`** | `mk_svc_` | `db_admin` (full access) | **Bypassed** | Backend servers, admin tools | **Must keep secret** |
 
-**What changed in 0.4.0** (**next train**): the `service_role` key is the **only** credential that bypasses partition- and
+**What changed in 0.4.0** (**0.4.0**): the `service_role` key is the **only** credential that bypasses partition- and
 row-level security. A server API key (`mk_srv_`) bypassed them too up to 0.3.x; it now gets its role's grants and, on a
 protected table, what a request with no user may see (with the usual RLS rules, no row; a PLS table answers `403`). Use the
 database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with either key for one user's data —

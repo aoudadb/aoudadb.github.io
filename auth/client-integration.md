@@ -195,7 +195,7 @@ const orders = await aouda.table("orders")
 // Sign up
 const result = await client.auth.signUp("newuser@example.com", "Password123!");
 
-// Sign in — deviceInfo names this device in the user's session list (NativeClients, next train)
+// Sign in — deviceInfo names this device in the user's session list (NativeClients, 0.4.0)
 const session = await client.auth.signIn("alice@example.com", "SecurePass123!", { deviceInfo: "Alice's iPhone — MyApp 2.1" });
 
 // Profile
@@ -204,7 +204,7 @@ const me = await client.auth.me();
 // Change password
 await client.auth.changePassword("OldPass123!", "NewPass456!");
 
-// Sign out — this device only (NativeClients, next train; before, every session of the user)
+// Sign out — this device only (NativeClients, 0.4.0; before, every session of the user)
 await client.auth.signOut();
 // … or every other device (this one stays signed in), or everywhere
 await client.auth.signOut({ scope: "others" });
@@ -218,7 +218,7 @@ await client.auth.revokeSession(sessions.find((s) => !s.current)!.id);
 C#: `SignInAsync(email, password, deviceInfo)`, `SignOutAsync(SignOutScope.Others)`, `ListSessionsAsync()`, `RevokeSessionAsync(id)`.
 What a session is, and what ends one: [Sessions are devices](reference.md#sessions-are-devices).
 
-### Keeping tokens across restarts (**NativeClients, next train**)
+### Keeping tokens across restarts (**NativeClients, 0.4.0**)
 
 Each refresh **rotates** the refresh token, and presenting a spent one again ends the whole session (it is treated as stolen). An
 app that persists only the token it got at sign-in therefore signs the user out on its first restart after a refresh. Persist the
@@ -292,11 +292,11 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 | **Created by** | Server admin | Auto-generated when app auth is enabled |
 | **Stored in** | `_serverauth` database | `_auth` database (linked to the app) |
 | **Scope** | One or more databases (via `databaseRoles`) | One specific database |
-| **PLS / RLS** | **Enforced** from 0.4.0 (**next train**); up to 0.3.x never enforced | `mk_anon_` / `mk_pub_` / `custom`: enforced; `mk_svc_`: bypassed |
+| **PLS / RLS** | **Enforced** from 0.4.0 (**0.4.0**); up to 0.3.x never enforced | `mk_anon_` / `mk_pub_` / `custom`: enforced; `mk_svc_`: bypassed |
 | **Listener** | Admin | `mk_pub_`: data-plane only (admin → `AUTH_KEY_LISTENER_MISMATCH`); others: either |
 | **Use case** | Backend services, CI/CD, cross-database | Frontend clients, per-database backend access |
 
-**What changed in 0.4.0** (**next train**). Only an app's service key (`mk_svc_`) bypasses partition- and row-level security.
+**What changed in 0.4.0** (**0.4.0**). Only an app's service key (`mk_svc_`) bypasses partition- and row-level security.
 A server API key (`mk_srv_`) did too up to 0.3.x; it now gets its role's grants and, on a protected table, only what a request
 with no user may see — with the usual RLS rules, no row; on a PLS table `403`, unless its role is `db_admin` and the read asks
 for `"crossPartitionAccess": true` (audited). For a whole database use that database's `mk_svc_` key; for one user's data send
@@ -351,7 +351,7 @@ The middleware:
 - If the primary credential is an `anon` key or a user JWT, `X-User-Token` is ignored.
 - If `X-User-Token` is present but invalid (expired, revoked), the request returns 401 with a clear error about the user token.
 - If `X-User-Token` is absent, an app service key (`mk_svc_`) grants full access with PLS / RLS bypassed. A server API key
-  (`mk_srv_`) gets its role's grants with PLS / RLS enforced (**0.4.0, next train**; up to 0.3.x it bypassed them too).
+  (`mk_srv_`) gets its role's grants with PLS / RLS enforced (**0.4.0**; up to 0.3.x it bypassed them too).
 
 ### Example: Backend Querying on Behalf of a User
 

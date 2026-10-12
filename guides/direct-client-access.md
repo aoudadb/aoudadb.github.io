@@ -134,7 +134,7 @@ default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not 
 agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
 minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
 subscriptions. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
-(**NativeClients, next train**).
+(**NativeClients, 0.4.0**).
 
 **Server clock.** Every response carries a `Date` header that a browser can read cross-origin (**NativeClients, next
 train**); the SDKs keep the offset from it (`serverClockOffsetMs` / `ServerClockOffset`) so a client can judge a
@@ -187,7 +187,7 @@ Application end users today:
 **A hosted OAuth 2.0 authorization server is not available** — no `/authorize` login page, social login or third-party consent
 (tracked as BL-043). Token introspection (BL-042) is not available. Do not implement a SPA that redirects to an IdP and expects Aouda
 to complete the code exchange. **Native apps** can sign in through the browser: the signed-in web front issues a single-use PKCE code
-and the app redeems it for its own session (**NativeClients, next train**) — [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
+and the app redeems it for its own session (**NativeClients, 0.4.0**) — [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
 
 OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. That is not a federated login.
 
@@ -254,7 +254,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 
 - Bare internet exposure (no edge).
 - A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
-  browser with a PKCE code ships in the next train — **NativeClients**.)
+  browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
 - Extending `mk_anon_*` to read data.
 

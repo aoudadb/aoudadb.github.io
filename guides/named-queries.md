@@ -329,7 +329,7 @@ Constraints:
 
 ## Server-time bounds (`serverTime` parameters)
 
-(**NativeClients, next train**)
+(**NativeClients, 0.4.0**)
 
 A parameter declared `{ "serverTime": { "offsetSeconds": <n> } }` is bound **by the server**, at execute, to its own UTC
 clock plus `n` seconds. It is how a read asks "seen in the last 75 seconds" against one clock — the server's — instead of
@@ -632,7 +632,7 @@ await client.namedMutations.execute("equity.adjustQty", { id: 1, qty: 10 });
 
 Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `rowsDeleted`) plus optional `RETURNING` rows. Mutations are **not** allowed in the read batch.
 
-**`returning` on `insert` and `upsert`** (**NativeClients, next train**; BL-639 — accepted and ignored before). The declared
+**`returning` on `insert` and `upsert`** (**NativeClients, 0.4.0**; BL-639 — accepted and ignored before). The declared
 columns of the rows **written**, under `rows`, as `update` / `delete` return them: an insert's rows in request order, with
 their server-computed values (stamps, derived columns, generated ids); an upsert's **one row per key** — the row that won
 (the batch's last row for a repeated key), as stored, so an `insert` stamp of an existing key is the stored one, not this
@@ -643,8 +643,8 @@ write's. A write that would return more than `MaxReturningRows` rows fails befor
 
 | `op` | Shape | Requires | Result fields |
 |---|---|---|---|
-| `insert` | row template in `values` | — | `rowsInserted`, `generatedValues`, `RETURNING` rows (**NativeClients, next train**) |
-| `upsert` *(**BL-637, 0.1.37**)* | row template in `values` | the table declares a **primary key** | `rowsInserted`, `rowsUpdated`, `generatedValues`, `RETURNING` rows (**NativeClients, next train**) |
+| `insert` | row template in `values` | — | `rowsInserted`, `generatedValues`, `RETURNING` rows (**NativeClients, 0.4.0**) |
+| `upsert` *(**BL-637, 0.1.37**)* | row template in `values` | the table declares a **primary key** | `rowsInserted`, `rowsUpdated`, `generatedValues`, `RETURNING` rows (**NativeClients, 0.4.0**) |
 | `update` | `where` + `set` / `setExpr` | non-empty `where` | `rowsUpdated`, `RETURNING` rows |
 | `delete` | `where` | explicit `limit` cap | `rowsDeleted`, `RETURNING` rows |
 
@@ -682,7 +682,7 @@ write's. A write that would return more than `MaxReturningRows` rows fails befor
 >
 > The server stamps `LastHeartbeat` with its own clock on every heartbeat (a
 > [server-time stamp](insert-transforms.md#server-time-stamp-servertime),
-> **NativeClients, next train**), so a lease is judged against one clock, not each device's. The
+> **NativeClients, 0.4.0**), so a lease is judged against one clock, not each device's. The
 > mutation does not, and cannot, send it.
 >
 > ```text

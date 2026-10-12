@@ -158,7 +158,7 @@ If you run server defaults and do not set per-database overrides:
 - Catalog durability:
   - `CatalogStore` JSON snapshot persistence (`catalog/catalog.json`) with atomic temp-write + move.
   - Additional catalog WAL/checkpoint classes (`FileCatalog`, `CatalogWal`, `CatalogCheckpoint`) are implemented in catalog layer.
-  - (**BL-980, next train**) The catalog reads only what this build writes, and refuses the rest with an error naming what it
+  - (**BL-980, 0.4.0**) The catalog reads only what this build writes, and refuses the rest with an error naming what it
     found: a catalog-WAL record in an older layout or of an unknown type (they were skipped), an unknown `PartitionOptions`
     member, a table without a data directory (made before BL-398), a segment entry without a row count. Pre-1.0 nothing is
     migrated: a database written by an older build is restored from a backup taken by this version, or re-created.
@@ -411,11 +411,11 @@ it is neither, and the sections were never separated. They are now.
 #### D.1 — The sound part: physical layout, positions, and reclamation
 
 1. **Physical layout.** The production WAL is a segmented log under `{db}/wal/`: segments named
-   `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json` (it carries the WAL root's id; (**BL-980, next train**) a
+   `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json` (it carries the WAL root's id; (**BL-980, 0.4.0**) a
    published manifest without one — only a build before BL-330 / BL-438 wrote one — is refused when the WAL root opens), a crash-recovery control
    file `CHECKPOINT`, and a portioned-recovery resume sidecar `RECOVERY`. Segment size is
    `clamp(MaxWalBytes / 16, 8 MB, 64 MB)`. A leftover monolithic `insert.wal` from before
-   segmentation is refused at open — (**BL-934, next train**) for good: `aouda wal convert` is removed, so restore from a backup
+   segmentation is refused at open — (**BL-934, 0.4.0**) for good: `aouda wal convert` is removed, so restore from a backup
    taken by this version, or delete `insert.wal` to discard the writes it holds that were never checkpointed.
 2. **Position model.** Every WAL position — in a slot, in the checkpoint, on the ladder below — is
    a **cumulative byte offset into a virtual, infinite log** (the PostgreSQL LSN model), not a row
@@ -511,7 +511,7 @@ Primary tests:
 | `CreateDatabaseRequest.enableWal` | bool | `true` | true/false | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |
-| `CreateDatabaseRequest.maxMemoryShareBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional cap on the database's share of the server budget (**BL-980, next train:** was `maxMemoryBytes`, now ignored) |
+| `CreateDatabaseRequest.maxMemoryShareBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional cap on the database's share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`, now ignored) |
 | `Archive.Enabled` | bool | `false` | true/false | startup config | Starts `WalArchiveWorker` when a destination is also set |
 | `Archive.Destination` | string | empty | URI/path | startup config | Required when archive enabled |
 | `Archive.WalRetentionDays` | int | `7` | >=1 | startup config | Archive retention (not the local PITR window) |

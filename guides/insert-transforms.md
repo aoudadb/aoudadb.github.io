@@ -109,7 +109,7 @@ Worked schema: [write-side fixture](https://github.com/aoudadb/aoudadb.github.io
 
 ### Server-time stamp (`serverTime`)
 
-(**NativeClients, next train**)
+(**NativeClients, 0.4.0**)
 
 A third sibling of `derived`: a `Timestamp` column the **server** stamps with its own UTC clock, so a sent-at or last-seen
 time never comes from a device's clock.
@@ -161,9 +161,9 @@ The presence pattern in [Named queries](named-queries.md) uses a `write` stamp f
 | `trim` | 1 | Leading and trailing whitespace removed |
 | `concat` | 1 or more | Arguments stringified and joined |
 | `substring` | 2 or 3 | `substring(s, start[, length])`. **`start` is 1-based** and must be ≥ 1; `length` must be ≥ 0. A `start` past the end yields `""` rather than an error |
-| `round` | 2 | `round(value, digits)`, `digits` 0–28, **away from zero** (not banker's rounding). (**LoadSpeed S13, next train**) Of a decimal, a decimal at scale `digits`; of a `Double`, a `Double` |
-| `roundTo` | 2 | `roundTo(value, step)`, `step` > 0, away from zero — this is the one for tick sizes and price increments. (**LoadSpeed S13, next train**) Of a decimal, a decimal at the larger of the two scales; of a `Double`, a `Double` |
-| `cast` | 2 | `cast(value, "TypeName")`; the type must be a **string literal**. A decimal target is spelled with its precision and scale, `cast(value, "Decimal(18,6)")`, and rounds half away from zero to that scale (**LoadSpeed S13, next train**: plain `"Decimal"` is refused) |
+| `round` | 2 | `round(value, digits)`, `digits` 0–28, **away from zero** (not banker's rounding). (**LoadSpeed S13, 0.4.0**) Of a decimal, a decimal at scale `digits`; of a `Double`, a `Double` |
+| `roundTo` | 2 | `roundTo(value, step)`, `step` > 0, away from zero — this is the one for tick sizes and price increments. (**LoadSpeed S13, 0.4.0**) Of a decimal, a decimal at the larger of the two scales; of a `Double`, a `Double` |
+| `cast` | 2 | `cast(value, "TypeName")`; the type must be a **string literal**. A decimal target is spelled with its precision and scale, `cast(value, "Decimal(18,6)")`, and rounds half away from zero to that scale (**LoadSpeed S13, 0.4.0**: plain `"Decimal"` is refused) |
 
 ```json
 {
@@ -191,8 +191,8 @@ The presence pattern in [Named queries](named-queries.md) uses a `write` stamp f
 Rules worth knowing before you design around it:
 
 - **Null propagates.** If *any* argument evaluates to null, the whole call returns null — it does not throw and does not substitute a default. Wrap in `coalesce` if you want one.
-- **Decimals are exact** (**LoadSpeed S13, next train**). Arithmetic over a `Decimal(p,s)` column or a fractional literal computes at a fixed scale (`+` / `-` the larger, `*` the sum, `/` at least 6 places), a literal keeps the scale it is written with (`0.05` is scale 2), and a result past 18 digits is an error, never a silent `Double`. The value is then rounded half away from zero to the derived column's scale. Full rules: [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020).
-- `cast` accepts only `Int32`, `Int64`, `Int16`, `Byte`, `UInt16`, `UInt32`, `UInt64`, `Double`, `Float32`, `Decimal(p,s)` (e.g. `"Decimal(18,6)"`; **LoadSpeed S13, next train** — plain `"Decimal"` is refused), `String`. **`Timestamp`, `Date`, `Guid`, `Bool`, and vector types are not castable.** Float→integer casts truncate toward zero, and a finite value outside the target range is an error rather than a silent wrap.
+- **Decimals are exact** (**LoadSpeed S13, 0.4.0**). Arithmetic over a `Decimal(p,s)` column or a fractional literal computes at a fixed scale (`+` / `-` the larger, `*` the sum, `/` at least 6 places), a literal keeps the scale it is written with (`0.05` is scale 2), and a result past 18 digits is an error, never a silent `Double`. The value is then rounded half away from zero to the derived column's scale. Full rules: [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020).
+- `cast` accepts only `Int32`, `Int64`, `Int16`, `Byte`, `UInt16`, `UInt32`, `UInt64`, `Double`, `Float32`, `Decimal(p,s)` (e.g. `"Decimal(18,6)"`; **LoadSpeed S13, 0.4.0** — plain `"Decimal"` is refused), `String`. **`Timestamp`, `Date`, `Guid`, `Bool`, and vector types are not castable.** Float→integer casts truncate toward zero, and a finite value outside the target range is an error rather than a silent wrap.
 - There is **no timestamp truncation function**. Bucketing a timestamp to a day or an hour is a partition-key function (`TruncateToDay` and friends) or a materialized-query `groupBy` term, not a derived column.
 - Unknown `fn`, wrong arity, or a non-literal `cast` type fails **schema apply** with `SCHEMA_EXPR_UNKNOWN_FUNCTION` — not at insert time. The same validation runs on `namedQueries[].selectExpr` and `namedMutations[].setExpr`.
 

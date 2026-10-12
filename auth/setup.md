@@ -212,13 +212,13 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signout \
 ```
 
 Ends **this** session — its refresh token and access token stop working; the user's other devices stay signed in
-(**NativeClients, next train**). To sign out everywhere, send `-d '{"scope":"global"}'` (and `-H "Content-Type: application/json"`);
+(**NativeClients, 0.4.0**). To sign out everywhere, send `-d '{"scope":"global"}'` (and `-H "Content-Type: application/json"`);
 `"others"` signs every other device out and keeps this one. A user lists their devices with `GET .../auth/sessions` and ends one with
 `DELETE .../auth/sessions/{id}` — see [Sessions are devices](reference.md#sessions-are-devices).
 
 ### Native apps: sign in through the browser
 
-(**NativeClients, next train**) A desktop or phone app can sign its user in through the browser, where your web front is already
+(**NativeClients, 0.4.0**) A desktop or phone app can sign its user in through the browser, where your web front is already
 signed in — MFA included — and get a session of its own at the same assurance level. Aouda serves no login page: your web front does
 the asking, Aouda issues a single-use code, and the app redeems it with a PKCE verifier. Endpoints, rules and error codes:
 [Native sign-in through the browser](reference.md#native-sign-in-through-the-browser).
@@ -314,7 +314,7 @@ tokens to the others), or give each client its own sign-in.
 Sign-in, sign-up and password changes hash the password, and the hash waits for its memory first; under load they
 can answer `503` with `Retry-After` too. Retry them as any capacity refusal (**BL-850, 0.3.0**).
 
-**The SDKs treat such a refusal as retryable (**BL-944, next train**).** A sign-in, sign-up or refresh refused for capacity is
+**The SDKs treat such a refusal as retryable (**BL-944, 0.4.0**).** A sign-in, sign-up or refresh refused for capacity is
 `AoudaCapacityException` (with `RetryAfter`) in `Aouda.Client` and `AoudaServerError` (with `retryAfterSeconds`; `AoudaApiError` for
 a `429 SERVER_AT_CAPACITY`) in `@aouda/client` — not an authentication error. A refused refresh keeps the refresh token for the
 retry, and a request that needed it fails with the refusal rather than with its `401`; an early refresh refused while the current

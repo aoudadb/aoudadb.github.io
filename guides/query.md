@@ -272,7 +272,7 @@ Runtime notes:
    `Last(col, orderBy)`, executed by `GroupAggregateAsync()`. The result is a `ColumnarQueryResult`: the keys, then one
    column per aggregate (`COUNT`, `SUM_<col>`, `MIN_<col>`, `FIRST_<col>` …), ordered by the keys ascending with nulls
    last; `Skip` / `Limit` apply after grouping. An integer `SUM` is an exact `Int64` (an overflow throws). (**LoadSpeed
-   S13, next train**) A `Decimal(p,s)` `SUM` is an exact `Decimal(18,s)` and a sum of 18 digits or more throws (*A Decimal
+   S13, 0.4.0**) A `Decimal(p,s)` `SUM` is an exact `Decimal(18,s)` and a sum of 18 digits or more throws (*A Decimal
    sum does not fit Decimal(18,s).*), as a materialized query's does; `Min` / `Max` are exact at the column's scale and
    `Avg` is a `Double` ([`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)). **ColumnarRead S16
    (0.3.0):** `OrderBy` over a grouped result (by a key's or an aggregate's output name, before `Skip` / `Limit`); `Avg(col)`

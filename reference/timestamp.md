@@ -90,7 +90,7 @@ ticks apart above 2^53. Pruning is the scan's `RowGroupClassifier` over each row
 
 ---
 
-## Server-stamped columns (**NativeClients, next train**)
+## Server-stamped columns (**NativeClients, 0.4.0**)
 
 A `Timestamp` column declared `derived: { "serverTime": "insert" | "write" }` is stamped by the primary with its own UTC
 clock (full tick precision, one reading per write request) and refuses any caller value. See

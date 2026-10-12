@@ -193,7 +193,7 @@ If you create a materialized query with standard helpers and no special options:
 | `SubscriptionManagerOptions.MaxQueueDepth` | `10000` | Queue bound for async MQ update processing; past it a query's batches go to its lane's backlog (**WorkloadCore S09, 0.3.0**) |
 | `SubscriptionManagerOptions.ProcessingBatchSize` | `100` | Batch size for update queue drain |
 | `SubscriptionManagerOptions.MaintenanceBacklogMaxBytes` | `64 MiB` per update lane | (**WorkloadCore S09, 0.3.0**) The backlog a lagging query's batches wait in, charged on the memory budget. Only past it is an update lost: the query is marked stale and rebuilt |
-| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background, by the table's deferred pass, started at the commit — while the table is loading, once it is quiet (2 s) or at the 60 s bound (**LoadSpeed M.3, next train**) (**WorkloadCore S10, 0.3.0**; a query the pass cannot fold or replay is rebuilt by a background job after it, **WorkloadCore S17, 0.3.0**); `:commit` waits for them up to `mqWaitMs` (30 s in 0.3.0; **0 — no wait — from the next train**, LoadSpeed M.2) and reports `mqStatus` (**WorkloadCore S09, 0.3.0**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` left them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)); (**LoadSpeed K31, next train**) it is folded into `Auto` and refused `400` |
+| `BulkLoadOptions.PostLoadMqBehavior` | `Auto` | Affected MQs of all four types are brought current by the server after the commit, in the background, by the table's deferred pass, started at the commit — while the table is loading, once it is quiet (2 s) or at the 60 s bound (**LoadSpeed M.3, 0.4.0**) (**WorkloadCore S10, 0.3.0**; a query the pass cannot fold or replay is rebuilt by a background job after it, **WorkloadCore S17, 0.3.0**); `:commit` waits for them up to `mqWaitMs` (30 s in 0.3.0; **0 — no wait — from the 0.4.0**, LoadSpeed M.2) and reports `mqStatus` (**WorkloadCore S09, 0.3.0**) — in 0.2.0 such a table's queries were written in the load's own commit, before `:commit` returned (**ColumnarCore S12**); wait, do not `:refresh`. `Deferred` left them behind until the table's pass ([Bulk load — deferred loads](bulk-load.md#deferred-loads-and-the-tables-pass)); (**LoadSpeed K31, 0.4.0**) it is folded into `Auto` and refused `400` |
 
 ### 2.3.1 Where a materialized query's result lives {#where-a-materialized-querys-result-lives}
 
@@ -207,7 +207,7 @@ rebuild fits a share far smaller than its result. **A maintained result's own wr
 any table's** (**WorkloadCore S17a, 0.3.0**): in 0.2.0 the maintenance pinned it in memory between checkpoints, whatever
 its `storageTemperature`, so a large result held its rows in the buffer until the next checkpoint.
 
-**While memory allows, a result's write buffer is not sealed early** (**BL-910, next train**). A result is rewritten by
+**While memory allows, a result's write buffer is not sealed early** (**BL-910, 0.4.0**). A result is rewritten by
 every load that reaches its groups, so sealing it at the small seal size an append-only table is sealed at made it a run
 of small segments — one more flush, more key-index work and one more segment for every later write to look through, and
 a group rewritten after its flush written again. While the database's write buffers hold **less than half of its
@@ -316,7 +316,7 @@ results are keyed by identity rather than time, and are not clustered.
 - Aggregate MQ extensions (P28):
   - `FIRST`/`LAST` aggregate functions with `orderByColumn` + `descending` ordering, enabling OHLC (Open/High/Low/Close) candle patterns.
   - Derived time-bucket group-by expressions: `{ "column": "time", "function": "TruncateToHour" }` or `"TruncateToMinute"` alongside plain column group-by. Group keys are stored as Int64 epoch milliseconds (allocation-free integer arithmetic).
-  - `AggregateConfig` bumped to v2: each `groupByColumns` entry is an object (`{ "column": "region" }`). (**BL-980, next train**) The v1 plain-string form is **refused** — a create request carrying it gets `400`, and a stored definition in that form is refused when it is read; up to 0.3.x it was parsed transparently. Pre-1.0 there is no migration: drop and re-create such a query with the object form.
+  - `AggregateConfig` bumped to v2: each `groupByColumns` entry is an object (`{ "column": "region" }`). (**BL-980, 0.4.0**) The v1 plain-string form is **refused** — a create request carrying it gets `400`, and a stored definition in that form is refused when it is read; up to 0.3.x it was parsed transparently. Pre-1.0 there is no migration: drop and re-create such a query with the object form.
 - Incremental maintenance:
   - Update routing via `MaterializedQuerySubscriptionManager` with `Async` and `Sync` modes.
   - Guard against infinite loops for result-table events.
@@ -409,7 +409,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Correct no-duplicate result-table reads after flush | No | Yes | No | P11 R8 handoff report | Known engine bug |
 | `FIRST`/`LAST` aggregate functions with ordering | Yes | No | No | P28 S2, `AggregateMaintainer`, `AggregateConfig.CurrentVersion == 2` | Enables OHLC candle patterns; requires `orderByColumn` + `descending` fields |
 | Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
-| ~~`AggregateConfig` v1 backward compatibility~~ | No | — | — | P28 S2; removed by BL-980 | (**next train**) A v1 plain-string `groupByColumns` is refused (`400` on create; a stored one is refused when read) |
+| ~~`AggregateConfig` v1 backward compatibility~~ | No | — | — | P28 S2; removed by BL-980 | (**0.4.0**) A v1 plain-string `groupByColumns` is refused (`400` on create; a stored one is refused when read) |
 | Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
 | Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, the table's pass (WorkloadCore S10) | All four MQ types brought current by the table's pass, started at the commit (**WorkloadCore S10, 0.3.0**; they accumulated during the load before); queries it cannot fold or apply are rebuilt. `MemoryOnly` sources skipped |
 | `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Failed; awaitable Task |
@@ -826,7 +826,7 @@ An aggregate materialized query may declare `computed` columns — physical, alw
 
 A named query over `barsWithChange` can then `orderBy: [{ "column": "changePct", "descending": true }]` with `limit: 20`. That is a catalog column, not a read-path expression. For sorts on a **base** table, use a stored `derived` column instead.
 
-**Decimals in an aggregate result** (**LoadSpeed S13, next train**). A computed output's `type` has no `precision` /
+**Decimals in an aggregate result** (**LoadSpeed S13, 0.4.0**). A computed output's `type` has no `precision` /
 `scale` beside it, so a decimal is spelled with them: `"type": "Decimal(18,6)"`. Plain `"Decimal"` is refused, as it is
 for a column. The expression is computed exactly and then rounded half away from zero to that scale: `+` / `-` at the
 larger scale, `*` at the sum of the scales, `/` at max(6, either scale) — an integer `SUM / COUNT` is at 6 places — and a
@@ -1058,9 +1058,9 @@ the work twice. Wait on `MqRebuildCompleted` / `mqRebuildStatus` instead. See
 Pooled refresh is for the case where you deliberately loaded with `PostLoadMqBehavior.Skip`, because
 you wanted ingestion to finish fast and will materialize later.
 
-**That was the recommended shape for a migration or an initial load on 0.3.0** (**LoadSpeed M.1, next train**): load every job with
+**That was the recommended shape for a migration or an initial load on 0.3.0** (**LoadSpeed M.1, 0.4.0**): load every job with
 `skip`, then, once the last job has committed, one pooled refresh per source table (`{ "sourceTable": "…", "staleOnly": true }`).
-(**LoadSpeed M.3, next train**) `auto` now coalesces while a table loads and reaches the same time on the same load — all 13 queries
+(**LoadSpeed M.3, 0.4.0**) `auto` now coalesces while a table loads and reaches the same time on the same load — all 13 queries
 current 440.5 s after the start, against the recipe's 441.5 s — so keep `auto` unless you want maintenance off for the whole load;
 the recipe still uses less CPU (28.1 against 37.4 CPU-s per million rows).
 Measured on 0.3.0 (2 GB, 15.3 M trades and 30 M quotes, 13 queries): all 13 queries current 441 s after the load started against
@@ -1100,7 +1100,7 @@ is for.
 
 ### Deferred loads
 
-(**LoadSpeed K31, next train**) **`PostLoadMqBehavior.Deferred` (`"deferred"`) is gone; use `Auto`.** With `Auto` coalescing while a
+(**LoadSpeed K31, 0.4.0**) **`PostLoadMqBehavior.Deferred` (`"deferred"`) is gone; use `Auto`.** With `Auto` coalescing while a
 table loads (below) and `:commit` not waiting by default (`mqWaitMs` 0), the two differed only in that a `Deferred` `:commit` never
 waited even when asked to, and that a `Deferred` load into a quiet table waited for the quiet period instead of starting its pass. A
 request naming `deferred` is refused `400 BULK_LOAD_INVALID_OPTIONS`, saying to use `auto`; `mqStatus` and `mqRebuildStatus` are never
@@ -1117,7 +1117,7 @@ table's pass below is its maintenance. `Auto` starts the pass for each table it 
 transform loads included), and `:commit` waits for it up to `mqWaitMs`; `Deferred` left it to the quiet period. So
 everything in this section applies to an `Auto` load too, except when its pass runs (and, since **LoadSpeed K31**, only to `Auto`).
 
-(**LoadSpeed M.3, next train**) **`Auto` coalesces while its table loads.** An `Auto` load into a table that is busy — another load
+(**LoadSpeed M.3, 0.4.0**) **`Auto` coalesces while its table loads.** An `Auto` load into a table that is busy — another load
 in flight on it, an earlier load's job still pending, or a load into it committed within the quiet period (2 s) — leaves its job to
 the table's pass as a `Deferred` one did: the queries report behind (`mqStatus: "behind"` at `:commit`) and are caught up in one pass
 once the table has been quiet for 2 s, or when the oldest waiting job has waited 60 s while loads keep arriving (the server logs

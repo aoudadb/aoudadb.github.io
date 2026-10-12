@@ -326,7 +326,7 @@ The test suite creates a fresh bucket per test run, exercises the full `IArchive
 | `NoSuchBucket` | Bucket does not exist | Create the bucket first; Aouda does not create buckets automatically |
 | Timeout connecting to MinIO | Wrong `ServiceUrl` or container not running | Check `ServiceUrl` and `ForcePathStyle: true` |
 | Restore hash mismatch | Corrupted blob in S3 | Run `RestoreEngine.VerifyBackupAsync`; re-run backup to upload a fresh set |
-| `PitrWindowException` | Target outside the local write-volume window and the archive, or backup not PITR-eligible — (**BL-980, next train**) including a backup that records no WAL-root incarnation (a database without a WAL, or a backup taken by an older build) | Take a newer backup, enable archiving, or pick a later `targetTime`; an exact restore (no `targetTime`) of such a backup still works |
+| `PitrWindowException` | Target outside the local write-volume window and the archive, or backup not PITR-eligible — (**BL-980, 0.4.0**) including a backup that records no WAL-root incarnation (a database without a WAL, or a backup taken by an older build) | Take a newer backup, enable archiving, or pick a later `targetTime`; an exact restore (no `targetTime`) of such a backup still works |
 | `NotSupportedException` for `azure://` or `gcs://` | Azure/GCS not yet implemented | Use `s3://` or a local path |
 
 ---

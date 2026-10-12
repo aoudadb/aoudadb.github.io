@@ -235,7 +235,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
 
 Key design decisions:
 
-- **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. One partition tree per `(ticker, source)` pair; simpler candle aggregation. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, next train**). See [schema](schema.md).
+- **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. One partition tree per `(ticker, source)` pair; simpler candle aggregation. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, 0.4.0**). See [schema](schema.md).
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
 - **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{name}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
 
@@ -703,7 +703,7 @@ Bulk-loaded rows bypass **incremental** MQ maintenance by design. What happens i
 records a pending job and the table's pass brings its queries current right after the commit, from the load's segments;
 before S10 the queries accumulated during the load's own pass and were published after the commit. `:commit` waits
 for that up to `mqWaitMs` and says in `mqStatus` whether it finished (**WorkloadCore S09, 0.3.0**; the default wait was 30 s in
-0.3.0 and is **0 — no wait — from the next train**, LoadSpeed M.2: send `mqWaitMs`, or read with the commit's `token`); wait for it; **do not also call `:refresh`.** A `:refresh` either runs the pass
+0.3.0 and is **0 — no wait — from the 0.4.0**, LoadSpeed M.2: send `mqWaitMs`, or read with the commit's `token`); wait for it; **do not also call `:refresh`.** A `:refresh` either runs the pass
 that was starting anyway or, once it has run, re-scans the whole source table, so it buys nothing and can cost a
 second full pass.
 

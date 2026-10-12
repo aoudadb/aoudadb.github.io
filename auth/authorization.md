@@ -49,7 +49,7 @@ write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table ans
 That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a service key bypasses it. So link
 the auth database before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable, not open.
 
-### What changed in 0.4.0: only a service key bypasses PLS and RLS (**next train**)
+### What changed in 0.4.0: only a service key bypasses PLS and RLS (**0.4.0**)
 
 Up to 0.3.x a **server API key** (`mk_srv_…`) was treated as a service key: on every database it could reach, it read and
 wrote past partition-level security (`jwt-claim` and `auth-db-pls`) and row-level security (`auth-db-rls`). From 0.4.0
@@ -152,7 +152,7 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 | `mk_anon_` API key | `anonymous` role — no data access by default |
 | `mk_svc_` service key (no X-User-Token) | PLS **bypassed** — sees all partitions |
 | `mk_svc_` + X-User-Token | PLS enforced using user JWT claims |
-| `mk_srv_` server key | PLS **enforced** (**0.4.0, next train**; [what changed](#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)): `403` without the claim; a `db_admin` key may read with `crossPartitionAccess` (audited). Up to 0.3.x: not enforced |
+| `mk_srv_` server key | PLS **enforced** (**0.4.0**; [what changed](#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)): `403` without the claim; a `db_admin` key may read with `crossPartitionAccess` (audited). Up to 0.3.x: not enforced |
 | `db_admin` user JWT | Can use cross-partition access |
 
 **When to use:** Simple SaaS where each user belongs to exactly one organization and should only see that organization's data.
@@ -358,7 +358,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 
 This resolver produces the compound predicate: `owner_id = '<userId>' OR team_id IN ('<team1>', '<team2>', ...)`.
 
-**A literal is bound to its column's type** (**BL-1015, next train**). `valueConfig` is a string, and the rule's value is read as the column's type wherever the rule is applied — a query, a subscription's change events, a materialized query's rows and the write check alike: `"true"` matches a `Bool` column's `true`, `"05"` an integer 5, `"2026-10-12T21:00:00Z"` a `Timestamp`, `"2026-10-12"` a `Date`, `"10.5"` a `Decimal(p,s)` 10.50, a `Guid` in either case. A literal that does not convert to the column's type (`"yes"` for a `Bool`) denies — the rule matches nothing, for `ne` too. (0.3.0 compared a literal with a row as text outside the query path, so a `Bool` column never matched `"true"` there, and a subscriber could receive events its rule hid from a query; the [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a `String` column, which works either way.)
+**A literal is bound to its column's type** (**BL-1015, 0.4.0**). `valueConfig` is a string, and the rule's value is read as the column's type wherever the rule is applied — a query, a subscription's change events, a materialized query's rows and the write check alike: `"true"` matches a `Bool` column's `true`, `"05"` an integer 5, `"2026-10-12T21:00:00Z"` a `Timestamp`, `"2026-10-12"` a `Date`, `"10.5"` a `Decimal(p,s)` 10.50, a `Guid` in either case. A literal that does not convert to the column's type (`"yes"` for a `Bool`) denies — the rule matches nothing, for `ne` too. (0.3.0 compared a literal with a row as text outside the query path, so a `Bool` column never matched `"true"` there, and a subscriber could receive events its rule hid from a query; the [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a `String` column, which works either way.)
 
 ### 19.5.2 Setup: Create the RLS Table
 
@@ -621,7 +621,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 **`writeCheckRules`:** optional second rule list. Present ⇒ write-check **replaces** read. Absent ⇒ write-check = read.
 
 **A stored rule is either a read rule or a write-check rule** — the admin API records which list it came from. A rule with no
-kind, or a kind the server does not know, **denies** reads and writes (fail closed). (**BL-980, next train**) Up to 0.3.x a
+kind, or a kind the server does not know, **denies** reads and writes (fail closed). (**BL-980, 0.4.0**) Up to 0.3.x a
 rule stored with no kind — only an auth database from before write-check rules had them — was read as a read rule; such a
 database is not upgraded any more (see [defaults](index.md#23-defaults-and-zero-config-behavior)), so re-create its resolvers.
 

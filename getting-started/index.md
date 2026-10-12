@@ -1026,7 +1026,7 @@ against the model), so a mismatch here is what a reconcile failure is reporting.
 | `short` / `int` / `long` | `Int16` / `Int32` / `Int64` |
 | `ushort` / `uint` / `ulong` | `UInt16` / `UInt32` / `UInt64` |
 | `float` / `double` | `Float32` / `Double` |
-| `decimal` | `Decimal(p,s)` from the property's `[AoudaDecimal(p, s)]`, which it must carry (**LoadSpeed S13, next train**: a `decimal` property without it is refused, naming the property — see [`Decimal(p,s)`](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)) |
+| `decimal` | `Decimal(p,s)` from the property's `[AoudaDecimal(p, s)]`, which it must carry (**LoadSpeed S13, 0.4.0**: a `decimal` property without it is refused, naming the property — see [`Decimal(p,s)`](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)) |
 | `string` | `String` |
 | `DateTime` / `DateTimeOffset` | `Timestamp` |
 | `DateOnly` | `Date` |
@@ -1331,7 +1331,7 @@ Auth state is stored in an internal database called `_serverauth`. This database
 
 When the server starts with no admin accounts, it enters **setup mode**. In setup mode, only the bootstrap endpoint is available, and only from localhost.
 
-Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, next train**) carries `Retry-After: 5`.
+Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`.
 
 You can inspect first-run state in a machine-readable way:
 
@@ -1652,7 +1652,7 @@ If a database has Application Auth enabled (see [Getting-Started-Auth.md](auth.m
 | **Stored in** | `_serverauth` | `_auth` (app auth database) |
 | **Scope** | One or more databases (via `databaseRoles`) | One specific database |
 | **Use case** | Backend services, CI/CD, cross-database access | Frontend clients, per-database backend access |
-| **PLS / RLS** | Enforced from 0.4.0 (**next train**); up to 0.3.x never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
+| **PLS / RLS** | Enforced from 0.4.0 (**0.4.0**); up to 0.3.x never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
 
 For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use server API keys (`mk_srv_`). From 0.4.0 a server API key no longer bypasses partition- or row-level security: on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)).
 

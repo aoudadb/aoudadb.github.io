@@ -156,7 +156,7 @@ Out of scope for this functionality:
 | L2 partitioned cache with frozen partition | Yes | No | No | `L2KeyCache.cs`, P18 §2 #2 | Includes `FrozenSentinel`. |
 | Within-batch duplicate rejection for all policies | Yes | No | No | `AoudaEngine.EnforcePrimaryKeyUniquenessAsync`, Pk tests | BestEffort still rejects in-batch duplicates. |
 | Strict sealed-segment lookup path | Yes | No | No | `LookupKeyInSealedSegmentsAsync`, P18 §3.3 | Uses L1/L0/L3/fallback. |
-| L1 sparse index persistence (`pk_index.spr`) | Yes | No | No | `SparsePkIndexFile.cs`, `HraCompactor.cs` | Versions 3 (flat) and 4 (Elias-Fano). (**BL-980, next train**) A v1 or v2 file — written by an older build — is refused, naming the version found; up to 0.3.x it was read. |
+| L1 sparse index persistence (`pk_index.spr`) | Yes | No | No | `SparsePkIndexFile.cs`, `HraCompactor.cs` | Versions 3 (flat) and 4 (Elias-Fano). (**BL-980, 0.4.0**) A v1 or v2 file — written by an older build — is refused, naming the version found; up to 0.3.x it was read. |
 | Elias-Fano L1 encoding for L4-active segments | Yes | No | No | `SparsePkIndex.cs`, `HraCompactor.EvaluateL4Trigger` | Falls back to flat if invalid input. |
 | L3 keymap persistence (`pk_keymap.dat/.idx`) | Yes | No | No | `L3KeyMapFile.cs`, `HraCompactor.cs` | Strict policy build path. |
 | L3 startup preload | Yes | No | No | `AoudaEngine.PreloadPrimaryKeyIndexes` | Strict tables only. |
@@ -438,7 +438,7 @@ Recovery expectations:
 | Policy enforcement paths | `tests/Aouda.Engine.Api.Tests/PkUniquenessIntegrationTests.cs` | Pass | Strong | Covers strict/recent/best-effort behavior. |
 | Migration strict gate behavior | `tests/Aouda.Engine.Api.Tests/PkUniquenessMigrationGateTests.cs` | Pass | Strong | Covers phase gate semantics. |
 | L2 frozen/batch pin semantics | `tests/Aouda.Engine.Storage.Tests/Index/PkUniquenessRegressionTests.cs` | Pass | Strong | Freeze-window and eviction safety behavior. |
-| L1 sparse index including EF | `tests/Aouda.Engine.Storage.Tests/Index/SparsePkIndexTests.cs`, `SparsePkIndexEliasFanoTests.cs` | Pass | Strong | Includes the refusal of v1 / v2 files (**BL-980, next train**). |
+| L1 sparse index including EF | `tests/Aouda.Engine.Storage.Tests/Index/SparsePkIndexTests.cs`, `SparsePkIndexEliasFanoTests.cs` | Pass | Strong | Includes the refusal of v1 / v2 files (**BL-980, 0.4.0**). |
 | L3 keymap files and lookup | `tests/Aouda.Engine.Storage.Tests/Index/L3KeyMapTests.cs` | Pass | Strong | Includes corruption and truncation guards. |
 
 ---

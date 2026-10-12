@@ -56,10 +56,10 @@ _Repo: `aouda-client-ts`_
 npm install @aouda/client
 ```
 
-Runs in browsers, on React Native (below) and on Node 22+ (**NativeClients, next train**: Node 22 is the floor, because the client
+Runs in browsers, on React Native (below) and on Node 22+ (**NativeClients, 0.4.0**: Node 22 is the floor, because the client
 uses the platform's `WebSocket` and no longer ships the `ws` package; on an older Node, pass `streaming.wsFactory`).
 
-### React Native (**NativeClients, next train**)
+### React Native (**NativeClients, 0.4.0**)
 
 `@aouda/client` runs on React Native with Hermes — no Node built-in is reachable from it, and it assumes nothing Hermes lacks
 (`TextDecoder`, `crypto.subtle`, `AbortSignal.timeout`). Install it as on the web; Metro bundles it as it is. One thing the app
@@ -127,7 +127,7 @@ const rows = await client.table('orders').atLeast(store.get('mydb')!).execute();
 const current = await client.getConsistencyToken();
 ```
 
-### The server's clock (**NativeClients, next train**)
+### The server's clock (**NativeClients, 0.4.0**)
 
 Every response's `Date` header tells the client how far the server's clock is from the device's. `client.serverClockOffsetMs`
 holds the last difference (undefined before the first response; about one second of resolution) and `client.serverNow()`
@@ -139,7 +139,7 @@ const online = rows.filter((r) => client.serverNow().getTime() - Date.parse(r.la
 ```
 
 `namedMutations.execute()` returns `op: "upsert"` (and `rowsAffected` = inserted + replaced) for an upsert, and `returning`
-rows for `insert` and `upsert` definitions that declare them (**NativeClients, next train**).
+rows for `insert` and `upsert` definitions that declare them (**NativeClients, 0.4.0**).
 
 ### With Authentication
 
@@ -152,7 +152,7 @@ const client = new AoudaClient({
 await client.connect();
 await client.auth.signIn('user@example.com', 'secret', { deviceInfo: 'Ann’s laptop — MyApp' });
 
-// Sessions are devices (NativeClients, next train): signOut() ends this one; listSessions / revokeSession manage the others
+// Sessions are devices (NativeClients, 0.4.0): signOut() ends this one; listSessions / revokeSession manage the others
 await client.auth.signOut({ scope: 'others' });
 const devices = await client.auth.listSessions();
 
@@ -173,13 +173,13 @@ const admin = new AoudaClient({
 await admin.connect();
 ```
 
-**Keeping tokens across restarts** (**NativeClients, next train**): `client.auth.onTokensChanged(({ accessToken, refreshToken,
+**Keeping tokens across restarts** (**NativeClients, 0.4.0**): `client.auth.onTokensChanged(({ accessToken, refreshToken,
 reason }) => …)` is called on sign-in, on every refresh (automatic ones too) and on sign-out (`reason`: `"signedIn"` /
 `"refreshed"` / `"signedOut"`); it returns the unsubscribe, and any number of listeners may subscribe. Persist the pair each time
 and seed a restarted client with `appAuth: { token, refreshToken }` — the server rotates the refresh token on every refresh, and a
 spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-next-train).
 
-**Native sign-in through the browser** (**NativeClients, next train**): `createPkcePair()` (needs `crypto.getRandomValues` — on
+**Native sign-in through the browser** (**NativeClients, 0.4.0**): `createPkcePair()` (needs `crypto.getRandomValues` — on
 React Native, `react-native-get-random-values`; see [React Native](#react-native-nativeclients-next-train)), then
 `web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state })` in the signed-in web front and
 `app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
@@ -499,7 +499,7 @@ fraction as a decimal, digit for digit (**BL-704, 0.2.0**) — so the inserted r
 decimal column whose every value in the batch fits 64 bits at the column's largest scale goes as the frame's
 `ScaledDecimal` kind — what a server `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**; a server
 from an earlier train refuses that kind with a `400`, so pair this client with a server of the same train). (**LoadSpeed
-S13, next train**) It is the only decimal kind the client writes: a batch whose decimals do not fit that way goes as JSON,
+S13, 0.4.0**) It is the only decimal kind the client writes: a batch whose decimals do not fit that way goes as JSON,
 where it was sent as the 16-byte `Decimal` kind, which the server now refuses. A frame carries one scale per decimal
 column, so a number sent into a `String` column is stored at the column's largest scale (`3` beside `2.50` is `3.00`). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
@@ -576,7 +576,7 @@ await client.tables.createTable({
 // Add a column
 await client.tables.addColumn('users', { database: 'mydb', name: 'phone', type: 'String' });
 
-// Add a Decimal(p,s) column — precision and scale, both required from the next train (server 0.2.0, @aouda/client 0.2.0)
+// Add a Decimal(p,s) column — precision and scale, both required from the 0.4.0 (server 0.2.0, @aouda/client 0.2.0)
 await client.tables.addColumn('users', { database: 'mydb', name: 'balance', type: 'Decimal', precision: 18, scale: 2 });
 
 // Rename a column
@@ -1071,10 +1071,10 @@ const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 20
 // Throws if the rebuild status reaches "failed".
 ```
 
-(**WorkloadCore S09, 0.3.0**) `:commit` itself can wait, bounded, for the load's queries to be current — (**LoadSpeed M.2, next train**) only when `mqWaitMs` asks it to — and the handle says how that ended:
+(**WorkloadCore S09, 0.3.0**) `:commit` itself can wait, bounded, for the load's queries to be current — (**LoadSpeed M.2, 0.4.0**) only when `mqWaitMs` asks it to — and the handle says how that ended:
 
 ```typescript
-const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 0 = no wait (next train; 30000 in 0.3.0)
+const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 0 = no wait (0.4.0; 30000 in 0.3.0)
 loaded.mqStatus;        // "current" | "behind" | "skipped" | "none"; "unknown" from an older server
 loaded.mqFrontierToken; // the lowest frontier among the load's queries, as a consistency token (absent: no query)
 loaded.mqWaitedMs;      // how long :commit waited for them
@@ -1113,7 +1113,7 @@ A query (`execute()`, `toColumnar()`, `namedQueries.execute()`) asks for the bin
 (`Accept: application/vnd.aouda.column-batch, application/json;q=0.5`) and reads whatever the server sends by its
 `Content-Type`. An older server, or a result a frame cannot carry, answers JSON as before. The values are the same either
 way: integers, `Date` (days since 1970-01-01), decimals and `UInt64` as numbers, `Guid` as a string, and a `Timestamp`
-row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks. (**LoadSpeed S13, next train**) A
+row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks. (**LoadSpeed S13, 0.4.0**) A
 decimal column arrives as `ScaledDecimal` at the column's scale and is read as a number as before; a frame carrying the
 retired 128-bit `Decimal` kind (6) throws.
 

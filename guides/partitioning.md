@@ -631,7 +631,7 @@ Core modules:
 | `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | startup config | Per-db timeout behavior |
 | `CreateDatabaseRequest.enableWal` | bool | `true` | `true/false` | create-db API | DB create-time operational setting |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | create-db API | DB create-time operational setting |
-| `CreateDatabaseRequest.maxMemoryShareBytes` | long? | `null` | null or non-negative | create-db API | DB create-time cap on its share of the server budget (**BL-980, next train:** was `maxMemoryBytes`) |
+| `CreateDatabaseRequest.maxMemoryShareBytes` | long? | `null` | null or non-negative | create-db API | DB create-time cap on its share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`) |
 | `CreateDatabaseRequest.defaultTemperature` | string? | `null` (`Auto` in options) | `Auto`, `HotOnly`, `ColdPreferred` | create-db API | DB create-time default table temp |
 | `Aouda:PlsCrossPartitionRateLimit:Enabled` | bool | `false` | `true/false` | server config | Enables limiter for bypassed cross-partition queries |
 | `Aouda:PlsCrossPartitionRateLimit:PermitLimit` | int | `60` | positive | server config | Max requests/window per (identity, db) |

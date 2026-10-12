@@ -303,7 +303,7 @@ Key anchors:
 
 1. Create branch from parent catalog snapshot.
 2. Apply schema changes in branch scope only.
-3. Generate a three-way merge plan from the branch's base snapshot (`base-catalog.json`, written when the branch is created). (**BL-980, next train**) A branch without one — made by a build before F.3 — is refused at merge and at delete, before anything is deleted; up to 0.3.x a merge fell back to a two-way plan.
+3. Generate a three-way merge plan from the branch's base snapshot (`base-catalog.json`, written when the branch is created). (**BL-980, 0.4.0**) A branch without one — made by a build before F.3 — is refused at merge and at delete, before anything is deleted; up to 0.3.x a merge fell back to a two-way plan.
 4. Conflicts return merge-plan response; `force` can override.
 5. Merge execution applies branch changes to parent catalog and records history.
 
@@ -852,7 +852,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 #### MigrationSource
 
-`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply. (**BL-980, next train**) These four are the only values: `StartupApply` is gone, and a migration history naming it — or any other unknown source, or a number — is refused when it is read.
+`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply. (**BL-980, 0.4.0**) These four are the only values: `StartupApply` is gone, and a migration history naming it — or any other unknown source, or a number — is refused when it is read.
 
 | Value | Meaning |
 |---|---|
@@ -904,7 +904,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
-| `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, next train**) Required on every `Decimal` column. |
+| `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) Required on every `Decimal` column. |
 | `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
@@ -921,7 +921,7 @@ A declared decimal is stored, logged, compared, aggregated and encoded as a **64
 (`123.45` is stored as `12345`) — as ClickHouse's and DuckDB's `Decimal(18,2)` are. It is 8 bytes instead of 16, its
 pages encode like an `Int64`, and filters, sorts, keys, `min` / `max` / `sum` run as integer operations.
 
-**`Decimal(p,s)` is the only decimal type** (**LoadSpeed S13, next train; breaking**). Up to 0.3.x a `Decimal` column
+**`Decimal(p,s)` is the only decimal type** (**LoadSpeed S13, 0.4.0; breaking**). Up to 0.3.x a `Decimal` column
 could leave out `precision` and `scale` and was then a 128-bit `System.Decimal` with any scale per value; that type is
 retired:
 
@@ -950,14 +950,14 @@ retired:
 | Derived columns / computed outputs | computed as decimals, then rounded half away from zero to the scale |
 | Reading | a decimal with exactly `scale` places (`10.50`, not `10.5`); type reported `Decimal` with `precision` / `scale` |
 | Filters | exact: `> 10.555` on scale 2 is `> 10.55`, `= 10.555` matches nothing |
-| `sum`, `min`, `max`, `first`, `last` | `Decimal(18,s)`, exact; a sum of 18 digits or more (an absolute value of 10^18 or more, scaled) is an error — *A Decimal sum does not fit Decimal(18,s).* — never a wrap, the same in a query and a materialized query (**LoadSpeed S13, next train**: a query's sum was bounded by `Int64` instead) |
+| `sum`, `min`, `max`, `first`, `last` | `Decimal(18,s)`, exact; a sum of 18 digits or more (an absolute value of 10^18 or more, scaled) is an error — *A Decimal sum does not fit Decimal(18,s).* — never a wrap, the same in a query and a materialized query (**LoadSpeed S13, 0.4.0**: a query's sum was bounded by `Int64` instead) |
 | `avg` | `Double` (the sum ÷ 10^scale ÷ count) |
 
 A column cannot be changed to or from `Decimal(p,s)`, nor to another precision or scale, in place: add a new column and
 copy. A `Decimal(p,s)` column cannot be a partition key. Schema export writes the declaration back, so an exported
 schema diffs to nothing.
 
-**Expressions over decimals are exact** (**LoadSpeed S13, next train**) — in a derived column, a materialized query's
+**Expressions over decimals are exact** (**LoadSpeed S13, 0.4.0**) — in a derived column, a materialized query's
 computed output, a `SET` expression and a `selectExpr`:
 
 | Expression | Result |

@@ -224,7 +224,7 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
 1. **Own zero data logic.** All data operations delegate to `AoudaEngine` via DI. Controllers are thin: no engine construction, no blocking inline async.
 2. **Orchestrate one engine per database.** `DatabaseManager` maintains a `ConcurrentDictionary<string, AoudaEngine>` keyed by database name. Engine lookups (the hot path for request routing) are lock-free `TryGetValue` calls. Lifecycle mutations (create / drop) are serialized by a `SemaphoreSlim(1,1)`.
 3. **Route HTTP by database.** Incoming requests carry a database name — either in the URL path (`/api/databases/{db}/…`) or in the request body (`database` field). A mismatch between path and body returns `400 INVALID_REQUEST`.
-4. **Govern memory across engines.** `ServerMemoryBudgetManager` tracks each engine's memory usage and assigns **weighted shares of one server budget**. HTTP create accepts `maxMemoryShareBytes` as a cap on that computed share (**BL-980, next train:** it was `maxMemoryBytes`, which is now ignored).
+4. **Govern memory across engines.** `ServerMemoryBudgetManager` tracks each engine's memory usage and assigns **weighted shares of one server budget**. HTTP create accepts `maxMemoryShareBytes` as a cap on that computed share (**BL-980, 0.4.0:** it was `maxMemoryBytes`, which is now ignored).
 
 ### Directory layout
 

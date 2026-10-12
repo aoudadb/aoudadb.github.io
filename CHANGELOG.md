@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-13
+
+Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's security review), **`@aouda/client` 0.4.0**,
+**`Aouda.Client` 0.4.0** and **Studio 0.0.27**. Every `(**…, next train**)` marker for what this train ships now names `0.4.0`;
+[compatibility](clients/compatibility.md) has the 0.4.0 row. ⚠️ Merge after the server tag `v0.4.0` and `@aouda/client` 0.4.0 on npm exist.
+
 - **Release 0.4.0 preparation: what the integration of NativeClients and its security review changed.** An RLS rule's literal is
   bound to its column's type wherever it is applied — subscriptions, materialized-query rows and the write check, as queries already
   did (BL-1015; [authorization](auth/authorization.md#1951-setup-define-a-resolver)). `PUT /admin/backup/schedule` and
