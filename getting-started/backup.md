@@ -8,7 +8,7 @@ parent: "Getting Started"
 
 This guide shows how to configure and use Aouda's backup and restore capabilities. It covers both local filesystem destinations and cloud storage via AWS S3 (including S3-compatible services such as MinIO and LocalStack).
 
-For the full backup subsystem reference — architecture, acceptance criteria, gap tracking, and test ledger — see [Functionality-Backup-And-Restore.md](Functionality-Backup-And-Restore.md).
+For the full backup subsystem reference — architecture, acceptance criteria, gap tracking, and test ledger — see [Functionality-Backup-And-Restore.md](../guides/backup.md).
 
 ---
 
@@ -155,7 +155,7 @@ s3://bucket-name/optional/key/prefix
 ## Triggering backup programmatically (hosted usage)
 
 When you host Aouda inside your own ASP.NET Core application using `AddAoudaServer()` (see
-[Getting Started: Option C — hosting in your own app](Getting-Started.md#option-c-hosting-in-your-own-aspnet-application)),
+[Getting Started: Option C — hosting in your own app](index.md#option-c-hosting-in-your-own-aspnet-application)),
 you can trigger backups directly through the DI container instead of going over HTTP.
 
 Resolve `IBackupManagementService` from the application's DI container and call `TriggerBackupAsync`:
@@ -333,6 +333,6 @@ The test suite creates a fresh bucket per test run, exercises the full `IArchive
 
 ## What's next
 
-- [Functionality-Backup-And-Restore.md](Functionality-Backup-And-Restore.md) — full architecture, gap tracking, and test ledger.
-- [Getting-Started.md](Getting-Started.md) — general Aouda getting-started guide.
-- [P24-B task spec](../tasks/P24/P24-B-S3BackupProvider.md) — full S3 provider implementation spec.
+- [Functionality-Backup-And-Restore.md](../guides/backup.md) — full architecture, gap tracking, and test ledger.
+- [Getting-Started.md](index.md) — general Aouda getting-started guide.
+- [P24-B task spec](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P24/P24-B-S3BackupProvider.md) — full S3 provider implementation spec.

@@ -328,7 +328,7 @@ Aouda has **two independent auth systems**, and conflating them is the most comm
 | **Server auth** | Which services and developers may connect to this server | Your backend, CI, operators, Studio. Like PostgreSQL roles |
 | **Application auth** | Who your end users are | Your app's sign-up, sign-in, JWT, refresh, MFA. Like Auth0 or Supabase Auth |
 
-Either can be used alone, together, or not at all — [Auth and Authorization](../auth/) has the full model. Then pick the data-authorization mode:
+Either can be used alone, together, or not at all — [Auth and Authorization](../auth/index.md) has the full model. Then pick the data-authorization mode:
 
 | Mode | Use when | Cost |
 |---|---|---|
@@ -337,7 +337,7 @@ Either can be used alone, together, or not at all — [Auth and Authorization](.
 | `auth-db-rls` | The filter is a row predicate rather than a partition — "rows I own", "rows my team owns" | A named resolver with rules |
 | `auth-db-pls` + `rlsResolverName` | Both: partition isolation *and* a row predicate inside it | Both of the above |
 
-Worked setups for all of them, including admin pass-through, write-check (read vs write predicates), identity stamp, and `plsClaimBinding`: [Data authorization](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](../examples/p43-write-side/) — stamp the principal into the row and gate writes with `writeCheckRules`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
+Worked setups for all of them, including admin pass-through, write-check (read vs write predicates), identity stamp, and `plsClaimBinding`: [Data authorization](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) — stamp the principal into the row and gate writes with `writeCheckRules`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
 
 > **The one mistake that matters.** A table with `dataPlaneAccess: true` and **no** authorization mode is readable — through your declared named queries — by **every signed-in user**. That is exactly right for reference data, price lists, and public catalogues. It is a data breach for anything owned by a user. Ship `authMode` in the *same change* that sets `dataPlaneAccess`, never in a follow-up, and confirm it with `aouda policy inspect` against a real identity per table class.
 
@@ -544,7 +544,7 @@ You are running a database now, so the operational surface matters. Every one of
 | Many apps, one server | Multi-database, isolation, async drop, quarantine | [Server and multi-database](server-multi-database.md) |
 | Knowing what it is doing | Prometheus metrics, health/ready probes, structured logs, query stats | [Server configuration](server-configuration.md) |
 | Looking at your data | Studio — data explorer, schema, cluster ops, backups, MQ browser | [Studio](studio.md) |
-| Running it somewhere | Docker, Compose, Kubernetes + Helm, Windows Service, systemd | [Deployment](../deployment/) · [Kubernetes and Helm](../deployment/kubernetes.md) |
+| Running it somewhere | Docker, Compose, Kubernetes + Helm, Windows Service, systemd | [Deployment](../deployment/index.md) · [Kubernetes and Helm](../deployment/kubernetes.md) |
 | Managed control plane | Hub | [Cloud and Hub](cloud-hub.md) |
 
 Two settings worth deciding deliberately rather than discovering: `storageTemperature` per table (step 1) and the memory budget. Everything else has a defensible default.
@@ -569,7 +569,7 @@ The showcase, and the table to check your feature list against. If something you
 | A filter panel with several optional facets | One definition with `whenParamPresent: true` on each optional condition — omitting the arg skips the predicate entirely | [Optional predicates](browser-tier-read-limits.md#optional-predicates-whenparampresent) |
 | A filter dropdown of "values that exist" | Named query with `distinct: true` — one constrained key is enough when the columns are partition keys | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
 | Search-as-you-type over a name | A stored `derived` normalized column plus a prefix/`in` predicate. There is **no full-text search** | [Derived columns](insert-transforms.md#derived-columns) |
-| A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbyChoices--orderbyindex) |
+| A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbychoices--orderbyindex) |
 | A live-updating grid or ticker | `namedQueries.subscribe` by name, collection-shaped, list parameter capped with `maxItems` | [Subscribe by name](named-queries.md#subscribe-by-name) |
 | A "latest value per key" board | `latestPerKey` materialized query, subscribed. **Not** the raw table plus `conflate` | [Materialized queries](materialized.md) |
 | A chart over hourly/daily buckets | `aggregate` MQ with `TruncateToHour`, `dataPlaneAccess: true`, read by `outputName` | [Materialized queries](materialized.md) |
@@ -617,7 +617,7 @@ The path above is the one that removes the most work. It is not the only support
 | Native mobile app, not a browser | Identical to the browser path — same data-plane listener, same `mk_pub_*`, same names | Nothing | [Direct client access](direct-client-access.md) |
 | Edge / serverless functions | Treat them as trusted services with `mk_svc_*`; mind connection lifetime and that subscriptions want a long-lived socket | Streaming from a short-lived function | [Direct client access](direct-client-access.md) |
 | Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and run the access gate | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
-| Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/) |
+| Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
 | A browser needs cross-partition analytics | **Refused by design.** Use `auth-db-pls` fan-out, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [No crossPartitionAccess on a named query](browser-tier-read-limits.md#no-crosspartitionaccess-on-a-named-query) |
 | You already have an application | Start from the existing-app branch below | Nothing — it is the same destination | [Adoption](adoption.md) |
 
@@ -863,7 +863,7 @@ Files and images (use object storage, keep the key in a column). Background jobs
 - [Partitioning and multi-tenancy](partitioning.md) · [Time-series and clustering](time-series.md) · [Timestamp type](../reference/timestamp.md)
 
 **Auth**
-- [Auth and Authorization](../auth/) · [Architecture patterns](../auth/architecture.md) · [Setup and flows](../auth/setup.md) · [Data authorization](../auth/authorization.md) · [Client integration](../auth/client-integration.md) · [Email, SMS & notifications](../auth/notifications.md) · [Reference](../auth/reference.md)
+- [Auth and Authorization](../auth/index.md) · [Architecture patterns](../auth/architecture.md) · [Setup and flows](../auth/setup.md) · [Data authorization](../auth/authorization.md) · [Client integration](../auth/client-integration.md) · [Email, SMS & notifications](../auth/notifications.md) · [Reference](../auth/reference.md)
 
 **Reads, writes, and streaming**
 - [Query execution](query.md) · [Bulk mutations](bulk-mutations.md) · [Bulk load](bulk-load.md) · [Real-time streaming](real-time.md) · [Graph and vector](graph-vector.md)
@@ -871,11 +871,11 @@ Files and images (use object storage, keep the key in a column). Background jobs
 **Operations**
 - [Hot/cold storage](hot-cold.md) · [Sizing memory and WAL](sizing.md) · [Write path durability](write-durability.md) · [Storage and persistence](storage.md) · [Primary key indexing and memory](pk-indexing.md)
 - [Backup and restore](backup.md) · [Replication and clustering](replication.md) · [Server and multi-database](server-multi-database.md) · [Server configuration](server-configuration.md)
-- [Studio](studio.md) · [Cloud and Hub](cloud-hub.md) · [Deployment](../deployment/) · [Kubernetes and Helm](../deployment/kubernetes.md)
+- [Studio](studio.md) · [Cloud and Hub](cloud-hub.md) · [Deployment](../deployment/index.md) · [Kubernetes and Helm](../deployment/kubernetes.md)
 
 **Clients, testing, and reference**
 - [TypeScript client](../clients/typescript.md) · [SDK compatibility](../clients/compatibility.md) · [Distribution and licensing](../clients/distribution.md)
-- [Testing](../getting-started/testing.md) · [Testing and DX](testing-dx.md) · [Getting started](../getting-started/)
+- [Testing](../getting-started/testing.md) · [Testing and DX](testing-dx.md) · [Getting started](../getting-started/index.md)
 - [HTTP API](../reference/http-api.md) · [Changelog](../CHANGELOG.md)
 
 **Worked end-to-end use case**

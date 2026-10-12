@@ -15,7 +15,7 @@ Aouda provides official clients for .NET and TypeScript, plus a raw HTTP/REST AP
 | **TypeScript** | `@aouda/client` (npm) | Server mode — connect from Node.js, browser, or edge |
 | **HTTP/REST** | Built into every Aouda server | Any language, direct API calls |
 
-The .NET and TypeScript clients expose matching APIs where practical. See [Getting Started](../getting-started/) for connection and first-query examples across all three.
+The .NET and TypeScript clients expose matching APIs where practical. See [Getting Started](../getting-started/index.md) for connection and first-query examples across all three.
 
 ⚠️ **The .NET packages target `net10.0` from 0.2.0** (**BL-739**) — `Aouda.Client`, `Aouda.Abstractions`, `Aouda.Embedded`, `Aouda.Testing` and the `Aouda.Cli` tool. A `net8.0` application cannot restore them: it stays on 0.1.40 until it retargets. .NET 8 leaves support on 2026-11-10.
 

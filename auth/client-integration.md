@@ -29,7 +29,7 @@ The .NET client uses two separate options types — one per auth system:
 | `Email` / `Password` | **Not available** — use `SignInAsync()` | Yes |
 | `UserToken` | Yes (with service keys) | Yes (with `mk_srv_`) |
 
-Use `AppAuth = new AppAuthOptions { ... }` for Application Auth (this document). Use `ServerAuth = new ServerAuthOptions { ... }` for [Server Auth](Getting-Started.md#8-server-authentication--securing-database-access). The two are mutually exclusive — setting both throws an `ArgumentException` at construction time.
+Use `AppAuth = new AppAuthOptions { ... }` for Application Auth (this document). Use `ServerAuth = new ServerAuthOptions { ... }` for [Server Auth](../getting-started/index.md#8-server-authentication--securing-database-access). The two are mutually exclusive — setting both throws an `ArgumentException` at construction time.
 
 ### Backend: Service Key (Full Access)
 

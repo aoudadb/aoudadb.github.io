@@ -10,13 +10,13 @@ This guide covers how to write **integration tests for applications that use Aou
 
 > **Before reading this guide:** If you are testing Aouda itself (building Aouda's engine tests), use the existing patterns in `tests/Aouda.Server.Tests/` and `tests/Aouda.Cli.Tests/`. This guide is for **consumer application developers** testing their own code that talks to Aouda.
 
-**Related:** [Getting-Started.md](Getting-Started.md) (embedded vs server), [Getting-Started-Auth.md](Getting-Started-Auth.md) (application auth), [ADR 0024 — Testing package](../decisions/0024-testing-package.md).
+**Related:** [Getting-Started.md](index.md) (embedded vs server), [Getting-Started-Auth.md](auth.md) (application auth), [ADR 0024 — Testing package](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0024-testing-package.md).
 
 ---
 
 ## Table of Contents
 
-1. [Why Aouda.Testing?](#1-why-aouda-testing)
+1. [Why Aouda.Testing?](#1-why-aoudatesting)
 2. [Installation](#2-installation)
 3. [Basic Usage — No Auth](#3-basic-usage--no-auth)
 4. [Auth-Enabled Usage](#4-auth-enabled-usage)
@@ -301,7 +301,7 @@ public class AuthControllerTests : IClassFixture<AoudaTestFixture>, IAsyncLifeti
 
 **Derive / gateway pattern:** If your app talks to Aouda via a base URL, inject the test server's base address (from `AoudaTestServer.ServerUrl` and your factory's `HttpClient.BaseAddress`) through configuration or `WebHostBuilder` overrides so the same code paths run in tests as in production.
 
-Exact JWT and OIDC wiring for .NET and TypeScript clients is covered in [Getting-Started-Auth.md](Getting-Started-Auth.md); this guide only ensures the **Aouda side** of the contract is available inside `dotnet test`.
+Exact JWT and OIDC wiring for .NET and TypeScript clients is covered in [Getting-Started-Auth.md](auth.md); this guide only ensures the **Aouda side** of the contract is available inside `dotnet test`.
 
 ---
 
@@ -690,7 +690,7 @@ Unit tests mock Aouda entirely — they are fast and test your application logic
 
 ## See Also
 
-- [Getting Started with Aouda](Getting-Started.md) — Core data operations and embedded mode
-- [Aouda Application Auth Service Guide](Getting-Started-Auth.md) — Auth architecture, quick start, patterns
-- [ADR 0024: Aouda.Testing Package](../decisions/0024-testing-package.md) — Design decisions behind this package
-- [ADR 0023: Authentication & Authorization](../decisions/0023-authentication-and-authorization.md) — Auth architecture overview
+- [Getting Started with Aouda](index.md) — Core data operations and embedded mode
+- [Aouda Application Auth Service Guide](auth.md) — Auth architecture, quick start, patterns
+- [ADR 0024: Aouda.Testing Package](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0024-testing-package.md) — Design decisions behind this package
+- [ADR 0023: Authentication & Authorization](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0023-authentication-and-authorization.md) — Auth architecture overview

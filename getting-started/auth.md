@@ -6,7 +6,7 @@ parent: "Getting Started"
 
 # Aouda Application Auth Service — Complete Guide
 
-> **This document covers using Aouda as an authentication service for your application's end users.** If you need to secure access to the Aouda server itself (database administrator logins, service accounts, CI/CD pipelines), see [Server Authentication in Getting-Started.md](Getting-Started.md#8-server-authentication--securing-database-access).
+> **This document covers using Aouda as an authentication service for your application's end users.** If you need to secure access to the Aouda server itself (database administrator logins, service accounts, CI/CD pipelines), see [Server Authentication in Getting-Started.md](index.md#8-server-authentication--securing-database-access).
 
 ---
 
@@ -21,14 +21,14 @@ parent: "Getting Started"
 
 **Detailed guides (separate pages):**
 
-- **[Architecture Patterns & Deployment](architecture.md)** — Four deployment patterns (backend-mediated, direct-to-database, standalone auth, hybrid) and six deployment scenarios
-- **[Setup & User Flows](setup.md)** — Enabling auth on a database, signup/signin/signout flows, token lifecycle and refresh
-- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, **console provider** (local OTP testing), and server config for password reset and MFA OTP delivery
-- **[Client Integration](client-integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context, **BFF/gateway proxying auth endpoints**
-- **[Use Cases & User Management](use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
-- **[Data Authorization: Three Modes](authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS (`auth-db-pls` + `rlsResolverName`), reference use cases
+- **[Architecture Patterns & Deployment](../auth/architecture.md)** — Four deployment patterns (backend-mediated, direct-to-database, standalone auth, hybrid) and six deployment scenarios
+- **[Setup & User Flows](../auth/setup.md)** — Enabling auth on a database, signup/signin/signout flows, token lifecycle and refresh
+- **[Email, SMS & Notifications](../auth/notifications.md)** — SendGrid, GatewayAPI, **console provider** (local OTP testing), and server config for password reset and MFA OTP delivery
+- **[Client Integration](../auth/client-integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context, **BFF/gateway proxying auth endpoints**
+- **[Use Cases & User Management](../auth/use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
+- **[Data Authorization: Three Modes](../auth/authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS (`auth-db-pls` + `rlsResolverName`), reference use cases
 - **[Direct client access](../guides/direct-client-access.md)** — `mk_pub_*`, listeners. OAuth authorization-code + PKCE is **not shipped**.
-- **[Reference](reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
+- **[Reference](../auth/reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
 
 ---
 
@@ -53,7 +53,7 @@ This is what the Aouda Application Auth Service provides. It is a REST API and S
 
 ### What Application Auth Is NOT
 
-- It is **NOT** database server access control. That is [Server Authentication](Getting-Started.md#8-server-authentication--securing-database-access), a completely separate system.
+- It is **NOT** database server access control. That is [Server Authentication](index.md#8-server-authentication--securing-database-access), a completely separate system.
 - It is **NOT** automatically enabled. You must explicitly enable it per database.
 - It is **NOT** required to use Aouda. If your application handles auth through another service (Auth0, Clerk, your own implementation), you don't need this feature at all.
 - It is **NOT** available in embedded mode. Application Auth requires the Aouda HTTP server.
@@ -332,7 +332,7 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{"name":"myapp","auth":{"enabled":true}}'
 ```
 
-Server admin API keys are database-scoped — specify `databaseRoles` to control exactly which databases the key can access and at what permission level. See [Getting-Started.md §8](Getting-Started.md#8-server-authentication--securing-database-access) for the full server auth reference.
+Server admin API keys are database-scoped — specify `databaseRoles` to control exactly which databases the key can access and at what permission level. See [Getting-Started.md §8](index.md#8-server-authentication--securing-database-access) for the full server auth reference.
 
 ---
 
@@ -471,14 +471,14 @@ The auth database can be used directly as the `{db}` segment in all auth endpoin
 
 JWT claims issued for standalone auth: `iss = http://localhost:5433/api/databases/auth`, `aud = auth`.
 
-See **[Architecture Patterns & Deployment — Pattern E](Auth-Architecture.md)** for the full deployment diagram and multi-service gateway example.
+See **[Architecture Patterns & Deployment — Pattern E](../auth/architecture.md)** for the full deployment diagram and multi-service gateway example.
 
 ---
 
 ## Next Steps
 
-- **[Architecture Patterns & Deployment](Auth-Architecture.md)** — Choose a deployment pattern for your application
-- **[Setup & User Flows](Auth-Setup-And-Flows.md)** — Enable auth and implement signup/signin
-- **[Client Integration](Auth-Client-Integration.md)** — Connect from .NET or TypeScript
-- **[Data Authorization](Auth-Data-Authorization.md)** — Configure partition-level and row-level security
-- **[Reference](Auth-Reference.md)** — API tables, error codes, JWT validation, security best practices
+- **[Architecture Patterns & Deployment](../auth/architecture.md)** — Choose a deployment pattern for your application
+- **[Setup & User Flows](../auth/setup.md)** — Enable auth and implement signup/signin
+- **[Client Integration](../auth/client-integration.md)** — Connect from .NET or TypeScript
+- **[Data Authorization](../auth/authorization.md)** — Configure partition-level and row-level security
+- **[Reference](../auth/reference.md)** — API tables, error codes, JWT validation, security best practices

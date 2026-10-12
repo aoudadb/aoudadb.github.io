@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Auth Setup & User Flows
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
@@ -147,7 +147,7 @@ Password reset, invite emails, and phone MFA require **server-side** notificatio
 | MFA phone challenge | SMS | `Aouda:Auth:Sms:Provider = gatewayapi` + GatewayAPI token, **or** `console` for local testing |
 | MFA TOTP (authenticator app) | — | No notification provider needed |
 
-Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. For local end-to-end testing without SendGrid/GatewayAPI credentials, set `Provider` to **`console`** — OTPs appear in server stdout (see [notifications.md §5](notifications.md#5-console-provider-local-development--testing)).
+Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. For local end-to-end testing without SendGrid/GatewayAPI credentials, set `Provider` to **`console`** — OTPs appear in server stdout (see [notifications.md §5](notifications.md#6-console-provider-cli--event-viewer-interim)).
 
 **Full guide:** [Email, SMS & Notifications](notifications.md) — settings reference, Docker/env examples, SendGrid/GatewayAPI/console providers, troubleshooting.
 

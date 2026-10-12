@@ -13,6 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Links between pages work on the published site (LoadSpeed K55).** The site was built without `jekyll-relative-links`, so
+  every link written as a relative `.md` file — about a thousand, on nearly every page — was published as that file name and
+  answered 404 (`/guides/defaults-reference/sizing.md`); a directory-style link (`../getting-started/`) resolved one level too
+  deep. The plugin is on, the directory-style links are `.md` links, and the leftovers of the engine repo's file names
+  (`Getting-Started-Auth.md`, `Auth-Data-Authorization.md`, `../decisions/…`) point at this site's pages or at the engine repo.
+  Five anchors that named no heading are fixed. `scripts/check-anchors.py` checks every internal link and anchor of a built
+  site (README, "Checking links").
+
 - **A database's memory cap is `maxMemoryShareBytes`; `maxMemoryBytes` is ignored (BL-980, LoadSpeed S10b; breaking).** The
   create-database request (`POST /api/databases`) and every database response's `options` carry `maxMemoryShareBytes` — a cap on
   that database's share of the one server budget, as `maxMemoryBytes` always was. A request that still sends `maxMemoryBytes`
@@ -559,7 +567,7 @@ Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
 
 - **Deployment has real pages now, and they describe what is actually shipped (BL-629).**
   New [Linux (systemd)](deployment/linux.md), [Windows Service](deployment/windows.md) and
-  [Docker](deployment/docker.md) guides; [Deployment](deployment/) becomes a router to them;
+  [Docker](deployment/docker.md) guides; [Deployment](deployment/index.md) becomes a router to them;
   `getting-started` §16 is rewritten against what exists rather than what was planned.
   - ⚠️ **Several things these pages used to say were not true.** The deployment index named six
     hosting modes and had a page for one, in a table whose Windows row had three cells and two
@@ -875,7 +883,7 @@ Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
 - **Catalog GET is metadata-only; linkage is no longer omitted.** `GET`/`list` `/api/databases` now document `auth.enabled` / `auth.database` (never `mk_*`). `authDatabaseKind: "none"` on a data DB does not mean unlinked. HTTP API v2.6. [HTTP API](reference/http-api.md#get-apidatabasesname).
 - **Create role contract.** `POST …/auth/admin/roles` requires `name`; `permissions` is optional (empty grants nothing). `actions` is a string, not an array. 400 bodies include `error` / `suggestion`. [Auth reference](auth/reference.md), [Use cases](auth/use-cases.md).
 - **Health vs ready.** Wait on `GET /ready` and `GET /api/databases/{name}` `state=Active` before schema apply; `/health` is liveness only. [`/ready` is unchanged](reference/http-api.md#get-health) for a `Dropping` sibling database.
-- **P43 write-side authorization (docs).** Public pages now name the code's RLS value sources (`UserId`, `Literal`, `PartitionGrant`), admin-API resolver authoring, identity stamp (`"derived": { "identity": "subject" }`), `plsClaimBinding`, `writeCheckRules`, and per-user claims. Conformance fixture: [`examples/p43-write-side/`](examples/p43-write-side/).
+- **P43 write-side authorization (docs).** Public pages now name the code's RLS value sources (`UserId`, `Literal`, `PartitionGrant`), admin-API resolver authoring, identity stamp (`"derived": { "identity": "subject" }`), `plsClaimBinding`, `writeCheckRules`, and per-user claims. Conformance fixture: [`examples/p43-write-side/`](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side).
 - **P42 catalog directory (operators).** Live catalog is `catalog.root.json` plus per-table shards. Opening a pre-P42 database migrates forward; there is no downgrade. Lazy catalog residency is the shipped default. [Storage](guides/storage.md).
 
 ## 0.1.10 — 2026-08-23
@@ -936,7 +944,7 @@ Server **0.1.6** treats `MaxTotalRamBytes` as a process RSS ceiling (default ~70
 ### Result
 Aouda became capable of ingesting, encoding, and reading columnar pages fully in-memory and on-disk.
 
-📄 *See also:* [P0-COMPLETION.md](./P0-COMPLETION.md)
+📄 *See also:* [P0-COMPLETION.md](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P0-COMPLETION.md)
 
 ---
 
@@ -957,7 +965,7 @@ Aouda became capable of ingesting, encoding, and reading columnar pages fully in
 ### Result
 Aouda now provides full **durable write semantics** — all data survives process restarts, and WAL replay guarantees correctness.
 
-📄 *See also:* [P1-COMPLETION.md](./P1-COMPLETION.md)
+📄 *See also:* [P1-COMPLETION.md](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P1-COMPLETION.md)
 
 
 ---

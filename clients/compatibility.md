@@ -107,7 +107,7 @@ While `@aouda/client` is `0.x`:
 
 | Topic | Location |
 |-------|----------|
-| **Cross-repo bump procedure (agents)** | Shared docs repo: `Cross-Repo-Release-And-Version-Bump.md` (chain map). **This repo:** [`dev/Release-And-Version-Bump.md`](../dev/Release-And-Version-Bump.md). Server: `aouda/docs/dev/Release-And-Version-Bump.md`. |
+| **Cross-repo bump procedure (agents)** | Shared docs repo: `Cross-Repo-Release-And-Version-Bump.md` (chain map). **This repo:** [`dev/Release-And-Version-Bump.md`](https://github.com/aoudadb/aoudadb.github.io/blob/main/dev/Release-And-Version-Bump.md). Server: `aouda/docs/dev/Release-And-Version-Bump.md`. |
 | npm Changesets + publish | [aouda-client-ts `docs/dev/Release-Process.md`](https://github.com/aouda/aouda-client-ts/blob/main/docs/dev/Release-Process.md) |
 | Studio pin + local link | [aouda-studio `docs/dev/Dependency-Policy.md`](https://github.com/aouda/aouda-studio/blob/main/docs/dev/Dependency-Policy.md) |
 | TypeScript client API | [TypeScript Client](./typescript.md) |

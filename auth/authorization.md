@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Data Authorization: Three Modes
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
@@ -358,7 +358,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 
 This resolver produces the compound predicate: `owner_id = '<userId>' OR team_id IN ('<team1>', '<team2>', ...)`.
 
-**Literal comparison is a string.** A Bool column does **not** match Literal `"true"` (`true.ToString()` is `"True"`). Prefer a String column (`"true"` / `"false"`), as in the [write-side fixture](../examples/p43-write-side/).
+**Literal comparison is a string.** A Bool column does **not** match Literal `"true"` (`true.ToString()` is `"True"`). Prefer a String column (`"true"` / `"false"`), as in the [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side).
 
 ### 19.5.2 Setup: Create the RLS Table
 
@@ -430,7 +430,7 @@ For writes to `auth-db-rls` tables, Aouda evaluates a **write-check** predicate 
 
 **Write-check replaces the read predicate** when `writeCheckRules` is present on the resolver. Absent `writeCheckRules` ⇒ write-check = the read rules (today's behavior). To require both membership and identity, put both rules in `writeCheckRules` — do not assume they are ANDed automatically.
 
-The [write-side fixture](../examples/p43-write-side/) uses a SenderId-only write-check so a user can insert a stamped message into a private room they cannot **read**.
+The [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a SenderId-only write-check so a user can insert a stamped message into a private room they cannot **read**.
 
 | Write Operation | Write-check matches row? | Result |
 |---|:---:|:---:|
@@ -680,7 +680,7 @@ curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/rls-resolver
 
 ### Worked example — public OR member + identity stamp
 
-Published fixture (byte-identical in the engine tree): [`examples/p43-write-side/`](../examples/p43-write-side/). Schema apply creates tables; [`auth-setup.json`](../examples/p43-write-side/auth-setup.json) is **admin HTTP** (users, roles, resolvers, grants) — proof that resolvers are not schema apply.
+Published fixture (byte-identical in the engine tree): [`examples/p43-write-side/`](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side). Schema apply creates tables; [`auth-setup.json`](https://github.com/aoudadb/aoudadb.github.io/blob/main/examples/p43-write-side/auth-setup.json) is **admin HTTP** (users, roles, resolvers, grants) — proof that resolvers are not schema apply.
 
 - `rooms` — `auth-db-rls`: `id In PartitionGrant{room_membership} Or IsPublic Eq Literal true`. Alice has zero grants and still sees the public room. `IsPublic` is **String**.
 - `messages` — read membership; `writeCheckRules` is `SenderId Eq UserId` only. Alice can insert a stamped row into a private room she cannot read.

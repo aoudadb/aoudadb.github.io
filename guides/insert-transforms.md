@@ -105,7 +105,7 @@ Apply rejects unknown ops and caller-supplied values for derived columns (`TRANS
 
 Unknown sources (`claim:…` on a derived identity column that is not bindable, or a misspelled source) fail apply or write with `IDENTITY_SOURCE_UNRESOLVABLE` / `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE`. Identity in `update` `set` / `setExpr` is not supported.
 
-Worked schema: [write-side fixture](../examples/p43-write-side/aouda.schema.json). Authorization for that stamp: [Data authorization](../auth/authorization.md#worked-example--public-or-member--identity-stamp).
+Worked schema: [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/blob/main/examples/p43-write-side/aouda.schema.json). Authorization for that stamp: [Data authorization](../auth/authorization.md#worked-example--public-or-member--identity-stamp).
 
 ### `call` — string and rounding functions
 

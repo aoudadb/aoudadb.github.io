@@ -330,7 +330,7 @@ table left demotable on purpose, so unbounded growth pages to disk instead of ex
 - [Defaults Reference](defaults-reference.md) — every derived default (memory, bulk load, partitioning), worked at several host sizes
 - [Server multi-database](server-multi-database.md) — per-database config keys and API surface
 - [Studio guide — Aouda.Setup](studio.md#12-aoudasetup-installer) — interactive install sequence
-- [Deployment](../deployment/) — Docker, Kubernetes, Windows Service
+- [Deployment](../deployment/index.md) — Docker, Kubernetes, Windows Service
 - [Replication](replication.md) — replica set and archive settings
 - [Backup](backup.md) — archive and scheduled backup configuration
 - [Direct client access](direct-client-access.md) — `Aouda:Listeners:DataPlane:Bind`, per-listener CORS, identity quotas, named-query cost caps

@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Auth Reference
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
@@ -386,7 +386,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
 
-**Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](Auth-Data-Authorization.md#198-admin-api-partition-grants)):
+**Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-partition-grants)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -394,7 +394,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 
-**RLS Resolvers** — define within-partition row filter rules ([§19.9](Auth-Data-Authorization.md#199-admin-api-rls-resolvers)):
+**RLS Resolvers** — define within-partition row filter rules ([§19.9](authorization.md#199-admin-api-rls-resolvers)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -889,7 +889,7 @@ def verify_token(token: str) -> dict:
 
 Application Auth is implemented in the **Aouda HTTP server** — OIDC discovery, JWKS, signup, signin, and JWT issuance are not available through `Aouda.Embedded`. That means **integration tests** that exercise real auth flows need either a running server (`aouda start`) or an **in-process** server inside the test process (for example `Aouda.Testing` / `DevServerHost` in tests).
 
-The **`Aouda.Testing`** NuGet package starts a full Aouda server backed by ASP.NET Core `TestHost` (no real ports, no external process). It exposes API keys, OIDC authority URLs, and fast engine-direct helpers (`CreateUserAsync`, `SignInAsync`) for test setup. See the full guide: **[Getting-Started-Testing.md](Getting-Started-Testing.md)** ([ADR 0024](../decisions/0024-testing-package.md)).
+The **`Aouda.Testing`** NuGet package starts a full Aouda server backed by ASP.NET Core `TestHost` (no real ports, no external process). It exposes API keys, OIDC authority URLs, and fast engine-direct helpers (`CreateUserAsync`, `SignInAsync`) for test setup. See the full guide: **[Getting-Started-Testing.md](../getting-started/testing.md)** ([ADR 0024](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0024-testing-package.md)).
 
 For **unit tests** of your own business logic, mocking auth clients or tokens remains appropriate — use `Aouda.Testing` when you need **end-to-end** behavior against the real Aouda auth stack.
 
@@ -1443,9 +1443,9 @@ Remove-Item -Recurse -Force C:\Users\you\AppData\Local\aouda\derive
 
 - **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, **console provider**, server configuration for OTP delivery
 
-- **[Getting Started](Getting-Started.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
-- **[ADR 0023: Authentication and Authorization](../decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC
-- **[ADR 0025: Auth-DB-Resolved Authorization (ADRA)](../decisions/0025-adra-auth-db-resolved-authorization.md)** — Full ADRA design rationale, auth modes, resolver model, performance analysis
+- **[Getting Started](../getting-started/index.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
+- **[ADR 0023: Authentication and Authorization](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC
+- **[ADR 0025: Auth-DB-Resolved Authorization (ADRA)](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0025-adra-auth-db-resolved-authorization.md)** — Full ADRA design rationale, auth modes, resolver model, performance analysis
 - **[HTTP API](../reference/http-api.md)** — Wire contract including auth headers
-- **[P12 Auth Tasks](../tasks/P12-Authentication-Authorization-Tasks.md)** — P12 implementation history
-- **[P14 ADRA Tasks](../tasks/P14-ADRA-Tasks.md)** — P14 ADRA implementation overview
+- **[P12 Auth Tasks](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P12/P12-Authentication-Authorization-Tasks.md)** — P12 implementation history
+- **[P14 ADRA Tasks](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P14/P14-ADRA-Tasks.md)** — P14 ADRA implementation overview

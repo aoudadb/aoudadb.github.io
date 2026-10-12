@@ -8,7 +8,7 @@ has_children: true
 
 This is the comprehensive guide to using Aouda. It covers both deployment models (embedded and server), data operations, schema management, and server authentication. By the end, you will understand how to create databases, insert and query data, and secure your Aouda server.
 
-**This guide does NOT cover the Application Auth Service** (using Aouda as an authentication provider for your app's end users — signup, signin, sessions, JWTs for end users). That is a separate product feature documented in [Getting-Started-Auth.md](Getting-Started-Auth.md). Ad-hoc insert/query examples below are for **admin and service** callers. Browser-tier apps use [named queries](../guides/named-queries.md) on the [data-plane listener](../guides/direct-client-access.md).
+**This guide does NOT cover the Application Auth Service** (using Aouda as an authentication provider for your app's end users — signup, signin, sessions, JWTs for end users). That is a separate product feature documented in [Getting-Started-Auth.md](auth.md). Ad-hoc insert/query examples below are for **admin and service** callers. Browser-tier apps use [named queries](../guides/named-queries.md) on the [data-plane listener](../guides/direct-client-access.md).
 
 ---
 
@@ -127,7 +127,7 @@ Do not use application auth keys (`mk_anon_...` / `mk_svc_...`) as your Studio c
 
 ---
 
-For app-auth setup, initialize server admin first, then create/link databases explicitly (see [Getting-Started-Auth.md](Getting-Started-Auth.md)).
+For app-auth setup, initialize server admin first, then create/link databases explicitly (see [Getting-Started-Auth.md](auth.md)).
 For the embedded / in-process path (no server): [Section 3](#3-embedded-mode--in-process-database).
 
 ---
@@ -146,9 +146,9 @@ For the embedded / in-process path (no server): [Section 3](#3-embedded-mode--in
 10. [Managing Multiple Databases](#10-managing-multiple-databases)
 11. [Hot/Cold Storage and Memory Control](#11-hotcold-storage-and-memory-control)
 12. [Branches](#12-branches)
-13. [Backup and Restore](Getting-Started-Backup.md)
+13. [Backup and Restore](backup.md)
 14. [What's Next](#14-whats-next)
-15. [Contributor / Internal Developer Workflows](Aouda-Developer.md)
+15. [Contributor / Internal Developer Workflows](https://github.com/aoudadb/aouda/blob/main/docs/dev/Aouda-Developer.md)
 16. [Native Production Hosting (Windows + Linux)](#16-native-production-hosting-windows--linux) — including Aouda.Setup interactive installer (§16.9)
 
 ---
@@ -403,7 +403,7 @@ var recent = await db.Engine.Table("sensors")
 | `MemoryBudget` | `long?` | `null` | `null` (no limit); any non-negative `long` (bytes) | Maximum memory in bytes. `null` = no limit. |
 | `TreatMissingAsEmpty` | `bool` | `true` | `true`, `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
-**Integration tests that need Application Auth** (OIDC discovery, JWT validation, real signup/signin against the HTTP API) cannot use embedded mode alone, because Application Auth requires the Aouda HTTP server. For those tests, use the **`Aouda.Testing`** package to start an in-process server from `dotnet test` — see [Getting-Started-Testing.md](Getting-Started-Testing.md).
+**Integration tests that need Application Auth** (OIDC discovery, JWT validation, real signup/signin against the HTTP API) cannot use embedded mode alone, because Application Auth requires the Aouda HTTP server. For those tests, use the **`Aouda.Testing`** package to start an in-process server from `dotnet test` — see [Getting-Started-Testing.md](testing.md).
 
 ---
 
@@ -452,7 +452,7 @@ For development environments that mirror production server auth (without app aut
 
 > **Tip for AI Agents**: Use explicit startup + API flows (`aouda start`, `POST /api/databases`, auth setup endpoints). For managed or production instances, prefer the HTTP admin API and future MCP tools over shelling out to the server executable.
 
-> **Internal/source workflows:** If you are developing Aouda itself (running from `src/`, local tool packaging, IDE task wiring, AppHost setup), use [Aouda-Developer.md](Aouda-Developer.md). This user guide intentionally stays product-facing.
+> **Internal/source workflows:** If you are developing Aouda itself (running from `src/`, local tool packaging, IDE task wiring, AppHost setup), use [Aouda-Developer.md](https://github.com/aoudadb/aouda/blob/main/docs/dev/Aouda-Developer.md). This user guide intentionally stays product-facing.
 
 #### Option B: Configuration File (local development)
 
@@ -1260,13 +1260,13 @@ Aouda has **two independent auth systems** that serve different purposes:
 
 They can be used independently, together, or not at all. A database can have server auth only, app auth only, both, or neither.
 
-For complete Application Auth documentation, see [Getting-Started-Auth.md](Getting-Started-Auth.md).
+For complete Application Auth documentation, see [Getting-Started-Auth.md](auth.md).
 
 ---
 
 ## 8. Server Authentication — Securing Database Access
 
-> **This section is about controlling who can connect to the Aouda server and access databases.** This is the equivalent of SQL Server authentication, PostgreSQL roles, or MongoDB SCRAM. It has nothing to do with authenticating your application's end users — that is a separate feature called the [Application Auth Service](Getting-Started-Auth.md).
+> **This section is about controlling who can connect to the Aouda server and access databases.** This is the equivalent of SQL Server authentication, PostgreSQL roles, or MongoDB SCRAM. It has nothing to do with authenticating your application's end users — that is a separate feature called the [Application Auth Service](auth.md).
 
 ### The Server Auth Hierarchy
 
@@ -1644,7 +1644,7 @@ curl http://localhost:5433/api/databases/cache/query \
 
 ### Server Auth vs Application Auth API Keys
 
-If a database has Application Auth enabled (see [Getting-Started-Auth.md](Getting-Started-Auth.md)), it also has auto-generated **app API keys** (`mk_anon_...`, `mk_svc_...`). These are different from server API keys:
+If a database has Application Auth enabled (see [Getting-Started-Auth.md](auth.md)), it also has auto-generated **app API keys** (`mk_anon_...`, `mk_svc_...`). These are different from server API keys:
 
 | | Server API Keys (`mk_srv_`) | App API Keys (`mk_anon_`, `mk_svc_`) |
 |---|---|---|
@@ -1869,18 +1869,18 @@ await client.branches.delete("feature-x");
 
 ### Backup and Restore
 
-- **[Backup and Restore](Getting-Started-Backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). REST and TypeScript client APIs for exact restore and point-in-time recovery. Retention and GC.
+- **[Backup and Restore](backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). REST and TypeScript client APIs for exact restore and point-in-time recovery. Retention and GC.
 
 ### Authentication & Authorization
 
-- **[Application Auth Service](Getting-Started-Auth.md)** — Use Aouda as an authentication provider for your app's end users (signup, signin, JWTs, Partition-Level Security, multi-tenancy). Covers the two-layer auth model, architecture patterns A-D, API keys, and AI agent workflows.
-- **[Auth ADR (0023)](../decisions/0023-authentication-and-authorization.md)** — The architecture decision record covering the full auth design, including Partition-Level Security and RBAC.
+- **[Application Auth Service](auth.md)** — Use Aouda as an authentication provider for your app's end users (signup, signin, JWTs, Partition-Level Security, multi-tenancy). Covers the two-layer auth model, architecture patterns A-D, API keys, and AI agent workflows.
+- **[Auth ADR (0023)](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0023-authentication-and-authorization.md)** — The architecture decision record covering the full auth design, including Partition-Level Security and RBAC.
 
 ### General
 
-- **[Testing with Aouda.Testing](Getting-Started-Testing.md)** — In-process integration tests, including Application Auth, xUnit/NUnit/MSTest fixtures, and CI-friendly `dotnet test` workflows.
-- **[Architecture](../ARCHITECTURE.md)** — Deep dive into Aouda's technical design.
-- **[ADR Index](../decisions/)** — All architecture decision records.
+- **[Testing with Aouda.Testing](testing.md)** — In-process integration tests, including Application Auth, xUnit/NUnit/MSTest fixtures, and CI-friendly `dotnet test` workflows.
+- **[Architecture](https://github.com/aoudadb/aouda/blob/main/docs/ARCHITECTURE.md)** — Deep dive into Aouda's technical design.
+- **[ADR Index](https://github.com/aoudadb/aouda/tree/main/docs/decisions)** — All architecture decision records.
 - **[HTTP API](../reference/http-api.md)** — Wire contract, including authentication headers and error codes.
 - **[Aouda Studio](https://github.com/aouda/aouda-studio)** — Web management console.
 
@@ -1888,7 +1888,7 @@ await client.branches.delete("feature-x");
 
 ## 15. Contributor / Internal Developer Workflows
 
-Internal contributor workflows (running Aouda from source, local `.nupkg` tool distribution, IDE task wiring, AppHost orchestration, and source-build setup) are documented in [Aouda-Developer.md](Aouda-Developer.md).
+Internal contributor workflows (running Aouda from source, local `.nupkg` tool distribution, IDE task wiring, AppHost orchestration, and source-build setup) are documented in [Aouda-Developer.md](https://github.com/aoudadb/aouda/blob/main/docs/dev/Aouda-Developer.md).
 
 This guide intentionally stays focused on Aouda users and production-facing usage.
 

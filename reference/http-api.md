@@ -992,6 +992,7 @@ without one UTF-16 code units, which put a character at U+E000–U+FFFF after an
 Default `false` — omitted, existing payloads and named-query hashes are unaffected. Matching then uses ordinal, case-insensitive comparison (`StringComparison.OrdinalIgnoreCase`), not a locale collation. Two things it deliberately does **not** change: primary-key/unique-column uniqueness stays always case-sensitive, so a case-insensitive `eq` against such a column can return more than one row if case-variant duplicates exist; and it never satisfies the [partition-filter rule](../guides/browser-tier-read-limits.md), the same treatment `like` already gets. A case-insensitive condition also skips zone-map/bloom-filter pruning for that predicate (full-page scan), same as `like`.
 
 **`like` semantics:**
+{: #like-semantics}
 
 - `%` matches any sequence of characters, including none. `_` matches exactly one character.
 - `\` escapes `%`, `_`, or `\` itself. A pattern that ends in a lone `\`, or escapes anything else, is

@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Auth Use Cases & User Management
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
