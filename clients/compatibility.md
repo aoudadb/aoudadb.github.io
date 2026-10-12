@@ -89,6 +89,13 @@ While `@aouda/client` is `0.x`:
 - Pin **exact** versions in production (`"0.0.1"`, not `"^0.0.1"`).
 - Prefer **patch** releases for additive API while on the `0.0.x` line (`0.0.3` → `0.0.4`). A Changesets **minor** bump advances the middle digit (`0.0.3` → `0.1.0`).
 - Regenerate TypeScript schema types after server schema changes: `npx @aouda/client generate`.
+- **Nothing older is kept compatible** (**next train**). Pre-1.0 the server keeps no compatibility path for older files,
+  databases or clients: upgrade the server, its replicas and the SDKs together, and restore older data from a backup taken by
+  the new build (or re-create it). In particular: the replication stream speaks **protocol v4 only** — a primary closes a
+  v1 / v2 / v3 handshake unanswered, so every node runs the same build; an application database accepts only access tokens
+  carrying its URL issuer (`{base}/api/databases/{db}`) — a token issued as `"aouda"` is `401`, while `"aouda"` remains
+  the issuer of the server auth database's own tokens; `GET /api/tables` drops `rowCountIsExact`;
+  and `Aouda.Client` treats a `415` on an insert frame as an error rather than re-sending JSON.
 
 ---
 

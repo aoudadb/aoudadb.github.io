@@ -1322,6 +1322,8 @@ Auth state is stored in an internal database called `_serverauth`. This database
 
 When the server starts with no admin accounts, it enters **setup mode**. In setup mode, only the bootstrap endpoint is available, and only from localhost.
 
+Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, next train**) carries `Retry-After: 5`.
+
 You can inspect first-run state in a machine-readable way:
 
 ```bash

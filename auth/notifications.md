@@ -502,6 +502,7 @@ Prefer `AOUDA_AUTH__EMAIL__PROVIDER` / `AOUDA_AUTH__SMS__PROVIDER` (see [Server 
 
 - Studio / `PUT /admin/notifications/*` **cannot** set `Provider: console` (API rejects it). Use env vars or `appsettings` only. Use **`capture`** when you need Studio/API configuration.
 - A SendGrid/GatewayAPI/capture row stored in `_settings` **overrides** env until you Clear it in Studio → Notification Providers, or `DELETE /admin/notifications/email` (and SMS twin).
+- (**BL-944, next train**) A `DELETE /admin/notifications/email` or `/sms` the server refuses for capacity answers **`503` + `Retry-After`**, and the stored setting — and the provider in use — stay as they were; retry it. Up to 0.3.x it answered `2xx` without deleting, and the provider came back at the next start.
 - After invite, password-reset, or MFA challenge, search Event Viewer for `[Aouda Auth — Console Email]` or `[Aouda Auth — Console SMS]`. Category should be `ConsoleEmailService` / `ConsoleSmsService`, not `NullEmailService`.
 
 SMTP → Mailpit for HTML rendering fidelity is tracked as backlog **BL-133** (email only; does not solve SMS).

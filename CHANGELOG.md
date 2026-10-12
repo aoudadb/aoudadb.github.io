@@ -13,6 +13,20 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A refusal is answered as one everywhere it was not yet (BL-944, LoadSpeed K46).** A refusal no other code names is
+  `503 SERVICE_UNAVAILABLE` with `Retry-After`, never a `500`. `SERVER_STARTING` now carries `Retry-After: 5`;
+  `SETUP_REQUIRED` and `SERVER_AUTH_NOT_CONFIGURED` deliberately carry none — an operator ends them, not time. A refused
+  `DELETE /admin/notifications/email` or `/sms` is `503` + `Retry-After` and leaves the setting as it was (it answered `2xx`
+  and the provider came back at the next start). A refusal wrapped in another error on
+  `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE` for the result ceiling), not
+  `400 INVALID_REQUEST`. A self-signup refused part-way is rolled back, so its retry does not find the email taken.
+  [HTTP API — server errors](reference/http-api.md#server-errors-5xx).
+- **`Aouda.Client`: a write stream survives a reconnect, and a `415` on an insert frame is an error (BL-987, BL-980,
+  LoadSpeed K42 / K43).** A write or close during a reconnect waits for the stream's re-open instead of failing the stream
+  for good; a write already sent when the connection dropped fails with `AoudaConnectionException` — its rows may or may not
+  have been written — instead of hanging. A `415` on a frame is an `AoudaException`: the SDK no longer re-sends the insert as
+  JSON or stays on JSON for five minutes (that served only an older server behind the same address; `@aouda/client` keeps
+  it). [.NET client](clients/index.md), [Real-time](guides/real-time.md).
 - **The catalog and schema history read only what this build writes (BL-980, LoadSpeed K42; breaking).** A catalog-WAL record
   in an older layout or of an unknown type, an unknown `PartitionOptions` member, and a table without a data directory (made
   before BL-398) are refused with an error naming what was found, instead of being skipped or guessed. Merging or deleting a

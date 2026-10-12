@@ -249,6 +249,11 @@ Documented intent that is not currently fully productized:
   - target-table match.
 - Write stream lifecycle:
   - open -> rows (sequence increasing) -> ack progression -> close.
+  - (.NET, **BL-987, next train**) On a reconnect `Aouda.Client` re-opens each write stream before anything else is sent on it:
+    a `WriteAsync` or `CloseAsync` during the reconnect waits for the re-open (a stream being closed is re-opened too, so its
+    close is delivered). A write already sent when the connection dropped fails with `AoudaConnectionException` — its rows may
+    or may not have been written, so check before re-sending them — and the stream carries on on the new connection. Up to
+    0.3.x such a write could race the re-open and fail the stream for good ("No open stream with id …"), or hang.
 - Transport strategy:
   - primary WebSocket, optional long-poll fallback for restricted environments.
 
