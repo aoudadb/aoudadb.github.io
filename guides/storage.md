@@ -158,6 +158,10 @@ If you run server defaults and do not set per-database overrides:
 - Catalog durability:
   - `CatalogStore` JSON snapshot persistence (`catalog/catalog.json`) with atomic temp-write + move.
   - Additional catalog WAL/checkpoint classes (`FileCatalog`, `CatalogWal`, `CatalogCheckpoint`) are implemented in catalog layer.
+  - (**BL-980, next train**) The catalog reads only what this build writes, and refuses the rest with an error naming what it
+    found: a catalog-WAL record in an older layout or of an unknown type (they were skipped), an unknown `PartitionOptions`
+    member, a table without a data directory (made before BL-398), a segment entry without a row count. Pre-1.0 nothing is
+    migrated: a database written by an older build is restored from a backup taken by this version, or re-created.
 - WAL durability and replay:
   - Append-only WAL frame writes (`WalWriter`), replay on restart (`WalReplayDriver`, `WalReplayer` paths), segment rolling and retention components.
   - Per-table durability override model (`TableDurabilityOptions`) is implemented.
@@ -407,7 +411,8 @@ it is neither, and the sections were never separated. They are now.
 #### D.1 — The sound part: physical layout, positions, and reclamation
 
 1. **Physical layout.** The production WAL is a segmented log under `{db}/wal/`: segments named
-   `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json`, a crash-recovery control
+   `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json` (it carries the WAL root's id; (**BL-980, next train**) a
+   published manifest without one — only a build before BL-330 / BL-438 wrote one — is refused when the WAL root opens), a crash-recovery control
    file `CHECKPOINT`, and a portioned-recovery resume sidecar `RECOVERY`. Segment size is
    `clamp(MaxWalBytes / 16, 8 MB, 64 MB)`. A leftover monolithic `insert.wal` from before
    segmentation is refused at open — (**BL-934, next train**) for good: `aouda wal convert` is removed, so restore from a backup

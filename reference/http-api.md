@@ -1585,7 +1585,7 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
 | `config` | object | Yes* | Alternative: embedded object; server serializes to JSON if `configJson` omitted. |
 
-`configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000).
+`configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000). AggregateConfig's `groupByColumns` entries are objects — `{ "column": "region" }`, or `{ "column": "time", "function": "TruncateToHour" }` for a time bucket. (**BL-980, next train**) The v1 plain-string form (`"groupByColumns": ["region"]`) is `400 INVALID_REQUEST`, and a stored definition in that form is refused when it is read; up to 0.3.x both were read.
 
 **Query response** (`POST .../query`):
 
@@ -1834,12 +1834,11 @@ List all tables with statistics.
 |-------|------|-------------|
 | `name` | string | Table name |
 | `columnCount` | number | Number of columns |
-| `rowCount` | number | Total row count across all segments |
-| `createdAt` | string | ISO 8601 timestamp when table was created (empty for legacy tables) |
-| `lastModifiedAt` | string | ISO 8601 timestamp when table/data was last modified (empty for legacy tables) |
+| `rowCount` | number | Total row count across all segments — always the exact total. (**BL-980, next train**) `rowCountIsExact` is gone: a catalog segment entry without a row count (only an older build wrote one) is refused rather than counted as a lower bound, so the flag had nothing left to say. Both SDKs drop it (`TableSummary.rowCountIsExact` in `@aouda/client`) |
+| `createdAt` | string | ISO 8601 timestamp when table was created. (**BL-980, next train**) Always set — including for a table a replica or a point-in-time replay registered from the log, which carried none before |
+| `lastModifiedAt` | string | ISO 8601 timestamp when table/data was last modified. (**BL-980, next train**) Always set, as `createdAt` |
 | `sizeBytes` | number | Approximate size in bytes across all segments |
 | `policy` | object | Storage policy |
-| `rowCountIsExact` | boolean | `false` when `rowCount` is a lower bound (a segment's count was unknown) |
 | `keyMapResident` | boolean, optional | (**ColumnarMerge S05, 0.2.0**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, when the server's memory governor refused it, or when it evicted part of the map to make room (**WorkloadCore, 0.3.0**) — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
 
 #### `GET /api/tables/{name}`
@@ -3102,7 +3101,7 @@ List all backups at the configured destination, ordered newest-first.
 
 `warning` is non-null when no destination is configured or when the destination is unavailable.
 
-`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0. Position `0` means *unknown* (ADR 0044 D-2) — that backup is exact-restore-only.
+`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0. Position `0` means *unknown* (ADR 0044 D-2) — that backup is exact-restore-only. (**BL-980, next train**) A point-in-time restore also needs the WAL-root incarnation the manifest records; a backup without one (a database without a WAL, or a backup taken by an older build) is refused at staging even when `pitrEligible` is `true` — restore it exactly instead.
 
 #### `POST /admin/backup/restore/{id}`
 
@@ -3184,7 +3183,7 @@ PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044
 | 400 Bad Request | Neither field supplied; `targetTime` is in the future; `targetTime` is at or before the backup's `createdUtc`; or the backup recorded WAL position `0` (unknown — exact-restore-only, ADR 0044 D-2) |
 | 404 Not Found | Backup ID does not exist at the destination, or no backup run exists at or before `targetTime` |
 | 409 Conflict | A backup operation is already in progress |
-| 500 Internal Server Error | Point-in-time staging or replay failed. The body names the database and the error. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. |
+| 500 Internal Server Error | Point-in-time staging or replay failed — (**BL-980, next train**) among them a backup that records no WAL-root incarnation, and a replay that meets a WAL frame or catalog-DDL record this build does not read. The body names the database and the error. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. |
 | 503 Service Unavailable | Engine not initialized |
 
 #### `GET /admin/backup/schedule`

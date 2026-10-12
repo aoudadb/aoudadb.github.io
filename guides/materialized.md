@@ -316,7 +316,7 @@ results are keyed by identity rather than time, and are not clustered.
 - Aggregate MQ extensions (P28):
   - `FIRST`/`LAST` aggregate functions with `orderByColumn` + `descending` ordering, enabling OHLC (Open/High/Low/Close) candle patterns.
   - Derived time-bucket group-by expressions: `{ "column": "time", "function": "TruncateToHour" }` or `"TruncateToMinute"` alongside plain column group-by. Group keys are stored as Int64 epoch milliseconds (allocation-free integer arithmetic).
-  - `AggregateConfig` bumped to v2; v1 (plain string `groupByColumns`) is still parsed transparently — no migration required for existing MQ definitions.
+  - `AggregateConfig` bumped to v2: each `groupByColumns` entry is an object (`{ "column": "region" }`). (**BL-980, next train**) The v1 plain-string form is **refused** — a create request carrying it gets `400`, and a stored definition in that form is refused when it is read; up to 0.3.x it was parsed transparently. Pre-1.0 there is no migration: drop and re-create such a query with the object form.
 - Incremental maintenance:
   - Update routing via `MaterializedQuerySubscriptionManager` with `Async` and `Sync` modes.
   - Guard against infinite loops for result-table events.
@@ -409,7 +409,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Correct no-duplicate result-table reads after flush | No | Yes | No | P11 R8 handoff report | Known engine bug |
 | `FIRST`/`LAST` aggregate functions with ordering | Yes | No | No | P28 S2, `AggregateMaintainer`, `AggregateConfig.CurrentVersion == 2` | Enables OHLC candle patterns; requires `orderByColumn` + `descending` fields |
 | Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
-| `AggregateConfig` v1 backward compatibility | Yes | No | No | P28 S2, implicit string → `GroupByExpression` conversion | Existing v1 definitions parse without migration |
+| ~~`AggregateConfig` v1 backward compatibility~~ | No | — | — | P28 S2; removed by BL-980 | (**next train**) A v1 plain-string `groupByColumns` is refused (`400` on create; a stored one is refused when read) |
 | Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
 | Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, the table's pass (WorkloadCore S10) | All four MQ types brought current by the table's pass, started at the commit (**WorkloadCore S10, 0.3.0**; they accumulated during the load before); queries it cannot fold or apply are rebuilt. `MemoryOnly` sources skipped |
 | `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Failed; awaitable Task |
@@ -468,7 +468,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 - Routing decision:
   - Planner result that says "serve from MQ result table" or "scan base table."
 - `GroupByExpression` (P28):
-  - Either a plain column name (backward-compatible) or a derived time-bucket expression `{ column, function }` where function is `TruncateToHour` or `TruncateToMinute`. Group keys for derived expressions are stored as Int64 epoch milliseconds so candle result tables remain first-class time-series tables (range-queryable, partitionable).
+  - Either a plain column `{ column }` or a derived time-bucket expression `{ column, function }` where function is `TruncateToHour` or `TruncateToMinute`. Group keys for derived expressions are stored as Int64 epoch milliseconds so candle result tables remain first-class time-series tables (range-queryable, partitionable).
   - **A null group is a group of its own (**BL-691, 0.2.0**).** Grouping by a nullable column gives the rows with a null value their own result row, whose key reads back as `null` — it no longer shares a row (or a key) with the rows whose value is `0` / the type's default. A result created before this release keeps a non-nullable key column; drop and re-create it to get the null group.
 - `FIRST`/`LAST` aggregate (P28):
   - Aggregate function that returns the value of `column` at the row with the minimum (`FIRST`/ascending) or maximum (`LAST`/descending) value of `orderByColumn`. The aggregate maintainer tracks the running extreme value of `orderByColumn` alongside each group's aggregate state. This enables OHLC candle patterns: Open = `FIRST(bid, orderBy=time asc)`, Close = `LAST(bid, orderBy=time asc)`.

@@ -13,6 +13,32 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **The catalog and schema history read only what this build writes (BL-980, LoadSpeed K42; breaking).** A catalog-WAL record
+  in an older layout or of an unknown type, an unknown `PartitionOptions` member, and a table without a data directory (made
+  before BL-398) are refused with an error naming what was found, instead of being skipped or guessed. Merging or deleting a
+  branch without its `base-catalog.json` (made before F.3) is refused before anything changes — there is no two-way fallback. A
+  migration history naming `StartupApply` (or any unknown source) is refused. An aggregate materialized query whose
+  `groupByColumns` are plain strings (`AggregateConfig` v1) is refused when read, and a create request in that shape is `400` —
+  use `{ "column": "…" }`. `GET /api/tables` always carries `createdAt` / `lastModifiedAt`, and tables a replica or a
+  point-in-time replay registers now carry their real timestamps. A database written by an older build is restored from a
+  backup taken by this version, or re-created. [Schema — MigrationSource](guides/schema.md#migrationsource),
+  [Materialized queries](guides/materialized.md).
+- **Older segment, index and bulk-load files are refused, and `rowCountIsExact` is gone (BL-980, LoadSpeed K42; breaking).**
+  A `pk_index.spr` of version 1 or 2 is refused, naming the version. A catalog segment entry without a row count is refused,
+  so `GET /api/tables`' `rowCount` is always the exact total and **`rowCountIsExact` is removed** from the response, from
+  `Aouda.Client` and from `@aouda/client`'s `TableSummary`. A pending bulk-load job record without its commit time is set aside as
+  corrupt at open and every materialized query is rebuilt; a pre-P41 `.bulkload.commit` marker is no longer read.
+  [HTTP API — tables](reference/http-api.md#get-apitables), [PK indexing](guides/pk-indexing.md).
+- **Replication speaks protocol v4 only, and a replica refuses what it cannot apply (BL-980, LoadSpeed K42; breaking).** A
+  primary closes a v1, v2 or v3 handshake without a response — replication has not shipped, so run every node on the same build.
+  An election heartbeat missing its profile, hints, hidden or per-database fields is not accepted. A catalog-DDL frame with an
+  unknown opcode or payload version, or a DDL record that does not decode, is refused on a replica and aborts a point-in-time
+  replay, instead of being skipped. A WAL holding a frame of the retired page-append family is refused at replay.
+  [Replication](guides/replication.md#available-now).
+- **A point-in-time restore needs the backup's WAL-root incarnation (BL-980, LoadSpeed K42; breaking).** A backup that records
+  none — one of a database without a WAL, or one taken by an older build — is refused for a point-in-time restore instead of
+  having its epoch inferred from the archive; an exact restore of it is unchanged. A WAL root whose `wal.manifest.json` has no
+  root id (only a build before BL-330 / BL-438 wrote one) is refused when it opens. [Backup — PITR](guides/backup.md#c-pitr-http-or-engine).
 - **Auth databases and tokens from an older build are not upgraded (BL-980, LoadSpeed K41; breaking).** Pre-1.0 nothing is
   kept compatible. An application database's access tokens must carry its URL issuer, `{base}/api/databases/{db}`; the default
   issuer `"aouda"` is no longer accepted beside it (a token carrying it is `401` — sign in again). `"aouda"` stays the issuer

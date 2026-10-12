@@ -303,7 +303,7 @@ Key anchors:
 
 1. Create branch from parent catalog snapshot.
 2. Apply schema changes in branch scope only.
-3. Generate merge plan (three-way where base snapshot exists).
+3. Generate a three-way merge plan from the branch's base snapshot (`base-catalog.json`, written when the branch is created). (**BL-980, next train**) A branch without one — made by a build before F.3 — is refused at merge and at delete, before anything is deleted; up to 0.3.x a merge fell back to a two-way plan.
 4. Conflicts return merge-plan response; `force` can override.
 5. Merge execution applies branch changes to parent catalog and records history.
 
@@ -852,7 +852,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 #### MigrationSource
 
-`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply:
+`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply. (**BL-980, next train**) These four are the only values: `StartupApply` is gone, and a migration history naming it — or any other unknown source, or a number — is refused when it is read.
 
 | Value | Meaning |
 |---|---|
@@ -860,7 +860,6 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
 | `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = On`). |
 | `BranchMerge` | Change applied by merging a branch into the parent catalog. |
-| `StartupApply` | Retained for backward compatibility; not used for new entries. |
 
 ### E) Schema JSON field reference (complete)
 
