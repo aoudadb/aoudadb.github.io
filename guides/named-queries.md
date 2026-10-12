@@ -356,6 +356,9 @@ each device's:
   condition on a `Timestamp` column, in the base `where` or a join's. Not `in` / `like`, not `whenParamPresent`, not a
   `limitParam` / `offsetParam`, not in `selectExpr`, and with no other constraint (`required`, `min`, …). Named mutations
   cannot declare one. `offsetSeconds` is within ±10 years.
+- **Whose clock.** The node that answers the read binds the bound, and stamps are the primary's clock — a read served by a
+  secondary compares the secondary's clock with the primary's stamps, so their skew shifts the lease window. Read leases from the
+  primary, or allow for the skew.
 - **Pairs with a server-time stamp.** With `LastHeartbeat` declared `derived: { "serverTime": "write" }`
   ([insert transforms](insert-transforms.md#server-time-stamp-servertime)), both
   sides of the comparison are the server's clock.

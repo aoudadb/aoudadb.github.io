@@ -137,6 +137,8 @@ time never comes from a device's clock.
   whose `values` / `set` / `setExpr` names it fails at apply with `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE`. A
   `preTransformed` bulk load into the table is refused with `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` — load
   historical times into an ordinary `Timestamp` column instead.
+- **No expression reads a stamp.** A `derived` expression that names a server-time column is refused at apply: its value
+  would disagree with the stamp on some write paths. Read the stamp itself.
 - **One reading per request.** Every row of a batch, every route / tee hop and every row of a bulk-load job hold the same
   value. It is the primary's wall clock: **not monotonic** — two writes can read the same time, and a clock step backwards
   shows. Order by your key or a sequence, not by the stamp, when order matters.
