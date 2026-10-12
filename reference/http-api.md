@@ -672,7 +672,7 @@ Lists databases visible to the caller.
       "state": "Active",
       "createdAt": "2026-06-26T10:00:00.0000000Z",
       "options": {
-        "maxMemoryBytes": null,
+        "maxMemoryShareBytes": null,
         "defaultTemperature": "Auto",
         "enableWal": true,
         "replicationMode": "Replicate"
@@ -737,7 +737,7 @@ Direct lookup of a specific database by name. Returns the database if it exists 
   "state": "Active",
   "createdAt": "2026-06-26T10:00:00.0000000Z",
   "options": {
-    "maxMemoryBytes": null,
+    "maxMemoryShareBytes": null,
     "defaultTemperature": "Auto",
     "enableWal": true,
     "replicationMode": "Replicate"
@@ -798,7 +798,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
   "name": "myapp",
   "enableWal": true,
   "replicationMode": "Replicate",
-  "maxMemoryBytes": null,
+  "maxMemoryShareBytes": null,
   "defaultTemperature": "Auto",
   "dataDurability": "DiskBacked",
   "kind": "data",
@@ -811,7 +811,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `name` | string | Yes | Database name. |
 | `enableWal` | bool | No | Default `true`. |
 | `replicationMode` | string | No | `Replicate` (default) or `DoNotReplicate`. |
-| `maxMemoryBytes` | number \| null | No | Per-database memory cap. |
+| `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, next train:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
 | `dataDurability` | string | No | `DiskBacked` (default) or `MemoryOnly`. |
 | `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database. Mutually exclusive with `auth`. |

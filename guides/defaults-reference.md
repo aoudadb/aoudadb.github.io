@@ -23,8 +23,15 @@ fraction: whether detection found a **real isolation boundary** (a cgroup v2/v1 
 explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical RAM — the host merely
 *has* this much memory; nothing says you own it alone).
 
+`MaxTotalRamBytes` defaults to **`0`, meaning "derive it from the host"** (the two rows below); any positive value you set is
+kept as is, and it is an RSS ceiling for the whole process ([sizing](sizing.md)). (**Next train:** the default was 2 GiB, and the
+server derived the budget whenever the value equalled it, so an explicit `--max-memory 2147483648` was silently replaced by
+70 % of the container's limit, or 40 % of the host's memory where there was none — 26 GB on a 64 GB machine. An explicit 2 GiB
+is now honoured.)
+
 | Value | Formula | Restoring key |
 |---|---|---|
+| `MaxTotalRamBytes` (explicit) | the value set, kept as is — also exactly 2 GiB (**next train**) | `Aouda:Memory:MaxTotalRamBytes`, `--max-memory`; `0` (the default) derives |
 | `MaxTotalRamBytes` (cgroup-bounded) | `0.70 × detected`, floor 256 MB | `Aouda:Memory:MaxTotalRamBytes` (set explicitly to skip detection) |
 | `MaxTotalRamBytes` (fallback) | `min(0.40 × detected, 0.70 × available)` at this boot, floor 256 MB. No grant: every boot under `BackPressure` logs one warning, and nothing is remembered across boots (**WorkloadCore, 0.3.0**) | same — or a container memory limit, which makes it the cgroup row |
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |

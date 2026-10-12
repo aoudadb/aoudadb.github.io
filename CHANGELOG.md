@@ -13,6 +13,21 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A database's memory cap is `maxMemoryShareBytes`; `maxMemoryBytes` is ignored (BL-980, LoadSpeed S10b; breaking).** The
+  create-database request (`POST /api/databases`) and every database response's `options` carry `maxMemoryShareBytes` — a cap on
+  that database's share of the one server budget, as `maxMemoryBytes` always was. A request that still sends `maxMemoryBytes`
+  has it ignored: the database gets no cap. `@aouda/client`'s `databases.create` takes `maxMemoryShareBytes`; the C# SDK's
+  `CreateDatabaseOptions.MaxMemoryShareBytes`. The server configuration's `Aouda:Databases:{db}:MaxMemoryBytes` was already
+  refused at startup ("no longer supported") — several guides still listed it as the cap; they now name `MaxMemoryShareBytes`.
+  Pages: `reference/http-api.md`, `guides/sizing.md`, `guides/storage.md`, `guides/server-multi-database.md`,
+  `guides/partitioning.md`, `guides/hot-cold.md`, `getting-started/index.md`.
+- **An explicit memory ceiling holds for the whole process, and an explicit 2 GiB is honoured (BL-983, LoadSpeed S10a).**
+  `MaxTotalRamBytes` is now an RSS ceiling in full: the server measures the memory outside the .NET heap every 10 s and lowers the
+  heap's limit by whatever exceeds its reserve, and caps glibc's malloc arenas at two. The sizing guide's interim advice (a
+  container limit ~10 % above the setting, `MALLOC_ARENA_MAX=2`) is removed. `MaxTotalRamBytes` defaults to `0` ("derive it from
+  the host"); before, the default was 2 GiB and an explicit 2 GiB was read as "not configured" and replaced by the derivation.
+  Pages: `guides/sizing.md`, `guides/defaults-reference.md`, `guides/hot-cold.md`.
+
 - **One decimal: `Decimal(p,s)` only; the undeclared `Decimal` is retired (LoadSpeed S13; breaking).** `Decimal(p,s)`
   (1 ≤ p ≤ 18, 0 ≤ s ≤ p), a scaled 64-bit integer on disk and on the wire, is the only decimal type; the 128-bit
   `System.Decimal` of any scale is gone. `"type": "Decimal"` without `precision` and `scale` — schema documents,

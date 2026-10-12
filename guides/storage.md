@@ -504,14 +504,14 @@ Primary tests:
 | `Aouda:Databases:{db}:EnableWal` | bool | `true` | true/false | startup config | DB-level WAL switch |
 | `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | DB replication participation |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | startup config | Default table policy |
-| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
+| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`,`Majority`,`All` | startup config | ACK semantics |
 | `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | >=100 | startup config | Timeout for higher write concerns |
 | `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | startup config | Timeout policy |
 | `CreateDatabaseRequest.enableWal` | bool | `true` | true/false | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |
-| `CreateDatabaseRequest.maxMemoryBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional |
+| `CreateDatabaseRequest.maxMemoryShareBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional cap on the database's share of the server budget (**BL-980, next train:** was `maxMemoryBytes`, now ignored) |
 | `Archive.Enabled` | bool | `false` | true/false | startup config | Starts `WalArchiveWorker` when a destination is also set |
 | `Archive.Destination` | string | empty | URI/path | startup config | Required when archive enabled |
 | `Archive.WalRetentionDays` | int | `7` | >=1 | startup config | Archive retention (not the local PITR window) |

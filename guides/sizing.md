@@ -8,13 +8,16 @@ parent: "Guides"
 
 Aouda treats `MaxTotalRamBytes` as a **process RSS ceiling**, not an advisory subtotal. Leave it unset and the server derives it from detected host (or cgroup) memory: **70%** when detection found a real cgroup isolation boundary, **40%** when it fell back to physical RAM (a fallback result proves nothing about how much of the host Aouda actually owns). Set it explicitly when you need a pinned number. Resize live from Studio (Settings → Server), `PATCH /admin/config`, or `aouda budget`. See the [Defaults Reference](defaults-reference.md) for every downstream number this derives (governed budget, per-database shares, the L2 cache ceiling, the bulk-load ingest buffer budget) worked at several host sizes.
 
-> **Known gap (BL-983, open):** the ceiling is held for the .NET heap, but the process's memory **outside** that heap (the
-> runtime's own native allocations, JIT code, thread stacks) is only estimated, and the estimate is low: measured at
-> 150–200 MiB under a bulk load with materialized queries, against the 77 MiB (1 GiB ceiling) to 123 MiB (2 GiB) the server
-> sets aside for it. With the heap near its limit, the process can therefore sit **2–5 % above** `MaxTotalRamBytes` — at 2 GiB
-> one load was killed at 2.05 GiB by a container limit of exactly 2 GiB. Until this is fixed, give a container or cgroup limit
-> about **10 % above** `MaxTotalRamBytes` (or set `MaxTotalRamBytes` about 10 % below the limit), and on Linux set
-> `MALLOC_ARENA_MAX=2` in the server's environment, which measured removes about 95 MiB of that native memory.
+> **The ceiling holds for the whole process (BL-983, next train).** It used to hold for the .NET heap only, with a fixed reserve
+> of about 6 % for the memory outside it (the runtime's native allocations, glibc's per-thread malloc arenas, JIT code, thread
+> stacks) — measured at 150–200 MiB under a bulk load with materialized queries, so the process could sit 2–5 % above
+> `MaxTotalRamBytes` and a container limit equal to it killed the server. The server now measures that memory every 10 s (anonymous
+> RSS less the GC's committed bytes) and lowers the heap's limit by whatever exceeds the reserve, and on glibc it caps the malloc
+> arenas at two at startup (an operator's `MALLOC_ARENA_MAX` or `GLIBC_TUNABLES` is left alone; the Alpine image's allocator has no
+> per-thread arenas). Measured: a bulk load OOM-killed at 1 GiB on the previous build completes with anonymous RSS at most 994 MiB;
+> at 2 GiB both builds hold. A container or cgroup limit equal to `MaxTotalRamBytes` is now safe — the earlier advice (a limit ~10 %
+> above the setting, `MALLOC_ARENA_MAX=2`) is no longer needed. The startup log states the reserve and the arena cap, and every
+> lowering of the heap's limit is logged with the reading behind it.
 
 ## Small hosts (under 1 GB)
 
@@ -34,7 +37,7 @@ A 2 GiB cap is a reasonable **explicit** choice, not a hidden default. Hot data 
 
 ## Large hosts
 
-Set an explicit ceiling so Aouda does not grow into all remaining RAM. Per-database `maxMemoryBytes` on HTTP create (config: `MaxMemoryShareBytes`) is a **cap on that database's share** of the one server budget, not a second independent heap.
+Set an explicit ceiling so Aouda does not grow into all remaining RAM. Per-database `maxMemoryShareBytes` on HTTP create (config: `MaxMemoryShareBytes`; it was `maxMemoryBytes` over HTTP until 0.3.x — that name is now ignored, **next train**) is a **cap on that database's share** of the one server budget, not a second independent heap.
 
 ## Sizing CPU
 

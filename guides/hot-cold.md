@@ -529,10 +529,10 @@ Primary proving tests:
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `Aouda:Memory:MaxTotalRamBytes` | long | ~70% of detected RAM | `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
+| `Aouda:Memory:MaxTotalRamBytes` | long | `0`: derived from the host (70 % of a cgroup limit, else 40 % of RAM) | `0` or `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
 | `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of the governed budget (floor 8 MB); on (**ColumnarRead, 0.3.0**) |
-| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or positive | startup config | Per-database cap when set |
+| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or positive | startup config | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
 | `UpdatePolicyRequest.storageTemperature` | string | none (required) | `Auto`, `HotOnly`, `ColdPreferred` | HTTP update-policy body | Per-table policy update |
@@ -730,7 +730,7 @@ When to use:
 - Shared server with multiple databases where one tenant risks memory starvation.
 
 Steps:
-1. Set per-database `MaxMemoryBytes` for key DBs under `Aouda:Databases`.
+1. Set per-database `MaxMemoryShareBytes` (and `MemoryWeight`) for key DBs under `Aouda:Databases`.
 2. Restart server to apply config.
 3. Drive load on multiple DBs.
 4. Poll `GET /api/server/memory` and observe per-db pressure.
@@ -836,7 +836,7 @@ Recovery/restart expectations:
 
 Suggested tuning sequence:
 1. Keep table policy at `Auto` and validate workload profile.
-2. Set per-database memory caps (`MaxMemoryBytes`) for fairness.
+2. Set per-database memory caps (`MaxMemoryShareBytes`) or weights (`MemoryWeight`) for fairness.
 3. Use `ColdPreferred`/`HotOnly` only for tables with clear access patterns.
 
 | Question | Practical answer |
@@ -852,7 +852,7 @@ For BL-058 troubleshooting, read `CompactionFloorSuppressed` together with adapt
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Table policy update returns `400 InvalidRequest` | Invalid `storageTemperature` value or database mismatch between route/body | Use `Auto`, `HotOnly`, or `ColdPreferred`; ensure body `database` matches route |
-| Memory appears unbounded for one database | Missing per-db cap (`MaxMemoryBytes` unset) | Add per-db memory cap in config and restart |
+| Memory appears unbounded for one database | Missing per-db cap (`MaxMemoryShareBytes` unset) | Add per-db memory cap in config and restart |
 | `MemoryFilter` is configured but demotion order is unchanged | Table may not be under byte/row-cap pressure (no demotions occur when under budget regardless of filter); or `FilePageStore` was not supplied to the maintenance worker in embedded mode (falls back to `CreatedUtc` ordering); or column zone-map ranges don't allow ruling out any segment (all segments "might match") | Verify table has enough hot data to exceed its budget; check `MemoryFilterDemotionsPrioritized` counter; inspect `GetSegmentResidencyExplanation` for each candidate segment |
 | Policy update with `memoryFilter` returns `400` | Filter JSON is invalid; column name does not exist in table schema; operator is not in the v1 supported set (`eq`/`ne`/`lt`/`lte`/`gt`/`gte`); `DataType` not supported in v1 (`Int16`, `Timestamp`, `Date`, `Vector`, `MdVector`) | Read the error message — it names the bad column/operator; check table schema and use a supported operator |
 | `memoryRowCap` or `targetMemoryBytes` set to `0` or negative returns `400` | Validation at catalog write time rejects non-positive values | Use a value `> 0`; send `0` on update-policy only if you want to **clear** an existing cap (sentinel convention) |

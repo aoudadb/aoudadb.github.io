@@ -567,7 +567,7 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{
     "name": "analytics",
     "enableWal": true,
-    "maxMemoryBytes": 1073741824
+    "maxMemoryShareBytes": 1073741824
   }'
 
 # List databases
