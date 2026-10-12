@@ -207,6 +207,17 @@ rebuild fits a share far smaller than its result. **A maintained result's own wr
 any table's** (**WorkloadCore S17a, 0.3.0**): in 0.2.0 the maintenance pinned it in memory between checkpoints, whatever
 its `storageTemperature`, so a large result held its rows in the buffer until the next checkpoint.
 
+**While memory allows, a result's write buffer is not sealed early** (**BL-910, next train**). A result is rewritten by
+every load that reaches its groups, so sealing it at the small seal size an append-only table is sealed at made it a run
+of small segments — one more flush, more key-index work and one more segment for every later write to look through, and
+a group rewritten after its flush written again. While the database's write buffers hold **less than half of its
+write-buffer ceiling** (`T11`, 15 % of the database's budget — [defaults](defaults-reference.md#memory-maxtotalrambytes-and-what-it-splits-into)),
+a result's buffer is **not sealed at the seal size or flushed on idle**: it flushes at its own per-table bound (`T16`, or
+the per-table row trigger), at a checkpoint, or under memory pressure — at half of `T11` and above, the ordinary rules
+apply. Expect fewer, larger result segments, and more result rows in the write buffer between checkpoints. Nothing is
+pinned and nothing is refused: the buffer's bytes are charged and governed as before, and `storageTemperature` still
+decides where a flush writes. [Sizing](sizing.md#mq-result-residency) says the same from the memory side.
+
 **Residency is policy, not a property of the query type.** With no declaration, every result table —
 `aggregate`, `latestPerKey`, `firstPerKey`, `filter`, `topNPerGroup` alike — defaults to **`Auto`**:
 hot while the tier has room, cold when it does not, demoted and promoted by the ordinary sweep.

@@ -553,6 +553,17 @@ cold segments are re-promoted — so the drain has nothing it is allowed to demo
 bargain a declared pin makes, and it is worth making deliberately on a small result and not by
 accident on a large one.
 
+🔎 **While memory allows, a result's rows stay in the write buffer longer** (**BL-910, next train**). A
+result is rewritten by every load that reaches its groups, so it is not sealed at the small seal size
+an append-only table is: while the database's write buffers hold less than half of the write buffer's
+ceiling (`T11`, 15 % of the database's budget — below the flush-debt soft line of the
+[stall curve](#debt-slows-the-writer-the-ingest-stall-curve-workloadcore-s16-030)), a result's buffer
+is not sealed at the seal size or flushed on idle. It flushes at its own per-table bound (`T16`, or
+the per-table row trigger), at a checkpoint, or under memory pressure — at half of `T11` and above,
+the ordinary rules apply. What you see: fewer, larger result segments, and more result rows in the
+write buffer between checkpoints. Nothing is pinned; the buffer's bytes are charged against the
+database's budget as before.
+
 ### Declaring a temperature
 
 `storage.storageTemperature` on the query's schema entry:

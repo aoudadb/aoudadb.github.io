@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A materialized query's result stays in the write buffer while memory allows (BL-910).** A result is rewritten by every load
+  that reaches its groups, and sealing it at the small seal size made it a run of small segments, each one more flush and more
+  key-index work. While the database's write buffers hold less than half of the write buffer's ceiling (`T11`), a result's buffer
+  is no longer sealed at the seal size or flushed on idle; it flushes at its own per-table bound, at a checkpoint, or under memory
+  pressure, where the ordinary rules apply. Fewer, larger result segments, more result rows buffered between checkpoints, and
+  bulk loads into tables with many queries cost less CPU.
+  [Materialized queries](guides/materialized.md#where-a-materialized-querys-result-lives), [Sizing](guides/sizing.md#mq-result-residency).
 - **`auto`'s catch-up, two details (LoadSpeed group 2 review).** A load held while its table was loading reported `pending` for
   ever when a query it reaches was in `error`: it now reports `failed` once a pass after its commit has left it owed only by such
   queries, as a load maintained at its commit always did. And the 60 s bound counts from the oldest load no pass has taken in, so the
