@@ -47,8 +47,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **`@aouda/client` treats a sign-in, sign-up or refresh refused for capacity as retryable (BL-944).** A `503`
   `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` (or `429 SERVER_AT_CAPACITY`) from an auth call is the data calls' error with
   `retryAfterSeconds`, not `AoudaAuthenticationError`; a refused refresh keeps its refresh token and the request that needed it fails
-  with the refusal, not its `401`; a refused early refresh keeps using the still-valid token. `Aouda.Client` gets the same fix in
-  this train (`AoudaCapacityException`).
+  with the refusal, not its `401`; a refused early refresh keeps using the still-valid token.
+- **Refusals on the auth and WebSocket paths are answered as refusals, and leave the retry its token (BL-944).** A JWT check the
+  server could not finish for capacity is `503` + `Retry-After` (it was `401 AUTH_TOKEN_INVALID`, which signs a browser user out);
+  a password reset refused at the hash, or answered 400 for a weak password, keeps its OTP; an MFA verify refused after its code
+  was accepted keeps its challenge (and backup code); WebSocket writes and subscriptions carry `MEMORY_BUDGET_EXCEEDED` /
+  `WAL_CAPACITY_EXCEEDED` / `WRITE_CONFLICT` instead of `INVALID_REQUEST`, `SNAPSHOT_FAILED` or `PERMISSION_REVOKED`; the backup
+  trigger answers a refusal 503 and other failures 500 (it answered 400). The C# SDK raises `AoudaCapacityException` with the
+  server's `Retry-After` for a refused sign-in, sign-up or refresh, keeping the refresh token.
 - **`postLoadMqBehavior: "auto"` coalesces while a table is loading (LoadSpeed M.3).** A load into a table that is busy (another
   load in flight, an earlier load still owed, or one committed in the last 2 s) no longer starts its queries' maintenance at its
   commit: they report behind and are caught up in one pass once loading has been quiet for 2 s, or at a 60 s bound while loads keep
@@ -66,6 +72,19 @@ Public, user-facing release notes. Engine phase status lives in the server
   source table at the end (all queries current 32 % sooner than `auto`, with 42 % less CPU); bulk-load jobs of 10 000 rows or more;
   `InsertMany` for trickles below about 2 000 rows per call. The bulk-load guide's old warning that a refresh after a `skip` load is
   not bounded by the memory governor is corrected: since 0.3.0 it is.
+- **An insert of a deleted key is no longer refused as a duplicate after the server evicts and rebuilds segment metadata (BL-954).**
+  The duplicate check now follows a segment's replacements, so a delete recorded on the replacement is seen. Nothing was ever
+  written wrongly; the insert succeeds now.
+- **A large UPDATE or DELETE racing other writers gives up less readily (BL-920).** Its up-to-16 re-runs before
+  `409 WRITE_CONFLICT` now pause briefly between them (under a second in all) instead of running back to back.
+- **`aouda wal convert` is removed (BL-934).** A data directory holding a single-file `insert.wal` (written before the segmented
+  WAL) is refused at open with a message that names the way out: restore from a backup taken by this version, or delete
+  `insert.wal` to discard the writes it holds that were never checkpointed. The undocumented `POST /api/databases/{db}/wal/convert`
+  is gone too.
+- **A capacity refusal's `Retry-After` is at most 30 s (BL-956).** One bulk-load refusal in the 0.3.0 `scale` soak said
+  `Retry-After: 300`, and a client that honoured it waited 310 s where the server needed ~15 s. Every `503`
+  (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`) now asks for at most 30 s, and a WAL refusal before the server has measured
+  how fast it frees log says 10 s. Ask again then; the next answer carries a fresh estimate. No client change is needed.
 
 ## 0.3.0 — 2026-10-10
 

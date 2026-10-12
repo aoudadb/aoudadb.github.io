@@ -410,7 +410,8 @@ it is neither, and the sections were never separated. They are now.
    `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json`, a crash-recovery control
    file `CHECKPOINT`, and a portioned-recovery resume sidecar `RECOVERY`. Segment size is
    `clamp(MaxWalBytes / 16, 8 MB, 64 MB)`. A leftover monolithic `insert.wal` from before
-   segmentation is refused at open until `aouda wal convert` runs.
+   segmentation is refused at open — (**BL-934, next train**) for good: `aouda wal convert` is removed, so restore from a backup
+   taken by this version, or delete `insert.wal` to discard the writes it holds that were never checkpointed.
 2. **Position model.** Every WAL position — in a slot, in the checkpoint, on the ladder below — is
    a **cumulative byte offset into a virtual, infinite log** (the PostgreSQL LSN model), not a row
    count and not a file offset. `WalManifest` tracks a pruned base offset so absolute positions
