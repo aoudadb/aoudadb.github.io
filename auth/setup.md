@@ -216,6 +216,51 @@ Ends **this** session — its refresh token and access token stop working; the u
 `"others"` signs every other device out and keeps this one. A user lists their devices with `GET .../auth/sessions` and ends one with
 `DELETE .../auth/sessions/{id}` — see [Sessions are devices](reference.md#sessions-are-devices).
 
+### Native apps: sign in through the browser
+
+(**NativeClients, next train**) A desktop or phone app can sign its user in through the browser, where your web front is already
+signed in — MFA included — and get a session of its own at the same assurance level. Aouda serves no login page: your web front does
+the asking, Aouda issues a single-use code, and the app redeems it with a PKCE verifier. Endpoints, rules and error codes:
+[Native sign-in through the browser](reference.md#native-sign-in-through-the-browser).
+
+**Once: register the app** (an administrator, with the service key):
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/native-clients \
+  -H "Authorization: Bearer <mk_svc_...>" -H "Content-Type: application/json" \
+  -d '{"name":"MyApp desktop","redirectUris":["http://127.0.0.1/callback","com.example.myapp:/oauth"]}'
+```
+
+**Desktop app — loopback redirect** (RFC 8252 §7.3). The app listens on `127.0.0.1` on any free port; the registered
+`http://127.0.0.1/callback` matches every port.
+
+```typescript
+import { AoudaClient, createPkcePair } from "@aouda/client";
+
+// 1. In the desktop app: a PKCE pair, a loopback listener, and the browser opened on your web front.
+const { codeVerifier, codeChallenge } = await createPkcePair();
+const redirectUri = `http://127.0.0.1:${port}/callback`;
+openBrowser(`https://app.example.com/native-sign-in?challenge=${codeChallenge}&redirect=${encodeURIComponent(redirectUri)}&state=${state}`);
+
+// 2. In the web front (signed in): ask for the code and send the browser on.
+const { redirectTo } = await web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state });
+window.location.assign(redirectTo);   // → http://127.0.0.1:<port>/callback?code=…&state=…
+
+// 3. Back in the desktop app's listener: check `state`, then redeem within 60 seconds.
+const app = new AoudaClient({ serverUrl, database: "myapp" });
+app.auth.onTokensChanged((t) => secureStore.save(t));             // keep the rotated refresh token
+await app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo: "MyApp desktop on Ann's laptop" });
+```
+
+**Phone app — private-use scheme or claimed link** (RFC 8252 §7.1 / §7.2). Register `com.example.myapp:/oauth` (a reverse-DNS
+scheme the app owns) or an `https://` link the OS routes to the app (Universal Links / App Links). The flow is the same; the browser
+lands on the app instead of a loopback port. A claimed `https` link is the stronger choice: another app cannot register it.
+
+C#: `Pkce.CreatePair()`, `client.Auth.CreateAuthorizationCodeAsync(...)`, `client.Auth.ExchangeCodeAsync(...)`.
+
+The code is single use, valid for 60 seconds, bound to the client and the redirect URI, and dies with the web session that issued it. A
+second redemption is treated as theft: it is refused and the session the first redemption opened is ended.
+
 ---
 
 ## 10. Token Lifecycle: Access Tokens and Refresh Tokens

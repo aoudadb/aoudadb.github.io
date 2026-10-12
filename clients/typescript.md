@@ -140,6 +140,11 @@ reason }) => …)` is called on sign-in, on every refresh (automatic ones too) a
 and seed a restarted client with `appAuth: { token, refreshToken }` — the server rotates the refresh token on every refresh, and a
 spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-next-train).
 
+**Native sign-in through the browser** (**NativeClients, next train**): `createPkcePair()` (needs Web Crypto), then
+`web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state })` in the signed-in web front and
+`app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
+session's `aal`. Recipes: [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
+
 **Auth option rules:**
 - `appAuth` and `serverAuth` are mutually exclusive. Omitting both still exposes `client.auth` for keyless browser login.
 - Within each, `apiKey` and `token` are mutually exclusive.

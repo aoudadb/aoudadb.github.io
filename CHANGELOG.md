@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Native sign-in in both SDKs** (NativeClients S07, Derive ask AQ-7). `createPkcePair()` / `Pkce.CreatePair()`,
+  `auth.createAuthorizationCode(...)` for the web front and `auth.exchangeCode(...)` for the native app; recipes for a desktop app
+  (loopback) and a phone app (private-use scheme or claimed link) in [Native apps](auth/setup.md#native-apps-sign-in-through-the-browser).
+  `guides/build-apps.md` now says what shipped (native sign-in) and what did not (a hosted authorization server, social login, consent).
+
 - **Native apps sign in through the browser** (NativeClients S06, Derive ask AQ-7). A signed-in web front issues a single-use PKCE
   code (`POST .../auth/authorize`); the native app redeems it (`POST .../auth/token`) for its own session at the web session's `aal`
   — MFA done in the browser carries over. Native clients and their redirect URIs (loopback, reverse-DNS scheme, `https`) are registered
