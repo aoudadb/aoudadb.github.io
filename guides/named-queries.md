@@ -113,9 +113,9 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1 },
         "ticker": { "type": "String" },
-        "bid": { "type": "Decimal", "precision": 18, "scale": 6 },
-        "ask": { "type": "Decimal", "precision": 18, "scale": 6 },
-        "internalSpread": { "type": "Decimal", "precision": 18, "scale": 6 },
+        "bid": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "ask": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "internalSpread": { "type": "Decimal", "precision": 18, "scale": 2 },
         "asOf": { "type": "Timestamp" }
       }
     },

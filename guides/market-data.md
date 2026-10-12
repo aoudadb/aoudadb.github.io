@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline  
 Primary owner: Aouda maintainers  
-Last updated: 2026-08-21
+Last updated: 2026-10-12
 
 This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, a paged screener, and real-time ranking — all from a **browser-tier caller** holding only a `mk_pub_*` key on the data-plane listener. Every recipe in §§2–8 is executable against the published conformance fixture.
 
@@ -59,8 +59,8 @@ All tables, materialized queries, and named queries for the market-data fixture 
         "ticker": { "type": "String" },
         "source": { "type": "String" },
         "time":   { "type": "Timestamp" },
-        "bid":    { "type": "Decimal", "precision": 18, "scale": 6, "nullable": true },
-        "ask":    { "type": "Decimal", "precision": 18, "scale": 6, "nullable": true }
+        "bid":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true },
+        "ask":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true }
       },
       "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
       "clusterColumns": ["time"],
@@ -235,7 +235,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
 
 Key design decisions:
 
-- **`bid`/`ask` as columns** — not a `price_type` partition key. One partition tree per `(ticker, source)` pair; simpler candle aggregation.
+- **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. One partition tree per `(ticker, source)` pair; simpler candle aggregation. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, next train**). See [schema](schema.md).
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
 - **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{name}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
 

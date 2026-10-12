@@ -234,6 +234,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   The presence example in [Named queries](guides/named-queries.md) now uses it.
 - **Fixed: an upsert of a key that had left the write buffer** (sealed to a hot or cold segment, or any key of a table
   with a `unique` column) **failed with `TRANSFORM_DERIVED_READONLY` on a table with a derived or identity column** (BL-994).
+- **Market-data guide: declared `Decimal(p,s)` for quote prices.** The worked `quotes` schema (and the P40 conformance fixture) now declare `bid` / `ask` as `"type": "Decimal"` with `"precision": 18` and `"scale": 2` — the wire form, not a type string `"Decimal(18,2)"`. The named-queries guide's equity-quote example matches. Both are required: the undeclared `Decimal` is refused (S13, above); see [schema](guides/schema.md).
 
 ## 0.3.0 — 2026-10-10
 
