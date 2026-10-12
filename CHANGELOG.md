@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Disabling a user ends what they hold** (NativeClients S03, Derive ask AQ-4). Refresh answers `423 AUTH_ACCOUNT_DISABLED`; every
+  live access token is refused on the next request, and an open WebSocket closes with `AUTH_TOKEN_REVOKED` within a heartbeat. An
+  admin's `DELETE .../admin/sessions/{id}` ends that session's refresh family and access tokens (it deleted the row only), and
+  "revoke all", a password change or reset end every session the same way. Each access token is now unique (`jti`): two
+  sign-ins in the same second no longer share a token, so ending one session cannot end another.
+
 - **Server-time read bounds** (NativeClients S02, Derive ask AQ-2). A named-query parameter declared
   `{ "serverTime": { "offsetSeconds": -75 } }` is bound by the server to its clock at execute — a presence lease read against
   one clock. One-shot reads only: subscribe refuses it (`NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE`).

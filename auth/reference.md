@@ -183,8 +183,11 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}` | GET | Get user details |
 | `.../admin/users/{id}` | PATCH | Update user |
 | `.../admin/users/{id}` | DELETE | Delete user by id (204; 404 if missing). Cascades that user's roles, claims, grants, credentials, sessions, tokens, MFA, and API keys. Leaves `_audit_log`.|
-| `.../admin/users/{id}/disable` | POST | Disable user |
+| `.../admin/users/{id}/disable` | POST | Disable user. Ends every session at once (**NativeClients, next train**): each live access token is revoked (refused on the next request in Hybrid and Stateful modes, an open WebSocket closed within a heartbeat with `AUTH_TOKEN_REVOKED`), every refresh token is revoked, and a refresh answers `423 AUTH_ACCOUNT_DISABLED`. Sign-in answers `AUTH_INVALID_CREDENTIALS`. Enable lets the user sign in again; it brings no session back |
 | `.../admin/users/{id}/enable` | POST | Enable user |
+| `.../admin/sessions` | GET | List sessions (`?userId=`, `limit`, `offset`) |
+| `.../admin/sessions/{id}` | DELETE | End one session: its refresh family is revoked and every access token it issued is revoked (**NativeClients, next train** — it deleted the row only, and the session kept refreshing). The user's other sessions are untouched |
+| `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
 | `.../admin/users/{id}/roles` | PUT | Replace user's role assignments |
 | `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
@@ -415,9 +418,10 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_TOKEN_MISSING` | 401 | No `Authorization` header on a protected endpoint | Add `Authorization: Bearer <token>` header |
 | `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature | Discard token; force re-sign-in |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
-| `AUTH_TOKEN_REVOKED` | 401 | Token was revoked (session signed out) | Redirect to sign-in |
+| `AUTH_TOKEN_REVOKED` | 401 | Token was revoked — the session signed out or was ended by an administrator, the account was disabled, or the password changed. Also sent on an open WebSocket as `auth_error` (**NativeClients, next train**) | Redirect to sign-in |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
 | `AUTH_API_KEY_INVALID` | 401 | API key is invalid, revoked, or expired | Regenerate via the admin regenerate-keys endpoint |
+| `AUTH_ACCOUNT_DISABLED` | 423 | (**NativeClients, next train**) A refresh for an account an administrator disabled. Nothing the account held refreshes | Sign out locally; tell the user the account is disabled |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live | Retry the **same** request (the same refresh token) after `Retry-After` |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) An admin write kept conflicting with a concurrent change to the same record and was not applied | Retry the same request |
@@ -429,7 +433,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 |------------|------|---------|--------|
 | `AUTH_INVALID_CREDENTIALS` | 401 | Wrong email or password | Show "Invalid credentials" |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts (default: 10) | Wait for the lockout window (default: 15 min) or re-enable via admin |
-| `AUTH_ACCOUNT_DISABLED` | 423 | Account disabled by an administrator | Re-enable via `POST .../admin/users/{id}/enable` |
+| `AUTH_ACCOUNT_DISABLED` | 423 | Not returned by sign-in: a disabled account's sign-in answers `AUTH_INVALID_CREDENTIALS`, as an unknown one does. Returned by **refresh** (above) | Re-enable via `POST .../admin/users/{id}/enable` |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email already registered | Show "Account exists" |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic; prevents info leakage) | Check server logs; try again |
 | `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is off for this database | Enable via `PUT …/admin/signup-settings` |
@@ -628,7 +632,7 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 
 > **`aal2` is not proof that a second factor was used.** If you need to know that, check that the user has an enrolled factor (`GET .../auth/mfa/factors`, or the admin list) as well as `aal2`. Removing a user's last factor (an operator calls `DELETE .../auth/admin/users/{id}/mfa/factors/{factorId}`) makes their next password signin `aal2` with no OTP step.
 >
-> An `aal2` refresh family keeps `aal2` until it expires or is revoked, including if the user enrols a factor later; revoke the user's sessions if that matters to you.
+> An `aal2` refresh family keeps `aal2` until it expires or is revoked, including if the user enrols a factor later; end the user's sessions if that matters to you (`DELETE .../admin/sessions/user/{userId}` — which revokes their refresh families and live access tokens since **NativeClients, next train**; before, it deleted session rows only).
 
 **MFA gate enforcement — ASP.NET Core (C#):**
 
