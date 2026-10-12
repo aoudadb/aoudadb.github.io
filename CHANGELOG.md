@@ -13,6 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Server-time stamps** (NativeClients S01, Derive ask AQ-1). A `Timestamp` column declared
+  `derived: { "serverTime": "insert" | "write" }` is stamped by the server's clock on every write path and refuses any
+  caller value, so sent-at and last-seen times no longer depend on device clocks.
+  [Insert transforms](guides/insert-transforms.md#server-time-stamp--servertime-insert--write-nativeclients-next-train).
+  The presence example in [Named queries](guides/named-queries.md) now uses it.
+- **Fixed: an upsert of a key that had left the write buffer** (sealed to a hot or cold segment, or any key of a table
+  with a `unique` column) **failed with `TRANSFORM_DERIVED_READONLY` on a table with a derived or identity column** (BL-994).
+
 ## 0.3.0 — 2026-10-10
 
 Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.

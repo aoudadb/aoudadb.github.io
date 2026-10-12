@@ -614,13 +614,28 @@ Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `ro
 > the first call there is no row to match.
 >
 > ```json
+> "Presence": {
+>   "columns": {
+>     "UserId":        { "type": "String", "primaryKey": 1, "derived": { "identity": "subject" } },
+>     "State":         { "type": "String" },
+>     "LastHeartbeat": { "type": "Timestamp", "derived": { "serverTime": "write" } }
+>   }
+> }
+> ```
+>
+> ```json
 > "connect.presence.heartbeat": {
 >   "op": "upsert",
 >   "table": "Presence",
->   "values": { "LastHeartbeat": { "param": "lastHeartbeat" } },
->   "params": { "lastHeartbeat": { "required": true } }
+>   "values": { "State": { "param": "state" } },
+>   "params": { "state": { "required": true } }
 > }
 > ```
+>
+> The server stamps `LastHeartbeat` with its own clock on every heartbeat (a
+> [server-time stamp](insert-transforms.md#server-time-stamp--servertime-insert--write-nativeclients-next-train),
+> **NativeClients, next train**), so a lease is judged against one clock, not each device's. The
+> mutation does not, and cannot, send it.
 >
 > ```text
 > first call                every call after
