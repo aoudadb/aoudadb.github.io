@@ -107,6 +107,29 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{ "name": "product-b", "auth": { "database": "product_b_auth" } }'
 ```
 
+### One auth database is one trust domain
+
+Databases that share an auth database **share sign-ins**, not only users (**BL-1018**, open). An access token is checked against
+the database it was issued for — a token from a sign-in at `orders-service` is refused at `products-service` — but the session
+behind it is not:
+
+- a **refresh token** from a sign-in at one database refreshes at any other database linked to the same auth database, and at the
+  auth database's own path, and gives a session there;
+- a **native sign-in code** (`POST …/auth/authorize`, [native sign-in](reference.md#native-sign-in-through-the-browser)) created at one database can be redeemed
+  (`POST …/auth/token`) at another, for a session there.
+
+So whoever holds a user's refresh token or code — the user, or anyone who took it — can open a session as that user on every
+database that shares the auth database. The user's roles still decide what each session may do; what does not separate the
+databases is the sign-in. 0.3.0 behaved the same for refresh tokens.
+
+**Share an auth database** among databases that serve the same users as one product, where a user signed in at one is meant to be
+signed in at all of them: the services of one application, the databases of one tenant.
+
+**Do not share one** between databases whose sign-ins must stay apart: different customers or tenants, a public app and an internal
+or admin tool, a test and a production database, an application whose users must not get a session at another one. Give each its own
+auth database, as above. Whether refresh tokens and codes will be bound to the database that issued them is an open decision; until
+it is made, this is the behaviour.
+
 ---
 
 ## 17. Use Case: Auth and Data Together (Full-Stack)

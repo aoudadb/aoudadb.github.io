@@ -13,6 +13,20 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A database with no linked auth database needs server credentials on the admin listener once a server auth database exists
+  (BL-1017; security, present in 0.3.0 and earlier).** It stayed open to anyone there — reads, writes, DDL, quarantine and
+  `DELETE /api/databases/{db}` — while `/api/databases` itself needed server credentials. Now every request to it, WebSocket and
+  long-poll included, needs a server user's token, `mk_srv_` or a server key with a role on it, and is authorized by the server
+  auth database's grants; an anonymous one is `401`, as for a database that does not exist. Before setup, and on the data-plane
+  listener, nothing changes ([databases without authentication](getting-started/index.md#9-databases-without-authentication),
+  [the auth states](getting-started/auth.md#three-authentication-states-for-a-database),
+  [how data endpoint auth works](reference/http-api.md#how-data-endpoint-auth-works)). The scenario 4 example in
+  [architecture](auth/architecture.md) now uses `/api/auth/admin/api-keys`' actual body (`roles: [{ role, scope }]`).
+- **Databases that share an auth database are one trust domain — documented (BL-1018, open).** A refresh token or a native sign-in
+  code issued at one is redeemed at another linked to the same auth database, for a session there; an access token is not. Who
+  should share an auth database and who should not: [use cases](auth/use-cases.md#one-auth-database-is-one-trust-domain); notes in
+  [the auth reference](auth/reference.md#sessions-are-devices) and [Pattern E](auth/architecture.md).
+
 - **Release 0.4.0 preparation: what the integration of NativeClients and its security review changed.** An RLS rule's literal is
   bound to its column's type wherever it is applied — subscriptions, materialized-query rows and the write check, as queries already
   did (BL-1015; [authorization](auth/authorization.md#1951-setup-define-a-resolver)). `PUT /admin/backup/schedule` and

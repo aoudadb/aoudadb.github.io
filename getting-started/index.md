@@ -1288,7 +1288,8 @@ Aouda Server Instance
 │
 ├── Database: "myapp"     ← server users/keys need db_* role to access
 ├── Database: "analytics"  ← separate role grants
-└── Database: "cache"      ← no auth (open access)
+└── Database: "cache"      ← no linked auth database: open before setup;
+                               after it, server credentials on the admin listener (BL-1017)
 ```
 
 A server user or API key with `db_writer` on "myapp" **cannot** access "analytics" unless explicitly granted a role there.
@@ -1691,7 +1692,7 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{ "name": "cache" }'
 ```
 
-Clients can access this database without any credentials:
+While the server has no server auth database (before `/api/auth/setup`), clients can access this database without any credentials:
 
 ```csharp
 // No auth needed
@@ -1713,7 +1714,16 @@ const client = createAoudaClient({
 });
 ```
 
-Authentication is enforced **only** for databases that are explicitly linked to an auth database. Databases created without auth are openly accessible to anyone who can reach the server.
+**Who may reach a database without auth (**BL-1017, next train**).** A database with no linked auth database is open only while
+the server has no server auth database — a fresh server before [server authentication](#8-server-authentication--securing-database-access) is set up. Once the server admin exists (`/api/auth/setup`,
+or a configured root user), every request to such a database on the **admin listener** needs server credentials, exactly as
+`/api/databases` itself does: reads, writes, DDL, `DELETE /api/databases/{db}`, quarantine, `inspect`, WebSocket and long-poll. A
+server credential is a server user's token (`/api/auth/signin`), a server admin key (`mk_srv_`, `POST /api/auth/admin/keys`) or a
+key from `POST /api/auth/admin/api-keys` with a role scoped to the database; it is authorized by the server auth database's grants,
+so a `db_writer` key scoped to `cache` writes to `cache` and can neither drop it nor reach another database. An anonymous caller
+gets `401`, and so does a request naming a database that does not exist. An application's own keys and tokens are not server
+credentials. On the **data-plane** listener nothing changes: such a database stays open to the routes that listener serves
+(named queries and mutations, WebSocket, long-poll). In 0.3.0 and earlier the admin listener served it to anyone, drop included.
 
 **When no-auth databases are appropriate:**
 - Local development and prototyping
@@ -1727,7 +1737,7 @@ Authentication is enforced **only** for databases that are explicitly linked to 
 - Multi-tenant applications
 - Any production deployment with untrusted clients
 
-**Security for no-auth databases:** Use network-level security (firewalls, VPNs, Kubernetes network policies) to control who can reach the server. A no-auth database is open to anyone who can connect to the port.
+**Security for no-auth databases:** Use network-level security (firewalls, VPNs, Kubernetes network policies) to control who can reach the server. Before setup, a no-auth database is open to anyone who can connect to the port; after it, to anyone who can connect to the data-plane port, through the named artifacts that listener serves.
 
 ---
 

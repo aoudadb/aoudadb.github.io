@@ -120,9 +120,10 @@ Aouda Server Instance
 │  │  Access:    Server users/keys with a role for "analytics"
 │  └─ Data: events, metrics, ...
 │
-└─ Database: "cache"
-   │  Auth:      None (open access)
-   │  Access:    Anyone who can reach the server
+└─ Database: "cache"  (no linked auth database)
+   │  Auth:      Server auth once _serverauth exists (BL-1017); none before setup
+   │  Access:    Server users/keys with a role for "cache" on the admin listener;
+   │             before setup, or on the data-plane listener, anyone who can reach it
    └─ Data: fx_quotes, ...
 ```
 
@@ -132,8 +133,8 @@ Every database on a Aouda server falls into one of three states:
 
 | State | How Data Is Protected | When to Use |
 |-------|----------------------|-------------|
-| **No auth** | Open — anyone on the network can read/write | Caches, development, low-sensitivity data |
-| **Server auth only** | Server users/keys must have a role for this database | Internal databases, analytics, services without end-user access |
+| **No auth** | Open — anyone on the network can read/write. Only while the server has no server auth database, or on the data-plane listener: once one exists, a database with no linked auth database is in the next state on the admin listener (**BL-1017, next train**; 0.3.0 left it open, drop included) | Caches, development, low-sensitivity data |
+| **Server auth only** | Server users/keys must have a role for this database — a database with no linked auth database, once a server auth database exists. Anonymous requests are `401` | Internal databases, analytics, services without end-user access |
 | **Server auth + App auth** | Server auth gates admin access; App auth gates end-user access via API keys + user JWTs | User-facing applications, SaaS, mobile apps |
 
 ### How Server Auth and App Auth Interact on the Same Database

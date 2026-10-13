@@ -145,15 +145,21 @@ See [Direct client access](../guides/direct-client-access.md) for configuration,
 | `/api/databases/{db}/auth/signup\|signin\|refresh\|request-password-reset\|reset-password` | No | None (public POST; bearer ignored) |
 | `/api/databases/{db}/auth/me\|signout\|password` | Yes (Layer 1 + 2) | API key + user JWT in `X-User-Token`, or user JWT directly |
 | `/api/databases/{db}/query\|tables\|rows\|...` | **Only if db has linked auth** | Any valid credential (see below) |
-| `/api/databases/{db}/query\|...` (no auth db) | No | None — open access |
+| `/api/databases/{db}/...` (no linked auth db), **server auth database exists**, admin listener | Yes (Layer 1 + 2) | Server JWT, `mk_srv_`, or a server key with a role on `{db}` — every route, `DELETE /api/databases/{db}`, WebSocket and long-poll included (**BL-1017, next train**) |
+| `/api/databases/{db}/...` (no linked auth db), no server auth database, or the data-plane listener | No | None — open access |
 
 #### How Data Endpoint Auth Works
 
 When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/query`):
 
 ```
-1. Does the target database have a linked auth database?
-   NO  → Request proceeds without auth (open access)
+1. Does the target database have a linked auth database (or is it one)?
+   NO  → Does a server auth database exist, and is this the admin listener?
+         NO  → Request proceeds without auth (open access)
+         YES → The server auth database governs it (BL-1017, next train): steps 2–3 with
+               server credentials only (server JWT, mk_srv_, a server key), authorized by
+               the server auth database's grants; a database that does not exist answers
+               401 too
    YES → Continue to step 2
 
 2. Read Authorization header
@@ -858,7 +864,9 @@ Poll `GET /api/databases/{name}` until `state=Active` before schema apply.
 
 #### `DELETE /api/databases/{db}`
 
-Drops a database. Returns `204 No Content` immediately after the foreground switch.
+Drops a database. Returns `204 No Content` immediately after the foreground switch. Needs `admin` on the database; for a
+database with no linked auth database, once a server auth database exists, that is a server credential (the server admin,
+`mk_srv_`), and an anonymous drop is `401` on the admin listener (**BL-1017, next train**; 0.3.0 dropped it).
 
 **How it works (async, crash-safe):**
 
