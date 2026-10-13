@@ -66,7 +66,7 @@ curl -X POST http://localhost:5433/api/databases \
 # 4. Create a scoped server API key
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{ "name": "myapp-backend", "databaseRoles": { "myapp": ["db_writer"] } }'
+  -d '{ "name": "myapp-backend", "roles": [{ "role": "db_writer", "scope": "myapp" }] }'
 
 # 5. Test the complete flow
 ```

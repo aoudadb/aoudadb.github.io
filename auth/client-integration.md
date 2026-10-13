@@ -287,11 +287,11 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 
 ### Comparison: Server Keys vs App Keys
 
-| | Server API Keys (`mk_srv_`) | App API Keys (`mk_anon_`, `mk_pub_`, `mk_svc_`) |
+| | Server API Keys (`mk_srv_` admin, `mk_` scoped) | App API Keys (`mk_anon_`, `mk_pub_`, `mk_svc_`) |
 |---|---|---|
 | **Created by** | Server admin | Auto-generated when app auth is enabled |
 | **Stored in** | `_serverauth` database | `_auth` database (linked to the app) |
-| **Scope** | One or more databases (via `databaseRoles`) | One specific database |
+| **Scope** | `mk_srv_` (`/api/auth/admin/keys`): every database, always `db_admin`; scoped `mk_` (`/api/auth/admin/api-keys`): each role's `scope` | One specific database |
 | **PLS / RLS** | **Enforced** from 0.4.0 (**next train**); up to 0.3.x never enforced | `mk_anon_` / `mk_pub_` / `custom`: enforced; `mk_svc_`: bypassed |
 | **Listener** | Admin | `mk_pub_`: data-plane only (admin → `AUTH_KEY_LISTENER_MISMATCH`); others: either |
 | **Use case** | Backend services, CI/CD, cross-database | Frontend clients, per-database backend access |
@@ -309,12 +309,13 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
   -d '{
     "name": "myapp-backend",
-    "databaseRoles": {
-      "myapp": ["db_writer"],
-      "analytics": ["db_reader"]
-    }
+    "roles": [
+      { "role": "db_writer", "scope": "myapp" },
+      { "role": "db_reader", "scope": "analytics" }
+    ]
   }'
-# Returns: { "key": "mk_srv_abc123...", ... }
+# Returns: { "key": "mk_abc123...", "kind": "custom", "roles": [ … ], … }
+# POST /api/auth/admin/keys instead creates a global db_admin key (mk_srv_…) and takes only name / expiresAt.
 ```
 
 ### Creating Custom App API Keys
@@ -322,7 +323,7 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
-  -d '{ "name": "analytics-pipeline", "roles": ["db_reader"] }'
+  -d '{ "name": "analytics-pipeline", "roles": [{ "role": "db_reader" }] }'
 # Returns: { "key": "mk_xyz789...", ... }
 ```
 

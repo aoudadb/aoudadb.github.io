@@ -314,16 +314,11 @@ TOKEN=$(curl -s -X POST http://localhost:5433/api/auth/signin \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"AdminPass123!"}' | jq -r .accessToken)
 
-# 2. Create a server admin API key (mk_srv_ prefix, never expires)
+# 2. Create a server admin API key (mk_srv_ prefix, global db_admin, no expiry unless expiresAt is set)
 curl -X POST http://localhost:5433/api/auth/admin/keys \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "ci-deploy",
-    "databaseRoles": {
-      "myapp": ["db_admin"]
-    }
-  }'
+  -d '{ "name": "ci-deploy" }'
 # → { "key": "mk_srv_abc123...", "name": "ci-deploy" }
 
 # 3. Use the key directly — no refresh needed
@@ -333,7 +328,7 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{"name":"myapp","auth":{"enabled":true}}'
 ```
 
-Server admin API keys are database-scoped — specify `databaseRoles` to control exactly which databases the key can access and at what permission level. See [Getting-Started.md §8](index.md#8-server-authentication--securing-database-access) for the full server auth reference.
+A server admin key (`mk_srv_…`, `POST /api/auth/admin/keys`) is always a global `db_admin` — it can create and drop any database, so keep it for the server admin's own automation. For a service that needs only some databases, create a **scoped** server API key instead: `POST /api/auth/admin/api-keys` with `"roles": [{ "role": "db_writer", "scope": "myapp" }]` (key prefix `mk_`). See [Getting-Started.md §8](index.md#8-server-authentication--securing-database-access) for the full server auth reference.
 
 ---
 

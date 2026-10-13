@@ -2045,15 +2045,18 @@ JSON
 
 ### 16.5 API keys for applications
 
-After bootstrap, sign in once and create scoped server API keys (`mk_srv_…`) per service:
+After bootstrap, sign in once and create a scoped server API key (`mk_…`) per service:
 
 ```bash
-curl -X POST http://localhost:5433/api/auth/admin/keys \
+curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "orders-api",
-    "databaseRoles": { "orders": ["db_writer"], "analytics": ["db_reader"] }
+    "roles": [
+      { "role": "db_writer", "scope": "orders" },
+      { "role": "db_reader", "scope": "analytics" }
+    ]
   }'
 ```
 
