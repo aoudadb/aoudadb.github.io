@@ -400,7 +400,7 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "name": "ci-pipeline",
-    "databaseRoles": { "production": ["db_admin"] }
+    "roles": [{ "role": "db_admin", "scope": "production" }]
   }'
 ```
 

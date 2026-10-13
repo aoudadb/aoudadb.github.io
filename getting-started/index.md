@@ -1595,15 +1595,15 @@ For CI/CD pipelines, background jobs, and service-to-service communication, use 
 
 ```bash
 # Create an API key scoped to specific databases (requires server admin)
-curl -X POST http://localhost:5433/api/auth/admin/keys \
+curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "myapp-backend",
-    "databaseRoles": {
-      "myapp": ["db_writer"],
-      "analytics": ["db_reader"]
-    }
+    "roles": [
+      { "role": "db_writer", "scope": "myapp" },
+      { "role": "db_reader", "scope": "analytics" }
+    ]
   }'
 ```
 
@@ -1613,32 +1613,37 @@ Response includes the key (shown only once):
 {
   "id": "...",
   "name": "myapp-backend",
-  "key": "mk_srv_abc123...",
-  "databaseRoles": {
-    "myapp": ["db_writer"],
-    "analytics": ["db_reader"]
-  }
+  "key": "mk_abc123...",
+  "keyPrefix": "mk_abc123de",
+  "roles": [
+    { "role": "db_writer", "scope": "myapp" },
+    { "role": "db_reader", "scope": "analytics" }
+  ],
+  "kind": "custom",
+  "createdAt": "..."
 }
 ```
 
 This key can read/write `myapp` data and read `analytics` data. It cannot access any other database.
+
+Use `POST /api/auth/admin/api-keys` for a scoped key. `POST /api/auth/admin/keys` is a different endpoint: it creates a **server admin key** (`mk_srv_…`) that is always a global `db_admin` and ignores any roles in the body — keep it for the server admin's own automation, never for a service that needs one database.
 
 Use the API key as a bearer token:
 
 ```bash
 # Access myapp — allowed (db_writer)
 curl http://localhost:5433/api/databases/myapp/query \
-  -H "Authorization: Bearer mk_srv_abc123..." \
+  -H "Authorization: Bearer mk_abc123..." \
   -d '{ "table": "orders", "limit": 10 }'
 
 # Access analytics — allowed (db_reader, read-only)
 curl http://localhost:5433/api/databases/analytics/query \
-  -H "Authorization: Bearer mk_srv_abc123..." \
+  -H "Authorization: Bearer mk_abc123..." \
   -d '{ "table": "events", "limit": 10 }'
 
 # Access cache — DENIED (no role for this database)
 curl http://localhost:5433/api/databases/cache/query \
-  -H "Authorization: Bearer mk_srv_abc123..." \
+  -H "Authorization: Bearer mk_abc123..." \
   -d '{ "table": "data", "limit": 10 }'
 # → 403 AUTHORIZATION_DENIED
 ```
@@ -1651,11 +1656,11 @@ If a database has Application Auth enabled (see [Getting-Started-Auth.md](auth.m
 |---|---|---|
 | **Created by** | Server admin | Auto-generated when app auth is enabled |
 | **Stored in** | `_serverauth` | `_auth` (app auth database) |
-| **Scope** | One or more databases (via `databaseRoles`) | One specific database |
+| **Scope** | One or more databases (each role's `scope`) | One specific database |
 | **Use case** | Backend services, CI/CD, cross-database access | Frontend clients, per-database backend access |
 | **PLS / RLS** | Enforced from 0.4.0 (**0.4.0**); up to 0.3.x never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
 
-For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use server API keys (`mk_srv_`). From 0.4.0 a server API key no longer bypasses partition- or row-level security: on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)).
+For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use scoped server API keys (`mk_…`, from `/api/auth/admin/api-keys`). From 0.4.0 a server API key no longer bypasses partition- or row-level security: on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)).
 
 ### Common Auth Error Codes
 
@@ -2040,15 +2045,18 @@ JSON
 
 ### 16.5 API keys for applications
 
-After bootstrap, sign in once and create scoped server API keys (`mk_srv_…`) per service:
+After bootstrap, sign in once and create a scoped server API key (`mk_…`) per service:
 
 ```bash
-curl -X POST http://localhost:5433/api/auth/admin/keys \
+curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "orders-api",
-    "databaseRoles": { "orders": ["db_writer"], "analytics": ["db_reader"] }
+    "roles": [
+      { "role": "db_writer", "scope": "orders" },
+      { "role": "db_reader", "scope": "analytics" }
+    ]
   }'
 ```
 
