@@ -155,6 +155,10 @@ This applies to connections opened with a user's token; one opened with an API k
 > **Signing out is per device now.** A client that called `signout` to sign the user out *everywhere* must send
 > `{ "scope": "global" }`.
 
+⚠️ **A session is not bound to the database it was opened at** (**BL-1018**, open). Its refresh token refreshes at any database
+linked to the same auth database, and at the auth database's own path, for a session there. Databases that share an auth database
+are one trust domain: see [who should share one](use-cases.md#one-auth-database-is-one-trust-domain).
+
 #### Native sign-in through the browser
 
 (**NativeClients, 0.4.0**) A native app (a desktop app, a phone app) signs a user in by handing off to the browser, where the app's own web front is
@@ -187,6 +191,10 @@ opened is ended too), `AUTH_REDIRECT_URI_MISMATCH`, `AUTH_CODE_INVALID` (unknown
 was ended). A failed redemption spends the code — start again. At `authorize`: `AUTH_NATIVE_CLIENT_UNKNOWN`,
 `AUTH_REDIRECT_URI_NOT_REGISTERED`, `AUTH_PKCE_METHOD_UNSUPPORTED` (`S256` only), `AUTH_PKCE_CHALLENGE_INVALID`. Both endpoints share
 sign-in's rate limit.
+
+⚠️ **A code is not bound to the database it was created at** (**BL-1018**, open): a code from `authorize` at one database can be
+redeemed at `token` on any database linked to the same auth database, or at the auth database's own path. See
+[one auth database is one trust domain](use-cases.md#one-auth-database-is-one-trust-domain).
 
 > **MFA endpoints require a user JWT** — the access token returned from sign-in. Send `Authorization: Bearer <accessToken>` directly; no API key is required or expected. If you are building a BFF that proxies MFA requests, forward the user JWT unchanged in `Authorization` — do not replace it with your service key. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints).
 
