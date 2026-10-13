@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A memory budget derived from the host keeps its heap limit (BL-983's fix, next train).** BL-983 lowers the .NET heap's limit at
+  runtime so that an explicit `MaxTotalRamBytes` holds for the whole process. It did so for a derived budget too, which already
+  leaves 30 % of a container's limit outside it: in a 512 MB container the heap's limit fell from 315 to 191 MiB within minutes and a
+  materialized query stayed stale for the rest of the run. Now only an explicit ceiling (configured, or set by a live resize) lowers
+  it ([sizing](guides/sizing.md)).
+
 - **A database with no linked auth database needs server credentials on the admin listener once a server auth database exists
   (BL-1017; security, present in 0.3.0 and earlier).** It stayed open to anyone there — reads, writes, DDL, quarantine and
   `DELETE /api/databases/{db}` — while `/api/databases` itself needed server credentials. Now every request to it, WebSocket and
