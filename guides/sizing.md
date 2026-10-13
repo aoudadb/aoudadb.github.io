@@ -18,6 +18,12 @@ Aouda treats `MaxTotalRamBytes` as a **process RSS ceiling**, not an advisory su
 > at 2 GiB both builds hold. A container or cgroup limit equal to `MaxTotalRamBytes` is now safe — the earlier advice (a limit ~10 %
 > above the setting, `MALLOC_ARENA_MAX=2`) is no longer needed. The startup log states the reserve and the arena cap, and every
 > lowering of the heap's limit is logged with the reading behind it.
+>
+> **Only an explicit ceiling is held this way (BL-983, 0.4.0).** The heap's limit is lowered at runtime only when
+> `MaxTotalRamBytes` is set — in configuration, with `--max-memory`, or by a live resize. A budget the server derives from the host
+> (the default) already leaves the rest of the grant outside it (30 % of a container's limit), and its heap limit stays fixed for
+> the process's life: lowering it as well left a 512 MB container's heap too small for materialized-query maintenance. The startup log
+> says which applies.
 
 ## Small hosts (under 1 GB)
 

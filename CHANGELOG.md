@@ -28,6 +28,11 @@ Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's sec
   [the auth states](getting-started/auth.md#three-authentication-states-for-a-database),
   [how data endpoint auth works](reference/http-api.md#how-data-endpoint-auth-works)). The scenario 4 example in
   [architecture](auth/architecture.md) now uses `/api/auth/admin/api-keys`' actual body (`roles: [{ role, scope }]`).
+- **A memory budget derived from the host keeps its heap limit (BL-983's fix).** BL-983 lowers the .NET heap's limit at runtime so
+  that an explicit `MaxTotalRamBytes` holds for the whole process. During the release's final gate it did so for a derived budget
+  too, which already leaves 30 % of a container's limit outside it: in a 512 MB container the heap's limit fell from 315 to 191 MiB
+  within minutes and a materialized query stayed stale for the rest of the run. Now only an explicit ceiling (configured, or set by a
+  live resize) lowers it ([sizing](guides/sizing.md)).
 - **Databases that share an auth database are one trust domain — documented (BL-1018, open).** A refresh token or a native sign-in
   code issued at one is redeemed at another linked to the same auth database, for a session there; an access token is not. Who
   should share an auth database and who should not: [use cases](auth/use-cases.md#one-auth-database-is-one-trust-domain); notes in
