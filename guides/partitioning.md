@@ -148,7 +148,7 @@ If you create a table/database without tuning partition or multidb options:
 - Multitenancy:
   - Database-scoped HTTP routes are the default API shape.
   - Database creation defaults to WAL enabled, replication mode `Replicate`, default temperature `Auto`.
-  - Per-database memory cap is unlimited unless configured (`MaxMemoryBytes = null`).
+  - Per-database memory cap is unlimited unless configured (`MaxMemoryShareBytes = null`).
 
 | Setting / behavior | Default | Allowed values | Practical impact |
 |---|---|---|---|
@@ -163,7 +163,7 @@ If you create a table/database without tuning partition or multidb options:
 | `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
 | `DatabaseOptions.EnableWal` | `true` | `true`, `false` | DB has WAL enabled unless explicitly disabled |
 | `DatabaseOptions.ReplicationMode` | `Replicate` | `Replicate`, `DoNotReplicate` | DB participates in replication by default |
-| `DatabaseOptions.MaxMemoryBytes` | `null` | `null` (no cap); or any non-negative `long` (bytes) | No explicit per-database cap unless set |
+| `DatabaseOptions.MaxMemoryShareBytes` | `null` | `null` (no cap); or any non-negative `long` (bytes) | No explicit per-database cap unless set |
 | `PlsCrossPartitionRateLimitOptions.Enabled` | `false` | `true`, `false` | Cross-partition bypass rate limiting is opt-in |
 | `PlsCrossPartitionRateLimitOptions.PermitLimit` | `60` | Positive integer | Effective only when limiter is enabled |
 | `PlsCrossPartitionRateLimitOptions.WindowSeconds` | `60` | Positive integer (seconds) | Effective only when limiter is enabled |
@@ -341,7 +341,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - Database-scoped server routes (`/api/databases/{db}/...`) for data and schema operations.
   - Required `database` field in database-scoped protocol messages.
 - Per-database operations:
-  - Per-db options (`MaxMemoryBytes`, temperature default, WAL, replication mode) through startup config and create-db API.
+  - Per-db options (`MaxMemoryShareBytes`, temperature default, WAL, replication mode) through startup config and create-db API.
   - Per-db memory coordination and server memory view.
   - Per-db monitoring/health surfaces from P6.
 - PLS interaction:
@@ -622,7 +622,7 @@ Core modules:
 | `PartitionOptions.InitialBucketCount` | int | `16` (engine-level constant; see the row above for the value a new table actually gets) | `>= 1` | catalog policy | Shared mode initial bucket fanout. Resolved to `16` or `128` at table-create time per the rule in `2.7` before this field is ever persisted. |
 | ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
 | ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, 0.3.0**) with `MigrationOptions` (its workers were never started by a production path); an old catalog's property is ignored on load |
-| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
+| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default table temperature in DB |
 | `Aouda:Databases:{db}:EnableWal` | bool | `true` | `true/false` | startup config | Per-db WAL default |
 | `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | Per-db replication mode |
@@ -631,7 +631,7 @@ Core modules:
 | `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | startup config | Per-db timeout behavior |
 | `CreateDatabaseRequest.enableWal` | bool | `true` | `true/false` | create-db API | DB create-time operational setting |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | create-db API | DB create-time operational setting |
-| `CreateDatabaseRequest.maxMemoryBytes` | long? | `null` | null or non-negative | create-db API | DB create-time memory cap |
+| `CreateDatabaseRequest.maxMemoryShareBytes` | long? | `null` | null or non-negative | create-db API | DB create-time cap on its share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`) |
 | `CreateDatabaseRequest.defaultTemperature` | string? | `null` (`Auto` in options) | `Auto`, `HotOnly`, `ColdPreferred` | create-db API | DB create-time default table temp |
 | `Aouda:PlsCrossPartitionRateLimit:Enabled` | bool | `false` | `true/false` | server config | Enables limiter for bypassed cross-partition queries |
 | `Aouda:PlsCrossPartitionRateLimit:PermitLimit` | int | `60` | positive | server config | Max requests/window per (identity, db) |
@@ -683,7 +683,7 @@ const client = createAoudaClient({
   database: "appdb",
 });
 
-await client.databases.create("tenantdb", { maxMemoryBytes: 536870912 });
+await client.databases.create("tenantdb", { maxMemoryShareBytes: 536870912 });
 
 const orders = await client
   .table("orders")

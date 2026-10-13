@@ -118,7 +118,8 @@ When you do not set durability knobs explicitly:
 - WAL:
   - Database default `EnableWal = true` (`DatabaseOptions`).
   - Table-level `Durability.EnableWal` is nullable; null inherits database default.
-  - On disk: segmented `{db}/wal/wal_%09d.log`. Crash recovery fast-forwards from `{db}/wal/CHECKPOINT`. A leftover monolithic `insert.wal` is refused until `aouda wal convert`.
+  - On disk: segmented `{db}/wal/wal_%09d.log`. Crash recovery fast-forwards from `{db}/wal/CHECKPOINT`. A leftover monolithic `insert.wal` is refused at open (**BL-934, 0.4.0**: `aouda wal convert` is removed — restore from a backup taken by this version, or delete the file to discard its unreplayed writes).
+  - (**BL-980, 0.4.0**) A log holding a frame of the retired page-append family (`Begin` / `Commit` / `Abort` / `InsertBatch` / `SealSegment`, which no current build writes) is refused when it is replayed — at open or by a point-in-time restore — with an error naming the frame; so is a `wal.manifest.json` without a WAL-root id. Neither is converted: restore from a backup taken by this version.
 - Replication mode:
   - Database default `ReplicationMode = Replicate`.
 - Write concern:

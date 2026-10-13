@@ -41,3 +41,16 @@ gem install bundler jekyll
 bundle exec jekyll serve
 # Site at http://localhost:4000
 ```
+
+## Checking links
+
+Link to another page by its `.md` file, relative to the page you are editing (`[sizing](../guides/sizing.md#anchor)`):
+`jekyll-relative-links` rewrites it to the page's URL. A directory-style link (`../guides/sizing/`) is resolved against the
+*published* URL, which is one level deeper than the source file, and breaks. After a change, build and check every internal
+link and `#anchor`:
+
+```bash
+bundle exec jekyll build -d /tmp/aouda-site      # any directory outside the repo
+python3 scripts/check-anchors.py /tmp/aouda-site # exit 1 and one line per broken link
+python3 -m unittest discover -s scripts -p "test_*.py"
+```

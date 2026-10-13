@@ -90,7 +90,7 @@ which prints the service command line on standard output, the steps it would tak
 
 ---
 
-## ⚠️ Where Windows differs from Linux: there is no memory limit
+## ⚠️ Where Windows differs from Linux: there is no memory limit {#where-windows-differs-from-linux-there-is-no-memory-limit}
 
 On Linux the systemd unit carries `MemoryMax`, which does two things: it caps the process, **and** it creates a cgroup boundary that lets Aouda size its own budget from a grant it was actually given (70 % of the limit) rather than from a guess about the host (40 % of total RAM).
 

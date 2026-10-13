@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Data Authorization: Three Modes
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
@@ -48,6 +48,37 @@ database with **no linked auth database**, and a permission lookup that failed a
 write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table answers an empty result and refuses writes).
 That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a service key bypasses it. So link
 the auth database before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable, not open.
+
+### What changed in 0.4.0: only a service key bypasses PLS and RLS (**0.4.0**)
+
+Up to 0.3.x a **server API key** (`mk_srv_…`) was treated as a service key: on every database it could reach, it read and
+wrote past partition-level security (`jwt-claim` and `auth-db-pls`) and row-level security (`auth-db-rls`). From 0.4.0
+**only an app's service key (`mk_svc_…`, kind `service_role`) bypasses them**, over HTTP, WebSocket and long-poll alike.
+
+**Which keys lost the bypass.** Server API keys (`mk_srv_…`, kind `server_admin`). The same rule now covers every other
+credential without a user — `custom` keys not linked to a user, `anon` and `public` keys: those already got no bypass from the
+keys the server issues, and the rule is now one rule rather than a list of exceptions.
+
+**What such a request gets now.** Its role's grants (RBAC is unchanged: a server key's `db_admin` still lets it create tables,
+apply schema and manage the database), and on a protected table only what a request with **no user** may see:
+
+| Table | A key without a user (not a service key) |
+|---|---|
+| `auth-db-rls` | Only rows the table's RLS rule shows to a request with no user — with `UserId` or `PartitionGrant` rules, **none**. Writes are refused. |
+| `auth-db-pls` | `403 AUTH_PLS_GRANT_NOT_FOUND`. A key whose role is `db_admin` on the database may still **read** across partitions by asking for it (`"crossPartitionAccess": true`), which is audited. |
+| `jwt-claim` | `403` — the key carries no partition claim. The same `db_admin` + `crossPartitionAccess` read applies. |
+| No auth mode | Unchanged: its role's grants. |
+
+The server-admin endpoints (`/api/auth/admin/*`, database management, backups) are unchanged: they answer from the key's role.
+
+**What to use instead.**
+
+- **Server-side code that must see a whole database:** that database's service key (`mk_svc_…`, returned once when the
+  database is created with auth enabled). Keep it on the server.
+- **Access on behalf of one user:** the user's own JWT (sign them in), or a service key **or server API key** with
+  `X-User-Token: <the user's JWT>` — the request then gets that user's grants ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)).
+- **A service limited to some partitions:** a `custom` key linked to a user ([§19.4.5](#1945-durable-credentials-for-non-interactive-services)).
+- **An operator's cross-partition read:** a `db_admin` key or JWT with `"crossPartitionAccess": true` (`auth-db-pls`, `jwt-claim`).
 
 ---
 
@@ -96,7 +127,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
     "columns": [
       { "name": "id", "type": "Int64", "isPrimaryKey": true },
       { "name": "tenant_id", "type": "String", "isPartitionKey": true },
-      { "name": "amount", "type": "Decimal" },
+      { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 },
       { "name": "status", "type": "String" }
     ],
     "security": {
@@ -121,7 +152,7 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 | `mk_anon_` API key | `anonymous` role — no data access by default |
 | `mk_svc_` service key (no X-User-Token) | PLS **bypassed** — sees all partitions |
 | `mk_svc_` + X-User-Token | PLS enforced using user JWT claims |
-| `mk_srv_` server key | PLS **not enforced** (server-level access) |
+| `mk_srv_` server key | PLS **enforced** (**0.4.0**; [what changed](#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)): `403` without the claim; a `db_admin` key may read with `crossPartitionAccess` (audited). Up to 0.3.x: not enforced |
 | `db_admin` user JWT | Can use cross-partition access |
 
 **When to use:** Simple SaaS where each user belongs to exactly one organization and should only see that organization's data.
@@ -277,7 +308,7 @@ curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
 # → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
 ```
 
-**Do not** reach for `mk_svc_`/`mk_srv_` for this instead. Both are a full, audited bypass of PLS on every table (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to `quote_source=oslo_bors`.
+**Do not** reach for `mk_svc_` for this instead. It is a full, audited bypass of PLS and RLS on every table of its database (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to `quote_source=oslo_bors`.
 
 `userId` is only accepted on `kind: "custom"` keys — `anon`, `service_role`, `public`, and `server_admin` stay singleton, system-managed credentials and reject it with `400 INVALID_REQUEST`. Revoke the key (`DELETE .../admin/api-keys/{id}`) to cut the service off immediately, or delete the specific partition grant to narrow its access without rotating the credential.
 
@@ -327,7 +358,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 
 This resolver produces the compound predicate: `owner_id = '<userId>' OR team_id IN ('<team1>', '<team2>', ...)`.
 
-**Literal comparison is a string.** A Bool column does **not** match Literal `"true"` (`true.ToString()` is `"True"`). Prefer a String column (`"true"` / `"false"`), as in the [write-side fixture](../examples/p43-write-side/).
+**A literal is bound to its column's type** (**BL-1015, 0.4.0**). `valueConfig` is a string, and the rule's value is read as the column's type wherever the rule is applied — a query, a subscription's change events, a materialized query's rows and the write check alike: `"true"` matches a `Bool` column's `true`, `"05"` an integer 5, `"2026-10-12T21:00:00Z"` a `Timestamp`, `"2026-10-12"` a `Date`, `"10.5"` a `Decimal(p,s)` 10.50, a `Guid` in either case. A literal that does not convert to the column's type (`"yes"` for a `Bool`) denies — the rule matches nothing, for `ne` too. (0.3.0 compared a literal with a row as text outside the query path, so a `Bool` column never matched `"true"` there, and a subscriber could receive events its rule hid from a query; the [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a `String` column, which works either way.)
 
 ### 19.5.2 Setup: Create the RLS Table
 
@@ -342,7 +373,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
       { "name": "company_id", "type": "String", "isPartitionKey": true },
       { "name": "owner_id", "type": "String" },
       { "name": "team_id", "type": "String" },
-      { "name": "amount", "type": "Decimal" }
+      { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 }
     ],
     "security": {
       "partitionLevelSecurity": true,
@@ -399,7 +430,7 @@ For writes to `auth-db-rls` tables, Aouda evaluates a **write-check** predicate 
 
 **Write-check replaces the read predicate** when `writeCheckRules` is present on the resolver. Absent `writeCheckRules` ⇒ write-check = the read rules (today's behavior). To require both membership and identity, put both rules in `writeCheckRules` — do not assume they are ANDed automatically.
 
-The [write-side fixture](../examples/p43-write-side/) uses a SenderId-only write-check so a user can insert a stamped message into a private room they cannot **read**.
+The [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a SenderId-only write-check so a user can insert a stamped message into a private room they cannot **read**.
 
 | Write Operation | Write-check matches row? | Result |
 |---|:---:|:---:|
@@ -426,7 +457,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
       { "name": "portfolio_group_id", "type": "String", "isPartitionKey": true },
       { "name": "owner_id", "type": "String" },
       { "name": "instrument", "type": "String" },
-      { "name": "value", "type": "Decimal" }
+      { "name": "value", "type": "Decimal", "precision": 18, "scale": 2 }
     ],
     "security": {
       "partitionLevelSecurity": true,
@@ -589,6 +620,11 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 
 **`writeCheckRules`:** optional second rule list. Present ⇒ write-check **replaces** read. Absent ⇒ write-check = read.
 
+**A stored rule is either a read rule or a write-check rule** — the admin API records which list it came from. A rule with no
+kind, or a kind the server does not know, **denies** reads and writes (fail closed). (**BL-980, 0.4.0**) Up to 0.3.x a
+rule stored with no kind — only an auth database from before write-check rules had them — was read as a read rule; such a
+database is not upgraded any more (see [defaults](index.md#23-defaults-and-zero-config-behavior)), so re-create its resolvers.
+
 ### List Resolvers
 
 ```bash
@@ -644,7 +680,7 @@ curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/rls-resolver
 
 ### Worked example — public OR member + identity stamp
 
-Published fixture (byte-identical in the engine tree): [`examples/p43-write-side/`](../examples/p43-write-side/). Schema apply creates tables; [`auth-setup.json`](../examples/p43-write-side/auth-setup.json) is **admin HTTP** (users, roles, resolvers, grants) — proof that resolvers are not schema apply.
+Published fixture (byte-identical in the engine tree): [`examples/p43-write-side/`](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side). Schema apply creates tables; [`auth-setup.json`](https://github.com/aoudadb/aoudadb.github.io/blob/main/examples/p43-write-side/auth-setup.json) is **admin HTTP** (users, roles, resolvers, grants) — proof that resolvers are not schema apply.
 
 - `rooms` — `auth-db-rls`: `id In PartitionGrant{room_membership} Or IsPublic Eq Literal true`. Alice has zero grants and still sees the public room. `IsPublic` is **String**.
 - `messages` — read membership; `writeCheckRules` is `SenderId Eq UserId` only. Alice can insert a stamped row into a private room she cannot read.
@@ -878,8 +914,8 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
       { "name": "id", "type": "Int64", "isPrimaryKey": true },
       { "name": "quote_source", "type": "String", "isPartitionKey": true },
       { "name": "instrument_id", "type": "String" },
-      { "name": "bid", "type": "Decimal" },
-      { "name": "ask", "type": "Decimal" },
+      { "name": "bid", "type": "Decimal", "precision": 18, "scale": 6 },
+      { "name": "ask", "type": "Decimal", "precision": 18, "scale": 6 },
       { "name": "timestamp", "type": "Timestamp" }
     ],
     "security": {

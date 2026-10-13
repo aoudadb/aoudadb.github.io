@@ -139,7 +139,7 @@ If you do nothing beyond starting local dev:
 | `DevServerOptions.EnableAuth` | `false` | Auth is opt-in in dev mode unless explicitly enabled |
 | `TokenOptions.AccessTokenLifetime` | `15m` | Short-lived user access tokens |
 | `TokenOptions.RefreshTokenLifetime` | `30d` | Long-lived sessions for app flows |
-| `TokenOptions.Issuer` | `"aouda"` | Default JWT issuer baseline |
+| `TokenOptions.Issuer` | `"aouda"` | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}`, and (**0.4.0**) only that issuer is accepted for them |
 | `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | Signature + revocation checking by default |
 | `PasswordPolicy` | Min `8`, Max `128` | NIST-aligned baseline policy |
 | App auth endpoint gate | API key required | Prevents unauthenticated direct auth route calls |
@@ -321,7 +321,7 @@ Primary evidence:
 | `Aouda:Auth:Sms:*` | — | null | GatewayAPI settings | `AOUDA_*` env / optional server appsettings | MFA phone OTP SMS |
 | `TokenOptions.AccessTokenLifetime` | timespan | `15m` | positive | Auth engine options | Access JWT lifetime |
 | `TokenOptions.RefreshTokenLifetime` | timespan | `30d` | positive | Auth engine options | Refresh token lifetime |
-| `TokenOptions.Issuer` | string | `"aouda"` | non-empty | Auth engine options | JWT issuer |
+| `TokenOptions.Issuer` | string | `"aouda"` | non-empty | Auth engine options | Issuer of the server auth database's tokens (app databases: their URL issuer) |
 | `AuthenticationMiddlewareOptions.ValidationMode` | enum | `Hybrid` | `SignatureOnly`, `Hybrid`, `Stateful` | Middleware options | Signature-only vs revocation/session enforcement |
 | `PasswordPolicy.MinLength` | int | `8` | `>=1` | Auth engine options | Password minimum length |
 | `PasswordPolicy.MaxLength` | int | `128` | `>= MinLength` | Auth engine options | Password maximum length |

@@ -13,6 +13,271 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-13
+
+Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's security review), **`@aouda/client` 0.4.0**,
+**`Aouda.Client` 0.4.0** and **Studio 0.0.27**. Every `(**…, next train**)` marker for what this train ships now names `0.4.0`;
+[compatibility](clients/compatibility.md) has the 0.4.0 row. ⚠️ Merge after the server tag `v0.4.0` and `@aouda/client` 0.4.0 on npm exist.
+
+- **A database with no linked auth database needs server credentials on the admin listener once a server auth database exists
+  (BL-1017; security, present in 0.3.0 and earlier).** It stayed open to anyone there — reads, writes, DDL, quarantine and
+  `DELETE /api/databases/{db}` — while `/api/databases` itself needed server credentials. Now every request to it, WebSocket and
+  long-poll included, needs a server user's token, `mk_srv_` or a server key with a role on it, and is authorized by the server
+  auth database's grants; an anonymous one is `401`, as for a database that does not exist. Before setup, and on the data-plane
+  listener, nothing changes ([databases without authentication](getting-started/index.md#9-databases-without-authentication),
+  [the auth states](getting-started/auth.md#three-authentication-states-for-a-database),
+  [how data endpoint auth works](reference/http-api.md#how-data-endpoint-auth-works)). The scenario 4 example in
+  [architecture](auth/architecture.md) now uses `/api/auth/admin/api-keys`' actual body (`roles: [{ role, scope }]`).
+- **A memory budget derived from the host keeps its heap limit (BL-983's fix).** BL-983 lowers the .NET heap's limit at runtime so
+  that an explicit `MaxTotalRamBytes` holds for the whole process. During the release's final gate it did so for a derived budget
+  too, which already leaves 30 % of a container's limit outside it: in a 512 MB container the heap's limit fell from 315 to 191 MiB
+  within minutes and a materialized query stayed stale for the rest of the run. Now only an explicit ceiling (configured, or set by a
+  live resize) lowers it ([sizing](guides/sizing.md)).
+- **Databases that share an auth database are one trust domain — documented (BL-1018, open).** A refresh token or a native sign-in
+  code issued at one is redeemed at another linked to the same auth database, for a session there; an access token is not. Who
+  should share an auth database and who should not: [use cases](auth/use-cases.md#one-auth-database-is-one-trust-domain); notes in
+  [the auth reference](auth/reference.md#sessions-are-devices) and [Pattern E](auth/architecture.md).
+
+- **Release 0.4.0 preparation: what the integration of NativeClients and its security review changed.** An RLS rule's literal is
+  bound to its column's type wherever it is applied — subscriptions, materialized-query rows and the write check, as queries already
+  did (BL-1015; [authorization](auth/authorization.md#1951-setup-define-a-resolver)). `PUT /admin/backup/schedule` and
+  `PATCH /admin/config` answer `503` + `Retry-After` when their save is refused and change nothing (BL-1016;
+  [HTTP API](reference/http-api.md)). A WebSocket or long-poll token check refused for capacity is the refusal's code, not
+  `AUTH_TOKEN_INVALID` ([`auth_error`](reference/http-api.md#auth_error)). An MFA challenge, a backup code and a reset OTP are spent
+  once, by the first of two concurrent requests ([auth error codes](auth/reference.md)). A native sign-in's `POST …/auth/token`
+  refused for capacity leaves the code redeemable. The server's database registry is version 2: an older one is refused at startup,
+  as a 0.3.0 data directory is.
+
+- **0.4.0 does not open a data directory, backup or replica checkpoint written by 0.3.0 or earlier (catalog format 7;
+  breaking).** 0.3.0 wrote catalog format 6. This train deleted every reader of an older shape and added columns to an auth
+  database's sessions table, so a 0.3.0 directory would have been half read; it is now refused at open (and a 0.3.0 backup at
+  restore) with `CatalogFormatException`, naming the version found and the one this build reads, like every older format before
+  it. There is no migration: reload the data from its source with 0.4.0, and have users sign in again (their sessions and keys lived
+  in the old auth database).
+
+- **Links between pages work on the published site (LoadSpeed K55).** The site was built without `jekyll-relative-links`, so
+  every link written as a relative `.md` file — about a thousand, on nearly every page — was published as that file name and
+  answered 404 (`/guides/defaults-reference/sizing.md`); a directory-style link (`../getting-started/`) resolved one level too
+  deep. The plugin is on, the directory-style links are `.md` links, and the leftovers of the engine repo's file names
+  (`Getting-Started-Auth.md`, `Auth-Data-Authorization.md`, `../decisions/…`) point at this site's pages or at the engine repo.
+  Five anchors that named no heading are fixed. `scripts/check-anchors.py` checks every internal link and anchor of a built
+  site (README, "Checking links").
+
+- **A database's memory cap is `maxMemoryShareBytes`; `maxMemoryBytes` is ignored (BL-980, LoadSpeed S10b; breaking).** The
+  create-database request (`POST /api/databases`) and every database response's `options` carry `maxMemoryShareBytes` — a cap on
+  that database's share of the one server budget, as `maxMemoryBytes` always was. A request that still sends `maxMemoryBytes`
+  has it ignored: the database gets no cap. `@aouda/client`'s `databases.create` takes `maxMemoryShareBytes`; the C# SDK's
+  `CreateDatabaseOptions.MaxMemoryShareBytes`. The server configuration's `Aouda:Databases:{db}:MaxMemoryBytes` was already
+  refused at startup ("no longer supported") — several guides still listed it as the cap; they now name `MaxMemoryShareBytes`.
+  Pages: `reference/http-api.md`, `guides/sizing.md`, `guides/storage.md`, `guides/server-multi-database.md`,
+  `guides/partitioning.md`, `guides/hot-cold.md`, `getting-started/index.md`.
+- **An explicit memory ceiling holds for the whole process, and an explicit 2 GiB is honoured (BL-983, LoadSpeed S10a).**
+  `MaxTotalRamBytes` is now an RSS ceiling in full: the server measures the memory outside the .NET heap every 10 s and lowers the
+  heap's limit by whatever exceeds its reserve, and caps glibc's malloc arenas at two. The sizing guide's interim advice (a
+  container limit ~10 % above the setting, `MALLOC_ARENA_MAX=2`) is removed. `MaxTotalRamBytes` defaults to `0` ("derive it from
+  the host"); before, the default was 2 GiB and an explicit 2 GiB was read as "not configured" and replaced by the derivation.
+  Pages: `guides/sizing.md`, `guides/defaults-reference.md`, `guides/hot-cold.md`.
+
+- **One decimal: `Decimal(p,s)` only; the undeclared `Decimal` is retired (LoadSpeed S13; breaking).** `Decimal(p,s)`
+  (1 ≤ p ≤ 18, 0 ≤ s ≤ p), a scaled 64-bit integer on disk and on the wire, is the only decimal type; the 128-bit
+  `System.Decimal` of any scale is gone. `"type": "Decimal"` without `precision` and `scale` — schema documents,
+  `POST …/tables`, `POST …/tables/{t}/columns` — is `400` ("A Decimal column declares its precision and scale …"), as is a
+  precision above 18. A computed output's `type` and `cast`'s target spell it `"Decimal(18,6)"`; plain `"Decimal"` is
+  refused there too. A C# `decimal` property needs `[AoudaDecimal(p, s)]` (`Aouda.Abstractions.Attributes`) for
+  `CreateTableAsync<T>()` and the embedded engine, and a table created from its first row no longer infers a decimal column
+  from a C# `decimal`. A data directory holding a column of the old type (type 13) is refused at open, naming the column —
+  export it with the build that wrote it; there is no migration. On the wire, the column-batch frame's 128-bit `Decimal`
+  kind (6) is deleted and refused `400`; decimals travel only as `ScaledDecimal` (kind 8), one scale per column, which the
+  C# SDK, `@aouda/client` and the server's NDJSON reader now use throughout, and query results send a decimal column as
+  `ScaledDecimal` at its declared scale (JSON gives exactly that many places). Compute is exact: `sum` of a decimal is
+  `Decimal(18,s)` and refused past 18 digits in a query as in a materialized query, `avg` is a `Double`, `min` / `max`
+  keep the column's scale, and expressions compute at fixed scales (`*` adds them, `/` gives at least 6 places, a literal
+  keeps the scale it is written with, `round(x, n)` is scale `n`) with an overflow an error, never a wrap or a silent
+  `Double`. [Schema — `Decimal(p,s)`](guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020),
+  [HTTP API — data types](reference/http-api.md#data-types), [the frame](reference/http-api.md#post-jobidappend),
+  [Insert-time transforms](guides/insert-transforms.md), [Materialized queries](guides/materialized.md),
+  [Query](guides/query.md), [.NET client](clients/index.md), [TypeScript client](clients/typescript.md),
+  [Compatibility](clients/compatibility.md).
+- **A refusal is answered as one everywhere it was not yet (BL-944, LoadSpeed K46).** A refusal no other code names is
+  `503 SERVICE_UNAVAILABLE` with `Retry-After`, never a `500`. `SERVER_STARTING` now carries `Retry-After: 5`;
+  `SETUP_REQUIRED` and `SERVER_AUTH_NOT_CONFIGURED` deliberately carry none — an operator ends them, not time. A refused
+  `DELETE /admin/notifications/email` or `/sms` is `503` + `Retry-After` and leaves the setting as it was (it answered `2xx`
+  and the provider came back at the next start). A refusal wrapped in another error on
+  `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE` for the result ceiling), not
+  `400 INVALID_REQUEST`. A self-signup refused part-way is rolled back, so its retry does not find the email taken.
+  [HTTP API — server errors](reference/http-api.md#server-errors-5xx).
+- **`Aouda.Client`: a write stream survives a reconnect, and a `415` on an insert frame is an error (BL-987, BL-980,
+  LoadSpeed K42 / K43).** A write or close during a reconnect waits for the stream's re-open instead of failing the stream
+  for good; a write already sent when the connection dropped fails with `AoudaConnectionException` — its rows may or may not
+  have been written — instead of hanging. A `415` on a frame is an `AoudaException`: the SDK no longer re-sends the insert as
+  JSON or stays on JSON for five minutes (that served only an older server behind the same address; `@aouda/client` keeps
+  it). [.NET client](clients/index.md), [Real-time](guides/real-time.md).
+- **The catalog and schema history read only what this build writes (BL-980, LoadSpeed K42; breaking).** A catalog-WAL record
+  in an older layout or of an unknown type, an unknown `PartitionOptions` member, and a table without a data directory (made
+  before BL-398) are refused with an error naming what was found, instead of being skipped or guessed. Merging or deleting a
+  branch without its `base-catalog.json` (made before F.3) is refused before anything changes — there is no two-way fallback. A
+  migration history naming `StartupApply` (or any unknown source) is refused. An aggregate materialized query whose
+  `groupByColumns` are plain strings (`AggregateConfig` v1) is refused when read, and a create request in that shape is `400` —
+  use `{ "column": "…" }`. `GET /api/tables` always carries `createdAt` / `lastModifiedAt`, and tables a replica or a
+  point-in-time replay registers now carry their real timestamps. A database written by an older build is restored from a
+  backup taken by this version, or re-created. [Schema — MigrationSource](guides/schema.md#migrationsource),
+  [Materialized queries](guides/materialized.md).
+- **Older segment, index and bulk-load files are refused, and `rowCountIsExact` is gone (BL-980, LoadSpeed K42; breaking).**
+  A `pk_index.spr` of version 1 or 2 is refused, naming the version. A catalog segment entry without a row count is refused,
+  so `GET /api/tables`' `rowCount` is always the exact total and **`rowCountIsExact` is removed** from the response, from
+  `Aouda.Client` and from `@aouda/client`'s `TableSummary`. A pending bulk-load job record without its commit time is set aside as
+  corrupt at open and every materialized query is rebuilt; a pre-P41 `.bulkload.commit` marker is no longer read.
+  [HTTP API — tables](reference/http-api.md#get-apitables), [PK indexing](guides/pk-indexing.md).
+- **Replication speaks protocol v4 only, and a replica refuses what it cannot apply (BL-980, LoadSpeed K42; breaking).** A
+  primary closes a v1, v2 or v3 handshake without a response — replication has not shipped, so run every node on the same build.
+  An election heartbeat missing its profile, hints, hidden or per-database fields is not accepted. A catalog-DDL frame with an
+  unknown opcode or payload version, or a DDL record that does not decode, is refused on a replica and aborts a point-in-time
+  replay, instead of being skipped. A WAL holding a frame of the retired page-append family is refused at replay.
+  [Replication](guides/replication.md#available-now).
+- **A point-in-time restore needs the backup's WAL-root incarnation (BL-980, LoadSpeed K42; breaking).** A backup that records
+  none — one of a database without a WAL, or one taken by an older build — is refused for a point-in-time restore instead of
+  having its epoch inferred from the archive; an exact restore of it is unchanged. A WAL root whose `wal.manifest.json` has no
+  root id (only a build before BL-330 / BL-438 wrote one) is refused when it opens. [Backup — PITR](guides/backup.md#c-pitr-http-or-engine).
+- **Auth databases and tokens from an older build are not upgraded (BL-980, LoadSpeed K41; breaking).** Pre-1.0 nothing is
+  kept compatible. An application database's access tokens must carry its URL issuer, `{base}/api/databases/{db}`; the default
+  issuer `"aouda"` is no longer accepted beside it (a token carrying it is `401` — sign in again). `"aouda"` stays the issuer
+  of the server auth database's own tokens. A refresh token whose stored `aal` is missing or not `aal1` / `aal2` is an invalid
+  token (`401`), not an `aal1` session. An RLS resolver rule with no kind denies (fail closed) instead of acting as a read rule.
+  Nothing adds tables or columns to an existing auth database at startup, or back-fills `_users.email`'s uniqueness, any more:
+  an auth database made by an older build is not upgraded — re-create it. The server JWT's `iss` was documented as
+  `{base_url}/api/auth`; it is `"aouda"`.
+  [Auth defaults](auth/index.md#23-defaults-and-zero-config-behavior), [OIDC discovery](auth/reference.md#discovery-endpoints).
+- **A materialized query's result stays in the write buffer while memory allows (BL-910).** A result is rewritten by every load
+  that reaches its groups, and sealing it at the small seal size made it a run of small segments, each one more flush and more
+  key-index work. While the database's write buffers hold less than half of the write buffer's ceiling (`T11`), a result's buffer
+  is no longer sealed at the seal size or flushed on idle; it flushes at its own per-table bound, at a checkpoint, or under memory
+  pressure, where the ordinary rules apply. Fewer, larger result segments, more result rows buffered between checkpoints, and
+  bulk loads into tables with many queries cost less CPU.
+  [Materialized queries](guides/materialized.md#where-a-materialized-querys-result-lives), [Sizing](guides/sizing.md#mq-result-residency).
+- **`auto`'s catch-up, two details (LoadSpeed group 2 review).** A load held while its table was loading reported `pending` for
+  ever when a query it reaches was in `error`: it now reports `failed` once a pass after its commit has left it owed only by such
+  queries, as a load maintained at its commit always did. And the 60 s bound counts from the oldest load no pass has taken in, so the
+  last loads of a long migration are caught up 2 s after it stops, not up to a minute later.
+  [Bulk load](guides/bulk-load.md#loading-a-lot-of-data-into-tables-with-queries).
+- **A materialized query built on another query's result says when it is behind because of it (BL-989).** Its status reports
+  `isStale: true` and a `staleReason` naming the query it is built on while that one is behind — for instance while `auto` holds a
+  loading table's queries for the catch-up. It used to read `isStale: false` beside `current: false`.
+- **`postLoadMqBehavior: "deferred"` is gone; use `"auto"` (LoadSpeed K31; breaking).** With `auto` catching a loading table up in
+  one pass and `:commit` not waiting by default (`mqWaitMs` 0), `deferred` differed only in never waiting at `:commit` and in not
+  starting a quiet table's maintenance at once. A server from 0.4.0 refuses it at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS`
+  (the message says to use `auto`); `mqStatus` and `mqRebuildStatus` are never `deferred`. `Aouda.Client` drops
+  `ClientPostLoadMqBehavior.Deferred`, `MqRebuildStatus.Deferred` and `MqCommitStatus.Deferred`; `@aouda/client` drops `"deferred"`
+  from `postLoadMqBehavior`, `MqCommitStatus` and `MqRebuildStatusWire`. [Bulk load — deferred loads](guides/bulk-load.md#deferred-loads-and-the-tables-pass).
+- **Only a service key bypasses partition- and row-level security (BL-944; breaking).** Up to 0.3.x a server API key
+  (`mk_srv_…`) read and wrote past PLS (`jwt-claim`, `auth-db-pls`) and RLS (`auth-db-rls`) on every database it could reach.
+  From 0.4.0 only an app's `service_role` key (`mk_svc_…`) does. A server key — and any other key without a user — gets its
+  role's grants and, on a protected table, what a request with no user may see: with the usual RLS rules no row (writes
+  refused), on a PLS table `403` unless its role is `db_admin` and the read asks for `crossPartitionAccess` (audited). Use the
+  database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with a service or server key for one user's
+  data. [What changed](auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+- **Sizing: a known gap in the memory ceiling is documented (BL-983).** [Sizing](guides/sizing.md) now says that the process can
+  sit 2–5 % above `MaxTotalRamBytes` under load — the memory outside the .NET heap is larger than the server sets aside for it — and
+  what to do until it is fixed: a container limit about 10 % above the setting, and `MALLOC_ARENA_MAX=2` on Linux.
+- **`@aouda/client` treats a sign-in, sign-up or refresh refused for capacity as retryable (BL-944).** A `503`
+  `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` (or `429 SERVER_AT_CAPACITY`) from an auth call is the data calls' error with
+  `retryAfterSeconds`, not `AoudaAuthenticationError`; a refused refresh keeps its refresh token and the request that needed it fails
+  with the refusal, not its `401`; a refused early refresh keeps using the still-valid token.
+- **Refusals on the auth and WebSocket paths are answered as refusals, and leave the retry its token (BL-944).** A JWT check the
+  server could not finish for capacity is `503` + `Retry-After` (it was `401 AUTH_TOKEN_INVALID`, which signs a browser user out);
+  a password reset refused at the hash, or answered 400 for a weak password, keeps its OTP; an MFA verify refused after its code
+  was accepted keeps its challenge (and backup code); WebSocket writes and subscriptions carry `MEMORY_BUDGET_EXCEEDED` /
+  `WAL_CAPACITY_EXCEEDED` / `WRITE_CONFLICT` instead of `INVALID_REQUEST`, `SNAPSHOT_FAILED` or `PERMISSION_REVOKED`; the backup
+  trigger answers a refusal 503 and other failures 500 (it answered 400). The C# SDK raises `AoudaCapacityException` with the
+  server's `Retry-After` for a refused sign-in, sign-up or refresh, keeping the refresh token.
+- **`postLoadMqBehavior: "auto"` coalesces while a table is loading (LoadSpeed M.3).** A load into a table that is busy (another
+  load in flight, an earlier load still owed, or one committed in the last 2 s) no longer starts its queries' maintenance at its
+  commit: they report behind and are caught up in one pass once loading has been quiet for 2 s, or at a 60 s bound while loads keep
+  coming. On a 2 GB server with 13 queries the trade load ran at 253 k rows/s (67 k on 0.3.0) and every query was current 440.5 s
+  after the load started (650 s) — as fast as the `skip` + pooled-refresh recipe (441.5 s), which the guidance now keeps for when
+  you want maintenance off. [Bulk load](guides/bulk-load.md#loading-a-lot-of-data-into-tables-with-queries),
+  [defaults](guides/defaults-reference.md).
+- **A bulk load's `:commit` does not wait for its materialized queries unless asked (LoadSpeed M.2).** `mqWaitMs` defaults to
+  `0` (it was 30000): the commit answers as soon as the load is durable, and a load whose queries are still catching up says
+  `mqStatus: "behind"` with `mqFrontierToken`. To go on only once they are current, send `mqWaitMs` (`MqWait` in `Aouda.Client`,
+  `mqWaitMs` in `@aouda/client`), or read with the commit's `token`. Neither SDK's code changes; only what the server does when the
+  field is left out.
+- **Guidance for loading a lot of data into tables with queries (LoadSpeed M.1).** [Bulk load](guides/bulk-load.md#loading-a-lot-of-data-into-tables-with-queries)
+  now says, with 0.3.0's measurements: for a migration or initial load, `postLoadMqBehavior: "skip"` and one pooled refresh per
+  source table at the end (all queries current 32 % sooner than `auto`, with 42 % less CPU); bulk-load jobs of 10 000 rows or more;
+  `InsertMany` for trickles below about 2 000 rows per call. The bulk-load guide's old warning that a refresh after a `skip` load is
+  not bounded by the memory governor is corrected: since 0.3.0 it is.
+- **An insert of a deleted key is no longer refused as a duplicate after the server evicts and rebuilds segment metadata (BL-954).**
+  The duplicate check now follows a segment's replacements, so a delete recorded on the replacement is seen. Nothing was ever
+  written wrongly; the insert succeeds now.
+- **A large UPDATE or DELETE racing other writers gives up less readily (BL-920).** Its up-to-16 re-runs before
+  `409 WRITE_CONFLICT` now pause briefly between them (under a second in all) instead of running back to back.
+- **`aouda wal convert` is removed (BL-934).** A data directory holding a single-file `insert.wal` (written before the segmented
+  WAL) is refused at open with a message that names the way out: restore from a backup taken by this version, or delete
+  `insert.wal` to discard the writes it holds that were never checkpointed. The undocumented `POST /api/databases/{db}/wal/convert`
+  is gone too.
+- **A capacity refusal's `Retry-After` is at most 30 s (BL-956).** One bulk-load refusal in the 0.3.0 `scale` soak said
+  `Retry-After: 300`, and a client that honoured it waited 310 s where the server needed ~15 s. Every `503`
+  (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`) now asks for at most 30 s, and a WAL refusal before the server has measured
+  how fast it frees log says 10 s. Ask again then; the next answer carries a fresh estimate. No client change is needed.
+
+- **Native sign-in in both SDKs** (NativeClients S07, Derive ask AQ-7). `createPkcePair()` / `Pkce.CreatePair()`,
+  `auth.createAuthorizationCode(...)` for the web front and `auth.exchangeCode(...)` for the native app; recipes for a desktop app
+  (loopback) and a phone app (private-use scheme or claimed link) in [Native apps](auth/setup.md#native-apps-sign-in-through-the-browser).
+  `guides/build-apps.md` now says what shipped (native sign-in) and what did not (a hosted authorization server, social login, consent).
+
+- **Native apps sign in through the browser** (NativeClients S06, Derive ask AQ-7). A signed-in web front issues a single-use PKCE
+  code (`POST .../auth/authorize`); the native app redeems it (`POST .../auth/token`) for its own session at the web session's `aal`
+  — MFA done in the browser carries over. Native clients and their redirect URIs (loopback, reverse-DNS scheme, `https`) are registered
+  by an administrator. [Native sign-in](auth/reference.md#native-sign-in-through-the-browser).
+
+- **An idle device can still be signed out** (NativeClients group 2 review). A session stays listed, and is ended by `others`,
+  `global`, a `DELETE` by id or an admin action, for as long as its refresh token lives — it vanished after 15 idle minutes and kept
+  refreshing. An access token from before an MFA step-up is refused once the user's sessions end; a long-poll connection is dropped
+  on its next request after a revoke (it was never checked); in Stateful mode a WebSocket opened with an API key is no longer closed
+  after a heartbeat; deleting a user refuses every access token they hold; an administrator's MFA factor removal ends the user's
+  sessions. SDKs: a refresh refused because the session is over clears the stored tokens (`signedOut`); `signOut` with `others` /
+  `global` rejects when nothing was ended; sign-out refreshes an expired token first; TS `auth.refresh()` no longer races an
+  automatic refresh into a token reuse.
+
+- **The SDKs tell the app every token change** (NativeClients S05, Derive ask AQ-6). `client.auth.onTokensChanged(listener)` in
+  `@aouda/client` (any number of listeners; the WebSocket transport is now one of them) and `client.Auth.TokensChanged` in
+  `Aouda.Client`, on sign-in, every refresh — the automatic ones included — and sign-out. Persist the refresh token on each change:
+  the server rotates it, and an app restarted with a spent one loses its session.
+  [Keeping tokens across restarts](auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-040).
+
+- **Sessions are devices; sign-out signs out this device** (NativeClients S04, Derive ask AQ-5, ADR 0062). A session is one sign-in
+  on one device: a refresh updates it instead of adding a row, and it carries the client's `deviceInfo` (≤ 512 UTF-8 bytes) beside
+  the user agent and IP the server saw. **`signout` now ends only the calling session** — send `{ "scope": "global" }` to sign out
+  everywhere, `"others"` to keep this device. Users list and end their own sessions with `GET` / `DELETE .../auth/sessions`.
+  Ending a session refuses its access tokens at once, and a reused refresh token now ends its whole session. Both SDKs:
+  `signIn(…, { deviceInfo })`, `signOut({ scope })`, `listSessions()`, `revokeSession(id)`.
+  [Sessions are devices](auth/reference.md#sessions-are-devices).
+
+- **Disabling a user ends what they hold** (NativeClients S03, Derive ask AQ-4). Refresh answers `423 AUTH_ACCOUNT_DISABLED`; every
+  live access token is refused on the next request, and an open WebSocket closes with `AUTH_TOKEN_REVOKED` within a heartbeat. An
+  admin's `DELETE .../admin/sessions/{id}` ends that session's refresh family and access tokens (it deleted the row only), and
+  "revoke all", a password change or reset end every session the same way. Each access token is now unique (`jti`): two
+  sign-ins in the same second no longer share a token, so ending one session cannot end another.
+
+- **Server-time read bounds** (NativeClients S02, Derive ask AQ-2). A named-query parameter declared
+  `{ "serverTime": { "offsetSeconds": -75 } }` is bound by the server to its clock at execute — a presence lease read against
+  one clock. One-shot reads only: subscribe refuses it (`NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE`).
+  [Named queries](guides/named-queries.md#server-time-bounds-servertime-parameters).
+- **`Date` readable cross-origin**, and both SDKs keep the server-clock offset (`serverClockOffsetMs` / `ServerClockOffset`).
+- **`returning` on `insert` and `upsert` named mutations** (AQ-10, BL-639): the rows written — an upsert's one row per key,
+  as stored. It was accepted and ignored.
+- **Subscription caps and the per-identity quota for several devices** are now in
+  [Defaults reference](guides/defaults-reference.md#data-plane-subscriptions-and-the-identity-quota) (AQ-9).
+
+- **Server-time stamps** (NativeClients S01, Derive ask AQ-1). A `Timestamp` column declared
+  `derived: { "serverTime": "insert" | "write" }` is stamped by the server's clock on every write path and refuses any
+  caller value, so sent-at and last-seen times no longer depend on device clocks.
+  [Insert transforms](guides/insert-transforms.md#server-time-stamp-servertime).
+  The presence example in [Named queries](guides/named-queries.md) now uses it.
+- **Fixed: an upsert of a key that had left the write buffer** (sealed to a hot or cold segment, or any key of a table
+  with a `unique` column) **failed with `TRANSFORM_DERIVED_READONLY` on a table with a derived or identity column** (BL-994).
+- **Market-data guide: declared `Decimal(p,s)` for quote prices.** The worked `quotes` schema (and the P40 conformance fixture) now declare `bid` / `ask` as `"type": "Decimal"` with `"precision": 18` and `"scale": 2` — the wire form, not a type string `"Decimal(18,2)"`. The named-queries guide's equity-quote example matches. Both are required: the undeclared `Decimal` is refused (S13, above); see [schema](guides/schema.md).
+
 ## 0.3.0 — 2026-10-10
 
 Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
@@ -402,7 +667,7 @@ Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
 
 - **Deployment has real pages now, and they describe what is actually shipped (BL-629).**
   New [Linux (systemd)](deployment/linux.md), [Windows Service](deployment/windows.md) and
-  [Docker](deployment/docker.md) guides; [Deployment](deployment/) becomes a router to them;
+  [Docker](deployment/docker.md) guides; [Deployment](deployment/index.md) becomes a router to them;
   `getting-started` §16 is rewritten against what exists rather than what was planned.
   - ⚠️ **Several things these pages used to say were not true.** The deployment index named six
     hosting modes and had a page for one, in a table whose Windows row had three cells and two
@@ -718,7 +983,7 @@ Server `0.3.0`, `@aouda/client` `0.3.0`, `Aouda.Client` `0.3.0`.
 - **Catalog GET is metadata-only; linkage is no longer omitted.** `GET`/`list` `/api/databases` now document `auth.enabled` / `auth.database` (never `mk_*`). `authDatabaseKind: "none"` on a data DB does not mean unlinked. HTTP API v2.6. [HTTP API](reference/http-api.md#get-apidatabasesname).
 - **Create role contract.** `POST …/auth/admin/roles` requires `name`; `permissions` is optional (empty grants nothing). `actions` is a string, not an array. 400 bodies include `error` / `suggestion`. [Auth reference](auth/reference.md), [Use cases](auth/use-cases.md).
 - **Health vs ready.** Wait on `GET /ready` and `GET /api/databases/{name}` `state=Active` before schema apply; `/health` is liveness only. [`/ready` is unchanged](reference/http-api.md#get-health) for a `Dropping` sibling database.
-- **P43 write-side authorization (docs).** Public pages now name the code's RLS value sources (`UserId`, `Literal`, `PartitionGrant`), admin-API resolver authoring, identity stamp (`"derived": { "identity": "subject" }`), `plsClaimBinding`, `writeCheckRules`, and per-user claims. Conformance fixture: [`examples/p43-write-side/`](examples/p43-write-side/).
+- **P43 write-side authorization (docs).** Public pages now name the code's RLS value sources (`UserId`, `Literal`, `PartitionGrant`), admin-API resolver authoring, identity stamp (`"derived": { "identity": "subject" }`), `plsClaimBinding`, `writeCheckRules`, and per-user claims. Conformance fixture: [`examples/p43-write-side/`](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side).
 - **P42 catalog directory (operators).** Live catalog is `catalog.root.json` plus per-table shards. Opening a pre-P42 database migrates forward; there is no downgrade. Lazy catalog residency is the shipped default. [Storage](guides/storage.md).
 
 ## 0.1.10 — 2026-08-23
@@ -779,7 +1044,7 @@ Server **0.1.6** treats `MaxTotalRamBytes` as a process RSS ceiling (default ~70
 ### Result
 Aouda became capable of ingesting, encoding, and reading columnar pages fully in-memory and on-disk.
 
-📄 *See also:* [P0-COMPLETION.md](./P0-COMPLETION.md)
+📄 *See also:* [P0-COMPLETION.md](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P0-COMPLETION.md)
 
 ---
 
@@ -800,7 +1065,7 @@ Aouda became capable of ingesting, encoding, and reading columnar pages fully in
 ### Result
 Aouda now provides full **durable write semantics** — all data survives process restarts, and WAL replay guarantees correctness.
 
-📄 *See also:* [P1-COMPLETION.md](./P1-COMPLETION.md)
+📄 *See also:* [P1-COMPLETION.md](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P1-COMPLETION.md)
 
 
 ---

@@ -56,6 +56,45 @@ _Repo: `aouda-client-ts`_
 npm install @aouda/client
 ```
 
+Runs in browsers, on React Native (below) and on Node 22+ (**NativeClients, 0.4.0**: Node 22 is the floor, because the client
+uses the platform's `WebSocket` and no longer ships the `ws` package; on an older Node, pass `streaming.wsFactory`).
+
+### React Native (**NativeClients, 0.4.0**)
+
+`@aouda/client` runs on React Native with Hermes — no Node built-in is reachable from it, and it assumes nothing Hermes lacks
+(`TextDecoder`, `crypto.subtle`, `AbortSignal.timeout`). Install it as on the web; Metro bundles it as it is. One thing the app
+supplies:
+
+- **`crypto.getRandomValues`, for `createPkcePair()`** (native sign-in): install
+  [`react-native-get-random-values`](https://github.com/LinusU/react-native-get-random-values) (or use `expo-crypto`) and import it
+  once, before `@aouda/client`. Without it the pair is refused with an error that says so — the verifier is never made from
+  `Math.random`. The S256 hash needs nothing: where `crypto.subtle` is missing, the client hashes in JavaScript.
+
+```typescript
+import "react-native-get-random-values";
+import { AoudaClient } from "@aouda/client";
+
+const client = new AoudaClient({
+  serverUrl: "https://db.example.com",
+  database: "myapp",
+  // Optional on React Native, which has both globally — pass your own to pin certificates or to test:
+  fetch: pinnedFetch,
+  streaming: { wsFactory: (url) => new WebSocket(url) },
+});
+client.auth.onTokensChanged((t) => SecureStore.setItemAsync("aouda", JSON.stringify(t)));   // keep the rotated refresh token
+```
+
+`fetch` (every HTTP call: data, auth, the long-poll fallback) and `streaming.wsFactory` (the streaming socket) work on every
+platform; both default to the platform's own.
+
+`streaming.wireMode: "msgpack"` needs a global `TextDecoder` (the MessagePack codec builds one when it loads): install a polyfill such
+as `fast-text-encoding`, or keep the default `"json"` — without one, connecting fails with an `AoudaConnectionError` that says so.
+Nothing else needs a polyfill: the client brings its own UTF-8, base64 and SHA-256.
+
+What does not work on React Native, because its `fetch` has no streaming response body: `client.admin.node` log tailing. Iterating a
+subscription with `for await` needs `Symbol.asyncIterator`, which Hermes may not define — use the `onSnapshot` / `onChange`
+callbacks there. CI runs a smoke on Hermes (sign in, a named query, a subscription, a refresh, PKCE) against every change.
+
 ### Basic Connection
 
 ```typescript
@@ -88,6 +127,20 @@ const rows = await client.table('orders').atLeast(store.get('mydb')!).execute();
 const current = await client.getConsistencyToken();
 ```
 
+### The server's clock (**NativeClients, 0.4.0**)
+
+Every response's `Date` header tells the client how far the server's clock is from the device's. `client.serverClockOffsetMs`
+holds the last difference (undefined before the first response; about one second of resolution) and `client.serverNow()`
+applies it. Use it to judge a lease the server stamped — a `derived: { serverTime: "write" }` column such as `lastSeen` —
+against the server's clock, not the device's:
+
+```typescript
+const online = rows.filter((r) => client.serverNow().getTime() - Date.parse(r.lastSeen) < 75_000);
+```
+
+`namedMutations.execute()` returns `op: "upsert"` (and `rowsAffected` = inserted + replaced) for an upsert, and `returning`
+rows for `insert` and `upsert` definitions that declare them (**NativeClients, 0.4.0**).
+
 ### With Authentication
 
 ```typescript
@@ -97,7 +150,11 @@ const client = new AoudaClient({
   database: 'mydb',
 });
 await client.connect();
-await client.auth.signIn('user@example.com', 'secret');
+await client.auth.signIn('user@example.com', 'secret', { deviceInfo: 'Ann’s laptop — MyApp' });
+
+// Sessions are devices (NativeClients, 0.4.0): signOut() ends this one; listSessions / revokeSession manage the others
+await client.auth.signOut({ scope: 'others' });
+const devices = await client.auth.listSessions();
 
 // App auth with service key (backend service acting on behalf of users)
 const backend = new AoudaClient({
@@ -115,6 +172,18 @@ const admin = new AoudaClient({
 });
 await admin.connect();
 ```
+
+**Keeping tokens across restarts** (**NativeClients, 0.4.0**): `client.auth.onTokensChanged(({ accessToken, refreshToken,
+reason }) => …)` is called on sign-in, on every refresh (automatic ones too) and on sign-out (`reason`: `"signedIn"` /
+`"refreshed"` / `"signedOut"`); it returns the unsubscribe, and any number of listeners may subscribe. Persist the pair each time
+and seed a restarted client with `appAuth: { token, refreshToken }` — the server rotates the refresh token on every refresh, and a
+spent one ends the session. See [Keeping tokens across restarts](../auth/client-integration.md#keeping-tokens-across-restarts-nativeclients-040).
+
+**Native sign-in through the browser** (**NativeClients, 0.4.0**): `createPkcePair()` (needs `crypto.getRandomValues` — on
+React Native, `react-native-get-random-values`; see [React Native](#react-native-nativeclients-040)), then
+`web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state })` in the signed-in web front and
+`app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
+session's `aal`. Recipes: [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
 
 **Auth option rules:**
 - `appAuth` and `serverAuth` are mutually exclusive. Omitting both still exposes `client.auth` for keyless browser login.
@@ -428,9 +497,11 @@ A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a 
 refuses it, whichever body the client would have sent. A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
 fraction as a decimal, digit for digit (**BL-704, 0.2.0**) — so the inserted rows are the same either way. A
 decimal column whose every value in the batch fits 64 bits at the column's largest scale goes as the frame's
-`ScaledDecimal` kind — what a server `Decimal(p,s)` column stores — and otherwise as the 16-byte `Decimal` kind; the
-server reads each value as its JSON text says (`101`, not `101.00`) (**ColumnarCore S13, 0.2.0**; a server
-from an earlier train refuses that kind with a `400`, so pair this client with a server of the same train). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
+`ScaledDecimal` kind — what a server `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**; a server
+from an earlier train refuses that kind with a `400`, so pair this client with a server of the same train). (**LoadSpeed
+S13, 0.4.0**) It is the only decimal kind the client writes: a batch whose decimals do not fit that way goes as JSON,
+where it was sent as the 16-byte `Decimal` kind, which the server now refuses. A frame carries one scale per decimal
+column, so a number sent into a `String` column is stored at the column's largest scale (`3` beside `2.50` is `3.00`). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
 #### Identity-insert (explicit autoIncrement IDs)
 
@@ -505,7 +576,7 @@ await client.tables.createTable({
 // Add a column
 await client.tables.addColumn('users', { database: 'mydb', name: 'phone', type: 'String' });
 
-// Add a Decimal(p,s) column — precision and scale, both or neither (server 0.2.0, @aouda/client 0.2.0)
+// Add a Decimal(p,s) column — precision and scale, both required from the 0.4.0 (server 0.2.0, @aouda/client 0.2.0)
 await client.tables.addColumn('users', { database: 'mydb', name: 'balance', type: 'Decimal', precision: 18, scale: 2 });
 
 // Rename a column
@@ -1000,11 +1071,11 @@ const finalStatus = await handle.waitForMaterializedQueries({ pollIntervalMs: 20
 // Throws if the rebuild status reaches "failed".
 ```
 
-(**WorkloadCore S09, 0.3.0**) `:commit` itself waits, bounded, for the load's queries to be current, and the handle says how that ended:
+(**WorkloadCore S09, 0.3.0**) `:commit` itself can wait, bounded, for the load's queries to be current — (**LoadSpeed M.2, 0.4.0**) only when `mqWaitMs` asks it to — and the handle says how that ended:
 
 ```typescript
-const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 30000; 0 = no wait
-loaded.mqStatus;        // "current" | "behind" | "skipped" | "deferred" | "none"; "unknown" from an older server
+const loaded = await client.table('users').bulkLoad(rows, { mqWaitMs: 10_000 }); // server default 0 = no wait (0.4.0; 30000 in 0.3.0)
+loaded.mqStatus;        // "current" | "behind" | "skipped" | "none"; "unknown" from an older server
 loaded.mqFrontierToken; // the lowest frontier among the load's queries, as a consistency token (absent: no query)
 loaded.mqWaitedMs;      // how long :commit waited for them
 ```
@@ -1012,7 +1083,7 @@ loaded.mqWaitedMs;      // how long :commit waited for them
 The load is durable whatever `mqStatus` says; `"behind"` means the queries' maintenance is still running. To read
 them current, read with `loaded.token`, which waits for them.
 
-See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#materialized-query-auto-refresh-after-bulk-load-p31--adr-0036).
+See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#available-now).
 
 ---
 
@@ -1042,7 +1113,9 @@ A query (`execute()`, `toColumnar()`, `namedQueries.execute()`) asks for the bin
 (`Accept: application/vnd.aouda.column-batch, application/json;q=0.5`) and reads whatever the server sends by its
 `Content-Type`. An older server, or a result a frame cannot carry, answers JSON as before. The values are the same either
 way: integers, `Date` (days since 1970-01-01), decimals and `UInt64` as numbers, `Guid` as a string, and a `Timestamp`
-row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks.
+row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks. (**LoadSpeed S13, 0.4.0**) A
+decimal column arrives as `ScaledDecimal` at the column's scale and is read as a number as before; a frame carrying the
+retired 128-bit `Decimal` kind (6) throws.
 
 From frames, the columns are held as typed arrays (`result.typedColumns`) and `result.rows` are **views** over them
 rather than one object per row. Property access, `Object.keys`, spread, `JSON.stringify`, assignment and `delete` behave

@@ -224,7 +224,7 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
 1. **Own zero data logic.** All data operations delegate to `AoudaEngine` via DI. Controllers are thin: no engine construction, no blocking inline async.
 2. **Orchestrate one engine per database.** `DatabaseManager` maintains a `ConcurrentDictionary<string, AoudaEngine>` keyed by database name. Engine lookups (the hot path for request routing) are lock-free `TryGetValue` calls. Lifecycle mutations (create / drop) are serialized by a `SemaphoreSlim(1,1)`.
 3. **Route HTTP by database.** Incoming requests carry a database name — either in the URL path (`/api/databases/{db}/…`) or in the request body (`database` field). A mismatch between path and body returns `400 INVALID_REQUEST`.
-4. **Govern memory across engines.** `ServerMemoryBudgetManager` tracks each engine's memory usage and assigns **weighted shares of one server budget**. HTTP create still accepts `maxMemoryBytes` as a cap on that computed share.
+4. **Govern memory across engines.** `ServerMemoryBudgetManager` tracks each engine's memory usage and assigns **weighted shares of one server budget**. HTTP create accepts `maxMemoryShareBytes` as a cap on that computed share (**BL-980, 0.4.0:** it was `maxMemoryBytes`, which is now ignored).
 
 ### Directory layout
 
@@ -622,12 +622,12 @@ var list = await client.Databases.ListAsync();
 foreach (var db in list.Databases)
     Console.WriteLine($"  {db.Name} ({db.State})");
 
-// Create a database with a cap on its share of the server budget (HTTP field name is still maxMemoryBytes)
+// Create a database with a cap on its share of the server budget (HTTP field maxMemoryShareBytes)
 var created = await client.Databases.CreateAsync("trading", new CreateDatabaseOptions
 {
     EnableWal = true,
     ReplicationMode = "Replicate",
-    MaxMemoryBytes = 2L * 1024 * 1024 * 1024,
+    MaxMemoryShareBytes = 2L * 1024 * 1024 * 1024,
     DefaultTemperature = "Auto"
 });
 
@@ -653,7 +653,7 @@ long count = await tradeClient.Table("orders")
 # Create a database
 curl -s -X POST http://localhost:5000/api/databases \
      -H "Content-Type: application/json" \
-     -d '{"name":"analytics","enableWal":true,"replicationMode":"Replicate","maxMemoryBytes":1073741824}'
+     -d '{"name":"analytics","enableWal":true,"replicationMode":"Replicate","maxMemoryShareBytes":1073741824}'
 # → 201 + { "name": "analytics", "state": "Active", ... }
 
 # List databases

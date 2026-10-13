@@ -202,6 +202,14 @@ High-level flow:
 ### C) PITR (HTTP or engine)
 - HTTP: `POST /admin/backup/restore` with `{ "backupId", "targetTime" }`, or omit `backupId` to pick the newest run at or before that time. Pre-flight refusals (future target, target at or before the backup, WAL position `0`, no run before the time) return `4xx` without stopping engines. See [HTTP API](../reference/http-api.md#post-adminbackuprestoreid).
 - Engine: `RestoreEngine.RestoreAsync` with `TargetTime` set **stages** the restore; replay happens on the next `AoudaEngine.OpenAsync`.
+- **A point-in-time restore needs the WAL-root incarnation the backup was taken in** (the epoch and root id its manifest records).
+  (**BL-980, 0.4.0**) A backup that records none — one of a database without a WAL, or one taken by an older build — is
+  **refused** for a point-in-time restore (`PitrWindowException` naming what the manifest holds; nothing is staged). Up to 0.3.x
+  the server inferred the epoch from the archive and fell back to byte-offset coverage, which a recreated WAL root could pass.
+  An **exact** restore of such a backup (no `targetTime`) is unchanged, and `pitrEligible` on the backup list is `false` for it.
+- A replay that meets a WAL frame this build does not read is refused, not skipped (**BL-980, 0.4.0**): a frame of the
+  retired page-append family, or a catalog-DDL record with an unknown opcode or payload version, aborts the point-in-time
+  replay (the database is quarantined, as for any failed replay).
 - Replay applies whole transactions only, through the crash-recovery path. Archived WAL is used when the local log no longer covers the window.
 - Counters: `PitrSegmentsDownloaded`, `PitrFromArchiveTotal`, and the `pitr` block on the HTTP restore response.
 

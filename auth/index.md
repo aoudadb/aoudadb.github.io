@@ -140,7 +140,13 @@ If you enable auth and keep defaults:
 
 - access token lifetime defaults to 15 minutes;
 - refresh token lifetime defaults to 30 days;
-- JWT issuer defaults to `"aouda"` unless base URL/issuer override path sets a different runtime issuer context;
+- each auth database's tokens carry one issuer, and only that one is accepted: an application auth database's tokens carry its
+  URL issuer `{base}/api/databases/{db}` (`Aouda:BaseUrl`, else the request's scheme and host); the server auth database's own
+  tokens (`/api/auth/signin`, setup) carry `TokenOptions.Issuer`, `"aouda"`. (**BL-980, 0.4.0**) An application
+  database no longer accepts a token issued as `"aouda"` beside its URL issuer — such a token is `401`; sign in again;
+- an auth database is created with every table and column it needs; (**BL-980, 0.4.0**) nothing adds tables or columns to
+  an existing auth database at startup any more, nor back-fills `_users.email`'s uniqueness — **an auth database made by an
+  older build is not upgraded**. Pre-1.0 there is no migration: recreate it (or restore a backup taken by this version);
 - token validation mode defaults to `Hybrid` in server middleware;
 - password policy defaults to min length 8, max length 128;
 - user lockout threshold defaults to 10 failed attempts with 15-minute lockout;
@@ -153,7 +159,7 @@ If you enable auth and keep defaults:
 |---|---|---|---|
 | `TokenOptions.AccessTokenLifetime` | `15 minutes` | Any positive `TimeSpan` | Short-lived bearer tokens reduce exposure window |
 | `TokenOptions.RefreshTokenLifetime` | `30 days` | Any positive `TimeSpan` | Long-lived session continuity with rotation |
-| `TokenOptions.Issuer` | `"aouda"` | Any non-empty string | Default `iss` when explicit issuer context not overridden |
+| `TokenOptions.Issuer` | `"aouda"` | Any non-empty string | `iss` of the server auth database's tokens. An application auth database's tokens carry its URL issuer instead, and (**BL-980, 0.4.0**) only that is accepted for them |
 | `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | `SignatureOnly`, `Hybrid`, `Stateful` | Signature + revocation checks by default |
 | `PasswordPolicy.MinLength` | `8` | Integer ≥ 1 | Minimum user password length |
 | `PasswordPolicy.MaxLength` | `128` | Integer ≥ `MinLength` | Upper bound for password size |
@@ -251,8 +257,11 @@ If you enable auth and keep defaults:
   - application auth database (`AuthDatabaseKind.Application`) for app user auth;
   - server auth database (`AuthDatabaseKind.Server`) for server-admin plane.
 - API key kinds:
-  - `anon`, `service_role`, and custom.
+  - `anon`, `service_role`, `public`, custom, and `server_admin` (server keys).
   - system-managed keys reserve key kinds for default app connection models.
+  - **only `service_role` bypasses PLS / RLS** (**0.4.0**): every other key without a user — custom, `server_admin`,
+    `anon`, `public` — gets its role's grants and, on a protected table, what a request with no user may see. Up to 0.3.x a
+    `server_admin` key bypassed them too. [What changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 - RBAC:
   - role memberships + permission rows define baseline operation rights.
 - PLS:
@@ -269,6 +278,8 @@ Invariants:
 - App auth endpoints require API key when app auth database is linked.
 - `auth-db-pls` requires `permissionDimension`; `auth-db-rls` requires `rlsResolverName`.
 - Service-key + `X-User-Token` impersonation flow must still validate/revocation-check user token.
+- Only a `service_role` key bypasses PLS / RLS; a principal without a user id gets the deny-by-default context (no partition
+  grants, a missing RLS key denies) on HTTP, WebSocket and long-poll alike (0.4.0).
 - Empty or unsupported complex resolver shapes fail closed instead of broadening access.
 
 ## 2.8 How Aouda implements it
@@ -401,7 +412,7 @@ Primary evidence:
 | `AuthenticationMiddlewareOptions.ValidationMode` | enum | `Hybrid` | `SignatureOnly`, `Hybrid`, `Stateful` | middleware options | Token validation strictness |
 | `TokenOptions.AccessTokenLifetime` | timespan | `15m` | positive timespan | auth engine service config | Access token expiry window |
 | `TokenOptions.RefreshTokenLifetime` | timespan | `30d` | positive timespan | auth engine service config | Refresh token validity window |
-| `TokenOptions.Issuer` | string | `"aouda"` | non-empty | auth engine service config | JWT issuer claim default |
+| `TokenOptions.Issuer` | string | `"aouda"` | non-empty | auth engine service config | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}` |
 | `PasswordPolicy.MinLength` | int | `8` | >= 1 | auth engine service config | Password policy minimum |
 | `PasswordPolicy.MaxLength` | int | `128` | >= MinLength | auth engine service config | Password policy maximum |
 | `UserService.LockoutThreshold` | int | `10` | positive | auth engine code-level options | Failed-attempt lockout trigger |

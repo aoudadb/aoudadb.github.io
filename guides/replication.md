@@ -161,11 +161,18 @@ If you do nothing:
   - `Standalone`, `Primary`, `Secondary`, `Hidden`, `Backup`, `Arbiter`.
   - Role-aware write blocking and fencing-token validation for write endpoints.
 - WAL streaming and catch-up:
-  - Streaming protocol v1/v2/v3 with HMAC and CRC.
+  - Streaming protocol **v4** with HMAC and CRC. (**BL-980, 0.4.0**) v4 is the only protocol: a primary closes a v1, v2 or
+    v3 handshake without a response (up to 0.3.x it answered them). Replication has not shipped, so there is no rolling upgrade
+    to support — run every node on the same build.
+  - (**BL-980, 0.4.0**) A replica **refuses** what it cannot apply instead of skipping it: a catalog-DDL frame with an
+    unknown opcode or payload version, a DDL record that does not decode, or a frame of the retired page-append family (no
+    current build writes one) fails the apply with an error naming it. A skipped DDL is a catalog that silently differs from the
+    log. Tables a replica registers from the log carry their real `createdAt` / `lastModifiedAt`.
   - Checkpoint transfer bootstrap for too-far-behind replicas.
   - Replica state machine applying WAL frames with transaction ordering safeguards.
 - Election and failover mechanics:
-  - Heartbeat protocol and failure detection.
+  - Heartbeat protocol and failure detection. (**BL-980, 0.4.0**) An election heartbeat must carry its profile, hints,
+    hidden flag and per-database fields; one missing any of them is not accepted.
   - Priority-based election with quorum and fencing token step-down.
   - Role transition wiring in server startup service.
 - Routing controls:
@@ -224,7 +231,7 @@ If you do nothing:
 | Too-far-behind checkpoint bootstrap | Yes | Yes | No | P4 E2 report + checkpoint tests; `ReplicaCheckpointBootstrapTests` (two nodes) | Every open database, per-database positions (**BL-763, 0.3.0**) |
 | Replica WAL replay into storage/catalog | Yes | No | No | P4 E3 report + replica state machine code/tests | Includes DDL and Tx frame handling |
 | Hidden replica read preference behavior | Yes | No | No | P4 E6 report + `HiddenReplicaQueryTests` | Non-hidden cannot serve `Hidden` preference |
-| Per-database replication subscriptions | Yes | No | No | P6 E1 report + multi-db tests | v1/v2 protocol compatibility retained |
+| Per-database replication subscriptions | Yes | No | No | P6 E1 report + multi-db tests | Protocol v4 only (**BL-980, 0.4.0**); v1 / v2 / v3 handshakes are closed unanswered |
 | Per-table subscription routing | Yes | No | No | P6 E4 report + table filter tests | O(1) table-id filtering at server |
 | Per-database lag/topology visibility | Yes | No | No | P6 E2 report + admin endpoints | Status + topology + health check |
 | Write concern wait/degrade/fail behavior | Yes | No | No | P6 E3 report + tracker/service tests | Hierarchy: request -> table -> DB |
@@ -310,7 +317,8 @@ Key implementation anchors:
      with the image's and opens it again (registering a database the secondary did not have).
    - Secondary reconnects; each database continues streaming from **its own** position in the checkpoint. Every write
      acknowledged before the checkpoint began is on the secondary; frames written during the transfer are not (**BL-839**).
-   - ⚠️ Primary and secondaries must run the same version: the checkpoint manifest carries each database's position.
+   - ⚠️ Primary and secondaries must run the same version: the checkpoint manifest carries each database's position, and
+     (**BL-980, 0.4.0**) the stream speaks protocol v4 only.
 4. Observability:
    - Checkpoint transfer logs and replication lag position transitions.
 5. Proving tests:
@@ -376,7 +384,7 @@ Key implementation anchors:
 |---|---|---|---|
 | How is replication state transferred? | Mix of snapshot/state shipping and log paths | WAL-first replication model plus checkpoint bootstrap fallback | Clearer durability model and predictable catch-up path |
 | Can workload-specialized replicas be represented directly? | Usually external routing metadata only | `TemperatureProfile` and `HotTableHints` embedded in node config + heartbeat/topology | Better placement signals for future smart routing |
-| Are subscriptions coarse or fine-grained? | Often DB-level only | Per-database + per-table filtering with v3 handshake and coverage API | Reduce replica traffic and tailor read replicas |
+| Are subscriptions coarse or fine-grained? | Often DB-level only | Per-database + per-table filtering in the (v4) handshake and coverage API | Reduce replica traffic and tailor read replicas |
 | Is write concern integrated with server config hierarchy? | Often request-only or static-only | Request -> table -> database hierarchy with timeout behavior and explicit status response | Stronger durability control per workload without full cluster-wide defaults |
 | Is replication observability first-class? | External tooling required for many details | Built-in `status`, `topology`, `coverage`, health thresholds, and counters | Faster diagnosis and safer operations |
 
@@ -856,7 +864,7 @@ Last verification date (UTC): `2026-03-31`.
 
 | Capability | Test files / suites | Current status | Coverage strength | Notes |
 |---|---|---|---|---|
-| WAL streaming protocol and transport behavior | `WalStreamProtocolTests.cs`, `WalStreamIntegrationTests.cs`, `WalStreamProtocolV2Tests.cs`, `WalStreamProtocolV3Tests.cs` | Pass | Strong | Covers v1/v2/v3 encode/decode, auth, CRC, integration |
+| WAL streaming protocol and transport behavior | `WalStreamProtocolTests.cs`, `WalStreamIntegrationTests.cs`, `WalStreamProtocolV2Tests.cs`, `WalStreamProtocolV4Tests.cs` | Pass | Strong | Covers the v4 handshake (older versions closed unanswered, **BL-980, 0.4.0**), auth, CRC, integration |
 | Checkpoint bootstrap flow | `CheckpointProtocolTests.cs`, `CheckpointCoordinatorTests.cs`, `CheckpointTransferTests.cs` | Pass | Strong | Includes atomic apply and corruption checks |
 | Election and failover mechanics | `ElectionManagerTests.cs`, `ClusterIntegrationTests.cs`, `FailureDetectorTests.cs`, `FencingGuardTests.cs` | Pass | Strong | Priority, quorum, fencing, transitions |
 | Replica replay and ordering correctness | `ReplicaStateMachine*` tests | Pass | Medium/Strong | Includes out-of-order and transaction frame handling |

@@ -105,7 +105,51 @@ Apply rejects unknown ops and caller-supplied values for derived columns (`TRANS
 
 Unknown sources (`claim:…` on a derived identity column that is not bindable, or a misspelled source) fail apply or write with `IDENTITY_SOURCE_UNRESOLVABLE` / `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE`. Identity in `update` `set` / `setExpr` is not supported.
 
-Worked schema: [write-side fixture](../examples/p43-write-side/aouda.schema.json). Authorization for that stamp: [Data authorization](../auth/authorization.md#worked-example--public-or-member--identity-stamp).
+Worked schema: [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/blob/main/examples/p43-write-side/aouda.schema.json). Authorization for that stamp: [Data authorization](../auth/authorization.md#worked-example--public-or-member--identity-stamp).
+
+### Server-time stamp (`serverTime`)
+
+(**NativeClients, 0.4.0**)
+
+A third sibling of `derived`: a `Timestamp` column the **server** stamps with its own UTC clock, so a sent-at or last-seen
+time never comes from a device's clock.
+
+```json
+"Messages": {
+  "columns": {
+    "Id":       { "type": "Int64", "primaryKey": 1 },
+    "Body":     { "type": "String" },
+    "SentAt":   { "type": "Timestamp", "derived": { "serverTime": "insert" } },
+    "EditedAt": { "type": "Timestamp", "derived": { "serverTime": "write" } }
+  }
+}
+```
+
+| Mode | Insert | Update | Upsert, key exists | Upsert, new key |
+|---|---|---|---|---|
+| `insert` | stamped | kept | kept | stamped |
+| `write` | stamped | stamped | stamped | stamped |
+
+- **Every write path stamps it**: insert, named mutations (`insert` / `update` / `upsert`), the row and batch HTTP
+  endpoints, the write stream, route / tee targets (each target stamps its own), and bulk load with `applyTransforms`.
+- **No caller value, ever.** A write that names the column — with a value or `null`, from a user token or a service key —
+  fails with `TRANSFORM_DERIVED_READONLY` (400) and writes nothing; `update` `set` / `setExpr` the same. A named mutation
+  whose `values` / `set` / `setExpr` names it fails at apply with `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE`. A
+  `preTransformed` bulk load into the table is refused with `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` — load
+  historical times into an ordinary `Timestamp` column instead.
+- **No expression reads a stamp.** A `derived` expression that names a server-time column is refused at apply: its value
+  would disagree with the stamp on some write paths. Read the stamp itself.
+- **One reading per request.** Every row of a batch, every route / tee hop and every row of a bulk-load job hold the same
+  value. It is the primary's wall clock: **not monotonic** — two writes can read the same time, and a clock step backwards
+  shows. Order by your key or a sequence, not by the stamp, when order matters.
+- **Stored, not recomputed.** The value is written like any other cell (the WAL carries it), so a restart, a replay or a
+  replica reads exactly what was stamped.
+- **Declared on a `Timestamp` column only**, which is not a primary or partition key, not `unique` or `autoIncrement`,
+  and has no `default`. An existing column cannot be turned into a stamp (its values were not the server's); add a new
+  one. A stamp column added to a table that has rows must be `nullable: true`: the rows that predate it read `null`, and
+  an update of such a row keeps it `null` for an `insert` stamp.
+
+The presence pattern in [Named queries](named-queries.md) uses a `write` stamp for `LastHeartbeat`.
 
 ### `call` — string and rounding functions
 
@@ -117,9 +161,9 @@ Worked schema: [write-side fixture](../examples/p43-write-side/aouda.schema.json
 | `trim` | 1 | Leading and trailing whitespace removed |
 | `concat` | 1 or more | Arguments stringified and joined |
 | `substring` | 2 or 3 | `substring(s, start[, length])`. **`start` is 1-based** and must be ≥ 1; `length` must be ≥ 0. A `start` past the end yields `""` rather than an error |
-| `round` | 2 | `round(value, digits)`, `digits` 0–28, **away from zero** (not banker's rounding) |
-| `roundTo` | 2 | `roundTo(value, step)`, `step` > 0, away from zero — this is the one for tick sizes and price increments |
-| `cast` | 2 | `cast(value, "TypeName")`; the type must be a **string literal** |
+| `round` | 2 | `round(value, digits)`, `digits` 0–28, **away from zero** (not banker's rounding). (**LoadSpeed S13, 0.4.0**) Of a decimal, a decimal at scale `digits`; of a `Double`, a `Double` |
+| `roundTo` | 2 | `roundTo(value, step)`, `step` > 0, away from zero — this is the one for tick sizes and price increments. (**LoadSpeed S13, 0.4.0**) Of a decimal, a decimal at the larger of the two scales; of a `Double`, a `Double` |
+| `cast` | 2 | `cast(value, "TypeName")`; the type must be a **string literal**. A decimal target is spelled with its precision and scale, `cast(value, "Decimal(18,6)")`, and rounds half away from zero to that scale (**LoadSpeed S13, 0.4.0**: plain `"Decimal"` is refused) |
 
 ```json
 {
@@ -133,6 +177,8 @@ Worked schema: [write-side fixture](../examples/p43-write-side/aouda.schema.json
   },
   "priceAtTick": {
     "type": "Decimal",
+    "precision": 18,
+    "scale": 2,
     "derived": {
       "type": "call",
       "fn": "roundTo",
@@ -145,7 +191,8 @@ Worked schema: [write-side fixture](../examples/p43-write-side/aouda.schema.json
 Rules worth knowing before you design around it:
 
 - **Null propagates.** If *any* argument evaluates to null, the whole call returns null — it does not throw and does not substitute a default. Wrap in `coalesce` if you want one.
-- `cast` accepts only `Int32`, `Int64`, `Int16`, `Byte`, `UInt16`, `UInt32`, `UInt64`, `Double`, `Float32`, `Decimal`, `String`. **`Timestamp`, `Date`, `Guid`, `Bool`, and vector types are not castable.** Float→integer casts truncate toward zero, and a finite value outside the target range is an error rather than a silent wrap.
+- **Decimals are exact** (**LoadSpeed S13, 0.4.0**). Arithmetic over a `Decimal(p,s)` column or a fractional literal computes at a fixed scale (`+` / `-` the larger, `*` the sum, `/` at least 6 places), a literal keeps the scale it is written with (`0.05` is scale 2), and a result past 18 digits is an error, never a silent `Double`. The value is then rounded half away from zero to the derived column's scale. Full rules: [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020).
+- `cast` accepts only `Int32`, `Int64`, `Int16`, `Byte`, `UInt16`, `UInt32`, `UInt64`, `Double`, `Float32`, `Decimal(p,s)` (e.g. `"Decimal(18,6)"`; **LoadSpeed S13, 0.4.0** — plain `"Decimal"` is refused), `String`. **`Timestamp`, `Date`, `Guid`, `Bool`, and vector types are not castable.** Float→integer casts truncate toward zero, and a finite value outside the target range is an error rather than a silent wrap.
 - There is **no timestamp truncation function**. Bucketing a timestamp to a day or an hour is a partition-key function (`TruncateToDay` and friends) or a materialized-query `groupBy` term, not a derived column.
 - Unknown `fn`, wrong arity, or a non-literal `cast` type fails **schema apply** with `SCHEMA_EXPR_UNKNOWN_FUNCTION` — not at insert time. The same validation runs on `namedQueries[].selectExpr` and `namedMutations[].setExpr`.
 

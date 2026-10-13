@@ -158,6 +158,10 @@ If you run server defaults and do not set per-database overrides:
 - Catalog durability:
   - `CatalogStore` JSON snapshot persistence (`catalog/catalog.json`) with atomic temp-write + move.
   - Additional catalog WAL/checkpoint classes (`FileCatalog`, `CatalogWal`, `CatalogCheckpoint`) are implemented in catalog layer.
+  - (**BL-980, 0.4.0**) The catalog reads only what this build writes, and refuses the rest with an error naming what it
+    found: a catalog-WAL record in an older layout or of an unknown type (they were skipped), an unknown `PartitionOptions`
+    member, a table without a data directory (made before BL-398), a segment entry without a row count. Pre-1.0 nothing is
+    migrated: a database written by an older build is restored from a backup taken by this version, or re-created.
 - WAL durability and replay:
   - Append-only WAL frame writes (`WalWriter`), replay on restart (`WalReplayDriver`, `WalReplayer` paths), segment rolling and retention components.
   - Per-table durability override model (`TableDurabilityOptions`) is implemented.
@@ -407,10 +411,12 @@ it is neither, and the sections were never separated. They are now.
 #### D.1 — The sound part: physical layout, positions, and reclamation
 
 1. **Physical layout.** The production WAL is a segmented log under `{db}/wal/`: segments named
-   `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json`, a crash-recovery control
+   `wal_%09d.log` (`WalSegmentNamer`), a manifest `wal.manifest.json` (it carries the WAL root's id; (**BL-980, 0.4.0**) a
+   published manifest without one — only a build before BL-330 / BL-438 wrote one — is refused when the WAL root opens), a crash-recovery control
    file `CHECKPOINT`, and a portioned-recovery resume sidecar `RECOVERY`. Segment size is
    `clamp(MaxWalBytes / 16, 8 MB, 64 MB)`. A leftover monolithic `insert.wal` from before
-   segmentation is refused at open until `aouda wal convert` runs.
+   segmentation is refused at open — (**BL-934, 0.4.0**) for good: `aouda wal convert` is removed, so restore from a backup
+   taken by this version, or delete `insert.wal` to discard the writes it holds that were never checkpointed.
 2. **Position model.** Every WAL position — in a slot, in the checkpoint, on the ladder below — is
    a **cumulative byte offset into a virtual, infinite log** (the PostgreSQL LSN model), not a row
    count and not a file offset. `WalManifest` tracks a pruned base offset so absolute positions
@@ -435,7 +441,7 @@ it is neither, and the sections were never separated. They are now.
    open reconciles); update WAL-on-disk / WAL-reclaimable inventory metrics.
 6. **The size ladder** (`WalSizeGovernor`, one per WAL root) is the backstop: `MaxWalBytes` derived
    from free disk space at open and (**BL-787, 0.3.0**) recomputed after reclaims from the disk and the largest working set
-   the log has held — see [Sizing](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-next-train), whose `[WAL]` log
+   the log has held — see [Sizing](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-030), whose `[WAL]` log
    lines show each crossing — a force-checkpoint rung at 70% of it, a run-retention-now rung at 85% (**WorkloadCore S16, 0.3.0**)
    (it was an insert-throttle rung: a fixed delay inside the commit; the writer is now slowed before
    it takes any lock, by the ingest stall curve — see the sizing guide), an
@@ -498,14 +504,14 @@ Primary tests:
 | `Aouda:Databases:{db}:EnableWal` | bool | `true` | true/false | startup config | DB-level WAL switch |
 | `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | DB replication participation |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | startup config | Default table policy |
-| `Aouda:Databases:{db}:MaxMemoryBytes` | long? | `null` | null or non-negative | startup config | Per-db memory cap |
+| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`,`Majority`,`All` | startup config | ACK semantics |
 | `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | >=100 | startup config | Timeout for higher write concerns |
 | `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | startup config | Timeout policy |
 | `CreateDatabaseRequest.enableWal` | bool | `true` | true/false | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |
-| `CreateDatabaseRequest.maxMemoryBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional |
+| `CreateDatabaseRequest.maxMemoryShareBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional cap on the database's share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`, now ignored) |
 | `Archive.Enabled` | bool | `false` | true/false | startup config | Starts `WalArchiveWorker` when a destination is also set |
 | `Archive.Destination` | string | empty | URI/path | startup config | Required when archive enabled |
 | `Archive.WalRetentionDays` | int | `7` | >=1 | startup config | Archive retention (not the local PITR window) |

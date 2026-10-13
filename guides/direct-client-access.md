@@ -129,6 +129,17 @@ A named query over a non-opted-in table is still **allowed to apply** — operat
 
 **Runtime (data-plane only):** per-identity sliding window, default 60 permits / 60 seconds. One permit per execute, per **batch envelope**, per mutation execute, per subscribe attempt. Exceed → `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After`. Disabled on admin-only deployments. Config: `Aouda:IdentityQuota:PermitLimit` / `WindowSeconds` / `Enabled`.
 
+**Several devices, one identity.** The quota and the subscription caps (`Aouda:WebSocket:MaxSubscriptionsPerConnection`,
+default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not the device, so a user on a browser, a desktop
+agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
+minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
+subscriptions. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
+(**NativeClients, 0.4.0**).
+
+**Server clock.** Every response carries a `Date` header that a browser can read cross-origin (**NativeClients, next
+train**); the SDKs keep the offset from it (`serverClockOffsetMs` / `ServerClockOffset`) so a client can judge a
+server-stamped lease against the server's clock.
+
 Signup 5/min and signin 20/min per IP still apply. An optional failed-signin ceiling (`Aouda:Auth:FailedSigninCeiling`, off by default) caps **failed** sign-ins per auth database — the attack shape per-IP limiting cannot see. It is per process. A tripped ceiling is a full login outage on that database until the window drains (correct passwords included); see [Auth reference](../auth/reference.md#rate-limiting).
 
 ---
@@ -173,11 +184,14 @@ Application end users today:
 
 ### What is not shipped
 
-**OAuth 2.0 authorization code flow with PKCE is not available** (tracked as BL-043). Token introspection (BL-042) is not available. Do not implement a SPA that redirects to an IdP and expects Aouda to complete the code exchange.
+**A hosted OAuth 2.0 authorization server is not available** — no `/authorize` login page, social login or third-party consent
+(tracked as BL-043). Token introspection (BL-042) is not available. Do not implement a SPA that redirects to an IdP and expects Aouda
+to complete the code exchange. **Native apps** can sign in through the browser: the signed-in web front issues a single-use PKCE code
+and the app redeems it for its own session (**NativeClients, 0.4.0**) — [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
 
 OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. That is not a federated login.
 
-Until PKCE exists, the supported browser pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)) with **no API key**, or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
+For the browser itself, the supported pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)) with **no API key**, or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
 
 The **application** holds the consistency token (cookie or header **you** name). The SDK captures `X-Aouda-Token` in memory and **never** `Set-Cookie`. Recreating the client without a shared store loses read-your-writes. See [Freshness](freshness.md).
 
@@ -239,7 +253,8 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 ## Not in this release
 
 - Bare internet exposure (no edge).
-- PKCE / OAuth authorization code / token introspection.
+- A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
+  browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
 - Extending `mk_anon_*` to read data.
 

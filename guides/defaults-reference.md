@@ -23,8 +23,15 @@ fraction: whether detection found a **real isolation boundary** (a cgroup v2/v1 
 explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical RAM — the host merely
 *has* this much memory; nothing says you own it alone).
 
+`MaxTotalRamBytes` defaults to **`0`, meaning "derive it from the host"** (the two rows below); any positive value you set is
+kept as is, and it is an RSS ceiling for the whole process ([sizing](sizing.md)). (**Next train:** the default was 2 GiB, and the
+server derived the budget whenever the value equalled it, so an explicit `--max-memory 2147483648` was silently replaced by
+70 % of the container's limit, or 40 % of the host's memory where there was none — 26 GB on a 64 GB machine. An explicit 2 GiB
+is now honoured.)
+
 | Value | Formula | Restoring key |
 |---|---|---|
+| `MaxTotalRamBytes` (explicit) | the value set, kept as is — also exactly 2 GiB (**0.4.0**) | `Aouda:Memory:MaxTotalRamBytes`, `--max-memory`; `0` (the default) derives |
 | `MaxTotalRamBytes` (cgroup-bounded) | `0.70 × detected`, floor 256 MB | `Aouda:Memory:MaxTotalRamBytes` (set explicitly to skip detection) |
 | `MaxTotalRamBytes` (fallback) | `min(0.40 × detected, 0.70 × available)` at this boot, floor 256 MB. No grant: every boot under `BackPressure` logs one warning, and nothing is remembered across boots (**WorkloadCore, 0.3.0**) | same — or a container memory limit, which makes it the cgroup row |
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
@@ -117,7 +124,7 @@ The server starts as before; remove the key.
 
 ## WAL size ladder
 
-Per WAL root, derived — none of these is a configuration key. See [Sizing — the WAL's cap](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-next-train)
+Per WAL root, derived — none of these is a configuration key. See [Sizing — the WAL's cap](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-030)
 and [Storage](storage.md) (walk-through D).
 
 | Value | Formula | Notes |
@@ -127,7 +134,7 @@ and [Storage](storage.md) (walk-through D).
 | `T24` — segment size | `clamp(T23 / 16, 8 MB, 64 MB)` | Fixed at open. |
 | `T25` — force checkpoint | `0.70 × T23` | Also the WAL debt's soft line for the ingest stall curve. Moves with `T23`. |
 | `T26` — run retention now | `0.85 × T23` | Moves with `T23`. |
-| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate. Moves with `T23`. |
+| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate — (**BL-956, 0.4.0**) at most 30 s, 10 s before any reclaim is measured. Moves with `T23`. |
 | `T28` — `MaxSlotWalKeepBytes` | `clamp(T23 / 2, 128 MB, 2 GiB)` | Fixed at open: a slot lagging further behind the head is invalidated. |
 
 (**BL-787, 0.3.0**) Each crossing of `T25`, `T26` and `T27`, in either direction, and the end of a refuse episode (its
@@ -144,8 +151,8 @@ length and how many writes it refused) is one line in the server log, prefixed `
 | Single-node WAL frame emission | `false` (elided) | `Aouda:BulkLoad:EmitFramesOnSingleNode` | On a detected single-node topology, `LogShipSegments` no longer re-reads/hashes segment files or appends a WAL frame. See [Single-Node Deployment](single-node-deployment.md). |
 | Job-shape warning — segment count | `64` | `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | Advisory only, never blocks a commit. See [Bulk Load — Reading `:commit completed`](bulk-load.md#reading-commit-completed-and-the-job-shape-warning). |
 | Job-shape warning — median rows/segment | `1000` | `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | Same. |
-| Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | (**WorkloadCore S10, 0.3.0**) Every load but a `Skip` one records a pending job, and the table's pass brings its queries current: `Auto` starts it at the commit (multi-table and transform loads included), `Deferred` after the quiet period (2 s quiet, at most 60 s). A load does no materialized-query work while it streams. Before S10, `Auto` accumulated affected MQs of all four types during the load and published after the commit, or, for a table whose every query is an aggregate or latest / first per key, the table's pass wrote them from a fold the load built (**WorkloadCore S09**); in 0.2.0 they were written in the load's own commit, before it returned (**ColumnarCore S12**). Wait on `mqRebuildStatus` / `MqRebuildCompleted`, or read with the commit's `token`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |
-| `:commit`'s wait for the load's queries | `30000` ms | `mqWaitMs` on `:commit` (`BulkLoadOptions.MqWait` in `Aouda.Client`) | (**WorkloadCore S09, 0.3.0**) How long `:commit` waits, after the load is durable and its locks are released, for the load's materialized queries to be current; `0` does not wait, at most `600000`. Holds no lock and refuses nothing; the response's `mqStatus` says whether they were current. |
+| Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | (**WorkloadCore S10, 0.3.0**) Every load but a `Skip` one records a pending job, and the table's pass brings its queries current: `Auto` starts it at the commit (multi-table and transform loads included) — while the table is loading, after the quiet period like `Deferred` (**LoadSpeed M.3, 0.4.0**: coalesced while loading) — `Deferred`, until the 0.4.0, after the quiet period (2 s quiet, at most 60 s); (**LoadSpeed K31, 0.4.0**) `Deferred` is refused `400` — use `Auto`. A load does no materialized-query work while it streams. Before S10, `Auto` accumulated affected MQs of all four types during the load and published after the commit, or, for a table whose every query is an aggregate or latest / first per key, the table's pass wrote them from a fold the load built (**WorkloadCore S09**); in 0.2.0 they were written in the load's own commit, before it returned (**ColumnarCore S12**). Wait on `mqRebuildStatus` / `MqRebuildCompleted`, or read with the commit's `token`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |
+| `:commit`'s wait for the load's queries | `0` ms (**LoadSpeed M.2, 0.4.0**; `30000` in 0.3.0) | `mqWaitMs` on `:commit` (`BulkLoadOptions.MqWait` in `Aouda.Client`) | (**WorkloadCore S09, 0.3.0**) How long `:commit` waits, after the load is durable and its locks are released, for the load's materialized queries to be current; `0` does not wait, at most `600000`. Holds no lock and refuses nothing; the response's `mqStatus` says whether they were current. |
 | ~~Ingest-fed MQ reservation floor~~ | — | ~~`Aouda:BulkLoad:MqIngestReservationFloorBytes`~~ | **Removed (WorkloadCore S10, 0.3.0)** with the ingest-fed feed: a load's queries are brought current by the table's pass, which reserves its own waves. It was the opening `Transient` reservation per destination table (1 MB). |
 | ~~Ingest-fed MQ reservation ceiling~~ | — | ~~`Aouda:BulkLoad:MqIngestReservationCeilingBytes`~~ | **Removed (WorkloadCore S10, 0.3.0)** with the ingest-fed feed. It capped the feed's live accumulator bytes (`0` = no dedicated cap). |
 | ~~Ingest-fed MQ accumulator budget~~ | — | ~~`Aouda:Memory:MqIngestAccumulatorBytes`~~ | **Removed (WorkloadCore S10, 0.3.0)** with the ingest-fed feed; it was meaningful only to the feed's accumulators. |
@@ -162,7 +169,7 @@ length and how many writes it refused) is one line in the server log, prefixed `
 | Resident result rows | 262,144 keys per query | — | An aggregate's or latest / first-per-key query's rows kept in RAM between commits, charged to the memory governor, least recently touched evicted (**ColumnarMerge S10, 0.2.0**). |
 | Result checkpoint | every 15 s, and at clean shutdown | — | What a restart restores a current result from (**ColumnarMerge S08, 0.2.0**). |
 | Rebuild grant | 1 MB to start, doubling to at most ¼ of the database's governed budget | `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` (the start) | (**WorkloadCore S12, 0.3.0**) A rebuild's memory; past it the build splits into `Aouda:MaterializedQueries:Rebuild:MaxPartitions` (64) partitions and spills. `ReservationCeilingBytes`, `SpillEnabled` and `PartitioningEnabled` are removed. See [Materialized queries](materialized.md#211b-what-a-rebuild-costs-and-what-bounds-it). |
-| Deferred-pass quiet window | 2 s with no load in flight or committed; 60 s bound | — | (**ColumnarMerge S01, 0.2.0** — a load still streaming no longer counts as quiet.) |
+| Deferred-pass quiet window | 2 s with no load in flight or committed; 60 s bound | — (constants: `DeferredPassCoordinator.QuietPeriod` / `MaxLag`, `src/Aouda.Engine.Api/Internal/DeferredPassCoordinator.cs`) | (**ColumnarMerge S01, 0.2.0** — a load still streaming no longer counts as quiet.) (**LoadSpeed M.3, 0.4.0**) Also when an `Auto` load into a busy table is caught up: a table is busy while a load is in flight on it, an earlier load's job on it is pending, or a load into it committed within the 2 s; its queries are caught up in one pass once it has been quiet for 2 s, or when the oldest waiting job has waited 60 s (logged as caught up at the bound). Not configurable. |
 | Deferred-pass workers | the CPU budget | `Aouda:Cpu:ConfiguredCores` (or the probed quota) | Read when the work starts (**ColumnarCore S15, 0.2.0**); was the machine's core count capped at 16 / 8. An insert no longer writes queries side by side: in-commit maintenance is deleted (**WorkloadCore S09, 0.3.0**). See [Sizing CPU](sizing.md#sizing-cpu). |
 
 ---
@@ -187,7 +194,7 @@ Every memory reservation carries a work class — `Interactive`, `Streaming`, `I
 that is the order the memory grant queue serves them in: first in, first out within a class, and a running unit's next step
 is taken only if nothing of the same or a higher class is waiting — a read's only if nothing of a higher class is, and a
 request blocked by its own database's cap holds back only that database (**BL-861, WorkloadCore S18, 0.3.0**; see
-[Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-next-train)).
+[Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-030)).
 
 (**WorkloadCore S06, 0.3.0**) **Classes no longer have entitlements.** The per-class shares of the transient budget
 (`Interactive` 0.35, `Streaming` 0.05, `Ingest` 0.25, `Background` 0.25, `Maintenance` 0.10, with different fractions in
@@ -245,6 +252,23 @@ Logging__LogLevel__Aouda.Engine.Storage=Debug
 ### Where the lines go
 
 Aouda logs to the console, structured as JSON. Under systemd that is `journalctl -u aouda`; under Docker it is `docker logs`; under the Windows SCM it is the service's stdout. There is no file sink by default and no log rotation to configure, because there is no file.
+
+## Data-plane subscriptions and the identity quota
+
+| Value | Default | Key |
+|---|---|---|
+| Live subscriptions on one WebSocket connection | `32` | `Aouda:WebSocket:MaxSubscriptionsPerConnection` |
+| Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
+| Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
+| The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
+
+Both limits are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
+quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch
+envelope, one named-mutation execute or one subscribe attempt; a live subscription costs no permits after it is
+established. A heartbeat every 30 s is 2 permits a minute per device, so three devices heartbeating spend 6 of the default
+60 — leave room for page loads (batch them), typing indicators and reconnect storms (each resubscribe is a permit), and
+measure before raising. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
+in no guide before).
 
 ## Related docs
 

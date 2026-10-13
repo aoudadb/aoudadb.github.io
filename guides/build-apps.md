@@ -246,7 +246,7 @@ Steps 1–4 are load-bearing: everything after them assumes the schema file exis
         "customerId": { "type": "Int64",  "references": "Customer.id" },
         "reference":  { "type": "String", "unique": true },
         "status":     { "type": "String" },
-        "total":      { "type": "Decimal" },
+        "total":      { "type": "Decimal", "precision": 18, "scale": 2 },
         "createdAt":  { "type": "Timestamp" }
       },
       "partitionKey":   [{ "column": "tenantId" }],
@@ -328,7 +328,7 @@ Aouda has **two independent auth systems**, and conflating them is the most comm
 | **Server auth** | Which services and developers may connect to this server | Your backend, CI, operators, Studio. Like PostgreSQL roles |
 | **Application auth** | Who your end users are | Your app's sign-up, sign-in, JWT, refresh, MFA. Like Auth0 or Supabase Auth |
 
-Either can be used alone, together, or not at all — [Auth and Authorization](../auth/) has the full model. Then pick the data-authorization mode:
+Either can be used alone, together, or not at all — [Auth and Authorization](../auth/index.md) has the full model. Then pick the data-authorization mode:
 
 | Mode | Use when | Cost |
 |---|---|---|
@@ -337,13 +337,13 @@ Either can be used alone, together, or not at all — [Auth and Authorization](.
 | `auth-db-rls` | The filter is a row predicate rather than a partition — "rows I own", "rows my team owns" | A named resolver with rules |
 | `auth-db-pls` + `rlsResolverName` | Both: partition isolation *and* a row predicate inside it | Both of the above |
 
-Worked setups for all of them, including admin pass-through, write-check (read vs write predicates), identity stamp, and `plsClaimBinding`: [Data authorization](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](../examples/p43-write-side/) — stamp the principal into the row and gate writes with `writeCheckRules`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
+Worked setups for all of them, including admin pass-through, write-check (read vs write predicates), identity stamp, and `plsClaimBinding`: [Data authorization](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) — stamp the principal into the row and gate writes with `writeCheckRules`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
 
 > **The one mistake that matters.** A table with `dataPlaneAccess: true` and **no** authorization mode is readable — through your declared named queries — by **every signed-in user**. That is exactly right for reference data, price lists, and public catalogues. It is a data breach for anything owned by a user. Ship `authMode` in the *same change* that sets `dataPlaneAccess`, never in a follow-up, and confirm it with `aouda policy inspect` against a real identity per table class.
 
 MFA (TOTP) is available, and password-reset and OTP delivery are configurable through [Email, SMS & notifications](../auth/notifications.md). Note that neither client SDK wraps password reset or MFA enrolment — the endpoints exist, and you call them over HTTP.
 
-**Alternatives.** Corporate IdP required? OAuth 2.0 authorization code + PKCE and token introspection are **not shipped**. The supported shapes are Aouda email/password (+ MFA) directly, or a backend that authenticates against your IdP and holds `mk_svc_*` — see [Choose your shape](#choose-your-shape).
+**Alternatives.** A native app whose users sign in (with MFA) in the browser? **Native sign-in** hands the browser session to the app: the web front issues a single-use PKCE code, the app redeems it for its own session (**NativeClients, 0.4.0**) — [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser). Corporate IdP required? A hosted OAuth 2.0 authorization server (login page, social login, consent) and token introspection are **not shipped**. The supported shapes are Aouda email/password (+ MFA) directly, or a backend that authenticates against your IdP and holds `mk_svc_*` — see [Choose your shape](#choose-your-shape).
 
 ### Phase 3 — Build the surface
 
@@ -544,7 +544,7 @@ You are running a database now, so the operational surface matters. Every one of
 | Many apps, one server | Multi-database, isolation, async drop, quarantine | [Server and multi-database](server-multi-database.md) |
 | Knowing what it is doing | Prometheus metrics, health/ready probes, structured logs, query stats | [Server configuration](server-configuration.md) |
 | Looking at your data | Studio — data explorer, schema, cluster ops, backups, MQ browser | [Studio](studio.md) |
-| Running it somewhere | Docker, Compose, Kubernetes + Helm, Windows Service, systemd | [Deployment](../deployment/) · [Kubernetes and Helm](../deployment/kubernetes.md) |
+| Running it somewhere | Docker, Compose, Kubernetes + Helm, Windows Service, systemd | [Deployment](../deployment/index.md) · [Kubernetes and Helm](../deployment/kubernetes.md) |
 | Managed control plane | Hub | [Cloud and Hub](cloud-hub.md) |
 
 Two settings worth deciding deliberately rather than discovering: `storageTemperature` per table (step 1) and the memory budget. Everything else has a defensible default.
@@ -569,7 +569,7 @@ The showcase, and the table to check your feature list against. If something you
 | A filter panel with several optional facets | One definition with `whenParamPresent: true` on each optional condition — omitting the arg skips the predicate entirely | [Optional predicates](browser-tier-read-limits.md#optional-predicates-whenparampresent) |
 | A filter dropdown of "values that exist" | Named query with `distinct: true` — one constrained key is enough when the columns are partition keys | [Paging, distinct, and count](named-queries.md#paging-distinct-and-count) |
 | Search-as-you-type over a name | A stored `derived` normalized column plus a prefix/`in` predicate. There is **no full-text search** | [Derived columns](insert-transforms.md#derived-columns) |
-| A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbyChoices--orderbyindex) |
+| A sortable grid | Declare `orderByChoices` in the definition; caller picks with `orderByIndex`. Cursor paging is **not shipped** (BL-182) — use `offsetParam` | [Bounded sort choices](named-queries.md#bounded-sort-choices-orderbychoices--orderbyindex) |
 | A live-updating grid or ticker | `namedQueries.subscribe` by name, collection-shaped, list parameter capped with `maxItems` | [Subscribe by name](named-queries.md#subscribe-by-name) |
 | A "latest value per key" board | `latestPerKey` materialized query, subscribed. **Not** the raw table plus `conflate` | [Materialized queries](materialized.md) |
 | A chart over hourly/daily buckets | `aggregate` MQ with `TruncateToHour`, `dataPlaneAccess: true`, read by `outputName` | [Materialized queries](materialized.md) |
@@ -611,13 +611,13 @@ The path above is the one that removes the most work. It is not the only support
 | No WebSockets survive your network path | Keep subscriptions; the client falls back to **HTTP long-poll** automatically | Some latency; more connections | [Real-time](real-time.md) |
 | Streaming is off the table entirely | Poll a named query on an interval | Latency, and permits — measure against the 60/60 s quota | [Direct client access](direct-client-access.md#quotas-and-cost) |
 | No credential may ever reach the browser | **Pattern A**: your backend holds `mk_svc_*` and calls the same named queries | The BFF stays. You keep name identity, the access gate, and bounded cost | [Pattern A](../auth/architecture.md#pattern-a-backend-mediated-traditional) |
-| Users must sign in with your corporate IdP | Backend authenticates against the IdP and holds `mk_svc_*`; or use Aouda email/password + MFA | OAuth code + PKCE and token introspection are **not shipped** | [Authentication that exists](direct-client-access.md#authentication-that-exists) |
+| Users must sign in with your corporate IdP | Backend authenticates against the IdP and holds `mk_svc_*`; or use Aouda email/password + MFA | A hosted OAuth authorization server (login page, social login, consent) and token introspection are **not shipped** | [Authentication that exists](direct-client-access.md#authentication-that-exists) |
 | Pure Node/JS CI, cannot add .NET | Call `POST …/schema/diff?access=true` on admin from your existing job | Convenience only — the gate still runs | [BL-176](browser-tier-read-limits.md#schema-diff---access-is-c-cli-only-bl-176) |
 | Your team needs SQL | A trusted service using the fluent query builder; ad-hoc queries on admin | There is **no SQL surface** | [Query execution](query.md) |
-| Native mobile app, not a browser | Identical to the browser path — same data-plane listener, same `mk_pub_*`, same names | Nothing | [Direct client access](direct-client-access.md) |
+| Native mobile or desktop app, not a browser | Identical to the browser path for data — same data-plane listener, same `mk_pub_*`, same names. Sign-in: email/password in the app, or **native sign-in through the browser** — the signed-in web front issues a PKCE code, the app redeems it for its own session, MFA carried (**NativeClients, 0.4.0**). Persist the rotated refresh token (`onTokensChanged`) | Nothing | [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser) · [Direct client access](direct-client-access.md) |
 | Edge / serverless functions | Treat them as trusted services with `mk_svc_*`; mind connection lifetime and that subscriptions want a long-lived socket | Streaming from a short-lived function | [Direct client access](direct-client-access.md) |
 | Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and run the access gate | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
-| Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/) |
+| Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
 | A browser needs cross-partition analytics | **Refused by design.** Use `auth-db-pls` fan-out, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [No crossPartitionAccess on a named query](browser-tier-read-limits.md#no-crosspartitionaccess-on-a-named-query) |
 | You already have an application | Start from the existing-app branch below | Nothing — it is the same destination | [Adoption](adoption.md) |
 
@@ -684,7 +684,7 @@ If you are an AI agent writing an application against Aouda, this section is you
 | State that `conflate` is a no-op on insert-only streams | Recommend `conflate` for a tick feed or event log |
 | Read an aggregate MQ by its `outputName` (`high`, `open`) | Read internal state columns (`_max_bid`, `_first_open_val`) |
 | Run `schema diff --access` and `policy inspect` before declaring done | Widen a `select` without re-running the gate |
-| Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, a SQL surface, PKCE, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, `computed` MQ outputs, `topNPerGroup`, `firstPerKey`, and a named query's declared `aggregates` / `groupBy` / `perKey` (**BL-796, 0.3.0**) **are** shipped — do not list them as absent) |
+| Say "not shipped" and link the alternative | Invent cursor paging, expression `orderBy`, a SQL surface, a hosted OAuth login page, or full-text search. (`whenParamPresent`, `orderByChoices`, `collapse_inserts`, `computed` MQ outputs, `topNPerGroup`, `firstPerKey`, and a named query's declared `aggregates` / `groupBy` / `perKey` (**BL-796, 0.3.0**) **are** shipped — do not list them as absent) |
 
 ### Per-screen decision procedure
 
@@ -831,7 +831,7 @@ Two lists. The first is *not yet*; the second is *not ever*, on purpose.
 | Ad-hoc aggregates built by the caller on the data plane | Declare `aggregates` / `groupBy` in the named query (**BL-796, 0.3.0**), or an aggregate MQ read through a named query when it must be live or subscribed |
 | Subscribe by name for definitions using joins, `selectExpr`, or `distinct` | HTTP execute plus polling, or split the view |
 | The failing row index on a rejected batch | The error names the check; pre-validate or quarantine |
-| OAuth 2.0 authorization code + PKCE; token introspection | Aouda email/password (+ MFA), or a backend holding `mk_svc_*` |
+| A hosted OAuth 2.0 authorization server (login page, social login, third-party consent); token introspection | Aouda email/password (+ MFA); for native apps, native sign-in through the browser (PKCE, **NativeClients, 0.4.0**); or a backend holding `mk_svc_*` |
 | Password reset / MFA methods on the client SDKs | The HTTP endpoints exist — call them directly |
 | `schema diff --access` in the npm CLI | The C# `aouda` CLI, or `POST …/schema/diff?access=true` on admin |
 | A SQL query surface | The fluent query builder, or named queries |
@@ -863,7 +863,7 @@ Files and images (use object storage, keep the key in a column). Background jobs
 - [Partitioning and multi-tenancy](partitioning.md) · [Time-series and clustering](time-series.md) · [Timestamp type](../reference/timestamp.md)
 
 **Auth**
-- [Auth and Authorization](../auth/) · [Architecture patterns](../auth/architecture.md) · [Setup and flows](../auth/setup.md) · [Data authorization](../auth/authorization.md) · [Client integration](../auth/client-integration.md) · [Email, SMS & notifications](../auth/notifications.md) · [Reference](../auth/reference.md)
+- [Auth and Authorization](../auth/index.md) · [Architecture patterns](../auth/architecture.md) · [Setup and flows](../auth/setup.md) · [Data authorization](../auth/authorization.md) · [Client integration](../auth/client-integration.md) · [Email, SMS & notifications](../auth/notifications.md) · [Reference](../auth/reference.md)
 
 **Reads, writes, and streaming**
 - [Query execution](query.md) · [Bulk mutations](bulk-mutations.md) · [Bulk load](bulk-load.md) · [Real-time streaming](real-time.md) · [Graph and vector](graph-vector.md)
@@ -871,11 +871,11 @@ Files and images (use object storage, keep the key in a column). Background jobs
 **Operations**
 - [Hot/cold storage](hot-cold.md) · [Sizing memory and WAL](sizing.md) · [Write path durability](write-durability.md) · [Storage and persistence](storage.md) · [Primary key indexing and memory](pk-indexing.md)
 - [Backup and restore](backup.md) · [Replication and clustering](replication.md) · [Server and multi-database](server-multi-database.md) · [Server configuration](server-configuration.md)
-- [Studio](studio.md) · [Cloud and Hub](cloud-hub.md) · [Deployment](../deployment/) · [Kubernetes and Helm](../deployment/kubernetes.md)
+- [Studio](studio.md) · [Cloud and Hub](cloud-hub.md) · [Deployment](../deployment/index.md) · [Kubernetes and Helm](../deployment/kubernetes.md)
 
 **Clients, testing, and reference**
 - [TypeScript client](../clients/typescript.md) · [SDK compatibility](../clients/compatibility.md) · [Distribution and licensing](../clients/distribution.md)
-- [Testing](../getting-started/testing.md) · [Testing and DX](testing-dx.md) · [Getting started](../getting-started/)
+- [Testing](../getting-started/testing.md) · [Testing and DX](testing-dx.md) · [Getting started](../getting-started/index.md)
 - [HTTP API](../reference/http-api.md) · [Changelog](../CHANGELOG.md)
 
 **Worked end-to-end use case**

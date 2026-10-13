@@ -113,9 +113,9 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1 },
         "ticker": { "type": "String" },
-        "bid": { "type": "Decimal" },
-        "ask": { "type": "Decimal" },
-        "internalSpread": { "type": "Decimal" },
+        "bid": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "ask": { "type": "Decimal", "precision": 18, "scale": 2 },
+        "internalSpread": { "type": "Decimal", "precision": 18, "scale": 2 },
         "asOf": { "type": "Timestamp" }
       }
     },
@@ -327,6 +327,47 @@ Constraints:
 
 ---
 
+## Server-time bounds (`serverTime` parameters)
+
+(**NativeClients, 0.4.0**)
+
+A parameter declared `{ "serverTime": { "offsetSeconds": <n> } }` is bound **by the server**, at execute, to its own UTC
+clock plus `n` seconds. It is how a read asks "seen in the last 75 seconds" against one clock — the server's — instead of
+each device's:
+
+```json
+"connect.presence.online": {
+  "table": "Presence",
+  "select": ["UserId", "State", "LastHeartbeat"],
+  "where": { "and": [{ "column": "LastHeartbeat", "op": "gt", "param": "leaseStart" }] },
+  "params": { "leaseStart": { "serverTime": { "offsetSeconds": -75 } } },
+  "limit": 500
+}
+```
+
+- **One-shot reads only**: execute, batch, `count` and aggregate definitions. **Subscribe refuses** the query with
+  `NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE` — a row would leave the result because time passed, with no write to
+  report, which is a timer, not a predicate. Subscribe to the table's query without the bound and judge the lease on the
+  client (below), or execute the bounded query on an interval. A materialized query cannot declare one (its predicate takes
+  literal values).
+- **The caller cannot supply it.** Naming it in `args` fails with `NAMED_QUERY_SERVER_TIME_INVALID` (400); omit it.
+  Generated typed clients leave it out of the arguments.
+- **Where it may stand** (checked at apply, `NAMED_QUERY_SERVER_TIME_INVALID`): an `eq` / `ne` / `gt` / `gte` / `lt` / `lte`
+  condition on a `Timestamp` column, in the base `where` or a join's. Not `in` / `like`, not `whenParamPresent`, not a
+  `limitParam` / `offsetParam`, not in `selectExpr`, and with no other constraint (`required`, `min`, …). Named mutations
+  cannot declare one. `offsetSeconds` is within ±10 years.
+- **Whose clock.** The node that answers the read binds the bound, and stamps are the primary's clock — a read served by a
+  secondary compares the secondary's clock with the primary's stamps, so their skew shifts the lease window. Read leases from the
+  primary, or allow for the skew.
+- **Pairs with a server-time stamp.** With `LastHeartbeat` declared `derived: { "serverTime": "write" }`
+  ([insert transforms](insert-transforms.md#server-time-stamp-servertime)), both
+  sides of the comparison are the server's clock.
+
+**Judging a lease on the client.** A subscription delivers the rows; whether a lease has lapsed is a comparison with now.
+Use the server's now: every HTTP response carries a `Date` header, readable cross-origin, and both SDKs keep the offset —
+`client.serverClockOffsetMs` / `client.serverNow()` in TypeScript, `ServerClockOffset` / `ServerNow()` in C# — good to
+about a second.
+
 ## Bounded sort choices (`orderByChoices` / `orderByIndex`)
 
 Declare a list of allowed sort permutations in the definition. The caller picks one by index in the execute or subscribe request.
@@ -434,7 +475,7 @@ HTTP **200** means the envelope was accepted. A missing name or a bind/ADRA fail
 ```json
 {
   "results": [
-    { "columns": ["ticker", "bid"], "types": ["String", "Decimal"], "data": [["AAPL", 189.2]], "rowCount": 1 },
+    { "columns": ["ticker", "bid"], "types": ["String", "Decimal"], "data": [["AAPL", 189.200000]], "rowCount": 1 },
     { "code": "NAMED_QUERY_NOT_FOUND", "error": "Named query 'equity.unknown' was not found." }
   ]
 }
@@ -591,12 +632,19 @@ await client.namedMutations.execute("equity.adjustQty", { id: 1, qty: 10 });
 
 Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `rowsDeleted`) plus optional `RETURNING` rows. Mutations are **not** allowed in the read batch.
 
+**`returning` on `insert` and `upsert`** (**NativeClients, 0.4.0**; BL-639 — accepted and ignored before). The declared
+columns of the rows **written**, under `rows`, as `update` / `delete` return them: an insert's rows in request order, with
+their server-computed values (stamps, derived columns, generated ids); an upsert's **one row per key** — the row that won
+(the batch's last row for a repeated key), as stored, so an `insert` stamp of an existing key is the stored one, not this
+write's. A write that would return more than `MaxReturningRows` rows fails before writing with
+`NAMED_MUTATION_RETURNING_OVERFLOW`.
+
 ### Choosing `op`
 
 | `op` | Shape | Requires | Result fields |
 |---|---|---|---|
-| `insert` | row template in `values` | — | `rowsInserted`, `generatedValues` |
-| `upsert` *(**BL-637, 0.1.37**)* | row template in `values` | the table declares a **primary key** | `rowsInserted`, `rowsUpdated`, `generatedValues` |
+| `insert` | row template in `values` | — | `rowsInserted`, `generatedValues`, `RETURNING` rows (**NativeClients, 0.4.0**) |
+| `upsert` *(**BL-637, 0.1.37**)* | row template in `values` | the table declares a **primary key** | `rowsInserted`, `rowsUpdated`, `generatedValues`, `RETURNING` rows (**NativeClients, 0.4.0**) |
 | `update` | `where` + `set` / `setExpr` | non-empty `where` | `rowsUpdated`, `RETURNING` rows |
 | `delete` | `where` | explicit `limit` cap | `rowsDeleted`, `RETURNING` rows |
 
@@ -614,13 +662,28 @@ Response uses the existing mutation counts (`rowsInserted` / `rowsUpdated` / `ro
 > the first call there is no row to match.
 >
 > ```json
+> "Presence": {
+>   "columns": {
+>     "UserId":        { "type": "String", "primaryKey": 1, "derived": { "identity": "subject" } },
+>     "State":         { "type": "String" },
+>     "LastHeartbeat": { "type": "Timestamp", "derived": { "serverTime": "write" } }
+>   }
+> }
+> ```
+>
+> ```json
 > "connect.presence.heartbeat": {
 >   "op": "upsert",
 >   "table": "Presence",
->   "values": { "LastHeartbeat": { "param": "lastHeartbeat" } },
->   "params": { "lastHeartbeat": { "required": true } }
+>   "values": { "State": { "param": "state" } },
+>   "params": { "state": { "required": true } }
 > }
 > ```
+>
+> The server stamps `LastHeartbeat` with its own clock on every heartbeat (a
+> [server-time stamp](insert-transforms.md#server-time-stamp-servertime),
+> **NativeClients, 0.4.0**), so a lease is judged against one clock, not each device's. The
+> mutation does not, and cannot, send it.
 >
 > ```text
 > first call                every call after

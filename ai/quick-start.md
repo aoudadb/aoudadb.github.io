@@ -158,10 +158,10 @@ For full capability details see [AI Agents](index.md).
 **Next step, once the bootstrap above works:** [How to build apps effortlessly with Aouda](../guides/build-apps.md) — the canonical build path for a real application, including a [Rules for AI agents](../guides/build-apps.md#rules-for-ai-agents) section with the reading order, the hard rules, the per-screen decision procedure, the error contract, and a self-verification checklist. This page gets you a database; that page gets you an application.
 
 - [Local CLI testing (agents)](local-cli-testing.md) — throwaway server recipe + CLI/schema/data-plane traps
-- [Full Getting Started guide](../getting-started/) — embedded mode, server mode, schema, auth, identity-insert
-- [Bulk Load](../guides/bulk-load/) — high-throughput ingest + `options.identityInsert`
+- [Full Getting Started guide](../getting-started/index.md) — embedded mode, server mode, schema, auth, identity-insert
+- [Bulk Load](../guides/bulk-load.md) — high-throughput ingest + `options.identityInsert`
 - [Auth for AI agents](index.md#212-scenario-playbooks-minimum-three) — bootstrap, service key, ADRA grant flows
-- [HTTP API reference](../reference/http-api/) — all endpoints
+- [HTTP API reference](../reference/http-api.md) — all endpoints
 - [Named queries](../guides/named-queries.md) — execute by name; do not compose ad-hoc queries with `mk_pub_*`
 - [Direct client access](../guides/direct-client-access.md) — data-plane vs admin. PKCE is not shipped.
-- [TypeScript client](../clients/typescript/) — full SDK reference
+- [TypeScript client](../clients/typescript.md) — full SDK reference

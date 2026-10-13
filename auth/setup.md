@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Auth Setup & User Flows
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
@@ -147,7 +147,7 @@ Password reset, invite emails, and phone MFA require **server-side** notificatio
 | MFA phone challenge | SMS | `Aouda:Auth:Sms:Provider = gatewayapi` + GatewayAPI token, **or** `console` for local testing |
 | MFA TOTP (authenticator app) | — | No notification provider needed |
 
-Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. For local end-to-end testing without SendGrid/GatewayAPI credentials, set `Provider` to **`console`** — OTPs appear in server stdout (see [notifications.md §5](notifications.md#5-console-provider-local-development--testing)).
+Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. For local end-to-end testing without SendGrid/GatewayAPI credentials, set `Provider` to **`console`** — OTPs appear in server stdout (see [notifications.md §5](notifications.md#6-console-provider-cli--event-viewer-interim)).
 
 **Full guide:** [Email, SMS & Notifications](notifications.md) — settings reference, Docker/env examples, SendGrid/GatewayAPI/console providers, troubleshooting.
 
@@ -211,7 +211,61 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signout \
   -H "Authorization: Bearer <user-access-token>"
 ```
 
-Revokes the session and invalidates the refresh token.
+Ends **this** session — its refresh token and access token stop working; the user's other devices stay signed in
+(**NativeClients, 0.4.0**). To sign out everywhere, send `-d '{"scope":"global"}'` (and `-H "Content-Type: application/json"`);
+`"others"` signs every other device out and keeps this one. A user lists their devices with `GET .../auth/sessions` and ends one with
+`DELETE .../auth/sessions/{id}` — see [Sessions are devices](reference.md#sessions-are-devices).
+
+### Native apps: sign in through the browser
+
+(**NativeClients, 0.4.0**) A desktop or phone app can sign its user in through the browser, where your web front is already
+signed in — MFA included — and get a session of its own at the same assurance level. Aouda serves no login page: your web front does
+the asking, Aouda issues a single-use code, and the app redeems it with a PKCE verifier. Endpoints, rules and error codes:
+[Native sign-in through the browser](reference.md#native-sign-in-through-the-browser).
+
+**Once: register the app** (an administrator, with the service key):
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/native-clients \
+  -H "Authorization: Bearer <mk_svc_...>" -H "Content-Type: application/json" \
+  -d '{"name":"MyApp desktop","redirectUris":["http://127.0.0.1/callback","com.example.myapp:/oauth"]}'
+```
+
+**Desktop app — loopback redirect** (RFC 8252 §7.3). The app listens on `127.0.0.1` on any free port; the registered
+`http://127.0.0.1/callback` matches every port.
+
+```typescript
+import { AoudaClient, createPkcePair } from "@aouda/client";
+
+// 1. In the desktop app: a PKCE pair, a loopback listener, and the browser opened on your web front.
+const { codeVerifier, codeChallenge } = await createPkcePair();
+const redirectUri = `http://127.0.0.1:${port}/callback`;
+openBrowser(`https://app.example.com/native-sign-in?challenge=${codeChallenge}&redirect=${encodeURIComponent(redirectUri)}&state=${state}`);
+
+// 2. In the web front (signed in): ask the user first — Aouda shows no consent screen, so this is where they see it — then ask for
+//    the code and send the browser on.
+if (!(await confirmDialog(`Sign in to MyApp on this device as ${user.email}?`))) return;
+const { redirectTo } = await web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state });
+window.location.assign(redirectTo);   // → http://127.0.0.1:<port>/callback?code=…&state=…
+
+// 3. Back in the desktop app's listener: check `state`, then redeem within 60 seconds.
+const app = new AoudaClient({ serverUrl, database: "myapp" });
+app.auth.onTokensChanged((t) => secureStore.save(t));             // keep the rotated refresh token
+await app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo: "MyApp desktop on Ann's laptop" });
+```
+
+**Phone app — private-use scheme or claimed link** (RFC 8252 §7.1 / §7.2). Register `com.example.myapp:/oauth` (a reverse-DNS
+scheme the app owns) or an `https://` link the OS routes to the app (Universal Links / App Links). The flow is the same; the browser
+lands on the app instead of a loopback port. **A claimed `https` link is the stronger choice:** another app on the phone can register
+the same private-use scheme and receive the code — with its own PKCE pair, it could redeem it (RFC 8252 §8.6) — while a claimed
+link reaches only your app. Either way, the web front must ask the user before it calls `createAuthorizationCode` (step 2). On
+React Native, import `react-native-get-random-values` before `@aouda/client` so `createPkcePair()` has a random source
+([React Native](../clients/typescript.md#react-native-nativeclients-040)).
+
+C#: `Pkce.CreatePair()`, `client.Auth.CreateAuthorizationCodeAsync(...)`, `client.Auth.ExchangeCodeAsync(...)`.
+
+The code is single use, valid for 60 seconds, bound to the client and the redirect URI, and dies with the web session that issued it. A
+second redemption is treated as theft: it is refused and the session the first redemption opened is ended.
 
 ---
 
@@ -232,7 +286,7 @@ Revokes the session and invalidates the refresh token.
 3. App sends accessToken → on every API call (Authorization: Bearer)
 4. Token expires (15 min) → App calls /refresh with refreshToken
 5. Aouda returns         → new accessToken + new refreshToken (rotation)
-6. User signs out       → App calls /signout, discards tokens
+6. User signs out       → App calls /signout (this device), discards tokens
 ```
 
 ### Refreshing the Access Token
@@ -259,6 +313,13 @@ tokens to the others), or give each client its own sign-in.
 
 Sign-in, sign-up and password changes hash the password, and the hash waits for its memory first; under load they
 can answer `503` with `Retry-After` too. Retry them as any capacity refusal (**BL-850, 0.3.0**).
+
+**The SDKs treat such a refusal as retryable (**BL-944, 0.4.0**).** A sign-in, sign-up or refresh refused for capacity is
+`AoudaCapacityException` (with `RetryAfter`) in `Aouda.Client` and `AoudaServerError` (with `retryAfterSeconds`; `AoudaApiError` for
+a `429 SERVER_AT_CAPACITY`) in `@aouda/client` — not an authentication error. A refused refresh keeps the refresh token for the
+retry, and a request that needed it fails with the refusal rather than with its `401`; an early refresh refused while the current
+access token is still valid does not fail the request — the valid token is used and a later call refreshes. (Before, both SDKs
+reported such a refusal as an authentication failure, which an app reads as "sign in again".)
 
 ### Session Validation Modes
 

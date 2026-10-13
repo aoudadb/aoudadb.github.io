@@ -10,7 +10,7 @@ Aouda runs from **one binary**. `aouda` and `Aouda.Server` are two names for the
 
 | Mode | Best for | Guide |
 |---|---|---|
-| **CLI** (`aouda start`) | Local development, quick demos, agent workflows | [Getting started](../getting-started/) |
+| **CLI** (`aouda start`) | Local development, quick demos, agent workflows | [Getting started](../getting-started/index.md) |
 | **Linux / systemd** | On-premise or cloud Linux servers | [Linux (systemd)](linux.md) |
 | **Windows Service** | On-premise Windows servers | [Windows Service](windows.md) |
 | **Docker** | Containerised environments, single-node production | [Docker](docker.md) |
@@ -41,7 +41,7 @@ They are the same two on every platform, and both pages repeat them because both
 
 **A CPU *share* is not a CPU *limit*.** A share carries no core count, so the kernel exposes no quota and Aouda sizes scan parallelism from the whole node.
 
-Both are covered per platform: [systemd](linux.md#the-memory-limit-and-why-it-does-more-than-you-think), [Docker](docker.md#-m-is-the-single-most-valuable-flag-in-that-command), and — ⚠️ with an important difference — [Windows](windows.md#-where-windows-differs-from-linux-there-is-no-memory-limit), which has no equivalent of either.
+Both are covered per platform: [systemd](linux.md#the-memory-limit-and-why-it-does-more-than-you-think), [Docker](docker.md#-m-is-the-single-most-valuable-flag-in-that-command), and — ⚠️ with an important difference — [Windows](windows.md#where-windows-differs-from-linux-there-is-no-memory-limit), which has no equivalent of either.
 
 ---
 

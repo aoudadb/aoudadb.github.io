@@ -29,7 +29,7 @@ The .NET client uses two separate options types — one per auth system:
 | `Email` / `Password` | **Not available** — use `SignInAsync()` | Yes |
 | `UserToken` | Yes (with service keys) | Yes (with `mk_srv_`) |
 
-Use `AppAuth = new AppAuthOptions { ... }` for Application Auth (this document). Use `ServerAuth = new ServerAuthOptions { ... }` for [Server Auth](Getting-Started.md#8-server-authentication--securing-database-access). The two are mutually exclusive — setting both throws an `ArgumentException` at construction time.
+Use `AppAuth = new AppAuthOptions { ... }` for Application Auth (this document). Use `ServerAuth = new ServerAuthOptions { ... }` for [Server Auth](../getting-started/index.md#8-server-authentication--securing-database-access). The two are mutually exclusive — setting both throws an `ArgumentException` at construction time.
 
 ### Backend: Service Key (Full Access)
 
@@ -195,8 +195,8 @@ const orders = await aouda.table("orders")
 // Sign up
 const result = await client.auth.signUp("newuser@example.com", "Password123!");
 
-// Sign in
-const session = await client.auth.signIn("alice@example.com", "SecurePass123!");
+// Sign in — deviceInfo names this device in the user's session list (NativeClients, 0.4.0)
+const session = await client.auth.signIn("alice@example.com", "SecurePass123!", { deviceInfo: "Alice's iPhone — MyApp 2.1" });
 
 // Profile
 const me = await client.auth.me();
@@ -204,9 +204,53 @@ const me = await client.auth.me();
 // Change password
 await client.auth.changePassword("OldPass123!", "NewPass456!");
 
-// Sign out
+// Sign out — this device only (NativeClients, 0.4.0; before, every session of the user)
 await client.auth.signOut();
+// … or every other device (this one stays signed in), or everywhere
+await client.auth.signOut({ scope: "others" });
+await client.auth.signOut({ scope: "global" });
+
+// The user's devices, and signing one of them out
+const sessions = await client.auth.listSessions();   // [{ id, deviceInfo, userAgent, ipAddress, createdAt, lastSeenAt, aal, current }]
+await client.auth.revokeSession(sessions.find((s) => !s.current)!.id);
 ```
+
+C#: `SignInAsync(email, password, deviceInfo)`, `SignOutAsync(SignOutScope.Others)`, `ListSessionsAsync()`, `RevokeSessionAsync(id)`.
+What a session is, and what ends one: [Sessions are devices](reference.md#sessions-are-devices).
+
+### Keeping tokens across restarts (**NativeClients, 0.4.0**)
+
+Each refresh **rotates** the refresh token, and presenting a spent one again ends the whole session (it is treated as stolen). An
+app that persists only the token it got at sign-in therefore signs the user out on its first restart after a refresh. Persist the
+pair on every change — both SDKs tell you each one (sign-in, every refresh including the automatic ones, sign-out) — and seed the
+restarted client from what you stored:
+
+```typescript
+const stop = client.auth.onTokensChanged(({ accessToken, refreshToken, reason }) => {
+  if (reason === "signedOut") secureStore.delete("aouda");
+  else secureStore.set("aouda", JSON.stringify({ accessToken, refreshToken }));
+});
+
+// On the next start
+const saved = JSON.parse(secureStore.get("aouda"));
+const client = new AoudaClient({ serverUrl, database, appAuth: { token: saved.accessToken, refreshToken: saved.refreshToken } });
+```
+
+```csharp
+client.Auth.TokensChanged += (_, e) => store.Save(e.AccessToken, e.RefreshToken);   // e.Reason: SignedIn, Refreshed, SignedOut
+var restarted = new AoudaClient(new AoudaClientOptions { ServerUrl = url, DatabaseName = db,
+    AppAuth = new AppAuthOptions { Token = saved.AccessToken, RefreshToken = saved.RefreshToken } });
+```
+
+When a refresh is refused because the session is over — `AUTH_REFRESH_TOKEN_INVALID` (ended, or a reused token) or
+`AUTH_ACCOUNT_DISABLED` — the SDKs clear their tokens and report `signedOut` / `SignedOut`, so the app deletes what it stored rather than
+re-seeding a dead pair on every start. An explicit `refresh()` / `RefreshAsync()` rejects with that code; a transient refusal (`503`)
+keeps the tokens for a retry. Sign-out refreshes an expired access token first; `signOut({ scope: "others" | "global" })` rejects
+when the server ended nothing, while a plain `signOut()` stays best-effort.
+
+Listeners run synchronously, before the new tokens are used; any number may subscribe (`onTokensChanged` returns the
+unsubscribe). A listener that throws is ignored — store failures are the app's to handle — and a listener must not refresh.
+Where to keep them is the app's choice (Keychain, Android Keystore / SecureStore, DPAPI); never `localStorage` for a native app.
 
 ---
 
@@ -223,7 +267,7 @@ Aouda has **four** API key types. Understanding when to use each is critical.
 | **App `public` key** | `mk_pub_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **data** — named queries, mutations, subscriptions (plus auth) |
 | **App `service_role` key** | `mk_svc_` | Auto-generated on `auth.enabled` | One database | `_auth` | Per-database backend access, admin tools |
 
-Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control. A `custom` key can optionally be **linked to a user** (`userId` at creation) — the key then inherits that user's `auth-db-pls` partition-grants and RBAC roles, giving a non-interactive service a durable credential scoped to exactly the partitions it needs, without the full-database bypass of `mk_svc_`/`mk_srv_`. See [Data Authorization §19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services) and the [`POST .../admin/api-keys` reference](reference.md).
+Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control. A `custom` key can optionally be **linked to a user** (`userId` at creation) — the key then inherits that user's `auth-db-pls` partition-grants and RBAC roles, giving a non-interactive service a durable credential scoped to exactly the partitions it needs, without the full-database bypass of `mk_svc_`. See [Data Authorization §19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services) and the [`POST .../admin/api-keys` reference](reference.md).
 
 `mk_pub_` arrived with the data-plane listener in server `0.1.7`. Signup/signin/refresh/password-reset are **keyless**. `mk_anon_` is **denied on data routes** — if you are giving a frontend read access before login, that is `mk_pub_`, on the data-plane, through [named queries](../guides/named-queries.md). Full rules: [Direct client access](../guides/direct-client-access.md).
 
@@ -237,20 +281,26 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 | Frontend that only signs users in (data goes through your backend) | None — `new AoudaClient({ serverUrl, database })` | Signup/signin are public POSTs |
 | Backend accessing one database (app auth enabled) | App `service_role` key (`mk_svc_`) | Full access to that database, PLS bypassed |
 | Non-interactive service that should see only specific partitions (a feeder job, a scoped integration) | `custom` key linked to a user (`userId`) | Durable like `mk_svc_`, but genuinely scoped via `auth-db-pls` partition-grants — not a bypass |
-| Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases |
+| Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases; from 0.4.0 PLS / RLS apply to it (send `X-User-Token`, or use each database's `mk_svc_`, to read protected tables) |
 | CI/CD pipeline | Server API key (`mk_srv_`) | Scoped to test databases |
 | Admin tooling | Server admin JWT or server API key | Full control |
 
 ### Comparison: Server Keys vs App Keys
 
-| | Server API Keys (`mk_srv_`) | App API Keys (`mk_anon_`, `mk_pub_`, `mk_svc_`) |
+| | Server API Keys (`mk_srv_` admin, `mk_` scoped) | App API Keys (`mk_anon_`, `mk_pub_`, `mk_svc_`) |
 |---|---|---|
 | **Created by** | Server admin | Auto-generated when app auth is enabled |
 | **Stored in** | `_serverauth` database | `_auth` database (linked to the app) |
-| **Scope** | One or more databases (via `databaseRoles`) | One specific database |
-| **PLS** | Never enforced (server-level access) | `mk_anon_` / `mk_pub_`: enforced; `mk_svc_`: bypassed |
+| **Scope** | `mk_srv_` (`/api/auth/admin/keys`): every database, always `db_admin`; scoped `mk_` (`/api/auth/admin/api-keys`): each role's `scope` | One specific database |
+| **PLS / RLS** | **Enforced** from 0.4.0 (**0.4.0**); up to 0.3.x never enforced | `mk_anon_` / `mk_pub_` / `custom`: enforced; `mk_svc_`: bypassed |
 | **Listener** | Admin | `mk_pub_`: data-plane only (admin → `AUTH_KEY_LISTENER_MISMATCH`); others: either |
 | **Use case** | Backend services, CI/CD, cross-database | Frontend clients, per-database backend access |
+
+**What changed in 0.4.0** (**0.4.0**). Only an app's service key (`mk_svc_`) bypasses partition- and row-level security.
+A server API key (`mk_srv_`) did too up to 0.3.x; it now gets its role's grants and, on a protected table, only what a request
+with no user may see — with the usual RLS rules, no row; on a PLS table `403`, unless its role is `db_admin` and the read asks
+for `"crossPartitionAccess": true` (audited). For a whole database use that database's `mk_svc_` key; for one user's data send
+`X-User-Token` with either key. Details: [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 
 ### Creating Server API Keys
 
@@ -259,12 +309,13 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
   -d '{
     "name": "myapp-backend",
-    "databaseRoles": {
-      "myapp": ["db_writer"],
-      "analytics": ["db_reader"]
-    }
+    "roles": [
+      { "role": "db_writer", "scope": "myapp" },
+      { "role": "db_reader", "scope": "analytics" }
+    ]
   }'
-# Returns: { "key": "mk_srv_abc123...", ... }
+# Returns: { "key": "mk_abc123...", "kind": "custom", "roles": [ … ], … }
+# POST /api/auth/admin/keys instead creates a global db_admin key (mk_srv_…) and takes only name / expiresAt.
 ```
 
 ### Creating Custom App API Keys
@@ -272,7 +323,7 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
-  -d '{ "name": "analytics-pipeline", "roles": ["db_reader"] }'
+  -d '{ "name": "analytics-pipeline", "roles": [{ "role": "db_reader" }] }'
 # Returns: { "key": "mk_xyz789...", ... }
 ```
 
@@ -300,7 +351,8 @@ The middleware:
 - `X-User-Token` is only accepted when the primary credential is a **service-level key** (`mk_svc_` or `mk_srv_`).
 - If the primary credential is an `anon` key or a user JWT, `X-User-Token` is ignored.
 - If `X-User-Token` is present but invalid (expired, revoked), the request returns 401 with a clear error about the user token.
-- If `X-User-Token` is absent, the service key grants full access with PLS bypassed.
+- If `X-User-Token` is absent, an app service key (`mk_svc_`) grants full access with PLS / RLS bypassed. A server API key
+  (`mk_srv_`) gets its role's grants with PLS / RLS enforced (**0.4.0**; up to 0.3.x it bypassed them too).
 
 ### Example: Backend Querying on Behalf of a User
 

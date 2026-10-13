@@ -303,7 +303,7 @@ Key anchors:
 
 1. Create branch from parent catalog snapshot.
 2. Apply schema changes in branch scope only.
-3. Generate merge plan (three-way where base snapshot exists).
+3. Generate a three-way merge plan from the branch's base snapshot (`base-catalog.json`, written when the branch is created). (**BL-980, 0.4.0**) A branch without one — made by a build before F.3 — is refused at merge and at delete, before anything is deleted; up to 0.3.x a merge fell back to a two-way plan.
 4. Conflicts return merge-plan response; `force` can override.
 5. Merge execution applies branch changes to parent catalog and records history.
 
@@ -462,7 +462,7 @@ This is a full, versioned example set you can keep in git and run end-to-end.
         "tenant_id": { "type": "String" },
         "customer_id": { "type": "Int64", "references": "customers.id" },
         "status": { "type": "String" },
-        "total_amount": { "type": "Decimal" },
+        "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
@@ -518,7 +518,7 @@ Changes from v1:
         "tenant_id": { "type": "String" },
         "customer_id": { "type": "Int64", "references": "customers.id" },
         "status": { "type": "String" },
-        "total_amount": { "type": "Decimal" },
+        "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
         "priority": { "type": "Int32", "nullable": true },
         "fulfilled_at": { "type": "Timestamp", "nullable": true },
         "created_at": { "type": "Timestamp" }
@@ -539,7 +539,7 @@ Changes from v1:
         "order_id": { "type": "Int64", "references": "orders.id" },
         "provider": { "type": "String" },
         "status": { "type": "String" },
-        "amount": { "type": "Decimal" },
+        "amount": { "type": "Decimal", "precision": 18, "scale": 2 },
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
@@ -593,7 +593,7 @@ Changes from v2:
         "id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
         "tenant_id": { "type": "String" },
         "customer_id": { "type": "Int64", "references": "customers.id" },
-        "total_amount": { "type": "Decimal" },
+        "total_amount": { "type": "Decimal", "precision": 18, "scale": 2 },
         "priority": { "type": "Int32", "nullable": true },
         "fulfilled_at": { "type": "Timestamp", "nullable": true },
         "created_at": { "type": "Timestamp" }
@@ -614,7 +614,7 @@ Changes from v2:
         "order_id": { "type": "Int64", "references": "orders.id" },
         "provider": { "type": "String" },
         "status": { "type": "String" },
-        "amount": { "type": "Decimal" },
+        "amount": { "type": "Decimal", "precision": 18, "scale": 2 },
         "created_at": { "type": "Timestamp" }
       },
       "partitionKey": [
@@ -852,7 +852,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 #### MigrationSource
 
-`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply:
+`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply. (**BL-980, 0.4.0**) These four are the only values: `StartupApply` is gone, and a migration history naming it — or any other unknown source, or a number — is refused when it is read.
 
 | Value | Meaning |
 |---|---|
@@ -860,7 +860,6 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
 | `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = On`). |
 | `BranchMerge` | Change applied by merging a branch into the parent catalog. |
-| `StartupApply` | Retained for backward compatibility; not used for new entries. |
 
 ### E) Schema JSON field reference (complete)
 
@@ -905,15 +904,14 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `default` | `default` | `string` | None | Invariant string literal default for the column type. Does not rewrite already-written pages when changed. |
 | `description` | `description` | `string` | None | Human-readable column description (metadata only). |
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
-| `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). |
+| `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) Required on every `Decimal` column. |
 | `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
 
 #### `Decimal(p,s)`: a decimal stored as a scaled integer (**ColumnarCore S13, 0.2.0**)
 
-A `Decimal` column may declare `precision` (total digits, 1–18) and `scale` (digits after the point, 0–`precision`),
-both or neither:
+A `Decimal` column declares `precision` (total digits, 1–18) and `scale` (digits after the point, 0–`precision`):
 
 ```json
 "Price": { "type": "Decimal", "precision": 18, "scale": 2 }
@@ -921,8 +919,28 @@ both or neither:
 
 A declared decimal is stored, logged, compared, aggregated and encoded as a **64-bit integer scaled by 10^scale**
 (`123.45` is stored as `12345`) — as ClickHouse's and DuckDB's `Decimal(18,2)` are. It is 8 bytes instead of 16, its
-pages encode like an `Int64`, and filters, sorts, keys, `min` / `max` / `sum` run as integer operations. An
-undeclared `Decimal` is unchanged (a 128-bit `System.Decimal`, any scale per value); use it for more than 18 digits.
+pages encode like an `Int64`, and filters, sorts, keys, `min` / `max` / `sum` run as integer operations.
+
+**`Decimal(p,s)` is the only decimal type** (**LoadSpeed S13, 0.4.0; breaking**). Up to 0.3.x a `Decimal` column
+could leave out `precision` and `scale` and was then a 128-bit `System.Decimal` with any scale per value; that type is
+retired:
+
+- `"type": "Decimal"` without `precision` and `scale` — in a schema document, `POST …/tables` or
+  `POST …/tables/{t}/columns` — is refused with `400`: *A Decimal column declares its precision and scale (Decimal(p,s),
+  1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* A precision above 18 is refused: *Decimal precision
+  above 18 is not supported (got N).* A value that needs more than 18 digits belongs in a `Double` or a `String` column.
+- Where a type is named by a string alone, with no `precision` / `scale` beside it — a materialized query's computed
+  output `type` and `cast(x, …)`'s target type — spell it `"Decimal(p,s)"`, e.g. `"Decimal(18,6)"`. Plain `"Decimal"`
+  there is refused the same way.
+- A C# `decimal` property declares its column with `[AoudaDecimal(p, s)]` (namespace `Aouda.Abstractions.Attributes`),
+  e.g. `[AoudaDecimal(18, 6)] public decimal Price { get; set; }`. Without it, `CreateTableAsync<T>()` and the embedded
+  engine refuse the type with a message naming the property. A table created implicitly from its first inserted row no
+  longer infers a column from a C# `decimal` value: create the table with a `Decimal(p,s)` column first. (A JSON number
+  with a fraction already inferred `Double` there.)
+- A data directory whose catalog names a column of the old type (type 13), or that holds a segment, WAL record or cold
+  page of it, is refused when the database opens, naming the column: *… has type 13, the undeclared 128-bit Decimal
+  retired by LoadSpeed S13; this build has no reader for it … Export the data with the build that wrote it.* There is no
+  migration: export with the old build, declare the column `Decimal(p,s)`, and load it into a new database.
 
 | | Declared `Decimal(p,s)` |
 |---|---|
@@ -932,12 +950,30 @@ undeclared `Decimal` is unchanged (a 128-bit `System.Decimal`, any scale per val
 | Derived columns / computed outputs | computed as decimals, then rounded half away from zero to the scale |
 | Reading | a decimal with exactly `scale` places (`10.50`, not `10.5`); type reported `Decimal` with `precision` / `scale` |
 | Filters | exact: `> 10.555` on scale 2 is `> 10.55`, `= 10.555` matches nothing |
-| `sum`, `min`, `max`, `first`, `last` | `Decimal(18,s)`; a sum past 18 digits is an error, never a wrap |
+| `sum`, `min`, `max`, `first`, `last` | `Decimal(18,s)`, exact; a sum of 18 digits or more (an absolute value of 10^18 or more, scaled) is an error — *A Decimal sum does not fit Decimal(18,s).* — never a wrap, the same in a query and a materialized query (**LoadSpeed S13, 0.4.0**: a query's sum was bounded by `Int64` instead) |
 | `avg` | `Double` (the sum ÷ 10^scale ÷ count) |
 
 A column cannot be changed to or from `Decimal(p,s)`, nor to another precision or scale, in place: add a new column and
 copy. A `Decimal(p,s)` column cannot be a partition key. Schema export writes the declaration back, so an exported
-schema diffs to nothing. Tables without a declared decimal are untouched.
+schema diffs to nothing.
+
+**Expressions over decimals are exact** (**LoadSpeed S13, 0.4.0**) — in a derived column, a materialized query's
+computed output, a `SET` expression and a `selectExpr`:
+
+| Expression | Result |
+|---|---|
+| `a + b`, `a - b` | at the larger of the two scales |
+| `a * b` | at the sum of the scales; above 18 places, rounded half away from zero to 18 |
+| `a / b` | at scale max(6, scale of `a`, scale of `b`), rounded half away from zero |
+| A fractional literal | keeps the scale it is written with: `0.005` is scale 3 |
+| `round(x, n)` | scale `n` |
+| `roundTo(x, step)` | the larger of the two scales |
+| `cast(x, "Decimal(p,s)")` | rounded half away from zero to scale `s` |
+| An integer `SUM / COUNT` in a computed output | 6 places |
+| Any of these with a `Double` or `Float32` operand | `Double` — `round` / `roundTo` of a `Double` stay `Double` |
+
+A result past 18 digits is an error, never a wrapped value and never a silent `Double`. A computed value stored in a
+`Decimal(p,s)` column is then rounded half away from zero to that column's scale (table above).
 
 **Common mistake:** Using `"Integer"`, `"Long"`, `"Float"`, or `"DateTime"` as type names — these are not valid. Use `Int32`, `Int64`, `Float32`, and `Timestamp` respectively.
 
@@ -992,7 +1028,7 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
       "id":         { "type": "Int64", "primaryKey": 1, "autoIncrement": true },
       "tenant_id":  { "type": "String" },
       "status":     { "type": "String" },
-      "amount":     { "type": "Decimal" },
+      "amount":     { "type": "Decimal", "precision": 18, "scale": 2 },
       "created_at": { "type": "Timestamp" }
     },
     "partitionKey": [

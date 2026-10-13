@@ -6,7 +6,7 @@ parent: "Getting Started"
 
 # Aouda Application Auth Service — Complete Guide
 
-> **This document covers using Aouda as an authentication service for your application's end users.** If you need to secure access to the Aouda server itself (database administrator logins, service accounts, CI/CD pipelines), see [Server Authentication in Getting-Started.md](Getting-Started.md#8-server-authentication--securing-database-access).
+> **This document covers using Aouda as an authentication service for your application's end users.** If you need to secure access to the Aouda server itself (database administrator logins, service accounts, CI/CD pipelines), see [Server Authentication in Getting-Started.md](index.md#8-server-authentication--securing-database-access).
 
 ---
 
@@ -21,14 +21,14 @@ parent: "Getting Started"
 
 **Detailed guides (separate pages):**
 
-- **[Architecture Patterns & Deployment](architecture.md)** — Four deployment patterns (backend-mediated, direct-to-database, standalone auth, hybrid) and six deployment scenarios
-- **[Setup & User Flows](setup.md)** — Enabling auth on a database, signup/signin/signout flows, token lifecycle and refresh
-- **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, **console provider** (local OTP testing), and server config for password reset and MFA OTP delivery
-- **[Client Integration](client-integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context, **BFF/gateway proxying auth endpoints**
-- **[Use Cases & User Management](use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
-- **[Data Authorization: Three Modes](authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS (`auth-db-pls` + `rlsResolverName`), reference use cases
+- **[Architecture Patterns & Deployment](../auth/architecture.md)** — Four deployment patterns (backend-mediated, direct-to-database, standalone auth, hybrid) and six deployment scenarios
+- **[Setup & User Flows](../auth/setup.md)** — Enabling auth on a database, signup/signin/signout flows, token lifecycle and refresh
+- **[Email, SMS & Notifications](../auth/notifications.md)** — SendGrid, GatewayAPI, **console provider** (local OTP testing), and server config for password reset and MFA OTP delivery
+- **[Client Integration](../auth/client-integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context, **BFF/gateway proxying auth endpoints**
+- **[Use Cases & User Management](../auth/use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
+- **[Data Authorization: Three Modes](../auth/authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS (`auth-db-pls` + `rlsResolverName`), reference use cases
 - **[Direct client access](../guides/direct-client-access.md)** — `mk_pub_*`, listeners. OAuth authorization-code + PKCE is **not shipped**.
-- **[Reference](reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
+- **[Reference](../auth/reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
 
 ---
 
@@ -53,7 +53,7 @@ This is what the Aouda Application Auth Service provides. It is a REST API and S
 
 ### What Application Auth Is NOT
 
-- It is **NOT** database server access control. That is [Server Authentication](Getting-Started.md#8-server-authentication--securing-database-access), a completely separate system.
+- It is **NOT** database server access control. That is [Server Authentication](index.md#8-server-authentication--securing-database-access), a completely separate system.
 - It is **NOT** automatically enabled. You must explicitly enable it per database.
 - It is **NOT** required to use Aouda. If your application handles auth through another service (Auth0, Clerk, your own implementation), you don't need this feature at all.
 - It is **NOT** available in embedded mode. Application Auth requires the Aouda HTTP server.
@@ -120,9 +120,10 @@ Aouda Server Instance
 │  │  Access:    Server users/keys with a role for "analytics"
 │  └─ Data: events, metrics, ...
 │
-└─ Database: "cache"
-   │  Auth:      None (open access)
-   │  Access:    Anyone who can reach the server
+└─ Database: "cache"  (no linked auth database)
+   │  Auth:      Server auth once _serverauth exists (BL-1017); none before setup
+   │  Access:    Server users/keys with a role for "cache" on the admin listener;
+   │             before setup, or on the data-plane listener, anyone who can reach it
    └─ Data: fx_quotes, ...
 ```
 
@@ -132,8 +133,8 @@ Every database on a Aouda server falls into one of three states:
 
 | State | How Data Is Protected | When to Use |
 |-------|----------------------|-------------|
-| **No auth** | Open — anyone on the network can read/write | Caches, development, low-sensitivity data |
-| **Server auth only** | Server users/keys must have a role for this database | Internal databases, analytics, services without end-user access |
+| **No auth** | Open — anyone on the network can read/write. Only while the server has no server auth database, or on the data-plane listener: once one exists, a database with no linked auth database is in the next state on the admin listener (**BL-1017, 0.4.0**; 0.3.0 left it open, drop included) | Caches, development, low-sensitivity data |
+| **Server auth only** | Server users/keys must have a role for this database — a database with no linked auth database, once a server auth database exists. Anonymous requests are `401` | Internal databases, analytics, services without end-user access |
 | **Server auth + App auth** | Server auth gates admin access; App auth gates end-user access via API keys + user JWTs | User-facing applications, SaaS, mobile apps |
 
 ### How Server Auth and App Auth Interact on the Same Database
@@ -148,8 +149,11 @@ Who is making the request?
 Case A: Server credential (from _serverauth)
   → JWT or mk_srv_ API key from the _serverauth database
   → db_roles checked for "myapp"
-  → Full access at the granted role level
-  → No PLS enforcement (server credentials see all data)
+  → Access at the granted role level
+  → PLS / RLS enforced (0.4.0): no user's grants, so protected
+    tables show it nothing unless it sends X-User-Token (a db_admin key may
+    read a PLS table with crossPartitionAccess, audited). Up to 0.3.x an
+    mk_srv_ key saw all data.
   → Used by: DBAs, CI/CD, cross-database backend services
 
 Case B: App API key (from _auth, auto-generated)
@@ -310,16 +314,11 @@ TOKEN=$(curl -s -X POST http://localhost:5433/api/auth/signin \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"AdminPass123!"}' | jq -r .accessToken)
 
-# 2. Create a server admin API key (mk_srv_ prefix, never expires)
+# 2. Create a server admin API key (mk_srv_ prefix, global db_admin, no expiry unless expiresAt is set)
 curl -X POST http://localhost:5433/api/auth/admin/keys \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "ci-deploy",
-    "databaseRoles": {
-      "myapp": ["db_admin"]
-    }
-  }'
+  -d '{ "name": "ci-deploy" }'
 # → { "key": "mk_srv_abc123...", "name": "ci-deploy" }
 
 # 3. Use the key directly — no refresh needed
@@ -329,7 +328,7 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{"name":"myapp","auth":{"enabled":true}}'
 ```
 
-Server admin API keys are database-scoped — specify `databaseRoles` to control exactly which databases the key can access and at what permission level. See [Getting-Started.md §8](Getting-Started.md#8-server-authentication--securing-database-access) for the full server auth reference.
+A server admin key (`mk_srv_…`, `POST /api/auth/admin/keys`) is always a global `db_admin` — it can create and drop any database, so keep it for the server admin's own automation. For a service that needs only some databases, create a **scoped** server API key instead: `POST /api/auth/admin/api-keys` with `"roles": [{ "role": "db_writer", "scope": "myapp" }]` (key prefix `mk_`). See [Getting-Started.md §8](index.md#8-server-authentication--securing-database-access) for the full server auth reference.
 
 ---
 
@@ -368,6 +367,12 @@ When you create a database with auth enabled, Aouda still auto-generates keys. T
 | **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | Enforced | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
 | **`public`** | `mk_pub_` | `public` | Enforced | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
 | **`service_role`** | `mk_svc_` | `db_admin` (full access) | **Bypassed** | Backend servers, admin tools | **Must keep secret** |
+
+**What changed in 0.4.0** (**0.4.0**): the `service_role` key is the **only** credential that bypasses partition- and
+row-level security. A server API key (`mk_srv_`) bypassed them too up to 0.3.x; it now gets its role's grants and, on a
+protected table, what a request with no user may see (with the usual RLS rules, no row; a PLS table answers `403`). Use the
+database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with either key for one user's data —
+[what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 
 ```bash
 # Enable self-service signup (app-admin) — default is off
@@ -462,14 +467,14 @@ The auth database can be used directly as the `{db}` segment in all auth endpoin
 
 JWT claims issued for standalone auth: `iss = http://localhost:5433/api/databases/auth`, `aud = auth`.
 
-See **[Architecture Patterns & Deployment — Pattern E](Auth-Architecture.md)** for the full deployment diagram and multi-service gateway example.
+See **[Architecture Patterns & Deployment — Pattern E](../auth/architecture.md)** for the full deployment diagram and multi-service gateway example.
 
 ---
 
 ## Next Steps
 
-- **[Architecture Patterns & Deployment](Auth-Architecture.md)** — Choose a deployment pattern for your application
-- **[Setup & User Flows](Auth-Setup-And-Flows.md)** — Enable auth and implement signup/signin
-- **[Client Integration](Auth-Client-Integration.md)** — Connect from .NET or TypeScript
-- **[Data Authorization](Auth-Data-Authorization.md)** — Configure partition-level and row-level security
-- **[Reference](Auth-Reference.md)** — API tables, error codes, JWT validation, security best practices
+- **[Architecture Patterns & Deployment](../auth/architecture.md)** — Choose a deployment pattern for your application
+- **[Setup & User Flows](../auth/setup.md)** — Enable auth and implement signup/signin
+- **[Client Integration](../auth/client-integration.md)** — Connect from .NET or TypeScript
+- **[Data Authorization](../auth/authorization.md)** — Configure partition-level and row-level security
+- **[Reference](../auth/reference.md)** — API tables, error codes, JWT validation, security best practices

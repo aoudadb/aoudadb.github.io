@@ -157,7 +157,7 @@ If you do nothing:
 | .NET `WebSocketTransportOptions.ReconnectBaseDelay` | `1s` | Reconnect exponential backoff base |
 | .NET `WebSocketTransportOptions.ReconnectMaxDelay` | `30s` | Reconnect backoff cap |
 | TypeScript `streaming.wireMode` | `"json"` | Uses JSON frames unless MessagePack is selected |
-| TypeScript `streaming.enableCompression` | `true` | Enables compression option on Node transport path |
+| TypeScript `streaming.wsFactory` | the platform `WebSocket` | Makes the socket; compression is the socket's own (**NativeClients, 0.4.0**: replaces `streaming.enableCompression`, which reached only the `ws` package) |
 | TypeScript `streaming.enableLongPollFallback` | `true` | Uses fallback transport wrapper by default |
 | TypeScript `streaming.longPollWaitMs` | `25000` | Long-poll wait on TS fallback transport |
 
@@ -249,6 +249,11 @@ Documented intent that is not currently fully productized:
   - target-table match.
 - Write stream lifecycle:
   - open -> rows (sequence increasing) -> ack progression -> close.
+  - (.NET, **BL-987, 0.4.0**) On a reconnect `Aouda.Client` re-opens each write stream before anything else is sent on it:
+    a `WriteAsync` or `CloseAsync` during the reconnect waits for the re-open (a stream being closed is re-opened too, so its
+    close is delivered). A write already sent when the connection dropped fails with `AoudaConnectionException` — its rows may
+    or may not have been written, so check before re-sending them — and the stream carries on on the new connection. Up to
+    0.3.x such a write could race the re-open and fail the stream for good ("No open stream with id …"), or hang.
 - Transport strategy:
   - primary WebSocket, optional long-poll fallback for restricted environments.
 
@@ -423,7 +428,7 @@ Primary proving tests:
 | `.NET WebSocketTransportOptions.KeepAliveInterval` | timespan | `30s` | positive | client options | Client WS keepalive |
 | `.NET WebSocketTransportOptions.ReceiveBufferSize` | int | `65536` | positive | client options | Receive buffer |
 | `.NET WebSocketTransportOptions.LongPollWaitTimeout` | timespan | `25s` | positive | client options | Long-poll wait in fallback |
-| `TS streaming.enableCompression` | bool | `true` | `true/false` | `AoudaClientOptions.streaming` | Node transport option |
+| `TS streaming.wsFactory` | function | platform `WebSocket` | `(url) => WebSocket` | `AoudaClientOptions.streaming` | Makes the socket (**NativeClients, 0.4.0**; `enableCompression` removed) |
 | `TS streaming.wireMode` | string | `"json"` | `"json"`, `"msgpack"` | `AoudaClientOptions.streaming` | WS wire mode |
 | `TS streaming.enableLongPollFallback` | bool | `true` | `true/false` | `AoudaClientOptions.streaming` | Enables fallback wrapper |
 | `TS streaming.longPollWaitMs` | number | `25000` | positive | `AoudaClientOptions.streaming` | TS long-poll wait |

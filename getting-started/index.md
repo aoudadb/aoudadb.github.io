@@ -8,7 +8,7 @@ has_children: true
 
 This is the comprehensive guide to using Aouda. It covers both deployment models (embedded and server), data operations, schema management, and server authentication. By the end, you will understand how to create databases, insert and query data, and secure your Aouda server.
 
-**This guide does NOT cover the Application Auth Service** (using Aouda as an authentication provider for your app's end users — signup, signin, sessions, JWTs for end users). That is a separate product feature documented in [Getting-Started-Auth.md](Getting-Started-Auth.md). Ad-hoc insert/query examples below are for **admin and service** callers. Browser-tier apps use [named queries](../guides/named-queries.md) on the [data-plane listener](../guides/direct-client-access.md).
+**This guide does NOT cover the Application Auth Service** (using Aouda as an authentication provider for your app's end users — signup, signin, sessions, JWTs for end users). That is a separate product feature documented in [Getting-Started-Auth.md](auth.md). Ad-hoc insert/query examples below are for **admin and service** callers. Browser-tier apps use [named queries](../guides/named-queries.md) on the [data-plane listener](../guides/direct-client-access.md).
 
 ---
 
@@ -127,7 +127,7 @@ Do not use application auth keys (`mk_anon_...` / `mk_svc_...`) as your Studio c
 
 ---
 
-For app-auth setup, initialize server admin first, then create/link databases explicitly (see [Getting-Started-Auth.md](Getting-Started-Auth.md)).
+For app-auth setup, initialize server admin first, then create/link databases explicitly (see [Getting-Started-Auth.md](auth.md)).
 For the embedded / in-process path (no server): [Section 3](#3-embedded-mode--in-process-database).
 
 ---
@@ -146,9 +146,9 @@ For the embedded / in-process path (no server): [Section 3](#3-embedded-mode--in
 10. [Managing Multiple Databases](#10-managing-multiple-databases)
 11. [Hot/Cold Storage and Memory Control](#11-hotcold-storage-and-memory-control)
 12. [Branches](#12-branches)
-13. [Backup and Restore](Getting-Started-Backup.md)
+13. [Backup and Restore](backup.md)
 14. [What's Next](#14-whats-next)
-15. [Contributor / Internal Developer Workflows](Aouda-Developer.md)
+15. [Contributor / Internal Developer Workflows](https://github.com/aoudadb/aouda/blob/main/docs/dev/Aouda-Developer.md)
 16. [Native Production Hosting (Windows + Linux)](#16-native-production-hosting-windows--linux) — including Aouda.Setup interactive installer (§16.9)
 
 ---
@@ -316,10 +316,13 @@ await db.GetTable("users").InsertAsync(new Dictionary<string, object?>
 Instead of dictionaries, you can use C# classes. Aouda infers the schema from the type:
 
 ```csharp
+using Aouda.Abstractions.Attributes;
+
 public class Order
 {
     public long Id { get; set; }
     public string Customer { get; set; } = "";
+    [AoudaDecimal(18, 2)]              // a decimal declares its precision and scale
     public decimal Total { get; set; }
     public DateTime CreatedAt { get; set; }
 }
@@ -400,7 +403,7 @@ var recent = await db.Engine.Table("sensors")
 | `MemoryBudget` | `long?` | `null` | `null` (no limit); any non-negative `long` (bytes) | Maximum memory in bytes. `null` = no limit. |
 | `TreatMissingAsEmpty` | `bool` | `true` | `true`, `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
-**Integration tests that need Application Auth** (OIDC discovery, JWT validation, real signup/signin against the HTTP API) cannot use embedded mode alone, because Application Auth requires the Aouda HTTP server. For those tests, use the **`Aouda.Testing`** package to start an in-process server from `dotnet test` — see [Getting-Started-Testing.md](Getting-Started-Testing.md).
+**Integration tests that need Application Auth** (OIDC discovery, JWT validation, real signup/signin against the HTTP API) cannot use embedded mode alone, because Application Auth requires the Aouda HTTP server. For those tests, use the **`Aouda.Testing`** package to start an in-process server from `dotnet test` — see [Getting-Started-Testing.md](testing.md).
 
 ---
 
@@ -449,7 +452,7 @@ For development environments that mirror production server auth (without app aut
 
 > **Tip for AI Agents**: Use explicit startup + API flows (`aouda start`, `POST /api/databases`, auth setup endpoints). For managed or production instances, prefer the HTTP admin API and future MCP tools over shelling out to the server executable.
 
-> **Internal/source workflows:** If you are developing Aouda itself (running from `src/`, local tool packaging, IDE task wiring, AppHost setup), use [Aouda-Developer.md](Aouda-Developer.md). This user guide intentionally stays product-facing.
+> **Internal/source workflows:** If you are developing Aouda itself (running from `src/`, local tool packaging, IDE task wiring, AppHost setup), use [Aouda-Developer.md](https://github.com/aoudadb/aouda/blob/main/docs/dev/Aouda-Developer.md). This user guide intentionally stays product-facing.
 
 #### Option B: Configuration File (local development)
 
@@ -564,7 +567,7 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{
     "name": "analytics",
     "enableWal": true,
-    "maxMemoryBytes": 1073741824
+    "maxMemoryShareBytes": 1073741824
   }'
 
 # List databases
@@ -722,7 +725,7 @@ await client.tables.createTable({
     { name: "id", type: "Int64", isPrimaryKey: true },
     { name: "product_id", type: "Int64" },
     { name: "quantity", type: "Int32" },
-    { name: "total", type: "Decimal" },
+    { name: "total", type: "Decimal", precision: 18, scale: 2 },
   ],
 });
 
@@ -1022,7 +1025,8 @@ against the model), so a mismatch here is what a reconcile failure is reporting.
 | `byte` | `Byte` |
 | `short` / `int` / `long` | `Int16` / `Int32` / `Int64` |
 | `ushort` / `uint` / `ulong` | `UInt16` / `UInt32` / `UInt64` |
-| `float` / `double` / `decimal` | `Float32` / `Double` / `Decimal` |
+| `float` / `double` | `Float32` / `Double` |
+| `decimal` | `Decimal(p,s)` from the property's `[AoudaDecimal(p, s)]`, which it must carry (**LoadSpeed S13, 0.4.0**: a `decimal` property without it is refused, naming the property — see [`Decimal(p,s)`](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020)) |
 | `string` | `String` |
 | `DateTime` / `DateTimeOffset` | `Timestamp` |
 | `DateOnly` | `Date` |
@@ -1136,14 +1140,19 @@ Rules of thumb:
 For production use, you often want explicit control over data types, primary keys, partition keys, and auto-increment:
 
 ```csharp
-await engine.CreateTableAsync("orders", new[]
+// The same request in the .NET client (client.Schema) and the embedded engine (db.Schema)
+await client.Schema.CreateTableAsync(new CreateTableRequest
 {
-    new ColumnDef("order_id", DataType.Int64, isPrimaryKey: true, isAutoIncrement: true),
-    new ColumnDef("tenant_id", DataType.String, isPartitionKey: true),
-    new ColumnDef("customer", DataType.String),
-    new ColumnDef("amount", DataType.Decimal),
-    new ColumnDef("status", DataType.String),
-    new ColumnDef("created_at", DataType.Timestamp)
+    Name = "orders",
+    Columns =
+    [
+        new() { Name = "order_id", Type = "Int64", PrimaryKeyOrder = 1, IsAutoIncrement = true },
+        new() { Name = "tenant_id", Type = "String", PartitionKeyOrder = 1 },
+        new() { Name = "customer", Type = "String" },
+        new() { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2 },   // Decimal(18,2)
+        new() { Name = "status", Type = "String" },
+        new() { Name = "created_at", Type = "Timestamp" },
+    ],
 });
 ```
 
@@ -1174,7 +1183,7 @@ Aouda supports a declarative schema file that serves as the source of truth. Def
       "columns": [
         { "name": "order_id", "type": "Int64", "isPrimaryKey": true, "autoIncrement": true },
         { "name": "tenant_id", "type": "String", "isPartitionKey": true },
-        { "name": "amount", "type": "Decimal" },
+        { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 },
         { "name": "created_at", "type": "Timestamp" }
       ]
     }
@@ -1251,13 +1260,13 @@ Aouda has **two independent auth systems** that serve different purposes:
 
 They can be used independently, together, or not at all. A database can have server auth only, app auth only, both, or neither.
 
-For complete Application Auth documentation, see [Getting-Started-Auth.md](Getting-Started-Auth.md).
+For complete Application Auth documentation, see [Getting-Started-Auth.md](auth.md).
 
 ---
 
 ## 8. Server Authentication — Securing Database Access
 
-> **This section is about controlling who can connect to the Aouda server and access databases.** This is the equivalent of SQL Server authentication, PostgreSQL roles, or MongoDB SCRAM. It has nothing to do with authenticating your application's end users — that is a separate feature called the [Application Auth Service](Getting-Started-Auth.md).
+> **This section is about controlling who can connect to the Aouda server and access databases.** This is the equivalent of SQL Server authentication, PostgreSQL roles, or MongoDB SCRAM. It has nothing to do with authenticating your application's end users — that is a separate feature called the [Application Auth Service](auth.md).
 
 ### The Server Auth Hierarchy
 
@@ -1279,7 +1288,8 @@ Aouda Server Instance
 │
 ├── Database: "myapp"     ← server users/keys need db_* role to access
 ├── Database: "analytics"  ← separate role grants
-└── Database: "cache"      ← no auth (open access)
+└── Database: "cache"      ← no linked auth database: open before setup;
+                               after it, server credentials on the admin listener (BL-1017)
 ```
 
 A server user or API key with `db_writer` on "myapp" **cannot** access "analytics" unless explicitly granted a role there.
@@ -1321,6 +1331,8 @@ Auth state is stored in an internal database called `_serverauth`. This database
 ### Step 1: Bootstrap the First Admin
 
 When the server starts with no admin accounts, it enters **setup mode**. In setup mode, only the bootstrap endpoint is available, and only from localhost.
+
+Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`.
 
 You can inspect first-run state in a machine-readable way:
 
@@ -1494,7 +1506,7 @@ All server auth endpoints are under `/api/auth/...` and resolve to the internal 
 | `/api/auth/setup` | POST | No (setup mode only) | Bootstrap first admin |
 | `/api/auth/signin` | POST | No | Sign in, get JWT |
 | `/api/auth/refresh` | POST | No | Refresh access token |
-| `/api/auth/signout` | POST | Yes | Revoke session |
+| `/api/auth/signout` | POST | Yes | End this session (`scope`: `others`, `global` for more) |
 | `/api/auth/me` | GET | Yes | Current user profile |
 | `/api/auth/me` | PATCH | Yes | Update profile metadata |
 | `/api/auth/password` | PUT | Yes | Change password |
@@ -1583,15 +1595,15 @@ For CI/CD pipelines, background jobs, and service-to-service communication, use 
 
 ```bash
 # Create an API key scoped to specific databases (requires server admin)
-curl -X POST http://localhost:5433/api/auth/admin/keys \
+curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "myapp-backend",
-    "databaseRoles": {
-      "myapp": ["db_writer"],
-      "analytics": ["db_reader"]
-    }
+    "roles": [
+      { "role": "db_writer", "scope": "myapp" },
+      { "role": "db_reader", "scope": "analytics" }
+    ]
   }'
 ```
 
@@ -1601,49 +1613,54 @@ Response includes the key (shown only once):
 {
   "id": "...",
   "name": "myapp-backend",
-  "key": "mk_srv_abc123...",
-  "databaseRoles": {
-    "myapp": ["db_writer"],
-    "analytics": ["db_reader"]
-  }
+  "key": "mk_abc123...",
+  "keyPrefix": "mk_abc123de",
+  "roles": [
+    { "role": "db_writer", "scope": "myapp" },
+    { "role": "db_reader", "scope": "analytics" }
+  ],
+  "kind": "custom",
+  "createdAt": "..."
 }
 ```
 
 This key can read/write `myapp` data and read `analytics` data. It cannot access any other database.
+
+Use `POST /api/auth/admin/api-keys` for a scoped key. `POST /api/auth/admin/keys` is a different endpoint: it creates a **server admin key** (`mk_srv_…`) that is always a global `db_admin` and ignores any roles in the body — keep it for the server admin's own automation, never for a service that needs one database.
 
 Use the API key as a bearer token:
 
 ```bash
 # Access myapp — allowed (db_writer)
 curl http://localhost:5433/api/databases/myapp/query \
-  -H "Authorization: Bearer mk_srv_abc123..." \
+  -H "Authorization: Bearer mk_abc123..." \
   -d '{ "table": "orders", "limit": 10 }'
 
 # Access analytics — allowed (db_reader, read-only)
 curl http://localhost:5433/api/databases/analytics/query \
-  -H "Authorization: Bearer mk_srv_abc123..." \
+  -H "Authorization: Bearer mk_abc123..." \
   -d '{ "table": "events", "limit": 10 }'
 
 # Access cache — DENIED (no role for this database)
 curl http://localhost:5433/api/databases/cache/query \
-  -H "Authorization: Bearer mk_srv_abc123..." \
+  -H "Authorization: Bearer mk_abc123..." \
   -d '{ "table": "data", "limit": 10 }'
 # → 403 AUTHORIZATION_DENIED
 ```
 
 ### Server Auth vs Application Auth API Keys
 
-If a database has Application Auth enabled (see [Getting-Started-Auth.md](Getting-Started-Auth.md)), it also has auto-generated **app API keys** (`mk_anon_...`, `mk_svc_...`). These are different from server API keys:
+If a database has Application Auth enabled (see [Getting-Started-Auth.md](auth.md)), it also has auto-generated **app API keys** (`mk_anon_...`, `mk_svc_...`). These are different from server API keys:
 
 | | Server API Keys (`mk_srv_`) | App API Keys (`mk_anon_`, `mk_svc_`) |
 |---|---|---|
 | **Created by** | Server admin | Auto-generated when app auth is enabled |
 | **Stored in** | `_serverauth` | `_auth` (app auth database) |
-| **Scope** | One or more databases (via `databaseRoles`) | One specific database |
+| **Scope** | One or more databases (each role's `scope`) | One specific database |
 | **Use case** | Backend services, CI/CD, cross-database access | Frontend clients, per-database backend access |
-| **PLS** | Never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
+| **PLS / RLS** | Enforced from 0.4.0 (**0.4.0**); up to 0.3.x never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
 
-For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use server API keys (`mk_srv_`).
+For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use scoped server API keys (`mk_…`, from `/api/auth/admin/api-keys`). From 0.4.0 a server API key no longer bypasses partition- or row-level security: on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-next-train)).
 
 ### Common Auth Error Codes
 
@@ -1680,7 +1697,7 @@ curl -X POST http://localhost:5433/api/databases \
   -d '{ "name": "cache" }'
 ```
 
-Clients can access this database without any credentials:
+While the server has no server auth database (before `/api/auth/setup`), clients can access this database without any credentials:
 
 ```csharp
 // No auth needed
@@ -1702,7 +1719,16 @@ const client = createAoudaClient({
 });
 ```
 
-Authentication is enforced **only** for databases that are explicitly linked to an auth database. Databases created without auth are openly accessible to anyone who can reach the server.
+**Who may reach a database without auth (**BL-1017, 0.4.0**).** A database with no linked auth database is open only while
+the server has no server auth database — a fresh server before [server authentication](#8-server-authentication--securing-database-access) is set up. Once the server admin exists (`/api/auth/setup`,
+or a configured root user), every request to such a database on the **admin listener** needs server credentials, exactly as
+`/api/databases` itself does: reads, writes, DDL, `DELETE /api/databases/{db}`, quarantine, `inspect`, WebSocket and long-poll. A
+server credential is a server user's token (`/api/auth/signin`), a server admin key (`mk_srv_`, `POST /api/auth/admin/keys`) or a
+key from `POST /api/auth/admin/api-keys` with a role scoped to the database; it is authorized by the server auth database's grants,
+so a `db_writer` key scoped to `cache` writes to `cache` and can neither drop it nor reach another database. An anonymous caller
+gets `401`, and so does a request naming a database that does not exist. An application's own keys and tokens are not server
+credentials. On the **data-plane** listener nothing changes: such a database stays open to the routes that listener serves
+(named queries and mutations, WebSocket, long-poll). In 0.3.0 and earlier the admin listener served it to anyone, drop included.
 
 **When no-auth databases are appropriate:**
 - Local development and prototyping
@@ -1716,7 +1742,7 @@ Authentication is enforced **only** for databases that are explicitly linked to 
 - Multi-tenant applications
 - Any production deployment with untrusted clients
 
-**Security for no-auth databases:** Use network-level security (firewalls, VPNs, Kubernetes network policies) to control who can reach the server. A no-auth database is open to anyone who can connect to the port.
+**Security for no-auth databases:** Use network-level security (firewalls, VPNs, Kubernetes network policies) to control who can reach the server. Before setup, a no-auth database is open to anyone who can connect to the port; after it, to anyone who can connect to the data-plane port, through the named artifacts that listener serves.
 
 ---
 
@@ -1858,18 +1884,18 @@ await client.branches.delete("feature-x");
 
 ### Backup and Restore
 
-- **[Backup and Restore](Getting-Started-Backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). REST and TypeScript client APIs for exact restore and point-in-time recovery. Retention and GC.
+- **[Backup and Restore](backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). REST and TypeScript client APIs for exact restore and point-in-time recovery. Retention and GC.
 
 ### Authentication & Authorization
 
-- **[Application Auth Service](Getting-Started-Auth.md)** — Use Aouda as an authentication provider for your app's end users (signup, signin, JWTs, Partition-Level Security, multi-tenancy). Covers the two-layer auth model, architecture patterns A-D, API keys, and AI agent workflows.
-- **[Auth ADR (0023)](../decisions/0023-authentication-and-authorization.md)** — The architecture decision record covering the full auth design, including Partition-Level Security and RBAC.
+- **[Application Auth Service](auth.md)** — Use Aouda as an authentication provider for your app's end users (signup, signin, JWTs, Partition-Level Security, multi-tenancy). Covers the two-layer auth model, architecture patterns A-D, API keys, and AI agent workflows.
+- **[Auth ADR (0023)](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0023-authentication-and-authorization.md)** — The architecture decision record covering the full auth design, including Partition-Level Security and RBAC.
 
 ### General
 
-- **[Testing with Aouda.Testing](Getting-Started-Testing.md)** — In-process integration tests, including Application Auth, xUnit/NUnit/MSTest fixtures, and CI-friendly `dotnet test` workflows.
-- **[Architecture](../ARCHITECTURE.md)** — Deep dive into Aouda's technical design.
-- **[ADR Index](../decisions/)** — All architecture decision records.
+- **[Testing with Aouda.Testing](testing.md)** — In-process integration tests, including Application Auth, xUnit/NUnit/MSTest fixtures, and CI-friendly `dotnet test` workflows.
+- **[Architecture](https://github.com/aoudadb/aouda/blob/main/docs/ARCHITECTURE.md)** — Deep dive into Aouda's technical design.
+- **[ADR Index](https://github.com/aoudadb/aouda/tree/main/docs/decisions)** — All architecture decision records.
 - **[HTTP API](../reference/http-api.md)** — Wire contract, including authentication headers and error codes.
 - **[Aouda Studio](https://github.com/aouda/aouda-studio)** — Web management console.
 
@@ -1877,7 +1903,7 @@ await client.branches.delete("feature-x");
 
 ## 15. Contributor / Internal Developer Workflows
 
-Internal contributor workflows (running Aouda from source, local `.nupkg` tool distribution, IDE task wiring, AppHost orchestration, and source-build setup) are documented in [Aouda-Developer.md](Aouda-Developer.md).
+Internal contributor workflows (running Aouda from source, local `.nupkg` tool distribution, IDE task wiring, AppHost orchestration, and source-build setup) are documented in [Aouda-Developer.md](https://github.com/aoudadb/aouda/blob/main/docs/dev/Aouda-Developer.md).
 
 This guide intentionally stays focused on Aouda users and production-facing usage.
 
@@ -2019,15 +2045,18 @@ JSON
 
 ### 16.5 API keys for applications
 
-After bootstrap, sign in once and create scoped server API keys (`mk_srv_…`) per service:
+After bootstrap, sign in once and create a scoped server API key (`mk_…`) per service:
 
 ```bash
-curl -X POST http://localhost:5433/api/auth/admin/keys \
+curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "orders-api",
-    "databaseRoles": { "orders": ["db_writer"], "analytics": ["db_reader"] }
+    "roles": [
+      { "role": "db_writer", "scope": "orders" },
+      { "role": "db_reader", "scope": "analytics" }
+    ]
   }'
 ```
 

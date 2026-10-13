@@ -108,7 +108,7 @@ If you do nothing except install artifacts:
   - ephemeral data path (temp folder, deleted on shutdown)
   - `--auth` disabled
 - `Aouda.Testing` defaults to MIT-licensed in-process test-server packaging.
-- TypeScript client package defaults to MIT license and Node `>=20` engine requirement.
+- TypeScript client package defaults to MIT license and Node `>=22` engine requirement (**NativeClients, 0.4.0**; 0.3.0: `>=20`).
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
@@ -329,7 +329,7 @@ This section includes both runtime distribution settings and package/build metad
 | `aouda start --data-dir` | string? | from config | path | CLI args | Persistent data directory |
 | App auth | HTTP | — | create-database API | Not CLI | `mk_anon_` / `mk_svc_` in response |
 | npm `license` | string | `"MIT"` | SPDX | `aouda-client-ts/package.json` | Package-level legal declaration |
-| npm `engines.node` | string | `>=20` | semver range | `aouda-client-ts/package.json` | Distribution runtime constraint |
+| npm `engines.node` | string | `>=22` (**NativeClients, 0.4.0**; 0.3.0: `>=20`) | semver range | `aouda-client-ts/package.json` | Distribution runtime constraint |
 
 Configuration precedence and operational notes:
 
@@ -422,7 +422,7 @@ Common mistake: assuming schema commands can run without server/database context
 |---|---|---|---|---|---|
 | Install embedded package | NuGet (`Aouda.Embedded`) + `AoudaEmbedded` | N/A | N/A | Implemented | In-process only |
 | Install remote .NET client | NuGet (`Aouda.Client`) + `AoudaClient` | N/A | N/A | Implemented | Depends on server URL availability |
-| Install TS client package | N/A | npm `@aouda/client` + `createAoudaClient` | N/A | Implemented | Node 20+ |
+| Install TS client package | N/A | npm `@aouda/client` + `createAoudaClient` | N/A | Implemented | Node 22+, browsers, React Native (**NativeClients, 0.4.0**; 0.3.0: Node 20+) |
 | Start local server | `aouda` tool command path from .NET ecosystem | via process execution | Server HTTP endpoints | Implemented | `aouda start` |
 | In-process test server package | `Aouda.Testing` (`AoudaTestServer`) | N/A | Test-hosted HTTP | Implemented | MIT tool package |
 | Unified auto client mode selection | No stable public API in current snapshot | N/A | N/A | Missing | Reports mention prior work, symbols absent now |

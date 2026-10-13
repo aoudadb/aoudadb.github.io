@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Auth Reference
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
@@ -66,7 +66,7 @@ curl -X POST http://localhost:5433/api/databases \
 # 4. Create a scoped server API key
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{ "name": "myapp-backend", "databaseRoles": { "myapp": ["db_writer"] } }'
+  -d '{ "name": "myapp-backend", "roles": [{ "role": "db_writer", "scope": "myapp" }] }'
 
 # 5. Test the complete flow
 ```
@@ -115,9 +115,13 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | Endpoint | Method | Auth Required | Description |
 |----------|--------|---------------|-------------|
 | `.../auth/signup` | POST | None (public POST; 403 `AUTH_SIGNUP_DISABLED` unless `allowSelfSignup`) | Register a new user |
-| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens |
+| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens. Optional `deviceInfo`: your description of the device, at most 512 UTF-8 bytes, shown in the session list (**NativeClients, 0.4.0**) |
 | `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token |
-| `.../auth/signout` | POST | User JWT | Revoke session |
+| `.../auth/signout` | POST | User JWT | End **this** session (**NativeClients, 0.4.0**) — it ended every session of the user. Optional body `{ "scope": "local" \| "others" \| "global" }`: `others` ends every other session and keeps this one, `global` ends all. See [Sessions are devices](#sessions-are-devices) |
+| `.../auth/authorize` | POST | User JWT | Native sign-in, step 1 (**NativeClients, 0.4.0**): issue a single-use code for a registered native client. Body `{ clientId, redirectUri, codeChallenge, codeChallengeMethod: "S256", state? }` → `{ code, state, redirectTo, expiresIn: 60, aal }`. See [Native sign-in](#native-sign-in-through-the-browser) |
+| `.../auth/token` | POST | None (public) | Native sign-in, step 2 (**NativeClients, 0.4.0**): redeem the code. Body `{ grantType: "authorization_code", code, codeVerifier, clientId, redirectUri, deviceInfo? }` → the sign-in response, a **new session** at the code's `aal` |
+| `.../auth/sessions` | GET | User JWT | The caller's sessions, one per device (**NativeClients, 0.4.0**): `{ "sessions": [{ id, deviceInfo, userAgent, ipAddress, createdAt, lastSeenAt, aal, current }] }`, most recently used first |
+| `.../auth/sessions/{id}` | DELETE | User JWT | End one of the caller's sessions — sign another device out (204) (**NativeClients, 0.4.0**). Another user's session, or an unknown id: `404 AUTH_SESSION_NOT_FOUND` |
 | `.../auth/me` | GET | User JWT | Get current user profile |
 | `.../auth/me` | PATCH | User JWT | Update user metadata |
 | `.../auth/password` | PUT | User JWT | Change password |
@@ -125,9 +129,72 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success |
 | `.../auth/mfa/enroll` | POST | User JWT | Enrol a TOTP or phone MFA factor. Phone enrol is idempotent per-user: a second call returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists (same or different number). To replace a number: `DELETE .../auth/mfa/factors/{id}` then enrol again |
 | `.../auth/mfa/challenge` | POST | User JWT | Create a challenge for an enrolled factor; sends SMS for phone factors |
-| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success |
+| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success. The `aal2` session **replaces** the one verified from (**NativeClients, 0.4.0**): the same device, its `deviceInfo` kept unless the request gives `deviceInfo` |
 | `.../auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
 | `.../auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
+
+#### Sessions are devices
+
+(**NativeClients, 0.4.0**) A **session** is one sign-in on one device: its refresh tokens are one family, and every access token
+minted in it carries the session's id as the `sid` claim. A refresh updates the session — last seen, IP, user agent — and does not
+create a new one, so `GET .../auth/sessions` lists one entry per device. `deviceInfo` is whatever the client sent at sign-in (stored as
+given, never trusted; over 512 UTF-8 bytes is `400 AUTH_DEVICE_INFO_TOO_LONG`); `userAgent` and `ipAddress` are what the server saw.
+
+**Ending a session** revokes its refresh tokens and refuses its access tokens at once (Hybrid and Stateful validation alike). A
+session ends when it signs out, when the user ends it from another device (`DELETE .../auth/sessions/{id}`) or signs out with
+`others` / `global`, when an administrator ends it, and when its refresh token is **reused** — a spent refresh token presented again is
+treated as stolen, and the whole session ends, its current access token included — so a client must keep the refresh token each
+refresh returns, not the one it first stored. A password change or reset, an administrator's removal of an MFA factor
+(`DELETE .../admin/users/{id}/mfa/factors/{factorId}`), disabling and deleting the user end every session. A session stays listed —
+and can be ended — for as long as its refresh token lives (30 days by default), however long the device has been idle.
+
+An open realtime connection is held to the same rule: a WebSocket is closed with `AUTH_TOKEN_REVOKED` within a heartbeat (20 s), and
+a long-poll session answers its next `send` or `poll` with `401 AUTH_TOKEN_REVOKED` (checked at most once per heartbeat interval).
+This applies to connections opened with a user's token; one opened with an API key is unaffected by session changes.
+
+> **Signing out is per device now.** A client that called `signout` to sign the user out *everywhere* must send
+> `{ "scope": "global" }`.
+
+⚠️ **A session is not bound to the database it was opened at** (**BL-1018**, open). Its refresh token refreshes at any database
+linked to the same auth database, and at the auth database's own path, for a session there. Databases that share an auth database
+are one trust domain: see [who should share one](use-cases.md#one-auth-database-is-one-trust-domain).
+
+#### Native sign-in through the browser
+
+(**NativeClients, 0.4.0**) A native app (a desktop app, a phone app) signs a user in by handing off to the browser, where the app's own web front is
+already signed in — MFA included — and comes back with a session of its own. Aouda hosts no login page: the web front does the asking.
+
+1. An administrator registers the native client once: `POST .../admin/native-clients` `{ name, redirectUris }`. A redirect URI is one of:
+   a **loopback** URL `http://127.0.0.1/path` or `http://[::1]/path` (matched on any port, the path exactly — RFC 8252 §7.3; `localhost`
+   is refused), a **private-use scheme** in reverse-DNS form `com.example.app:/oauth`, or a claimed **`https`** link. No fragment,
+   wildcard or user info. A loopback URI is registered **without a port** (any port matches, so a registered one would read as pinned)
+   and in that one form — `127.1`, `0x7f000001` and the like are refused; at `authorize` and `token` too, only the canonical text
+   matches (no `..`, no escaped path characters, no empty port). `GET` lists, `DELETE .../admin/native-clients/{id}` removes — and
+   its outstanding codes stop redeeming (`AUTH_NATIVE_CLIENT_UNKNOWN`).
+2. The native app makes a PKCE pair — a random `codeVerifier` (43–128 characters) and `codeChallenge` = base64url(SHA-256(verifier)) —
+   and opens the web front in the browser with the challenge and its redirect URI.
+3. The web front, signed in, **asks the user** ("Sign in to *MyApp* on this device?") and only on their click calls
+   `POST .../auth/authorize`, then sends the browser to the `redirectTo` it gets back
+   (`redirectUri?code=…&state=…`). The code is single use, valid for **60 seconds**, stored only as its hash, and carries the web
+   session's `aal` (never more).
+4. The native app receives the code at its redirect URI and calls `POST .../auth/token` with the code, its verifier, the same
+   `clientId` and `redirectUri`, and its `deviceInfo`. It gets the usual token response — a new session, listed under the user's
+   devices.
+
+⚠️ **Do not let the web front approve without asking.** Aouda shows no consent screen, so the web front is the only place the user
+can see that an app is about to get their session. A page that calls `authorize` as soon as it loads hands a session — at `aal2` if
+they did MFA — to whatever app opened it with its own challenge: on a phone, another app can register the same private-use scheme
+(RFC 8252 §8.6). Prefer a claimed `https` link for phone apps; no other app can receive it.
+
+Every refusal says which: `AUTH_PKCE_VERIFIER_INVALID`, `AUTH_CODE_EXPIRED`, `AUTH_CODE_REUSED` (the session the first redemption
+opened is ended too), `AUTH_REDIRECT_URI_MISMATCH`, `AUTH_CODE_INVALID` (unknown, or the web session that issued it has signed out or
+was ended). A failed redemption spends the code — start again. At `authorize`: `AUTH_NATIVE_CLIENT_UNKNOWN`,
+`AUTH_REDIRECT_URI_NOT_REGISTERED`, `AUTH_PKCE_METHOD_UNSUPPORTED` (`S256` only), `AUTH_PKCE_CHALLENGE_INVALID`. Both endpoints share
+sign-in's rate limit.
+
+⚠️ **A code is not bound to the database it was created at** (**BL-1018**, open): a code from `authorize` at one database can be
+redeemed at `token` on any database linked to the same auth database, or at the auth database's own path. See
+[one auth database is one trust domain](use-cases.md#one-auth-database-is-one-trust-domain).
 
 > **MFA endpoints require a user JWT** — the access token returned from sign-in. Send `Authorization: Bearer <accessToken>` directly; no API key is required or expected. If you are building a BFF that proxies MFA requests, forward the user JWT unchanged in `Authorization` — do not replace it with your service key. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints).
 
@@ -183,8 +250,14 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}` | GET | Get user details |
 | `.../admin/users/{id}` | PATCH | Update user |
 | `.../admin/users/{id}` | DELETE | Delete user by id (204; 404 if missing). Cascades that user's roles, claims, grants, credentials, sessions, tokens, MFA, and API keys. Leaves `_audit_log`.|
-| `.../admin/users/{id}/disable` | POST | Disable user |
+| `.../admin/users/{id}/disable` | POST | Disable user. Ends every session at once (**NativeClients, 0.4.0**): each live access token is revoked (refused on the next request in Hybrid and Stateful modes, an open WebSocket closed within a heartbeat with `AUTH_TOKEN_REVOKED`), every refresh token is revoked, and a refresh answers `423 AUTH_ACCOUNT_DISABLED`. Sign-in answers `AUTH_INVALID_CREDENTIALS`. Enable lets the user sign in again; it brings no session back |
 | `.../admin/users/{id}/enable` | POST | Enable user |
+| `.../admin/users/{id}/mfa/factors/{factorId}` | DELETE | Remove one of a user's MFA factors (an MFA reset). Ends every session of the user (**NativeClients, 0.4.0**), so they sign in again and enrol afresh |
+| `.../admin/native-clients` | POST / GET | Register a native client `{ name, redirectUris }` (201) / list them (**NativeClients, 0.4.0**) |
+| `.../admin/native-clients/{id}` | DELETE | Remove a native client (204; `404 AUTH_NATIVE_CLIENT_UNKNOWN`) (**NativeClients, 0.4.0**) |
+| `.../admin/sessions` | GET | List sessions (`?userId=`, `limit`, `offset`) — one per device, with `userAgent`, `lastSeenAt` and `aal` (**NativeClients, 0.4.0**) |
+| `.../admin/sessions/{id}` | DELETE | End one session: its refresh family is revoked and every access token it issued is revoked (**NativeClients, 0.4.0** — it deleted the row only, and the session kept refreshing). The user's other sessions are untouched |
+| `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
 | `.../admin/users/{id}/roles` | PUT | Replace user's role assignments |
 | `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
@@ -341,7 +414,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 | `roles` | array | No | RBAC roles for this key: `[{ "role": "db_writer", "scope": null }]`. `scope` is a database name or `null` for all databases — same shape as user role assignments. |
 | `expiresAt` | string? | No | ISO-8601 timestamp. Omit for a non-expiring key. |
 | `kind` | string | No | Defaults to `"custom"`. `"anon"`, `"service_role"`, `"public"`, and `"server_admin"` are reserved — they are singleton, system-managed keys and this endpoint rejects creating them (`400 INVALID_REQUEST`). |
-| `userId` | string? | No | Links this key to an existing user. The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
+| `userId` | string? | No | Links this key to an existing user. The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
 
 ```json
 {
@@ -386,7 +459,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
 
-**Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](Auth-Data-Authorization.md#198-admin-api-partition-grants)):
+**Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-partition-grants)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -394,7 +467,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 
-**RLS Resolvers** — define within-partition row filter rules ([§19.9](Auth-Data-Authorization.md#199-admin-api-rls-resolvers)):
+**RLS Resolvers** — define within-partition row filter rules ([§19.9](authorization.md#199-admin-api-rls-resolvers)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -413,15 +486,27 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_TOKEN_MISSING` | 401 | No `Authorization` header on a protected endpoint | Add `Authorization: Bearer <token>` header |
-| `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature | Discard token; force re-sign-in |
+| `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature — or (**BL-980, 0.4.0**) an application database's token whose `iss` is not the database's URL issuer (the `"aouda"` issuer is no longer accepted beside it) | Discard token; force re-sign-in |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
-| `AUTH_TOKEN_REVOKED` | 401 | Token was revoked (session signed out) | Redirect to sign-in |
+| `AUTH_TOKEN_REVOKED` | 401 | Token was revoked — the session signed out or was ended by an administrator, the account was disabled, or the password changed. Also sent on an open WebSocket as `auth_error` (**NativeClients, 0.4.0**) | Redirect to sign-in |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
 | `AUTH_API_KEY_INVALID` | 401 | API key is invalid, revoked, or expired | Regenerate via the admin regenerate-keys endpoint |
-| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only |
-| `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live | Retry the **same** request (the same refresh token) after `Retry-After` |
+| `AUTH_ACCOUNT_DISABLED` | 423 | (**NativeClients, 0.4.0**) A refresh for an account an administrator disabled. Nothing the account held refreshes | Sign out locally; tell the user the account is disabled |
+| `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received. A reuse ends the whole session (**NativeClients, 0.4.0**): its access tokens are refused too (`AUTH_TOKEN_REVOKED`) | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only. (**BL-980, 0.4.0**) Also a refresh token whose stored `aal` is missing or not `aal1` / `aal2` — only an older build left one; it is not read as an `aal1` session |
+| `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live. (**BL-944, 0.4.0**) Also a bearer JWT whose check was refused (it was `401 AUTH_TOKEN_INVALID`), a password reset refused at the hash and an MFA verify refused after its code was accepted: the reset OTP and the MFA challenge (and a backup code) stay usable — and a reset whose new password is too weak no longer spends its OTP. (**NativeClients, 0.4.0**) Also a native sign-in's `POST …/auth/token`: the code is put back, so the same code and verifier can be retried within its 60 s | Retry the **same** request (the same refresh token, OTP, challenge or code) after `Retry-After`. (**BL-944, 0.4.0**) A sign-up refused part-way — after its user was written, at the role grant — is rolled back, so its retry succeeds instead of finding the email taken |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) An admin write kept conflicting with a concurrent change to the same record and was not applied | Retry the same request |
 | `UNAUTHORIZED` | 401 | Unrecognised path when server auth is configured (deny-by-default) | Ensure request targets a valid path with a valid credential |
+| `AUTH_CODE_INVALID` | 400 | (**NativeClients, 0.4.0**) Native sign-in: the code is unknown, or the session that issued it has ended | Start the sign-in again |
+| `AUTH_CODE_EXPIRED` | 400 | (**NativeClients, 0.4.0**) The code is older than 60 s | Start the sign-in again |
+| `AUTH_CODE_REUSED` | 400 | (**NativeClients, 0.4.0**) The code was already redeemed; the session that redemption opened has been ended | Start the sign-in again; investigate a copied code |
+| `AUTH_PKCE_VERIFIER_INVALID` | 400 | (**NativeClients, 0.4.0**) `codeVerifier` does not answer the code's challenge. The code is spent | Start again with a fresh pair |
+| `AUTH_REDIRECT_URI_MISMATCH` | 400 | (**NativeClients, 0.4.0**) `clientId` / `redirectUri` differ from the ones the code was issued for. The code is spent | Send the same values as at `authorize` |
+| `AUTH_UNSUPPORTED_GRANT_TYPE` | 400 | (**NativeClients, 0.4.0**) `.../auth/token` serves `grantType: "authorization_code"` only | Use `.../auth/signin` / `.../auth/refresh` for the others |
+| `AUTH_NATIVE_CLIENT_UNKNOWN` | 400 / 404 | (**NativeClients, 0.4.0**) No native client with that `clientId` | Register it (`.../admin/native-clients`) |
+| `AUTH_REDIRECT_URI_NOT_REGISTERED` | 400 | (**NativeClients, 0.4.0**) `authorize`: the redirect URI is not one of the client's | Register it, or send a registered one |
+| `AUTH_REDIRECT_URI_INVALID` | 400 | (**NativeClients, 0.4.0**) Registration: not a loopback, reverse-DNS scheme or `https` URI | See [Native sign-in](#native-sign-in-through-the-browser) |
+| `AUTH_PKCE_METHOD_UNSUPPORTED` / `AUTH_PKCE_CHALLENGE_INVALID` | 400 | (**NativeClients, 0.4.0**) `codeChallengeMethod` is not `S256`, or the challenge is not 43 base64url characters | Use S256 |
+| `AUTH_SESSION_NOT_FOUND` | 404 | (**NativeClients, 0.4.0**) `DELETE .../auth/sessions/{id}` named a session that is not the caller's, or none | Refresh the session list |
 
 ### Signup / Signin Errors
 
@@ -429,8 +514,9 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 |------------|------|---------|--------|
 | `AUTH_INVALID_CREDENTIALS` | 401 | Wrong email or password | Show "Invalid credentials" |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts (default: 10) | Wait for the lockout window (default: 15 min) or re-enable via admin |
-| `AUTH_ACCOUNT_DISABLED` | 423 | Account disabled by an administrator | Re-enable via `POST .../admin/users/{id}/enable` |
+| `AUTH_ACCOUNT_DISABLED` | 423 | Not returned by sign-in: a disabled account's sign-in answers `AUTH_INVALID_CREDENTIALS`, as an unknown one does. Returned by **refresh** (above) | Re-enable via `POST .../admin/users/{id}/enable` |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email already registered | Show "Account exists" |
+| `AUTH_DEVICE_INFO_TOO_LONG` | 400 | (**NativeClients, 0.4.0**) `deviceInfo` (sign-in, sign-up, MFA verify) is over 512 UTF-8 bytes. Nothing was minted | Send a shorter description |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic; prevents info leakage) | Check server logs; try again |
 | `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is off for this database | Enable via `PUT …/admin/signup-settings` |
 | `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format | Prompt the user to correct the email field |
@@ -441,7 +527,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_RESET_TOKEN_INVALID` | 400 | OTP is wrong, email is not registered, or no valid reset token exists | Show a generic "Invalid or expired code" message; do not indicate whether the email exists |
+| `AUTH_RESET_TOKEN_INVALID` | 400 | OTP is wrong, email is not registered, or no valid reset token exists. (**Next train**) Also the second of two concurrent resets with one OTP: it is spent once | Show a generic "Invalid or expired code" message; do not indicate whether the email exists |
 | `AUTH_RESET_TOKEN_EXPIRED` | 400 | OTP was correct but the 15-minute window has passed | Ask the user to request a new reset code |
 | `AUTH_RESET_TOKEN_EXHAUSTED` | 400 | Five consecutive wrong OTP attempts on the same token; token is now permanently invalid | Ask the user to request a new reset code |
 
@@ -452,7 +538,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_MFA_FACTOR_NOT_FOUND` | 404 | MFA factor ID does not exist or belongs to another user | Re-fetch via `GET .../auth/mfa/factors` (signed-in user) or `GET .../admin/users/{id}/mfa/factors` (operator) |
 | `AUTH_MFA_STEP_UP_REQUIRED` | 403 | `POST .../auth/mfa/enroll` or `DELETE .../auth/mfa/factors/{id}` was called with a token that is not `aal2` — the user has an enrolled factor and has not completed it this session (**BL-795, 0.3.0**) | Run `POST .../auth/mfa/challenge` then `.../mfa/verify` and retry with the new token, or have an operator call `DELETE .../auth/admin/users/{id}/mfa/factors/{factorId}` |
 | `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | 409 | A phone factor is already active or pending for this user. The existing factor id is in the `detail` field. Enroll does not overwrite the number. | The signed-in user calls `DELETE .../auth/mfa/factors/{id}`. An operator calls `DELETE .../admin/users/{id}/mfa/factors/{factorId}`, then enrolls the new number |
-| `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user | Show "Invalid code"; prompt user to try again or re-request a challenge |
+| `AUTH_MFA_CHALLENGE_INVALID` | 400 | Code is wrong, challenge ID is not found, or challenge belongs to another user. (**Next train**) Also the second of two concurrent verifies of one challenge (or of one backup code): it is spent once | Show "Invalid code"; prompt user to try again or re-request a challenge |
 | `AUTH_MFA_CHALLENGE_EXPIRED` | 400 | Challenge window has passed (10 minutes for both TOTP and phone) | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
 | `AUTH_MFA_CHALLENGE_EXHAUSTED` | 400 | Five consecutive wrong codes on the same challenge; challenge is permanently invalid | Call `POST .../auth/mfa/challenge` again to create a fresh challenge |
 
@@ -541,6 +627,11 @@ try {
 - **`anon` keys** (`mk_anon_`) are safe to embed in frontend code — they grant limited access only.
 - **`service_role` keys** (`mk_svc_`) must be kept secret — they grant full database access.
 - **Server keys** (`mk_srv_`) must be kept secret and stored in environment variables.
+- **What each key may read (0.4.0, **0.4.0**):** only the `service_role` key (`mk_svc_`) bypasses partition- and
+  row-level security. Every other key without a user — `custom` (not linked to a user), `server_admin` (`mk_srv_`), `anon`,
+  `public` — gets its role's grants, and on a PLS / RLS table only what a request with no user may see (with the usual
+  rules, no row; a PLS table answers `403`). Up to 0.3.x a server key bypassed them too. Use `X-User-Token` with a service or
+  server key for one user's data — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
 - Auto-generated keys are shown only once at creation time. Store them securely.
 - Rotate keys periodically via the regeneration endpoint.
 
@@ -604,6 +695,8 @@ Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any
 
 Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database.
 
+> **Only that issuer is accepted** (**BL-980, 0.4.0**). A request on a database path validates a JWT against the database's URL issuer (and, for a database linked to a separate auth database, that auth database's URL issuer) — nothing else. Builds up to 0.3.x also accepted the default issuer `"aouda"` beside it; a token carrying it on a database path is now `401 AUTH_TOKEN_INVALID`, so a client holding one signs in again. `"aouda"` remains the issuer of the **server** auth database's tokens (`/api/auth/signin`, setup).
+
 > **Non-standard discovery path — read before using `AddJwtBearer`.**
 > The OIDC discovery document is served at `…/auth/.well-known/openid-configuration`, which is one path segment deeper than the OIDC convention of `{issuer}/.well-known/openid-configuration`. Because the `issuer` is `{base_url}/api/databases/{db}`, any library that auto-constructs the metadata URL from `Authority` alone will try the wrong path and get a 404, causing JWT validation to fail on every request.
 >
@@ -621,6 +714,8 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 | `exp` | expiry timestamp |
 | `db_roles` | Native JSON object — role map keyed by scope (see below) |
 | `aal` | Authentication Assurance Level: `"aal1"` (password-only signin) or `"aal2"` (MFA-verified). Present on all tokens minted by Aouda AppAuth. |
+| `sid` | (**NativeClients, 0.4.0**) The session (device) the token belongs to — the `id` in `GET .../auth/sessions` |
+| `jti` | (**NativeClients, 0.4.0**) A unique id per token |
 
 ### 24.1 — The `aal` Claim: Enforcing MFA Gates
 
@@ -628,7 +723,7 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 
 > **`aal2` is not proof that a second factor was used.** If you need to know that, check that the user has an enrolled factor (`GET .../auth/mfa/factors`, or the admin list) as well as `aal2`. Removing a user's last factor (an operator calls `DELETE .../auth/admin/users/{id}/mfa/factors/{factorId}`) makes their next password signin `aal2` with no OTP step.
 >
-> An `aal2` refresh family keeps `aal2` until it expires or is revoked, including if the user enrols a factor later; revoke the user's sessions if that matters to you.
+> An `aal2` refresh family keeps `aal2` until it expires or is revoked, including if the user enrols a factor later; end the user's sessions if that matters to you (`DELETE .../admin/sessions/user/{userId}` — which revokes their refresh families and live access tokens since **NativeClients, 0.4.0**; before, it deleted session rows only).
 
 **MFA gate enforcement — ASP.NET Core (C#):**
 
@@ -882,7 +977,7 @@ def verify_token(token: str) -> dict:
 
 Application Auth is implemented in the **Aouda HTTP server** — OIDC discovery, JWKS, signup, signin, and JWT issuance are not available through `Aouda.Embedded`. That means **integration tests** that exercise real auth flows need either a running server (`aouda start`) or an **in-process** server inside the test process (for example `Aouda.Testing` / `DevServerHost` in tests).
 
-The **`Aouda.Testing`** NuGet package starts a full Aouda server backed by ASP.NET Core `TestHost` (no real ports, no external process). It exposes API keys, OIDC authority URLs, and fast engine-direct helpers (`CreateUserAsync`, `SignInAsync`) for test setup. See the full guide: **[Getting-Started-Testing.md](Getting-Started-Testing.md)** ([ADR 0024](../decisions/0024-testing-package.md)).
+The **`Aouda.Testing`** NuGet package starts a full Aouda server backed by ASP.NET Core `TestHost` (no real ports, no external process). It exposes API keys, OIDC authority URLs, and fast engine-direct helpers (`CreateUserAsync`, `SignInAsync`) for test setup. See the full guide: **[Getting-Started-Testing.md](../getting-started/testing.md)** ([ADR 0024](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0024-testing-package.md)).
 
 For **unit tests** of your own business logic, mocking auth clients or tokens remains appropriate — use `Aouda.Testing` when you need **end-to-end** behavior against the real Aouda auth stack.
 
@@ -1436,9 +1531,9 @@ Remove-Item -Recurse -Force C:\Users\you\AppData\Local\aouda\derive
 
 - **[Email, SMS & Notifications](notifications.md)** — SendGrid, GatewayAPI, **console provider**, server configuration for OTP delivery
 
-- **[Getting Started](Getting-Started.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
-- **[ADR 0023: Authentication and Authorization](../decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC
-- **[ADR 0025: Auth-DB-Resolved Authorization (ADRA)](../decisions/0025-adra-auth-db-resolved-authorization.md)** — Full ADRA design rationale, auth modes, resolver model, performance analysis
+- **[Getting Started](../getting-started/index.md)** — Core Aouda usage (embedded, server, data operations) and server authentication
+- **[ADR 0023: Authentication and Authorization](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0023-authentication-and-authorization.md)** — P12 auth architecture, JWT structure, PLS model, RBAC
+- **[ADR 0025: Auth-DB-Resolved Authorization (ADRA)](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0025-adra-auth-db-resolved-authorization.md)** — Full ADRA design rationale, auth modes, resolver model, performance analysis
 - **[HTTP API](../reference/http-api.md)** — Wire contract including auth headers
-- **[P12 Auth Tasks](../tasks/P12-Authentication-Authorization-Tasks.md)** — P12 implementation history
-- **[P14 ADRA Tasks](../tasks/P14-ADRA-Tasks.md)** — P14 ADRA implementation overview
+- **[P12 Auth Tasks](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P12/P12-Authentication-Authorization-Tasks.md)** — P12 implementation history
+- **[P14 ADRA Tasks](https://github.com/aoudadb/aouda/blob/main/docs/tasks/P14/P14-ADRA-Tasks.md)** — P14 ADRA implementation overview

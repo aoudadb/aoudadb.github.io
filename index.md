@@ -120,10 +120,10 @@ docker compose up
 → **[How to build apps effortlessly with Aouda](guides/build-apps.md)** — the canonical build path: the tiers you do not have to build, a 10-minute app, the twelve-step sequence, a capability map for whatever feature you have to ship, honest alternatives when the ideal path does not fit, and a contract you can point an AI agent at.
 
 **Just want the engine running and a first row inserted?**
-→ [Getting Started](getting-started/) — embedded mode, server mode, data operations, schema, and auth
+→ [Getting Started](getting-started/index.md) — embedded mode, server mode, data operations, schema, and auth
 
 **Using the TypeScript client?**
-→ [TypeScript Client](clients/typescript/) — query builder, typed queries, auth, MCP tools
+→ [TypeScript Client](clients/typescript.md) — query builder, typed queries, auth, MCP tools
 
 **Exposing Aouda to a browser or SPA?**
 → [Direct client access](guides/direct-client-access.md) — listeners, `mk_pub_*`, named queries. [Division of responsibility](guides/division-of-responsibility.md) — what belongs in a service.
@@ -135,13 +135,13 @@ docker compose up
 → [Adopting Aouda](guides/adoption.md) — target architecture, which hops to delete, migration order, and where the SDKs lag the engine.
 
 **Setting up authentication?**
-→ [Auth and Authorization](auth/) — two-layer auth model, API keys, JWT, ADRA modes
+→ [Auth and Authorization](auth/index.md) — two-layer auth model, API keys, JWT, ADRA modes
 
 **Deploying to production?**
-→ [Deployment](deployment/) — Kubernetes, Helm, Docker, Windows Service, systemd
+→ [Deployment](deployment/index.md) — Kubernetes, Helm, Docker, Windows Service, systemd
 
 **Building with AI agents?**
-→ [AI Agent Quick Start](ai/quick-start/) — minimal bootstrap for agent-driven workflows  
+→ [AI Agent Quick Start](ai/quick-start.md) — minimal bootstrap for agent-driven workflows  
 → [Local CLI testing (agents)](ai/local-cli-testing.md) — throwaway server recipe and CLI traps (`start -h`, data-plane allowlist, CorsOrigins)
 
 ---

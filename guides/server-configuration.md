@@ -291,7 +291,7 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 | ~~`Aouda:Memory:PerClassAdmissionEnabled`~~ | — | **Removed (WorkloadCore, 0.3.0)**: the per-class ceilings are gone; work asks for memory before it starts and waits in its class's queue. Was: | Per-class entitlements. Off admits against the process ceiling alone, which is the pre-governance behaviour. Always off under `Advisory` enforcement (embedded, `aouda dev`). |
 | `Aouda:Memory:ForegroundQuiescenceWindow` | see `MemoryBudgetSection` | How long after the last foreground unit finishes before background work returns to full rate. |
 | `Aouda:Memory:PageCacheEnabled` | unset | Unset: **on**, within its `MaxPageCacheBytes` (`T12`) share (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode every database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). `false` turns it off; `true` is the default said out loud. |
-| ~~`Aouda:Memory:ResourceMode`~~ | — | **Removed (WorkloadCore S17, 0.3.0)** with the resource mode: the engine no longer classifies itself `Constrained` / `Balanced` / `Abundant`, and its buffering thresholds are one formula on every host (see [Sizing](sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-next-train)). A server still configured with it logs a warning at boot. Was: pinned the resource state instead of measuring it. |
+| ~~`Aouda:Memory:ResourceMode`~~ | — | **Removed (WorkloadCore S17, 0.3.0)** with the resource mode: the engine no longer classifies itself `Constrained` / `Balanced` / `Abundant`, and its buffering thresholds are one formula on every host (see [Sizing](sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-030)). A server still configured with it logs a warning at boot. Was: pinned the resource state instead of measuring it. |
 | `Aouda:Query:MaxResultRows` | `1000000` | A query whose result exceeds this is refused rather than materialised: `400 RESULT_TOO_LARGE`, no `Retry-After` (**release blockers, 0.3.0**; it was a retryable `503`, which a retry could never pass). |
 | `residency.hotOnlyBackstop` | `RefuseWrites` | **Per table, not server config.** What a `HotOnly` pin does when honouring it would breach the ceiling — see [Hot/Cold](hot-cold.md#when-a-pin-cannot-be-honoured). |
 
@@ -330,7 +330,7 @@ table left demotable on purpose, so unbounded growth pages to disk instead of ex
 - [Defaults Reference](defaults-reference.md) — every derived default (memory, bulk load, partitioning), worked at several host sizes
 - [Server multi-database](server-multi-database.md) — per-database config keys and API surface
 - [Studio guide — Aouda.Setup](studio.md#12-aoudasetup-installer) — interactive install sequence
-- [Deployment](../deployment/) — Docker, Kubernetes, Windows Service
+- [Deployment](../deployment/index.md) — Docker, Kubernetes, Windows Service
 - [Replication](replication.md) — replica set and archive settings
 - [Backup](backup.md) — archive and scheduled backup configuration
 - [Direct client access](direct-client-access.md) — `Aouda:Listeners:DataPlane:Bind`, per-listener CORS, identity quotas, named-query cost caps

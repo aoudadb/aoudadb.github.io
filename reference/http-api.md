@@ -85,9 +85,9 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 |--------|------|--------|-------------|
 | `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
-| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access. Ad-hoc query is allowed on the **admin** listener. |
-| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. |
-| `mk_` (other) | Custom app key | Application Auth | Granular custom key created via admin API. |
+| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. |
+| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): no user's grants, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. |
+| `mk_` (other) | Custom app key | Application Auth | Granular custom key created via admin API. PLS / RLS enforced; linked to a user (`userId`), it gets that user's grants. |
 | `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. Application end-user JWTs on the data-plane listener are browser-tier (named artifacts only). Operator JWTs via Studio use the admin listener (ad-hoc allowed). |
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
@@ -129,6 +129,9 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 
 **Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After` (readable cross-origin since the **architecture review, 0.3.0**), code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
 
+**`Date`** is on every response and readable cross-origin (**NativeClients, 0.4.0**): a browser client can compare a
+server-stamped time with the server's clock rather than its own.
+
 See [Direct client access](../guides/direct-client-access.md) for configuration, CORS, and Studio/Hub URL rules.
 
 #### Auth Enforcement Rules
@@ -142,15 +145,21 @@ See [Direct client access](../guides/direct-client-access.md) for configuration,
 | `/api/databases/{db}/auth/signup\|signin\|refresh\|request-password-reset\|reset-password` | No | None (public POST; bearer ignored) |
 | `/api/databases/{db}/auth/me\|signout\|password` | Yes (Layer 1 + 2) | API key + user JWT in `X-User-Token`, or user JWT directly |
 | `/api/databases/{db}/query\|tables\|rows\|...` | **Only if db has linked auth** | Any valid credential (see below) |
-| `/api/databases/{db}/query\|...` (no auth db) | No | None — open access |
+| `/api/databases/{db}/...` (no linked auth db), **server auth database exists**, admin listener | Yes (Layer 1 + 2) | Server JWT, `mk_srv_`, or a server key with a role on `{db}` — every route, `DELETE /api/databases/{db}`, WebSocket and long-poll included (**BL-1017, 0.4.0**) |
+| `/api/databases/{db}/...` (no linked auth db), no server auth database, or the data-plane listener | No | None — open access |
 
 #### How Data Endpoint Auth Works
 
 When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/query`):
 
 ```
-1. Does the target database have a linked auth database?
-   NO  → Request proceeds without auth (open access)
+1. Does the target database have a linked auth database (or is it one)?
+   NO  → Does a server auth database exist, and is this the admin listener?
+         NO  → Request proceeds without auth (open access)
+         YES → The server auth database governs it (BL-1017, 0.4.0): steps 2–3 with
+               server credentials only (server JWT, mk_srv_, a server key), authorized by
+               the server auth database's grants; a database that does not exist answers
+               401 too
    YES → Continue to step 2
 
 2. Read Authorization header
@@ -165,7 +174,8 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
    mk_anon_ → Resolve as app anon key → anonymous role; **auth endpoints only**
    mk_pub_  → Resolve as browser-tier public key → data-plane listener only; named artifacts
    mk_svc_  → Resolve as app service key → full access, PLS bypassed (audited)
-   mk_srv_  → Resolve as server API key → check db_roles claim for this database
+   mk_srv_  → Resolve as server API key → check db_roles claim for this database;
+              PLS/RLS enforced, no bypass (0.4.0)
    mk_*     → Resolve as custom app key → check permissions
    eyJ*     → Validate JWT signature and claims → extract roles
 
@@ -227,7 +237,9 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/setup` | POST | No (setup mode, localhost only) | Bootstrap first admin |
 | `/api/auth/signin` | POST | No | Sign in → JWT + refresh token |
 | `/api/auth/refresh` | POST | No | Exchange refresh token → new JWT |
-| `/api/auth/signout` | POST | Bearer JWT | Revoke session |
+| `/api/auth/signout` | POST | Bearer JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, 0.4.0**) |
+| `/api/auth/sessions` | GET | Bearer JWT | The caller's sessions, one per device (**NativeClients, 0.4.0**) |
+| `/api/auth/sessions/{id}` | DELETE | Bearer JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, 0.4.0**) |
 | `/api/auth/me` | GET | Bearer JWT | Current user profile |
 | `/api/auth/me` | PATCH | Bearer JWT | Update profile metadata |
 | `/api/auth/password` | PUT | Bearer JWT | Change password |
@@ -267,7 +279,7 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `{base_url}/api/auth` |
+| `iss` | `"aouda"` (`TokenOptions.Issuer`) — the server auth database's issuer. Accepted where the server auth database authenticates: the server-scoped paths (`/admin`, `/api/admin`, `/api/server`, the `/api/databases` collection) and as the server credential on a database's paths |
 | `aud` | Server auth database name (e.g. `"_serverauth"`) |
 | `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_writer"], "analytics": ["db_reader"] }`. Read directly as an object; no `JSON.parse()` needed. |
 | `is_admin` | `true` for server admins (implicit `db_admin` on all databases) |
@@ -284,7 +296,11 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/signup` | POST | API key (Layer 1) | Register new user |
 | `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token |
 | `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT |
-| `/api/databases/{db}/auth/signout` | POST | API key + user JWT | Revoke session |
+| `/api/databases/{db}/auth/signout` | POST | API key + user JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, 0.4.0**) |
+| `/api/databases/{db}/auth/authorize` | POST | user JWT | Native sign-in: issue a single-use PKCE code for a registered native client (**NativeClients, 0.4.0**) |
+| `/api/databases/{db}/auth/token` | POST | none | Native sign-in: redeem the code (`grantType: "authorization_code"`) for a new session (**NativeClients, 0.4.0**) |
+| `/api/databases/{db}/auth/sessions` | GET | user JWT | The caller's sessions, one per device (**NativeClients, 0.4.0**) |
+| `/api/databases/{db}/auth/sessions/{id}` | DELETE | user JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, 0.4.0**) |
 | `/api/databases/{db}/auth/me` | GET | API key + user JWT | Current user profile |
 | `/api/databases/{db}/auth/me` | PATCH | API key + user JWT | Update profile metadata |
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
@@ -337,7 +353,7 @@ Content-Type: application/json
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `{base_url}/api/databases/{db}` |
+| `iss` | `{base_url}/api/databases/{db}` (`Aouda:BaseUrl`, else the request's scheme and host). (**BL-980, 0.4.0**) The only issuer accepted for this database's tokens (with, for a linked auth database, that database's URL issuer); up to 0.3.x `"aouda"` was accepted beside it, and a token carrying it is now `401` |
 | `aud` | Auth database name (e.g. `"_auth"`) |
 | `aal` | Authentication assurance level: `"aal1"` (password signin by a user who has an active MFA factor, not yet verified) or `"aal2"` (MFA verified, **or a password signin by a user with no active factor** — **BL-795, 0.3.0**) |
 | `tenant_id` | Tenant ID for PLS partition scoping |
@@ -446,6 +462,8 @@ MQ list/status and `POST …/materialized-queries/{name}/query` stamp `token` as
 materialising read (**BL-776, 0.3.0**): a result over the read budget is `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`; a
 result over the row ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (**release blockers, 0.3.0**; it was a `503`), because
 retrying is refused the same way — read it with a filtered `POST …/tables/{result}/query` and a `limit`, or its aggregates.
+(**BL-944, 0.4.0**) The same holds when the refusal or the ceiling arrives wrapped in another error: it is a `503` with
+`Retry-After` (or `400 RESULT_TOO_LARGE`), where up to 0.3.x it answered `400 INVALID_REQUEST`.
 
 Query parameter **wins** over the header when both are sent:
 
@@ -516,6 +534,7 @@ All errors return a JSON body with this structure:
 | `SNAPSHOT_OVERFLOW` | 400 | Change-event buffer overflowed while paging the snapshot; subscribe fails (not a mid-snapshot `gap`) |
 | `BULK_LOAD_TRANSFORM_INTENT_REQUIRED` | 400 | Bulk load into a table with derived columns, checks, or transforms without `applyTransforms` or `preTransformed` |
 | `BULK_LOAD_TRANSFORM_INTENT_CONFLICT` | 400 | Both transform-intent flags set |
+| `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` | 400 | `preTransformed` load into a table with a server-time column; use `applyTransforms` (**NativeClients, 0.4.0**) |
 
 #### Authentication Errors (4xx)
 
@@ -524,7 +543,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `AUTH_TOKEN_MISSING` | 401 | Missing or empty `Authorization: Bearer` header. Exception: data-plane listed named-artifact execute / batch is 404 `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` instead (admin listener still 401). |
-| `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`) |
+| `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
 | `AUTH_API_KEY_INVALID` | 401 | API key invalid, revoked, or expired |
@@ -559,7 +578,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `IDENTITY_SOURCE_UNRESOLVABLE` | 400 | Identity derived source could not be resolved from the principal |
 | `IDENTITY_STAMP_REQUIRED` | 400 | Service role omitted a required identity-stamped column |
 | `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | `plsClaimBinding` / identity source is not a bindable spelling (`subject` or `claim:<name>`) |
-| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including identity stamp) |
+| `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE` | 400 | A named mutation's `values` / `set` / `setExpr` names a server-time column (**NativeClients, 0.4.0**) |
+| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp) |
 
 #### State Errors (4xx)
 
@@ -581,10 +601,13 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable |
+| `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable. (**BL-944, 0.4.0**) Also the answer to a refusal no other code names: a request the server refused for capacity with no more specific code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `WRITE_CONFLICT`) is `503 SERVICE_UNAVAILABLE` with `Retry-After: 10`, never a `500` — nothing was applied; retry after `Retry-After` |
+| `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this) |
+| `SETUP_REQUIRED` | 503 | The server has no admin yet and is in setup mode: only setup status and a local `POST /api/auth/setup` are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
+| `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
-| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. |
-| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -595,6 +618,12 @@ design relies on. Before, it was not exposed and a browser read `null`.
 #### Named-query, streaming, and data-plane errors
 
 These also appear as WebSocket `error` `code` values where noted.
+
+(**BL-944, 0.4.0**) **A refusal on a WebSocket is its own code.** A `stream_rows` write, a subscription's snapshot and a
+subscription's permission read that the server refused for capacity answer `MEMORY_BUDGET_EXCEEDED` or `WAL_CAPACITY_EXCEEDED`
+(message ending "retry after N s"), and a write conflict `WRITE_CONFLICT` — wherever the refusal arose. Before, a wrapped refusal
+or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED` and a refused permission read `PERMISSION_REVOKED`
+(the subscription is still denied when its permissions cannot be read; only the code changed).
 
 | Code | HTTP / WS | Description |
 |------|-----------|-------------|
@@ -619,6 +648,8 @@ These also appear as WebSocket `error` `code` values where noted.
 | `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
 | `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
+| `NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE` | WS error | Definition has a `serverTime` parameter; only one-shot reads bind the server's clock (**NativeClients, 0.4.0**) |
+| `NAMED_QUERY_SERVER_TIME_INVALID` | 400 | A `serverTime` parameter supplied in `args`, or (schema apply) declared where only a `Timestamp` comparison may use it (**NativeClients, 0.4.0**) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
 | `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
@@ -660,7 +691,7 @@ Lists databases visible to the caller.
       "state": "Active",
       "createdAt": "2026-06-26T10:00:00.0000000Z",
       "options": {
-        "maxMemoryBytes": null,
+        "maxMemoryShareBytes": null,
         "defaultTemperature": "Auto",
         "enableWal": true,
         "replicationMode": "Replicate"
@@ -725,7 +756,7 @@ Direct lookup of a specific database by name. Returns the database if it exists 
   "state": "Active",
   "createdAt": "2026-06-26T10:00:00.0000000Z",
   "options": {
-    "maxMemoryBytes": null,
+    "maxMemoryShareBytes": null,
     "defaultTemperature": "Auto",
     "enableWal": true,
     "replicationMode": "Replicate"
@@ -786,7 +817,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
   "name": "myapp",
   "enableWal": true,
   "replicationMode": "Replicate",
-  "maxMemoryBytes": null,
+  "maxMemoryShareBytes": null,
   "defaultTemperature": "Auto",
   "dataDurability": "DiskBacked",
   "kind": "data",
@@ -799,7 +830,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `name` | string | Yes | Database name. |
 | `enableWal` | bool | No | Default `true`. |
 | `replicationMode` | string | No | `Replicate` (default) or `DoNotReplicate`. |
-| `maxMemoryBytes` | number \| null | No | Per-database memory cap. |
+| `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, 0.4.0:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
 | `dataDurability` | string | No | `DiskBacked` (default) or `MemoryOnly`. |
 | `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database. Mutually exclusive with `auth`. |
@@ -833,7 +864,9 @@ Poll `GET /api/databases/{name}` until `state=Active` before schema apply.
 
 #### `DELETE /api/databases/{db}`
 
-Drops a database. Returns `204 No Content` immediately after the foreground switch.
+Drops a database. Returns `204 No Content` immediately after the foreground switch. Needs `admin` on the database; for a
+database with no linked auth database, once a server auth database exists, that is a server credential (the server admin,
+`mk_srv_`), and an anonymous drop is `401` on the admin listener (**BL-1017, 0.4.0**; 0.3.0 dropped it).
 
 **How it works (async, crash-safe):**
 
@@ -980,6 +1013,7 @@ without one UTF-16 code units, which put a character at U+E000–U+FFFF after an
 Default `false` — omitted, existing payloads and named-query hashes are unaffected. Matching then uses ordinal, case-insensitive comparison (`StringComparison.OrdinalIgnoreCase`), not a locale collation. Two things it deliberately does **not** change: primary-key/unique-column uniqueness stays always case-sensitive, so a case-insensitive `eq` against such a column can return more than one row if case-variant duplicates exist; and it never satisfies the [partition-filter rule](../guides/browser-tier-read-limits.md), the same treatment `like` already gets. A case-insensitive condition also skips zone-map/bloom-filter pruning for that predicate (full-page scan), same as `like`.
 
 **`like` semantics:**
+{: #like-semantics}
 
 - `%` matches any sequence of characters, including none. `_` matches exactly one character.
 - `\` escapes `%`, `_`, or `\` itself. A pattern that ends in a lone `\`, or escapes anything else, is
@@ -1104,9 +1138,11 @@ can make more groups than that sets `limit` (up to 10,000) and pages with `offse
 last) unless `orderBy` says otherwise.
 
 **Types:** `count` / `countDistinct` are `Int64`. `sum` is an exact `Int64` over integers (overflow is an error, not a wrapped
-value), the column's own `Decimal(p,s)` over one, and a `Double` over floating point. `min` / `max` keep the column's type.
-`avg` is a `Double`; a `Decimal(p,s)` mean is divided in decimal first. Over no row, `count` is `0` and every other aggregate is
-`null`. A grouped query over no row answers no row.
+value), an exact `Decimal(18,s)` over a `Decimal(p,s)` column, and a `Double` over floating point. `min` / `max` keep the
+column's type (exact at its scale). `avg` is a `Double` (**LoadSpeed S13, 0.4.0**: for a `Decimal(p,s)`, the exact sum
+÷ 10^s ÷ count; it was divided in decimal first). (**LoadSpeed S13, 0.4.0**) A decimal `sum` of 18 digits or more is
+refused as an overflow — *A Decimal sum does not fit Decimal(18,s).* — the same as in a materialized query. Over no row,
+`count` is `0` and every other aggregate is `null`. A grouped query over no row answers no row.
 
 **Refused (`400 INVALID_REQUEST`):**
 
@@ -1218,13 +1254,13 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 | `Guid` | `String` (4) | The `D` form (`0f8fad5b-d9cb-469f-a165-70867728950e`) |
 | `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
 | `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
-| `Decimal` declared `Decimal(p,s)` | `ScaledDecimal` (8); `Decimal` (6) when the column is empty or every value is null | The unscaled value at scale `s` |
-| `Decimal` (undeclared) | `ScaledDecimal` (8) if every value has one scale and fits, else `Decimal` (6) | |
+| `Decimal` (`Decimal(p,s)`) | `ScaledDecimal` (8) | The unscaled value at the column's declared scale `s` |
 | A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
 
-A decimal column's kind is chosen **from the values it holds**, not from its declaration: a reader takes the scale from
-the frame and accepts either kind for any `Decimal` column (**architecture review, 0.3.0** — the table above implied
-a `Decimal(p,s)` column was always `ScaledDecimal`).
+(**LoadSpeed S13, 0.4.0**) A decimal column always goes out as `ScaledDecimal` at its declared scale; the 128-bit
+`Decimal` kind (6) is retired and never sent. (A computed decimal column — a `selectExpr` — goes at its largest value's
+scale; one whose values no 64-bit integer holds at one scale goes as JSON.) Up to 0.3.x a decimal column's kind was chosen from the values it held, and
+an empty or all-null `Decimal(p,s)` column, or an undeclared `Decimal`, could come as kind 6.
 
 `X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`.
 `GET /admin/capabilities` lists `queryColumnBatch: true`.
@@ -1455,7 +1491,7 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 **Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the row array; every other field is unchanged.
 
-**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound.
+**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound. `insert` and `upsert` return `rows` too when the definition declares `returning` — the rows written, an upsert's one per key as stored (**NativeClients, 0.4.0**; BL-639).
 
 **Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, 0.3.0**), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
@@ -1535,7 +1571,7 @@ Queries over one source table are built from a **single traversal** of it, so th
 |-------|------|----------|-------------|
 | `sourceTable` | string? | one of | Refresh every materialized query over this table. |
 | `names` | string[]? | one of | Explicit list. An unknown name is a `404`. |
-| `staleOnly` | bool? | no | With `sourceTable`: restrict to queries a `postLoadMqBehavior: "skip"` or `"deferred"` load (or anything else) left stale. `400` without `sourceTable`. |
+| `staleOnly` | bool? | no | With `sourceTable`: restrict to queries a `postLoadMqBehavior: "skip"` load (or anything else) left stale. `400` without `sourceTable`. |
 | `await` | bool? | no | Same semantics, same window and the same BL-419 guarantees as `{name}:refresh`. Default `false`. |
 
 Supplying both `names` and `sourceTable`, or neither, is a `400` naming the conflict.
@@ -1578,7 +1614,7 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
 | `config` | object | Yes* | Alternative: embedded object; server serializes to JSON if `configJson` omitted. |
 
-`configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000).
+`configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000). AggregateConfig's `groupByColumns` entries are objects — `{ "column": "region" }`, or `{ "column": "time", "function": "TruncateToHour" }` for a time bucket. (**BL-980, 0.4.0**) The v1 plain-string form (`"groupByColumns": ["region"]`) is `400 INVALID_REQUEST`, and a stored definition in that form is refused when it is read; up to 0.3.x both were read.
 
 **Query response** (`POST .../query`):
 
@@ -1643,7 +1679,7 @@ The list route returns an array of the same object.
 | `currentLag` | string? | **How long this query has been behind its source**, or `null` when it is not behind. `TimeSpan` in .NET constant format (`"00:01:30"`), not a number of milliseconds. See the honesty note below (**BL-642, 0.1.38**). |
 | `rebuildProgress` | number? | `0.0`–`1.0` while `Rebuilding`; `null` otherwise. |
 | `isStale` / `staleReason` | boolean / string? | **The result is readable but is not current.** Absent on servers that predate the field, which deserializes as `false`. See below. |
-| `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (a `"deferred"` load, or an `"auto"` load folded by the pass; **WorkloadCore S10, 0.3.0**: every load but a `"skip"` one). `0` when none; absent on older servers. While it is above zero the query is also `isStale` (behind) and not `current`, with a `staleReason` like "2 bulk load(s) into its source are pending the table's pass…"; it is owed work, not holed, so `staleOnly` does not select it and `currentLag` counts from the oldest owed load's commit (**WorkloadCore S10**). `:refresh` of the query runs the table's pass at once. |
+| `pendingDeferredJobs` | integer | (**BatchFirst S09, 0.1.40**) How many committed bulk loads this query has not yet incorporated because they are waiting for its table's deferred pass (an `"auto"` load folded by the pass — held while its table goes on loading, **LoadSpeed M.3, 0.4.0**; **WorkloadCore S10, 0.3.0**: every load but a `"skip"` one; until the 0.4.0 also a `"deferred"` load). `0` when none; absent on older servers. While it is above zero the query is also `isStale` (behind) and not `current`, with a `staleReason` like "2 bulk load(s) into its source are pending the table's pass…"; it is owed work, not holed, so `staleOnly` does not select it and `currentLag` counts from the oldest owed load's commit (**WorkloadCore S10**). `:refresh` of the query runs the table's pass at once. |
 | `stalenessMs` | integer? | (**ColumnarMerge S01, 0.2.0**) **How old the oldest change this result does not yet reflect is**, in milliseconds: a queued insert or update, an unfinished bulk-load publish, a deferred load waiting for its pass, or the hole a lost update left. **Omitted** when the result reflects every commit it has been given (read absent as `0`, on older servers too). This is the number a freshness target means — see below. |
 | `current` | boolean | (**WorkloadCore, 0.3.0**) **Whether the result is current for a reader starting now** — the one rule the server uses to route a source-table read to this result and to decide whether a consistency token is covered by it: no lost update (`isStale` for that reason), nothing queued or in flight for it or for a query it is built on (an incremental update, a bulk-load publish, a load past its commit point), no commit to its source still being routed, and its frontier (`token`) at the WAL head. `false` on older servers. |
 | `frontierLagBytes` | integer? | (**WorkloadCore, 0.3.0**) How many WAL bytes the query's frontier is behind the head. **Omitted** when it is at the head. A size, not a position: positions are only ever on the wire as tokens. |
@@ -1663,11 +1699,11 @@ otherwise the table answers, with the same rows as ever. Its currency is reporte
 
 | Field | Meaning |
 |---|---|
-| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. (**WorkloadCore S09, 0.3.0**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). |
+| `isStale` | `true` when the result is **not current**: an update was lost before it reached the maintainer, a maintenance apply failed part-way, or work is queued and unfinished. (**WorkloadCore S09, 0.3.0**) An update is lost only when its query's maintenance backlog is past its bound (64 MiB an update lane; `staleReason` begins "Maintenance backlog past its bound"), and the query is rebuilt; it used to be dropped after a 250 ms wait for a full queue (BL-427). (**BL-989, 0.4.0**) A query built on another query's result is also `isStale` while that query is behind — its `staleReason` names it ("The query it is built on, 'x', is behind…") and its own `pendingDeferredJobs` stays `0`; before, it read `isStale: false` with `current: false`. |
 | `staleReason` | Why, in a sentence meant for a human. `null` unless `isStale`. |
 | `currentLag` | How long the query has **been behind** without a break. `null` when it is not behind — including for a caught-up query that has been idle for days. |
 | `stalenessMs` | (**ColumnarMerge S01, 0.2.0**) How **old** the oldest change the result does not reflect yet is. Omitted when current. |
-| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. |
+| `current` | (**WorkloadCore, 0.3.0**) The server's own yes/no: current for a reader starting now. It is the answer routing and the token check use, so it can be `false` while `isStale` is `false` — for the moment a commit to the source is being routed, or a load is past its commit point and its maintenance has not finished. (A query behind only because the query it is built on is behind reports `isStale` too since **BL-989, 0.4.0**.) |
 
 ⚠️ **For "how fresh is this query", read `stalenessMs`, not `currentLag`.** Under a steady stream of
 inserts that never lets a query's queue empty, `currentLag` grows for as long as the stream runs — it is
@@ -1827,12 +1863,11 @@ List all tables with statistics.
 |-------|------|-------------|
 | `name` | string | Table name |
 | `columnCount` | number | Number of columns |
-| `rowCount` | number | Total row count across all segments |
-| `createdAt` | string | ISO 8601 timestamp when table was created (empty for legacy tables) |
-| `lastModifiedAt` | string | ISO 8601 timestamp when table/data was last modified (empty for legacy tables) |
+| `rowCount` | number | Total row count across all segments — always the exact total. (**BL-980, 0.4.0**) `rowCountIsExact` is gone: a catalog segment entry without a row count (only an older build wrote one) is refused rather than counted as a lower bound, so the flag had nothing left to say. Both SDKs drop it (`TableSummary.rowCountIsExact` in `@aouda/client`) |
+| `createdAt` | string | ISO 8601 timestamp when table was created. (**BL-980, 0.4.0**) Always set — including for a table a replica or a point-in-time replay registered from the log, which carried none before |
+| `lastModifiedAt` | string | ISO 8601 timestamp when table/data was last modified. (**BL-980, 0.4.0**) Always set, as `createdAt` |
 | `sizeBytes` | number | Approximate size in bytes across all segments |
 | `policy` | object | Storage policy |
-| `rowCountIsExact` | boolean | `false` when `rowCount` is a lower bound (a segment's count was unknown) |
 | `keyMapResident` | boolean, optional | (**ColumnarMerge S05, 0.2.0**) `true` when the table's key map covers every tier, so an insert or upsert checks whether a key exists without reading a segment; `false` while it is still loading, when the server's memory governor refused it, or when it evicted part of the map to make room (**WorkloadCore, 0.3.0**) — existence is then checked by reading segments, correctly and more slowly. Absent for a table without a key map (no primary key, or a `pkUniqueness` other than `Strict`). |
 
 #### `GET /api/tables/{name}`
@@ -2120,9 +2155,11 @@ Create a new table.
 }
 ```
 
-A `Decimal` column may carry `"precision"` and `"scale"` — both or neither, `1 ≤ precision ≤ 18`,
-`0 ≤ scale ≤ precision` — to declare `Decimal(p,s)` (**ColumnarCore S13, 0.2.0**; see [Data types](#data-types)).
-A `Decimal(p,s)` partition key is refused.
+A `Decimal` column carries `"precision"` and `"scale"` — `1 ≤ precision ≤ 18`, `0 ≤ scale ≤ precision` — to declare
+`Decimal(p,s)` (**ColumnarCore S13, 0.2.0**; see [Data types](#data-types)). (**LoadSpeed S13, 0.4.0; breaking**)
+Both are required: `"type": "Decimal"` without them is `400` — *A Decimal column declares its precision and scale
+(Decimal(p,s), 1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* — and a precision above 18 is `400`
+*Decimal precision above 18 is not supported (got N).* A `Decimal(p,s)` partition key is refused.
 
 **Response:** `201 Created` with table detail
 
@@ -2206,7 +2243,8 @@ Add a column to a table.
 ```
 
 `"precision"` / `"scale"` beside `"type": "Decimal"` add a `Decimal(p,s)` column, as on create (**ColumnarCore S13,
-0.2.0**). A column cannot be changed to or from `Decimal(p,s)`, or to another precision or scale: add a new column and copy.
+0.2.0**); (**LoadSpeed S13, 0.4.0**) they are required, and a `Decimal` without them is refused `400` as on create. A
+column cannot be changed to or from `Decimal(p,s)`, or to another precision or scale: add a new column and copy.
 
 **Response:** `201 Created` with column detail
 
@@ -2324,7 +2362,9 @@ The same endpoint also accepts **one column-batch frame** — `Content-Type: app
 binary layout bulk-load [`:append`](#post-jobidappend) takes. The rows
 insert exactly as the same rows sent as JSON would: the same values, defaults, generated ids, errors and messages. A
 frame carries values, not JSON text, so where the text matters the server reads the frame's rows as JSON: a number sent
-into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50`), whatever the server's culture. A client
+into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50`), whatever the server's culture.
+(**LoadSpeed S13, 0.4.0**) A frame's decimal column has one scale, its largest, so such a number is stored at that
+scale: `3` sent beside `2.50` is stored as `3.00`. A client
 that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
 cannot say which text it had.
 
@@ -2338,10 +2378,11 @@ cannot say which text it had.
 `Accept-Post: application/json, application/vnd.aouda.column-batch` (a request refused before it, by authentication or an
 unsupported `Content-Type`, gets none; browsers can read the header through CORS), and `GET /admin/capabilities` lists
 `insertColumnBatch: true`. A server that predates this does not send the header, and answers a frame with
-`415 Unsupported Media Type`. The official SDKs send JSON until they have seen the header, and go back to JSON on a
-`415` (see [.NET](../clients/index.md) and [TypeScript](../clients/typescript.md)). After a `415` both SDKs stay on JSON
-for **five minutes**, whatever a later response advertises, so a mixed fleet of old and new servers behind one address
-does not cost an upload per flip (**BL-716, 0.2.0**).
+`415 Unsupported Media Type`. The official SDKs send JSON until they have seen the header (see [.NET](../clients/index.md)
+and [TypeScript](../clients/typescript.md)). `@aouda/client` goes back to JSON on a `415` and stays on JSON for **five
+minutes**, whatever a later response advertises (**BL-716, 0.2.0**). (**BL-980, 0.4.0**) `Aouda.Client` no longer
+does: a `415` on a frame is an error like any other — the fallback existed only for an older server behind the same address,
+and pre-1.0 the client and server are upgraded together. The advertisement itself is unchanged.
 
 **JSON is read into columns too.** A JSON body is no longer deserialized into one dictionary per row: the server
 locates `rows` and reads each value straight into the table's typed columns, with the same conversions as before (a
@@ -2365,7 +2406,7 @@ like every other error of this endpoint, and an empty body is `400 MISSING_DATAB
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), or a string cell that is not valid UTF-8 (**BL-716, 0.2.0**) |
+| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
 | — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch` |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
@@ -2424,7 +2465,7 @@ Update rows matching a WHERE filter.
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
-| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts (each re-checks its matches at commit and rescans if one changed). Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts (each re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst). Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
 #### `DELETE /api/databases/{db}/tables/{name}/rows`
 
@@ -2727,11 +2768,14 @@ A `colRef` names its column exactly as the table does — case-sensitively, as `
 {
   "columns": ["id", "name", "price", "discountedPrice"],
   "types":   ["Int64", "String", "Decimal", "Decimal"],
-  "data":    [[1], ["Widget"], [99.0], [89.1]],
+  "data":    [[1], ["Widget"], [99.00], [89.100]],
   "rowCount": 1,
   "stats": { "executionMs": 4 }
 }
 ```
+
+With `price` a `Decimal(18,2)` column, `price * 0.9` is exact at scale 3, the sum of the two scales (**LoadSpeed S13, next
+train**: a fractional JSON literal is a decimal at the scale it is written with, and a decimal expression is exact).
 
 Computed column types are inferred where the expression permits (`"Unknown"` otherwise) and are always nullable. See [browser-tier read limits](../guides/browser-tier-read-limits.md#selectexpr-result-types).
 
@@ -2909,7 +2953,7 @@ a clamp that bound at startup says nothing about a budget you have since set by 
 `workingSetSource`, `mode`, `transitions` and the four entry / exit ratios) are gone, with the `Constrained` / `Balanced` /
 `Abundant` classification they reported: the engine no longer sizes its pools from the process's measured headroom, and
 `Abundant` no longer raises them. The transient pool, the per-table flush trigger and the per-table hot budget are one
-formula in every deployment — see [Sizing](../guides/sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-next-train).
+formula in every deployment — see [Sizing](../guides/sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-030).
 To see room the ledger does not hold, read `managedHeapBytes`, `ledgerBytes`, `untrackedHeadroomBytes` and `rssBytes`.
 
 #### The ledger: leases and consumer charges (**WorkloadCore, 0.3.0**)
@@ -3066,8 +3110,9 @@ Trigger an immediate backup of all active databases. Runs concurrently across da
 | Status | When |
 |--------|------|
 | 409 Conflict | A backup or restore is already in progress |
-| 503 Service Unavailable | Cloud destination not yet supported (S3/Azure/GCS), or engine not ready |
+| 503 Service Unavailable | Cloud destination not yet supported (S3/Azure/GCS), or engine not ready; (**BL-944, 0.4.0**) or the backup was refused for capacity (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, with `Retry-After`) |
 | 400 Bad Request | Destination path cannot be created or accessed |
+| 500 Internal Server Error | (**BL-944, 0.4.0**) The backup failed for another reason (an I/O error in the checkpoint, say). Before, every failure was answered 400 as if the destination were wrong |
 
 #### `GET /admin/backup/list`
 
@@ -3094,7 +3139,7 @@ List all backups at the configured destination, ordered newest-first.
 
 `warning` is non-null when no destination is configured or when the destination is unavailable.
 
-`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0. Position `0` means *unknown* (ADR 0044 D-2) — that backup is exact-restore-only.
+`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0 and (**BL-980, 0.4.0**) the WAL-root incarnation (epoch and root id) a point-in-time restore needs. Position `0` means *unknown* (ADR 0044 D-2); a backup without the incarnation is one of a database without a WAL, or one taken by an older build. Either way the backup is exact-restore-only, and a point-in-time restore of it is refused.
 
 #### `POST /admin/backup/restore/{id}`
 
@@ -3176,7 +3221,7 @@ PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044
 | 400 Bad Request | Neither field supplied; `targetTime` is in the future; `targetTime` is at or before the backup's `createdUtc`; or the backup recorded WAL position `0` (unknown — exact-restore-only, ADR 0044 D-2) |
 | 404 Not Found | Backup ID does not exist at the destination, or no backup run exists at or before `targetTime` |
 | 409 Conflict | A backup operation is already in progress |
-| 500 Internal Server Error | Point-in-time staging or replay failed. The body names the database and the error. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. |
+| 500 Internal Server Error | Point-in-time staging or replay failed — (**BL-980, 0.4.0**) among them a backup that records no WAL-root incarnation, and a replay that meets a WAL frame or catalog-DDL record this build does not read. The body names the database and the error. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. |
 | 503 Service Unavailable | Engine not initialized |
 
 #### `GET /admin/backup/schedule`
@@ -3196,7 +3241,7 @@ Get the current backup schedule.
 
 #### `PUT /admin/backup/schedule`
 
-Update (or disable) the backup schedule. Persisted to `{DataPath}/backup-config.json`.
+Update (or disable) the backup schedule. Saved to the server's `_settings` database before it is applied (**BL-1016, 0.4.0**): a refused save is `503` and nothing changes.
 
 **Request body:**
 ```json
@@ -3216,6 +3261,7 @@ Set `cronExpression` to null to disable scheduled backups.
 | Status | When |
 |--------|------|
 | 400 Bad Request | `cronExpression` is not a valid 5-field cron expression |
+| 503 Service Unavailable | (**BL-1016, 0.4.0**) The save was refused (`WAL_CAPACITY_EXCEEDED`, `MEMORY_BUDGET_EXCEEDED`); `Retry-After` is set and the schedule is unchanged — retry. (0.3.0 answered `200` and the schedule reverted at the next start.) |
 
 ---
 
@@ -3471,6 +3517,7 @@ Patch mutable runtime config values.
 | Status | When |
 |--------|------|
 | `400 Bad Request` | Unsupported/immutable fields, invalid values (e.g., non-positive memory cap), invalid log level |
+| `503 Service Unavailable` | (**BL-1016, 0.4.0**) A save was refused (`WAL_CAPACITY_EXCEEDED`, `MEMORY_BUDGET_EXCEEDED`); `Retry-After` is set. Every section the request sets is saved before any is applied, and one saved before a later refusal is put back, so nothing changes — retry. (0.3.0 applied the change, answered `200` and lost it at the next start; a refused save of `memory.maxTotalRamBytes` was a `409`.) |
 
 #### `GET /admin/config/schema`
 
@@ -3647,8 +3694,8 @@ Get cluster topology.
 | `UInt64` | 64-bit unsigned integer |
 | `Float32` | 32-bit floating point |
 | `Double` | 64-bit floating point |
-| `Decimal` | 128-bit decimal (`System.Decimal`, any scale per value) |
-| `Decimal` with `precision` / `scale` | `Decimal(p,s)`, p ≤ 18: a 64-bit integer scaled by 10^s (**ColumnarCore S13, 0.2.0**). Declared with `"precision"` and `"scale"` beside `"type": "Decimal"` in create-table / add-column bodies and schema documents; reported with the same two fields in column details. Values are written and read as decimal numbers with exactly `s` places; more places or more than `p − s` integer digits is a `400`; `avg` returns a `Double`. See the [schema guide](../guides/schema.md) |
+| `Decimal` with `precision` / `scale` | `Decimal(p,s)`, 1 ≤ p ≤ 18, 0 ≤ s ≤ p: a 64-bit integer scaled by 10^s (**ColumnarCore S13, 0.2.0**). Declared with `"precision"` and `"scale"` beside `"type": "Decimal"` in create-table / add-column bodies and schema documents; reported with the same two fields in column details. Where a type is a name alone (a computed output's `type`, `cast`'s target) it is spelled `"Decimal(18,6)"`. Values are written and read as decimal numbers with exactly `s` places; more places or more than `p − s` integer digits is a `400`; `sum` is an exact `Decimal(18,s)`; `avg` returns a `Double`. See the [schema guide](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020) |
+| ~~`Decimal`~~ (undeclared) | (**LoadSpeed S13, 0.4.0; breaking**) Retired: the 128-bit `System.Decimal` of any scale. `"type": "Decimal"` without `precision` and `scale` is refused `400`, plain `"Decimal"` as a type name is refused, and a data directory holding a column of it (type 13) is refused at open, naming the column — export it with the build that wrote it |
 | `String` | UTF-8 string |
 | `Timestamp` | UTC instant (see note below) |
 | `Date` | Date only |
@@ -3988,7 +4035,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**
@@ -4340,7 +4387,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
 | `embeddingModelVersion` | string? | null | Any valid model version string | Embedding model version for vector-indexed tables. |
-| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"`, `"deferred"` | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it runs the table's pass that was starting anyway or, once that has run, re-scans the whole source table. (**WorkloadCore S10, 0.3.0**) `"auto"` records a pending job, as `"deferred"` does, and starts the table's **deferred pass** for each table it wrote right after the commit (multi-table and transform loads included): a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the other queries on the table are not held behind one long rebuild), and the queries built on them caught up. The load does no materialized-query work while its rows stream and is not paced to a drain. Until the pass ends its queries read as behind (`isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false`). Before S10, how `"auto"` did it depended on the table: a table of only `aggregate` and `latestPerKey`/`firstPerKey` queries was folded as the load wrote its segments and written by the table's pass after the commit; on any other table the queries accumulated during the load's own pass and published by shadow-swap after the commit (the ingest-fed path). (**WorkloadCore S09, 0.3.0**) Every `"auto"` load's maintenance runs after the commit point, in the background, and `:commit` waits for it only as long as `mqWaitMs` allows (below): on a table of only aggregates and latest / first per key the load used to write its queries before `:commit` returned, with `mqRebuildStatus: "completed"` (**ColumnarCore S12, 0.2.0**). `"skip"`: no pending job, no pass and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`; **WorkloadCore S10, 0.3.0**: owed the pass, not marked stale as `"skip"` leaves them), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. Use it for very large or many back-to-back loads: many loads, one pass. An older server answers `"deferred"` with `400 BULK_LOAD_INVALID_OPTIONS`. See [Deferred loads](../guides/materialized.md#deferred-loads). |
+| `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` (`"deferred"` until 0.3.x; refused `400` from the 0.4.0 — use `"auto"`) | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it runs the table's pass that was starting anyway or, once that has run, re-scans the whole source table. (**WorkloadCore S10, 0.3.0**) `"auto"` records a pending job, as `"deferred"` did, and starts the table's **deferred pass** for each table it wrote right after the commit (multi-table and transform loads included): a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the other queries on the table are not held behind one long rebuild), and the queries built on them caught up. The load does no materialized-query work while its rows stream and is not paced to a drain. Until the pass ends its queries read as behind (`isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false`). Before S10, how `"auto"` did it depended on the table: a table of only `aggregate` and `latestPerKey`/`firstPerKey` queries was folded as the load wrote its segments and written by the table's pass after the commit; on any other table the queries accumulated during the load's own pass and published by shadow-swap after the commit (the ingest-fed path). (**WorkloadCore S09, 0.3.0**) Every `"auto"` load's maintenance runs after the commit point, in the background, and `:commit` waits for it only as long as `mqWaitMs` allows (below): on a table of only aggregates and latest / first per key the load used to write its queries before `:commit` returned, with `mqRebuildStatus: "completed"` (**ColumnarCore S12, 0.2.0**). `"skip"`: no pending job, no pass and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. (**LoadSpeed K31, 0.4.0**) `"deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message saying to use `"auto"`: it was folded into `"auto"`, which since M.3 leaves a loading table's pass to the quiet period as `"deferred"` did, and which with `mqWaitMs` 0 (the default) does not wait at `:commit`. Until then: `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`; **WorkloadCore S10, 0.3.0**: owed the pass, not marked stale as `"skip"` leaves them), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. It was for very large or many back-to-back loads: many loads, one pass (a server before 0.1.40 refused it `400` too). See [Deferred loads](../guides/materialized.md#deferred-loads). |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
 | `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. |
@@ -4434,11 +4481,10 @@ frame   := "ACB1" rowCount:u32 columnCount:u16 column*
 column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
 flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
 bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
-kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 6 Decimal · 8 ScaledDecimal
+kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 8 ScaledDecimal   (6: retired, refused)
 values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
          | Double          : rowCount × f64
          | Bool            : bitmap
-         | Decimal         : rowCount × 4 × i32 (the .NET decimal layout)
          | ScaledDecimal   : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
 ```
@@ -4454,8 +4500,13 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   `maxRowsPerAppend` applies across all the frames of one `:append`, as it does to NDJSON lines.
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
   earlier, well-formed frames in the same body are kept and counted, as NDJSON lines before a bad line are.
+- (**LoadSpeed S13, 0.4.0; breaking**) **Kind 6, the 128-bit `Decimal`, is retired.** It was
+  `rowCount × 4 × i32` in the .NET decimal layout. A frame that carries it — on `:append` or on
+  `POST …/tables/{name}/rows` — is refused `400`: `Column '<name>': kind 6, the 128-bit Decimal, is retired
+  (LoadSpeed S13); send a decimal as ScaledDecimal (kind 8).` Send decimals as `ScaledDecimal`: 64-bit
+  unscaled integers and one scale per column.
 
-**A frame loads the same values as the NDJSON body of the same rows.** Decimals travel as the 16-byte `Decimal` kind or, since **ColumnarCore S13 (0.2.0)**, as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores. The TypeScript SDK sends a decimal column that fits 64 bits at its largest scale that way, and the server reads each value as its JSON text says (`101`, not `101.00`) into any column type. The C# SDK sends a .NET `decimal` as the 16-byte kind (a `decimal` keeps its trailing zeros, which an undeclared `Decimal` column stores); a caller building a `ColumnBatch` can add a scaled column directly. The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
+**A frame loads the same values as the NDJSON body of the same rows.** Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a .NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's NDJSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as NDJSON. A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
 
 **NDJSON is still fully supported**, for curl and for any client without the frame. From the same train
 the server decodes it straight into column batches, so it is faster too. A column whose lines mix
@@ -4512,7 +4563,7 @@ Commit the session. All sealed segments become queryable.
 | `waitForDeferredWork` | bool | No | `false` | If `true`, the response is held until all post-processing (PK index rebuild, CSC mirror, RaBitQ encodings) completes. |
 | `writeConcern` | string? | No | `"acknowledged"` | Replication barrier. Allowed: `"acknowledged"`, `"majority"`, `"all"`. |
 | `writeConcernTimeoutMs` | number? | No | `300000` (5 min) | Max wait for the write-concern barrier. On timeout, returns 200 OK with `writeConcernTimedOut: true`. The data is durable; replicas catch up at their own pace. |
-| `mqWaitMs` | number? | No | `30000` | (**WorkloadCore S09, 0.3.0**) How long `:commit` waits, after the load is durable and its table locks are released, for every materialized query the load's rows reach to be current for the load. `0` = do not wait. `0`–`600000`; outside that, `400 BULK_LOAD_INVALID_OPTIONS`, checked before anything is committed. The answer is `mqStatus` below. |
+| `mqWaitMs` | number? | No | `0` (**LoadSpeed M.2, 0.4.0**; `30000` in 0.3.0) | (**WorkloadCore S09, 0.3.0**) How long `:commit` waits, after the load is durable and its table locks are released, for every materialized query the load's rows reach to be current for the load. `0` = do not wait. `0`–`600000`; outside that, `400 BULK_LOAD_INVALID_OPTIONS`, checked before anything is committed. The answer is `mqStatus` below. |
 
 **Response body:**
 
@@ -4531,12 +4582,14 @@ Commit the session. All sealed segments become queryable.
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
 | `progress` | object? | Present only when `waitForDeferredWork: true`. Fields: `ivfAssignmentsCompleted`, `ivfAssignmentsTotal`, `raBitQEncodingsCompleted`, `raBitQEncodingsTotal`, `cscMirrorsCompleted`, `cscMirrorsTotal`, `pkIndexRebuildCompleted`, `pkIndexRebuildTotal`. |
 | `mqRebuildStatus` | string | **BL-419 (0.1.22).** Materialized Query rebuild status at the moment of commit — same allowed values and meaning as the `:status` field below. For an `"auto"` load that reaches any query it is `"pending"` or `"inProgress"`, never `"completed"` from the commit itself (**WorkloadCore S09, 0.3.0**); it was `"completed"` for an `"auto"` load whose queries were written in its own commit (**ColumnarCore S12, 0.2.0**). Poll `GET {jobId}:status` for this field rather than calling `:refresh`, which would queue behind the already-scheduled rebuild and then re-scan the whole source table a second time. |
-| `mqStatus` | string | (**WorkloadCore S09, 0.3.0**) Whether the materialized queries the load's rows reach (over the loaded tables, and every query built on them) were current for the load when `:commit` returned: `"current"` all of them were, within `mqWaitMs`; `"behind"` the wait ended first, and their maintenance is still running — or (**WorkloadCore S16, 0.3.0**) one of them can only be brought current by a rebuild (it is holed, in `Error`, or its rebuild is waiting for memory), which `:commit` does not wait for: it answers `"behind"` as soon as the others are current — (**release blockers, 0.3.0**) and so is a query that is behind only because a query it is built on is being rebuilt; and if the wait itself fails (the heap, say) the commit is still answered as committed, `"behind"`; `"skipped"` a `"skip"` load — the queries are behind until refreshed; `"deferred"` a `"deferred"` load — a later pass owes them; `"none"` no query reads the loaded tables. |
+| `mqStatus` | string | (**WorkloadCore S09, 0.3.0**) Whether the materialized queries the load's rows reach (over the loaded tables, and every query built on them) were current for the load when `:commit` returned: `"current"` all of them were, within `mqWaitMs`; `"behind"` the wait ended first, and their maintenance is still running — or (**WorkloadCore S16, 0.3.0**) one of them can only be brought current by a rebuild (it is holed, in `Error`, or its rebuild is waiting for memory), which `:commit` does not wait for: it answers `"behind"` as soon as the others are current — (**release blockers, 0.3.0**) and so is a query that is behind only because a query it is built on is being rebuilt; and if the wait itself fails (the heap, say) the commit is still answered as committed, `"behind"`; `"skipped"` a `"skip"` load — the queries are behind until refreshed; `"none"` no query reads the loaded tables. (`"deferred"`, for a `"deferred"` load, until the 0.4.0: **LoadSpeed K31** folded that option into `"auto"`.) |
 | `mqFrontierToken` | string? | (**WorkloadCore S09, 0.3.0**) The lowest frontier among the load's queries when `:commit` returned, as a consistency token: a read of those queries with it is served at once. Absent when the load reaches no query. |
 | `mqWaitedMs` | number | (**WorkloadCore S09, 0.3.0**) How long `:commit` waited for the load's queries, in milliseconds. |
 
 **`:commit` waits for the load's queries, bounded** (**WorkloadCore S09, 0.3.0**). After the load is durable and its table locks are released,
-`:commit` waits up to `mqWaitMs` for the load's materialized queries to be current for it, then answers either way. The wait
+`:commit` waits up to `mqWaitMs` for the load's materialized queries to be current for it, then answers either way.
+(**LoadSpeed M.2, 0.4.0**) **By default it does not wait:** `mqWaitMs` omitted is `0`, so a load whose queries are still
+catching up answers `mqStatus: "behind"` at once; send `mqWaitMs` to wait (it was 30 s by default in 0.3.0). The wait
 holds no lock and refuses nothing: the load is durable whatever `mqStatus` says, and `"behind"` is not an error. To read the
 queries current, read with the commit's `token` (which waits for them, as for any write), or wait on `mqRebuildStatus`.
 
@@ -4546,7 +4599,7 @@ queries current, read with the commit's `token` (which waits for them, as for an
 | Code | Status | When |
 |---|---|---|
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, 0.3.0**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, 0.3.0**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |
-| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, 0.3.0**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. |
+| `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, 0.3.0**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. (**BL-956, 0.4.0**) At most **30 s** (half of the 60 s a bulk-load request may be refused in a row), and `10` before any rate is measured — it was the time between periodic checkpoints, 300 s by default. |
 
 The session is **failed** either way: the engine has aborted the load, and `GET {jobId}` shows `state: "failed"` with the
 same `errorCode`. A repeated `:commit` of that job answers the same 503 rather than a 409. Wait `Retry-After`, then run the
@@ -4579,7 +4632,7 @@ Get current session state and progress.
 | `lastUpdatedUtc` | string | ISO 8601 last state update time. |
 | `progress` | object? | Deferred work progress. Same structure as in commit response. Null if no deferred work is in progress. |
 | `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
-| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"`, `"deferred"`. Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"deferred"` (BatchFirst, 0.1.40)** means the load was `postLoadMqBehavior: "deferred"` and its job is pending the table's deferred pass; it is terminal for this job — follow the queries' `pendingDeferredJobs` and `isStale` instead. **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone — the WAL does not record rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
+| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"` (and `"deferred"` until the 0.4.0). Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"deferred"` (BatchFirst, 0.1.40; gone in the 0.4.0, LoadSpeed K31)** meant the load was `postLoadMqBehavior: "deferred"` and its job was pending the table's deferred pass. An `"auto"` load whose table is still loading is `"pending"` until the catch-up has brought it in (**LoadSpeed M.3**), and `"failed"` if a pass after its commit leaves it owed only by queries in `error` (their rebuild failed; they are retried, or `:refresh` them). **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone — the WAL does not record rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
 | `error` | string? | Human-readable error message. Set when `state = "failed"`. |
 | `errorCode` | string? | Error code when `state = "failed"`. |
 
@@ -4642,3 +4695,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.8 | 2026-09-30 (0.2.0) | **ColumnarCore S06 / S13, BL-716 (additive on the wire):** `POST …/tables/{name}/rows` also accepts one column-batch frame (`Content-Type: application/vnd.aouda.column-batch`; database and table from the URL, `identityInsert` / `writeConcern` as query parameters), advertised by `Accept-Post: application/json, application/vnd.aouda.column-batch` on the endpoint's responses and by `features.insertColumnBatch` in `GET /admin/capabilities`; an older server answers a frame with `415`. Column-batch frames gain the `ScaledDecimal` kind (`8`). `Decimal` columns may declare `precision` / `scale` (`Decimal(p,s)`, `1 ≤ p ≤ 18`, `0 ≤ s ≤ p`) on create-table, add-column and column details. Insert errors: a body that is not valid JSON is `400 INVALID_REQUEST` (was MVC's validation problem), an empty body is `400 MISSING_DATABASE`; a string cell that is not valid UTF-8, or a non-finite `Double` in a frame, is a `400`. |
 | 2.9 | 0.3.0 (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is answered with that security applied on the joined side, not refused (BL-818; it was `403 AUTHORIZATION_DENIED` until ColumnarRead2 S05), with `joins[i].where` to filter the joined table; `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |
 | 2.10 | 0.3.0 (WorkloadCore) | **WorkloadCore S09:** materialized-query maintenance is off the commit — an insert's `200` and an `"auto"` load's `:commit` no longer wait for their queries to be written. Bulk-load `:commit` gains `mqWaitMs` (a bounded wait for the load's queries, default 30000) and answers `mqStatus`, `mqFrontierToken` and `mqWaitedMs`; `mqRebuildStatus` is never `"completed"` from the commit itself; a single-node load's `token` is the WAL head at its commit. **WorkloadCore S10:** every load but a `"skip"` one is a pending job brought in by the table's pass (`"auto"` starts it at the commit); the ingest-fed path is gone; a query owing a load reports `isStale: true`, `pendingDeferredJobs` ≥ 1 and `current: false` with a new `staleReason` wording, and is not selected by `staleOnly`; a rebuild refused memory waits for room instead of being retried on timers. No field added or removed. **WorkloadCore S17:** `GET /api/server/memory` loses `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the `headroom` block (the resource mode is deleted); a memory refusal's `Retry-After` is the queue's estimate, or 10 s, never a constant 1 s. **Release blockers:** every endpoint answers a capacity refusal `503` + `Retry-After` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) and a write conflict `409 WRITE_CONFLICT` — some answered `400`, `409` or `500` before (BL-921, BL-881); the result ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (it was `503`); a token refresh refused for capacity is `503` and keeps its token, and of two concurrent refreshes with one token exactly one succeeds (BL-841); a materialized-query create whose first build is refused for capacity answers `204` with the query behind (BL-884); bulk-load `:append` is refused `503` before it decodes when memory is short (BL-831). No field added or removed. |
+| 2.11 | 0.4.0 (LoadSpeed) | **LoadSpeed M.2:** bulk-load `:commit`'s `mqWaitMs` defaults to `0` (it was `30000`) — a commit with queries answers `mqStatus: "behind"` at once unless the request asks to wait. No field added or removed. **LoadSpeed K31 (breaking):** `postLoadMqBehavior: "deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` (use `"auto"`); `mqStatus` and `mqRebuildStatus` lose `"deferred"`. **LoadSpeed K5 (BL-980, BL-944; breaking):** `GET /api/tables` drops `rowCountIsExact` (`rowCount` is always exact) and always carries `createdAt` / `lastModifiedAt`; an aggregate materialized query whose `groupByColumns` are plain strings is `400`; an application database accepts only its URL issuer on access tokens; a point-in-time restore of a backup without a WAL-root incarnation fails at staging. Refusals: a refusal no other code names is `503 SERVICE_UNAVAILABLE` + `Retry-After`, `SERVER_STARTING` carries `Retry-After: 5`, a refused notification-provider `DELETE` is `503`, and a wrapped refusal on `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE`), not `400 INVALID_REQUEST`. **LoadSpeed S13 (breaking):** `Decimal(p,s)` is the only decimal type — `"type": "Decimal"` without `precision` / `scale` is `400`, as is a precision above 18; a computed output's `type` and `cast`'s target spell it `"Decimal(p,s)"`; the column-batch frame's 128-bit `Decimal` kind (6) is deleted and refused `400`, and query results send a decimal column as `ScaledDecimal` at its declared scale; a decimal `sum` past 18 digits is refused in a query as in a materialized query. |

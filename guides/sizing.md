@@ -8,6 +8,23 @@ parent: "Guides"
 
 Aouda treats `MaxTotalRamBytes` as a **process RSS ceiling**, not an advisory subtotal. Leave it unset and the server derives it from detected host (or cgroup) memory: **70%** when detection found a real cgroup isolation boundary, **40%** when it fell back to physical RAM (a fallback result proves nothing about how much of the host Aouda actually owns). Set it explicitly when you need a pinned number. Resize live from Studio (Settings → Server), `PATCH /admin/config`, or `aouda budget`. See the [Defaults Reference](defaults-reference.md) for every downstream number this derives (governed budget, per-database shares, the L2 cache ceiling, the bulk-load ingest buffer budget) worked at several host sizes.
 
+> **The ceiling holds for the whole process (BL-983, 0.4.0).** It used to hold for the .NET heap only, with a fixed reserve
+> of about 6 % for the memory outside it (the runtime's native allocations, glibc's per-thread malloc arenas, JIT code, thread
+> stacks) — measured at 150–200 MiB under a bulk load with materialized queries, so the process could sit 2–5 % above
+> `MaxTotalRamBytes` and a container limit equal to it killed the server. The server now measures that memory every 10 s (anonymous
+> RSS less the GC's committed bytes) and lowers the heap's limit by whatever exceeds the reserve, and on glibc it caps the malloc
+> arenas at two at startup (an operator's `MALLOC_ARENA_MAX` or `GLIBC_TUNABLES` is left alone; the Alpine image's allocator has no
+> per-thread arenas). Measured: a bulk load OOM-killed at 1 GiB on the previous build completes with anonymous RSS at most 994 MiB;
+> at 2 GiB both builds hold. A container or cgroup limit equal to `MaxTotalRamBytes` is now safe — the earlier advice (a limit ~10 %
+> above the setting, `MALLOC_ARENA_MAX=2`) is no longer needed. The startup log states the reserve and the arena cap, and every
+> lowering of the heap's limit is logged with the reading behind it.
+>
+> **Only an explicit ceiling is held this way (BL-983, 0.4.0).** The heap's limit is lowered at runtime only when
+> `MaxTotalRamBytes` is set — in configuration, with `--max-memory`, or by a live resize. A budget the server derives from the host
+> (the default) already leaves the rest of the grant outside it (30 % of a container's limit), and its heap limit stays fixed for
+> the process's life: lowering it as well left a 512 MB container's heap too small for materialized-query maintenance. The startup log
+> says which applies.
+
 ## Small hosts (under 1 GB)
 
 Give the process only what remains after the OS. Flush and hot-tier thresholds scale with the budget, so many tables do not each assume a large in-memory buffer. Prefer `ColdPreferred` for archival tables. Ingest will throttle sooner than on a large box — that is the process staying up, not a crash.
@@ -26,7 +43,7 @@ A 2 GiB cap is a reasonable **explicit** choice, not a hidden default. Hot data 
 
 ## Large hosts
 
-Set an explicit ceiling so Aouda does not grow into all remaining RAM. Per-database `maxMemoryBytes` on HTTP create (config: `MaxMemoryShareBytes`) is a **cap on that database's share** of the one server budget, not a second independent heap.
+Set an explicit ceiling so Aouda does not grow into all remaining RAM. Per-database `maxMemoryShareBytes` on HTTP create (config: `MaxMemoryShareBytes`; it was `maxMemoryBytes` over HTTP until 0.3.x — that name is now ignored, **0.4.0**) is a **cap on that database's share** of the one server budget, not a second independent heap.
 
 ## Sizing CPU
 
@@ -134,7 +151,8 @@ inside its own commit, which is removed (next bullet).
   in one pass (see [bulk load](bulk-load.md)); at the same four cores that is ~50k
   rows/s end to end *with the queries current*. (**WorkloadCore S10, 0.3.0**) An `Auto` load's queries are brought
   current by the table's pass, started at the commit — the load itself does no materialized-query work while it
-  streams — and `:commit` waits for them up to `mqWaitMs` (30 s by default); in 0.2.0 (**ColumnarCore S12**) the load
+  streams — and `:commit` waits for them up to `mqWaitMs` (30 s by default in 0.3.0; **no wait — `0` — by default from the
+  0.4.0**, LoadSpeed M.2); in 0.2.0 (**ColumnarCore S12**) the load
   folded them while it wrote its segments and returned with them written. A query the pass cannot fold or replay is
   rebuilt by a background job after the pass (**WorkloadCore S17, 0.3.0**).
 - A table keyed by an increasing id (an `autoIncrement` column, a sequence) no longer pays a
@@ -184,7 +202,12 @@ An undeclared `Decimal` costs 16 bytes per value in the write buffer, the hot ti
 that carries it, and compresses poorly on disk. A `Decimal(p,s)` column (`"precision"` / `"scale"`, p ≤ 18 — see the
 [schema guide](schema.md)) is a scaled 64-bit integer: 8 bytes in memory, and encoded like an `Int64` in
 segments — frame-of-reference or delta bit-packing chosen per 2,048-row vector (**ColumnarRead, 0.3.0**) (a price column of cents typically takes 2–3 bytes per value on disk). Declare prices, amounts and rates
-that have a fixed number of places this way; keep the undeclared `Decimal` for values that need more than 18 digits.
+that have a fixed number of places this way.
+
+(**LoadSpeed S13, 0.4.0**) It is the only decimal: the undeclared 16-byte `Decimal` is retired and refused, so every
+decimal column now costs 8 bytes a value in memory. A decimal also travels as 8 bytes a value in a column-batch frame and
+loads without a per-value allocation: a bulk load's decimal column takes as much of the ingest buffer as an `Int64`
+column.
 
 ## The buffering thresholds are one formula in every deployment (**WorkloadCore S17, 0.3.0**)
 
@@ -545,6 +568,17 @@ cold segments are re-promoted — so the drain has nothing it is allowed to demo
 bargain a declared pin makes, and it is worth making deliberately on a small result and not by
 accident on a large one.
 
+🔎 **While memory allows, a result's rows stay in the write buffer longer** (**BL-910, 0.4.0**). A
+result is rewritten by every load that reaches its groups, so it is not sealed at the small seal size
+an append-only table is: while the database's write buffers hold less than half of the write buffer's
+ceiling (`T11`, 15 % of the database's budget — below the flush-debt soft line of the
+[stall curve](#debt-slows-the-writer-the-ingest-stall-curve-workloadcore-s16-030)), a result's buffer
+is not sealed at the seal size or flushed on idle. It flushes at its own per-table bound (`T16`, or
+the per-table row trigger), at a checkpoint, or under memory pressure — at half of `T11` and above,
+the ordinary rules apply. What you see: fewer, larger result segments, and more result rows in the
+write buffer between checkpoints. Nothing is pinned; the buffer's bytes are charged against the
+database's budget as before.
+
 ### Declaring a temperature
 
 `storage.storageTemperature` on the query's schema entry:
@@ -592,7 +626,8 @@ then is refused with a `Retry-After` that the queue estimates. `grants` on `GET 
 (**WorkloadCore S17, 0.3.0**) **A memory refusal's `Retry-After` is never a constant 1 s**, wherever it is raised —
 a read growing past its budget, a write decided under a lock, a heap exhausted mid-request included: it is the queue's
 estimate for the refused bytes at its measured service rate, or **10 s** (the memory broker's next look, `T6`) before any
-rate has been measured or when the refusal carries no estimate.
+rate has been measured or when the refusal carries no estimate. (**BL-956, 0.4.0**) Whichever it is, it is at most **30 s**
+(it was up to 300 s): ask again then, and the next answer carries a fresh estimate.
 
 The top **`max(32 MB, 3 %)` of the budget** (at most an eighth of it) is **held** for small writes (≤ 64 KiB) and sign-ins.
 Everything else is admitted against the budget less that reserve, so a budget of 512 MB gives ordinary work 480 MB. Size for
@@ -695,7 +730,7 @@ threshold you choose; a log line is gone from a polling system the moment it scr
 
 ## When ingest outruns flush
 
-Writes that do not fit **wait** for memory — before they take any lock, for up to one 10-second sampling tick — and then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` and a `Retry-After` estimated from the queue they waited in (**WorkloadCore S06, 0.3.0**), or `WAL_CAPACITY_EXCEEDED` and `Retry-After` from the WAL. Retry; the process stays up. Small writes (≤ 64 KiB) and sign-ins are admitted from a held reserve whatever else holds the memory. After flush and checkpoint, WAL segments below every consumer slot are deleted. The local point-in-time-recovery window is that same bound — **write volume** since the last backup (`MaxSlotWalKeepBytes`), not a number of days; enable WAL archiving to recover further back. Studio Inspect shows bytes on disk versus reclaimable, and `earliestRecoverablePitrPosition`. A database that cannot open (including leftover `insert.wal`) is **quarantined** — inspect or run `aouda wal convert`, then drop if you do not need it. The rest of the server keeps serving.
+Writes that do not fit **wait** for memory — before they take any lock, for up to one 10-second sampling tick — and then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` and a `Retry-After` estimated from the queue they waited in (**WorkloadCore S06, 0.3.0**), or `WAL_CAPACITY_EXCEEDED` and `Retry-After` from the WAL. Retry; the process stays up. Small writes (≤ 64 KiB) and sign-ins are admitted from a held reserve whatever else holds the memory. After flush and checkpoint, WAL segments below every consumer slot are deleted. The local point-in-time-recovery window is that same bound — **write volume** since the last backup (`MaxSlotWalKeepBytes`), not a number of days; enable WAL archiving to recover further back. Studio Inspect shows bytes on disk versus reclaimable, and `earliestRecoverablePitrPosition`. A database that cannot open (including leftover `insert.wal`) is **quarantined** — inspect it, then drop it if you do not need it (**BL-934, 0.4.0**: `aouda wal convert` is removed; restore from a backup or delete the leftover `insert.wal`). The rest of the server keeps serving.
 (**WorkloadCore S06, 0.3.0**) A refusal no longer names a **class** that hit its own entitlement: the per-class ceilings and `Aouda:Memory:PerClassAdmissionEnabled` are removed. A refusal now says how long the request waited, what was queued ahead of it, and the budget less the held reserve it was measured against. `reservedByClass` on `GET /api/server/memory` still says who was holding the budget, and `grants` what was waiting.
 
 Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed its read budget (the transient pool `T15`, less what other reads hold — the class ceiling it was measured against is gone, **WorkloadCore S06, 0.3.0**) is refused, where it previously succeeded while holding far more memory than it had reserved. The batch's refusal is the typed

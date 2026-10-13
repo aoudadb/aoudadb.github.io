@@ -329,4 +329,4 @@ Full examples are also under `examples/github-actions/schema-deploy-typescript.y
 | Apply to prod on release | `schema apply` (prod server/database, optional `--env prod`) |
 | Fail CI if server drifted | `schema validate` (exit 1 if drift) |
 
-Copy and customize the workflows under `examples/github-actions/` and set the required secrets. For a quick start with schema files and local CLI usage, see [Schema Management Guide](Schema-Management-Guide.md).
+Copy and customize the workflows under `examples/github-actions/` and set the required secrets. For a quick start with schema files and local CLI usage, see [Schema Management Guide](schema-management.md).

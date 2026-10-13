@@ -49,7 +49,7 @@ In your project root, create `aouda.schema.json`:
 }
 ```
 
-Set `database` to the database name your Aouda server uses. Your IDE can validate and autocomplete if `$schema` points to the JSON Schema (see [ADR 0019](../decisions/0019-declarative-schema-management.md)).
+Set `database` to the database name your Aouda server uses. Your IDE can validate and autocomplete if `$schema` points to the JSON Schema (see [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-declarative-schema-management.md)).
 
 ### 2. Choose your CLI
 
@@ -125,7 +125,7 @@ dotnet aouda schema diff --server http://localhost:5433 --database myapp --json
 
 See the [Schema Lifecycle guide](schema.md) §2.6 / §2.11 for the full capability and change-type matrices.
 
-That’s it. Your schema is now in code, and you can run diff/apply in CI/CD. See [Schema CI/CD Guide](Schema-CI-CD-Guide.md) for GitHub Actions and automation.
+That’s it. Your schema is now in code, and you can run diff/apply in CI/CD. See [Schema CI/CD Guide](schema-cicd.md) for GitHub Actions and automation.
 
 ---
 
@@ -237,7 +237,7 @@ Then add `"$schema": "https://aouda.io/schema/v1.json"` at the top and set `data
 
 ### Step 2: Turn off inference (recommended for production)
 
-To avoid accidental new tables, configure the server so that tables are only created via schema apply or explicit DDL. Set **InferenceMode: Off** for the database (see server configuration and [ADR 0019](../decisions/0019-declarative-schema-management.md)). With inference off:
+To avoid accidental new tables, configure the server so that tables are only created via schema apply or explicit DDL. Set **InferenceMode: Off** for the database (see server configuration and [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-declarative-schema-management.md)). With inference off:
 
 - Inserts to a **non-existent table** return an error.
 - **New tables** must be created by running `schema apply` (or by direct DDL).
@@ -268,4 +268,4 @@ Overlays can only change **database-level settings** (`settings.durability`) and
 
 - **Quick start**: Add `aouda.schema.json`, run `schema diff` / `schema apply` with either `dotnet aouda` or `npx @aouda/client`.
 - **Migration**: Export existing schema → optionally set InferenceMode to Off → do all changes via the file and `schema apply`.
-- **CI/CD**: See [Schema CI/CD Guide](Schema-CI-CD-Guide.md) for workflows (PR diff comment, apply on merge/release).
+- **CI/CD**: See [Schema CI/CD Guide](schema-cicd.md) for workflows (PR diff comment, apply on merge/release).

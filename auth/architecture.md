@@ -6,7 +6,7 @@ parent: "Auth and Authorization"
 
 # Auth Architecture Patterns & Deployment Scenarios
 
-> Part of the [Application Auth Guide](Getting-Started-Auth.md). Start there for an overview.
+> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
 
 ---
 
@@ -229,6 +229,8 @@ Use a single dedicated auth database to issue and validate JWTs for multiple dow
 
 **When to use:** Microservice architectures where auth is a separate concern; Auth0/Clerk replacement with self-hosted performance; organizations that want a single identity provider for multiple independent data services.
 
+**Every database linked to the auth database is one trust domain:** a refresh token or a native sign-in code issued at one gives a session at another ([use cases](use-cases.md#one-auth-database-is-one-trust-domain), BL-1018). Link only databases whose users may be signed in to all of them.
+
 **Setup:**
 
 ```bash
@@ -307,6 +309,11 @@ Aouda supports many different deployment configurations. This section maps each 
 | **Production — full stack** | Yes | Yes | `mk_srv_`, `mk_anon_`, `mk_svc_` | Bootstrap admin, create DB with `auth.enabled` |
 | **AI agent development** | Optional | Optional | From create-database response | `aouda start` + create auth-enabled DB via API |
 
+**Which key sees past PLS / RLS** (**0.4.0**): only an app's `mk_svc_` key. A server API key (`mk_srv_`) runs the
+server — databases, schema, backups, keys — but on a table with a PLS or RLS mode it now gets only what a request with no user
+may see (up to 0.3.x it bypassed them). A backend that reads protected tables uses the database's `mk_svc_` key, or sends the
+user's JWT as `X-User-Token` — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+
 ### Scenario 1: Embedded Mode (Zero Auth)
 
 Your application embeds the Aouda engine in-process. No network, no server, no auth needed.
@@ -332,7 +339,9 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
   -d '{ "rows": [{ "id": 1, "total": 99.99 }] }'
 ```
 
-**Auth status:** No application auth. Protect with server auth in production.
+**Auth status:** No application auth. Open while the server has no server auth database; once the server admin is set up, every
+request to `myapp` on the admin listener needs server credentials — a server admin token, `mk_srv_`, or a server key with a role on
+`myapp` (**BL-1017, 0.4.0**; in 0.3.0 it stayed open to anyone, drop included). Protect with server auth in production.
 
 ### Scenario 3: Local Server With App Auth (Testing Auth Flows)
 
@@ -355,16 +364,18 @@ curl -X POST http://localhost:5433/api/databases \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{ "name": "cache" }'
 
-# Create a server API key for your service
+# Create a server API key for your service, scoped to the one database
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{
     "name": "cache-service",
-    "databaseRoles": { "cache": ["db_writer"] }
+    "roles": [{ "role": "db_writer", "scope": "cache" }]
   }'
 ```
 
-**Auth status:** Server auth protects access. No end-user auth needed.
+**Auth status:** Server auth protects access. No end-user auth needed. `cache` has no linked auth database, so the server auth
+database governs it: an anonymous request is `401`, and the key above writes and reads `cache` but can neither drop it nor reach
+another database (**BL-1017, 0.4.0**).
 
 ### Scenario 5: Production — Full Stack (Server Auth + App Auth)
 
@@ -389,7 +400,7 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
     "name": "ci-pipeline",
-    "databaseRoles": { "production": ["db_admin"] }
+    "roles": [{ "role": "db_admin", "scope": "production" }]
   }'
 ```
 
