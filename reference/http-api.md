@@ -87,10 +87,28 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
 | `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. |
 | `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): no user's grants, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. |
-| `mk_` (other) | Custom app key | Application Auth | Granular custom key created via admin API. PLS / RLS enforced; linked to a user (`userId`), it gets that user's grants. |
+| `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, next train**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. |
+| `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants. A custom `mk_` minted on server auth is a scoped server key (BL-1017). PLS / RLS enforced. |
 | `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. Application end-user JWTs on the data-plane listener are browser-tier (named artifacts only). Operator JWTs via Studio use the admin listener (ad-hoc allowed). |
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
+
+**Named service keys and overlapping rotation (**BL-1032, next train**).** A server key (`mk_srv_`) mints extra service keys for a database that has a linked auth database:
+
+| Method | Path | Body | Result |
+|--------|------|------|--------|
+| POST | `/api/databases/{db}/service-keys` | `{ "name", "expiresAt"? }` | `201` and the secret once: `{ name, key, keyPrefix, expiresAt, createdAt }` |
+| GET | `/api/databases/{db}/service-keys` | | Live named keys: `{ keys: [{ name, keyPrefix, expiresAt, createdAt }] }`. No secret, and not the bootstrap system key |
+| DELETE | `/api/databases/{db}/service-keys/{name}` | | `204`. Revokes every live row of that name, including one still inside an overlap |
+| POST | `/api/databases/{db}/service-keys/{name}/rotate` | `{ "overlapSeconds" }` | `201` with the new secret and `validUntil` |
+
+`name` is 1–64 characters, `[A-Za-z0-9][A-Za-z0-9._-]*`. A second live key of the same name is `409`. `overlapSeconds` omitted or `0` revokes the old secret before the response returns. A positive value (max 86400) sets the old row's `expires_at` and leaves it unrevoked until then, never later than an expiry it already had. A second rotate while two rows of that name are live is `409`. A `db_admin` user and a `service_role` key are `403`. A database with no linked auth database is `400`; use a scoped server key (`POST /api/auth/admin/api-keys`, BL-1017).
+
+The same four routes under `/api/databases/{authDb}/auth-admin-keys` mint `mk_adm_` for an **application** auth database (not a data database, not server auth). That credential is accepted on that database's user, grant, session, audit, and MFA admin routes, and refused on role definitions, API-key minting, `regenerate-keys`, signup settings, RLS resolvers, and every data route.
+
+`POST /api/databases/{db}/auth/admin/regenerate-keys` takes `{ "overlapSeconds"? }` the same way and returns `validUntil` (`null` when the previous system keys were revoked at once). Named keys are not swept.
+
+`Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_`; `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings.
 
 #### Listeners and profiles
 

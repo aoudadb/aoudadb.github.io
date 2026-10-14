@@ -13,6 +13,15 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Named service keys, overlapping rotation, and an auth-admin credential (BL-1032, next train).** A server key mints
+  service keys by name (`POST /api/databases/{db}/service-keys`), lists prefixes, and revokes one name. Rotate and
+  `regenerate-keys` take `overlapSeconds` (max 86400); omit it or send `0` to revoke at once, and the response's
+  `validUntil` is when the old secret stops. `mk_adm_` (`/auth-admin-keys`) administers users and grants on one
+  application auth database and does not bypass PLS / RLS. `Aouda.Client` and `@aouda/client` refuse a key prefix in
+  the wrong setting. [HTTP API](reference/http-api.md#authentication-and-authorization),
+  [auth reference](auth/reference.md#named-service-keys-and-an-auth-admin-credential-bl-1032-next-train),
+  [getting started](getting-started/auth.md#api-keys-that-still-exist).
+
 - **A bulk load into a table with PLS or RLS requires a `service_role` key (BL-1031, next train).** `:begin` answers
   `403 AUTHORIZATION_DENIED` for every other caller, including one whose grant would allow an insert and a user JWT
   that carries `api_key_kind=service_role`. Those authenticator claim names (`auth_type`, `api_key_kind`, `api_key_id`,

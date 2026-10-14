@@ -367,6 +367,9 @@ When you create a database with auth enabled, Aouda still auto-generates keys. T
 | **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | Enforced | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
 | **`public`** | `mk_pub_` | `public` | Enforced | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
 | **`service_role`** | `mk_svc_` | `db_admin` (full access) | **Bypassed** | Backend servers, admin tools | **Must keep secret** |
+| **`auth_admin`** | `mk_adm_` | user and grant admin on that auth database | Enforced | A user-management service (**BL-1032, next train**) | **Must keep secret** |
+
+**Named keys (**BL-1032, next train**).** The bootstrap `mk_svc_` is still shown once, at database creation. A server key mints more, one name per service (`POST /api/databases/{db}/service-keys`), lists them by prefix, and revokes one name without touching the others. `POST …/{name}/rotate` with `overlapSeconds` leaves the old secret valid until `validUntil`; omit it, or send `0`, to revoke at once. Put `mk_adm_` in `AuthAdmin` / `authAdmin`, not in the service-key setting. The C# client and `@aouda/client` refuse a prefix that belongs to a different setting, so an `mk_srv_` cannot sit in `ServiceKey`.
 
 **What changed in 0.4.0** (**0.4.0**): the `service_role` key is the **only** credential that bypasses partition- and
 row-level security. A server API key (`mk_srv_`) bypassed them too up to 0.3.x; it now gets its role's grants and, on a

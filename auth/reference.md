@@ -269,13 +269,26 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/api-keys` | GET | List API keys |
 | `.../admin/api-keys` | POST | Create custom API key |
 | `.../admin/api-keys/{id}` | DELETE | Revoke API key |
-| `.../admin/regenerate-keys` | POST | Regenerate auto-generated keys |
+| `.../admin/regenerate-keys` | POST | Regenerate the auto-generated anon, service, and public keys. Body `{ "overlapSeconds"? }` (**BL-1032, next train**): omitted or `0` revokes the previous system keys in the same call; `1`–`86400` leaves them valid until `validUntil` in the response. Named service keys are not touched |
 | `.../admin/signup-settings` | GET/PUT | Read/write self-service signup (`allowSelfSignup`, `selfSignupRole`; null role → `db_writer`) |
 | `.../admin/users/{id}/password` | PUT | Admin override of a user's password — no current-password check; optionally set `forcePasswordChange` |
 | `.../admin/users/{id}/invite` | POST | (Re-)send an invite email with OTP to set a password; invalidates previous unused tokens |
 | `.../admin/users/{id}/mfa/factors` | GET | List that user's MFA factors. Same envelope as `GET .../auth/mfa/factors` (`id`, `type`, `maskedPhone`, `status`, `createdAt`). Includes active and pending. Phone is masked. 200 `factors: []` when the user has none. 404 if the user does not exist |
 | `.../admin/users/{id}/mfa/factors/{factorId}` | DELETE | Delete that factor and its challenges. The factor must belong to `{id}` (otherwise 404). 200 `{ "ok": true }` |
 | `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user. Returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; existing factor id in `detail`. Does not change the stored number. To replace it, DELETE the factor on this admin route, then enroll again |
+
+#### Named service keys and an auth-admin credential (**BL-1032, next train**)
+
+These routes take a **server key** (`mk_srv_`), not `mk_svc_` and not a `db_admin` user. The secret is returned once, on mint and on rotate.
+
+| Method | Path | What |
+|--------|------|------|
+| POST / GET | `/api/databases/{db}/service-keys` | Mint `{ name, expiresAt? }` / list live named `mk_svc_` keys by name and prefix |
+| DELETE | `/api/databases/{db}/service-keys/{name}` | Revoke every live row of that name |
+| POST | `/api/databases/{db}/service-keys/{name}/rotate` | New secret. `{ "overlapSeconds" }` `0` revokes now; a positive value leaves the old secret valid until `validUntil` |
+| POST / GET / DELETE / POST `…/rotate` | `/api/databases/{authDb}/auth-admin-keys` | The same, for `mk_adm_` on an application auth database |
+
+`mk_adm_` is accepted on that auth database's user, grant, session, audit, and MFA admin routes. It is not `service_role` (PLS / RLS stay enforced) and it cannot mint keys, regenerate system keys, define roles, change signup settings, or edit RLS. Call those routes as `/api/databases/{authDb}/auth/admin/…`.
 
 #### Response Bodies
 
@@ -1201,13 +1214,16 @@ curl -X POST http://localhost:5433/api/databases \
 
 The response includes `auth.keys.anonKey` and `auth.keys.serviceRoleKey` — **copy both immediately** (shown once). See [setup.md](setup.md) §7 for linked-database patterns.
 
-If keys are lost later:
+If a service's key is lost later, mint a named one with the server key (**BL-1032, next train**) — `POST /api/databases/{db}/service-keys` — and revoke the name you are replacing. Regenerating the bootstrap system keys still revokes the previous anon, service, and public secrets in the same call unless the body sets `overlapSeconds`:
 
 ```powershell
 curl -X POST http://localhost:5433/api/databases/derive/auth/admin/regenerate-keys `
-  -H "Authorization: Bearer mk_svc_..." `
-  -H "Content-Type: application/json"
+  -H "Authorization: Bearer mk_srv_..." `
+  -H "Content-Type: application/json" `
+  -d '{ "overlapSeconds": 3600 }'
 ```
+
+`validUntil` in the response is when the previous system secrets stop working. Omit the body, or send `0`, to revoke them before the response returns.
 
 ---
 
