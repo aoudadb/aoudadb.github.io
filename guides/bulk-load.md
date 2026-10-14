@@ -1,4 +1,4 @@
----
+﻿---
 title: "Bulk Load"
 nav_order: 17
 parent: "Guides"
@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Complete
 Primary owner: Engineering
-Last updated: 2026-09-09
+Last updated: 2026-10-14
 
 Coverage phases: P20, BL (Post20-S1, Post20-S3), P31, P46
 Primary task folders: `docs/tasks/P20/`, `docs/tasks/BL-COMPLETION.md`, `docs/tasks/P31/`, `docs/tasks/P46/`
@@ -58,6 +58,7 @@ Operationally, this gives Aouda one ingest primitive that can be used by:
 
 Scope boundaries:
 - Bulk load optimizes the ingest path; it is not a replacement for normal row-level write APIs.
+- A table with partition or row security is not a per-user bulk-load target. `:begin` refuses it (`403 AUTHORIZATION_DENIED`) unless the caller is that database's `service_role` key (`mk_svc_`). A grant that would allow an ordinary insert does not. A table with no PLS and no RLS policy is unchanged. (**BL-1031, next train**)
 - It guarantees atomic commit at the job boundary (`BulkLoadCommitted`), not partial "progressively visible" reads.
 - It currently does not provide persistent server session reconstruction across restarts (see `2.18`, `BL-067`).
 
@@ -357,6 +358,9 @@ difference is *when* the work is paid — per load, or once for many — not how
    where it committed in the log, and crash recovery re-applies a `Strict` table's delete (logged by key) only to the bulk segments
    loaded before it; on `Recent` / `BestEffort` tables a delete is replayed onto exactly the copies it matched. Before, deleting a
    key, bulk loading it again and crashing before the next checkpoint removed the loaded row.
+8. A load into a table with PLS or RLS is refused at `:begin` unless the caller bypasses both — an app `service_role` key
+   (`mk_svc_`). A user JWT, a server key (`mk_srv_`), and a `custom` key are refused, including a caller who holds a partition
+   write grant. The refusal names the protected tables and starts no session. (**BL-1031, next train**)
 
 ### What a frame carries is what NDJSON carries
 
@@ -893,6 +897,7 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
+| `403 AUTHORIZATION_DENIED` on `:begin` (**BL-1031, next train**) | A table in the load has PLS or RLS, and the caller is not a `service_role` key | Load with that database's `mk_svc_` key. Ordinary inserts remain the per-user write path. |
 | `BulkLoadInvalidOptions` on begin with `skipReplication` | Multi-node safety/policy check failed | Use `logShipSegments` or explicit bypass where allowed. |
 | `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Add `_table` for each row and keep within declared table set. |
 | `BulkLoadCursorMismatch` from client | Client send position diverges from server durable cursor expectations | Retry from returned durable cursor and keep same idempotency key. |

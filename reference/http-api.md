@@ -4459,6 +4459,12 @@ Content-Type: application/json
 }
 ```
 
+**Authorization (**BL-1031, next train**).** `:begin` returns `403` `AUTHORIZATION_DENIED` when any table the load will
+write — the tables in the request, plus transform targets when `applyTransforms` is set — has partition-level or
+row-level security, unless the caller is an app `service_role` key (`mk_svc_`). A user JWT, a server API key (`mk_srv_`),
+and a `custom` key are refused, including one whose grants would allow an ordinary insert of the same rows. A table with
+no PLS and no RLS policy is not affected. The refusal happens before a session exists; `:append` does not filter rows.
+
 ---
 
 ### `POST {jobId}:append`

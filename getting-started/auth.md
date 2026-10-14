@@ -373,6 +373,8 @@ row-level security. A server API key (`mk_srv_`) bypassed them too up to 0.3.x; 
 protected table, what a request with no user may see (with the usual RLS rules, no row; a PLS table answers `403`). Use the
 database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with either key for one user's data —
 [what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+Bulk load of a protected table is the same credential, and stricter: `:begin` is `403` for every caller except `mk_svc_`,
+even one whose grant would allow an insert (**BL-1031, next train**). [Bulk load](../guides/bulk-load.md).
 
 ```bash
 # Enable self-service signup (app-admin) — default is off

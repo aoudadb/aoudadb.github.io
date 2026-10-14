@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A bulk load into a table with PLS or RLS requires a `service_role` key (BL-1031, next train).** `:begin` answers
+  `403 AUTHORIZATION_DENIED` for every other caller, including one whose grant would allow an insert. A table with no
+  PLS and no RLS policy is unchanged. [Bulk load](guides/bulk-load.md),
+  [authorization](auth/authorization.md#bulk-load-is-not-a-per-user-write-bl-1031-next-train).
+
 ## 0.4.0 — 2026-10-13
 
 Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's security review), **`@aouda/client` 0.4.0**,
