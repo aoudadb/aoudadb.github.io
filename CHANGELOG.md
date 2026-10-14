@@ -14,7 +14,9 @@ Public, user-facing release notes. Engine phase status lives in the server
 ## Unreleased
 
 - **A bulk load into a table with PLS or RLS requires a `service_role` key (BL-1031, next train).** `:begin` answers
-  `403 AUTHORIZATION_DENIED` for every other caller, including one whose grant would allow an insert. A table with no
+  `403 AUTHORIZATION_DENIED` for every other caller, including one whose grant would allow an insert and a user JWT
+  that carries `api_key_kind=service_role`. Those authenticator claim names (`auth_type`, `api_key_kind`, `api_key_id`,
+  `api_key_prefix`, `api_key_name`, `aouda_auth_db`) are rejected on `PUT …/claims`. A table with no
   PLS and no RLS policy is unchanged. [Bulk load](guides/bulk-load.md),
   [authorization](auth/authorization.md#bulk-load-is-not-a-per-user-write-bl-1031-next-train).
 

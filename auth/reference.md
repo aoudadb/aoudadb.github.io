@@ -261,7 +261,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}/roles` | GET | List user's roles |
 | `.../admin/users/{id}/roles` | PUT | Replace user's role assignments |
 | `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
-| `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key |
+| `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key, a nested name, or a reserved name (`sub`, `email`, `iss`, `aud`, `iat`, `exp`, `nbf`, `aal`, `db_roles`, and the authenticator names `auth_type`, `api_key_kind`, `api_key_id`, `api_key_prefix`, `api_key_name`, `aouda_auth_db` — **BL-1031, next train**) |
 | `.../admin/roles` | GET | List roles |
 | `.../admin/roles` | POST | Create custom role |
 | `.../admin/roles/{id}` | PATCH | Update role |

@@ -84,7 +84,8 @@ The server-admin endpoints (`/api/auth/admin/*`, database management, backups) a
 
 `POST …/bulk-load:begin` on a table with PLS or RLS returns `403` `AUTHORIZATION_DENIED` unless the caller is that
 database's `service_role` key (`mk_svc_`). A `db_admin` user, a server key (`mk_srv_`), and a `custom` key are refused,
-including a caller whose partition grant would allow an ordinary insert of the same rows. Bulk load does not filter
+including a caller whose partition grant would allow an ordinary insert of the same rows, and a user JWT that carries
+`api_key_kind=service_role`. That name is not a custom claim: storing it is `AUTH_CLAIM_INVALID`. Bulk load does not filter
 rows down to the caller's scope: it is a migration, and the session is not started. A table with no PLS and no RLS
 policy is unchanged. See [Bulk load](../guides/bulk-load.md).
 
