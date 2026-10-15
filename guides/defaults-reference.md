@@ -232,9 +232,18 @@ Standard ASP.NET Core configuration — no Aouda-specific mechanism:
 # Everything at Information
 AOUDA__LOGGING__LOGLEVEL__DEFAULT=Information
 
-# Or one category, which is usually what you want
+# Or one category, which is usually what you want - restating the shipped levels beside it (below)
+Logging__LogLevel__Default=Warning
+Logging__LogLevel__Aouda.Server.Startup=Information
+Logging__LogLevel__Aouda.Server.Observability.BulkLoadCommitLog=Information
 Logging__LogLevel__Aouda.Engine.Storage=Debug
 ```
+
+⚠️ **Any `Logging:LogLevel` setting replaces the shipped levels as a whole**, not just its own category: the moment one key is
+set, from `appsettings.json`, an environment variable or the command line, the server applies none of the defaults in the table
+above, and every category you did not name falls to .NET's own default, `Information` — four ASP.NET lines for every request
+among them. Restate `Default` and the two `Information` categories beside the one you turn up, as above (**LoadScan, next
+train**: the benchmarks were found running this way).
 
 ```json
 {
@@ -269,6 +278,20 @@ established. A heartbeat every 30 s is 2 permits a minute per device, so three d
 60 — leave room for page loads (batch them), typing indicators and reconnect storms (each resubscribe is a permit), and
 measure before raising. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
 in no guide before).
+
+## Runtime: GC and thread pool
+
+Set in the server's `runtimeconfig.json`; nothing needs setting. .NET's own `DOTNET_*` variables override them (their numbers
+are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing.md#garbage-collection-and-the-thread-pool-columnarcore-s14-020-loadscan-next-train).
+
+| Setting | Default | Override | Why |
+|---|---|---|---|
+| Server GC | on | `DOTNET_gcServer=0` | one heap per core; the write and read paths allocate in parallel |
+| Heap hard limit | 85 % of the memory the process may use | — (the memory budget lowers it further) | a second ceiling under the governed budget |
+| DATAS (dynamic adaptation) | on | `DOTNET_GCDynamicAdaptationMode=0` | the heap count and gen-0 budget follow the load, not the core count; off is cheaper on a bulk load but keeps one heap per visible core |
+| Thread-pool spin limit | **10** (.NET's default 70) (**LoadScan, next train**) | `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=46` (hexadecimal) | idle workers spin less before they sleep: 6–11 % less CPU per row on a steady bulk load, 15–20 % on a fresh server's first million; reads within ±10 % |
+
+The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
 ## Related docs
 

@@ -81,13 +81,26 @@ class, so a long merge or upload on one database never holds up another database
 waits only for flushes already running (**WorkloadCore group 5 review, 0.3.0**). Many databases on one server therefore no longer each
 run their own background loops at full width; nothing needs configuring.
 
-### Garbage collection (**ColumnarCore S14, 0.2.0**)
+### Garbage collection and the thread pool (**ColumnarCore S14, 0.2.0**; **LoadScan, next train**)
 
 The server runs .NET's **Server GC with DATAS** (dynamic adaptation) and a heap hard limit of 85 % of the memory it may
-use; that is in its `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores with the write paths now
-allocating about 0.4–2.4 KB per row: GC pauses stay under 5 % of wall time on bulk loads, inserts and inserts with nine
-materialized queries (0.9–4.9 %). Workstation GC, Server GC without DATAS and a larger gen-0 budget
-(`DOTNET_GCgen0size`) were measured beside it and none was consistently cheaper, so the default stands.
+use, and (**LoadScan, next train**) its **thread pool's spin limit is 10** (.NET's default is 70): an idle worker spins less before
+it sleeps. All of it is in the server's `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores, the spin limit cut the
+server's steady bulk load by 6–11 % (about 3.15 to 2.8–3.0 CPU-s per million rows) and, in four of five measurements, a fresh
+server's first million by 15–20 %, with memory unchanged and reads within ±10 % (a young server's first passes up to 8 % slower,
+selective scans 10 % faster); an idle server with materialized queries wakes less. The 2 GB lab soak passed with it. With the write paths allocating about 0.4–2.4 KB per row,
+GC pauses stay under 5 % of wall time on bulk loads, inserts and inserts with nine materialized queries (0.9–4.9 %).
+
+Workstation GC, two heaps, a larger gen-0 budget (`DOTNET_GCgen0size`), concurrent GC off, a spin limit of 0, tiered-compilation
+and PGO settings, and ReadyToRun were measured beside them; each was slower on the load or on the reads, or saved no CPU. **DATAS
+off** was cheaper still on the load (about 2.4 CPU-s per million rows with the spin limit) but it keeps one GC heap per core the
+process can see — peak memory 41–61 % higher on four cores, and on a host with many cores and no CPU limit, one heap per core of
+the host — so DATAS stays on.
+
+To override, use .NET's own variables, which take precedence over the `runtimeconfig`: `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit`
+sets the spin limit (the value is hexadecimal: `46` is .NET's 70), `DOTNET_GCDynamicAdaptationMode=0` turns DATAS off — on a host
+whose CPU limit is set and where memory is plentiful. The startup line `Runtime GC configuration: serverGC=…,
+dynamicAdaptation(DATAS)=…` says what is in force; before LoadScan it read `False` whenever DATAS came from the `runtimeconfig`.
 
 **If you embed the engine in your own process** (the embedded package, or `AoudaEngine` directly), your application's
 GC settings apply, and .NET's default is Workstation GC. Turn Server GC on (`<ServerGarbageCollection>true</ServerGarbageCollection>`
