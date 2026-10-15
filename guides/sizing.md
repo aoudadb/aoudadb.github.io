@@ -88,8 +88,12 @@ use, and (**LoadScan, next train**) its **thread pool's spin limit is 10** (.NET
 it sleeps. All of it is in the server's `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores, the spin limit cut the
 server's steady bulk load by 6–11 % (about 3.15 to 2.8–3.0 CPU-s per million rows) and, in four of five measurements, a fresh
 server's first million by 15–20 %, with memory unchanged and reads within ±10 % (a young server's first passes up to 8 % slower,
-selective scans 10 % faster); an idle server with materialized queries wakes less. The 2 GB lab soak passed with it. With the write paths allocating about 0.4–2.4 KB per row,
-GC pauses stay under 5 % of wall time on bulk loads, inserts and inserts with nine materialized queries (0.9–4.9 %).
+selective scans 10 % faster); an idle server with materialized queries wakes less. The 2 GB lab soak passed with it.
+(**LoadScan, next train**) The segment writer then stopped copying each page, rebuilding its encoders and reopening its files per page: on the same
+4 cores the server's steady bulk load measured about 2.65 → 2.0 CPU-s per million rows (≈ 300 k → 370 k rows/s) and a fresh
+server's first million 9.7 → 5.4, with no change to the files it writes. With the write paths allocating about 0.3–2.4 KB per row
+(a plain bulk load ~0.3 KB), GC pauses stay under 5 % of wall time on bulk loads, inserts and inserts with nine materialized
+queries (0.9–4.9 %).
 
 Workstation GC, two heaps, a larger gen-0 budget (`DOTNET_GCgen0size`), concurrent GC off, a spin limit of 0, tiered-compilation
 and PGO settings, and ReadyToRun were measured beside them; each was slower on the load or on the reads, or saved no CPU. **DATAS
