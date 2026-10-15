@@ -94,7 +94,9 @@ selective scans 10 % faster); an idle server with materialized queries wakes les
 server's first million 9.7 → 5.4, with no change to the files it writes. (**LoadScan, next train**) Then an `:append` stopped
 copying each column a second time as it is read, and a load's buffers stopped being allocated per job (they are reused, by the
 next part of the job and the next job): the steady load about 1.9 → 1.1 CPU-s per million rows, a fresh server's first million
-5.0 → 4.3, and a plain bulk load's allocation about 320 → 170 bytes per row over HTTP (in process about 220 → 35). With the write
+5.0 → 4.3, and a plain bulk load's allocation about 320 → 170 bytes per row over HTTP (in process about 220 → 35). The buffers
+waiting for the next job are counted in the database's memory budget (`bulkLoadAccrual` in the server's memory report) and are the
+first thing given back when the heap needs room, so reusing them never holds memory the budget cannot see. With the write
 paths allocating about 0.2–2.4 KB per row (a plain bulk load ~0.2 KB), GC pauses stay under 5 % of wall time on bulk loads,
 inserts and inserts with nine materialized queries (0.9–4.9 %).
 
