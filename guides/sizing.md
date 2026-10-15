@@ -91,9 +91,12 @@ server's first million by 15–20 %, with memory unchanged and reads within ±10
 selective scans 10 % faster); an idle server with materialized queries wakes less. The 2 GB lab soak passed with it.
 (**LoadScan, next train**) The segment writer then stopped copying each page, rebuilding its encoders and reopening its files per page: on the same
 4 cores the server's steady bulk load measured about 2.65 → 2.0 CPU-s per million rows (≈ 300 k → 370 k rows/s) and a fresh
-server's first million 9.7 → 5.4, with no change to the files it writes. With the write paths allocating about 0.3–2.4 KB per row
-(a plain bulk load ~0.3 KB), GC pauses stay under 5 % of wall time on bulk loads, inserts and inserts with nine materialized
-queries (0.9–4.9 %).
+server's first million 9.7 → 5.4, with no change to the files it writes. (**LoadScan, next train**) Then an `:append` stopped
+copying each column a second time as it is read, and a load's buffers stopped being allocated per job (they are reused, by the
+next part of the job and the next job): the steady load about 1.9 → 1.1 CPU-s per million rows, a fresh server's first million
+5.0 → 4.3, and a plain bulk load's allocation about 320 → 170 bytes per row over HTTP (in process about 220 → 35). With the write
+paths allocating about 0.2–2.4 KB per row (a plain bulk load ~0.2 KB), GC pauses stay under 5 % of wall time on bulk loads,
+inserts and inserts with nine materialized queries (0.9–4.9 %).
 
 Workstation GC, two heaps, a larger gen-0 budget (`DOTNET_GCgen0size`), concurrent GC off, a spin limit of 0, tiered-compilation
 and PGO settings, and ReadyToRun were measured beside them; each was slower on the load or on the reads, or saved no CPU. **DATAS
