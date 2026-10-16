@@ -13,6 +13,26 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Data past its time stops costing anything: windowed materialized queries, table retention, and deleting by dropping
+  segments (Horizon, next train; ADR 0063).** An `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column
+  may declare `window: { keep }`: its result keeps only the groups at or after its **horizon** (the server's clock minus `keep`,
+  persisted before any reader sees it, never moved back), maintenance and a history load build nothing below it, and **a read
+  below it is computed from the source** by the query's own build code (`stats.windowCompletionRows`, in pieces under the read's
+  budget) — so a window decides what is fast, never what is returned. Status reports `window` and `horizon`; routing reaches a
+  windowed result only inside its window. **Expiry** drops whole segments behind the horizon and writes nothing (one catalog batch
+  a round; segments cut by time slice). A table may declare **retention** (`policy.retention: { keep }`): rows below its horizon
+  are not returned, not matched by `UPDATE` / `DELETE`, and a write below it is accepted and counted as `expiredRows`; queries
+  over it keep their history. **`DELETE … WHERE t < X`** on a table clustered by `t` costs metadata, not rows: an early expiry
+  with retention, one log record and whole-segment retirements without. **Deleted rows** stop costing: a segment with no live row
+  is retired, `TRUNCATE` drops the table's segments, a cold segment a quarter dead is rewritten whatever its size, and scans skip
+  what has no live row. **Subscriptions** get a snapshot that carries its horizon, a `horizon` message when it rises and a
+  `range_delete` message for a `DELETE` before a time, instead of a row event per row. Known limitations are named with their
+  cards (BL-1059 … BL-1064). ⚠️ A data directory written by 0.4.0 is refused at open (catalog format 10, no migration).
+  [Windows](guides/materialized.md#windows), [retention](guides/retention.md),
+  [subscriptions](guides/real-time.md#horizons-and-range-deletes), [bulk load](guides/bulk-load.md),
+  [sizing](guides/sizing.md#windowed-results), [defaults](guides/defaults-reference.md#horizons),
+  [HTTP API](reference/http-api.md).
+
 - **A bulk load into a table with PLS or RLS requires a `service_role` key (BL-1031, next train).** `:begin` answers
   `403 AUTHORIZATION_DENIED` for every other caller, including one whose grant would allow an insert and a user JWT
   that carries `api_key_kind=service_role`. Those authenticator claim names (`auth_type`, `api_key_kind`, `api_key_id`,

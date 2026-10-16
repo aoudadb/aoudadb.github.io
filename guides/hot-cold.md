@@ -164,6 +164,13 @@ If you do nothing beyond default server config:
 - **Mutable keyed tier** (P30): `MutableKeyedStore` provides in-place upsert by PK. Dead-row reclamation via lazy tombstone compaction. Bounded memory at keyspace size. Serves `LatestPerKey` and cache/UPSERT workloads.
 - **Representation selector** (P30): `RepresentationSelector` routes incoming write streams by: intent hint (`Mutable` policy) → mutation rate (rolling writes/s) → segment size (below seal floor) → defaults to immutable hot.
 - **Hot segment merge** (P30): `HotSegmentMergeWorker` coalesces small immutable hot segments and compacts mutable-tier tombstones.
+- **Deleted rows** (**Horizon, next train**): a hot or cold segment with no live row is retired whole by its coalescer's next pass
+  (one catalog batch, nothing rewritten); `TRUNCATE` retires the table's segments instead of masking every row; a cold segment with
+  at least 25 % of its rows deleted is rewritten alone within one cold-merge tick, whatever its size (before, only cold segments under
+  65,536 rows were merged); and a scan skips a segment or row group whose rows are all deleted. On a table with a horizon (a windowed
+  result, or a table with [retention](retention.md)) the coalescers merge only within one time slice wholly at or after the horizon;
+  a segment reaching below it is left for expiry, which drops whole segments and writes nothing. See
+  [Storage — Deleted rows and retired segments](storage.md#deleted-rows-and-retired-segments-horizon-next-train).
 - **Durability gating end-to-end** (P30): `DefaultPageStoreRouter` governs flush/persist path. `MemoryOnly` tables write nothing (no `.hot`, `.col`, `.hra`, WAL). `DiskBacked` tables persist per representation. The old bypass (hardcoded `FilePageStore`) was removed.
 - Query/read correctness over mixed hot/cold:
   - Query paths consult segment temperature and deletion-mask correctness fixes are in place.

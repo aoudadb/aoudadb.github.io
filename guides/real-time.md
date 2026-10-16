@@ -188,6 +188,9 @@ If you do nothing:
   - HTTP long-poll fallback server endpoint plus .NET/TypeScript fallback transports.
 - Materialized query streaming:
   - Subscribe via table path to result tables with incremental updates.
+- Horizon notices (**Horizon, next train**):
+  - `snapshot_complete` carries `horizon` / `horizon_column` for a windowed result or a table with retention; `horizon` and
+    `range_delete` messages tell a client what to drop. See [Horizons and range deletes](#horizons-and-range-deletes).
 
 ### Planned / proposed
 
@@ -263,6 +266,109 @@ Invariants:
 - Sequence/version continuity is monotonic and is the basis for resume and dedup.
 - Authorization filtering is enforced in subscription delivery and write validation paths.
 - Long-poll transport negotiates JSON wire mode only.
+
+### Horizons and range deletes
+
+(**Horizon, next train**) Some tables drop old rows without a row event per row: a **windowed materialized query's result**
+(its window, see [Materialized Queries](materialized.md)) and a **table with retention** ([Retention](retention.md)). Each has a
+**horizon** — an instant below which its rows are gone — and it only rises. And a `DELETE` before a time on a table **without**
+retention deletes a whole range in one statement. A subscriber learns about all three from **notices**: messages that name a
+column and a time, not rows.
+
+**The snapshot carries its horizon.** When the subscribed table has a horizon, `snapshot_complete` gains `horizon` (ISO-8601 UTC,
+seven fractional digits) and `horizon_column`. The snapshot holds no row whose column lies below the horizon, or is null there. Both
+fields are omitted for any other table.
+
+```json
+{
+  "type": "snapshot_complete",
+  "id": "sub-candles",
+  "version": 100040,
+  "row_count": 2880,
+  "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213",
+  "horizon": "2026-10-09T00:00:00.0000000Z",
+  "horizon_column": "Minute"
+}
+```
+
+**A windowed result's snapshot is its stored part** — the rows at or after its horizon. Nothing below the horizon is computed for a
+subscription: no change event would ever maintain it (maintenance builds nothing below the horizon), and computing it was unbounded
+at subscribe. A named-query subscription's `total_matches` counts the same stored part. An HTTP read of the result is still complete:
+the part below the horizon is computed from the source there (`stats.windowCompletionRows`).
+
+**`horizon` — the floor rose.** Sent once per published advance of the table's horizon: a windowed result's clock advance, a
+retention table's clock advance, or a `DELETE` before a time on a table with retention (an early expiry).
+
+```json
+{ "type": "horizon", "id": "sub-candles", "column": "Minute", "horizon": "2026-10-09T00:01:00.0000000Z", "version": 100057 }
+```
+
+Drop every held row whose `column` is below `horizon` **or is null**, and keep no later row below it. No row event is sent for the
+expired rows.
+
+**`range_delete` — rows below a time were deleted.** Sent once for a `DELETE` whose whole predicate was `column lt X` (`before` is
+`X`) or `column lte X` (`before` is the successor of `X` at the column's resolution — one tick for a `Timestamp`, one day for a
+`Date`) on a table **without** retention.
+
+```json
+{ "type": "range_delete", "id": "sub-trades", "column": "Ts", "before": "2026-07-01T00:00:00.0000000Z", "version": 100060 }
+```
+
+Drop every held row whose `column` is below `before`. A row with a null time was **not** deleted — keep it. No horizon is installed:
+rows that arrive after the notice are live whatever their time, so do not filter later rows by it. No per-row delete event is sent.
+
+**Ordering and resume.** Both notices take a change-event sequence number (`version`) and are ordered in the table's change stream
+like any `change`: a `range_delete` is emitted inside the statement's commit, so a row inserted after the statement — even with a time
+below `before` — arrives after the notice. Both carry `token` when the server can encode one. Both are kept by the resume buffer and
+replayed in order on `resume_from`; a resume that falls back to a fresh snapshot gets one that carries the current horizon.
+
+**Who receives them.** Every subscriber of the table that is not denied it. A notice names no row, so the subscription's `filter`, a
+named query's bound `where` and row-level security do not apply to it.
+
+**Conflation.** A conflated subscription sends what it holds before it sends a notice, so a held change from before a range delete
+never arrives after it.
+
+**Times.** The notices carry ISO strings; rows on the JSON wire carry a `Timestamp` as .NET ticks (an `Int64`, 100 ns since
+0001-01-01 UTC). Compare them as the same instant, at full precision — the SDK helpers below do.
+
+**Dropping rows in the client.** `Aouda.Client`: a `SubscriptionEvent` has `Type` `"horizon"` or `"range_delete"` (`IsHorizon`,
+`IsRangeDelete`), `Horizon` (a snapshot's, or a `horizon` event's), `Before` (a `range_delete`'s) and `Column`; `evt.Removes(row)`
+says whether a held row goes. The typed `SubscriptionEvent<T>` carries the same, with `Removes(row, r => r.Ts)`.
+
+```csharp
+await foreach (var evt in client.GetTable("trades").SubscribeAsync())
+{
+    if (evt.IsSnapshot)
+        held = evt.Rows!.ToList();                // nothing below evt.Horizon, when the table has one
+    else if (evt.IsHorizon || evt.IsRangeDelete)
+        held.RemoveAll(row => evt.Removes(row));
+    else
+        Apply(held, evt);                         // insert / update / delete, as before
+}
+```
+
+`@aouda/client`: the `subscribe` options take `onHorizon(event)` and `onRangeDelete(event)` (`SubscriptionHorizonEvent`,
+`SubscriptionRangeDeleteEvent`); the async iterator yields the same events (`type: "horizon"` / `"range_delete"`), and its snapshot
+event carries `horizon` and `horizonColumn`. `applyNotice(rows, event)` returns the rows a notice keeps; `noticeRemoves(row, event)`
+answers for one row.
+
+```typescript
+import { applyNotice } from "@aouda/client";
+
+let rows: Trade[] = [];
+const sub = client.table<Trade>("trades").subscribe({
+  onSnapshot: (snapshot) => { rows = snapshot; },
+  onChange: (event) => { /* insert / update / delete, as before */ },
+  onHorizon: (event) => { rows = applyNotice(rows, event); },
+  onRangeDelete: (event) => { rows = applyNotice(rows, event); },
+});
+```
+
+**An older client** ignores both messages (both SDKs drop a `type` they do not know), so its cache keeps rows the server no longer
+returns until it subscribes again. There is no compatibility shim: upgrade the client with the server.
+
+**`TRUNCATE` sends no notice** — and no row events — today. A client holding a truncated table's rows keeps them until it subscribes
+again.
 
 ## 2.8 How Aouda implements it
 
@@ -804,6 +910,8 @@ Last verification context date (UTC): `2026-03-31` (from P10 session reports and
 - Distinct materialized-query "not ready" error code is not yet surfaced as a dedicated protocol contract.
   - User impact: client error handling for MQ-not-ready vs not-found remains coarse.
 - Long-poll fallback still uses a bounded outbox; WebSocket overflow is `gap` then unregister (or `SLOW_CONSUMER` on the send-path HWM).
+- A `TRUNCATE` sends subscribers nothing — no notice and no row events (pre-existing; the horizon notices do not cover it).
+  - User impact: a client cache keeps a truncated table's rows until it subscribes again.
 
 ## 2.19 References
 

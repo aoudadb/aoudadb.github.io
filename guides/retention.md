@@ -1,0 +1,309 @@
+---
+title: "Retention and Deleting Before a Time"
+nav_order: 11.5
+parent: "Guides"
+---
+
+# Aouda Functionality: Table Retention and Deleting Before a Time
+
+Document status: New (**Horizon, next train**)
+Primary owner: Aouda maintainers
+Last updated: 2026-10-16
+
+Coverage phases: Horizon (`S09`, `S10`, `S11`, `S12`)
+Primary ADR: `docs/decisions/0063-time-horizons-windowed-results-retention-and-deleting-by-segment.md` (`D-9`, `D-10`, `D-11`)
+Related: [Materialized Queries](materialized.md) (windowed results, and the history a query keeps over a table with retention),
+[Real-time Streaming](real-time.md#horizons-and-range-deletes), [Bulk Load](bulk-load.md#loading-a-table-with-retention),
+[Time-series and Clustering](time-series.md), [HTTP API](../reference/http-api.md)
+
+Everything on this page is new in the next train (**Horizon, next train**). Nothing here exists in 0.4.0.
+
+---
+
+## Start Here
+
+| If you need to know... | Go to |
+|---|---|
+| How to make a table keep only its recent rows | [Declaring retention](#declaring-retention) |
+| What happens to a row older than `keep` | [The horizon](#the-horizon), [Below the horizon](#below-the-horizon) |
+| What a write below the horizon answers | [Writes below the horizon: `expiredRows`](#writes-below-the-horizon-expiredrows) |
+| How to delete everything before a time without paying per row | [Deleting everything before a time](#deleting-everything-before-a-time) |
+| What a live subscriber sees | [What a subscriber sees](#what-a-subscriber-sees) |
+| What a replica sees | [Replicas](#replicas) |
+| What deleting rows costs in general | [Deleting in general](#deleting-in-general) |
+| What is not done yet | [Known limitations](#known-limitations) |
+
+---
+
+## What retention is
+
+A table can declare that it keeps only its recent rows. Rows whose time is older than the server's clock minus `keep` stop being
+returned, stop being written, and leave the table **by whole segments**: no row is deleted one by one, nothing is logged per row,
+and no data byte is written to drop them.
+
+The shape it is built for is raw time-series data kept for a while, with materialized queries over it kept for ever — raw trades
+for 90 days, daily candles for good (the downsampling pattern). A materialized query over a table with retention keeps its history
+below the table's horizon; see [Materialized Queries](materialized.md).
+
+Retention is a table's contract, not a side effect: a horizon exists only on a table that declares retention (and on a windowed
+materialized query's result). A `DELETE` never installs one on a table without retention.
+
+---
+
+## Declaring retention
+
+`policy.retention` is `{ "keep": "<n><unit>" }` — a whole number of minutes, hours, days or weeks (`m`, `h`, `d`, `w`): `"90m"`,
+`"36h"`, `"90d"`, `"2w"`. Months and years are not units (`"3mo"` is refused).
+
+**The requirement:** the table's **first cluster column** (the lowest `clusterOrder`) is a `Timestamp` or `Date`. It may be
+nullable. That column is the one retention applies to.
+
+**On create** (`POST /api/databases/{db}/tables`):
+
+```json
+{
+  "database": "market",
+  "name": "trades",
+  "columns": [
+    { "name": "Id", "type": "Int64", "primaryKeyOrder": 1 },
+    { "name": "Ts", "type": "Timestamp", "clusterOrder": 1, "isNullable": true },
+    { "name": "Price", "type": "Double" }
+  ],
+  "policy": { "storageTemperature": "Auto", "retention": { "keep": "90d" } }
+}
+```
+
+**On an existing table** (`PUT /api/databases/{db}/tables/{name}/policy`). A body that only declares or changes retention needs no
+`storageTemperature`; the table's temperature is kept:
+
+```json
+{ "database": "market", "retention": { "keep": "30d" } }
+```
+
+Declared on a table that already holds rows, it hides the rows below the new horizon at once.
+
+The policy response and the table detail (`GET …/tables/{name}`, under `policy`) report it, with the table's current horizon:
+
+```json
+{
+  "storageTemperature": "Auto",
+  "residency": { … },
+  "retention": { "keep": "30d" },
+  "horizon": "2026-09-16T08:41:00Z"
+}
+```
+
+`retention` and `horizon` are omitted for a table without retention. The schema document takes the same object
+(`"policy": { "retention": { "keep": "90d" } }`), and so do both SDKs: `TablePolicy.Retention` in `Aouda.Client`, `retention` on
+`client.tables.createTable(…)` / `client.tables.updatePolicy(…)` in `@aouda/client` ([TypeScript client](../clients/typescript.md)).
+
+### What is refused
+
+Each refusal is a `400` that names its reason.
+
+| Refused | Why, and what to do instead |
+|---|---|
+| A table whose first cluster column is not a `Timestamp` or `Date` (or that has no cluster column) | Retention drops by time slices of that column; declare the time column with `clusterOrder: 1`. |
+| A `keep` that is not a whole number of `m` / `h` / `d` / `w` | — |
+| **Removing** a declared retention | The horizon only rises and the rows below it are already gone, so there is nothing to go back to. Change `keep` instead — a longer one leaves the horizon where it is. |
+| A **window** on a materialized query whose source has retention (directly, or as the first non-windowed table up a cascade) | A windowed result computes its part below the window from its source; once the source has dropped a range, that answer would change. Use an unwindowed query over the table with retention — it keeps its history. |
+| Retention on a table that a window completes from | The same rule, seen from the table. |
+| A query over a table with retention that does not split its groups by the retention column, and retention on a table such a query reads | See [What may read a table with retention](#what-may-read-a-table-with-retention). |
+
+### What may read a table with retention
+
+A materialized query over a table with retention must split its groups by that time, so that the groups below the horizon can be
+kept as they were when a rebuild reads only the rows still there:
+
+- an `aggregate` grouped by a time bucket of the retention column, or by the column itself;
+- a `topNPerGroup` grouped by the retention column.
+
+Anything else over such a table — a `latestPerKey`, a `firstPerKey`, a `filter`, an aggregate not grouped by the time — is refused at
+create, and retention is refused on a table that such a query already reads. Incremental maintenance would keep their history and
+a rebuild would drop it, answering the same query two ways. **Known limitation (BL-1060):** this blocks retention on a table that has
+a `latestPerKey` or `firstPerKey` query over it.
+
+A read of a table with retention is answered from the table, never routed to a materialized result. **Known limitation (BL-1061):**
+the routing a current result gives other tables ([Materialized Queries](materialized.md)) does not apply to it.
+
+---
+
+## The horizon
+
+The table's **horizon** is the instant below which its rows are gone: the server's clock minus `keep`, **on the minute**.
+
+- It is **persisted, then published**: set in the catalog when retention is declared (create, policy, schema apply), and raised by
+  the server's horizon job, which writes it to the catalog before any reader is given it. A reader therefore never sees a row that a
+  restart would bring back.
+- The job runs every slice / 8, and no more often than once a minute. The slice is the largest of hour / day / week / month that
+  is at most `keep / 4` (a `90d` keep has a week slice; `7d`, a day).
+- It **never moves back** — not when the clock is stepped back, not across a crash, not when `keep` is made longer.
+- Every read takes the horizon of the snapshot it reads, so a horizon that rises while a read runs does not change that read.
+- It is reported as `horizon` in the policy response and the table detail, and to subscribers (below).
+
+---
+
+## Below the horizon
+
+**No read returns a row below the horizon** — rows, `COUNT(*)`, aggregates, `GROUP BY`, `DISTINCT`, `ORDER BY … LIMIT`, joins,
+named queries and subscription snapshots alike. A **null** time in the retention column counts as below it.
+
+**`UPDATE` and `DELETE` match nothing below it**, so their counts are what a read shows. A row stored below the horizon is not
+changed, counted, logged or sent to the table's queries.
+
+### Writes below the horizon: `expiredRows`
+
+A row written with a time below the horizon — or with a null time in a nullable retention column — is **accepted, not stored, and
+counted**. It is left out at the write's entry, before any key check, log record, buffer or change event, and the response says how
+many: `expiredRows` on the insert response, the named mutation's insert and upsert results, and the bulk-load `:commit` response
+([HTTP API](../reference/http-api.md#post-apidatabasesdbtablesnamerows)). `expiredRows` is omitted when it is 0 — always, on a table
+without retention. A null in a `NOT NULL` time column is refused, as on any table.
+
+```json
+{ "rowsInserted": 1, "expiredRows": 2, "executionMs": 3, "token": "…" }
+```
+
+Accepting rather than refusing keeps a history load with a few old rows from failing whole; the count is how the write tells you a
+row it acknowledged will never be read. `POST …/rows/batch` does not report `expiredRows`.
+
+### How the rows leave: whole segments
+
+A table with retention keeps each segment inside one **time slice** of its retention column: the live flush and the coalescers cut and
+merge within slices, and the [bulk load](bulk-load.md#loading-a-table-with-retention) writes one segment per slice and never spills
+such a table. After each horizon advance, **expiry** retires every segment whose newest time lies below the horizon — from the
+catalog's facts alone, in one catalog batch per table, with no row read and **no data byte written**. The files go once no reader that
+pinned the segment still holds it. A three-year history with a one-year `keep` lands as one segment per month and leaves a month at a
+time; the remaining segments are never rewritten. A restart brings nothing back.
+
+The cost: more, smaller segments than the same table without retention (one per slice), and at most about one slice stored beyond
+`keep` — the segment straddling the horizon stays, its old rows hidden, until all of it lies behind.
+
+---
+
+## Deleting everything before a time
+
+A `DELETE` whose **whole** predicate is the table's first cluster column (a `Timestamp` or `Date`) below a time does not scan, log and
+mask row by row:
+
+```json
+DELETE /api/databases/market/tables/trades/rows
+{
+  "database": "market",
+  "where": { "and": [ { "column": "Ts", "op": "lt", "value": "2026-07-01T00:00:00Z" } ] }
+}
+```
+
+The shape is exactly one condition, `lt` or `lte`, on the first cluster column, with no `limit`, `orderBy` or `returning`, on a table
+with no vector column that no foreign key references. Anything else — a second condition, a lower bound, a `limit` — takes the
+ordinary row path, unchanged. For `lte` the cutoff is the successor of the value at the column's resolution (one tick for a
+`Timestamp`, one day for a `Date`), so "below the cutoff" is exactly the statement's rows. `rowsDeleted` is exact either way.
+
+What it does depends on whether the table declares retention.
+
+### With retention: an early expiry
+
+The table's horizon rises to the cutoff — persisted, then published — and expiry retires every segment now wholly below it. Nothing is
+logged and no byte is written. From then on a write below the cutoff is `expiredRows`, as below any horizon.
+
+- `rowsDeleted` is the number of rows a read showed below the cutoff.
+- A cutoff **past the server's clock** takes the ordinary row path and installs nothing: raising the horizon there would make every
+  row written until then expire at its write.
+- A cutoff at or below the current horizon deletes nothing (`rowsDeleted: 0`).
+- A materialized query over the table treats it as an expiry: nothing is retracted from its result.
+
+### Without retention: a statement-time range delete
+
+The statement deletes the rows that exist when it runs and **installs no horizon** — a row written later with an older time is
+visible, as it always was. It costs metadata, not rows:
+
+- **one log record** carries the predicate (a crash after it replays it against the rows logged before it, and nothing after);
+- every segment wholly below the cutoff is **retired whole** in one catalog batch — no mask, no rewrite;
+- the segments that straddle the cutoff get mask bits for their matching rows only, found from their row groups' statistics without
+  reading a row;
+- the write buffer's matching rows are masked in memory;
+- a null time is not deleted;
+- the table's materialized queries are **rebuilt** when the statement deleted anything.
+
+### What it costs, measured
+
+Illustration, not a promise: Horizon `S11`'s measurement (W-6) on 15.3 M Derive-shaped trades bulk-loaded in process (a Debug build,
+one run each), deleting the third of them before a day — 5,100,074 rows:
+
+| | Time | WAL | Data bytes written | Segments |
+|---|---|---|---|---|
+| With retention (`365d`) | 72.6 ms | 0 B | 0 | 31 of 555 retired whole (the months wholly below the cutoff); the rest hidden below the horizon |
+| Without retention | 668 ms | 127 B (one record in its transaction) | 0 (masks apart: 1.9 MB of mask bits) | 7 of 216 retired whole (24,745 rows); 182 straddling segments masked for 5,075,329 rows |
+| The row path before this train | refused for ever as one statement; narrowed by trading day, 754 k rows took 18.4 min and 2.0 GiB of WAL before failing | | | |
+
+Without retention the table keeps its usual layout — a bulk segment per series bucket over the whole history — so nearly every
+segment straddles the cutoff, and the statement pays in mask bits rather than log records or rewrites. With retention the table is cut
+by time slices, so whole months leave.
+
+---
+
+## What a subscriber sees
+
+A subscriber is not sent one event per expired or deleted row. Instead:
+
+- a snapshot of a table with retention carries the table's `horizon` and `horizon_column` on `snapshot_complete`, and holds no row
+  below it;
+- each published horizon advance — the clock's, or an early expiry — sends one `horizon` message;
+- a delete before a time on a table **without** retention sends one `range_delete` message.
+
+The client drops what it holds below the time. Both SDKs do it for you (`evt.Removes(row)` in `Aouda.Client`,
+`applyNotice(rows, event)` in `@aouda/client`). The contract — ordering, resume, filters, conflation, old clients — is in
+[Real-time Streaming: Horizons and range deletes](real-time.md#horizons-and-range-deletes).
+
+---
+
+## Replicas
+
+- A replica learns a retention declaration from the replicated policy and **advances its own horizon on its own clock** — no horizon
+  is logged — so its horizon can differ from the primary's by the two clocks. This has not yet been tested on a replica.
+- A range delete on a table without retention is replicated as its one log record; the replica applies it to its write buffer, as it
+  applies a `TRUNCATE` (its segments are the primary's, shipped to it).
+- **Known limitation (BL-1064):** an early expiry is not logged, so a replica keeps the rows below its cutoff until its own clock
+  expires them — up to `keep` later. Read from the primary when that matters.
+
+See [Replication and Clustering](replication.md).
+
+---
+
+## Deleting in general
+
+These hold for every table, with or without retention (**Horizon, next train**). Row deletes keep their model — a deletion mask per
+segment, read through — and lose four wastes:
+
+- **`TRUNCATE` retires the table's segments** instead of writing a mask over every row of every segment. It is still one log record and
+  still atomic for readers, and the disk is freed at once. (A segment another mechanism owns at that instant, such as a flush in
+  progress, keeps the old mask path.)
+- **A segment with no live row is retired whole** by the hot or cold coalescer's next pass — one catalog batch, nothing rewritten.
+  Before, it stayed on disk and in every scan until some merge happened to pick it up.
+- **A cold segment with at least 25 % of its rows deleted is rewritten alone within one coalescer tick, whatever its size.** Before,
+  only segments under 65,536 rows were ever merged, so a large bulk-loaded segment kept its deleted rows for ever. (Measured: 200,000
+  rows at 30 % deleted, rewritten in one tick, 1.2 s, into 140,000; at 20 %, left alone.) On a table with a horizon only a segment
+  wholly at or after the horizon is rewritten; one reaching below it is expiry's to drop whole.
+- **A scan skips a segment, or a row group, whose rows are all deleted** — no page is loaded.
+
+See [Storage and Persistence](storage.md#deleted-rows-and-retired-segments-horizon-next-train) and
+[Hot/Cold Storage](hot-cold.md#24-availability-status-implementation-honesty).
+
+---
+
+## Known limitations
+
+Current behaviour, each with its card in the `aouda` repository's backlog:
+
+- **Known limitation (BL-1062):** a key below a retention horizon is still in the table's key index — an insert of that key is refused
+  as a duplicate, and an upsert can hit the invisible row; `UNIQUE` and foreign-key checks count it, and a delete by explicit key
+  still reaches it.
+- **Known limitation (BL-1063):** a rebuild of a materialized query over a table with retention carries the group straddling the
+  horizon whole from the old result, so a change to that group's rows that only a rebuild would pick up is not reflected in it.
+- **Known limitation (BL-1064):** an early expiry is not logged; a replica keeps the rows until its own clock expires them — up to
+  `keep` later.
+- **Known limitation (BL-1059):** rows below an early expiry's cutoff in segments that straddle it — and rows below the horizon in
+  segments written before retention was declared — are hidden, not reclaimed, until the whole segment falls behind the horizon.
+- **Known limitation (BL-1060):** only queries that split their groups by the retention column may read a table with retention;
+  `latestPerKey`, `firstPerKey` and `filter` over it are refused.
+- **Known limitation (BL-1061):** a read of a table with retention is not routed to a materialized result.
+- A `TRUNCATE` sends subscribers no notice.

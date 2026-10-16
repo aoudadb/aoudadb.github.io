@@ -618,6 +618,28 @@ Set `memoryRowCap` / `targetMemoryBytes` on the result table via
 Full treatment, including the amplification counters that say what a query costs:
 [Materialized queries](materialized.md#where-a-materialized-querys-result-lives).
 
+### A windowed result holds its window, not its history (**Horizon, next train**) {#windowed-results}
+
+A [window](materialized.md#windows) bounds what a time-bucketed result stores at all; `storageTemperature` and a row cap still
+decide where what it stores lives. Unlike the duration above, a window needs no arrival rate: it counts **groups**, and every row
+that arrives in a bucket folds into that bucket's one group.
+
+- **Groups ≈ series × buckets in `keep`**, plus at most about one time slice (a quarter of `keep`) and one horizon tick. It does not
+  grow with history. On the soak's `scale` shape, minute candles over 60 days are 26.3 M groups unwindowed and **2,098,324** in
+  the last seven days — what a `7d` window holds, after ten years as after one week.
+- **Measured at steady state** (in process, the clock moved through several windows): **1.140 ×** the groups in `keep` for `7d`
+  minute candles with day slices, **1.028 ×** for a `1d` window with hour slices — and **3.1 ×**, growing, with expiry taken out.
+- **Disk:** one segment per time slice, so more, smaller segments than an unwindowed result; on the Derive-shaped runs their
+  metadata was 1.37 % (`lab`) and 1.03 % (`scale`, 2 GB) of the column bytes. A slice that falls behind the horizon leaves whole,
+  with nothing rewritten.
+- **A rebuild folds only the window** — it reads its source from the horizon — so its grant ([§ rebuilds](materialized.md#211b-what-a-rebuild-costs-and-what-bounds-it))
+  is sized by the window's groups, not the history's.
+- **A read below the horizon is charged to the read's budget**, as its computed groups grow. A part that fits half of what the read
+  may still grow to is folded at once; a larger one in bucket-aligned pieces, one held at a time, as a stored read holds one
+  segment. A single bucket that alone outgrows the read-path ceiling is refused `503` + `Retry-After`, as a stored read of that size
+  is. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
+  history keyset-paged 10,000 at a time needed 8.5 MB against a 512 MB server's 4 MB read ceiling, and was refused on every retry.
+
 ## Memory is granted before work starts, and small writes have a reserve (**WorkloadCore S06, 0.3.0**)
 
 Work asks for memory before it starts — at least what it needs, at most what it can use — and waits in its class's queue if it

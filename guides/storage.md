@@ -274,6 +274,10 @@ If you run server defaults and do not set per-database overrides:
   - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
     taken with the older build is what carries them over.
   - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
+  - (**Horizon, next train**) The catalog format is **10** (8: a windowed result's horizon; 9: a table's row-id floor, kept when
+    whole segments are retired; 10: a table's retention), and a materialized-query definition file is version **2**. A directory
+    written by 0.4.0 (catalog format 7), or by any other format, is refused at open naming the version found and the version
+    expected; there is no migration. The WAL gains a `RangeDelete` frame (tag 73), which an older build does not know.
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
@@ -290,6 +294,30 @@ Invariants:
 - Table directory name validity is enforced (invalid names rejected; no path sanitization tricks).
 - WAL replay never requires table directory guessing; resolver maps `TableId` to table directory.
 - Slot safety boundaries prevent WAL truncation ahead of active consumers.
+
+### Deleted rows and retired segments (**Horizon, next train**)
+
+Row deletes keep their model — a deletion mask (`_deleted.pages`) per segment, read through — and lose four wastes:
+
+- **`TRUNCATE` retires the table's segments** instead of writing a mask over every row of every segment. The statement is still one
+  WAL record and still atomic for readers; the segments leave in one catalog batch right after its commit, and the disk is freed at
+  once. A segment another mechanism owns at that instant (a flush in progress) keeps the old mask path.
+- **A segment with no live row is retired whole** by the hot or cold coalescer's next pass — one catalog batch, nothing rewritten, its
+  files (with its deletion mask and the mask's directory) gone once no reader that pinned it still holds it. Before, it stayed on disk
+  and in every scan until some merge happened to pick it up, and a hot one never was.
+- **A cold segment with at least 25 % of its rows deleted is rewritten alone within one coalescer tick, whatever its size.** Before,
+  only cold segments under 65,536 rows were ever merged, so a large bulk-loaded segment kept its deleted rows for ever. Measured:
+  200,000 rows at 30 % deleted, rewritten in one tick (1.2 s) into 140,000; at 20 %, left alone; 1,048,576 rows at 30 %, one tick,
+  4.0 s. On a table with a horizon (a windowed result, or a table with [retention](retention.md)) only a segment wholly at or after
+  the horizon, inside one time slice, is rewritten; one reaching below it is left for expiry to drop whole.
+- **A scan does not plan a segment, or visit a row group, whose rows are all deleted** — no page is loaded.
+
+Retiring the segment that holds a table's highest row id would lower the row-id watermark, which is computed from the catalogued
+segments, and a restart could then replay rows that segment held. The catalog therefore keeps that watermark as the table's
+**row-id floor**, saved before the segments leave.
+
+Expiry (a windowed result's or a retention table's) and a `DELETE` before a time use the same retirement batch:
+[Retention](retention.md#deleting-everything-before-a-time).
 
 ## 2.8 How Aouda implements it
 
