@@ -371,6 +371,18 @@ durability one.
 of very recent data may be slower. The page cache is the tier for exactly that, and the condition
 only arises when the alternative was approaching the hot ceiling.
 
+**A pass over cold data asks the operating system to read ahead** (**LoadScan, next train**). When a read
+goes through every row group of a cold segment — a full GROUP BY, an export, a predicate's own column —
+the server tells the OS, before it starts, which pages of each column file it will read next
+(`posix_fadvise(WILLNEED)` on Linux), for this segment and the next one, so the disk reads overlap the
+decode instead of waiting one page at a time. A read that selects a few rows does not read its other
+columns ahead. Pages the server's own page cache holds, and ranges the OS already holds, are skipped. What
+the OS reads ahead lands in its file cache — the host's, or the container's, which a cgroup memory limit
+counts like any file read and reclaims under pressure; it is not part of `MaxTotalRamBytes`. Measured with
+nothing in any cache, on 1 M trades: a full GROUP BY 38 → 32 ms, an export of every row 8–38 % faster; at
+100 M trades a two-hour range over every segment 11–23 % faster. With the data already in a cache it changes
+nothing.
+
 Promotions and restart-time segment loads ask the same question. A promotion that would not fit is
 simply not made — the rows are already readable from cold, so nothing is lost but the speed-up.
 
