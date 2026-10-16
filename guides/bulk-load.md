@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Bulk Load"
 nav_order: 17
 parent: "Guides"
@@ -115,7 +115,7 @@ Scope boundaries:
 | Server `Aouda:BulkLoad:TargetSegmentBytes` | `67108864` (64 MB) | Accrued bytes at which a bucket seals into a segment — matches every other segment the engine writes. |
 | Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, floored at 8 MB. As of P45, the ceiling is no longer a fixed 256 MB — it grows with the server's own memory governor (shared with other concurrent loads and background work), so a well-provisioned host's fraction actually means something. Nothing changes on a small host, where `0.04 × governed` was already under 256 MB. |
 | Server `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` | `0` (derive, per above) | Set to a specific byte count to pin the ceiling explicitly — `268435456` reproduces the pre-P45 fixed 256 MB behavior exactly. |
-| Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. |
+| Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. (**LoadScan, next train**) It bounds how many segment writes run at once; inside one, the segment's columns are encoded and written in parallel on up to the load's CPU share — a bulk load is `Ingest` work, half the schedulable cores — for a segment of four or more pages. |
 | Cluster `Aouda:BulkLoad:EmitFramesOnSingleNode` | `false` | On a detected single-node topology, `LogShipSegments` elides `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames by default — no per-segment re-read/hash. `true` restores frames on a single node. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | `64` | Segment count above which, combined with a low median rows/segment, a job's commit logs one advisory warning. See `2.13`. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | `1000` | Median rows/segment below which the same warning can fire. |
