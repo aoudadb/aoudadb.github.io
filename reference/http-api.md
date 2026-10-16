@@ -1230,13 +1230,17 @@ batch stays JSON.
 - **One query exports every row (**LoadScan, next train**).** A `POST …/query` asked for frames with **no page** (`limit: 0`,
   no `offset`) and no `orderBy`, `distinct`, grouping, aggregate, join or computed column is **streamed**: the server counts the
   rows first — so `X-Aouda-Row-Count` is exact and arrives before the first frame — then writes the frames while it reads the
-  table, holding one batch of frames (tens of MB, never more than a quarter of the read path's memory ceiling) instead of the
+  table, holding one batch of frames (tens of MB, sized to a quarter of the read path's memory ceiling) instead of the
   whole result. Such a read is **not refused** at the read path's memory ceiling (`503 MEMORY_BUDGET_EXCEEDED`) or at
   `Aouda:Query:MaxResultRows` (`400 RESULT_TOO_LARGE`): both bound a result the server holds, and the same read answered as
-  JSON — or as a named query — is still held whole and still refused there. Its frames are cut per row group (at most 65,536
+  JSON — or as a named query — is still held whole and still refused there. A batch is sized from what the rows' frames
+  actually cost — the first is one row group, so long strings are measured before they are batched — and the size only grows
+  with what it meets: a table whose rows become much wider partway through can still pass the ceiling in one batch, and that
+  read is cut after its headers (the connection aborted). Its frames are cut per row group (at most 65,536
   rows, never past half the reader's 256 MB frame budget) and come in the order the JSON answer's rows have; `X-Aouda-Stats`'
-  `executionMs` is the time to the count, not to the last frame. A string value over 16 MB fails a streamed read after its
-  headers (the connection is aborted; the row-count check catches it), where a held read is answered as JSON. Before, one query
+  `executionMs` is the time to the count, not to the last frame. A string value over 16 MB fails a streamed read — after its
+  headers (the connection is aborted; the row-count check catches it), or, in the first batch, before them as `500` — where a
+  held read is answered as JSON. Before, one query
   that returned every row of a large table was refused `503`, and a client read it a partition or a page at a time.
 - **Headers** carry the rest of the JSON envelope:
 
