@@ -109,6 +109,8 @@ Each refusal is a `400` that names its reason.
 | A **window** on a materialized query whose source has retention (directly, or as the first non-windowed table up a cascade) | A windowed result computes its part below the window from its source; once the source has dropped a range, that answer would change. Use an unwindowed query over the table with retention — it keeps its history. |
 | Retention on a table that a window completes from | The same rule, seen from the table. |
 | A query over a table with retention that does not split its groups by the retention column, and retention on a table such a query reads | See [What may read a table with retention](#what-may-read-a-table-with-retention). |
+| Retention on an **edge table**, or on a table with a **vector column** | Traversals and nearest-neighbour reads apply no horizon, and vector segments carry no time to drop by; retention is for tabular tables. |
+| **Dropping or retyping the retention column** while retention is declared | Every read hides the rows below the horizon by that column; without it they would be readable again. |
 
 ### What may read a table with retention
 
@@ -166,6 +168,18 @@ without retention. A null in a `NOT NULL` time column is refused, as on any tabl
 Accepting rather than refusing keeps a history load with a few old rows from failing whole; the count is how the write tells you a
 row it acknowledged will never be read. `POST …/rows/batch` does not report `expiredRows`.
 
+Three cases worth knowing:
+
+- **An upsert that moves an existing key below the horizon** replaces that key: the key is no longer returned (as after an `UPDATE`
+  that moves the time below it), and the row is counted in `expiredRows`.
+- **A key held by a row below the horizon** stays taken until that row leaves the table (the next flush while it is buffered; expiry
+  once its segment lies wholly below the horizon). Until then a plain insert of the same key is refused as a duplicate, and the
+  refusal says so ("the key is held by a row below the table's retention horizon"); an upsert replaces it. `UNIQUE` behaves the same.
+  Freeing the key at once would mean deleting a row whose history the table's materialized queries keep.
+- **A table whose transforms are routes** stores no row of its own, so its retention does not judge a routed row — the target table's
+  horizon does. (A **tee** copy is the exception today: a row below the ingress table's horizon is left out before its tee copies are
+  planned — **Known limitation (BL-1070)**.)
+
 ### How the rows leave: whole segments
 
 A table with retention keeps each segment inside one **time slice** of its retention column: the live flush and the coalescers cut and
@@ -202,8 +216,9 @@ What it does depends on whether the table declares retention.
 
 ### With retention: an early expiry
 
-The table's horizon rises to the cutoff — persisted, then published — and expiry retires every segment now wholly below it. Nothing is
-logged and no byte is written. From then on a write below the cutoff is `expiredRows`, as below any horizon.
+The table's horizon rises to the cutoff — persisted, then published — and expiry retires every segment now wholly below it. One small
+record is logged for the replicas (the table and the cutoff, a few dozen bytes) and no data byte is written. From then on a write below
+the cutoff is `expiredRows`, as below any horizon.
 
 - `rowsDeleted` is the number of rows a read showed below the cutoff.
 - A cutoff **past the server's clock** takes the ordinary row path and installs nothing: raising the horizon there would make every
@@ -258,12 +273,12 @@ The client drops what it holds below the time. Both SDKs do it for you (`evt.Rem
 
 ## Replicas
 
-- A replica learns a retention declaration from the replicated policy and **advances its own horizon on its own clock** — no horizon
-  is logged — so its horizon can differ from the primary's by the two clocks. This has not yet been tested on a replica.
+- A replica learns a retention declaration from the replicated policy — declared at create or later — and **advances its own horizon
+  on its own clock** (a horizon the clock moves is not logged), so its horizon can differ from the primary's by the two clocks.
 - A range delete on a table without retention is replicated as its one log record; the replica applies it to its write buffer, as it
   applies a `TRUNCATE` (its segments are the primary's, shipped to it).
-- **Known limitation (BL-1064):** an early expiry is not logged, so a replica keeps the rows below its cutoff until its own clock
-  expires them — up to `keep` later. Read from the primary when that matters.
+- **An early expiry reaches the replica** as its one logged record: the replica raises its horizon to the cutoff (the higher of the
+  two), hides the rows below it at once and expires its segments, as the primary did.
 
 See [Replication and Clustering](replication.md).
 
@@ -294,13 +309,14 @@ See [Storage and Persistence](storage.md#deleted-rows-and-retired-segments-horiz
 
 Current behaviour, each with its card in the `aouda` repository's backlog:
 
-- **Known limitation (BL-1062):** a key below a retention horizon is still in the table's key index — an insert of that key is refused
-  as a duplicate, and an upsert can hit the invisible row; `UNIQUE` and foreign-key checks count it, and a delete by explicit key
-  still reaches it.
-- **Known limitation (BL-1063):** a rebuild of a materialized query over a table with retention carries the group straddling the
-  horizon whole from the old result, so a change to that group's rows that only a rebuild would pick up is not reflected in it.
-- **Known limitation (BL-1064):** an early expiry is not logged; a replica keeps the rows until its own clock expires them — up to
-  `keep` later.
+- **Known limitation (BL-1063):** a rebuild of a materialized query over a table with retention carries the group whose bucket
+  straddles the horizon whole from the old result (its rows below the horizon are gone, so it cannot be recomputed). A change to that
+  group that only a rebuild picks up — a deleted minimum or maximum, a bulk load folded only by the rebuild — is therefore not
+  reflected in that one group, its count and sum included; every other group is exact.
+- **Known limitation (BL-1071):** a foreign key into a table with retention is checked at write time only — a parent row expires
+  under its children, and a parent row stored below the horizon still satisfies the check.
+- **Known limitation (BL-1069):** on a **partitioned** table with retention the live flush does not yet cut segments by time slice or
+  leave out rows below the horizon (every read still hides them; expiry drops them later).
 - **Known limitation (BL-1059):** rows below an early expiry's cutoff in segments that straddle it — and rows below the horizon in
   segments written before retention was declared — are hidden, not reclaimed, until the whole segment falls behind the horizon.
 - **Known limitation (BL-1060):** only queries that split their groups by the retention column may read a table with retention;

@@ -27,7 +27,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   is retired, `TRUNCATE` drops the table's segments, a cold segment a quarter dead is rewritten whatever its size, and scans skip
   what has no live row. **Subscriptions** get a snapshot that carries its horizon, a `horizon` message when it rises and a
   `range_delete` message for a `DELETE` before a time, instead of a row event per row. Known limitations are named with their
-  cards (BL-1059 … BL-1064). ⚠️ A data directory written by 0.4.0 is refused at open (catalog format 10, no migration).
+  cards (BL-1059 … BL-1071). ⚠️ A data directory written by 0.4.0 is refused at open (catalog format 10, no migration).
   [Windows](guides/materialized.md#windows), [retention](guides/retention.md),
   [subscriptions](guides/real-time.md#horizons-and-range-deletes), [bulk load](guides/bulk-load.md),
   [sizing](guides/sizing.md#windowed-results), [defaults](guides/defaults-reference.md#horizons),

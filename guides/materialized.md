@@ -1729,8 +1729,9 @@ segments. A materialized query over such a table is **not** windowed — it **ke
   grouped by a time bucket of it (or by the column itself), or a `topNPerGroup` grouped by it; a `latestPerKey`, `firstPerKey`,
   `filter` or any other query is refused at create, and retention is refused on a table such a query reads. Incremental
   maintenance would keep their history and a rebuild drop it.
-- **Known limitation (BL-1063):** a rebuild carries the bucket that straddles its cut whole, so a delete inside that bucket
-  below the cut is not reflected in it.
+- **Known limitation (BL-1063):** a rebuild carries the group whose bucket straddles the table's horizon whole (its rows below the
+  horizon are gone, so it cannot be recomputed): a change to that group that only a rebuild picks up — a deleted minimum or maximum,
+  a bulk load — is not reflected in it, its count and sum included. Every other group is exact.
 - **Known limitation (BL-1061):** a read of a table with retention is not routed to a materialized result; it reads the table.
 - No window over such a table (refused, above): use raw retention plus **unwindowed** results.
 
@@ -1972,8 +1973,8 @@ Last verification date (UTC): `2026-03-31`.
   - A question that reaches below a windowed result's horizon is not routed to it; a routed union across the horizon is not built.
   - Known limitation (BL-1060): only a query that splits its groups by the retention column may read a table with retention.
   - Known limitation (BL-1061): a read of a table with retention is not routed to a materialized result.
-  - Known limitation (BL-1063): a rebuild over a table with retention carries the bucket straddling its cut whole, so a delete
-    inside that bucket below the cut is not reflected. See [2.11e](#queries-over-a-table-with-retention).
+  - Known limitation (BL-1063): a rebuild over a table with retention carries the group straddling the table's horizon whole, so
+    a change to it that only a rebuild picks up (a deleted extreme, a bulk load) is not reflected. See [2.11e](#queries-over-a-table-with-retention).
 - Reserved type support:
   - `FirstPerKey` and `TopNPerGroup` are represented in type enums but not fully shipped as end-to-end capabilities.
 - Surface parity gap (reduced):
