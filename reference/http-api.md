@@ -502,7 +502,7 @@ All errors return a JSON body with this structure:
 | `INVALID_OPERATOR` | 400 | Invalid comparison operator in where clause |
 | `INVALID_COLUMN` | 400 | Invalid column name or reference |
 | `INVALID_VALUE` | 400 | Invalid value type or format |
-| `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour |
+| `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, next train**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
 
 #### Resource Errors (4xx)
 
@@ -1227,6 +1227,17 @@ batch stays JSON.
   every column. Every frame carries every column, in result order. A result that names a column twice is answered as JSON.
   A reader should check that the frames' rows add up to `X-Aouda-Row-Count`: a body cut between two frames is otherwise a
   shorter, well-formed answer.
+- **One query exports every row (**LoadScan, next train**).** A `POST …/query` asked for frames with **no page** (`limit: 0`,
+  no `offset`) and no `orderBy`, `distinct`, grouping, aggregate, join or computed column is **streamed**: the server counts the
+  rows first — so `X-Aouda-Row-Count` is exact and arrives before the first frame — then writes the frames while it reads the
+  table, holding one batch of frames (tens of MB, never more than a quarter of the read path's memory ceiling) instead of the
+  whole result. Such a read is **not refused** at the read path's memory ceiling (`503 MEMORY_BUDGET_EXCEEDED`) or at
+  `Aouda:Query:MaxResultRows` (`400 RESULT_TOO_LARGE`): both bound a result the server holds, and the same read answered as
+  JSON — or as a named query — is still held whole and still refused there. Its frames are cut per row group (at most 65,536
+  rows, never past half the reader's 256 MB frame budget) and come in the order the JSON answer's rows have; `X-Aouda-Stats`'
+  `executionMs` is the time to the count, not to the last frame. A string value over 16 MB fails a streamed read after its
+  headers (the connection is aborted; the row-count check catches it), where a held read is answered as JSON. Before, one query
+  that returned every row of a large table was refused `503`, and a client read it a partition or a page at a time.
 - **Headers** carry the rest of the JSON envelope:
 
 | Header | Content |
