@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Bulk Load"
 nav_order: 17
 parent: "Guides"
@@ -115,7 +115,7 @@ Scope boundaries:
 | Server `Aouda:BulkLoad:TargetSegmentBytes` | `67108864` (64 MB) | Accrued bytes at which a bucket seals into a segment — matches every other segment the engine writes. |
 | Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, floored at 8 MB. As of P45, the ceiling is no longer a fixed 256 MB — it grows with the server's own memory governor (shared with other concurrent loads and background work), so a well-provisioned host's fraction actually means something. Nothing changes on a small host, where `0.04 × governed` was already under 256 MB. |
 | Server `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` | `0` (derive, per above) | Set to a specific byte count to pin the ceiling explicitly — `268435456` reproduces the pre-P45 fixed 256 MB behavior exactly. |
-| Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. |
+| Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. (**LoadScan, next train**) It bounds how many segment writes run at once; inside one, the segment's columns are encoded and written in parallel on up to the load's CPU share — a bulk load is `Ingest` work, half the schedulable cores — for a segment of four or more pages. |
 | Cluster `Aouda:BulkLoad:EmitFramesOnSingleNode` | `false` | On a detected single-node topology, `LogShipSegments` elides `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames by default — no per-segment re-read/hash. `true` restores frames on a single node. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | `64` | Segment count above which, combined with a low median rows/segment, a job's commit logs one advisory warning. See `2.13`. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | `1000` | Median rows/segment below which the same warning can fire. |
@@ -168,6 +168,9 @@ Scope boundaries:
     30 M quotes, 13 queries): the trade load ran at **253 k rows/s** (67 k on 0.3.0; 266 k with no queries), at **37.4 CPU-s per
     million rows** (48.2), and all 13 queries were current **440.5 s** after the load started (650 s on 0.3.0) — the time of the
     `skip` + pooled-refresh recipe below (441.5 s), with identical results.
+- **A table with retention, or a windowed result, is loaded one segment per time slice and never spilled; rows below its horizon
+  are counted in `:commit`'s `expiredRows`, not written** (**Horizon, next train**). See
+  [Loading a table with retention](#loading-a-table-with-retention).
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
@@ -481,6 +484,26 @@ queries should use bulk load, which keeps them current at its own rate and costs
 **And `:commit` no longer waits for the queries by default** (**LoadSpeed M.2, 0.4.0**): `mqWaitMs` defaults to `0`. A
 loader that needs the queries current before its next step sends `mqWaitMs`, or reads with the commit's `token`.
 
+### Loading a table with retention
+
+(**Horizon, next train**) A table that declares [retention](retention.md) — and a windowed materialized query's result — has a
+time-slice rule: no segment may span two slices of its time column (the largest of hour / day / week / month that is at most
+`keep / 4`), so that expiry can drop whole segments. The bulk load follows it:
+
+- **One segment per time slice.** Each bucket of the load is written as one segment per slice its rows fall in, with the run
+  directory and granule marks built inside each segment as before, so a series' rows stay in order within a slice. A three-year
+  history loaded into a table with a one-year `keep` lands as one segment per month and leaves a month at a time; the segments that
+  remain are never rewritten.
+- **Never spilled.** A bucket of such a table that must leave memory is flushed, one segment per slice, instead of spilling to a run
+  that the commit merges (a spill merge cuts by bytes, not by time). Under a tight budget that means more, smaller segments; the
+  coalescers merge them within their slices.
+- **Rows below the horizon are counted, not written.** A row whose time lies below the table's horizon — or is an explicit `null`, in a
+  nullable time column — is left out, and the `:commit` response reports how many in `expiredRows` (omitted when 0; not in `rowsLoaded`).
+  `BulkLoadJobHandle.ExpiredRows` in `Aouda.Client`, `handle.expiredRows` in `@aouda/client`. See
+  [HTTP API — `:commit`](../reference/http-api.md#post-jobidcommit).
+
+A table without retention is loaded exactly as before.
+
 ### Choosing partition storage mode
 
 **This section assumes the table should be partitioned at all.** That is a separate and earlier question,
@@ -582,7 +605,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `Aouda:BulkLoad:AllowWritePermission` | bool | `false` | `true/false` | Server config | Compatibility gate for write-only principals. |
 | `Aouda:BulkLoad:ForceLogShipBulkLoad` | bool | `false` | `true/false` | Cluster/server config | Rejects non-log-ship modes. |
 | `BulkLoadOptions.RequestTimeout` — *since 0.1.22* | `TimeSpan` | `10m` | positive duration | Client | Deadline for each individual bulk-load HTTP call. Deliberately not `AoudaClientOptions.Timeout` (30 s), which is sized for point operations and cannot cover a `:commit` that seals a million rows. Governs one call, not the job. A caller-supplied `HttpClient` keeps its own `HttpClient.Timeout`, which caps this. |
-| `BulkLoadOptions.MaxAppendBytes` — *since 0.1.22* | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). |
+| `BulkLoadOptions.MaxAppendBytes` — *since 0.1.22* | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). (**LoadScan, next train**) The C# client builds the next `:append` body while the previous one is in flight — still one `:append` at a time, in order — so your row source is read at most one body ahead of what the server has accepted, and two bodies may be held at once. Your source is read on a thread-pool thread, by one call at a time. A load that fails or is cancelled stops reading your rows before it returns — and waits for the row your source is producing to do so: an iterator that waits for its rows (a feed) should honour its cancellation token (`[EnumeratorCancellation]`), or a failed load returns only when the feed's next row arrives. |
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` — *since 0.1.22* | int | `600000` | `>=0` (`0` disables) | Server config | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. Not the bound on an abandoned session — `SessionIdleTimeoutMinutes` is. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | int | `10` | `>=0` (`0` disables) | Server config | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock and ingest budget. |
 | `Aouda:BulkLoad:MaxConcurrentStreamingRequests` — *since 0.1.22* | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` and `:commit` run in. They do not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. |
