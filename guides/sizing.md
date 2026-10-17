@@ -100,6 +100,13 @@ first thing given back when the heap needs room, so reusing them never holds mem
 paths allocating about 0.2–2.4 KB per row (a plain bulk load ~0.2 KB), GC pauses stay under 5 % of wall time on bulk loads,
 inserts and inserts with nine materialized queries (0.9–4.9 %).
 
+(**LoadScan, next train**) Where the train's work ends, measured once on the same 4 pinned cores with the C# client on 4 others:
+a steady bulk load costs about **1.3–1.4 CPU-s per million rows** (~470 k rows/s), a fresh server's first million about 4.1 (most
+of it the runtime compiling its code), and a load allocates about 180 bytes per row. At 100 M rows the load runs at about 510 k rows/s
+for 1.3 CPU-s per million rows, and loading 100 M rows, then reading every one of them back three ways (a full GROUP BY, an export of
+every column, a selective scan), costs about 1.6 CPU-s per million rows end to end. The wall of a load from one client is mostly the
+client's: the server spends much of it waiting for the next rows.
+
 Workstation GC, two heaps, a larger gen-0 budget (`DOTNET_GCgen0size`), concurrent GC off, a spin limit of 0, tiered-compilation
 and PGO settings, and ReadyToRun were measured beside them; each was slower on the load or on the reads, or saved no CPU. **DATAS
 off** was cheaper still on the load (about 2.4 CPU-s per million rows with the spin limit) but it keeps one GC heap per core the
