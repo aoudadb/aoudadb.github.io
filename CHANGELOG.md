@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **The server is precompiled in the image, the archives and the `aouda` tool (Lead S06, next train).** Every published server is
+  ReadyToRun, so a fresh or restarted server spends less of its first minute compiling: on the project's test machine the image's
+  first-impression run (start, sign-in, schema, a 1 M-row load, three first queries) takes 6.6 s instead of 8.5, and a restart answers
+  its first aggregate in 3.2 s instead of 4.2. Steady query speed is unchanged. The image is ~30 MB larger, an unpacked archive ~23 MB. Still
+  framework-dependent: nothing to install or configure differently.
 - **Named service keys, overlapping rotation, and an auth-admin credential (BL-1032, next train).** A server key mints
   service keys by name (`POST /api/databases/{db}/service-keys`), lists prefixes, and revokes one name. Rotate and
   `regenerate-keys` take `overlapSeconds` (max 86400); omit it or send `0` to revoke at once, and the response's
