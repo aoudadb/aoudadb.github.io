@@ -81,13 +81,42 @@ class, so a long merge or upload on one database never holds up another database
 waits only for flushes already running (**WorkloadCore group 5 review, 0.3.0**). Many databases on one server therefore no longer each
 run their own background loops at full width; nothing needs configuring.
 
-### Garbage collection (**ColumnarCore S14, 0.2.0**)
+### Garbage collection and the thread pool (**ColumnarCore S14, 0.2.0**; **LoadScan, next train**)
 
 The server runs .NET's **Server GC with DATAS** (dynamic adaptation) and a heap hard limit of 85 % of the memory it may
-use; that is in its `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores with the write paths now
-allocating about 0.4–2.4 KB per row: GC pauses stay under 5 % of wall time on bulk loads, inserts and inserts with nine
-materialized queries (0.9–4.9 %). Workstation GC, Server GC without DATAS and a larger gen-0 budget
-(`DOTNET_GCgen0size`) were measured beside it and none was consistently cheaper, so the default stands.
+use, and (**LoadScan, next train**) its **thread pool's spin limit is 10** (.NET's default is 70): an idle worker spins less before
+it sleeps. All of it is in the server's `runtimeconfig`, so nothing needs setting. Measured on 4 pinned cores, the spin limit cut the
+server's steady bulk load by 6–11 % (about 3.15 to 2.8–3.0 CPU-s per million rows) and, in four of five measurements, a fresh
+server's first million by 15–20 %, with memory unchanged and reads within ±10 % (a young server's first passes up to 8 % slower,
+selective scans 10 % faster); an idle server with materialized queries wakes less. The 2 GB lab soak passed with it.
+(**LoadScan, next train**) The segment writer then stopped copying each page, rebuilding its encoders and reopening its files per page: on the same
+4 cores the server's steady bulk load measured about 2.65 → 2.0 CPU-s per million rows (≈ 300 k → 370 k rows/s) and a fresh
+server's first million 9.7 → 5.4, with no change to the files it writes. (**LoadScan, next train**) Then an `:append` stopped
+copying each column a second time as it is read, and a load's buffers stopped being allocated per job (they are reused, by the
+next part of the job and the next job): the steady load about 1.9 → 1.1 CPU-s per million rows, a fresh server's first million
+5.0 → 4.3, and a plain bulk load's allocation about 320 → 170 bytes per row over HTTP (in process about 220 → 35). The buffers
+waiting for the next job are counted in the database's memory budget (`bulkLoadAccrual` in the server's memory report) and are the
+first thing given back when the heap needs room, so reusing them never holds memory the budget cannot see. With the write
+paths allocating about 0.2–2.4 KB per row (a plain bulk load ~0.2 KB), GC pauses stay under 5 % of wall time on bulk loads,
+inserts and inserts with nine materialized queries (0.9–4.9 %).
+
+(**LoadScan, next train**) Where the train's work ends, measured once on the same 4 pinned cores with the C# client on 4 others:
+a steady bulk load costs about **1.3–1.4 CPU-s per million rows** (~470 k rows/s), a fresh server's first million about 4.1 (most
+of it the runtime compiling its code), and a load allocates about 180 bytes per row. At 100 M rows the load runs at about 510 k rows/s
+for 1.3 CPU-s per million rows, and loading 100 M rows, then reading every one of them back three ways (a full GROUP BY, an export of
+every column, a selective scan), costs about 1.6 CPU-s per million rows end to end. The wall of a load from one client is mostly the
+client's: the server spends much of it waiting for the next rows.
+
+Workstation GC, two heaps, a larger gen-0 budget (`DOTNET_GCgen0size`), concurrent GC off, a spin limit of 0, tiered-compilation
+and PGO settings, and ReadyToRun were measured beside them; each was slower on the load or on the reads, or saved no CPU. **DATAS
+off** was cheaper still on the load (about 2.4 CPU-s per million rows with the spin limit) but it keeps one GC heap per core the
+process can see — peak memory 41–61 % higher on four cores, and on a host with many cores and no CPU limit, one heap per core of
+the host — so DATAS stays on.
+
+To override, use .NET's own variables, which take precedence over the `runtimeconfig`: `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit`
+sets the spin limit (the value is hexadecimal: `46` is .NET's 70), `DOTNET_GCDynamicAdaptationMode=0` turns DATAS off — on a host
+whose CPU limit is set and where memory is plentiful. The startup line `Runtime GC configuration: serverGC=…,
+dynamicAdaptation(DATAS)=…` says what is in force; before LoadScan it read `False` whenever DATAS came from the `runtimeconfig`.
 
 **If you embed the engine in your own process** (the embedded package, or `AoudaEngine` directly), your application's
 GC settings apply, and .NET's default is Workstation GC. Turn Server GC on (`<ServerGarbageCollection>true</ServerGarbageCollection>`
@@ -348,6 +377,18 @@ durability one.
 **The trade, stated plainly:** rows that flush cold are on disk rather than in RAM, so the first read
 of very recent data may be slower. The page cache is the tier for exactly that, and the condition
 only arises when the alternative was approaching the hot ceiling.
+
+**A pass over cold data asks the operating system to read ahead** (**LoadScan, next train**). When a read
+goes through every row group of a cold segment — a full GROUP BY, an export, a predicate's own column —
+the server tells the OS, before it starts, which pages of each column file it will read next
+(`posix_fadvise(WILLNEED)` on Linux), for this segment and the next one, so the disk reads overlap the
+decode instead of waiting one page at a time. A read that selects a few rows does not read its other
+columns ahead. Pages the server's own page cache holds, and ranges the OS already holds, are skipped. What
+the OS reads ahead lands in its file cache — the host's, or the container's, which a cgroup memory limit
+counts like any file read and reclaims under pressure; it is not part of `MaxTotalRamBytes`. Measured with
+nothing in any cache, on 1 M trades: a full GROUP BY 38 → 32 ms, an export of every row 8–38 % faster; at
+100 M trades a two-hour range over every segment 11–23 % faster. With the data already in a cache it changes
+nothing.
 
 Promotions and restart-time segment loads ask the same question. A promotion that would not fit is
 simply not made — the rows are already readable from cold, so nothing is lost but the speed-up.
@@ -618,6 +659,28 @@ Set `memoryRowCap` / `targetMemoryBytes` on the result table via
 Full treatment, including the amplification counters that say what a query costs:
 [Materialized queries](materialized.md#where-a-materialized-querys-result-lives).
 
+### A windowed result holds its window, not its history (**Horizon, next train**) {#windowed-results}
+
+A [window](materialized.md#windows) bounds what a time-bucketed result stores at all; `storageTemperature` and a row cap still
+decide where what it stores lives. Unlike the duration above, a window needs no arrival rate: it counts **groups**, and every row
+that arrives in a bucket folds into that bucket's one group.
+
+- **Groups ≈ series × buckets in `keep`**, plus at most about one time slice (a quarter of `keep`) and one horizon tick. It does not
+  grow with history. On the soak's `scale` shape, minute candles over 60 days are 26.3 M groups unwindowed and **2,098,324** in
+  the last seven days — what a `7d` window holds, after ten years as after one week.
+- **Measured at steady state** (in process, the clock moved through several windows): **1.140 ×** the groups in `keep` for `7d`
+  minute candles with day slices, **1.028 ×** for a `1d` window with hour slices — and **3.1 ×**, growing, with expiry taken out.
+- **Disk:** one segment per time slice, so more, smaller segments than an unwindowed result; on the Derive-shaped runs their
+  metadata was 1.37 % (`lab`) and 1.03 % (`scale`, 2 GB) of the column bytes. A slice that falls behind the horizon leaves whole,
+  with nothing rewritten.
+- **A rebuild folds only the window** — it reads its source from the horizon — so its grant ([§ rebuilds](materialized.md#211b-what-a-rebuild-costs-and-what-bounds-it))
+  is sized by the window's groups, not the history's.
+- **A read below the horizon is charged to the read's budget**, as its computed groups grow. A part that fits half of what the read
+  may still grow to is folded at once; a larger one in bucket-aligned pieces, one held at a time, as a stored read holds one
+  segment. A single bucket that alone outgrows the read-path ceiling is refused `503` + `Retry-After`, as a stored read of that size
+  is. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
+  history keyset-paged 10,000 at a time needed 8.5 MB against a 512 MB server's 4 MB read ceiling, and was refused on every retry.
+
 ## Memory is granted before work starts, and small writes have a reserve (**WorkloadCore S06, 0.3.0**)
 
 Work asks for memory before it starts — at least what it needs, at most what it can use — and waits in its class's queue if it
@@ -733,7 +796,7 @@ threshold you choose; a log line is gone from a polling system the moment it scr
 Writes that do not fit **wait** for memory — before they take any lock, for up to one 10-second sampling tick — and then return **HTTP 503** with `MEMORY_BUDGET_EXCEEDED` and a `Retry-After` estimated from the queue they waited in (**WorkloadCore S06, 0.3.0**), or `WAL_CAPACITY_EXCEEDED` and `Retry-After` from the WAL. Retry; the process stays up. Small writes (≤ 64 KiB) and sign-ins are admitted from a held reserve whatever else holds the memory. After flush and checkpoint, WAL segments below every consumer slot are deleted. The local point-in-time-recovery window is that same bound — **write volume** since the last backup (`MaxSlotWalKeepBytes`), not a number of days; enable WAL archiving to recover further back. Studio Inspect shows bytes on disk versus reclaimable, and `earliestRecoverablePitrPosition`. A database that cannot open (including leftover `insert.wal`) is **quarantined** — inspect it, then drop it if you do not need it (**BL-934, 0.4.0**: `aouda wal convert` is removed; restore from a backup or delete the leftover `insert.wal`). The rest of the server keeps serving.
 (**WorkloadCore S06, 0.3.0**) A refusal no longer names a **class** that hit its own entitlement: the per-class ceilings and `Aouda:Memory:PerClassAdmissionEnabled` are removed. A refusal now says how long the request waited, what was queued ahead of it, and the budget less the held reserve it was measured against. `reservedByClass` on `GET /api/server/memory` still says who was holding the budget, and `grants` what was waiting.
 
-Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised; and a `POST …/named-queries/batch` whose results genuinely exceed its read budget (the transient pool `T15`, less what other reads hold — the class ceiling it was measured against is gone, **WorkloadCore S06, 0.3.0**) is refused, where it previously succeeded while holding far more memory than it had reserved. The batch's refusal is the typed
+Two refusals are new in this release and are worth knowing before you meet them. A query whose result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000) is refused rather than materialised (**LoadScan, next train**: a `/query` with no page that asks for column-batch frames is streamed and holds one batch of frames, so neither this nor the read budget refuses an export of a whole table); and a `POST …/named-queries/batch` whose results genuinely exceed its read budget (the transient pool `T15`, less what other reads hold — the class ceiling it was measured against is gone, **WorkloadCore S06, 0.3.0**) is refused, where it previously succeeded while holding far more memory than it had reserved. The batch's refusal is the typed
 retryable `503`; the result ceiling is the client's to fix and answers `400 RESULT_TOO_LARGE` with no `Retry-After` (**release
 blockers, 0.3.0**; it was the same `503`, and a client that honoured its `Retry-After` was refused the same way every time).
 (**ColumnarRead, 0.3.0**) A large scan's decode buffers and a GROUP BY's, top-K's or `DISTINCT`'s growing state are now
