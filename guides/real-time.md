@@ -276,8 +276,9 @@ retention deletes a whole range in one statement. A subscriber learns about all 
 column and a time, not rows.
 
 **The snapshot carries its horizon.** When the subscribed table has a horizon, `snapshot_complete` gains `horizon` (ISO-8601 UTC,
-seven fractional digits) and `horizon_column`. The snapshot holds no row whose column lies below the horizon, or is null there. Both
-fields are omitted for any other table.
+seven fractional digits) and `horizon_column`. The horizon is read after the snapshot, so for a moment the snapshot can hold a row
+below it; a `horizon` message then follows. Apply the snapshot's horizon to its rows as you would a notice — drop every row whose
+column lies below it or is null. Both fields are omitted for any other table.
 
 ```json
 {
@@ -341,7 +342,7 @@ SDK helpers below do. So that a client can tell a day number from a time, a noti
 await foreach (var evt in client.GetTable("trades").SubscribeAsync())
 {
     if (evt.IsSnapshot)
-        held = evt.Rows!.ToList();                // nothing below evt.Horizon, when the table has one
+        held = evt.Rows!.Where(row => !evt.Removes(row)).ToList();   // drop what lies below evt.Horizon, when the table has one
     else if (evt.IsHorizon || evt.IsRangeDelete)
         held.RemoveAll(row => evt.Removes(row));
     else
@@ -352,7 +353,9 @@ await foreach (var evt in client.GetTable("trades").SubscribeAsync())
 `@aouda/client`: the `subscribe` options take `onHorizon(event)` and `onRangeDelete(event)` (`SubscriptionHorizonEvent`,
 `SubscriptionRangeDeleteEvent`); the async iterator yields the same events (`type: "horizon"` / `"range_delete"`), and its snapshot
 event carries `horizon` and `horizonColumn` (and `horizonColumnType: "date"` on a `Date` column; the notices carry `columnType`).
-`applyNotice(rows, event)` returns the rows a notice keeps; `noticeRemoves(row, event)` answers for one row.
+`applyNotice(rows, event)` returns the rows a notice keeps; `noticeRemoves(row, event)` answers for one row. Apply it to the
+snapshot too (`applyNotice(rows, snapshotEvent)` in the async iterator). The `onSnapshot` callback receives no horizon (BL-1068), so
+a callback-only client drops those rows at the next `horizon` message instead.
 
 ```typescript
 import { applyNotice } from "@aouda/client";

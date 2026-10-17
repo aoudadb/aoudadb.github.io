@@ -166,8 +166,8 @@ If you do nothing beyond default server config:
 - **Hot segment merge** (P30): `HotSegmentMergeWorker` coalesces small immutable hot segments and compacts mutable-tier tombstones.
 - **Deleted rows** (**Horizon, next train**): a hot or cold segment with no live row is retired whole by its coalescer's next pass
   (one catalog batch, nothing rewritten); `TRUNCATE` retires the table's segments instead of masking every row; a cold segment with
-  at least 25 % of its rows deleted is rewritten alone within one cold-merge tick, whatever its size (before, only cold segments under
-  65,536 rows were merged); and a scan skips a segment or row group whose rows are all deleted. On a table with a horizon (a windowed
+  at least 25 % of its rows deleted is rewritten alone within one cold-merge tick, whatever its size, once its metadata is loaded (before, only
+  cold segments under 65,536 rows were merged); and a scan skips a segment or row group whose rows are all deleted. On a table with a horizon (a windowed
   result, or a table with [retention](retention.md)) the coalescers merge only within one time slice wholly at or after the horizon;
   a segment reaching below it is left for expiry, which drops whole segments and writes nothing. See
   [Storage — Deleted rows and retired segments](storage.md#deleted-rows-and-retired-segments-horizon-next-train).

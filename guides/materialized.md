@@ -1683,11 +1683,14 @@ catalog's time facts alone, all of a table's in one catalog batch, with no row r
 once no reader that pinned the segment still holds it, with its key partitions and its deletion mask. A round that retires
 writes two catalog records — the horizon's and the batch — however many rows or segments go.
 
-- When a result's write buffer holds **a quarter** of its rows below `H`, its flush is forced, and writes none of them.
+- When a result's write buffer holds **a quarter** of its rows below `H`, its flush is asked for, and writes none of them.
 - A segment with no time facts on the window column is kept and reported (unknown keeps).
 - A crash between the catalog batch and the files loses nothing and brings nothing back; the restart removes the leftover files.
-- **Replicas:** each node advances its own horizon on its own clock (a replica maintains its own results), so nothing about
-  it is logged. A replica's `H` may differ by its clock; its answers do not.
+- **Replicas:** a windowed result's horizon on a replica is the primary's (**Horizon, next train**). A replica's result rows are
+  the primary's, so the primary logs each advance (`AdvanceTableHorizon`, one catalog record) and a replica advances none on its
+  own clock. (A table's [retention](retention.md#replicas) horizon still advances on each engine's own clock; an early expiry
+  reaches replicas as a logged record.) An engine that is not a replica also logs every horizon once when it opens, so a horizon
+  saved just before a crash still reaches replicas and point-in-time restores.
 - **What is stored:** the window, plus at most about one slice (a quarter of `keep`), plus whatever segments a pinned snapshot
   still holds. Measured at steady state: **1.140 ×** the groups in `keep` for `7d` minute candles, **1.028 ×** for a `1d`
   window — and 3.1 × and growing with expiry taken out. Retiring 120 segments took one catalog batch and about 30 ms; an hour
@@ -1724,14 +1727,24 @@ segments. A materialized query over such a table is **not** windowed — it **ke
   90 days, daily candles for ever. A `DELETE` before a time on such a table is an early expiry, and is treated the same way.
 - **A rebuild keeps the history.** It reads the table from its horizon, rounded up to the query's bucket, and copies the old
   result's groups below that cut into the new result as they were — across a `:refresh` and a restart's rebuild alike. A
-  query's **first** build carries nothing, so a query created after the table has expired rows starts without them.
+  query's **first** build carries nothing: it computes every group from the rows the table holds, so a query created after the
+  table has expired rows starts without them, and its group straddling the horizon counts only the rows at or after it.
+- **`TRUNCATE`** (**Horizon, next train**) empties the table; its results are rebuilt and keep their history below the cut, as
+  every rebuild over the table does, and the group straddling the horizon is carried as it was (BL-1063, below), so it may still
+  count truncated rows from between the horizon and the cut. The groups at or after the cut are recomputed from the empty table,
+  so they are gone. An unfiltered `DELETE` instead retracts exactly the visible rows. Use `TRUNCATE` to empty the table and keep the
+  history; no statement also clears a result's history — drop the query and create it again.
 - **Known limitation (BL-1060):** a query over such a table must split its groups by the retention column — an `aggregate`
   grouped by a time bucket of it (or by the column itself), or a `topNPerGroup` grouped by it; a `latestPerKey`, `firstPerKey`,
   `filter` or any other query is refused at create, and retention is refused on a table such a query reads. Incremental
   maintenance would keep their history and a rebuild drop it.
-- **Known limitation (BL-1063):** a rebuild carries the group whose bucket straddles the table's horizon whole (its rows below the
-  horizon are gone, so it cannot be recomputed): a change to that group that only a rebuild picks up — a deleted minimum or maximum,
-  a bulk load — is not reflected in it, its count and sum included. Every other group is exact.
+- **Known limitation (BL-1063):** every rebuild over the table, whatever caused it, recomputes every group at or after the cut `K`
+  (the horizon rounded up to the query's bucket) and carries every group below it — the one straddling the horizon included — as
+  the old result held it (its rows below the horizon are gone, so it cannot be recomputed). A change to a carried group that only a
+  rebuild picks up — a deleted minimum or maximum, a bulk load folded by the rebuild rather than incrementally, a `TRUNCATE` — is
+  not reflected in it, its count and sum included. A straddling group exists only for a bucket coarser than a minute (an hour,
+  day, week, month or year) when the horizon is not on its boundary. A result that is behind when it is rebuilt — it had not yet
+  absorbed a change, such as a bulk load whose deferred pass had not run — loses below `K` whatever it had not absorbed.
 - **Known limitation (BL-1061):** a read of a table with retention is not routed to a materialized result; it reads the table.
 - No window over such a table (refused, above): use raw retention plus **unwindowed** results.
 
@@ -1973,8 +1986,9 @@ Last verification date (UTC): `2026-03-31`.
   - A question that reaches below a windowed result's horizon is not routed to it; a routed union across the horizon is not built.
   - Known limitation (BL-1060): only a query that splits its groups by the retention column may read a table with retention.
   - Known limitation (BL-1061): a read of a table with retention is not routed to a materialized result.
-  - Known limitation (BL-1063): a rebuild over a table with retention carries the group straddling the table's horizon whole, so
-    a change to it that only a rebuild picks up (a deleted extreme, a bulk load) is not reflected. See [2.11e](#queries-over-a-table-with-retention).
+  - Known limitation (BL-1063): a rebuild over a table with retention recomputes only the groups at or after its cut and carries
+    every group below it, the straddling one included, as the old result held it, so a change to a carried group that only a rebuild
+    picks up (a deleted minimum or maximum, a bulk load folded by the rebuild, a `TRUNCATE`) is not reflected. See [2.11e](#queries-over-a-table-with-retention).
 - Reserved type support:
   - `FirstPerKey` and `TopNPerGroup` are represented in type enums but not fully shipped as end-to-end capabilities.
 - Surface parity gap (reduced):

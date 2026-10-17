@@ -308,7 +308,8 @@ Row deletes keep their model — a deletion mask (`_deleted.pages`) per segment,
 - **A cold segment with at least 25 % of its rows deleted is rewritten alone within one coalescer tick, whatever its size.** Before,
   only cold segments under 65,536 rows were ever merged, so a large bulk-loaded segment kept its deleted rows for ever. Measured:
   200,000 rows at 30 % deleted, rewritten in one tick (1.2 s) into 140,000; at 20 %, left alone; 1,048,576 rows at 30 %, one tick,
-  4.0 s. On a table with a horizon (a windowed result, or a table with [retention](retention.md)) only a segment wholly at or after
+  4.0 s. That holds for a segment whose metadata is resident; one not loaded is judged when it is next loaded. On a table with a
+  horizon (a windowed result, or a table with [retention](retention.md)) only a segment wholly at or after
   the horizon, inside one time slice, is rewritten; one reaching below it is left for expiry to drop whole.
 - **A scan does not plan a segment, or visit a row group, whose rows are all deleted** — no page is loaded.
 

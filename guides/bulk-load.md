@@ -497,8 +497,8 @@ time-slice rule: no segment may span two slices of its time column (the largest 
 - **Never spilled.** A bucket of such a table that must leave memory is flushed, one segment per slice, instead of spilling to a run
   that the commit merges (a spill merge cuts by bytes, not by time). Under a tight budget that means more, smaller segments; the
   coalescers merge them within their slices.
-- **Rows below the horizon are counted, not written.** A row whose time lies below the table's horizon — or is null, in a nullable
-  time column — is left out, and the `:commit` response reports how many in `expiredRows` (omitted when 0; not in `rowsLoaded`).
+- **Rows below the horizon are counted, not written.** A row whose time lies below the table's horizon — or is an explicit `null`, in a
+  nullable time column — is left out, and the `:commit` response reports how many in `expiredRows` (omitted when 0; not in `rowsLoaded`).
   `BulkLoadJobHandle.ExpiredRows` in `Aouda.Client`, `handle.expiredRows` in `@aouda/client`. See
   [HTTP API — `:commit`](../reference/http-api.md#post-jobidcommit).
 

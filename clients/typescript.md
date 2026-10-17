@@ -504,8 +504,9 @@ where it was sent as the 16-byte `Decimal` kind, which the server now refuses. A
 column, so a number sent into a `String` column is stored at the column's largest scale (`3` beside `2.50` is `3.00`). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
 **`expiredRows`** (**Horizon, next train**): on a table with [retention](../guides/retention.md), a row whose time lies below the
-table's horizon — or is null in a nullable time column — is accepted and left out, and `InsertResult.expiredRows` counts it. It is
-absent when 0, always on a table without retention.
+table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
+counts it (a row that omits the column is stored, hidden and dropped by the next flush, and not counted). It is absent when 0, always
+on a table without retention.
 
 ```typescript
 const result = await client.table('trades').insertMany(rows);
@@ -560,7 +561,8 @@ await client.table('users')
 ```
 
 (**Horizon, next train**) A delete whose only condition is the table's first cluster column (a `Timestamp` or `Date`) `<` or `<=` a
-time — no `limit`, `orderBy` or `returning` — costs metadata, not rows: on a table with retention it raises the table's horizon (an
+time — no `limit`, `orderBy` or `returning`, on a tabular table with no vector column that no foreign key references (an edge
+table takes the row path) — costs metadata, not rows: on a table with retention it raises the table's horizon (an
 early expiry), on any other table it is one log record and whole segments retired. See
 [Retention — Deleting everything before a time](../guides/retention.md#deleting-everything-before-a-time).
 
@@ -885,6 +887,10 @@ const sub = client.table<Trade>('trades').subscribe({
   onRangeDelete: (event) => { rows = applyNotice(rows, event); },
 });
 ```
+
+The snapshot's horizon is read after the snapshot, so for a moment the snapshot can hold a row below it (a `horizon` event then
+follows): apply it to the async iterator's snapshot event too, `applyNotice(rows, snapshotEvent)`. The `onSnapshot` callback receives
+no horizon (BL-1068), so a callback-only client drops those rows at the next `horizon` event instead.
 
 A client older than this ignores both messages, so its rows include ones the server no longer returns until it subscribes again. A
 `TRUNCATE` sends no notice. The wire contract: [Real-time Streaming — Horizons and range deletes](../guides/real-time.md#horizons-and-range-deletes).
