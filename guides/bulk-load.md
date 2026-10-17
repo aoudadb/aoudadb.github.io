@@ -168,6 +168,9 @@ Scope boundaries:
     30 M quotes, 13 queries): the trade load ran at **253 k rows/s** (67 k on 0.3.0; 266 k with no queries), at **37.4 CPU-s per
     million rows** (48.2), and all 13 queries were current **440.5 s** after the load started (650 s on 0.3.0) — the time of the
     `skip` + pooled-refresh recipe below (441.5 s), with identical results.
+- **A table with retention, or a windowed result, is loaded one segment per time slice and never spilled; rows below its horizon
+  are counted in `:commit`'s `expiredRows`, not written** (**Horizon, next train**). See
+  [Loading a table with retention](#loading-a-table-with-retention).
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
   - When `true`: validate every autoIncrement column on every row; store values as-is (including `0`); no ID allocation; `EnsureMinimumValue` only after successful `RunAsync` / commit.
@@ -480,6 +483,26 @@ queries should use bulk load, which keeps them current at its own rate and costs
 
 **And `:commit` no longer waits for the queries by default** (**LoadSpeed M.2, 0.4.0**): `mqWaitMs` defaults to `0`. A
 loader that needs the queries current before its next step sends `mqWaitMs`, or reads with the commit's `token`.
+
+### Loading a table with retention
+
+(**Horizon, next train**) A table that declares [retention](retention.md) — and a windowed materialized query's result — has a
+time-slice rule: no segment may span two slices of its time column (the largest of hour / day / week / month that is at most
+`keep / 4`), so that expiry can drop whole segments. The bulk load follows it:
+
+- **One segment per time slice.** Each bucket of the load is written as one segment per slice its rows fall in, with the run
+  directory and granule marks built inside each segment as before, so a series' rows stay in order within a slice. A three-year
+  history loaded into a table with a one-year `keep` lands as one segment per month and leaves a month at a time; the segments that
+  remain are never rewritten.
+- **Never spilled.** A bucket of such a table that must leave memory is flushed, one segment per slice, instead of spilling to a run
+  that the commit merges (a spill merge cuts by bytes, not by time). Under a tight budget that means more, smaller segments; the
+  coalescers merge them within their slices.
+- **Rows below the horizon are counted, not written.** A row whose time lies below the table's horizon — or is an explicit `null`, in a
+  nullable time column — is left out, and the `:commit` response reports how many in `expiredRows` (omitted when 0; not in `rowsLoaded`).
+  `BulkLoadJobHandle.ExpiredRows` in `Aouda.Client`, `handle.expiredRows` in `@aouda/client`. See
+  [HTTP API — `:commit`](../reference/http-api.md#post-jobidcommit).
+
+A table without retention is loaded exactly as before.
 
 ### Choosing partition storage mode
 

@@ -174,6 +174,23 @@ length and how many writes it refused) is one line in the server log, prefixed `
 
 ---
 
+## Horizons: windows, retention and expiry {#horizons}
+
+A windowed materialized query's result and a table with retention each have a **horizon**: rows older than it are not returned,
+and leave by whole segments. Its physical rules are constants of the engine, not settings — there is no knob for any row below.
+See [Materialized queries — windows](materialized.md#windows) and [Retention](retention.md).
+
+| Setting | Default | Config key | Notes |
+|---|---|---|---|
+| Time-slice width | the largest of hour, day, week or month that is at most `keep / 4`, never smaller than the bucket (the bucket itself when none fits) — a day for `7d`, a week for `35d` | — (not configurable) | (**Horizon, next train**) Every segment of a table with a horizon lies in one slice of its time column, and the coalescers merge only within one slice; a slice that falls behind the horizon is dropped whole. A table with retention uses the minute as its bucket, so a `keep` under four hours slices by the minute. At most about one slice is stored beyond `keep`. |
+| Horizon advance cadence | one slice / 8, at least 1 minute (a month counts 30 days) — every 3 h for a `7d` window, 21 h for `35d` | — (not configurable) | (**Horizon, next train**) The `horizon-advance` housekeeping job raises each horizon to the clock's value, persists it, then publishes it, and runs expiry for the table in the same round. Readers use only the persisted horizon, so up to one tick beyond `keep` is still stored (a windowed result) or still returned (a table with retention). |
+| Windowed result's horizon | `server clock − keep`, rounded down to the query's bucket (a `topNPerGroup`: to its `keep`'s unit) | `window.keep` on the query | (**Horizon, next train**) Never moves back. A query over a windowed result takes the higher of its own and its upstream's, raised to its own bucket. |
+| Retention horizon | `server clock − keep`, on the minute | `policy.retention.keep` on the table | (**Horizon, next train**) Persisted with the declaration, raised by the same job, never lowered — a longer `keep` leaves it where it is. A `DELETE` before a time on the table can raise it early. |
+| Expiry's forced flush | a quarter of the table's buffered committed rows below its horizon | — (not configurable) | (**Horizon, next train**) At that point expiry asks for the table's flush, which writes none of those rows (a partitioned table's flush does not yet leave them out, BL-1069). |
+| Cold rewrite of a partly deleted segment | at least 25 % of its rows deleted, whatever its size | — (not configurable) | (**Horizon, next train**) Rewritten alone within one cold-coalescer tick, when the segment's metadata is resident (one not loaded is judged when it is next loaded); before, only segments under 65,536 rows were ever merged. On a table with a horizon only a segment wholly inside the window (one slice, at or after the horizon) is rewritten; one reaching below it is expiry's to drop. Rows below a retention horizon do not count as deleted here (BL-1059). A segment with no live row is retired whole, with no rewrite. |
+
+---
+
 ## Partitioning
 
 | Setting | Default | Config key | Notes |

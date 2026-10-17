@@ -503,6 +503,17 @@ S13, 0.4.0**) It is the only decimal kind the client writes: a batch whose decim
 where it was sent as the 16-byte `Decimal` kind, which the server now refuses. A frame carries one scale per decimal
 column, so a number sent into a `String` column is stored at the column's largest scale (`3` beside `2.50` is `3.00`). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
+**`expiredRows`** (**Horizon, next train**): on a table with [retention](../guides/retention.md), a row whose time lies below the
+table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
+counts it (a row that omits the column is stored, hidden and dropped by the next flush, and not counted). It is absent when 0, always
+on a table without retention.
+
+```typescript
+const result = await client.table('trades').insertMany(rows);
+result.rowsInserted;  // stored
+result.expiredRows;   // accepted, below the horizon: never returned (undefined when 0)
+```
+
 #### Identity-insert (explicit autoIncrement IDs)
 
 Use `{ identityInsert: true }` when you must supply IDs on an `autoIncrement` column without flipping schema (Bond `isAutoIncrementDisabled: true`). Every autoIncrement column must be present and non-null; literal `0` is stored as-is; after success the runtime counter advances to `max(inserted)`.
@@ -549,6 +560,12 @@ await client.table('users')
   .delete();
 ```
 
+(**Horizon, next train**) A delete whose only condition is the table's first cluster column (a `Timestamp` or `Date`) `<` or `<=` a
+time — no `limit`, `orderBy` or `returning`, on a tabular table with no vector column that no foreign key references (an edge
+table takes the row path) — costs metadata, not rows: on a table with retention it raises the table's horizon (an
+early expiry), on any other table it is one log record and whole segments retired. See
+[Retention — Deleting everything before a time](../guides/retention.md#deleting-everything-before-a-time).
+
 ---
 
 ## 8) Schema Management
@@ -587,6 +604,29 @@ await client.tables.dropColumn('users', 'phoneNumber');
 
 // Delete a table
 await client.tables.deleteTable('users');
+```
+
+**Retention** (**Horizon, next train**): `policy.retention` on `createTable` and `retention` on `updatePolicy` declare that a table
+keeps only its recent rows — `{ keep: '90d' }`, a whole number of `m` / `h` / `d` / `w` (`TableRetention`). The first cluster column
+must be a `Timestamp` or `Date`. An `updatePolicy` body that only sets `retention` may omit `storageTemperature`. Once declared it can
+be changed, not removed. The returned `TablePolicy` (and the table detail's `policy`) carries `retention` and `horizon` (ISO-8601 UTC,
+the instant below which rows are gone). See [Retention](../guides/retention.md).
+
+```typescript
+await client.tables.createTable({
+  database: 'market',
+  name: 'trades',
+  columns: [
+    { name: 'Id', type: 'Int64', primaryKeyOrder: 1 },
+    { name: 'Ts', type: 'Timestamp', clusterOrder: 1, isNullable: true },
+    { name: 'Price', type: 'Double' },
+  ],
+  policy: { storageTemperature: 'Auto', retention: { keep: '90d' } },
+});
+
+const policy = await client.tables.updatePolicy('trades', { retention: { keep: '30d' } });
+policy.retention; // { keep: '30d' }
+policy.horizon;   // e.g. '2026-09-16T08:41:00Z'
 ```
 
 ### Declarative Schema Operations
@@ -816,6 +856,44 @@ const sub = client.table('events')
     onChange: (event) => console.log('Error event:', event.row),
   });
 ```
+
+#### Horizons and range deletes (**Horizon, next train**)
+
+A windowed materialized query's result and a table with [retention](../guides/retention.md) drop old rows without a row event per
+row, and a delete before a time on any other table removes a range in one statement. The subscription tells you with two more events
+in the `SubscriptionEvent` union:
+
+- `SubscriptionHorizonEvent` — `type: "horizon"`, `column`, `horizon` (ISO-8601 UTC), `version`, `token?`, `columnType?`: the table's horizon rose.
+  Drop every held row whose `column` is below `horizon` or null, and keep no later row below it.
+- `SubscriptionRangeDeleteEvent` — `type: "range_delete"`, `column`, `before`, `version`, `token?`, `columnType?`: rows below `before` were deleted
+  (a null time was not). Rows that arrive later are live whatever their time.
+
+The snapshot event (`SubscriptionSnapshotEvent`) of such a table carries `horizon` and `horizonColumn`; a windowed result's snapshot
+holds only its stored rows, at or after the horizon. The `subscribe` options (and a named-query subscribe's) take `onHorizon(event)`
+and `onRangeDelete(event)`; the async iterator yields the same events. Two helpers, exported from `@aouda/client`, do the dropping:
+`applyNotice(rows, event)` returns the rows a notice (or a snapshot's horizon) keeps, and `noticeRemoves(row, event)` answers for one
+row. They compare times exactly, in .NET ticks — rows carry a `Timestamp` as ticks on the JSON wire, the notices carry ISO strings.
+On a `Date` column a row carries its day number (days since the Unix epoch); the notice says so (`columnType: "date"`, and
+`horizonColumnType: "date"` on the snapshot event), and the helpers read a whole number there as days.
+
+```typescript
+import { applyNotice } from '@aouda/client';
+
+let rows: Trade[] = [];
+const sub = client.table<Trade>('trades').subscribe({
+  onSnapshot: (snapshot) => { rows = snapshot; },
+  onChange: (event) => { /* insert / update / delete, as before */ },
+  onHorizon: (event) => { rows = applyNotice(rows, event); },
+  onRangeDelete: (event) => { rows = applyNotice(rows, event); },
+});
+```
+
+The snapshot's horizon is read after the snapshot, so for a moment the snapshot can hold a row below it (a `horizon` event then
+follows): apply it to the async iterator's snapshot event too, `applyNotice(rows, snapshotEvent)`. The `onSnapshot` callback receives
+no horizon (BL-1068), so a callback-only client drops those rows at the next `horizon` event instead.
+
+A client older than this ignores both messages, so its rows include ones the server no longer returns until it subscribes again. A
+`TRUNCATE` sends no notice. The wire contract: [Real-time Streaming — Horizons and range deletes](../guides/real-time.md#horizons-and-range-deletes).
 
 #### One connection, many subscriptions
 
@@ -1058,6 +1136,27 @@ const finished = await client.materializedQueries.refreshAndWait('active_users_s
 // Throws if the query reaches state 3 (Error), or if timeoutMs elapses.
 ```
 
+**Windows** (**Horizon, next train**): `create` takes `window: { keep, column? }` (`MaterializedQueryWindow`) on an `aggregate` with
+a time bucket or a `topNPerGroup` grouped by a time column; the result stores only its groups within `keep` of the server's clock, and
+a read of an older range is computed from the source. `status()` reports `window` and `horizon` (ISO-8601 UTC). A window over a table
+with retention is refused. See [Materialized Queries](../guides/materialized.md).
+
+```typescript
+await client.materializedQueries.create({
+  name: 'candles_1m',
+  sourceTable: 'trades',
+  type: MaterializedQueryType.Aggregate,
+  config: {
+    groupByColumns: [{ column: 'Ticker' }, { column: 'Ts', function: 'truncateToMinute', outputName: 'Minute' }],
+    aggregates: [{ function: 'count', outputName: 'n' }],
+  },
+  window: { keep: '7d' },
+});
+const candles = await client.materializedQueries.status('candles_1m');
+candles.window;  // { keep: '7d' }
+candles.horizon; // groups before it are computed from the source on read
+```
+
 **Do not** call `refresh()` for a table you just bulk-loaded with the default
 `postLoadMqBehavior: "auto"` — the engine brings those queries current after the commit, in the background, with the
 table's pass over the load's segments (**WorkloadCore S10, 0.3.0**; before, it accumulated them during the load).
@@ -1082,6 +1181,10 @@ loaded.mqWaitedMs;      // how long :commit waited for them
 
 The load is durable whatever `mqStatus` says; `"behind"` means the queries' maintenance is still running. To read
 them current, read with `loaded.token`, which waits for them.
+
+(**Horizon, next train**) `handle.expiredRows` counts the rows a load into a table with [retention](../guides/retention.md) left out —
+below the horizon, or with a null time — never written and not in `rowsLoaded` (0 without retention). Such a table is loaded one
+segment per time slice; see [Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention).
 
 See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#available-now).
 
