@@ -13,6 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Named service keys, overlapping rotation, and an auth-admin credential (BL-1032, next train).** A server key mints
+  service keys by name (`POST /api/databases/{db}/service-keys`), lists prefixes, and revokes one name. Rotate and
+  `regenerate-keys` take `overlapSeconds` (max 86400); omit it or send `0` to revoke at once, and the response's
+  `validUntil` is when the old secret stops. `mk_adm_` (`/auth-admin-keys`) administers users and grants on one
+  application auth database and does not bypass PLS / RLS. `Aouda.Client` and `@aouda/client` refuse a key prefix in
+  the wrong setting. [HTTP API](reference/http-api.md#authentication-and-authorization),
+  [auth reference](auth/reference.md#named-service-keys-and-an-auth-admin-credential-bl-1032-next-train),
+  [getting started](getting-started/auth.md#api-keys-that-still-exist).
 - **Data past its time stops costing anything: windowed materialized queries, table retention, and deleting by dropping
   segments (Horizon, next train; ADR 0063).** An `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column
   may declare `window: { keep }`: its result keeps only the groups at or after its **horizon** (the server's clock minus `keep`,
