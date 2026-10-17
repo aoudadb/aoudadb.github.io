@@ -861,9 +861,9 @@ A windowed materialized query's result and a table with [retention](../guides/re
 row, and a delete before a time on any other table removes a range in one statement. The subscription tells you with two more events
 in the `SubscriptionEvent` union:
 
-- `SubscriptionHorizonEvent` — `type: "horizon"`, `column`, `horizon` (ISO-8601 UTC), `version`, `token?`: the table's horizon rose.
+- `SubscriptionHorizonEvent` — `type: "horizon"`, `column`, `horizon` (ISO-8601 UTC), `version`, `token?`, `columnType?`: the table's horizon rose.
   Drop every held row whose `column` is below `horizon` or null, and keep no later row below it.
-- `SubscriptionRangeDeleteEvent` — `type: "range_delete"`, `column`, `before`, `version`, `token?`: rows below `before` were deleted
+- `SubscriptionRangeDeleteEvent` — `type: "range_delete"`, `column`, `before`, `version`, `token?`, `columnType?`: rows below `before` were deleted
   (a null time was not). Rows that arrive later are live whatever their time.
 
 The snapshot event (`SubscriptionSnapshotEvent`) of such a table carries `horizon` and `horizonColumn`; a windowed result's snapshot
@@ -871,6 +871,8 @@ holds only its stored rows, at or after the horizon. The `subscribe` options (an
 and `onRangeDelete(event)`; the async iterator yields the same events. Two helpers, exported from `@aouda/client`, do the dropping:
 `applyNotice(rows, event)` returns the rows a notice (or a snapshot's horizon) keeps, and `noticeRemoves(row, event)` answers for one
 row. They compare times exactly, in .NET ticks — rows carry a `Timestamp` as ticks on the JSON wire, the notices carry ISO strings.
+On a `Date` column a row carries its day number (days since the Unix epoch); the notice says so (`columnType: "date"`, and
+`horizonColumnType: "date"` on the snapshot event), and the helpers read a whole number there as days.
 
 ```typescript
 import { applyNotice } from '@aouda/client';

@@ -80,7 +80,8 @@ nullable. That column is the one retention applies to.
 { "database": "market", "retention": { "keep": "30d" } }
 ```
 
-Declared on a table that already holds rows, it hides the rows below the new horizon at once.
+Declared on a table that already holds rows, it hides the rows below the new horizon at once — unless a rebuild of a materialized
+query over the table is running, in which case the horizon is set by the horizon job's first round after the rebuild (below).
 
 The policy response and the table detail (`GET …/tables/{name}`, under `policy`) report it, with the table's current horizon:
 
@@ -137,6 +138,10 @@ The table's **horizon** is the instant below which its rows are gone: the server
 - It is **persisted, then published**: set in the catalog when retention is declared (create, policy, schema apply), and raised by
   the server's horizon job, which writes it to the catalog before any reader is given it. A reader therefore never sees a row that a
   restart would bring back.
+- **A rebuild holds it.** While a materialized query over the table rebuilds, the horizon stays where the rebuild's cut was taken
+  from: a policy change made meanwhile — retention declared, `keep` shortened, any other policy field — is saved at once, and the
+  horizon it calls for is set by the job's first round after the rebuild. The rebuild therefore keeps every group it carries below
+  its cut; raised under it, the groups between the cut and the new horizon would be lost.
 - The job runs every slice / 8, and no more often than once a minute. The slice is the largest of hour / day / week / month that
   is at most `keep / 4` (a `90d` keep has a week slice; `7d`, a day).
 - It **never moves back** — not when the clock is stepped back, not across a crash, not when `keep` is made longer.

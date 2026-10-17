@@ -329,11 +329,13 @@ named query's bound `where` and row-level security do not apply to it.
 never arrives after it.
 
 **Times.** The notices carry ISO strings; rows on the JSON wire carry a `Timestamp` as .NET ticks (an `Int64`, 100 ns since
-0001-01-01 UTC). Compare them as the same instant, at full precision — the SDK helpers below do.
+0001-01-01 UTC) and a `Date` as its day number (days since the Unix epoch). Compare them as the same instant, at full precision — the
+SDK helpers below do. So that a client can tell a day number from a time, a notice on a `Date` column carries
+`"column_type": "date"` (and `snapshot_complete` `"horizon_column_type": "date"`); both are omitted for a `Timestamp`.
 
 **Dropping rows in the client.** `Aouda.Client`: a `SubscriptionEvent` has `Type` `"horizon"` or `"range_delete"` (`IsHorizon`,
-`IsRangeDelete`), `Horizon` (a snapshot's, or a `horizon` event's), `Before` (a `range_delete`'s) and `Column`; `evt.Removes(row)`
-says whether a held row goes. The typed `SubscriptionEvent<T>` carries the same, with `Removes(row, r => r.Ts)`.
+`IsRangeDelete`), `Horizon` (a snapshot's, or a `horizon` event's), `Before` (a `range_delete`'s), `Column` and `ColumnType`
+(`"date"` on a `Date` column); `evt.Removes(row)` says whether a held row goes, reading a `Date` row's day number as days. The typed `SubscriptionEvent<T>` carries the same, with `Removes(row, r => r.Ts)`.
 
 ```csharp
 await foreach (var evt in client.GetTable("trades").SubscribeAsync())
@@ -349,8 +351,8 @@ await foreach (var evt in client.GetTable("trades").SubscribeAsync())
 
 `@aouda/client`: the `subscribe` options take `onHorizon(event)` and `onRangeDelete(event)` (`SubscriptionHorizonEvent`,
 `SubscriptionRangeDeleteEvent`); the async iterator yields the same events (`type: "horizon"` / `"range_delete"`), and its snapshot
-event carries `horizon` and `horizonColumn`. `applyNotice(rows, event)` returns the rows a notice keeps; `noticeRemoves(row, event)`
-answers for one row.
+event carries `horizon` and `horizonColumn` (and `horizonColumnType: "date"` on a `Date` column; the notices carry `columnType`).
+`applyNotice(rows, event)` returns the rows a notice keeps; `noticeRemoves(row, event)` answers for one row.
 
 ```typescript
 import { applyNotice } from "@aouda/client";
