@@ -24,6 +24,9 @@ If your question is "How do I store and query graph edges?", start with:
 - §2.11 API coverage: `.NET` edge examples
 - §2.12 Scenario: Build and traverse a social graph
 
+If your question is "How do I do this over HTTP, from a language without the .NET engine?", start with:
+- §2.11 [REST endpoints](#rest-endpoints)
+
 If your question is "How do I store embeddings and run nearest-neighbor search?", start with:
 - §2.7 Core concepts (vector column primitive)
 - §2.11 API coverage: `.NET` vector examples
@@ -479,15 +482,15 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status |
 |---|---|---|---|---|
-| Create edge table | `AoudaEngine.CreateEdgeTableAsync` | Not documented (see §2.20) | Not directly exposed | Implemented |
-| Insert edges | `AoudaEngine.InsertEdgesAsync` | Not documented | Not directly exposed | Implemented |
-| Delete edge | `AoudaEngine.DeleteEdgeAsync` | Not documented | Not directly exposed | Implemented |
-| BFS traversal | `AoudaEngine.TraverseAsync` | Not documented | Not directly exposed | Implemented |
-| K-hop neighborhood | `AoudaEngine.KHopNeighborhoodAsync` | Not documented | Not directly exposed | Implemented |
-| Shortest path | `AoudaEngine.ShortestPathAsync` | Not documented | Not directly exposed | Implemented |
-| Insert vectors | `AoudaEngine.InsertVectorsAsync` | Not documented | Not directly exposed | Implemented |
-| Delete vector | `AoudaEngine.DeleteVectorAsync` | Not documented | Not directly exposed | Implemented |
-| ANN nearest neighbors | `AoudaEngine.NearestNeighborsAsync` | Not documented | Not directly exposed | Implemented |
+| Create edge table | `AoudaEngine.CreateEdgeTableAsync` | Not documented (see §2.20) | `POST …/edge-tables` | Implemented |
+| Insert edges | `AoudaEngine.InsertEdgesAsync` | Not documented | `POST …/tables/{name}/edges` | Implemented |
+| Delete edge | `AoudaEngine.DeleteEdgeAsync` | Not documented | No route | Implemented |
+| BFS traversal | `AoudaEngine.TraverseAsync` | Not documented | `POST …/tables/{name}/edges:traverse` | Implemented |
+| K-hop neighborhood | `AoudaEngine.KHopNeighborhoodAsync` | Not documented | `POST …/tables/{name}/edges:khop` | Implemented |
+| Shortest path | `AoudaEngine.ShortestPathAsync` | Not documented | `POST …/tables/{name}/edges:shortest-path` | Implemented |
+| Insert vectors | `AoudaEngine.InsertVectorsAsync` | Not documented | `POST …/tables/{name}/vectors/{column}` (the table from `POST …/tables/{name}:create-vector-column`) | Implemented |
+| Delete vector | `AoudaEngine.DeleteVectorAsync` | Not documented | No route | Implemented |
+| ANN nearest neighbors | `AoudaEngine.NearestNeighborsAsync` | Not documented | `POST …/tables/{name}/vectors/{column}:nearest` | Implemented |
 | Bulk load (edge/vector via tabular bulk-load) | `AoudaEngine.BulkLoadAsync`, `AoudaClient.BulkLoadAsync` | `client.table(name).bulkLoad(...)` | `POST .../bulk-load:begin` etc. | Implemented — see §2.18 for edge/vector bulk-load status |
 
 ### Missing API matrix
@@ -497,9 +500,48 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | SQL/PGQ graph queries | No SQL graph query endpoint | Use method-level operators | ADR 0027 (columnar) Stage 2 | High |
 | `Retrieve` hybrid pipeline | No `RetrieveAsync` operator | Chain operators manually | ADR 0027 (columnar) Stage 2 | High |
 | MaxSim rerank (MdVector) | No rerank operator | FDE column not yet computed | ADR 0027 (columnar) Stage 2 | High |
-| TypeScript graph/vector method APIs | No TS SDK surface for `TraverseAsync`, `NearestNeighborsAsync` etc. | Use engine API directly or HTTP raw endpoints once exposed | Not yet planned | Medium |
-| HTTP graph/vector endpoints | Graph/vector operators not exposed via REST | Engine API only | Not yet planned | Medium |
+| TypeScript graph/vector method APIs | No TS SDK surface for `TraverseAsync`, `NearestNeighborsAsync` etc. | Call the [REST endpoints](#rest-endpoints) directly | Not yet planned | Medium |
+| HTTP edge / vector delete | No route for `DeleteEdgeAsync` / `DeleteVectorAsync` | Engine API only | Not yet planned | Low |
 | GraphAr import | No CLI or API import command | Manual edge `InsertEdgesAsync` | BL-064 | Low |
+
+### REST endpoints
+
+(**Pass-10**: these routes exist on the server; earlier revisions of this guide said the operators were not exposed over REST.)
+Every operation above except the two deletes is an HTTP route under `/api/databases/{db}`, on the admin listener (the data-plane
+listener answers `404`). Neither SDK wraps them yet, so a client calls them directly with JSON. The full request and response
+fields are in the [HTTP reference](../reference/http-api.md#graph-and-vector-endpoints).
+
+| Operation | Route | Body → answer |
+|---|---|---|
+| Create edge table | `POST …/edge-tables` | `{ name, srcColumn, dstColumn, edgeLabel?, storeCsc?, … }` → `201 { name }` |
+| Insert edges | `POST …/tables/{name}/edges` | `{ srcs, dsts, edgeLabels? }` → `{ edgesInserted, token }` |
+| BFS traversal | `POST …/tables/{name}/edges:traverse` | `{ startNodeId, hops? }` → `{ neighborIds, executionMs }` |
+| K-hop neighborhood | `POST …/tables/{name}/edges:khop` | `{ startNodeId, k }` → `{ nodeIds, hops, executionMs }` |
+| Shortest path | `POST …/tables/{name}/edges:shortest-path` | `{ a, b }` → `{ path, executionMs }` |
+| Create a table with a vector column | `POST …/tables/{name}:create-vector-column` | `{ columnName, dimensions, distance?, quantization?, ivfCells?, … }` → `201 { columnName }` |
+| Insert vectors | `POST …/tables/{name}/vectors/{column}` | `{ rowKeys, vectorData, embeddingModelVersion?, partitionKey? }` → `{ rowsInserted, token }` |
+| ANN nearest neighbors | `POST …/tables/{name}/vectors/{column}:nearest` | `{ queryEmbedding, k }` → `{ rowKeys, distances, executionMs, token }` |
+
+The answers that list several results are **column arrays**, like every row-shaped answer of the API: `:khop` answers `nodeIds`
+and `hops` with node *i* at index *i* of both, and `:nearest` answers `rowKeys` and `distances`, nearest first
+(**Lead S12, next train; breaking**: they were `"nodes": [{"nodeId", "hops"}]` and `"results": [{"rowKey", "distance"}]`, one
+object per result). `vectorData` is row-major: the vectors one after another, `rowKeys.length × dimensions` numbers.
+
+```bash
+# The follow graph of Scenario 1, over HTTP
+curl -X POST "$AOUDA/api/databases/social/edge-tables" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{ "name": "follows", "srcColumn": "src_id", "dstColumn": "dst_id", "storeCsc": true }'
+
+curl -X POST "$AOUDA/api/databases/social/tables/follows/edges" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{ "srcs": [1, 1, 2], "dsts": [2, 3, 4] }'
+
+curl -X POST "$AOUDA/api/databases/social/tables/follows/edges:khop" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{ "startNodeId": 1, "k": 2 }'
+# → { "nodeIds": [2, 3, 4], "hops": [1, 1, 2], "executionMs": 1 }
+```
+
+The reads (`edges:traverse`, `edges:khop`, `edges:shortest-path`, `:nearest`) take the same freshness parameters as `POST …/query`
+(`at_least`, `waitMs`, …), and the caller's PLS / RLS applies to them as in §2.7.6.
 
 ### .NET examples
 
@@ -630,7 +672,7 @@ foreach (var (rowKey, dist) in top10)
 
 ### TypeScript examples
 
-TypeScript graph/vector method APIs (Traverse, NearestNeighbors, etc.) are not yet exposed in `@aouda/client`. Evidence for TS bulk-load surfaces (`client.table(name).bulkLoad(...)`) is documented in `P20-COMPLETION.md §5.2` via cross-repo task reports; see §2.20 for the source-evidence status of TS surfaces.
+TypeScript graph/vector method APIs (Traverse, NearestNeighbors, etc.) are not yet exposed in `@aouda/client`: call the [REST endpoints](#rest-endpoints) with `fetch`. Evidence for TS bulk-load surfaces (`client.table(name).bulkLoad(...)`) is documented in `P20-COMPLETION.md §5.2` via cross-repo task reports; see §2.20 for the source-evidence status of TS surfaces.
 
 ---
 
@@ -847,7 +889,7 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | Stage 4 | Planned (P23) | No frozen object-storage tier; billion-vector corpora must reside on local disk | Ultra-scale vector lakes blocked on frozen tier |
 | MdVector retrieval | Stage 2 | `DataType.MdVector` data is stored but not queryable for MaxSim retrieval | Callers who insert `MdVector` in Stage 1 should plan to re-run `BulkLoadAsync` after Stage 2 lands to populate FDE |
 | TypeScript graph/vector method APIs | Missing | TS SDK consumers cannot traverse edges or run ANN natively | Evidence in P20-COMPLETION §5.2 is cross-repo only; no TS source confirmed in this workspace |
-| HTTP REST graph/vector endpoints | Missing | Non-.NET HTTP consumers cannot use graph/vector operations without embedding the engine | No controller-level exposure for Traverse/KHop/ShortestPath/NearestNeighbors |
+| HTTP REST graph/vector endpoints | Partial | An HTTP client can create edge tables and vector tables, insert edges and vectors, traverse, take a k-hop neighborhood or a shortest path, and search nearest neighbors ([REST endpoints](#rest-endpoints)); it cannot delete an edge or a vector | No route for `DeleteEdgeAsync` / `DeleteVectorAsync`. (**Pass-10**: this row said the operators had no controller; `GraphVectorController` exposes them) |
 | Edge/vector bulk-load native support | Partial | `BulkLoadAsync` for tabular tables is shipped; edge-table and vector-column bulk-load paths gated by BL-071 | `InsertEdgesAsync` / `InsertVectorsAsync` check `AwaitBulkLoadLockReleaseAsync` defensively; actual edge/vector bulk-load path tracked separately |
 
 ---
@@ -916,7 +958,7 @@ The following evidence could not be fully verified from local source materials a
 
 1. **TypeScript SDK surface for graph/vector** — `P20-COMPLETION.md §5.2` states `client.table(name).bulkLoad(...)` etc. are shipped in `aouda-client-ts`, but the TypeScript client repo (`c:\Data\GitHub\aouda-client-ts`) was not inspected for this document. TypeScript graph/vector method APIs (Traverse, NearestNeighbors) were not confirmed and are listed as Missing in the API coverage matrix. A follow-up pass against `aouda-client-ts` is needed to confirm or add those surfaces.
 
-2. **HTTP REST graph/vector endpoints** — No controller in `src/Aouda.Server/Controllers/` was found to expose `TraverseAsync`, `KHopNeighborhoodAsync`, `ShortestPathAsync`, or `NearestNeighborsAsync` over HTTP. This is consistent with the Stage-1 design (method-level API only), but the server-level route surface was not fully enumerated for this document. Confirmed as missing in §2.18.
+2. **HTTP REST graph/vector endpoints** — Resolved (**Pass-10**). Earlier revisions said no controller exposed the operators; `src/Aouda.Server/Controllers/GraphVectorController.cs` does, and the routes are documented in §2.11 [REST endpoints](#rest-endpoints) and the [HTTP reference](../reference/http-api.md#graph-and-vector-endpoints). Only the deletes have no route.
 
 3. **Edge/vector bulk-load via `BulkLoadAsync`** — `AoudaEngine.InsertEdgesAsync` and `InsertVectorsAsync` gate themselves via `AwaitBulkLoadLockReleaseAsync`, which is a defensive check for when bulk-load lands on those table kinds. BL-071 tracks enabling edge/vector tables for bulk-load. The exact status of BL-071 sub-tasks was not confirmed in source.
 

@@ -20,9 +20,9 @@ One of Aouda's key qualities is that AI agents can build and test complete appli
 aouda start --port 5433 --data-dir ./data
 # Create database via API or appsettings — see setup.md
 
-# Agent uses it immediately — zero setup
+# Agent uses it immediately — zero setup (rows as column arrays: Lead S12, next train)
 curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
-  -d '{ "rows": [{ "id": 1, "customer": "Acme", "total": 249.99 }] }'
+  -d '{ "columns": ["id", "customer", "total"], "data": [[1], ["Acme"], [249.99]] }'
 ```
 
 ### Level 1: Database with Auth (API setup)

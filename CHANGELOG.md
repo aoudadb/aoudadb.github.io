@@ -13,6 +13,21 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **The REST API speaks column arrays (Lead S12, next train; breaking on the wire).** Every JSON write body now sends its rows the
+  way a query result already arrives: `columns` (the names), `data` (one array per column) and, for a cell that is not given,
+  `absent` — which, unlike `null`, lets an auto-increment id be generated or a default apply. That holds for `POST …/rows`, a
+  branch insert, a WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed (`aouda.seed.json` too); a
+  body that still sends `rows` is refused `400 ROW_OBJECTS_UNSUPPORTED`, naming the shape to send. A bulk-load `:append` takes
+  frames or one JSON column-array body — NDJSON is refused `415` — and a JSON body now carries what only NDJSON could (a vector, a
+  nested value). On the read side the `format` parameter is gone (`400 INVALID_FORMAT`; results are always column arrays), and the
+  materialized-query read, `generatedValues` (one cell per request row), WebSocket `snapshot` pages, vector `:nearest`, graph
+  `:khop` and the policy inspector's samples answer column arrays too. A row-shaped body cost a key per value on every row; column
+  arrays name each column once and are read by one decoder on every surface. The C# SDK of this train speaks the new wire with
+  the same public API; `@aouda/client` and Studio follow in their own next trains. See
+  [the write body](reference/http-api.md#column-arrays-the-write-body).
+- **The graph and vector REST endpoints are documented (Pass-10).** The server has long exposed edge tables (create, insert,
+  `edges:traverse`, `edges:khop`, `edges:shortest-path`) and vector columns (create, insert, `:nearest`) over HTTP; the graph and
+  vector guide said they were not exposed. See [the HTTP reference](reference/http-api.md#graph-and-vector-endpoints).
 - **Column-batch frames are version 2, `ACB2` (Lead S09, next train; breaking on the wire).** Every frame body — a query response
   read as frames, a bulk-load `:append`, a `/rows` insert — ends with an **end frame**, and every frame carries a sequence number.
   A query response's row count, statistics, total matches and warnings now travel in that end frame (the `X-Aouda-Row-Count`,

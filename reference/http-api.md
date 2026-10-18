@@ -14,7 +14,7 @@ This document specifies the JSON-based wire protocol for Aouda client-server com
 
 - **Transport**: HTTP/1.1 and HTTP/2
 - **Format**: JSON for all messages
-- **Default Response Format**: Columnar JSON (50% smaller than row-based)
+- **Rows on the wire**: column arrays — `columns` and `data`, one array per column — in every JSON result and every JSON write body (**Lead S12, next train**: the row-object forms, `format=rows` and `"rows": [{…}]` bodies, are gone); binary [column-batch frames](#the-column-batch-frame-acb2) on request
 - **Content Type**: `application/json`
 
 ## Protocol Version
@@ -514,7 +514,8 @@ All errors return a JSON body with this structure:
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path |
-| `INVALID_FORMAT` | 400 | Invalid format parameter value |
+| `INVALID_FORMAT` | 400 | (**Lead S12, next train**) The request names the `format` query parameter (`/query`, a named query's execute or batch). It is no longer read: every JSON result is column arrays (`columns`, `data`), and the binary form is asked for with `Accept: application/vnd.aouda.column-batch-v2`. Any value is refused, `columnar` included, so an old client asking for `rows` is told rather than handed a body it misreads. Drop the parameter |
+| `ROW_OBJECTS_UNSUPPORTED` | 400 / 415 | (**Lead S12, next train**) A write body carries row objects (`rows`, or a named mutation's batch argument given as an array of objects), which no surface reads any more: `POST …/rows`, a branch insert, a named mutation's `batchParam`, the schema seed and `aouda.seed.json`, and a WebSocket `stream_rows` (as its `error` code). A bulk-load `:append` sent as NDJSON (`application/x-ndjson`) is refused the same way with `415`. Send [column arrays](#column-arrays-the-write-body) — `columns`, `data` and, for a cell that is not given, `absent` — or upgrade the client library. Nothing was written |
 | `MISSING_TABLE` | 400 | Table name is missing from request |
 | `MISSING_DATABASE` | 400 | Database name is missing or empty in request (v2: set the `database` field in the request body) |
 | `INVALID_OPERATOR` | 400 | Invalid comparison operator in where clause |
@@ -927,7 +928,7 @@ Execute a query against a table.
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `format` | `columnar` | Response format: `columnar` or `rows` |
+| `format` | — | (**Lead S12, next train**) **Removed.** Any `format=` (even `columnar`) is refused `400 INVALID_FORMAT`; the JSON result is always column arrays (below), and frames are asked for with `Accept` |
 | `readPreference` | `Primary` | Read preference (overrides header) |
 | `at_least` | _(omitted)_ | Consistency token. Wins over `X-Aouda-Token`. |
 | `waitMs` | 250 when gate active | Freshness wait; cap 30 000 |
@@ -1150,7 +1151,7 @@ and for `…/query/count`.
 | `groupBy[].bucket` | A time bucket of a `Timestamp` column: `minute`, `hour`, `day`, `week` (ISO, from Monday), `month`, `year`. The key is the bucket's start. |
 | `groupBy[].alias` | The key column's name (the column's name otherwise). |
 
-The answer is the ordinary query response (columnar, `format=rows`, or frames). It holds the group keys, then one column per
+The answer is the ordinary query response (column arrays, or frames). It holds the group keys, then one column per
 aggregate in the order asked; without `groupBy` it is **one row**. `where` selects the rows aggregated, and `orderBy` (over the
 result's column names), `offset` and `limit` apply to the groups — **including `limit`'s default of 1000**, so a query that
 can make more groups than that sets `limit` (up to 10,000) and pages with `offset`. Groups come in key order (ascending, nulls
@@ -1177,7 +1178,7 @@ An unknown column is `400 COLUMN_NOT_FOUND`. A caller denied the table gets the 
 columns. Named-query definitions do not carry these fields yet (**BL-796**): ⚠️ a definition that includes them is
 accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 
-**Columnar Response (default):**
+**Response (column arrays):**
 
 ```json
 {
@@ -1198,22 +1199,13 @@ accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 }
 ```
 
-**Row Response (`format=rows`):**
+`columns` names the result's columns, `types` their types, and `data` holds **one array per column**, in the order of
+`columns`, all `rowCount` long: row *i* is index *i* of every array.
 
-```json
-{
-  "rows": [
-    {"id": 1, "customer": "Alice", "total": 100.50},
-    {"id": 2, "customer": "Bob", "total": 200.75}
-  ],
-  "stats": {
-    "rowsScanned": 1000,
-    "rowsReturned": 2,
-    "segmentsAccessed": 5,
-    "executionMs": 12
-  }
-}
-```
+(**Lead S12, next train; breaking**) **This is the only JSON shape.** The row-object response (`format=rows`, `{"rows": [{…}]}`)
+is gone, and with it the `format` parameter: a request that still sends `format=` — any value, `columnar` included — is refused
+`400 INVALID_FORMAT`, so an old client is told instead of being handed a body it would misread. To get row objects, zip the
+arrays on the client (both SDKs do this for you); for the binary form, ask for frames with `Accept` (below).
 
 **`stats.routedTo` (**ColumnarRead S18, 0.3.0**):** the materialized query the answer was read from instead of the table,
 when it was — rows, columns, `aggregates` / `groupBy` and `…/query/count` are all routed to a current result that holds the
@@ -1226,7 +1218,7 @@ its horizon — the number of source rows read to compute that part with the que
 computed. A read of a windowed result is complete for any range: groups at or after the horizon come from the result, the rest from
 the source ([Materialized Queries](../guides/materialized.md)).
 
-**JSON written from the columns (**ColumnarRead, 0.3.0**):** both JSON shapes are now written straight from the
+**JSON written from the columns (**ColumnarRead, 0.3.0**):** the JSON answer is now written straight from the
 query's columns into the response and sent as they are written (chunked), instead of being built whole first. The bytes are
 the same as before for every type. One case changes: a `Double` / `Float32` result cell that is `NaN` or infinite, which JSON
 cannot represent, is now a clean `500 INTERNAL_ERROR` naming the column before anything is sent. Before, the response broke
@@ -1247,8 +1239,7 @@ body raises, retried or not by its code as any error is (before, the server abor
 connection error, failing again at the same place). The request timeout (`Aouda:RequestTimeoutMs`, 30 s by default) still bounds a
 streamed export: reached after the first frame, it is an error end frame `REQUEST_TIMEOUT` with status 504, as its JSON answer is.
 Only a server that dies mid-body still cuts a response, and a body without its end frame is an error in both SDKs.
-`format=columnar|rows` chooses the JSON shape only. The same applies to `POST …/named-queries/{name}/query`; the named-query
-batch stays JSON.
+The same applies to `POST …/named-queries/{name}/query`; the named-query batch stays JSON.
 
 - **Body:** data frames, each at most 65,536 rows — fewer for a wide result, so that no frame decodes past the reader's 256 MB a
   frame — then **one end frame** (**Lead S09, next train**). There is always at least one data frame: an empty result is one frame
@@ -1362,15 +1353,15 @@ Execute one named query by unique name.
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
-**Query parameters:** `format=columnar` (default) or `format=rows`. `readPreference` as on ad-hoc query. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`. The named query’s declared `freshness` is keyed by `{name}`. A name with no `freshness` block is fail-safe: primary-only + `readYourWrites`. Loosening (call site weaker than the declared budget, or non-`Primary` on fail-safe) is 400 `FRESHNESS_LOOSENED`.
+**Query parameters:** `readPreference` as on ad-hoc query. (**Lead S12, next train**) There is no `format` parameter any more: any `format=` is refused `400 INVALID_FORMAT`, and the result is always column arrays. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`. The named query’s declared `freshness` is keyed by `{name}`. A name with no `freshness` block is fail-safe: primary-only + `readYourWrites`. Loosening (call site weaker than the declared budget, or non-`Primary` on fail-safe) is 400 `FRESHNESS_LOOSENED`.
 
-**Success (200, columnar):** same `ColumnarResult` shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset — counted by the same read as the page, over the same snapshot (**ColumnarRead, 0.3.0**)). When the name is deprecated, `warnings` is present:
+**Success (200):** same column-array shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset — counted by the same read as the page, over the same snapshot (**ColumnarRead, 0.3.0**)). When the name is deprecated, `warnings` is present:
 
 ```json
 {
   "columns": ["ticker", "qty"],
   "types": ["String", "Int64"],
-  "data": [["AAPL", 10]],
+  "data": [["AAPL"], [10]],
   "rowCount": 1,
   "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 },
   "warnings": [
@@ -1417,7 +1408,7 @@ Read-only batch envelope. Every element is evaluated against **one read snapshot
     {
       "columns": ["ticker", "qty"],
       "types": ["String", "Int64"],
-      "data": [["AAPL", 10]],
+      "data": [["AAPL"], [10]],
       "rowCount": 1,
       "stats": { "rowsScanned": 2, "rowsReturned": 1, "segmentsAccessed": 1, "executionMs": 1 }
     },
@@ -1458,7 +1449,7 @@ A named-mutation name in `queries`:
 
 On the **data-plane listener**, unsigned or unentitled batch is **request-level 404** `NAMED_QUERY_NOT_FOUND` (not HTTP 200 with positional slots). Entitled callers still get HTTP 200 with positional `NAMED_QUERY_NOT_FOUND` for unknown names. The admin listener keeps 401/403 for unsigned/unentitled batch.
 
-`INVALID_FORMAT` when `?format=` is not `columnar` or `rows`.
+`INVALID_FORMAT` when the request names `?format=` at all (**Lead S12, next train**: every slot is column arrays; it used to choose `columnar` or `rows`).
 
 Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) — that is ad-hoc update/delete on one table.
 
@@ -1498,7 +1489,7 @@ The object shape is reserved for those two one-key forms, because `{ "param": �
 
 To store a JSON document in a `String` column, send it as a JSON **string** (`"Meta": "{\"a\":1}"`), not as a bare object.
 
-**Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying an **array** of row-argument objects, so one `execute` call inserts many rows. `values` stays the per-row template; each array element resolves that row's `{"param": …}` holes exactly as a single-row `args` object would. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT` — `upsert` is allowed, being row-shaped; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap and every row are checked before any row is inserted — one bad element fails the whole call and names its array index in `rowErrors`, the same shape as insert-transform per-row errors.
+**Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying **many rows of arguments**, so one `execute` call inserts many rows. (**Lead S12, next train; breaking**) That argument is **column arrays**: `columns` names parameters, `data` holds one array per parameter (all the same length, one value per row), and the optional `absent` lists, per parameter, the rows that do not give it. Row *i*'s given cells fill that row's `{"param": …}` holes, overriding the top-level `args` of the same name, exactly as a row object's keys did before; a parameter a row does not give falls back to `args`. An **array of row objects is refused `400 ROW_OBJECTS_UNSUPPORTED`** (it was the only form before). `values` stays the per-row template. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT` — `upsert` is allowed, being row-shaped; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap (`maxItems` counts rows) and every row are checked before any row is inserted — one bad row fails the whole call and names its row index in `rowErrors`, the same shape as insert-transform per-row errors.
 
 Definition:
 
@@ -1522,7 +1513,14 @@ Definition:
 Execute:
 
 ```json
-{ "args": { "rows": [ { "ticker": "AAPL", "px": 189.2 }, { "ticker": "MSFT", "px": 402.1 } ] } }
+{
+  "args": {
+    "rows": {
+      "columns": ["ticker", "px"],
+      "data": [["AAPL", "MSFT"], [189.2, 402.1]]
+    }
+  }
+}
 ```
 
 A definition without `batchParam` is unaffected — `args` stays one flat object of parameter values, exactly as before.
@@ -1539,16 +1537,16 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 #### `POST /api/databases/{db}/named-mutations/{name}/execute`
 
-**Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the row array; every other field is unchanged.
+**Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the rows as column arrays (`{columns, data, absent?}`, **Lead S12, next train**; it was an array of row objects, now refused `ROW_OBJECTS_UNSUPPORTED`); every other field is unchanged.
 
-**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound. `insert` and `upsert` return `rows` too when the definition declares `returning` — the rows written, an upsert's one per key as stored (**NativeClients, 0.4.0**; BL-639).
+**Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of batch rows bound. `insert` and `upsert` return `rows` too when the definition declares `returning` — the rows written, an upsert's one per key as stored (**NativeClients, 0.4.0**; BL-639).
 (**Horizon, next train**) On a table with [retention](../guides/retention.md), `insert` and `upsert` results carry `expiredRows` —
 rows whose time lies below the table's horizon or is an explicit `null` — omitted when 0. Such a row is left out before it is logged,
 except an upsert row that replaces a key a read returns: it is logged and buffered, hidden by every read and dropped by the next
 flush (the key disappears from reads), and counted in `rowsUpdated` **and** in `expiredRows`. The two counts overlap only for such a
 row, so `rowsInserted + rowsUpdated + expiredRows` can exceed the rows sent.
 
-**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, 0.3.0**), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending array index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
+**Errors:** `NAMED_MUTATION_NOT_FOUND` (404), `NAMED_MUTATION_BIND_FAILED` (400), `NAMED_QUERY_PARAM_REQUIRED` (400 — a required arg was omitted, including a missing `batchParam`), `NAMED_MUTATION_RETURNING_OVERFLOW` (400), `MEMORY_BUDGET_EXCEEDED` (503 + `Retry-After` — a DELETE / UPDATE whose matches do not fit the read budget, nothing changed; **BL-817, 0.3.0**), `WRITE_CONFLICT` (409 — a DELETE / UPDATE whose matched rows other writers kept changing through 16 attempts, nothing changed, retry; **BL-881, 0.3.0**), `TABLE_NOT_FOUND` (data-plane opt-in), `IDENTITY_QUOTA_EXCEEDED` (429). On the data-plane listener, unsigned or unentitled execute is 404 `NAMED_MUTATION_NOT_FOUND` (same envelope as unknown); admin listener keeps 401/403. A batch-element bind failure's 400 body includes `rowErrors: [{ "index", "code", "message" }]` naming the offending row index — the whole call fails, no row is inserted. `NAMED_MUTATION_BIND_FAILED` also covers a `values` / `set` entry that is an unrecognised object node, naming the column. Schema apply also rejects `NAMED_MUTATION_UNCAPPED_DELETE`, `NAMED_MUTATION_RETURNING_STAR`, `NAMED_MUTATION_VALUE_NODE_INVALID`, `NAMED_MUTATION_BATCH_NON_INSERT`, and `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`.
 
 ### Access-surface diff
 
@@ -1580,6 +1578,18 @@ Posting identities requires **Admin**. `?access=true` without identities is **Re
 
 Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` attaches `accessSurface`. Studio always sends `includeAccess: true`.
 
+#### `POST /api/databases/{db}/branches/{name}/insert`
+
+Insert rows into a table on a branch; they are written to the branch's own segments only. The body is the table and the rows as
+[column arrays](#column-arrays-the-write-body) (**Lead S12, next train; breaking**: it was `{"table", "rows": [{…}]}`, now refused
+`400 ROW_OBJECTS_UNSUPPORTED`). The rows are inserted as `POST …/tables/{name}/rows` inserts them.
+
+```json
+{ "table": "orders", "columns": ["id", "status"], "data": [[1, 2], ["pending", "shipped"]] }
+```
+
+**Response:** `200` `{ "table": "orders", "rowsInserted": 2 }`. A body without `table` or without a row is `400 INVALID_REQUEST`.
+
 ---
 
 ### Materialized query endpoints
@@ -1592,7 +1602,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | GET | `/{name}` | Read | Status for one query; `404` if missing. |
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. (**BL-884, 0.3.0**) A create whose first build is refused for capacity (memory, or a full WAL) still answers `204`: the definition is durable, the query exists **behind** (`current: false`) and is built once there is room. It used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists". |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
-| POST | `/{name}/query` | Read | Return materialized rows as JSON objects (see response). |
+| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, next train**: they were row objects). |
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
@@ -1672,19 +1682,26 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 
 `configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000). AggregateConfig's `groupByColumns` entries are objects — `{ "column": "region" }`, or `{ "column": "time", "function": "TruncateToHour" }` for a time bucket. (**BL-980, 0.4.0**) The v1 plain-string form (`"groupByColumns": ["region"]`) is `400 INVALID_REQUEST`, and a stored definition in that form is refused when it is read; up to 0.3.x both were read.
 
-**Query response** (`POST .../query`):
+**Query response** (`POST .../query`) — column arrays (**Lead S12, next train; breaking**: it was `"rows": [{…}]`, one object per
+row):
 
 ```json
 {
-  "rows": [ { "col1": 1, "col2": "a" } ],
+  "columns": ["col1", "col2"],
+  "data": [[1, 2], ["a", "b"]],
+  "rowCount": 2,
   "stats": {
-    "rowsScanned": 1,
-    "rowsReturned": 1,
+    "rowsScanned": 2,
+    "rowsReturned": 2,
     "executionMs": 0.42
   },
   "token": "01a1b2c3d4e5f60708090a0b0c0d0e0f10111213"
 }
 ```
+
+`data` holds one array per entry of `columns`, each `rowCount` long; row *i* is index *i* of every array. `columns` are the result
+table's public columns in their declared order (its maintenance columns are never shown), and an empty result still names them.
+Unlike `POST …/query` there is no `types` array.
 
 `token` is the MQ **maintenance watermark** (the source position the MQ has incorporated), not this node's WAL offset. Token-bearing MQ reads wait on that watermark. GET list/status objects include the same field.
 
@@ -1869,19 +1886,22 @@ query through `POST .../schema/apply`, or set the result table's policy afterwar
 
 Apply idempotent seed data. Tables must already exist.
 
-**Request:** seed document root:
+**Request:** seed document root — the same format as `aouda.seed.json`. Each table's rows are
+[column arrays](#column-arrays-the-write-body) (**Lead S12, next train; breaking**: they were `"rows": [{…}]`, which is now refused
+`400 ROW_OBJECTS_UNSUPPORTED`):
 
 ```json
 {
   "tables": {
     "orders": {
-      "rows": [
-        { "id": 1, "status": "pending" }
-      ]
+      "columns": ["id", "status"],
+      "data": [[1, 2], ["pending", "shipped"]]
     }
   }
 }
 ```
+
+A table may carry `absent` as any write body does; a cell left absent is not part of that row's seed.
 
 **Response:** `200 OK` — `SeedApplyResult` with per-table `insertedCount` and `skippedCount` (existing primary keys skipped).
 
@@ -2349,32 +2369,81 @@ Drop a column.
 
 ### Data Mutation Endpoints
 
-#### `POST /api/databases/{db}/tables/{name}/rows`
+#### Column arrays: the write body
 
-Insert one or more rows into a table.
-
-**Request Body:**
+(**Lead S12, next train; breaking**) **Every JSON write body sends its rows as column arrays** — the shape a query result already
+has. It is read the same way on every surface: `POST …/tables/{name}/rows`, a bulk-load [`:append`](#post-jobidappend) sent as JSON,
+a WebSocket [`stream_rows`](#stream_rows), a [branch insert](#post-apidatabasesdbbranchesnameinsert), a named mutation's
+[`batchParam`](#named-mutations) argument, and the [schema seed](#schema-seed) (`aouda.seed.json` too). Each surface keeps its own
+fields beside these three:
 
 ```json
 {
-  "database": "mydb",
-  "table": "orders",
-  "rows": [
-    { "id": 0, "status": "pending", "price": 100.50 },
-    { "id": 0, "status": "shipped", "price": 200.00 }
+  "columns": ["id", "ts", "price"],
+  "data": [
+    [1, 2, null],
+    ["2026-10-18T09:00:00Z", "2026-10-18T09:00:01Z", "2026-10-18T09:00:02Z"],
+    [1.5, 2.5, 3.5]
   ],
-  "writeConcern": "majority",
-  "identityInsert": false
+  "absent": { "id": [2] }
 }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `columns` | string[] | Yes | The column names: distinct, non-empty. |
+| `data` | array[] | Yes | **One array per column**, in the order of `columns`, all the same length — that length is the row count. Row *i* is index *i* of every array. |
+| `absent` | object? | No | Per column, the row indexes whose cell is **not given**: `{"<column>": [rowIndex, …]}`. The `data` slot of an absent cell must be `null`. |
+
+**Absent is not null.** An absent cell is what a key left out of a row object used to be: an absent `autoIncrement` cell is
+generated, and an absent column that has a default takes its default. An explicit `null` is a null — an `autoIncrement` cell sent as `null` is not generated. In the example,
+rows 0 and 1 give their ids and row 2's is generated. A column absent in **every** row can simply be left out of `columns`; `absent`
+is only needed when some rows give a column and others do not.
+
+**Values** are read as before: an integer is an integer, a fraction keeps the scale it is written with, a string is a string, and an
+array or an object (a vector, a nested value) is converted the way the column's type takes it. A value is judged exactly as the same
+cell sent in a [column-batch frame](#the-column-batch-frame-acb2) — the same conversions, the same errors.
+
+**Refused (`400`, nothing written):** `columns` and `data` that do not match (a different number of arrays, arrays of different
+lengths, a name given twice), an `absent` that names a column `columns` does not, a row past the body, a row twice, or a cell whose
+`data` slot is not `null`. The message names the column and the row. **A body that still carries `rows`** — row objects, the shape
+every write surface took up to this train — is refused **`400 ROW_OBJECTS_UNSUPPORTED`**, naming the shape to send. There is no
+fallback: upgrade the client. The SDKs' insert helpers keep taking rows and pivot them for you — `Aouda.Client` from this train,
+`@aouda/client` from its own next train.
+
+To turn row objects into this shape: collect every key any row has as `columns` (in first-seen order), give each column an array
+with one slot per row, and put a row's value in its slot — or, when that row has no such key, `null` in the slot and the row's index
+in `absent[column]`.
+
+#### `POST /api/databases/{db}/tables/{name}/rows`
+
+Insert one or more rows into a table.
+
+**Request Body** (**Lead S12, next train**: [column arrays](#column-arrays-the-write-body); it was `"rows": [{…}]`, now refused
+`400 ROW_OBJECTS_UNSUPPORTED`):
+
+```json
+{
+  "database": "mydb",
+  "table": "orders",
+  "columns": ["status", "price"],
+  "data": [["pending", "shipped"], [100.50, 200.00]],
+  "writeConcern": "majority",
+  "identityInsert": false
+}
+```
+
+The `id` column (an `autoIncrement` key) is left out of `columns`, so both rows' ids are generated.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
-| `rows` | object[] | Yes | Array of row objects to insert. Each key is a column name. |
+| `columns` | string[] | Yes | (**Lead S12, next train**) The column names. See [column arrays](#column-arrays-the-write-body). |
+| `data` | array[] | Yes | (**Lead S12, next train**) One array of values per column, all the same length. |
+| `absent` | object? | No | (**Lead S12, next train**) Per column, the rows whose cell is not given (not null). |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
-| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be present and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column means the same as `0`. An explicit non-zero id without the flag is stored, and the counter moves past it before the insert commits, so a later generated id cannot repeat it (**ColumnarMerge S02, 0.2.0**) — as a JSON integer, a numeric string (`"300"`) or an integral number (`5.0`, `1e2`) alike, each stored as that integer (**BL-703, 0.2.0**; a string id used to be stored without moving the counter, and a fractional form failed with a `500`). |
+| `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be given (not absent) and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column (leaving it out of `columns`, or listing the row in `absent`) means the same as `0`. An explicit non-zero id without the flag is stored, and the counter moves past it before the insert commits, so a later generated id cannot repeat it (**ColumnarMerge S02, 0.2.0**) — as a JSON integer, a numeric string (`"300"`) or an integral number (`5.0`, `1e2`) alike, each stored as that integer (**BL-703, 0.2.0**; a string id used to be stored without moving the counter, and a fractional form failed with a `500`). |
 
 **Response:** `200 OK`
 
@@ -2383,8 +2452,8 @@ Insert one or more rows into a table.
   "rowsInserted": 2,
   "executionMs": 5,
   "generatedValues": {
-    "0": { "id": 42 },
-    "1": { "id": 43 }
+    "columns": ["id"],
+    "data": [[42, 43]]
   },
   "writeConcernStatus": {
     "requested": "majority",
@@ -2400,7 +2469,7 @@ Insert one or more rows into a table.
 |-------|------|-------------|
 | `rowsInserted` | number | Number of rows successfully inserted |
 | `executionMs` | number | Server-side execution time in milliseconds |
-| `generatedValues` | object? | Generated values for auto-increment columns. Keys are row indices (as strings), values are objects mapping column names to generated values. Only present when the server allocated IDs. Absent or empty for that row/column under `identityInsert: true` (client-supplied values are stored as-is). |
+| `generatedValues` | object? | Generated values for auto-increment columns, as column arrays (**Lead S12, next train; breaking**: it was an object keyed by row index, `{"0": {"id": 42}}`): `columns` names the generated columns and `data` holds one array per column with **one cell per request row** — the value generated for that row, or `null` where the row gave its own value. Row *i* of the request is index *i*. Only present when the server allocated IDs — so not under `identityInsert: true`, where client-supplied values are stored as-is. |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"` (no replication wait). See `WriteConcernStatus` below. |
 | `expiredRows` | number? | (**Horizon, next train**) Rows of the request accepted and left out because their time lay below the table's [retention](../guides/retention.md) horizon, or was an explicit `null` in a nullable time column — never stored, never returned, not in `rowsInserted`. A row that omits the column is not counted (it is stored, hidden by every read and dropped by the next flush). **Omitted when 0** (always, on a table without retention). Not reported by `POST …/rows/batch` or the WebSocket write stream. |
 
@@ -2418,15 +2487,13 @@ S11**) an insert wrote its table's aggregate and latest / first-per-key queries 
   "database": "mydb",
   "table": "orders",
   "identityInsert": true,
-  "rows": [
-    { "id": 1000, "status": "seeded" },
-    { "id": 0, "status": "zero-is-literal" }
-  ]
+  "columns": ["id", "status"],
+  "data": [[1000, 0], ["seeded", "zero-is-literal"]]
 }
 ```
 
 - Stores client-supplied autoIncrement values as-is (including literal `0` — does **not** mean “please generate”).
-- Requires every autoIncrement column on every row; missing or `null` → `400` / clear error; no partial insert.
+- Requires every autoIncrement column on every row; missing, absent or `null` → `400` / clear error; no partial insert.
 - After success, the next normal insert with `id: 0` receives `max(inserted) + 1`. Omitting the column is still `400` (BL-429).
 - Does **not** flip catalog `autoIncrement` (use schema apply / Studio Toggle AutoId for that — BL-126).
 - For large seed/reseed jobs, prefer bulk-load `options.identityInsert` (see [Bulk Load API](#bulk-load-api)).
@@ -2462,10 +2529,10 @@ minutes**, whatever a later response advertises (**BL-716, 0.2.0**). (**BL-980, 
 does: a `415` on a frame is an error like any other — the fallback existed only for an older server behind the same address,
 and pre-1.0 the client and server are upgraded together. The advertisement itself is unchanged.
 
-**JSON is read into columns too.** A JSON body is no longer deserialized into one dictionary per row: the server
-locates `rows` and reads each value straight into the table's typed columns, with the same conversions as before (a
-number in a `String` column is stored as its JSON text; `"12"` in an integer column is parsed). The request format is
-unchanged, and so is what it accepts: `application/json`, `text/json` and `application/*+json`, with or without a UTF-8
+**JSON is read into columns too.** A JSON body is not deserialized into one dictionary per row: the server reads each
+array of `data` straight into the table's typed columns (**Lead S12, next train**: the arrays are the body's own, where it located
+`rows` before), with the same conversions as before (a number in a `String` column is stored as its JSON text; `"12"` in an integer
+column is parsed). It accepts `application/json`, `text/json` and `application/*+json`, with or without a UTF-8
 byte-order mark. Two visible differences: a body that is not valid JSON is now a `ProtocolError` `400 INVALID_REQUEST`,
 like every other error of this endpoint, and an empty body is `400 MISSING_DATABASE`.
 
@@ -2484,7 +2551,8 @@ like every other error of this endpoint, and an empty body is `400 MISSING_DATAB
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
+| `ROW_OBJECTS_UNSUPPORTED` | 400 | (**Lead S12, next train**) A JSON body with `rows` (row objects). Send [column arrays](#column-arrays-the-write-body). Nothing is inserted |
+| `INVALID_REQUEST` | 400 | Missing `columns` / `data`, column arrays that do not match (see [column arrays](#column-arrays-the-write-body)), invalid column name, schema mismatch, `identityInsert: true` with a missing, absent or `null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
 | — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch-v2` |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` frame body, or the retired `application/vnd.aouda.column-batch` type. The message names the version found and the one expected. Nothing is inserted |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
@@ -2900,6 +2968,152 @@ Computed column types are inferred where the expression permits (`"Unknown"` oth
 - All mutation endpoints use `encodeURIComponent()` for the table name in the URL path.
 - Standard error codes (`INTERNAL_ERROR`, `SERVICE_UNAVAILABLE`, etc.) apply as described in the Error Codes section above.
 - For the full user guide with SDK examples and patterns, see [guides/bulk-mutations.md](../guides/bulk-mutations.md).
+
+---
+
+### Graph and vector endpoints
+
+(**Pass-10**: these routes have existed since the graph and vector stage; this reference did not list them.) Edge tables and
+vector columns are created, written and queried over REST under `/api/databases/{db}`. All bodies and answers are JSON. They are
+admin-listener routes: on the data-plane listener they are `404`. Writes need write permission on the database; the four reads need
+read permission and honour the [freshness parameters](#consistency-tokens-and-freshness) (`at_least`, `waitMs`, `onExceeded`, the
+lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)).
+Neither SDK wraps them yet.
+
+| Method | Path | Body | Answer |
+|---|---|---|---|
+| `POST` | `/api/databases/{db}/edge-tables` | `{ name, srcColumn, dstColumn, edgeLabel?, storeCsc?, authMode?, permissionDimension?, srcIsPartitionKey?, rlsResolverName?, rlsColumn? }` | `201` `{ "name" }` |
+| `POST` | `/api/databases/{db}/tables/{name}/edges` | `{ srcs, dsts, edgeLabels? }` | `200` `{ "edgesInserted", "token" }` |
+| `POST` | `/api/databases/{db}/tables/{name}/edges:traverse` | `{ startNodeId, hops? }` | `200` `{ "neighborIds", "executionMs" }` |
+| `POST` | `/api/databases/{db}/tables/{name}/edges:khop` | `{ startNodeId, k }` | `200` `{ "nodeIds", "hops", "executionMs" }` |
+| `POST` | `/api/databases/{db}/tables/{name}/edges:shortest-path` | `{ a, b }` | `200` `{ "path", "executionMs" }` |
+| `POST` | `/api/databases/{db}/tables/{name}:create-vector-column` | `{ columnName, dimensions, distance?, quantization?, ivfCells?, embeddingModel?, authMode?, permissionDimension?, rlsResolverName?, rlsColumn? }` | `201` `{ "columnName" }` |
+| `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}` | `{ rowKeys, vectorData, embeddingModelVersion?, partitionKey? }` | `200` `{ "rowsInserted", "token" }` |
+| `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}:nearest` | `{ queryEmbedding, k }` | `200` `{ "rowKeys", "distances", "executionMs", "token" }` |
+
+#### `POST /api/databases/{db}/edge-tables`
+
+Create an edge table: two `Int64` columns, the source and the destination node ids.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | The edge table's name. |
+| `srcColumn` / `dstColumn` | string | Yes | The source and destination columns' names. |
+| `edgeLabel` | string? | No | A label for the table's edges. |
+| `storeCsc` | bool | No | Also keep the reverse (destination → source) index, which lets a shortest path search from both ends. Default `false`. |
+| `authMode` | string? | No | `jwt-claim` (default), `auth-db-pls` or `auth-db-rls`. |
+| `permissionDimension` | string? | With `auth-db-pls` | The partition dimension the caller's grants are matched on. |
+| `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
+| `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. |
+| `rlsColumn` | string? | No | Adds a `String` column for grant-sourced RLS (for example `org`). |
+
+`400 INVALID_REQUEST` for a missing field or an unknown `authMode`; `409 TABLE_EXISTS` when the name is taken.
+
+```json
+{ "name": "follows", "srcColumn": "src_id", "dstColumn": "dst_id", "edgeLabel": "follows", "storeCsc": true }
+```
+
+#### `POST /api/databases/{db}/tables/{name}/edges`
+
+Insert edges: `srcs[i]` → `dsts[i]`. The two arrays must be non-empty and the same length (`400 INVALID_REQUEST` otherwise);
+`edgeLabels`, when given, holds one label per edge. The answer carries the write's consistency `token`.
+
+```json
+{ "srcs": [1, 1, 2], "dsts": [2, 3, 3] }
+```
+
+```json
+{ "edgesInserted": 3, "token": "…" }
+```
+
+#### `POST /api/databases/{db}/tables/{name}/edges:traverse`
+
+Breadth-first traversal: every node reachable from `startNodeId` within `hops` hops (default `1`), each once, the start node not
+included.
+
+```json
+{ "startNodeId": 1, "hops": 2 }
+```
+
+```json
+{ "neighborIds": [2, 3], "executionMs": 1 }
+```
+
+#### `POST /api/databases/{db}/tables/{name}/edges:khop`
+
+The k-hop neighbourhood: every node reachable from `startNodeId` within `k` hops (`k` > 0), with its smallest hop distance
+(from 1; the start node not included), ordered by distance and then node id. The answer is column arrays: `nodeIds[i]` is at
+`hops[i]` hops (**Lead S12, next train; breaking**: it was `"nodes": [{"nodeId", "hops"}]`, one object per node).
+
+```json
+{ "startNodeId": 1, "k": 2 }
+```
+
+```json
+{ "nodeIds": [2, 3, 4], "hops": [1, 1, 2], "executionMs": 1 }
+```
+
+#### `POST /api/databases/{db}/tables/{name}/edges:shortest-path`
+
+The shortest path from node `a` to node `b`: the node ids along it, both ends included, or `[]` when there is none. A table
+created with `storeCsc: true` is searched from both ends.
+
+```json
+{ "a": 1, "b": 4 }
+```
+
+```json
+{ "path": [1, 3, 4], "executionMs": 1 }
+```
+
+#### `POST /api/databases/{db}/tables/{name}:create-vector-column`
+
+Create the table `{name}` with an `Int64` primary key `RowKey` and one vector column.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `columnName` | string | Yes | The vector column's name. |
+| `dimensions` | number | Yes | The vectors' length, > 0. |
+| `distance` | string | No | `L2` (default), `Cosine` or `DotProduct`. |
+| `quantization` | string | No | `None` (default), `RaBitQ`, `PQ` or `SQ`. |
+| `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
+| `embeddingModel` | string? | No | The embedding model's name. |
+| `authMode`, `permissionDimension`, `rlsResolverName`, `rlsColumn` | | No | As for an edge table. |
+
+`400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance`, `quantization` or `authMode`;
+`409 TABLE_EXISTS` when the table exists.
+
+#### `POST /api/databases/{db}/tables/{name}/vectors/{column}`
+
+Insert vectors for row keys. `vectorData` is **row-major**: the vectors one after another, `rowKeys.length × dimensions` numbers.
+`embeddingModelVersion` records which model made them; `partitionKey` places them in a partition of a PLS table (the default
+partition when omitted). Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
+
+```json
+{ "rowKeys": [1, 2], "vectorData": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], "embeddingModelVersion": "v1" }
+```
+
+```json
+{ "rowsInserted": 2, "token": "…" }
+```
+
+#### `POST /api/databases/{db}/tables/{name}/vectors/{column}:nearest`
+
+Approximate nearest neighbours of `queryEmbedding` (its length is the column's `dimensions`): up to `k` (> 0) hits, nearest first.
+The answer is column arrays: `rowKeys[i]` is at `distances[i]` (**Lead S12, next train; breaking**: it was
+`"results": [{"rowKey", "distance"}]`, one object per hit). `token` is the cut the search read.
+
+```json
+{ "queryEmbedding": [0.1, 0.2, 0.3], "k": 2 }
+```
+
+```json
+{ "rowKeys": [1, 2], "distances": [0.0, 0.52], "executionMs": 2, "token": "…" }
+```
+
+**Errors:** on the routes under `tables/{name}`, `404 TABLE_NOT_FOUND` for an unknown table or column and `400 INVALID_REQUEST` for
+an operation the table does not support (for example a traversal of a table that is not an edge table); on every route, the
+capacity refusals every endpoint answers (`503` + `Retry-After`).
 
 ---
 
@@ -4059,7 +4273,14 @@ Send a batch of rows on an open write stream.
 | `type` | string | Yes | Always `"stream_rows"` |
 | `id` | string | Yes | Stream ID (must match a prior `stream_open`). |
 | `seq` | number | Yes | Monotonically increasing sequence number for this batch. Must start at 1 and increment by 1 per batch. The server uses this to detect gaps and for acknowledgement. |
-| `rows` | array | Yes | Array of row objects to insert. Same format as the HTTP insert endpoint. |
+| `columns` | string[] | Yes | (**Lead S12, next train**) The column names. |
+| `data` | array[] | Yes | (**Lead S12, next train**) One array of values per column, all the same length (at least one row). |
+| `absent` | object? | No | (**Lead S12, next train**) Per column, the rows whose cell is not given (not null). |
+
+The batch is [column arrays](#column-arrays-the-write-body), the same body the HTTP insert takes (**Lead S12, next train; breaking**:
+it was `"rows": [{…}]`). A message that still carries `rows` gets an `error` with code `ROW_OBJECTS_UNSUPPORTED`; column arrays that
+do not match get `INVALID_STREAM_ROWS`. Either way nothing of that batch is written. The long-poll fallback's `stream_rows` is read the same way. Rows are still applied and acknowledged one by
+one (a `stream_ack` error's `index` is the row's index in the batch).
 
 **Example:**
 ```json
@@ -4067,9 +4288,11 @@ Send a batch of rows on an open write stream.
   "type": "stream_rows",
   "id": "stream-metrics-1",
   "seq": 1,
-  "rows": [
-    {"sensor_id": 42, "value": 98.6, "recorded_at": "2026-05-22T11:00:00Z"},
-    {"sensor_id": 42, "value": 99.1, "recorded_at": "2026-05-22T11:00:05Z"}
+  "columns": ["sensor_id", "value", "recorded_at"],
+  "data": [
+    [42, 42],
+    [98.6, 99.1],
+    ["2026-05-22T11:00:00Z", "2026-05-22T11:00:05Z"]
   ]
 }
 ```
@@ -4215,7 +4438,8 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 |---|---|---|
 | `type` | string | Always `"snapshot"` |
 | `id` | string | Subscription ID this snapshot belongs to. |
-| `rows` | object[] | Rows in this page. May be empty. |
+| `columns` | string[] | (**Lead S12, next train**) The page's column names. |
+| `data` | array[] | (**Lead S12, next train**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
 
@@ -4224,13 +4448,18 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 {
   "type": "snapshot",
   "id": "sub-orders-1",
-  "rows": [
-    {"id": 1, "status": "active", "total": 150.00},
-    {"id": 2, "status": "active", "total": 99.99}
+  "columns": ["id", "status", "total"],
+  "data": [
+    [1, 2],
+    ["active", "active"],
+    [150.00, 99.99]
   ],
   "version": 100040
 }
 ```
+
+(**Lead S12, next train; breaking**) A page is column arrays, as a query result is; it was `"rows": [{…}]`, one object per row.
+`snapshot_complete` and `change` are unchanged: a change event still carries one row.
 
 ---
 
@@ -4513,14 +4742,14 @@ Client                                  Server
 
 The Bulk Load API provides high-throughput batch data ingestion with durability guarantees, idempotency, and optional replication barriers. It uses a begin/append/commit pattern over HTTP.
 
-All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is NDJSON (`application/x-ndjson`) or, on a server that advertises it, the binary column-batch frame (`application/vnd.aouda.column-batch`, **IngestAtSpeed S09, 0.1.40**; see [`:append`](#post-jobidappend)); all other bodies are JSON.
+All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is the binary column-batch frame (`application/vnd.aouda.column-batch-v2`) or one JSON body of [column arrays](#column-arrays-the-write-body) (`application/json`); see [`:append`](#post-jobidappend). (**Lead S12, next train; breaking**) NDJSON (`application/x-ndjson`) is no longer read: it is refused `415 ROW_OBJECTS_UNSUPPORTED`. All other bodies are JSON.
 
 ### Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/databases/{db}/bulk-load:begin` | Begin a new session. Returns `jobId`. |
-| `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (NDJSON or column-batch body). |
+| `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (column-batch frames, or JSON column arrays). |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:commit` | Commit the session. |
 | `GET` | `/api/databases/{db}/bulk-load/{jobId}` | Get session status and progress. (Listed as `{jobId}:status` until **WorkloadCore, 0.3.0**; the route has always been `{jobId}`.) |
 | `GET` | `/api/databases/{db}/bulk-load:list` | List all sessions for this database. |
@@ -4598,7 +4827,7 @@ A table with no write-time compute needs neither flag.
 | `tables` | string[] | Echo of the requested tables. |
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
 | `maxRowsPerAppend` | number | Maximum rows allowed per single `:append` call. Clients must chunk larger payloads. |
-| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `"ndjson"` and `"column-batch-v2"` (**Lead S09, next train**: it was `"column-batch"`, `ACB1`, which is no longer read). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
+| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, next train**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
 | `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count). |
 
 **Example:**
@@ -4635,16 +4864,29 @@ no PLS and no RLS policy is not affected. The refusal happens before a session e
 
 Append a chunk of rows to an in-flight session.
 
-**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line), or `application/vnd.aouda.column-batch-v2` (column-batch frames, then an end frame; layout below). The retired `application/vnd.aouda.column-batch` is refused `415 FRAME_VERSION_UNSUPPORTED` (**Lead S09, next train**).
+**Content-Type:** `application/vnd.aouda.column-batch-v2` (column-batch frames, then an end frame; layout below), or
+`application/json` — **one** body of [column arrays](#column-arrays-the-write-body), `{"columns": […], "data": [[…], …], "absent"?: {…}}`
+(**Lead S12, next train**). The retired `application/vnd.aouda.column-batch` is refused `415 FRAME_VERSION_UNSUPPORTED` (**Lead S09,
+next train**).
 
-When the session was begun with more than one table, each row must include a `"_table"` field naming its destination. The `"_table"` field is stripped before inserting.
+(**Lead S12, next train; breaking**) **NDJSON is gone.** A body sent as `application/x-ndjson` (one row object per line) is refused
+`415 ROW_OBJECTS_UNSUPPORTED` and nothing is appended. Send the same rows as one JSON column-array body instead: it carries what
+only NDJSON could before — a vector, a nested value, a column whose rows disagree on type — and it is read by the same reader as every
+other write body. A JSON body is one batch: it is decoded whole before any row of it is queued, so a body that is not valid column
+arrays appends nothing (`400 INVALID_REQUEST`, or `400 ROW_OBJECTS_UNSUPPORTED` for a body with `rows`). `maxRowsPerAppend` counts
+its rows.
 
-**NDJSON line ends.** `\n`, `\r\n` and a bare `\r` each end a line (**BatchFirst S03, 0.1.40** — a bare `\r` used to leave the whole body as one line and fail it).
+When the session was begun with more than one table, each row must name its destination in a **`_table` column**: a
+multi-table body carries `_table` in `columns`, with each row's table name in its slot. The `_table` column is stripped before
+inserting. A row whose `_table` is missing (absent or `null`) or names a table outside the job is refused
+`400 BULK_LOAD_MISSING_DISCRIMINATOR`: *Row {n} of this :append is missing the '_table' discriminator …* or *… references table
+'{t}' which is not in this job's table set.*, with `details: row={n}` (1-based, counted over this `:append`). The rows before it
+stay credited (**Lead S12, next train**: the message said "Row at line N", with `lineNumber=N`).
 
 #### The column-batch frame (`ACB2`)
 
 (**IngestAtSpeed S09, 0.1.40**; version 2, `ACB2`, since **Lead S09, next train**.) A binary, column-major body the SDKs send
-instead of NDJSON when `:begin` lists `"column-batch-v2"`, and the body of [`POST …/rows`](#post-apidatabasesdbtablesnamerows)
+when `:begin` lists `"column-batch-v2"`, and the body of [`POST …/rows`](#post-apidatabasesdbtablesnamerows)
 and of a [frame query response](#post-apidatabasesdbquery). It carries the same rows, and the server loads the same values from
 it, without parsing one JSON document per row. **A body is its data frames, then exactly one end frame.** All integers are
 little-endian.
@@ -4681,41 +4923,56 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   (application/vnd.aouda.column-batch-v2).` Nothing of the request is applied. The column layout inside a data frame is
   unchanged.
 - **Absent is not null.** A row whose bit is set in the absent bitmap does not have the column at all,
-  exactly like a JSON line that omits the key: an omitted auto-increment key is allocated. A row in the
+  exactly like a row listed in a JSON body's `absent`: an absent auto-increment key is allocated. A row in the
   null bitmap has the column with a `null` value. Absent and null rows still occupy their slot.
 - **Strings are dictionary-encoded per frame**: each distinct value once, then one code per row.
 - **Limits:** 1,000,000 rows and 4,096 columns per frame; a name that is empty or longer than 1,024
   UTF-8 bytes; a string up to 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would
   decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, 0.1.40**:
   the last two, and the C# SDK no longer writes a name or string the reader refuses).
-  `maxRowsPerAppend` applies across all the frames of one `:append`, as it does to NDJSON lines.
+  `maxRowsPerAppend` applies across all the frames of one `:append`.
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
-  earlier, well-formed frames in the same body are kept and counted, as NDJSON lines before a bad line are.
+  earlier, well-formed frames in the same body are kept and counted.
 - (**LoadSpeed S13, 0.4.0; breaking**) **Kind 6, the 128-bit `Decimal`, is retired.** It was
   `rowCount × 4 × i32` in the .NET decimal layout. A frame that carries it — on `:append` or on
   `POST …/tables/{name}/rows` — is refused `400`: `Column '<name>': kind 6, the 128-bit Decimal, is retired
   (LoadSpeed S13); send a decimal as ScaledDecimal (kind 8).` Send decimals as `ScaledDecimal`: 64-bit
   unscaled integers and one scale per column.
 
-**A frame loads the same values as the NDJSON body of the same rows.** Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a .NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's NDJSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as NDJSON. A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as NDJSON rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
+**A frame loads the same values as the JSON column-array body of the same rows** (the NDJSON body, until **Lead S12, next train**). Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a .NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's JSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as JSON (NDJSON before **Lead S12**). A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). (**Lead S12, next train**) The C# SDK of this train sends what a frame cannot carry as a JSON column-array body instead of NDJSON; `@aouda/client` still sends NDJSON there until its own next train, which this server refuses. The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as JSON (NDJSON before **Lead S12**) rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON — refused by a server of **Lead S12** onwards until `@aouda/client` follows (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
 
-**NDJSON is still fully supported**, for curl and for any client without the frame. From the same train
-the server decodes it straight into column batches, so it is faster too. A column whose lines mix
-integers and fractions is read as decimal for every line.
+**JSON column arrays** are the body for curl and for any client without the frame (**Lead S12, next train**; NDJSON was, until
+this train). The server decodes them straight into a column batch, as it does a frame. A column whose rows mix integers and
+fractions is read as decimal for every row.
 
 **Example (single table):**
 ```
 POST /api/databases/my_db/bulk-load/blj_abc123:append
-Content-Type: application/x-ndjson
+Content-Type: application/json
 
-{"sensor_id": 1, "value": 98.6, "recorded_at": "2026-05-22T09:00:01Z"}
-{"sensor_id": 2, "value": 72.1, "recorded_at": "2026-05-22T09:00:01Z"}
+{
+  "columns": ["sensor_id", "value", "recorded_at"],
+  "data": [
+    [1, 2],
+    [98.6, 72.1],
+    ["2026-05-22T09:00:01Z", "2026-05-22T09:00:01Z"]
+  ]
+}
 ```
 
-**Example (multi-table, `"_table"` discriminator required):**
+**Example (multi-table, a `_table` column required):** a column only one table has is `absent` in the other table's rows.
 ```
-{"_table": "events",     "id": 1, "type": "click"}
-{"_table": "event_meta", "event_id": 1, "browser": "Chrome"}
+{
+  "columns": ["_table", "id", "type", "event_id", "browser"],
+  "data": [
+    ["events", "event_meta"],
+    [1, null],
+    ["click", null],
+    [null, 1],
+    [null, "Chrome"]
+  ],
+  "absent": { "id": [1], "type": [1], "event_id": [0], "browser": [0] }
+}
 ```
 
 **Response body:**
@@ -4736,7 +4993,9 @@ Content-Type: application/x-ndjson
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, 0.3.0**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume from `rowsDurablyCommitted` as on any reconnect. It used to fail on the heap mid-frame and answer `500`. |
-| `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `"_table"`. |
+| `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job. `details: row={n}` (**Lead S12, next train**: was `lineNumber=N`). |
+| `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, next train**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
+| `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). |
 | `BULK_LOAD_CURSOR_MISMATCH` | 409 | Client resumed from an incorrect cursor (sent rows below `rowsDurablyCommitted`). |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
 
@@ -4891,3 +5150,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.11 | 0.4.0 (LoadSpeed) | **LoadSpeed M.2:** bulk-load `:commit`'s `mqWaitMs` defaults to `0` (it was `30000`) — a commit with queries answers `mqStatus: "behind"` at once unless the request asks to wait. No field added or removed. **LoadSpeed K31 (breaking):** `postLoadMqBehavior: "deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` (use `"auto"`); `mqStatus` and `mqRebuildStatus` lose `"deferred"`. **LoadSpeed K5 (BL-980, BL-944; breaking):** `GET /api/tables` drops `rowCountIsExact` (`rowCount` is always exact) and always carries `createdAt` / `lastModifiedAt`; an aggregate materialized query whose `groupByColumns` are plain strings is `400`; an application database accepts only its URL issuer on access tokens; a point-in-time restore of a backup without a WAL-root incarnation fails at staging. Refusals: a refusal no other code names is `503 SERVICE_UNAVAILABLE` + `Retry-After`, `SERVER_STARTING` carries `Retry-After: 5`, a refused notification-provider `DELETE` is `503`, and a wrapped refusal on `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE`), not `400 INVALID_REQUEST`. **LoadSpeed S13 (breaking):** `Decimal(p,s)` is the only decimal type — `"type": "Decimal"` without `precision` / `scale` is `400`, as is a precision above 18; a computed output's `type` and `cast`'s target spell it `"Decimal(p,s)"`; the column-batch frame's 128-bit `Decimal` kind (6) is deleted and refused `400`, and query results send a decimal column as `ScaledDecimal` at its declared scale; a decimal `sum` past 18 digits is refused in a query as in a materialized query. |
 | 2.12 | next train (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
 | 2.13 | next train (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |
+| 2.14 | next train (Lead) | **Lead S12 (breaking on the wire): the REST API as column arrays.** Every JSON write body sends its rows as [column arrays](#column-arrays-the-write-body) — `columns`, `data` (one array per column), optional `absent` (per column, the rows whose cell is not given, which is not null) — on `POST …/tables/{name}/rows`, a branch insert, WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed / `aouda.seed.json`; a body with `rows` (row objects) is refused `400 ROW_OBJECTS_UNSUPPORTED` (new code). Bulk-load `:append` takes frames or one JSON column-array body; NDJSON is refused `415 ROW_OBJECTS_UNSUPPORTED`, `:begin`'s `acceptedAppendFormats` is `["column-batch-v2", "column-arrays"]`, and an unroutable multi-table row is named "Row {n} of this :append" with `details: row={n}`. Reads: the `format` query parameter is removed from `/query` and the named-query execute and batch routes (any `format=` is `400 INVALID_FORMAT`; results are always `{columns, types, data, rowCount, …}`); the materialized-query `POST …/{name}/query` answers `{columns, data, rowCount, stats, token}`; `generatedValues` is `{columns, data}` with one cell per request row; a WebSocket `snapshot` page is `{type, id, columns, data, version, token?}` (`snapshot_complete` and `change` unchanged); vector `:nearest` answers `{rowKeys, distances, executionMs, token}` and graph `:khop` `{nodeIds, hops, executionMs}`; the policy inspector's table and materialized-query `sample` is `{columns, data}`. **Pass-10 (documentation only):** the [graph and vector endpoints](#graph-and-vector-endpoints) are documented. |

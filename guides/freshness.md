@@ -45,8 +45,10 @@ The token is an opaque, sortable, 42-character lowercase hex string. Callers com
 POST /api/databases/appdb/tables/orders/rows HTTP/1.1
 Content-Type: application/json
 
-{ "database": "appdb", "rows": [{ "id": 1, "status": "open" }] }
+{ "database": "appdb", "columns": ["id", "status"], "data": [[1], ["open"]] }
 ```
+
+(The insert body's rows are column arrays since **Lead S12, next train**; see [the write body](../reference/http-api.md#column-arrays-the-write-body).)
 
 ```http
 HTTP/1.1 200 OK

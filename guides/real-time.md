@@ -461,7 +461,7 @@ Primary proving tests:
 
 1. Client opens stream (`stream_open`) with mode (`insert`/`upsert`).
 2. `WriteStreamHandler.HandleOpenAsync(...)` validates stream ID and target table.
-3. Each `stream_rows` frame enforces:
+3. Each `stream_rows` frame is read as column arrays (**Lead S12, next train**; a frame with `rows` is refused `ROW_OBJECTS_UNSUPPORTED`) and enforces:
    - batch limits and payload limits,
    - sequence continuity,
    - backpressure decision (accept/reject/close),
@@ -669,8 +669,11 @@ Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `
 **Step 2 response — `snapshot` then `change` (server → client):**
 
 ```json
-{"type":"snapshot","id":"sub-orders","rows":[{"id":1,"status":"open"}],"version":456}
+{"type":"snapshot","id":"sub-orders","columns":["id","status"],"data":[[1],["open"]],"version":456}
 ```
+
+(**Lead S12, next train; breaking**) A `snapshot` page is column arrays — `columns`, and `data` with one array per column — as a
+query result is; it was `"rows": [{…}]`. A `change` still carries one row, as an object.
 
 ```json
 {"type":"change","id":"sub-orders","op":"insert","row":{"id":2,"status":"pending"},"prev":null,"key":null,"version":457}
@@ -701,8 +704,12 @@ Server acknowledges with `stream_ready` before the client may send rows:
 ```
 
 ```json
-{"type":"stream_rows","id":"stream-1","seq":1,"rows":[{"id":1,"status":"open"}]}
+{"type":"stream_rows","id":"stream-1","seq":1,"columns":["id","status"],"data":[[1],["open"]]}
 ```
+
+(**Lead S12, next train; breaking**) A `stream_rows` batch is column arrays (`columns`, `data`, and `absent` for a cell that is not
+given), the same body as an HTTP insert; it was `"rows": [{…}]`, which is now answered with an `error` coded
+`ROW_OBJECTS_UNSUPPORTED`. See the [HTTP reference](../reference/http-api.md#column-arrays-the-write-body).
 
 ```json
 {"type":"stream_ack","id":"stream-1","through":1,"errors":null}

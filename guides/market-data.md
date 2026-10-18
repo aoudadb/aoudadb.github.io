@@ -270,11 +270,13 @@ Authorization: Bearer <service-key>
 {
   "database": "finance",
   "table": "quotes",
-  "rows": [
-    { "id": 1, "ticker": "AAPL", "source": "nasdaq", "time": "2023-11-15T10:00:00Z", "bid": 150.0, "ask": 150.5 }
-  ]
+  "columns": ["id", "ticker", "source", "time", "bid", "ask"],
+  "data": [[1], ["AAPL"], ["nasdaq"], ["2023-11-15T10:00:00Z"], [150.0], [150.5]]
 }
 ```
+
+The rows travel as column arrays — one array per column (**Lead S12, next train**: `"rows": [{…}]` is refused
+`400 ROW_OBJECTS_UNSUPPORTED`; see [the write body](../reference/http-api.md#column-arrays-the-write-body)).
 
 No `updateMode` makes an insert wait for its queries (**WorkloadCore S09, 0.3.0**): `sync` and `async` queries alike are applied by
 their maintainer after the commit, so read with the insert's consistency token to see its rows in them. For bulk loads, `updateMode: "async"` + an explicit refresh call after the load completes is more efficient (see [§11 — Bulk loading historical data](#bulk-loading-historical-data)).

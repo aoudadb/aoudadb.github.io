@@ -578,7 +578,7 @@ Expected:
 - exactly one member with `role = "Primary"`
 - secondaries present in `members`.
 
-2. Write to primary:
+2. Write to primary (the rows as column arrays, **Lead S12, next train**):
 
 ```http
 POST http://127.0.0.1:5001/api/databases/appdb/tables/orders/rows
@@ -587,7 +587,8 @@ Content-Type: application/json
 {
   "database": "appdb",
   "table": "orders",
-  "rows": [{ "id": 1, "total": 100.0 }]
+  "columns": ["id", "total"],
+  "data": [[1], [100.0]]
 }
 ```
 
@@ -684,7 +685,8 @@ Content-Type: application/json
 {
   "database": "appdb",
   "table": "orders",
-  "rows": [{ "id": 101, "total": 42.5 }],
+  "columns": ["id", "total"],
+  "data": [[101], [42.5]],
   "writeConcern": "majority"
 }
 ```

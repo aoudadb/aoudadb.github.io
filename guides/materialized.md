@@ -974,6 +974,10 @@ Content-Type: application/json
 {}
 ```
 
+The answer is column arrays — `{ "columns": [...], "data": [[...], ...], "rowCount": N, "stats": {...}, "token": "..." }`, one array
+per column in the result's declared order (**Lead S12, next train; breaking**: it was `"rows": [{…}]`, one object per row). See the
+[HTTP reference](../reference/http-api.md#materialized-query-endpoints).
+
 **Query MQ result table via standard query endpoint (same as normal table):**
 
 ```http

@@ -1170,14 +1170,15 @@ Content-Type: application/json
   "database": "commerce",
   "table": "orders",
   "identityInsert": true,
-  "rows": [
-    { "id": 1000, "status": "seeded" },
-    { "id": 0, "status": "literal-zero" }
-  ]
+  "columns": ["id", "status"],
+  "data": [[1000, 0], ["seeded", "literal-zero"]]
 }
 ```
 
-**Bulk-load (large jobs):** set `options.identityInsert: true` on `:begin` and include every autoIncrement column on every NDJSON row. The counter advances only after a successful commit.
+The rows are column arrays (**Lead S12, next train**: `"rows": [{…}]` is refused `400 ROW_OBJECTS_UNSUPPORTED`; see the
+[HTTP reference](../reference/http-api.md#column-arrays-the-write-body)).
+
+**Bulk-load (large jobs):** set `options.identityInsert: true` on `:begin` and give every autoIncrement column on every appended row (not absent, not `null`). The counter advances only after a successful commit.
 
 **Contrast with Scenario 5:**
 | Approach | Schema change? | Counter bump | Best for |

@@ -182,7 +182,7 @@ Scope boundaries:
   - (**LoadSpeed M.2, 0.4.0**) **`mqWaitMs` defaults to `0`**: `:commit` answers as soon as the load is durable and does not wait for its queries unless the request says how long (it waited up to 30 s). A load whose queries are still catching up answers `mqStatus: "behind"` with `mqFrontierToken`; that is not an error. To go on only once they are current, send `mqWaitMs` (up to `600000`), or read with the commit's `token`, which waits for them.
   - (**WorkloadCore S16, 0.3.0**) The wait does not wait for a query only a rebuild can bring current (holed, in `Error`, or waiting for memory to rebuild): `mqStatus` is `"behind"` as soon as the others are current, instead of after the whole `mqWaitMs`.
   - (**WorkloadCore S16, 0.3.0**) **`:append` can be paced.** When the database's debt — WAL fill, materialized-query maintenance lag, unflushed rows or hot bytes — is past its soft line, each batch of an `:append` waits (at most 10 s) before it is queued — whatever the batch's size (**WorkloadCore group 5 review, 0.3.0**) — so the load settles at the rate the debt drains; see the sizing guide, *Debt slows the writer*. An `:append` whose load already failed for capacity answers `503` with `Retry-After`, as `:commit` does, rather than `409`. A load's buffer growth refused for a moment's queue no longer caps the buffer for the rest of the load.
-  - (**BL-831, 0.3.0**) **A column-batch `:append` asks for its memory before it decodes.** Each column's array is a grant from the memory queue first (waiting at most one sampling tick), so when memory is short the `:append` is refused `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` **before** the frame is decoded, instead of failing on the heap part-way through it (`500`). The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume from `rowsDurablyCommitted`. NDJSON bodies decode in small batches and take no such grant.
+  - (**BL-831, 0.3.0**) **A column-batch `:append` asks for its memory before it decodes.** Each column's array is a grant from the memory queue first (waiting at most one sampling tick), so when memory is short the `:append` is refused `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` **before** the frame is decoded, instead of failing on the heap part-way through it (`500`). The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume from `rowsDurablyCommitted`. JSON column-array bodies (NDJSON bodies, until **Lead S12, next train**) take no such grant.
   - (**BL-831, BL-928, 0.3.0**) **A `:commit` that runs out of memory is a `503`, never a `500` or a damaged segment.** A commit whose spill merge meets the managed heap's hard limit answers `503` with `Retry-After` (it answered `500 INTERNAL_ERROR`), and a merge that runs out of memory part-way through a row is refused with nothing published — it used to seal a segment whose columns held different row counts. As for every refused `:commit`, the session is failed and nothing was applied: run the load again from `:begin`.
   - (**release blockers, 0.3.0**) `mqWaitMs` does not wait on a query that is behind only because a query it is built on (its upstream) is being rebuilt — waiting cannot bring it in, so `mqStatus` is `"behind"` as soon as the others are current. And a wait that itself fails (the heap, say) answers the commit as committed with `mqStatus: "behind"`: the load is durable, so it must not be sent again (it was answered `503` "not applied", and a client that resent it loaded the rows twice).
   - Replica coordinator: `MqRebuildScheduler` delegate triggers rebuild after all segments fetched.
@@ -315,7 +315,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 | Segment-level WAL frame (`BulkSegmentCommitted`) | Yes | No | No | `WalTag.cs`, `WalPayloads.Encode/TryDecodeBulkSegmentCommitted` | Includes per-file BLAKE3 bytes. |
 | Closing-frame atomic commit (`BulkLoadCommitted`) | Yes | No | No | `WalPayloads.Encode/TryDecodeBulkLoadCommitted`, coordinator commit path | Job-level atomic close unit. |
 | Abort frame (`BulkLoadAborted`) | Yes | No | No | `WalPayloads.Encode/TryDecodeBulkLoadAborted`, watchdog/force-abort paths | Used by watchdog and operator abort. |
-| Multi-table atomic bulk load | Yes | No | No | `AoudaEngine.BulkLoadAsync` (`AdditionalTables`), controller `_table` checks | Requires `_table` discriminator in rows. |
+| Multi-table atomic bulk load | Yes | No | No | `AoudaEngine.BulkLoadAsync` (`AdditionalTables`), controller `_table` checks | Requires a `_table` discriminator column in the append body. |
 | Lock conflict policy (`Block`/`FailFast`) | Yes | No | No | `BulkLoadOptions`, `TableLoadLockManager`, controller errors | Exposed to client/CLI. |
 | Durable cursor contract (`rowsDurablyCommitted`) | Yes | Yes | No | Protocol DTOs + controller/client code | Server session cursor is updated at commit; append-time cursor granularity is incomplete in Stage 1. |
 | Resume watchdog lifecycle | Yes | No | No | `BulkLoadResumeWatchdog`, lifecycle tests | Default resume window 5 minutes. |
@@ -340,7 +340,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 
 ### Core concepts
 
-- **Streaming phase vs commit phase:** rows are appended over NDJSON in chunks, then closed by a commit call.
+- **Streaming phase vs commit phase:** rows are appended in chunks — column-batch frames, or JSON column arrays (**Lead S12, next train**: NDJSON is no longer read) — then closed by a commit call.
 - **Durability unit:** durability is represented by WAL-visible segment/job events, not by row-level WAL entries.
 - **Job-level atomicity:** query visibility is tied to closing-frame commit completion.
 - **Replica catch-up model:** replicas consume WAL events and fetch segment files out-of-band.
@@ -349,7 +349,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 
 1. Bulk load bypasses per-row WAL framing by design; this is not optional.
 2. A load that reaches `BulkLoadCommitted` has a single, explicit WAL position for commit.
-3. Multi-table jobs require `_table` discriminator on append payload rows.
+3. Multi-table jobs require a `_table` discriminator column in every append body: each row names its table.
 4. `ForceLogShipBulkLoad=true` disallows skip/snapshot replication modes.
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
 6. A load's segment files are fsynced before its frames name them, so a committed load survives a power loss. If the catalog
@@ -365,14 +365,15 @@ difference is *when* the work is paid — per load, or once for many — not how
    (`mk_svc_`). A user JWT, a server key (`mk_srv_`), and a `custom` key are refused, including a caller who holds a partition
    write grant. The refusal names the protected tables and starts no session. (**BL-1031, next train**)
 
-### What a frame carries is what NDJSON carries
+### What a frame carries is what JSON carries
 
-The C# SDK appends column-batch frames where the server accepts them, and NDJSON where it does not or
-where a row holds something a frame cannot carry (a nested value, a list). Either way the table ends
-up with the same values: a frame gives each number the kind its JSON text would have, a `DateTime`
-that is not UTC and a `DateTimeOffset` travel as their JSON text, and a value a frame would have to
-change is sent as NDJSON instead (**BatchFirst S03, 0.1.40**). A load that mixes the two formats
-mid-stream is still one load, with one resume cursor.
+The C# SDK appends column-batch frames where the server accepts them, and JSON column arrays where a
+batch holds something a frame cannot carry (a nested value, a list) (**Lead S12, next train**: it was
+NDJSON, which the server no longer reads). Either way the table ends up with the same values: a frame
+gives each number the kind its JSON text would have, a `DateTime` that is not UTC and a
+`DateTimeOffset` travel as their JSON text, and a value a frame would have to change is sent as JSON
+instead (**BatchFirst S03, 0.1.40**). A load that mixes the two formats mid-stream is still one load,
+with one resume cursor.
 
 ### Sizing a session: fewer, longer, one commit
 
@@ -540,7 +541,7 @@ High-level architecture path:
 
 1. Client calls `POST .../bulk-load:begin` with tables and optional options.
 2. Controller validates database/table list/options and starts/returns session from `BulkLoadSessionRegistry`.
-3. Client streams NDJSON batches to `POST .../{jobId}:append` (`application/x-ndjson`).
+3. Client streams batches to `POST .../{jobId}:append`: column-batch frames (`application/vnd.aouda.column-batch-v2`) or one JSON column-array body per call (`application/json`) (**Lead S12, next train**: NDJSON, `application/x-ndjson`, is refused `415 ROW_OBJECTS_UNSUPPORTED`).
 4. Rows are pushed into session channel; engine consumes channel via `AoudaEngine.BulkLoadAsync`.
 5. Client calls `POST .../{jobId}:commit`; controller completes channel and awaits engine task.
 6. Engine returns `BulkLoadJobHandle`; controller sets session completed and returns commit response.
@@ -633,7 +634,7 @@ Precedence notes:
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Begin bulk-load session | Client coordinator via `BulkLoadAsync`/`BulkLoadMultiTableAsync` | Reported in P20 completion (`client.table(...).bulkLoad`, `bulkLoadMultiTable`) | `POST .../bulk-load:begin` | Implemented | TS evidence is completion-doc based in this repo. |
-| Append NDJSON chunk | Internal client coordinator (`PostRawAsync` with NDJSON) | Reported in completion docs | `POST .../{jobId}:append` | Implemented | Content type `application/x-ndjson`. |
+| Append a chunk | Internal client coordinator (frames, or JSON column arrays) | Reported in completion docs | `POST .../{jobId}:append` | Implemented | `application/vnd.aouda.column-batch-v2` or `application/json` column arrays (**Lead S12, next train**; `application/x-ndjson` is refused `415 ROW_OBJECTS_UNSUPPORTED`). |
 | Commit load | `BulkLoadAsync` returns `BulkLoadJobHandle` | Reported in completion docs | `POST .../{jobId}:commit` | Implemented | Includes write-concern fields. |
 | Abort load | Best-effort abort in coordinator cancellation path | Reported in completion docs | `POST .../{jobId}:abort` | Implemented | Explicit operator abort route also exists. |
 | Get status/progress | `BulkLoadJobHandle.GetProgressAsync` via status polling path | Reported in completion docs | `GET .../{jobId}` | Implemented | Deferred work + replica progress DTOs. |
@@ -734,11 +735,11 @@ When to use: normalized imports where rows for multiple tables must commit toget
 
 Steps:
 1. `POST .../bulk-load:begin` with `tables: ["runs","steps","messages"]`.
-2. Send NDJSON rows to `:append`, each row containing `_table`.
+2. Send rows to `:append` with a `_table` column naming each row's table (**Lead S12, next train**: column arrays, where it was NDJSON rows each carrying `_table`; see the [HTTP reference](../reference/http-api.md#post-jobidappend)).
 3. `POST ...:commit` with optional `waitForDeferredWork` and `mqWaitMs` (**WorkloadCore S09, 0.3.0**).
 
 Expected checks:
-- Invalid row without `_table` is rejected with `BulkLoadMissingDiscriminator`.
+- A row without `_table` is rejected with `BULK_LOAD_MISSING_DISCRIMINATOR`: *Row {n} of this :append …*, `details: row={n}` (1-based; **Lead S12, next train**: it said "Row at line N"). The rows before it stay credited.
 - Commit response includes `perTableRowCounts`.
 - Any abort leaves session in `aborted` and no successful commit response.
 
@@ -761,7 +762,7 @@ When to use: large seed/reseed/ingestion where you must preserve upstream IDs (i
 
 Steps:
 1. `POST .../bulk-load:begin` with `options: { "identityInsert": true }` (or C#/TS `IdentityInsert` / `identityInsert: true`).
-2. Append NDJSON rows that include every autoIncrement column on every row.
+2. Append rows that give every autoIncrement column on every row — not absent, not `null` (frames or JSON column arrays; **Lead S12, next train**: NDJSON is refused).
 3. Commit successfully — only then does the server call `EnsureMinimumValue` to `max(inserted)` per column.
 4. Verify a subsequent ordinary insert with `id: 0` returns `max + 1`.
 
@@ -849,13 +850,16 @@ bytes and charged to the memory governor (`MaxQueuedAppendBytes` above).
 
 (**IngestAtSpeed S09, 0.1.40**) **The SDKs send rows column by column.** Against a server that
 advertises it in `:begin` (`acceptedAppendFormats`), `Aouda.Client` and `@aouda/client` send each
-`:append` as a binary column-batch frame instead of NDJSON (`ACB2`, advertised as `"column-batch-v2"` since **Lead S09, next
+`:append` as a binary column-batch frame (`ACB2`, advertised as `"column-batch-v2"` since **Lead S09, next
 train**; an `ACB1` body is refused `415 FRAME_VERSION_UNSUPPORTED`): typed values, each distinct string once per
 batch, no JSON per row. Nothing changes in how you call `BulkLoadAsync` / `bulkLoad`, in what is loaded,
 or in the resume cursor. A batch holding something the frame cannot carry (a nested object, an array, a
 column whose rows disagree on type) is sent as NDJSON, and so is every batch to an older server. NDJSON
-remains the format for curl and hand-written clients; the server now decodes it without building a
-dictionary per row. The format is specified in the [HTTP API reference](../reference/http-api.md).
+remained the format for curl and hand-written clients; the server decoded it without building a
+dictionary per row. (**Lead S12, next train; breaking**) NDJSON is gone: `:begin` advertises
+`["column-batch-v2", "column-arrays"]`, and what a frame cannot carry — and anything curl or a hand-written client sends — is one
+JSON column-array body (`application/json`, `{ "columns", "data", "absent"? }`) per `:append`. An NDJSON body is refused
+`415 ROW_OBJECTS_UNSUPPORTED`. `Aouda.Client` of this train sends column arrays; `@aouda/client` follows in its own next train. The format is specified in the [HTTP API reference](../reference/http-api.md).
 On the 1 M-trade benchmark the load ran 10–25 % faster, with about 10 % less CPU per row while loading.
 
 (**IngestAtSpeed S07, 0.1.40**) **The post-commit wait is gone.** A committed load hands its
@@ -923,7 +927,8 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 |---|---|---|
 | `403 AUTHORIZATION_DENIED` on `:begin` (**BL-1031, next train**) | A table in the load has PLS or RLS, and the caller is not a `service_role` key | Load with that database's `mk_svc_` key. Ordinary inserts remain the per-user write path. |
 | `BulkLoadInvalidOptions` on begin with `skipReplication` | Multi-node safety/policy check failed | Use `logShipSegments` or explicit bypass where allowed. |
-| `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Add `_table` for each row and keep within declared table set. |
+| `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Give every row a `_table` value within the declared table set. |
+| `415 ROW_OBJECTS_UNSUPPORTED` on append | The body is NDJSON (`application/x-ndjson`), no longer read (**Lead S12, next train**) | Send column-batch frames, or the rows as one JSON column-array body (`application/json`); upgrade the client library. |
 | `BulkLoadCursorMismatch` from client | Client send position diverges from server durable cursor expectations | Retry from returned durable cursor and keep same idempotency key. |
 | `BulkLoadTableLocked` | Concurrent load holds table lock | Retry with same idempotency key or wait for lock release. |
 | `AlreadyTerminal` on force-abort | Job already completed/aborted/failed | Treat as no-op; inspect job history instead. |
@@ -954,7 +959,7 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 | Replica state machine and fetch concurrency | `tests/Aouda.Engine.Replication.Tests/Replay/BulkLoadReplicaCoordinatorTests.cs` | Not run in S2 session | Strong | Covers staged/committed transitions, concurrency, dedup, cancellation. |
 | Cluster force-log policy | `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadForceLogShipTests.cs` | Not run in S2 session | Medium | Confirms policy rejection and perf counter increments. |
 | Watchdog lifecycle integration | `tests/Aouda.Engine.Api.Tests/BulkLoad/BulkLoadWatchdogLifecycleTests.cs` | Not run in S2 session | Medium | Verifies registration/clear/dispose paths. |
-| Client protocol orchestration and error mapping | `tests/Aouda.Client.Tests/BulkLoad/BulkLoadCoordinatorTests.cs` | Not run in S2 session | Medium | Covers NDJSON type, cursor mismatch, deferred polling. |
+| Client protocol orchestration and error mapping | `tests/Aouda.Client.Tests/BulkLoad/BulkLoadCoordinatorTests.cs` | Not run in S2 session | Medium | Covers the append content type, cursor mismatch, deferred polling. |
 
 ---
 

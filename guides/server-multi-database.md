@@ -724,10 +724,10 @@ curl -s -X POST http://localhost:5000/api/databases \
 curl -s http://localhost:5000/ready
 # → { "status": "healthy", ... }
 
-# 5. Insert and query data
+# 5. Insert and query data (an insert's rows are column arrays: Lead S12, next train)
 curl -s -X POST http://localhost:5000/api/databases/app/tables/users/rows \
      -H "Content-Type: application/json" \
-     -d '{"database":"app","rows":[{"id":1,"name":"Alice","age":30}]}'
+     -d '{"database":"app","columns":["id","name","age"],"data":[[1],["Alice"],[30]]}'
 
 curl -s -X POST http://localhost:5000/api/databases/app/query \
      -H "Content-Type: application/json" \

@@ -370,9 +370,8 @@ POST /api/tables/orders/events/rows/insert
 Content-Type: application/json
 
 {
-  "rows": [
-    { "orderId": 123, "status": "created" }
-  ],
+  "columns": ["orderId", "status"],
+  "data": [[123], ["created"]],
   "writeConcern": "Majority"
 }
 ```

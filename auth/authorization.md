@@ -305,15 +305,15 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/api-keys \
   }'
 # → { "key": "mk_...", "userId": "usr_feeder", ... } — the key is shown once; store it like a password
 
-# The feeder authenticates with that static key going forward:
+# The feeder authenticates with that static key going forward (rows as column arrays: Lead S12, next train):
 curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
-  -d '{ "rows": [{ "id": 1, "quote_source": "oslo_bors", "instrument_id": "EQNR", "bid": 289.10, "ask": 289.30 }] }'
+  -d '{ "columns": ["id", "quote_source", "instrument_id", "bid", "ask"], "data": [[1], ["oslo_bors"], ["EQNR"], [289.10], [289.30]] }'
 # → 200 — granted partition
 
 curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
-  -d '{ "rows": [{ "id": 2, "quote_source": "bloomberg", "instrument_id": "EQNR", "bid": 289.10, "ask": 289.30 }] }'
+  -d '{ "columns": ["id", "quote_source", "instrument_id", "bid", "ask"], "data": [[2], ["bloomberg"], ["EQNR"], [289.10], [289.30]] }'
 # → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
 ```
 
@@ -739,12 +739,12 @@ curl -X POST http://localhost:5433/api/databases/chat/query \
 # Alice posts to room_42 (write access) — succeeds
 curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "rows": [{ "room_id": "room_42", "body": "Hello!", "user_id": "usr_alice" }] }'
+  -d '{ "columns": ["room_id", "body", "user_id"], "data": [["room_42"], ["Hello!"], ["usr_alice"]] }'
 
 # Alice tries to post to room_99 (read-only) — rejected
 curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "rows": [{ "room_id": "room_99", "body": "Hi there" }] }'
+  -d '{ "columns": ["room_id", "body"], "data": [["room_99"], ["Hi there"]] }'
 # → 403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS
 ```
 
@@ -902,7 +902,7 @@ curl -X POST http://localhost:5433/api/databases/crm/query \
 # Regular user tries to insert a record owned by someone else — rejected
 curl -X POST http://localhost:5433/api/databases/crm/tables/sales/rows \
   -H "Authorization: Bearer <user-jwt>" \
-  -d '{ "rows": [{ "company_id": "acme", "owner_id": "usr_other", "amount": 5000 }] }'
+  -d '{ "columns": ["company_id", "owner_id", "amount"], "data": [["acme"], ["usr_other"], [5000]] }'
 # → 403 AUTH_RLS_INSERT_VIOLATION (row would not be visible to the inserter)
 ```
 

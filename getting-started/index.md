@@ -1126,9 +1126,14 @@ Content-Type: application/json
   "database": "mydb",
   "table": "orders",
   "identityInsert": true,
-  "rows": [{ "id": 1000, "status": "seeded" }]
+  "columns": ["id", "status"],
+  "data": [[1000], ["seeded"]]
 }
 ```
+
+Over HTTP the rows are column arrays: `columns`, and `data` with one array per column (**Lead S12, next train**: a `rows` array of
+objects is refused `400 ROW_OBJECTS_UNSUPPORTED`; see [the write body](../reference/http-api.md#column-arrays-the-write-body)).
+The SDK calls above still take rows.
 
 Rules of thumb:
 - Prefer identity-insert over temporarily disabling `autoIncrement` for one-shot seeds.

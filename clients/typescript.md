@@ -771,6 +771,10 @@ Generates TypeScript interfaces from Aouda table schemas.
 npx @aouda/client schema seed --server http://localhost:5000 --database mydb --file seed.json
 ```
 
+(**Lead S12, next train**) The seed file's tables hold their rows as column arrays —
+`{ "tables": { "orders": { "columns": ["id", "status"], "data": [[1, 2], ["open", "paid"]] } } }`; a table given as `"rows"` is
+refused `400 ROW_OBJECTS_UNSUPPORTED` ([HTTP reference](../reference/http-api.md#schema-seed)).
+
 ---
 
 ## 9) Branches
