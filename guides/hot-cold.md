@@ -130,7 +130,7 @@ If you do nothing beyond default server config:
 - Server memory defaults to:
   - `MaxTotalRamBytes` unset → about **70% of detected host or cgroup memory** (an RSS ceiling, not a 2 GiB constant)
   - `MaxHotBytes = 0` (effective fraction of the governed budget)
-  - `MaxPageCacheBytes = 0` (effective fraction of the governed budget)
+  - `MaxPageCacheBytes = 0` (effective fraction of each database's share of the governed budget)
 - Budget target defaults to a high fraction of the governed budget when unspecified.
 - Over-budget ingest returns **HTTP 503** (`MEMORY_BUDGET_EXCEEDED`) with `Retry-After`; the process stays up.
 
@@ -140,7 +140,7 @@ If you do nothing beyond default server config:
 | Segment temperature on creation | `Hot` | New data is queried on hot path first |
 | `Aouda:Memory:MaxTotalRamBytes` | ~70% of detected RAM | Process RSS ceiling (set explicitly to pin a number) |
 | `Aouda:Memory:MaxHotBytes` | `0` | Auto-computes effective hot budget (`T10`) as 45% of the governed budget, floor 32 MB |
-| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes effective cache budget (`T12`) as 10% of the governed budget, floor 8 MB. The cache is on (**ColumnarRead, 0.3.0**); `Aouda:Memory:PageCacheEnabled = false` turns it off |
+| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes each database's cache budget (`T12`) as 10% of that database's share of the governed budget, floor 8 MB. A value you set is the server's total, divided among the databases by share (**Lead S10, next train** — it used to reach no database). The cache is on (**ColumnarRead, 0.3.0**); `Aouda:Memory:PageCacheEnabled = false` turns it off. A read larger than the cache admits only half of it (**Lead S10, next train**; [sizing](sizing.md)) |
 | `MemoryBudgetOptions.TargetRamBytes` | `0` | Effective target is 90% of max total |
 | Database `DefaultTemperature` | `Auto` | New tables inherit `Auto` unless table policy overrides |
 | `HotColdMaintenanceWorkerOptions` | `SweepInterval=5s`, `AutoHotByteBudgetBytes=64MiB`, `PromotionAccessThreshold=3` | Internal maintenance defaults when worker is active |
@@ -538,7 +538,7 @@ Primary proving tests:
 |---|---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | long | `0`: derived from the host (70 % of a cgroup limit, else 40 % of RAM) | `0` or `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
-| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of the governed budget (floor 8 MB); on (**ColumnarRead, 0.3.0**) |
+| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, next train**); on (**ColumnarRead, 0.3.0**) |
 | `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or positive | startup config | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
