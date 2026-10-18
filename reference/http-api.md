@@ -1244,8 +1244,9 @@ before the response starts are JSON `ProtocolError`s with their status. **An err
 end frame** (**Lead S09, next train**): `status: "error"` with the code, the message and the status the JSON error would have had,
 after the frames already sent — which are not a result. Both SDKs drop those frames and raise the same typed error the JSON error
 body raises, retried or not by its code as any error is (before, the server aborted the connection and both SDKs retried it as a
-connection error, failing again at the same place). Only a server that dies mid-body still cuts a response, and a body without its
-end frame is an error in both SDKs.
+connection error, failing again at the same place). The request timeout (`Aouda:RequestTimeoutMs`, 30 s by default) still bounds a
+streamed export: reached after the first frame, it is an error end frame `REQUEST_TIMEOUT` with status 504, as its JSON answer is.
+Only a server that dies mid-body still cuts a response, and a body without its end frame is an error in both SDKs.
 `format=columnar|rows` chooses the JSON shape only. The same applies to `POST …/named-queries/{name}/query`; the named-query
 batch stays JSON.
 
