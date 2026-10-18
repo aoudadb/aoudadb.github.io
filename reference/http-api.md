@@ -3151,6 +3151,8 @@ million rows, bytes allocated per row, share of wall time paused for GC.
 | `gen0Collections` / `gen1Collections` / `gen2Collections` | integer | Collections of each generation since start. |
 | `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Read when the response is built; `managedHeapBytes` is the same reading as of the last reconciliation (**WorkloadCore, 0.3.0**: before, `managedHeapBytes` counted garbage not yet collected, and under a fast ingest the two differed by gigabytes). |
 | `heapSizeBytes` | integer | Heap size as of the most recent collection of any generation. |
+| `jitCompiledMethods` | integer | Methods the JIT has compiled since start, every tier and on-stack replacement included (**Lead group 2 review, next train**). A precompiled (ReadyToRun) method counts when it is recompiled at tier 1. Its difference across a piece of work says whether the process was still compiling: the benchmark's steady reads start where it stops growing. |
+| `jitCompilationMs` | number | Time spent in the JIT since start, every thread (**Lead group 2 review, next train**). |
 | `lastGen2` | object | The most recent gen-2 collection as the runtime reports it (**WorkloadCore, 0.3.0**): `index`, `kind` (`Background` or `FullBlocking`), `compacted`, `concurrent`, `heapSizeBytes`, `fragmentedBytes`, `promotedBytes` (what it traced live), `totalCommittedBytes`, `pinnedObjectsCount`, `finalizationPendingCount`, and per generation — 0, 1, 2, the large-object heap, the pinned-object heap — `generationSizeAfterBytes`, `generationFragmentationAfterBytes` and `generationSizeBeforeBytes`. `null` before the first. |
 
 🔎 All six provenance fields also appear in the `memory` health component's `details` —
@@ -4668,7 +4670,11 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`. A body that
   ends without an end frame, has bytes after it, carries a frame out of sequence, counts other rows than its frames, or holds an
   unknown frame kind is refused `400 INVALID_REQUEST`, naming what was wrong; so is a request body whose end frame reports an error.
-  A body may hold no data frame — one end frame with `rowCount: 0`.
+  A body may hold no data frame — one end frame with `rowCount: 0`. ⚠️ **On `:append`, "refused" keeps the frames before the
+  fault** (**Lead group 2 review, next train**: said so): each data frame is queued as it is read, and the rows queued before the
+  error stay credited, as for every `:append` that ends in an error. The error's `details` name them (`rowsAppended=N`). Do not
+  send the body again: resume from the job's cursor (`rowsAppendedToBuffer`, or `:begin` again with the same idempotency key), or
+  the frames before the fault load twice. `/rows` is all or nothing and inserts nothing from a refused body.
 - **`ACB1` is refused by name** (**Lead S09, next train; breaking**). The version before (`"ACB1" rowCount:u32 columnCount:u16
   column*`, frames back to back, the body ending where the stream ended) and its media type `application/vnd.aouda.column-batch`
   are answered `415 FRAME_VERSION_UNSUPPORTED`: `ACB1 frames are no longer read; this server reads ACB2
