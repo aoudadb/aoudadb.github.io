@@ -2398,7 +2398,8 @@ fields beside these three:
 **Absent is not null.** An absent cell is what a key left out of a row object used to be: an absent `autoIncrement` cell is
 generated, and an absent column that has a default takes its default. An explicit `null` is a null — an `autoIncrement` cell sent as `null` is not generated. In the example,
 rows 0 and 1 give their ids and row 2's is generated. A column absent in **every** row can simply be left out of `columns`; `absent`
-is only needed when some rows give a column and others do not.
+is only needed when some rows give a column and others do not. ⚠️ **A bulk-load `:append` does not apply defaults:** an absent cell
+there is stored as null (an absent `autoIncrement` cell is still generated), for a JSON body as for a frame (BL-1104).
 
 **Values** are read as before: an integer is an integer, a fraction keeps the scale it is written with, a string is a string, and an
 array or an object (a vector, a nested value) is converted the way the column's type takes it. A value is judged exactly as the same
