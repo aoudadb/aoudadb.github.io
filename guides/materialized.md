@@ -554,7 +554,7 @@ after it, so a crash in between cannot bring the old column back (**BL-810, 0.3.
 column, and a column's new type, do the same: both rewrite stored values no change event carries. (**0.3.0**)
 
 The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
-`stats.routedTo` over HTTP (JSON and the frame response's `X-Aouda-Stats`), `ClientQueryStats.RoutedTo` in the C# SDK,
+`stats.routedTo` over HTTP (JSON, and the frame response's end frame — **Lead S09, next train**: it was the `X-Aouda-Stats` header), `ClientQueryStats.RoutedTo` in the C# SDK,
 `result.stats.routedTo` in the TypeScript SDK.
 `ExplainRoutingAsync` gives the decision with its reason, every candidate's included.
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.

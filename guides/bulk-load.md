@@ -849,7 +849,8 @@ bytes and charged to the memory governor (`MaxQueuedAppendBytes` above).
 
 (**IngestAtSpeed S09, 0.1.40**) **The SDKs send rows column by column.** Against a server that
 advertises it in `:begin` (`acceptedAppendFormats`), `Aouda.Client` and `@aouda/client` send each
-`:append` as a binary column-batch frame instead of NDJSON: typed values, each distinct string once per
+`:append` as a binary column-batch frame instead of NDJSON (`ACB2`, advertised as `"column-batch-v2"` since **Lead S09, next
+train**; an `ACB1` body is refused `415 FRAME_VERSION_UNSUPPORTED`): typed values, each distinct string once per
 batch, no JSON per row. Nothing changes in how you call `BulkLoadAsync` / `bulkLoad`, in what is loaded,
 or in the resume cursor. A batch holding something the frame cannot carry (a nested object, an array, a
 column whose rows disagree on type) is sent as NDJSON, and so is every batch to an older server. NDJSON

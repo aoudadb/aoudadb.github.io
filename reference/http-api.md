@@ -520,6 +520,7 @@ All errors return a JSON body with this structure:
 | `INVALID_OPERATOR` | 400 | Invalid comparison operator in where clause |
 | `INVALID_COLUMN` | 400 | Invalid column name or reference |
 | `INVALID_VALUE` | 400 | Invalid value type or format |
+| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) A column-batch body of a version this server no longer reads: an `ACB1` frame, or the retired media type `application/vnd.aouda.column-batch`. The message names the version found and the one expected (`ACB2`, `application/vnd.aouda.column-batch-v2`). Upgrade the client; nothing of the request was applied |
 | `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, next train**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
 
 #### Resource Errors (4xx)
@@ -1217,7 +1218,8 @@ accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 **`stats.routedTo` (**ColumnarRead S18, 0.3.0**):** the materialized query the answer was read from instead of the table,
 when it was — rows, columns, `aggregates` / `groupBy` and `…/query/count` are all routed to a current result that holds the
 answer ([routing](../guides/materialized.md#routing-a-read-to-a-maintained-result)); omitted when the table was read. The
-answer is the same either way. It is in the frame response's `X-Aouda-Stats` too.
+answer is the same either way. It is in the frame response's end frame too (**Lead S09, next train**: it was the
+`X-Aouda-Stats` header).
 
 **`stats.windowCompletionRows` (**Horizon, next train**):** a read of a windowed materialized query's result that reached below
 its horizon — the number of source rows read to compute that part with the query's own build code. Omitted when nothing was
@@ -1230,52 +1232,61 @@ the same as before for every type. One case changes: a `Double` / `Float32` resu
 cannot represent, is now a clean `500 INTERNAL_ERROR` naming the column before anything is sent. Before, the response broke
 after its headers. Ask for the frame response below, which carries these values.
 
-**Column-batch frame response (**ColumnarRead, 0.3.0**):** a request whose `Accept` header lists
-`application/vnd.aouda.column-batch` gets the result as **column-batch frames**: the same binary format `POST …/rows`
-accepts, described under [`POST …/rows`](#post-apidatabasesdbtablesnamerows). Both SDKs ask for it by default.
-Send `Accept: application/vnd.aouda.column-batch, application/json;q=0.5` and **branch on the response's `Content-Type`**. A
-server older than this, or a result the frame cannot carry, answers JSON as before. A frame cannot carry a non-null
-vector cell, a computed or joined column whose values are not its declared type, more than 4,096 columns, a column name
-it cannot hold (empty, or over 1,024 UTF-8 bytes), a single row that would decode past half the reader's 256 MB frame
-budget, or a string value over 16 MB of UTF-8 (**architecture review, 0.3.0**: the last four were not listed
-before). Errors are JSON `ProtocolError`s with their status — as long as they happen before the response starts. A
-failure **after the response headers are sent** cannot turn into an error body: the server aborts the connection and
-sends no trailing error. Both SDKs report that as a retryable connection error (`AoudaConnectionException` in .NET,
-`AoudaConnectionError` in TypeScript).
+**Column-batch frame response (**ColumnarRead, 0.3.0**; `ACB2` since **Lead S09, next train**):** a request whose `Accept`
+header lists `application/vnd.aouda.column-batch-v2` gets the result as **column-batch frames**: the same binary format
+`POST …/rows` and bulk-load `:append` accept, described under [the column-batch frame](#the-column-batch-frame-acb2). Both SDKs
+ask for it by default. Send `Accept: application/vnd.aouda.column-batch-v2, application/json;q=0.5` and **branch on the
+response's `Content-Type`**. A result the frame cannot carry answers JSON as before, and so does a request whose `Accept` names
+only the retired `application/vnd.aouda.column-batch` (`ACB1`). A frame cannot carry a non-null vector cell, a computed or joined
+column whose values are not its declared type, more than 4,096 columns, a column name it cannot hold (empty, or over 1,024 UTF-8
+bytes), a single row that would decode past half the reader's 256 MB frame budget, or a string value over 16 MB of UTF-8. Errors
+before the response starts are JSON `ProtocolError`s with their status. **An error after the response has started is the body's
+end frame** (**Lead S09, next train**): `status: "error"` with the code, the message and the status the JSON error would have had,
+after the frames already sent — which are not a result. Both SDKs drop those frames and raise the same typed error the JSON error
+body raises, retried or not by its code as any error is (before, the server aborted the connection and both SDKs retried it as a
+connection error, failing again at the same place). Only a server that dies mid-body still cuts a response, and a body without its
+end frame is an error in both SDKs.
 `format=columnar|rows` chooses the JSON shape only. The same applies to `POST …/named-queries/{name}/query`; the named-query
 batch stays JSON.
 
-- **Body:** one or more frames back to back, each at most 65,536 rows — fewer for a wide result, so that no frame decodes past
-  the reader's 256 MB a frame. There is always at least one frame: an empty result is one frame of 0 rows that still names
-  every column. Every frame carries every column, in result order. A result that names a column twice is answered as JSON.
-  A reader should check that the frames' rows add up to `X-Aouda-Row-Count`: a body cut between two frames is otherwise a
-  shorter, well-formed answer.
-- **One query exports every row (**LoadScan, next train**).** A `POST …/query` asked for frames with **no page** (`limit: 0`,
-  no `offset`) and no `orderBy`, `distinct`, grouping, aggregate, join or computed column is **streamed**: the server counts the
-  rows first — so `X-Aouda-Row-Count` is exact and arrives before the first frame — then writes the frames while it reads the
-  table, holding one batch of frames (tens of MB, sized to a quarter of the read path's memory ceiling) instead of the
-  whole result. Such a read is **not refused** at the read path's memory ceiling (`503 MEMORY_BUDGET_EXCEEDED`) or at
-  `Aouda:Query:MaxResultRows` (`400 RESULT_TOO_LARGE`): both bound a result the server holds, and the same read answered as
-  JSON — or as a named query — is still held whole and still refused there. A batch is sized from what the rows' frames
-  actually cost — the first is one row group, so long strings are measured before they are batched — and the size only grows
-  with what it meets: a table whose rows become much wider partway through can still pass the ceiling in one batch, and that
-  read is cut after its headers (the connection aborted). Its frames are cut per row group (at most 65,536
-  rows, never past half the reader's 256 MB frame budget) and come in the order the JSON answer's rows have; `X-Aouda-Stats`'
-  `executionMs` is the time to the count, not to the last frame. A string value over 16 MB fails a streamed read — after its
-  headers (the connection is aborted; the row-count check catches it), or, in the first batch, before them as `500` — where a
-  held read is answered as JSON. Before, one query
-  that returned every row of a large table was refused `503`, and a client read it a partition or a page at a time.
-- **Headers** carry the rest of the JSON envelope:
+- **Body:** data frames, each at most 65,536 rows — fewer for a wide result, so that no frame decodes past the reader's 256 MB a
+  frame — then **one end frame** (**Lead S09, next train**). There is always at least one data frame: an empty result is one frame
+  of 0 rows that still names every column. Every frame carries every column, in result order. A result that names a column twice
+  is answered as JSON. The end frame's `rowCount` is the frames' rows, checked by the reader: a body cut anywhere — between two
+  frames included — is an error, not a shorter answer.
+- **One query exports every row (**LoadScan, next train**; streamed from its first row since **Lead S09, next train**).** A
+  `POST …/query` asked for frames with **no page** (`limit: 0`, no `offset`) and no `orderBy`, `distinct`, grouping, aggregate,
+  join or computed column is **streamed**: the server writes the frames while it reads the table, a batch at a time (tens of MB,
+  sized to a quarter of the read path's memory ceiling), and states the row count and the statistics in the end frame. It no
+  longer holds the first batch, or reads the table a second time to count it, before the first byte. Such a read is **not
+  refused** at the read path's memory ceiling (`503 MEMORY_BUDGET_EXCEEDED`) or at `Aouda:Query:MaxResultRows`
+  (`400 RESULT_TOO_LARGE`): both bound a result the server holds, and the same read answered as JSON — or as a named query — is
+  still held whole and still refused there. A batch is sized from what the rows' frames actually cost — the first is one row
+  group, so long strings are measured before they are batched — and the size only grows with what it meets: a table whose rows
+  become much wider partway through can still pass the ceiling in one batch, and that read then ends with an error end frame
+  (`MEMORY_BUDGET_EXCEEDED`). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
+  budget) and come in the order the JSON answer's rows have. Its `stats.rowsScanned` is the rows the scan read (the rows of the row
+  groups no statistic ruled out) and `executionMs` the time to the last frame (**Lead S09, next train**: before, `rowsScanned`
+  repeated `rowsReturned` and `executionMs` was the time to the count). A string value over 16 MB fails a streamed read with an
+  error end frame where a held read is answered as JSON.
+- **Headers** carry only what is known before the first frame (**Lead S09, next train**); the rest of the JSON envelope is the
+  end frame's:
 
 | Header | Content |
 |---|---|
 | `X-Aouda-Column-Types` | JSON array of the logical type names, the JSON body's `types` (e.g. `["Int64","Decimal","Timestamp"]`) |
-| `X-Aouda-Row-Count` | Total rows across the frames (`rowCount`) |
-| `X-Aouda-Total-Matches` | `totalMatches`, when the query asked for it (a named query with `count: true`) |
-| `X-Aouda-Stats` | The JSON body's `stats` object |
-| `X-Aouda-Warnings` | The JSON body's `warnings` array, when there are any |
 | `X-Aouda-Token` | The consistency token, as on every response |
 
+| End frame field | Content |
+|---|---|
+| `rowCount` | Total rows across the data frames (the JSON body's `rowCount`) |
+| `status` | `"ok"`, or `"error"` when the read failed after the response started |
+| `error` | When `status` is `"error"`: `{ "code", "message", "status" }` — what the JSON error body would have said, and its HTTP status |
+| `stats` | The JSON body's `stats` object, taken after the last frame |
+| `totalMatches` | `totalMatches`, when the query asked for it (a named query with `count: true`) |
+| `warnings` | The JSON body's `warnings` array, when there are any |
+
+`X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats` and `X-Aouda-Warnings` are gone (**Lead S09, next train**).
 Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a browser client reads them cross-origin —
 together with `X-Request-Id`, `X-Aouda-Protocol-Version`, `Accept-Post` and `Retry-After` (**architecture review, next
 train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
@@ -2421,8 +2432,10 @@ S11**) an insert wrote its table's aggregate and latest / first-per-key queries 
 
 **The column-batch frame body** (**BL-695 / ColumnarCore S06, 0.2.0**):
 
-The same endpoint also accepts **one column-batch frame** — `Content-Type: application/vnd.aouda.column-batch`, the
-binary layout bulk-load [`:append`](#post-jobidappend) takes. The rows
+The same endpoint also accepts **one column-batch frame** — `Content-Type: application/vnd.aouda.column-batch-v2` (`ACB2`,
+**Lead S09, next train**: one data frame, then the body's end frame), the binary layout bulk-load
+[`:append`](#the-column-batch-frame-acb2) takes. An `ACB1` body or the retired `application/vnd.aouda.column-batch` type is
+`415 FRAME_VERSION_UNSUPPORTED`, and nothing is inserted. The rows
 insert exactly as the same rows sent as JSON would: the same values, defaults, generated ids, errors and messages. A
 frame carries values, not JSON text, so where the text matters the server reads the frame's rows as JSON: a number sent
 into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50`), whatever the server's culture.
@@ -2434,11 +2447,12 @@ cannot say which text it had.
 - A frame has no envelope: the **database and table are the URL's**, and `identityInsert` / `writeConcern` are query
   parameters — `POST /api/databases/mydb/tables/orders/rows?identityInsert=true&writeConcern=majority`. (On a JSON body
   those query parameters are ignored; the body's own fields apply.)
-- **One frame per request.** A body holding two frames is `400 INVALID_REQUEST`; so is a body that is not a valid frame.
+- **One data frame per request.** A body holding two is `400 INVALID_REQUEST`; so is a body that is not a valid `ACB2` body
+  (no end frame, a frame out of sequence, an end frame that counts other rows).
 - The response is the JSON above.
 
 **How a client knows.** Every response the endpoint itself returns — success or error — carries
-`Accept-Post: application/json, application/vnd.aouda.column-batch` (a request refused before it, by authentication or an
+`Accept-Post: application/json, application/vnd.aouda.column-batch-v2` (a request refused before it, by authentication or an
 unsupported `Content-Type`, gets none; browsers can read the header through CORS), and `GET /admin/capabilities` lists
 `insertColumnBatch: true`. A server that predates this does not send the header, and answers a frame with
 `415 Unsupported Media Type`. The official SDKs send JSON until they have seen the header (see [.NET](../clients/index.md)
@@ -2470,7 +2484,8 @@ like every other error of this endpoint, and an empty body is `400 MISSING_DATAB
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing rows, invalid column name, schema mismatch, `identityInsert: true` with a missing/`null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
-| — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch` |
+| — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch-v2` |
+| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` frame body, or the retired `application/vnd.aouda.column-batch` type. The message names the version found and the one expected. Nothing is inserted |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
@@ -4580,7 +4595,7 @@ A table with no write-time compute needs neither flag.
 | `tables` | string[] | Echo of the requested tables. |
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
 | `maxRowsPerAppend` | number | Maximum rows allowed per single `:append` call. Clients must chunk larger payloads. |
-| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `"ndjson"` and `"column-batch"`. Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
+| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `"ndjson"` and `"column-batch-v2"` (**Lead S09, next train**: it was `"column-batch"`, `ACB1`, which is no longer read). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
 | `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count). |
 
 **Example:**
@@ -4617,19 +4632,24 @@ no PLS and no RLS policy is not affected. The refusal happens before a session e
 
 Append a chunk of rows to an in-flight session.
 
-**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line), or `application/vnd.aouda.column-batch` (one or more column-batch frames back to back; layout below).
+**Content-Type:** `application/x-ndjson` (JSON Lines — one row object per line), or `application/vnd.aouda.column-batch-v2` (column-batch frames, then an end frame; layout below). The retired `application/vnd.aouda.column-batch` is refused `415 FRAME_VERSION_UNSUPPORTED` (**Lead S09, next train**).
 
 When the session was begun with more than one table, each row must include a `"_table"` field naming its destination. The `"_table"` field is stripped before inserting.
 
 **NDJSON line ends.** `\n`, `\r\n` and a bare `\r` each end a line (**BatchFirst S03, 0.1.40** — a bare `\r` used to leave the whole body as one line and fail it).
 
-**The column-batch frame** (**IngestAtSpeed S09, 0.1.40**). A binary, column-major body the SDKs send
-instead of NDJSON when `:begin` lists `"column-batch"`. It carries the same rows, and the server loads the
-same values from it, without parsing one JSON document per row. A body is one or more frames back to
-back. All integers are little-endian.
+#### The column-batch frame (`ACB2`)
+
+(**IngestAtSpeed S09, 0.1.40**; version 2, `ACB2`, since **Lead S09, next train**.) A binary, column-major body the SDKs send
+instead of NDJSON when `:begin` lists `"column-batch-v2"`, and the body of [`POST …/rows`](#post-apidatabasesdbtablesnamerows)
+and of a [frame query response](#post-apidatabasesdbquery). It carries the same rows, and the server loads the same values from
+it, without parsing one JSON document per row. **A body is its data frames, then exactly one end frame.** All integers are
+little-endian.
 
 ```
-frame   := "ACB1" rowCount:u32 columnCount:u16 column*
+frame   := "ACB2" kind:u8 seq:u64 body
+kind 0  := data   body := rowCount:u32 columnCount:u16 column*
+kind 1  := end    body := length:u32 payload:utf8-json[length]   (at most 1 MiB)
 column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
 flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
 bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
@@ -4641,6 +4661,18 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
 ```
 
+- **The sequence and the end frame** (**Lead S09, next train**). Every frame carries `seq`, its number in the body: 0, 1, 2, …
+  with no gap or repeat; the end frame takes the number after the last data frame. The end frame's payload is a JSON object:
+  `rowCount` (the data frames' rows, checked), `status` (`"ok"`, or `"error"` with `error: { code, message, status }`), and on a
+  query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`. A body that
+  ends without an end frame, has bytes after it, carries a frame out of sequence, counts other rows than its frames, or holds an
+  unknown frame kind is refused `400 INVALID_REQUEST`, naming what was wrong; so is a request body whose end frame reports an error.
+  A body may hold no data frame — one end frame with `rowCount: 0`.
+- **`ACB1` is refused by name** (**Lead S09, next train; breaking**). The version before (`"ACB1" rowCount:u32 columnCount:u16
+  column*`, frames back to back, the body ending where the stream ended) and its media type `application/vnd.aouda.column-batch`
+  are answered `415 FRAME_VERSION_UNSUPPORTED`: `ACB1 frames are no longer read; this server reads ACB2
+  (application/vnd.aouda.column-batch-v2).` Nothing of the request is applied. The column layout inside a data frame is
+  unchanged.
 - **Absent is not null.** A row whose bit is set in the absent bitmap does not have the column at all,
   exactly like a JSON line that omits the key: an omitted auto-increment key is allocated. A row in the
   null bitmap has the column with a `null` value. Absent and null rows still occupy their slot.
@@ -4699,6 +4731,7 @@ Content-Type: application/x-ndjson
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume from `rowsDurablyCommitted` as on any reconnect. It used to fail on the heap mid-frame and answer `500`. |
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `"_table"`. |
 | `BULK_LOAD_CURSOR_MISMATCH` | 409 | Client resumed from an incorrect cursor (sent rows below `rowsDurablyCommitted`). |
+| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
 
 ---
 
@@ -4850,3 +4883,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.10 | 0.3.0 (WorkloadCore) | **WorkloadCore S09:** materialized-query maintenance is off the commit — an insert's `200` and an `"auto"` load's `:commit` no longer wait for their queries to be written. Bulk-load `:commit` gains `mqWaitMs` (a bounded wait for the load's queries, default 30000) and answers `mqStatus`, `mqFrontierToken` and `mqWaitedMs`; `mqRebuildStatus` is never `"completed"` from the commit itself; a single-node load's `token` is the WAL head at its commit. **WorkloadCore S10:** every load but a `"skip"` one is a pending job brought in by the table's pass (`"auto"` starts it at the commit); the ingest-fed path is gone; a query owing a load reports `isStale: true`, `pendingDeferredJobs` ≥ 1 and `current: false` with a new `staleReason` wording, and is not selected by `staleOnly`; a rebuild refused memory waits for room instead of being retried on timers. No field added or removed. **WorkloadCore S17:** `GET /api/server/memory` loses `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the `headroom` block (the resource mode is deleted); a memory refusal's `Retry-After` is the queue's estimate, or 10 s, never a constant 1 s. **Release blockers:** every endpoint answers a capacity refusal `503` + `Retry-After` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) and a write conflict `409 WRITE_CONFLICT` — some answered `400`, `409` or `500` before (BL-921, BL-881); the result ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (it was `503`); a token refresh refused for capacity is `503` and keeps its token, and of two concurrent refreshes with one token exactly one succeeds (BL-841); a materialized-query create whose first build is refused for capacity answers `204` with the query behind (BL-884); bulk-load `:append` is refused `503` before it decodes when memory is short (BL-831). No field added or removed. |
 | 2.11 | 0.4.0 (LoadSpeed) | **LoadSpeed M.2:** bulk-load `:commit`'s `mqWaitMs` defaults to `0` (it was `30000`) — a commit with queries answers `mqStatus: "behind"` at once unless the request asks to wait. No field added or removed. **LoadSpeed K31 (breaking):** `postLoadMqBehavior: "deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` (use `"auto"`); `mqStatus` and `mqRebuildStatus` lose `"deferred"`. **LoadSpeed K5 (BL-980, BL-944; breaking):** `GET /api/tables` drops `rowCountIsExact` (`rowCount` is always exact) and always carries `createdAt` / `lastModifiedAt`; an aggregate materialized query whose `groupByColumns` are plain strings is `400`; an application database accepts only its URL issuer on access tokens; a point-in-time restore of a backup without a WAL-root incarnation fails at staging. Refusals: a refusal no other code names is `503 SERVICE_UNAVAILABLE` + `Retry-After`, `SERVER_STARTING` carries `Retry-After: 5`, a refused notification-provider `DELETE` is `503`, and a wrapped refusal on `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE`), not `400 INVALID_REQUEST`. **LoadSpeed S13 (breaking):** `Decimal(p,s)` is the only decimal type — `"type": "Decimal"` without `precision` / `scale` is `400`, as is a precision above 18; a computed output's `type` and `cast`'s target spell it `"Decimal(p,s)"`; the column-batch frame's 128-bit `Decimal` kind (6) is deleted and refused `400`, and query results send a decimal column as `ScaledDecimal` at its declared scale; a decimal `sum` past 18 digits is refused in a query as in a materialized query. |
 | 2.12 | next train (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
+| 2.13 | next train (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |

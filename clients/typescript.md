@@ -1213,8 +1213,15 @@ const columnar = await client.table('events')
 
 A query (`execute()`, `toColumnar()`, `namedQueries.execute()`) asks for the binary
 [column-batch frame](../reference/http-api.md#post-apidatabasesdbquery)
-(`Accept: application/vnd.aouda.column-batch, application/json;q=0.5`) and reads whatever the server sends by its
-`Content-Type`. An older server, or a result a frame cannot carry, answers JSON as before. The values are the same either
+(`Accept: application/vnd.aouda.column-batch-v2, application/json;q=0.5`) and reads whatever the server sends by its
+`Content-Type`. An older server, or a result a frame cannot carry, answers JSON as before.
+
+(**Lead S09, next train; breaking**) The frames are `ACB2`: the body ends with an **end frame** that carries the row count, the
+`stats`, `totalMatches` and `warnings` (they were `X-Aouda-*` headers). A body without one — cut anywhere, between two frames
+included — or with a frame out of sequence throws `AoudaResponseError`, never returns fewer rows. A server that fails after the
+response started writes the error in the end frame; the client drops the frames before it and throws the `AoudaApiError` that
+error's code gets as a JSON body (an `INTERNAL_ERROR` is an `AoudaServerError`). `stats.rowsScanned` of a streamed read is the rows
+the server read. This client needs a server that speaks `ACB2`; an `ACB1` frame body (an older server) throws, naming the version. The values are the same either
 way: integers, `Date` (days since 1970-01-01), decimals and `UInt64` as numbers, `Guid` as a string, and a `Timestamp`
 row value as an ISO 8601 string. `toColumnar().data` keeps the JSON body's .NET ticks. (**LoadSpeed S13, 0.4.0**) A
 decimal column arrives as `ScaledDecimal` at the column's scale and is read as a number as before; a frame carrying the

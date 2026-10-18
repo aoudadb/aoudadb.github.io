@@ -13,6 +13,15 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Column-batch frames are version 2, `ACB2` (Lead S09, next train; breaking on the wire).** Every frame body — a query response
+  read as frames, a bulk-load `:append`, a `/rows` insert — ends with an **end frame**, and every frame carries a sequence number.
+  A query response's row count, statistics, total matches and warnings now travel in that end frame (the `X-Aouda-Row-Count`,
+  `-Stats`, `-Total-Matches` and `-Warnings` headers are gone), so the server streams a whole-table export from its first row
+  instead of holding a batch and counting the rows first. A response cut anywhere is an error in both SDKs, never a shorter
+  result, and a failure after the response started reaches the caller as its own typed error instead of a dropped connection that
+  was retried. The media type is `application/vnd.aouda.column-batch-v2` (`"column-batch-v2"` on `:begin`); an `ACB1` body or the
+  old type is refused `415 FRAME_VERSION_UNSUPPORTED`. Upgrade the server and both clients together. See the
+  [HTTP reference](reference/http-api.md#the-column-batch-frame-acb2).
 - **The server is precompiled in the image, the archives and the `aouda` tool (Lead S06, next train).** Every published server is
   ReadyToRun, so a fresh or restarted server spends less of its first minute compiling: on the project's test machine the image's
   first-impression run (start, sign-in, schema, a 1 M-row load, three first queries) takes 6.6 s instead of 8.5, and a restart answers
