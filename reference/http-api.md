@@ -2524,7 +2524,7 @@ cannot say which text it had.
 `Accept-Post: application/json, application/vnd.aouda.column-batch-v2` (a request refused before it, by authentication or an
 unsupported `Content-Type`, gets none; browsers can read the header through CORS), and `GET /admin/capabilities` lists
 `insertColumnBatch: true`. A server that predates this does not send the header, and answers a frame with
-`415 Unsupported Media Type`. The official SDKs send JSON until they have seen the header (see [.NET](../clients/index.md)
+`415 Unsupported Media Type`. The official SDKs send JSON until they have seen the header (see [.NET](../clients/dotnet.md)
 and [TypeScript](../clients/typescript.md)). `@aouda/client` goes back to JSON on a `415` and stays on JSON for **five
 minutes**, whatever a later response advertises (**BL-716, 0.2.0**). (**BL-980, 0.4.0**) `Aouda.Client` no longer
 does: a `415` on a frame is an error like any other — the fallback existed only for an older server behind the same address,

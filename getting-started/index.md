@@ -619,6 +619,24 @@ var cheap = await client.GetTable("products")
     .ToListAsync();
 ```
 
+**Data you already hold as columns** (**Lead S13, next train**) — read from Parquet or Arrow, a data frame, another database —
+goes in as a `ColumnBatch`, without a dictionary per row. It is the fast path for inserts and bulk loads alike:
+
+```csharp
+using Aouda.Protocol.BulkLoad;
+
+var batch = ColumnBatch.Of(
+    ColumnBatchColumn.FromInt64s("id", new long[] { 3, 4 }),
+    ColumnBatchColumn.FromStrings("name", new[] { "Sprocket", "Gizmo" }),
+    ColumnBatchColumn.FromDecimals("price", new[] { 4.50m, 12.00m }, scale: 2));
+
+var inserted = await client.GetTable("products").InsertAsync(batch);   // InsertResult: RowsInserted, GeneratedValues
+await client.BulkLoadAsync("products", batches);                       // IAsyncEnumerable<ColumnBatch>, a list, or one batch
+```
+
+The full .NET client reference — options, inserts, column batches, bulk load, what is retried, errors — is
+[.NET Client](../clients/dotnet.md).
+
 #### Client Options
 
 ```csharp
@@ -1898,6 +1916,7 @@ await client.branches.delete("feature-x");
 
 ### General
 
+- **[.NET Client](../clients/dotnet.md)** — `Aouda.Client`: connecting, queries, inserts, column batches, bulk load, retries and errors.
 - **[Testing with Aouda.Testing](testing.md)** — In-process integration tests, including Application Auth, xUnit/NUnit/MSTest fixtures, and CI-friendly `dotnet test` workflows.
 - **[Architecture](https://github.com/aoudadb/aouda/blob/main/docs/ARCHITECTURE.md)** — Deep dive into Aouda's technical design.
 - **[ADR Index](https://github.com/aoudadb/aouda/tree/main/docs/decisions)** — All architecture decision records.

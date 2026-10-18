@@ -22,6 +22,7 @@
 
 ## Clients and SDKs
 
+- [.NET Client (Aouda.Client)](https://aoudadb.github.io/clients/dotnet/): Connect, query, insert, bulk load, retry rules, errors. Next train (Lead S13): column batches (`ColumnBatchColumn.FromInt64s` / `FromStrings` / `FromTimestamps` / `FromDecimals` …, `ColumnBatch.Of`) for `InsertAsync(ColumnBatch)` and `BulkLoadAsync(table, batches)`, written as frames straight from their arrays
 - [TypeScript Client (@aouda/client)](https://aoudadb.github.io/clients/typescript/): Query builder, typed queries, auth, MCP cluster tools, admin APIs
 - [Distribution and Licensing](https://aoudadb.github.io/clients/distribution/): NuGet packages, npm package, CLI tool, Docker images, Helm charts
 

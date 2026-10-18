@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **The C# SDK takes column batches, and has its own page (Lead S13, next train).** A .NET application that already holds its
+  data as columns (Parquet or Arrow row groups, a data frame, another database's export) can insert and bulk-load it without
+  building a dictionary per row: build columns with `ColumnBatchColumn`'s typed factories (`FromInt64s`, `FromDoubles`, `FromBools`,
+  `FromTimestamps`, `FromDecimals`, `FromStrings`, `FromDictionary`, …, with optional null and absent bitmaps), make a batch with
+  `ColumnBatch.Of`, and pass it to `InsertAsync(batch)` (which returns the inserted count and the generated values as column
+  arrays) or a stream of them to `BulkLoadAsync(table, batches)`. Each batch is written as column-batch frames straight from its
+  arrays; small batches share an `:append` body, a large one is split across several, and a resumed load skips rows inside a
+  batch. A malformed batch is refused before it is sent, naming its column and row. The row and object APIs are unchanged. The
+  new [.NET Client](clients/dotnet.md) page documents `Aouda.Client` as a whole — connecting, options, inserts, bulk load, what
+  is and is not re-sent after a failure, and errors — which until now was spread across Getting Started and the guides.
 - **The REST API speaks column arrays (Lead S12, next train; breaking on the wire).** Every JSON write body now sends its rows the
   way a query result already arrives: `columns` (the names), `data` (one array per column) and, for a cell that is not given,
   `absent` — which, unlike `null`, lets an auto-increment id be generated or a default apply. That holds for `POST …/rows`, a

@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Complete
 Primary owner: Engineering
-Last updated: 2026-10-14
+Last updated: 2026-10-18
 
 Coverage phases: P20, BL (Post20-S1, Post20-S3), P31, P46
 Primary task folders: `docs/tasks/P20/`, `docs/tasks/BL-COMPLETION.md`, `docs/tasks/P31/`, `docs/tasks/P46/`
@@ -145,6 +145,9 @@ Scope boundaries:
   - `AoudaClient.BulkLoadMultiTableAsync`
   - `RemoteTableQuery.BulkLoadAsync`
   - `AoudaTable<T>.BulkLoadAsync`
+  - (**Lead S13, next train**) `AoudaClient.BulkLoadAsync` / `RemoteTableQuery.BulkLoadAsync` over `ColumnBatch`es (a stream, a list
+    or one batch) and `AoudaClient.BulkLoadMultiTableAsync` over a stream of them; see
+    [Column batches (C#)](#column-batches-c-lead-s13-next-train).
 - Typed client exception family for lock/cursor/discriminator/options/duplicate-PK failures.
 - CLI shipped for both single and multi-table:
   - `aouda table bulk-load`
@@ -374,6 +377,51 @@ gives each number the kind its JSON text would have, a `DateTime` that is not UT
 `DateTimeOffset` travel as their JSON text, and a value a frame would have to change is sent as JSON
 instead (**BatchFirst S03, 0.1.40**). A load that mixes the two formats mid-stream is still one load,
 with one resume cursor.
+
+### Column batches (C#) (**Lead S13, next train**)
+
+When the data is already columnar (Parquet or Arrow row groups, a data frame, another database's export), `Aouda.Client` loads
+it as `ColumnBatch`es (namespace `Aouda.Protocol.BulkLoad`) and skips building a dictionary per row. This is the fast path: each
+batch is written to the `:append` body as column-batch frames **straight from its arrays**.
+
+```csharp
+using Aouda.Client;
+using Aouda.Protocol.BulkLoad;
+
+var batch = ColumnBatch.Of(
+    ColumnBatchColumn.FromInt64s("id", ids),                         // long[]
+    ColumnBatchColumn.FromStrings("symbol", symbols),                // string?[]: a null element is a null row
+    ColumnBatchColumn.FromDecimals("price", prices, scale: 4),       // decimal[] or decimal?[], at the column's scale
+    ColumnBatchColumn.FromTimestamps("ts", times));                  // DateTime[] or DateTime?[]
+
+var handle = await client.BulkLoadAsync("trades", batches,          // IAsyncEnumerable<ColumnBatch>, a list, or one batch
+    new BulkLoadOptions { IdempotencyKey = "trades-2026-10-18" });
+```
+
+The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatch.Validate()` are described on the
+[.NET Client page](../clients/dotnet.md#6-building-column-batches-lead-s13-next-train). A multi-table load
+(`BulkLoadMultiTableAsync`) takes batches that carry a `_table` string column.
+
+- **How batches map to `:append` bodies.** A body holds up to `AppendBatchSize` rows (capped by the server's `maxRowsPerAppend`)
+  and about `MaxAppendBytes` bytes, as consecutive frames numbered from 0 and closed by the body's end frame. Several small
+  batches share one body, a frame each; a large batch is cut across several bodies. Batches of a few thousand rows or more load
+  fastest, since each batch is at least one frame. Sizing the session itself is unchanged: see
+  [Sizing a session](#sizing-a-session-fewer-longer-one-commit).
+- **Checked before it is sent.** Each batch is validated before any of it is written: a malformed batch throws `ArgumentException`
+  naming the column and row, and the load is not committed. Rows from earlier batches already appended stay in the open session
+  until the server reclaims it.
+- **Resume inside a batch.** A failed `:append` is never re-sent; it throws `BulkLoadAppendFailedException`. Run the same load
+  again with the same `IdempotencyKey` and the same batches from the start: `:begin` answers with the row the session needs next,
+  and the SDK skips every row before it, even when that row is in the middle of a batch.
+- **The JSON fallback.** A batch with a column no frame can carry (an object column from `ColumnBatchBuilder`) is sent as a JSON
+  column-array body of the same rows, after the frames before it. So is every batch when `:begin` does not list
+  `column-batch-v2` in `acceptedAppendFormats`. The values loaded are the same either way.
+- **Absent is not null, and a bulk load applies no defaults.** A cell marked absent is stored as null, except that an absent
+  `autoIncrement` cell is generated (BL-1104, as for any `:append`). An insert (`InsertAsync(ColumnBatch)`) does apply defaults.
+- **The arrays are not copied.** A batch's arrays are read while its rows are written, which happens before the SDK asks your
+  source for the next batch; reuse them from then on.
+
+The row and object overloads of `BulkLoadAsync` are unchanged and remain the convenient path; they are sent as frames too.
 
 ### Sizing a session: fewer, longer, one commit
 
@@ -662,6 +710,13 @@ var handle = await client.BulkLoadAsync(
         WriteConcern = WriteConcern.Majority,
         ReplicationMode = BulkLoadReplicationMode.LogShipSegments
     },
+    ct);
+
+// (Lead S13, next train) Columnar data: ColumnBatch streams, written as frames straight from their arrays
+var batchHandle = await client.BulkLoadAsync(
+    "orders",
+    batches, // IAsyncEnumerable<ColumnBatch>, IReadOnlyList<ColumnBatch> or one ColumnBatch
+    new BulkLoadOptions { IdempotencyKey = "orders-2026-10-18-b1" },
     ct);
 
 // Seed reserved autoIncrement IDs (BL-131) — Bond isAutoIncrementDisabled: true
