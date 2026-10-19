@@ -383,7 +383,7 @@ const client = createAoudaClient({
 });
 
 await client.auth.signIn("admin@myapp.com", "Pass123!");
-await client.auth.createPartitionGrant("usr_123", {
+await client.auth.createPartitionGrant("550e8400-e29b-41d4-a716-446655440000", {
   dimension: "org_id",
   partitionKey: "org-a",
   accessLevel: "write"
@@ -407,7 +407,7 @@ Content-Type: application/json
 ```
 
 ```http
-POST /api/databases/myapp/auth/admin/users/usr_123/partition-grants
+POST /api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants
 Authorization: Bearer <access_token>
 Content-Type: application/json
 

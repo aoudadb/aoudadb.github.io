@@ -181,7 +181,7 @@ Response:
 ```json
 {
   "user": {
-    "id": "usr_abc123",
+    "id": "550e8400-e29b-41d4-a716-446655440000",
     "email": "alice@example.com",
     "createdAt": "2026-03-18T12:00:00Z"
   },

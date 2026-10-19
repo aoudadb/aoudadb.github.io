@@ -527,8 +527,13 @@ appropriate.
 ### What it does
 
 Batch mutation executes multiple update/delete operations against the same table in a single
-HTTP round-trip. All operations are applied sequentially in the order given and committed in a
-single WAL transaction. Each operation can have its own WHERE predicate and SET values.
+HTTP round-trip. All operations are applied sequentially in the order given. Each operation can have its own WHERE predicate
+and SET values.
+
+⚠️ **A batch is not one transaction** (**BL-843**): each operation commits on its own, so when one fails, the operations before it
+stay applied. Re-sending the whole batch applies them again — which matters for `$mul` / `$inc`-style expression SETs like the
+ones below. [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch) lists what each answer
+means for what was applied, and what to re-send.
 
 This is useful when different subsets of rows need different transformations:
 
@@ -632,7 +637,7 @@ Content-Type: application/json
 | Prefer batch when... | Prefer individual calls when... |
 |---|---|
 | Multiple WHERE groups get different SET values (e.g. tier pricing) | Simple single-predicate mutations |
-| You need all operations to commit atomically (one WAL transaction) | You need the result of one mutation to inform the next |
+| One round-trip for several operations matters more than all-or-nothing (a batch is not one transaction) | You need the result of one mutation to inform the next |
 | Minimizing round-trips matters (high-latency network, tight SLA) | Operations span different tables |
 
 ---
@@ -1009,7 +1014,7 @@ await client.branches.delete(`backup-${Date.now()}`);
 | RETURNING returns unexpected columns | `["*"]` was used and the schema has more columns than expected | Enumerate explicit column names instead of `"*"` |
 | Computed column value is `null` | Division by zero in the expression for that row | Guard with `$ifNull` or check denominator values before querying; this is intentional behavior |
 | Expression SELECT result type shows `"Unknown"` | Expression is uninferable (mixed coalesce, unbound param, missing col) | Expected for that expression; inferable expressions report a concrete type (P40 S08) |
-| Batch operation fails partway through | One operation in the batch returned an error | All operations up to (but not including) the failing one may have been applied; the WAL transaction was rolled back for the failing operation only if the error occurred before commit |
+| Batch operation fails partway through | One operation in the batch returned an error | A batch is not one transaction: the operations before the failing one were applied and stay applied, and the later ones did not run. Do not re-send the whole batch unless its operations are idempotent; see [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch) for what each answer means (`503 BATCH_PARTIALLY_APPLIED` names how many were applied) |
 
 ---
 
@@ -1021,7 +1026,7 @@ await client.branches.delete(`backup-${Date.now()}`);
 | S2 | B.1–B.3 | TRUNCATE — `POST .../truncate`, `DatabaseOperation.Truncate` scope, C# `TruncateAsync()`, TS `.truncate()`; DELETE with LIMIT — `limit`/`orderBy` on `DeleteMessage`, `hasMore` response, C# `.Limit().DeleteAsync()`, TS `.limit().delete()` | Complete |
 | BL-106 | — | First-class TRUNCATE WAL frame (`WalTag.TruncateTable = 24`); crash recovery and replica replay; O(1) WAL records regardless of row count; no-PK table durability fix | Complete |
 | S3 | C.1–C.3 | RETURNING clause — `returning` field on `UpdateMessage`/`DeleteMessage`, secondary scan after mutation, post-update / pre-delete semantics, columnar response, C# `returning:` param, TS `{ returning: [...] }` option | Complete |
-| S4 | D.1 | Batch mutation — `POST .../rows/batch`, sequential execution, single WAL commit, `operationResults` response, C# `.BatchAsync()`, TS `.batch()` | Complete |
+| S4 | D.1 | Batch mutation — `POST .../rows/batch`, sequential execution (each operation commits on its own — not one transaction, BL-843), `operationResults` response, C# `.BatchAsync()`, TS `.batch()` | Complete |
 | S5 | E.1–E.3 | Studio bulk mutation panel — predicate builder, SET editor (literal + expression modes), preview count, confirm dialog, RETURNING selector, LIMIT field, result display | Complete |
 | S6 | F.1–F.2 | User documentation — this guide; cross-links in `query.md`, `getting-started/index.md`, `http-api.md`, `studio.md` | Complete |
 | S7 | BL-080 | Expression SELECT projections — `ComputedColumnDef`, `QueryMessage.selectExpr`, post-projection in `ToColumnarAsync`/`ToResultAsync`, server schema validation (unknown ColRef, alias collision, >20 limit), C# `ITableOperations.SelectExpr()`, TS `.selectExpr()` | Complete |

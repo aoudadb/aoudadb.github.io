@@ -433,7 +433,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 | `roles` | array | No | RBAC roles for this key: `[{ "role": "db_writer", "scope": null }]`. `scope` is a database name or `null` for all databases — same shape as user role assignments. |
 | `expiresAt` | string? | No | ISO-8601 timestamp. Omit for a non-expiring key. |
 | `kind` | string | No | Defaults to `"custom"`. `"anon"`, `"service_role"`, `"public"`, and `"server_admin"` are reserved — they are singleton, system-managed keys and this endpoint rejects creating them (`400 INVALID_REQUEST`). |
-| `userId` | string? | No | Links this key to an existing user. The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
+| `userId` | string? (GUID) | No | Links this key to an existing user (its `id`). The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
 
 ```json
 {
@@ -446,7 +446,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
   "createdAt": "2026-01-15T10:30:00Z",
   "kind":      "custom",
   "isSystem":  false,
-  "userId":    "usr_feeder"
+  "userId":    "550e8400-e29b-41d4-a716-446655440002"
 }
 ```
 

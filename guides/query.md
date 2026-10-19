@@ -406,7 +406,7 @@ Notes:
 || DELETE with LIMIT | `.DeleteAsync()` + `.Limit()` | `.delete()` + `.limit()` | `DELETE .../rows` (`limit`, `orderBy`) | Implemented (P27 S2) | Returns `hasMore` sentinel; pair with `orderBy` for deterministic rolling deletes. |
 || TRUNCATE | `.TruncateAsync()` | `.truncate()` | `POST .../truncate` | Implemented (P27 S2) | Requires `Truncate` auth scope; crash-safe. |
 || RETURNING on UPDATE/DELETE | `.UpdateAsync(..., returning:[...])` | `.update(v, { returning:[...] })` | `returning` field on PATCH/DELETE | Implemented (P27 S3) | UPDATE returns post-update; DELETE returns pre-delete values. |
-|| Batch mutation | `.BatchAsync([...])` | `.batch([...])` | `POST .../rows/batch` | Implemented (P27 S4) | Multiple operations, single WAL commit. |
+|| Batch mutation | `.BatchAsync([...])` | `.batch([...])` | `POST .../rows/batch` | Implemented (P27 S4) | Multiple operations in one round-trip, applied in order; **not one transaction** — each commits on its own (BL-843). See [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch). |
 
 ### B) Missing API matrix
 

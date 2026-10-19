@@ -95,7 +95,7 @@ User signs up via one service, can sign in via any linked service. JWT contains 
 
 ```json
 {
-  "sub": "usr_abc123",
+  "sub": "550e8400-e29b-41d4-a716-446655440000",
   "db_roles": {
     "orders-service": ["db_writer"],
     "products-service": ["db_reader"]
@@ -269,7 +269,7 @@ curl http://localhost:5433/api/databases/myapp/auth/admin/users \
 ### Disable/Enable a User
 
 ```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/disable \
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/disable \
   -H "Authorization: Bearer <admin-token>"
 ```
 
@@ -293,7 +293,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/roles \
   }'
 
 # Replace user role assignments
-curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/roles \
+curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/roles \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -308,7 +308,7 @@ curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/r
 # 3) PUT merged list
 
 # Note: POST on this route is not supported and returns 405.
-# curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/roles
+# curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/roles
 ```
 
 ### Default Roles
