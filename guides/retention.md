@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Aouda Functionality: Table Retention and Deleting Before a Time
 
-Document status: New (**Horizon, next train**)
+Document status: New (**Horizon, 0.5.0**)
 Primary owner: Aouda maintainers
 Last updated: 2026-10-17
 
@@ -16,7 +16,7 @@ Related: [Materialized Queries](materialized.md) (windowed results, and the hist
 [Real-time Streaming](real-time.md#horizons-and-range-deletes), [Bulk Load](bulk-load.md#loading-a-table-with-retention),
 [Time-series and Clustering](time-series.md), [HTTP API](../reference/http-api.md)
 
-Everything on this page is new in the next train (**Horizon, next train**). Nothing here exists in 0.4.0.
+Everything on this page is new in 0.5.0 (**Horizon, 0.5.0**). Nothing here exists in 0.4.0.
 
 ---
 
@@ -203,7 +203,7 @@ catalog's facts alone, in one catalog batch per table, with no row read and **no
 pinned the segment still holds it. A three-year history with a one-year `keep` lands as one segment per month and leaves a month at a
 time; the remaining segments are never rewritten. A restart brings nothing back. Expiry (and the retirement of a segment with no live
 row) leaves a segment alone while a pending deferred bulk-load pass still owes it to the table's queries, or while it is a bulk
-segment not yet acknowledged by a majority of replicas, until that is settled (**Horizon, next train**).
+segment not yet acknowledged by a majority of replicas, until that is settled (**Horizon, 0.5.0**).
 
 The cost: more, smaller segments than the same table without retention (one per slice), and at most about one slice stored beyond
 `keep` — the segment straddling the horizon stays, its old rows hidden, until all of it lies behind.
@@ -272,7 +272,7 @@ by time slices, so whole months leave.
 
 ### `TRUNCATE` on a table with retention
 
-(**Horizon, next train**) `TRUNCATE` empties the table. Its materialized queries are rebuilt and, as every rebuild over the table
+(**Horizon, 0.5.0**) `TRUNCATE` empties the table. Its materialized queries are rebuilt and, as every rebuild over the table
 does, **keep their history below the cut** (the horizon rounded up to the query's bucket); the group straddling the horizon is carried
 as it was (BL-1063), so it may still count truncated rows from between the horizon and the cut. The groups at or after the cut are
 recomputed from the empty table, so they are gone. An unfiltered `DELETE` instead retracts exactly the visible rows from the results.
@@ -302,16 +302,16 @@ The client drops what it holds below the time. Both SDKs do it for you (`evt.Rem
   on its own clock** (a horizon the clock moves is not logged), so its horizon can differ from the primary's by the two clocks. (A
   windowed result's horizon is the primary's instead: see [Materialized Queries](materialized.md#window-expiry).)
 - A table created by declarative schema apply (`/schema/apply`) reaches replicas and point-in-time restores like one created by
-  `POST /tables`, with the retention declared with it (**Horizon, next train**).
+  `POST /tables`, with the retention declared with it (**Horizon, 0.5.0**).
 - A range delete on a table without retention is replicated as its one log record, and reaches only a replica's **buffered** rows:
   rows below the cutoff in the segments the replica got from its checkpoint image stay visible there until its next image — the same
-  as a `TRUNCATE` and a keyed delete today (**Horizon, next train**).
+  as a `TRUNCATE` and a keyed delete today (**Horizon, 0.5.0**).
 - **An early expiry reaches the replica** as its one logged record: the replica raises its horizon to the cutoff (the higher of the
   two), hides the rows below it at once and expires its segments, as the primary did. One that arrives while a rebuild on the replica
   holds the table's horizon is applied by the replica's next advance round after the rebuild, instead of failing after 30 s
-  (**Horizon, next train**).
+  (**Horizon, 0.5.0**).
 - An engine that is not a replica logs every horizon it holds (a table's retention, a windowed result's) once when it opens, so a
-  horizon saved just before a crash still reaches replicas and point-in-time restores (**Horizon, next train**).
+  horizon saved just before a crash still reaches replicas and point-in-time restores (**Horizon, 0.5.0**).
 
 See [Replication and Clustering](replication.md).
 
@@ -319,7 +319,7 @@ See [Replication and Clustering](replication.md).
 
 ## Deleting in general
 
-These hold for every table, with or without retention (**Horizon, next train**). Row deletes keep their model — a deletion mask per
+These hold for every table, with or without retention (**Horizon, 0.5.0**). Row deletes keep their model — a deletion mask per
 segment, read through — and lose four wastes:
 
 - **`TRUNCATE` retires the table's segments** instead of writing a mask over every row of every segment. It is still one log record and
@@ -334,7 +334,7 @@ segment, read through — and lose four wastes:
   wholly at or after the horizon is rewritten; one reaching below it is expiry's to drop whole.
 - **A scan skips a segment, or a row group, whose rows are all deleted** — no page is loaded.
 
-See [Storage and Persistence](storage.md#deleted-rows-and-retired-segments-horizon-next-train) and
+See [Storage and Persistence](storage.md#deleted-rows-and-retired-segments-horizon-050) and
 [Hot/Cold Storage](hot-cold.md#24-availability-status-implementation-honesty).
 
 ---
