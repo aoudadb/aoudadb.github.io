@@ -13,6 +13,18 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **The TypeScript SDK takes column batches, and speaks the column-array wire (Lead S14, next train).** Data a TypeScript
+  application already holds as columns (Arrow, Parquet, typed arrays) is bulk-loaded and inserted with no row object in between:
+  build columns with the `column` factories (`column.int64`, `double`, `bool`, `string`, `dictionary`, `timestamp`, `decimal`, …;
+  `null` a null cell, `undefined` an absent one), make a `ColumnBatch`, and pass it to `bulkLoad` or `insert`. On kb2 a million
+  rows go through the SDK in 0.32 s as batches against 5.7 s as row objects. The client now speaks Lead S12's column arrays on
+  every surface it used to send or read rows on, so it works against a server of this train again; `generatedValues` is
+  `{columns, data}` with `forRow(i)`. A bulk load's `:append` is never re-sent, whatever the retry policy (it could duplicate
+  rows); a failed load can be resumed by running it again with the same `idempotencyKey`, from the row the server needs next; and
+  a key whose job already committed returns that job instead of failing `409`. An insert is re-sent only after a refusal that
+  proves it was not applied, never after a timeout. A subscription snapshot with pages missing is an error, not a short snapshot.
+  The HTTP reference now documents `resumeFromRow` and `:begin`'s `alreadyCompleted`, and no longer calls `rowsDurablyCommitted`
+  the resume offset.
 - **The C# SDK takes column batches, and has its own page (Lead S13, next train).** A .NET application that already holds its
   data as columns (Parquet or Arrow row groups, a data frame, another database's export) can insert and bulk-load it without
   building a dictionary per row: build columns with `ColumnBatchColumn`'s typed factories (`FromInt64s`, `FromDoubles`, `FromBools`,

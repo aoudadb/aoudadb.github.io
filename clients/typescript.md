@@ -485,11 +485,28 @@ await client.table('events').insertMany([
 ]);
 ```
 
-If the table has an `autoIncrement` primary key, that column **must be present** on every row — send `0` to auto-generate. Omitting it is `400 INVALID_REQUEST` (`Missing required column`), not auto-generate. See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows) (BL-429).
+**A key a row leaves out is absent, not null** (**Lead S12, next train**): an absent `autoIncrement` column is generated
+(as `0` is), and an absent column that has a default takes it; an explicit `null` is a null. So a row may leave its
+`autoIncrement` id out (until Lead S12 that was `400 INVALID_REQUEST`, `Missing required column`; BL-429). See
+[column arrays](../reference/http-api.md#column-arrays-the-write-body).
+
+**`generatedValues`** (**Lead S14, next train; breaking**: it was an object keyed by row index, `{ "0": { id: 42 } }`) holds
+the generated ids as column arrays, one cell per inserted row, `null` where the row gave its own value; `forRow(i)` gives row
+`i`'s as an object:
+
+```typescript
+const result = await client.table('orders').insertMany([{ status: 'new' }, { id: 7, status: 'given' }]);
+result.generatedValues?.forRow(0); // { id: 42 }
+result.generatedValues?.forRow(1); // undefined — row 1 gave its own id
+result.generatedValues?.data;      // [[42, null]]
+```
 
 **On the wire** (**ColumnarCore S06, 0.2.0**): `insert` and `insertMany` send the rows as a binary column-batch
 frame once the server has advertised that it reads one (`Accept-Post` on an earlier insert's response), and JSON
-otherwise — so the first insert on a client, and every insert to an older server, is JSON. Rows holding an object, an
+otherwise — so the first insert on a client, and every insert to an older server, is JSON. (**Lead S14, next train**)
+The JSON body is [column arrays](../reference/http-api.md#column-arrays-the-write-body) (`{database, columns, data,
+absent?}`), as this server requires (a body of row objects is refused `400 ROW_OBJECTS_UNSUPPORTED`). `insert` and
+`insertMany` also take a [`ColumnBatch`](#column-batches-lead-s14-next-train). Rows holding an object, an
 array, a column whose rows disagree on type, a number in exponent notation (`1e21`), or more than the frame holds (4,096
 columns, 1,000,000 rows, a 16 MB string, an empty or 1 KB+ column name) are sent as JSON; so is everything for five
 minutes after a `415`, whatever a later response advertises (**BL-716, 0.2.0**).
@@ -502,6 +519,12 @@ from an earlier train refuses that kind with a `400`, so pair this client with a
 S13, 0.4.0**) It is the only decimal kind the client writes: a batch whose decimals do not fit that way goes as JSON,
 where it was sent as the 16-byte `Decimal` kind, which the server now refuses. A frame carries one scale per decimal
 column, so a number sent into a `String` column is stored at the column's largest scale (`3` beside `2.50` is `3.00`). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
+
+**An insert is not re-sent after a timeout** (**Lead S14, next train**): under a `retryPolicy`, an insert is sent again only
+after a refusal that proves the server did not apply it — `503` / `429` with `Retry-After` (`MEMORY_BUDGET_EXCEEDED`,
+`WAL_CAPACITY_EXCEEDED`, …) or a connection refused before anything was sent. A timeout, a dropped connection or a `5xx` is
+yours: an insert has no idempotency key, so a blind repeat could insert twice (it was retried like a read). The same holds for
+`namedMutations.execute` and a bulk load's `:commit`; reads are retried as before.
 
 **`expiredRows`** (**Horizon, next train**): on a table with [retention](../guides/retention.md), a row whose time lies below the
 table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
@@ -543,6 +566,81 @@ await client.table('orders').bulkLoad(rows, {
 ```
 
 See also: [Getting Started — Seeding explicit IDs](../getting-started/index.md), [HTTP API insert / bulk-load options](../reference/http-api.md), [Bulk Load guide § Scenario 4](../guides/bulk-load.md), [Schema — autoIncrement toggle vs identity-insert](../guides/schema.md).
+
+### Column batches (**Lead S14, next train**)
+
+Data you already hold as columns — an Arrow table, a Parquet reader's output, typed arrays — goes to `bulkLoad` and `insert`
+as a `ColumnBatch`, and reaches the server as column-batch frames with **no row object in between**. A batch is shaped like a
+query result's [typed columns](#query-responses-are-column-batch-frames-columnarread-s16-030): typed arrays, and bitmaps
+(bit `i % 8` of byte `i >> 3` for row `i`) for nulls and absent cells.
+
+```typescript
+import { ColumnBatch, column } from '@aouda/client';
+
+const batch = ColumnBatch.of(
+  column.int64('id', new BigInt64Array([1n, 2n, 3n])),          // or a Float64Array of safe integers, or numbers / bigints
+  column.string('sym', ['AAPL', 'MSFT', null]),                  // null = a null cell
+  column.double('px', new Float64Array([187.5, 410.25, 0.5])),
+  column.timestamp('ts', [new Date(), new Date(), new Date()]),  // or epoch ms; column.timestampTicks for 100-ns ticks
+  column.decimal('price', ['187.50', 410.25, undefined], 4),     // undefined = absent: the default applies
+  column.bool('open', new Uint8Array([1, 0, 1])),
+).validate();
+
+await client.table('trades').bulkLoad([batch]);   // one batch, an array, or a (async) generator of batches
+await client.table('trades').insert(batch);       // one insert; frames once the server has advertised them
+```
+
+| Factory | Values | Kind on the wire |
+|---|---|---|
+| `column.int64(name, values)` | `BigInt64Array`, a `Float64Array` of safe integers, or numbers / bigints | Int64 |
+| `column.double(name, values)` | `Float64Array` or numbers (NaN and the infinities are carried) | Double |
+| `column.bool(name, values)` | `Uint8Array` of 0 / 1, or booleans | Bool |
+| `column.string(name, values)` | strings | String (a dictionary of the values each frame's rows use) |
+| `column.dictionary(name, dictionary, codes)` | the distinct values and one `Uint32Array` code per row (Arrow / Parquet dictionaries) | String |
+| `column.timestamp(name, values)` / `column.timestampTicks(name, ticks)` | `Date`s or epoch ms / `BigInt64Array` of 100-ns ticks since the Unix epoch | Timestamp |
+| `column.decimal(name, values, scale)` / `column.scaledDecimal(name, unscaled, scale)` | numbers or decimal text at one scale / `BigInt64Array` of unscaled values | ScaledDecimal (a server `Decimal(p,s)`) |
+| `column.nulls(name, length)` | — | Null |
+
+A typed array is kept as it is, not copied: do not change it until the call that sends it has returned. A plain array may
+hold `null` (a null cell) and `undefined` (an **absent** cell — not given, so a generated id or the column's default applies;
+a bulk load stores it as null, BL-1104); a typed array takes `{ nulls, absent }` bitmaps. **Call `validate()` while building
+batches**: it throws, naming the column and row, for everything the server's frame reader would refuse — a name given twice,
+empty or over 1 KB, a code past its dictionary, a timestamp outside .NET's `DateTime`, an int64 in a `Float64Array` that is
+not a safe integer, a string over 16 MiB, a bitmap shorter than its rows, more than 4,096 columns. A load validates each batch
+as it reaches it; a malformed one fails the load (the job stays open — see below).
+
+A bulk load packs batches into `:append` bodies as consecutive frames, up to the job's rows per append (`appendBatchSize`,
+50,000) and about `maxAppendBytes` (8 MiB; `0` turns the bound off), and cuts a larger batch across bodies, each frame's
+string dictionary cut to the values its rows use. Batches of a few thousand rows or more load fastest. A server that does not
+advertise frames gets JSON column arrays of the same rows. Row objects work as before (`bulkLoad(rows)`): the SDK pivots
+them, one frame per body, JSON column arrays for rows no frame carries (an object, an array); a source may not mix rows and
+batches.
+
+On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.32 s and 0.57 CPU-s as batches**, 5.7 s and
+7.4 CPU-s as row objects — the same 42 MB of frames either way.
+
+### Bulk load: resume, a committed job, and no re-sent append (**Lead S14, next train**)
+
+- **An `:append` is never re-sent**, whatever the `retryPolicy`: a body the server partly applied would be applied twice.
+  (Until Lead S14 a retry policy re-sent it.)
+- **A failed load leaves its job open** (holding its tables until the session's idle timeout). Run the same `bulkLoad` again
+  with the **same `idempotencyKey`** — pass one if you may need to — and it resumes: `:begin` answers the job's cursor, and the
+  SDK skips the rows it already accepted, inside a batch if need be, from `resumeFromRow` (or, after a server restart,
+  `rowsDurablyCommitted`; until Lead S14 the SDK skipped only the durable count, which against a live session sends the
+  buffered rows twice). `handle.wasResumed` says so. Only a cancellation (`signal`) aborts the job.
+- **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
+  `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
+  `409 BULK_LOAD_INVALID_STATE`).
+
+```typescript
+const key = `orders-${day}`;
+try {
+  await client.table('orders').bulkLoad(batches(), { idempotencyKey: key });
+} catch {
+  const handle = await client.table('orders').bulkLoad(batches(), { idempotencyKey: key }); // resumes, or returns the commit
+  handle.wasResumed; handle.alreadyCompleted;
+}
+```
 
 ### Update
 
@@ -823,6 +921,9 @@ The subscription delivers two event types via `onChange`:
 - `op: "delete"` — a row was deleted; `key` contains the deleted primary key.
 
 An `onSnapshot` callback receives the initial consistent snapshot of existing rows when the subscription first connects.
+(**Lead S14, next train**) The server sends a snapshot's pages as column arrays; the SDK gives you rows, as before. A snapshot
+whose pages carry fewer rows than the server counted (`snapshot_complete`'s `row_count`) is an error (`onError`, and the
+subscription ends) — never a snapshot with rows missing.
 
 ```typescript
 // Callback style
@@ -1116,8 +1217,9 @@ const status = await client.materializedQueries.status('active_users_summary');
 
 // Query results (returns all rows; options reserved for future use)
 const results = await client.materializedQueries.query('active_users_summary');
-// results.rows: Record<string, unknown>[]
-// results.stats: { rowsScanned, rowsReturned, executionMs }
+// results.columns / results.data: the column arrays the server sends (Lead S14, next train); results.rowCount
+// results.rows: Record<string, unknown>[] — the same cells as objects
+// results.stats: { rowsScanned, rowsReturned, executionMs }; results.token
 
 // Drop
 await client.materializedQueries.drop('active_users_summary');

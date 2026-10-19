@@ -785,12 +785,10 @@ curl -s -X POST \
 ```
 
 ```typescript
-// `args` is sent as given, so the batch argument is column arrays here too.
+// The SDK sends a batch argument given as rows as column arrays (Lead S14, next train) — the type the generated client
+// declares for it (`Array<{…}>`). A ColumnBatch works too.
 await client.namedMutations.execute("tick.record", {
-  rows: {
-    columns: ["ticker", "px"],
-    data: [ticks.map((t) => t.ticker), ticks.map((t) => t.px)],
-  },
+  rows: ticks.map((t) => ({ ticker: t.ticker, px: t.px })),
 });
 ```
 

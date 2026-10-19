@@ -4829,7 +4829,10 @@ A table with no write-time compute needs neither flag.
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
 | `maxRowsPerAppend` | number | Maximum rows allowed per single `:append` call. Clients must chunk larger payloads. |
 | `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, next train**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
-| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count). |
+| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count) and `resumeFromRow` (number?). **Resume from `resumeFromRow`**: the index of the first row to send next — the rows the job has accepted, buffered ones included. `rowsDurablyCommitted` counts only the durable ones; against a session that is still live, skipping only that many re-sends the buffered rows, and the commit writes them twice. `resumeFromRow` is absent when the server cannot offer a safe position (a cursor rebuilt after a restart, whose buffered rows are gone); then resume from `rowsDurablyCommitted`. (Documented by **Lead S14, next train**; both SDKs resume this way — `@aouda/client` since Lead S14.) |
+| `alreadyCompleted` | bool | `true` when the idempotency key matched a job that already **committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`): no session is opened, and `:append` / `:commit` on this `jobId` are refused `409 BULK_LOAD_INVALID_STATE`. Read the job's result from `rowsDurablyCommitted` and `token` below. `false` otherwise. |
+| `rowsDurablyCommitted` | number? | With `alreadyCompleted`: the committed job's rows. |
+| `token` | string? | With `alreadyCompleted`: the committed job's consistency token. |
 
 **Example:**
 ```
@@ -4982,7 +4985,7 @@ Content-Type: application/json
 |---|---|---|
 | `rowsAppended` | number | Rows accepted in **this** append call. Not necessarily durable yet. |
 | `rowsAppendedToBuffer` | number | Cumulative rows accepted into the session buffer since `:begin`. Not necessarily durable (lost on server crash before sealing). |
-| `rowsDurablyCommitted` | number | Cumulative rows in sealed segments with commit markers that have been fsync'd to WAL. Use this as the upstream offset for resume on reconnect. |
+| `rowsDurablyCommitted` | number | Cumulative rows in sealed segments with commit markers that have been fsync'd to WAL — what a crash cannot take away. **Not the resume offset** (**Lead S14, next train**: this said it was): after a reconnect, send the same `:begin` with the same idempotency key and resume from its cursor's `resumeFromRow` (else its `rowsDurablyCommitted`) — see the `:begin` response above. |
 | `acceptedAtUtc` | string | ISO 8601 UTC timestamp. |
 | `segmentsSealedSoFar` | number | Segments sealed across all tables in this job so far. |
 
@@ -4993,7 +4996,7 @@ Content-Type: application/json
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, 0.3.0**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
-| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume from `rowsDurablyCommitted` as on any reconnect. It used to fail on the heap mid-frame and answer `500`. |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its cursor's `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job. `details: row={n}` (**Lead S12, next train**: was `lineNumber=N`). |
 | `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, next train**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
 | `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). |
