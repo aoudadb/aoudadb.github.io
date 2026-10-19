@@ -267,7 +267,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}/roles` | GET | List user's roles |
 | `.../admin/users/{id}/roles` | PUT | Replace user's role assignments |
 | `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
-| `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key, a nested name, or a reserved name (`sub`, `email`, `iss`, `aud`, `iat`, `exp`, `nbf`, `aal`, `db_roles`, and the authenticator names `auth_type`, `api_key_kind`, `api_key_id`, `api_key_prefix`, `api_key_name`, `aouda_auth_db` — **BL-1031, next train**) |
+| `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key, a nested name, or a reserved name (`sub`, `email`, `iss`, `aud`, `iat`, `exp`, `nbf`, `aal`, `db_roles`, and the authenticator names `auth_type`, `api_key_kind`, `api_key_id`, `api_key_prefix`, `api_key_name`, `aouda_auth_db` — **BL-1031, 0.5.0**) |
 | `.../admin/roles` | GET | List roles |
 | `.../admin/roles` | POST | Create custom role |
 | `.../admin/roles/{id}` | PATCH | Update role |
@@ -275,7 +275,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/api-keys` | GET | List API keys |
 | `.../admin/api-keys` | POST | Create custom API key |
 | `.../admin/api-keys/{id}` | DELETE | Revoke API key |
-| `.../admin/regenerate-keys` | POST | Regenerate the auto-generated anon, service, and public keys. Body `{ "overlapSeconds"? }` (**BL-1032, next train**): omitted or `0` revokes the previous system keys in the same call; `1`–`86400` leaves them valid until `validUntil` in the response. Named service keys are not touched |
+| `.../admin/regenerate-keys` | POST | Regenerate the auto-generated anon, service, and public keys. Body `{ "overlapSeconds"? }` (**BL-1032, 0.5.0**): omitted or `0` revokes the previous system keys in the same call; `1`–`86400` leaves them valid until `validUntil` in the response. Named service keys are not touched |
 | `.../admin/signup-settings` | GET/PUT | Read/write self-service signup (`allowSelfSignup`, `selfSignupRole`; null role → `db_writer`) |
 | `.../admin/users/{id}/password` | PUT | Admin override of a user's password — no current-password check; optionally set `forcePasswordChange` |
 | `.../admin/users/{id}/invite` | POST | (Re-)send an invite email with OTP to set a password; invalidates previous unused tokens |
@@ -283,7 +283,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}/mfa/factors/{factorId}` | DELETE | Delete that factor and its challenges. The factor must belong to `{id}` (otherwise 404). 200 `{ "ok": true }` |
 | `.../admin/users/{id}/mfa/enroll` | POST | Admin enrols a phone MFA factor on behalf of a user. Returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; existing factor id in `detail`. Does not change the stored number. To replace it, DELETE the factor on this admin route, then enroll again |
 
-#### Named service keys and an auth-admin credential (**BL-1032, next train**)
+#### Named service keys and an auth-admin credential (**BL-1032, 0.5.0**)
 
 These routes take a **server key** (`mk_srv_`), not `mk_svc_` and not a `db_admin` user. The secret is returned once, on mint and on rotate.
 
@@ -1220,7 +1220,7 @@ curl -X POST http://localhost:5433/api/databases \
 
 The response includes `auth.keys.anonKey` and `auth.keys.serviceRoleKey` — **copy both immediately** (shown once). See [setup.md](setup.md) §7 for linked-database patterns.
 
-If a service's key is lost later, mint a named one with the server key (**BL-1032, next train**) — `POST /api/databases/{db}/service-keys` — and revoke the name you are replacing. Regenerating the bootstrap system keys still revokes the previous anon, service, and public secrets in the same call unless the body sets `overlapSeconds`:
+If a service's key is lost later, mint a named one with the server key (**BL-1032, 0.5.0**) — `POST /api/databases/{db}/service-keys` — and revoke the name you are replacing. Regenerating the bootstrap system keys still revokes the previous anon, service, and public secrets in the same call unless the body sets `overlapSeconds`:
 
 ```powershell
 curl -X POST http://localhost:5433/api/databases/derive/auth/admin/regenerate-keys `

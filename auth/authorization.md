@@ -80,7 +80,7 @@ The server-admin endpoints (`/api/auth/admin/*`, database management, backups) a
 - **A service limited to some partitions:** a `custom` key linked to a user ([§19.4.5](#1945-durable-credentials-for-non-interactive-services)).
 - **An operator's cross-partition read:** a `db_admin` key or JWT with `"crossPartitionAccess": true` (`auth-db-pls`, `jwt-claim`).
 
-### Bulk load is not a per-user write (**BL-1031, next train**)
+### Bulk load is not a per-user write (**BL-1031, 0.5.0**)
 
 `POST …/bulk-load:begin` on a table with PLS or RLS returns `403` `AUTHORIZATION_DENIED` unless the caller is that
 database's `service_role` key (`mk_svc_`). A `db_admin` user, a server key (`mk_srv_`), and a `custom` key are refused,

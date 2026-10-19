@@ -58,7 +58,7 @@ Operationally, this gives Aouda one ingest primitive that can be used by:
 
 Scope boundaries:
 - Bulk load optimizes the ingest path; it is not a replacement for normal row-level write APIs.
-- A table with partition or row security is not a per-user bulk-load target. `:begin` refuses it (`403 AUTHORIZATION_DENIED`) unless the caller is that database's `service_role` key (`mk_svc_`). A grant that would allow an ordinary insert does not. A table with no PLS and no RLS policy is unchanged. (**BL-1031, next train**)
+- A table with partition or row security is not a per-user bulk-load target. `:begin` refuses it (`403 AUTHORIZATION_DENIED`) unless the caller is that database's `service_role` key (`mk_svc_`). A grant that would allow an ordinary insert does not. A table with no PLS and no RLS policy is unchanged. (**BL-1031, 0.5.0**)
 - It guarantees atomic commit at the job boundary (`BulkLoadCommitted`), not partial "progressively visible" reads.
 - It currently does not provide persistent server session reconstruction across restarts (see `2.18`, `BL-067`).
 
@@ -115,7 +115,7 @@ Scope boundaries:
 | Server `Aouda:BulkLoad:TargetSegmentBytes` | `67108864` (64 MB) | Accrued bytes at which a bucket seals into a segment — matches every other segment the engine writes. |
 | Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, floored at 8 MB. As of P45, the ceiling is no longer a fixed 256 MB — it grows with the server's own memory governor (shared with other concurrent loads and background work), so a well-provisioned host's fraction actually means something. Nothing changes on a small host, where `0.04 × governed` was already under 256 MB. |
 | Server `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` | `0` (derive, per above) | Set to a specific byte count to pin the ceiling explicitly — `268435456` reproduces the pre-P45 fixed 256 MB behavior exactly. |
-| Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. (**LoadScan, next train**) It bounds how many segment writes run at once; inside one, the segment's columns are encoded and written in parallel on up to the load's CPU share — a bulk load is `Ingest` work, half the schedulable cores — for a segment of four or more pages. |
+| Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. (**LoadScan, 0.5.0**) It bounds how many segment writes run at once; inside one, the segment's columns are encoded and written in parallel on up to the load's CPU share — a bulk load is `Ingest` work, half the schedulable cores — for a segment of four or more pages. |
 | Cluster `Aouda:BulkLoad:EmitFramesOnSingleNode` | `false` | On a detected single-node topology, `LogShipSegments` elides `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames by default — no per-segment re-read/hash. `true` restores frames on a single node. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | `64` | Segment count above which, combined with a low median rows/segment, a job's commit logs one advisory warning. See `2.13`. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | `1000` | Median rows/segment below which the same warning can fire. |
@@ -172,7 +172,7 @@ Scope boundaries:
     million rows** (48.2), and all 13 queries were current **440.5 s** after the load started (650 s on 0.3.0) — the time of the
     `skip` + pooled-refresh recipe below (441.5 s), with identical results.
 - **A table with retention, or a windowed result, is loaded one segment per time slice and never spilled; rows below its horizon
-  are counted in `:commit`'s `expiredRows`, not written** (**Horizon, next train**). See
+  are counted in `:commit`'s `expiredRows`, not written** (**Horizon, 0.5.0**). See
   [Loading a table with retention](#loading-a-table-with-retention).
 - **Identity-insert on bulk-load (BL-131):**
   - `BulkLoadOptions.IdentityInsert` / wire `options.identityInsert` on `:begin`.
@@ -366,7 +366,7 @@ difference is *when* the work is paid — per load, or once for many — not how
    key, bulk loading it again and crashing before the next checkpoint removed the loaded row.
 8. A load into a table with PLS or RLS is refused at `:begin` unless the caller bypasses both — an app `service_role` key
    (`mk_svc_`). A user JWT, a server key (`mk_srv_`), and a `custom` key are refused, including a caller who holds a partition
-   write grant. The refusal names the protected tables and starts no session. (**BL-1031, next train**)
+   write grant. The refusal names the protected tables and starts no session. (**BL-1031, 0.5.0**)
 
 ### What a frame carries is what JSON carries
 
@@ -569,7 +569,7 @@ loader that needs the queries current before its next step sends `mqWaitMs`, or 
 
 ### Loading a table with retention
 
-(**Horizon, next train**) A table that declares [retention](retention.md) — and a windowed materialized query's result — has a
+(**Horizon, 0.5.0**) A table that declares [retention](retention.md) — and a windowed materialized query's result — has a
 time-slice rule: no segment may span two slices of its time column (the largest of hour / day / week / month that is at most
 `keep / 4`), so that expiry can drop whole segments. The bulk load follows it:
 
@@ -688,7 +688,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `Aouda:BulkLoad:AllowWritePermission` | bool | `false` | `true/false` | Server config | Compatibility gate for write-only principals. |
 | `Aouda:BulkLoad:ForceLogShipBulkLoad` | bool | `false` | `true/false` | Cluster/server config | Rejects non-log-ship modes. |
 | `BulkLoadOptions.RequestTimeout` — *since 0.1.22* | `TimeSpan` | `10m` | positive duration | Client | Deadline for each individual bulk-load HTTP call. Deliberately not `AoudaClientOptions.Timeout` (30 s), which is sized for point operations and cannot cover a `:commit` that seals a million rows. Governs one call, not the job. A caller-supplied `HttpClient` keeps its own `HttpClient.Timeout`, which caps this. |
-| `BulkLoadOptions.MaxAppendBytes` — *since 0.1.22* | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). (**LoadScan, next train**) The C# client builds the next `:append` body while the previous one is in flight — still one `:append` at a time, in order — so your row source is read at most one body ahead of what the server has accepted, and two bodies may be held at once. Your source is read on a thread-pool thread, by one call at a time. A load that fails or is cancelled stops reading your rows before it returns — and waits for the row your source is producing to do so: an iterator that waits for its rows (a feed) should honour its cancellation token (`[EnumeratorCancellation]`), or a failed load returns only when the feed's next row arrives. |
+| `BulkLoadOptions.MaxAppendBytes` — *since 0.1.22* | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). (**LoadScan, 0.5.0**) The C# client builds the next `:append` body while the previous one is in flight — still one `:append` at a time, in order — so your row source is read at most one body ahead of what the server has accepted, and two bodies may be held at once. Your source is read on a thread-pool thread, by one call at a time. A load that fails or is cancelled stops reading your rows before it returns — and waits for the row your source is producing to do so: an iterator that waits for its rows (a feed) should honour its cancellation token (`[EnumeratorCancellation]`), or a failed load returns only when the feed's next row arrives. |
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` — *since 0.1.22* | int | `600000` | `>=0` (`0` disables) | Server config | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. Not the bound on an abandoned session — `SessionIdleTimeoutMinutes` is. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | int | `10` | `>=0` (`0` disables) | Server config | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock and ingest budget. |
 | `Aouda:BulkLoad:MaxConcurrentStreamingRequests` — *since 0.1.22* | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` and `:commit` run in. They do not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. |
@@ -1015,7 +1015,7 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `403 AUTHORIZATION_DENIED` on `:begin` (**BL-1031, next train**) | A table in the load has PLS or RLS, and the caller is not a `service_role` key | Load with that database's `mk_svc_` key. Ordinary inserts remain the per-user write path. |
+| `403 AUTHORIZATION_DENIED` on `:begin` (**BL-1031, 0.5.0**) | A table in the load has PLS or RLS, and the caller is not a `service_role` key | Load with that database's `mk_svc_` key. Ordinary inserts remain the per-user write path. |
 | `BulkLoadInvalidOptions` on begin with `skipReplication` | Multi-node safety/policy check failed | Use `logShipSegments` or explicit bypass where allowed. |
 | `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Give every row a `_table` value within the declared table set. |
 | `415 ROW_OBJECTS_UNSUPPORTED` on append | The body is NDJSON (`application/x-ndjson`), no longer read (**Lead S12, next train**) | Send column-batch frames, or the rows as one JSON column-array body (`application/json`); upgrade the client library. |

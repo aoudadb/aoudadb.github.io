@@ -274,7 +274,7 @@ If you run server defaults and do not set per-database overrides:
   - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
     taken with the older build is what carries them over.
   - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
-  - (**Horizon, next train**) The catalog format is **10** (8: a windowed result's horizon; 9: a table's row-id floor, kept when
+  - (**Horizon, 0.5.0**) The catalog format is **10** (8: a windowed result's horizon; 9: a table's row-id floor, kept when
     whole segments are retired; 10: a table's retention), and a materialized-query definition file is version **2**. A directory
     written by 0.4.0 (catalog format 7), or by any other format, is refused at open naming the version found and the version
     expected; there is no migration. The WAL gains a `RangeDelete` frame (tag 73), which an older build does not know.
@@ -295,7 +295,7 @@ Invariants:
 - WAL replay never requires table directory guessing; resolver maps `TableId` to table directory.
 - Slot safety boundaries prevent WAL truncation ahead of active consumers.
 
-### Deleted rows and retired segments (**Horizon, next train**)
+### Deleted rows and retired segments (**Horizon, 0.5.0**)
 
 Row deletes keep their model — a deletion mask (`_deleted.pages`) per segment, read through — and lose four wastes:
 

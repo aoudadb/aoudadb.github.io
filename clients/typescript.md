@@ -533,7 +533,7 @@ until this train one with a `Retry-After` was; a proxy may answer it after forwa
 [error codes](../reference/http-api.md#server-errors-5xx)). This is the C# SDK's rule. Reads — `GET`s, and the queries, counts and
 diffs sent as a `POST` — are re-sent after any transient failure, as before; a bulk load's `:append` is never re-sent (below).
 
-**`expiredRows`** (**Horizon, next train**): on a table with [retention](../guides/retention.md), a row whose time lies below the
+**`expiredRows`** (**Horizon, 0.5.0**): on a table with [retention](../guides/retention.md), a row whose time lies below the
 table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
 counts it (a row that omits the column is stored, hidden and dropped by the next flush, and not counted). It is absent when 0, always
 on a table without retention.
@@ -668,7 +668,7 @@ await client.table('users')
   .delete();
 ```
 
-(**Horizon, next train**) A delete whose only condition is the table's first cluster column (a `Timestamp` or `Date`) `<` or `<=` a
+(**Horizon, 0.5.0**) A delete whose only condition is the table's first cluster column (a `Timestamp` or `Date`) `<` or `<=` a
 time — no `limit`, `orderBy` or `returning`, on a tabular table with no vector column that no foreign key references (an edge
 table takes the row path) — costs metadata, not rows: on a table with retention it raises the table's horizon (an
 early expiry), on any other table it is one log record and whole segments retired. See
@@ -714,7 +714,7 @@ await client.tables.dropColumn('users', 'phoneNumber');
 await client.tables.deleteTable('users');
 ```
 
-**Retention** (**Horizon, next train**): `policy.retention` on `createTable` and `retention` on `updatePolicy` declare that a table
+**Retention** (**Horizon, 0.5.0**): `policy.retention` on `createTable` and `retention` on `updatePolicy` declare that a table
 keeps only its recent rows — `{ keep: '90d' }`, a whole number of `m` / `h` / `d` / `w` (`TableRetention`). The first cluster column
 must be a `Timestamp` or `Date`. An `updatePolicy` body that only sets `retention` may omit `storageTemperature`. Once declared it can
 be changed, not removed. The returned `TablePolicy` (and the table detail's `policy`) carries `retention` and `horizon` (ISO-8601 UTC,
@@ -972,7 +972,7 @@ const sub = client.table('events')
   });
 ```
 
-#### Horizons and range deletes (**Horizon, next train**)
+#### Horizons and range deletes (**Horizon, 0.5.0**)
 
 A windowed materialized query's result and a table with [retention](../guides/retention.md) drop old rows without a row event per
 row, and a delete before a time on any other table removes a range in one statement. The subscription tells you with two more events
@@ -1252,7 +1252,7 @@ const finished = await client.materializedQueries.refreshAndWait('active_users_s
 // Throws if the query reaches state 3 (Error), or if timeoutMs elapses.
 ```
 
-**Windows** (**Horizon, next train**): `create` takes `window: { keep, column? }` (`MaterializedQueryWindow`) on an `aggregate` with
+**Windows** (**Horizon, 0.5.0**): `create` takes `window: { keep, column? }` (`MaterializedQueryWindow`) on an `aggregate` with
 a time bucket or a `topNPerGroup` grouped by a time column; the result stores only its groups within `keep` of the server's clock, and
 a read of an older range is computed from the source. `status()` reports `window` and `horizon` (ISO-8601 UTC). A window over a table
 with retention is refused. See [Materialized Queries](../guides/materialized.md).
@@ -1298,7 +1298,7 @@ loaded.mqWaitedMs;      // how long :commit waited for them
 The load is durable whatever `mqStatus` says; `"behind"` means the queries' maintenance is still running. To read
 them current, read with `loaded.token`, which waits for them.
 
-(**Horizon, next train**) `handle.expiredRows` counts the rows a load into a table with [retention](../guides/retention.md) left out —
+(**Horizon, 0.5.0**) `handle.expiredRows` counts the rows a load into a table with [retention](../guides/retention.md) left out —
 below the horizon, or with a null time — never written and not in `rowsLoaded` (0 without retention). Such a table is loaded one
 segment per time slice; see [Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention).
 

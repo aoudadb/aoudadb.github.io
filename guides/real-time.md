@@ -188,7 +188,7 @@ If you do nothing:
   - HTTP long-poll fallback server endpoint plus .NET/TypeScript fallback transports.
 - Materialized query streaming:
   - Subscribe via table path to result tables with incremental updates.
-- Horizon notices (**Horizon, next train**):
+- Horizon notices (**Horizon, 0.5.0**):
   - `snapshot_complete` carries `horizon` / `horizon_column` for a windowed result or a table with retention; `horizon` and
     `range_delete` messages tell a client what to drop. See [Horizons and range deletes](#horizons-and-range-deletes).
 
@@ -269,7 +269,7 @@ Invariants:
 
 ### Horizons and range deletes
 
-(**Horizon, next train**) Some tables drop old rows without a row event per row: a **windowed materialized query's result**
+(**Horizon, 0.5.0**) Some tables drop old rows without a row event per row: a **windowed materialized query's result**
 (its window, see [Materialized Queries](materialized.md)) and a **table with retention** ([Retention](retention.md)). Each has a
 **horizon** — an instant below which its rows are gone — and it only rises. And a `DELETE` before a time on a table **without**
 retention deletes a whole range in one statement. A subscriber learns about all three from **notices**: messages that name a
