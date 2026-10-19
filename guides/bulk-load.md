@@ -462,7 +462,8 @@ What it shares with C#, and what changed for it in the same session:
 A load that arrives as several jobs — a file per day, a batch per hour — should not wait for each job's `:commit` before
 beginning the next. The server already lets a second job's `:begin` and `:append`s in while the first commits: the second job's
 rows decode and queue (up to `Aouda:BulkLoad:MaxQueuedAppendBytes`, 64 MB) behind the table's bulk-load lock, and its row loop starts when
-the first job's commit releases the lock. Both SDKs do this for you:
+the first job's rows end — (**Lead S19, next train**) the lock passes to the next job as soon as the first job's `:commit` has
+closed its rows, so the second job's rows load while the first one writes and commits. Both SDKs do this for you:
 
 ```csharp
 await foreach (var handle in client.BulkLoadJobsAsync("trades", days))   // C#: each job a list or stream of ColumnBatch, or rows
@@ -474,7 +475,11 @@ for await (const handle of client.bulkLoadJobs('trades', days)) console.log(hand
 ```
 
 - **Nothing about a job changes.** Each is committed, visible and answered on its own, in job order; a later job is never visible
-  before an earlier one, because it cannot take the table's lock before the earlier commit released it.
+  before an earlier one: (**Lead S19, next train**) commits on a table are first in, first out — a job that took the table's lock
+  later reaches its commit point only after every earlier job is committed (or aborted). A `:commit` therefore still returns after
+  its own job is durable and visible, as before; `commitWaitMs` on the server's commit line says how long it waited for the job
+  ahead of it. An update, delete or other write to the table waits for every load that was in flight when it arrived — loading or
+  committing — and not for loads that start after it.
 - **One `:append` and one `:commit` in flight per loader.** That is what keeps the server's `:append` lane (4 requests at once by
   default, `Aouda:BulkLoad:MaxConcurrentStreamingRequests`) from starving: up to four loaders into one table finish, each `:commit` running on
   no lane at all. More loaders into one table than the lane has permits can still starve the lock holder's next `:append` until
@@ -482,8 +487,9 @@ for await (const handle of client.bulkLoadJobs('trades', days)) console.log(hand
 - **The first failure ends the sequence** after every earlier job's handle; the job being sent behind a failed commit is aborted.
   A caller's idempotency key keys job `i` as `{key}.{i}`, so a repeated call replays what committed and resumes the rest.
 - **`FailFast` runs the jobs one at a time**: a job queued behind the lock would be refused.
-- What overlaps today is a commit with the next job's begin, send and decode; the next job's row loop still waits for the
-  commit. Raw HTTP clients can pipeline the same way: send job N+1's `:begin` / `:append`s after N's `:commit` is sent, and
+- What overlaps is a commit with the next job's begin, send, decode and (**Lead S19, next train**) row loop: the next job's rows
+  are accrued while the earlier job drains, writes and commits. Two jobs' ingest buffers are then held at once, each under its own
+  memory grant. Raw HTTP clients can pipeline the same way: send job N+1's `:begin` / `:append`s after N's `:commit` is sent, and
   N+1's `:commit` only after N's returned.
 
 ### Sizing a session: fewer, longer, one commit
@@ -935,10 +941,11 @@ Logging__LogLevel__Aouda=Information
 | Field | What it tells you |
 |---|---|
 | `commitMs` | How long the `:commit` call itself took, measured server-side across the whole request. This is the number a client experiences. (**WorkloadCore S09, 0.3.0**) It is the commit itself, to durable: it no longer includes the wait for the load's materialized queries, which follows it as `mqWaitMs`. |
-| `lockHoldMs` | How long the exclusive table lock was held — the **whole session**, from `:begin`. `lockHoldMs` far exceeding `commitMs` means the session was long, which is the recommended shape; it is also how long any other writer to those tables was blocked. |
+| `lockHoldMs` | How long the exclusive table lock was held — the **whole session**, from `:begin`; (**Lead S19, next train**) until the job's rows ended, when the lock passes to the next job queued on the table. `lockHoldMs` far exceeding `commitMs` means the session was long, which is the recommended shape. Another writer to those tables waits for the lock and for the commit after it. |
 | `mqPublishBacklog` | Materialized-query publishes outstanding on this database once this job queued its own, **including this one**, so `1` is the normal value for a load with a query attached. A figure that climbs job over job means the loader is committing faster than its materialized queries can publish. (**WorkloadCore S10, 0.3.0**) It counts the database's pending bulk-load jobs — loads whose table's pass has not yet run, this one included. See [Materialized queries](materialized.md). |
 | `mqKeyedLive`, `mqKeyedAbsent`, `mqKeyedUnresolved`, `mqKeyedLocated` | (**BL-662 / BL-664, 0.1.39**) — appended at the end of the line. How this database's materialized-query publishes found the existing result row for each group they touched, counted since the server opened the database:<br>• `live`: found in memory by primary key.<br>• `absent`: proven not to exist anywhere, cold storage included (**BL-663**).<br>• `unresolved`: neither, so the result table was read for it.<br>• `located`: the part of `unresolved` that exists in a segment, so its row had to be read. The rest of `unresolved` is keys nothing could decide.<br>They count lookups, not distinct rows. Read them as a ratio, and as the difference between two lines: a publish runs after its own commit, so each line includes every publish that has finished so far. A growing share of undecided keys (`unresolved` minus `located`) means publishes are searching again. |
 | `rowLoopMs`, `rowWaitMs`, ~~`mqFeedMs`, `mqDrainMs`, `mqStageWaitMs`~~ | (**WorkloadCore S10, 0.3.0**) `mqFeedMs`, `mqDrainMs` and `mqStageWaitMs` are removed: a load does no materialized-query work while it streams, so there is no stage to report. (**IngestAtSpeed S01 / S13, 0.1.40**) — appended at the end of the line. Where the session's row loop spent its time. `rowLoopMs` is the loop's wall time across the **whole session**, every `:append` included, so it can exceed `commitMs`. `rowWaitMs` is the part spent waiting for your client's next row (the append channel empty): it is your loader's time, not the server's. The materialized-query work runs on a stage beside the loop (**S13**): `mqFeedMs` is the stage's per-row feed, `mqDrainMs` its spill and build-buffer work, and both overlap `rowLoopMs` rather than adding to it. `mqStageWaitMs` is how long the loop waited for that stage; a large share of `rowLoopMs − rowWaitMs` there means the materialized queries, not the table write, set the ingest rate. (`mqInlineDrainMs`, from S01, is gone: the drains are no longer inline.) |
+| `commitWaitMs` | (**Lead S19, next train**) — appended at the end of the line. The part of `commitMs` this job's commit point waited for an earlier job on the same table to commit: commits on a table are first in, first out. `0` unless jobs were pipelined into one table. |
 | `postCommitMs`, `mqWaitMs`, `mqStatus` | (**WorkloadCore S09, 0.3.0**) — appended at the end of the line. `postCommitMs` is the time the engine spent after the load's commit point, outside the table lock: since the queries' maintenance no longer runs there, the hand-off of that maintenance. `mqWaitMs` is how long `:commit` then waited for the load's queries (the response's `mqWaitedMs`), and `mqStatus` how that ended (as in the response). BL-789's `mqPassWaitMs` and `mqPassMs` are gone with the pass that ran inside `:commit`. |
 
 ⚠️ **The phase fields do not have to sum to `commitMs`, and the gap is the point.** `segmentWriteMs`, `finalizeMs`, `walMs` and `catalogSaveMs` cover the coordinator's own work. Anything left over — buffer drain, spill merge waits, admission — is time nobody has attributed yet. Before `commitMs` existed there was no way to notice that there was a remainder at all.

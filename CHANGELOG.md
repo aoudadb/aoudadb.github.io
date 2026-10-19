@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Pipelined loads into one table overlap their commits with the next job's rows (Lead S19, next train).** A table's bulk-load
+  lock now passes to the next queued job when a job's rows end, not when its `:commit` returns, so job N+1's rows load while job N
+  drains, writes and commits. Nothing a client sees changes: a `:commit` still returns after its own job is durable and visible,
+  commits on a table stay first in, first out (a later job waits at its commit point for the earlier one — the commit line's new
+  `commitWaitMs`), and an update, delete or other write waits for every load in flight when it arrived. `lockHoldMs` now ends at
+  the hand-over. See [Several jobs into one table](guides/bulk-load.md#several-jobs-into-one-table-pipelined-lead-s18b-next-train).
 - **A replica no longer answers a bulk load's token before it has the load, and `:commit` leaves the `:append` lane (Lead S18a,
   next train).** A read presenting a token on a secondary is served only once that node holds every bulk load committed at or
   below the token: until then it waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`, and
