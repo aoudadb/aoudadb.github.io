@@ -510,8 +510,8 @@ absent?}`), as this server requires (a body of row objects is refused `400 ROW_O
 array, a column whose rows disagree on type, a number in exponent notation (`1e21`), or more than the frame holds (4,096
 columns, 1,000,000 rows, a 16 MB string, an empty or 1 KB+ column name) are sent as JSON; so is everything for five
 minutes after a `415`, whatever a later response advertises (**BL-716, 0.2.0**).
-A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a `bigint` is refused as `JSON.stringify`
-refuses it, whichever body the client would have sent. A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
+A `Date` goes as its JSON text (`toJSON()`), as the JSON body carries it, and a `bigint` as the integer's digits, unrounded
+(**Lead S15, next train**; it was refused, as `JSON.stringify` refuses it). A number goes in the frame as the kind its JSON text takes on the server — an integer as an integer, a
 fraction as a decimal, digit for digit (**BL-704, 0.2.0**) — so the inserted rows are the same either way. A
 decimal column whose every value in the batch fits 64 bits at the column's largest scale goes as the frame's
 `ScaledDecimal` kind — what a server `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**; a server
@@ -1337,6 +1337,21 @@ From frames, the columns are held as typed arrays (`result.typedColumns`) and `r
 rather than one object per row. Property access, `Object.keys`, spread, `JSON.stringify`, assignment and `delete` behave
 as on a plain object. A view cannot be structured-cloned: pass `{ ...row }` to `structuredClone`, `postMessage` or
 IndexedDB.
+
+**An `Int64` past 2^53** (**Lead S15, next train**). A row holds every integer as a JavaScript number, so a value above
+9,007,199,254,740,991 (or below its negative) is rounded, as `JSON.parse` rounds it — and a filter on the rounded value names a
+different key. From frames, the exact value is kept: `result.typedColumns[i].exact(r)` gives an `Int64` or `UInt64` cell outside
+that range as a `bigint` (any other cell as `raw(r)` gives it), and a `bigint` in a request — a `where` or `update` value, a named
+query's argument, an inserted value — is sent as its digits:
+
+```typescript
+const result = await client.table('events').limit(100).execute();
+const id = result.typedColumns?.find((c) => c.name === 'id');
+const key = id?.exact(0) ?? result.rows[0].id;         // 9007199254740993n, not 9007199254740992
+await client.table('events').where('id', '=', key).delete();
+```
+
+A result read as JSON (an older server) has no `typedColumns`, so its keys past 2^53 cannot be recovered.
 
 A `Timestamp` read through JSON could come back one millisecond early, because a JavaScript number cannot hold its
 .NET ticks exactly. It now reads as the millisecond the ticks round to, on both paths.
