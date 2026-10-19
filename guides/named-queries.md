@@ -794,7 +794,7 @@ await client.namedMutations.execute("tick.record", {
 
 `maxItems` on the batch parameter is **required** (it counts rows) — schema apply fails without it (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`), the same mechanism that bounds an `in`/`nin` list. `batchParam` is legal on the row-shaped ops, `op: "insert"` and (**BL-637, 0.1.37**) `op: "upsert"`; setting it on `update`/`delete` fails apply (`NAMED_MUTATION_BATCH_NON_INSERT`) — batching those is a separate, still-deferred predicate-shaped question (which row does which predicate identify?).
 
-**autoIncrement primary keys.** The `tick.record` example above has no surrogate PK. If the target table has an `autoIncrement` primary key (e.g. `"Id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }`), that column **must** appear in `values` — omitting it from the template is accepted at schema apply, then every `execute` fails with `400 INVALID_REQUEST` (`Missing required column 'Id'`). When the caller never chooses the id, the constant form says so once in the definition and keeps it out of every call's `args`:
+**autoIncrement primary keys.** The `tick.record` example above has no surrogate PK. If the target table has an `autoIncrement` primary key (e.g. `"Id": { "type": "Int64", "primaryKey": 1, "autoIncrement": true }`), a `values` template that leaves it out gets a generated id on every row, as an insert that leaves the column out does (BL-429; before 0.1.33 that was `400 INVALID_REQUEST`, `Missing required column 'Id'`). To say so explicitly, the constant form states it once in the definition and keeps it out of every call's `args`:
 
 ```json
 "values": {
@@ -804,7 +804,7 @@ await client.namedMutations.execute("tick.record", {
 }
 ```
 
-For a batch insert, bind it instead and send `0` per row (or leave the parameter out, below):
+For a batch insert where some callers choose the id, bind it instead and send `0` in each row that wants one generated:
 
 ```json
 "values": {
@@ -818,7 +818,7 @@ For a batch insert, bind it instead and send `0` per row (or leave the parameter
 { "args": { "rows": { "columns": ["id", "ticker", "px"], "data": [[0], ["AAPL"], [189.2]] } } }
 ```
 
-`0` still means auto-generate, and **omitting the column means the same as `0`** — so the constant form is a convenience rather than a requirement. `generatedValues` in the mutation result carries the allocated id (**Lead S12, next train**: as column arrays, `{ "columns": ["Id"], "data": [[…]] }`, one cell per row). The same rule applies to plain `POST …/tables/{t}/rows`. Under `identityInsert: true`, omitting the column is still an error: you asked to control the identity and then did not supply one.
+`0` still means auto-generate. Leaving the **column** out of the template means the same as `0` — so the constant form is a convenience rather than a requirement — but leaving a bound **parameter** out of a row does not: a required parameter (the default) refuses the call with `400 NAMED_QUERY_PARAM_REQUIRED`, and one declared optional binds `null`, which is not a request for an id. Send `0`. `generatedValues` in the mutation result carries the allocated id (**Lead S12, next train**: as column arrays, `{ "columns": ["Id"], "data": [[…]] }`, one cell per row). The same rule applies to plain `POST …/tables/{t}/rows`. Under `identityInsert: true`, omitting the column is still an error: you asked to control the identity and then did not supply one.
 
 Bind is **all-or-nothing**, matching the plain multi-row insert path: the cap is checked, then every row is bound, before any row reaches the engine. One malformed row fails the whole call — no partial insert — and the `400` response names the offending row index:
 

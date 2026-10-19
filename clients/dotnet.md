@@ -21,7 +21,7 @@ _Repo: `aouda` (`src/Aouda.Client/`)_
 - **Bulk load**: the `:begin` / `:append` / `:commit` protocol behind one call, from rows or from column batches
   (**Lead S13, next train**), with resume after a failure
 - **Schema, materialized queries, named queries and mutations, streaming, backup and admin APIs**
-- **Resilience**: retries that never duplicate a write, and a circuit breaker
+- **Resilience**: retries that never duplicate a write (**Lead S02, next train**), and a circuit breaker
 - **Authentication**: server auth and application auth
 
 For the same API in-process, without a server, use `Aouda.Embedded` (see
@@ -117,10 +117,24 @@ var cheap = await client.GetTable("products")
 long open = await client.GetTable("orders").Where("status", "eq", "open").CountAsync();
 ```
 
-`GetTable<T>()` (table name from the type, or `[AoudaTable("orders")]`) gives the same builder with typed results.
-Aggregates (`GroupBy`, `Sum`, `Min`, `Max`, `Avg`, `CountDistinct`, `AggregateAsync()`) are on the same builder
-(**ColumnarRead S16, 0.3.0**). Query results arrive as column-batch frames and are read into typed columns; the values
-are the ones the JSON answer would give.
+`GetTable<T>()` (table name from the type, or `[AoudaTable("orders")]` from `Aouda.Abstractions.Attributes`) returns an
+`AoudaTable<T>`: the same filters, ordering and paging (`Where`, `Select`, `OrderBy`, `Skip`, `Limit`, `ToListAsync`,
+`CountAsync`) with typed results, but no aggregates. Aggregates (`GroupBy`, `GroupByBucket`, `Count`, `Sum`, `Min`, `Max`,
+`Avg`, `CountDistinct`, run by `AggregateAsync()`) are on the untyped builder that `GetTable(name)` returns
+(**ColumnarRead S16, 0.3.0**):
+
+```csharp
+ClientColumnarResult perCustomer = await client.GetTable("orders")
+    .Where("status", "eq", "open")
+    .GroupBy("customer")
+    .Count()
+    .Sum("total")
+    .AggregateAsync();
+// Columns: customer, COUNT, SUM_total — one row per group (perCustomer.ToRows(), or GetColumn<T>(name))
+```
+
+Query results arrive as column-batch frames and are read into typed columns; the values are the ones the JSON answer would
+give.
 
 Predicates, operators and pagination: [Getting Started: Working with data](../getting-started/index.md#5-working-with-data)
 and the [Query guide](../guides/query.md). Named queries: [Named queries](../guides/named-queries.md).
@@ -206,7 +220,10 @@ null is stored as null, and a null `autoIncrement` cell is not generated.
 
 How it is sent: as **one column-batch frame**, written straight from the batch's arrays, once the server has advertised frames
 (the `Accept-Post` header on any earlier response from a `/rows` endpoint); as **JSON column arrays** of the same rows before
-that, and for a batch that holds a column no frame can carry. Either way the table ends up with the same values. The batch is
+that, for a batch that holds a column no frame can carry, and for one over 1,000,000 rows or 4,096 columns. Either way the
+table ends up with the same values, with one exception: a `NaN` or `±Infinity` in a double column has no JSON form, so the
+JSON path throws `ArgumentException` for it before sending anything, while a frame writes it. On a new client the first
+column-batch insert goes as JSON (nothing has advertised frames yet), so a batch holding one fails there. The batch is
 checked before anything is sent (`ColumnBatch.Validate()`, §6), so a malformed batch throws `ArgumentException` naming the
 column and row, and nothing is inserted. An empty batch sends nothing.
 
@@ -380,11 +397,14 @@ when batches come from a pipeline you do not control, call `Validate()` as you b
 
 **The JSON fallback.** A batch with a column no frame can carry (an object column from a `ColumnBatchBuilder`) is sent as JSON
 column arrays of the same rows, after the frames before it. The same happens to every batch when the server does not accept
-frames. The table ends up with the same values either way, and it is still one load with one resume cursor.
+frames. The table ends up with the same values either way — except that a `NaN` or `±Infinity` in a double column has no
+JSON form and makes such a batch throw `ArgumentException` — and it is still one load with one resume cursor.
 
 **Resume works inside a batch.** If a load fails part-way (§8), run it again with the same `IdempotencyKey` and the same batches
 from the start: the server says which row it needs next, and the SDK skips everything before it, even when that row is in the
-middle of a batch.
+middle of a batch. **Cancelling a load is not a failure to resume from:** when its `CancellationToken` fires, the SDK aborts the
+job (a best-effort `:abort`), and a re-run with the same key starts a fresh job and sends every row again. So does a re-run
+after a server restart, which an open job does not survive.
 
 ### Options that matter
 
@@ -403,29 +423,48 @@ middle of a batch.
 | `IdentityInsert` | `false` | Store explicit `autoIncrement` values as they are; every row must give them. |
 | `ApplyTransforms` / `PreTransformed` | `false` / `false` | A table with derived columns, checks or transforms needs exactly one of them. |
 | `ConflictPolicy` | `BulkLoadConflictPolicy.Block` | `FailFast` fails at once when another load holds the table. |
-| `Progress` | none | An `IProgress<BulkLoadProgress>` called after each `:append` and at commit. |
+| `Progress` | none | An `IProgress<BulkLoadProgress>` called after each `:append` and at commit. `BulkLoadProgress` carries deferred-work counters, not rows: the per-`:append` report is empty, so count rows in your source. |
 
 The handle reports `RowsLoaded`, `PerTableRowCounts`, `SegmentsCreated`, `ExpiredRows`, `WasResumed`, `Token` (the commit's
 consistency token), `MqStatus` / `MqFrontierToken`, and offers `WaitForMaterializedQueriesAsync()` and `GetProgressAsync()`.
+A handle returned for a key whose job had already committed (nothing sent) has the job's `RowsLoaded` and `Token`, but an empty
+`PerTableRowCounts` and `SegmentsCreated` 0.
 
 ---
 
 ## 8) What the SDK re-sends, and what it does not
 
-`RetryPolicy` retries transient failures (a refused connection, a timeout, a `503`) for reads and for writes a repeat cannot
-change. A write whose repeat is **not** a no-op is treated differently, because re-sending one the server already applied
-would apply it twice:
+`RetryPolicy` retries transient failures (a connection that failed, a timeout, a `503`) for reads and for writes a repeat
+cannot change, at most `MaxRetries` times (3 by default: four attempts in all), with exponential backoff. A **capacity
+refusal** — `503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` or `429 SERVER_AT_CAPACITY` (`AoudaCapacityException`) —
+is waited out: a `Retry-After` in seconds is the least the SDK waits before the next attempt; without one (or with an HTTP
+date, which is not read) the backoff applies. A write whose repeat is **not** a no-op is treated differently
+(**Lead S02, next train**; before, a timed-out insert was re-sent and could insert its rows twice), because re-sending one the
+server already applied would apply it twice:
 
 - **Inserts** (rows, typed objects, column batches), updates, deletes, named mutations and a bulk-load `:commit` are re-sent
-  **only after a failure that proves the server applied nothing**: a refused connection, a TLS handshake that failed before the
-  request was sent, or a capacity refusal (`503` / `429` with `Retry-After`, which the server answers only for a request it did not
-  apply). After a **timeout or a lost answer** the server may have committed, so the error reaches you instead of a second copy
-  of the rows. Check before you insert again.
+  **only after a failure that proves the server applied nothing**: a connection that was never opened (refused, unreachable,
+  or a host name that did not resolve), a TLS handshake that failed before the request was sent, or a capacity refusal, which
+  the server answers only for a request it did not apply. Any other `503`, a `504`, a **timeout or a lost answer** proves
+  nothing — the server may have committed — so the error reaches you instead of a second copy of the rows. Check before you
+  insert again. (**Lead group 3 review, next train**) A failure after a write was applied is never answered as a capacity
+  refusal.
+- **A `:commit` refused for capacity has failed its job.** The server answers every repeat of it with the same `503`, so the
+  SDK's re-sends end in `AoudaCapacityException`. Wait its `RetryAfter`, then run the load again: it starts a fresh job and
+  sends every row (the key is free again).
 - **A bulk-load `:append` is never re-sent.** The server writes each accepted row into the session as it reads it, so
-  replaying a body that partly landed would duplicate those rows. A failed `:append` throws `BulkLoadAppendFailedException`,
-  carrying the `IdempotencyKey`, `RowsSent` and `RowsDurablyCommitted`. Recover by running the same load again with the same
-  `IdempotencyKey`: the SDK sends `:begin` with that key, the server answers with the row it needs next, and the SDK skips the rows
-  before it (mid-batch included) and continues. Do not add a retry of your own around `:append`.
+  replaying a body that partly landed would duplicate those rows. An `:append` that fails in transit (a connection error, a
+  timeout, a `503`) throws `BulkLoadAppendFailedException`, carrying the `IdempotencyKey`, `RowsSent` and
+  `RowsDurablyCommitted`. Recover by running the same load again with the same `IdempotencyKey`: the SDK sends `:begin` with
+  that key, the server answers with the row it needs next, and the SDK skips the rows before it (mid-batch included) and
+  continues. Do not add a retry of your own around `:append`.
+- **Other `:append` failures are not wrapped.** A `500`, a `413` or another `4xx` surfaces as the exception for its status
+  (§9: `AoudaException`, `AoudaRequestException`, …), and three codes as their own exceptions: `BULK_LOAD_INVALID_STATE` (the job is no longer
+  open) as `BulkLoadAbortedException`, `BULK_LOAD_MISSING_DISCRIMINATOR` as `BulkLoadMissingDiscriminatorException` and
+  `BULK_LOAD_CURSOR_MISMATCH` as `BulkLoadCursorMismatchException`. A `400` for the body's rows leaves the job open, so the
+  same key resumes it from the row the server needs next — and fails there again until the source is fixed.
+- **Set your own `IdempotencyKey` if you may need to resume.** (**Lead group 3 review, next train**) A failed load whose key
+  the SDK generated is aborted, since nobody could name it to resume.
 - `:begin` carries the idempotency key, so a repeat of it finds the same job.
 
 A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was lost surfaces as an error, never silently.
@@ -440,9 +479,11 @@ handles (namespace `Aouda.Client` unless noted):
 
 | Exception | When |
 |---|---|
-| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request (`4xx`); `ErrorCode` says why. |
-| `AoudaCapacityException` | The server is short of capacity (`503` / `429`); `RetryAfter` says when to come back. Retried by the policy first. |
-| `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed or the request timed out. For an insert, the rows may or may not have been written (§8). |
+| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. |
+| `AoudaAuthenticationException` / `AoudaNotFoundException` (`Aouda.Abstractions`) / `AoudaMisdirectedRequestException` | `401` / `404` / `421`. |
+| `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
+| `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |
+| `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY` — with `StatusCode` set. |
 | `CircuitBreakerOpenException` | The circuit breaker is open; the call was not attempted. |
 | `ArgumentException` | A column batch failed `Validate()` (§6), or a factory refused its input (a decimal with too many places, a bitmap too short). Nothing was sent for that batch. |
 
@@ -450,10 +491,10 @@ Bulk load adds its own (namespace `Aouda.Client.Exceptions`):
 
 | Exception | When |
 |---|---|
-| `BulkLoadAppendFailedException` | An `:append` failed in transit. Resume with its `IdempotencyKey` (§8). |
+| `BulkLoadAppendFailedException` | An `:append` failed in transit (a connection error, a timeout, a `503`). Resume with its `IdempotencyKey` (§8). |
 | `BulkLoadTableLockedException` | Another load holds a table and `ConflictPolicy` is `FailFast`. `Tables`, `ActiveJobId`. |
 | `BulkLoadDuplicatePkException` | Duplicate primary keys under `PkUniquenessMode.Strict`; nothing is committed. |
-| `BulkLoadAbortedException` | An operator force-aborted the job. |
+| `BulkLoadAbortedException` | The job is no longer open (`409 BULK_LOAD_INVALID_STATE` on `:append`): an operator force-aborted it, it failed, or a reconnect with the same key superseded this call. |
 | `BulkLoadMissingDiscriminatorException` | A multi-table load's row has no `_table`. |
 | `BulkLoadCursorMismatchException` | The server's durable cursor disagrees with what the client sent. |
 | `BulkLoadProtocolException` | The server's answer to a phase was unusable (an empty body). Carries `Phase`, `JobId` and the cursors. |

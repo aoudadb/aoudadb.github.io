@@ -366,10 +366,11 @@ Content-Type: application/json
 ```
 
 ```http
-POST /api/tables/orders/events/rows/insert
+POST /api/databases/orders/tables/events/rows
 Content-Type: application/json
 
 {
+  "database": "orders",
   "columns": ["orderId", "status"],
   "data": [[123], ["created"]],
   "writeConcern": "Majority"

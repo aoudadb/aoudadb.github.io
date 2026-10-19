@@ -337,7 +337,8 @@ aouda start --port 5433 --data-dir ./data
 ```bash
 # rows as column arrays (Lead S12, next train)
 curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
-  -d '{ "columns": ["id", "total"], "data": [[1], [99.99]] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "columns": ["id", "total"], "data": [[1], [99.99]] }'
 ```
 
 **Auth status:** No application auth. Open while the server has no server auth database; once the server admin is set up, every

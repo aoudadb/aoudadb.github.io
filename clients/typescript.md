@@ -521,10 +521,12 @@ where it was sent as the 16-byte `Decimal` kind, which the server now refuses. A
 column, so a number sent into a `String` column is stored at the column's largest scale (`3` beside `2.50` is `3.00`). See [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows).
 
 **An insert is not re-sent after a timeout** (**Lead S14, next train**): under a `retryPolicy`, an insert is sent again only
-after a refusal that proves the server did not apply it — `503` / `429` with `Retry-After` (`MEMORY_BUDGET_EXCEEDED`,
-`WAL_CAPACITY_EXCEEDED`, …) or a connection refused before anything was sent. A timeout, a dropped connection or a `5xx` is
+after a refusal that proves the server did not apply it — a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` /
+`WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`) or a connection refused before anything was sent. A timeout, a dropped connection or any other `5xx` is
 yours: an insert has no idempotency key, so a blind repeat could insert twice (it was retried like a read). The same holds for
-`namedMutations.execute` and a bulk load's `:commit`; reads are retried as before.
+`namedMutations.execute` and a bulk load's `:commit`; reads are retried as before. (**Lead group 3 review, next train**) Updates,
+deletes and batch writes follow the insert rule too, and a capacity refusal is re-sent no sooner than its `Retry-After`, as the
+C# SDK does.
 
 **`expiredRows`** (**Horizon, next train**): on a table with [retention](../guides/retention.md), a row whose time lies below the
 table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
@@ -582,7 +584,7 @@ const batch = ColumnBatch.of(
   column.string('sym', ['AAPL', 'MSFT', null]),                  // null = a null cell
   column.double('px', new Float64Array([187.5, 410.25, 0.5])),
   column.timestamp('ts', [new Date(), new Date(), new Date()]),  // or epoch ms; column.timestampTicks for 100-ns ticks
-  column.decimal('price', ['187.50', 410.25, undefined], 4),     // undefined = absent: the default applies
+  column.decimal('price', ['187.50', 410.25, undefined], 4),     // undefined = absent: insert applies the default; bulkLoad stores null (BL-1104)
   column.bool('open', new Uint8Array([1, 0, 1])),
 ).validate();
 
@@ -625,9 +627,11 @@ On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.
   (Until Lead S14 a retry policy re-sent it.)
 - **A failed load leaves its job open** (holding its tables until the session's idle timeout). Run the same `bulkLoad` again
   with the **same `idempotencyKey`** — pass one if you may need to — and it resumes: `:begin` answers the job's cursor, and the
-  SDK skips the rows it already accepted, inside a batch if need be, from `resumeFromRow` (or, after a server restart,
-  `rowsDurablyCommitted`; until Lead S14 the SDK skipped only the durable count, which against a live session sends the
-  buffered rows twice). `handle.wasResumed` says so. Only a cancellation (`signal`) aborts the job.
+  SDK skips the rows it already accepted, inside a batch if need be, from `resumeFromRow` (until Lead S14 the SDK skipped
+  only the durable count, which against a live session sends the buffered rows twice). `handle.wasResumed` says so. Only a
+  cancellation (`signal`) aborts the job — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the
+  SDK generated, since nothing could resume it. A job does not survive a server restart: the same key then starts a fresh job
+  and the load is sent from its first row.
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
   `409 BULK_LOAD_INVALID_STATE`).

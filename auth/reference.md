@@ -22,7 +22,8 @@ aouda start --port 5433 --data-dir ./data
 
 # Agent uses it immediately — zero setup (rows as column arrays: Lead S12, next train)
 curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
-  -d '{ "columns": ["id", "customer", "total"], "data": [[1], ["Acme"], [249.99]] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "columns": ["id", "customer", "total"], "data": [[1], ["Acme"], [249.99]] }'
 ```
 
 ### Level 1: Database with Auth (API setup)

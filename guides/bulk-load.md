@@ -448,7 +448,8 @@ What it shares with C#, and what changed for it in the same session:
 - **A failed load leaves the job open; the same call with the same `idempotencyKey` resumes it** from `:begin`'s
   `resumeFromRow`, inside a batch if need be (until Lead S14 it resumed from `rowsDurablyCommitted`, which duplicates the rows a
   live session still buffers; and it aborted the job on any failure, so there was nothing to resume). Only a cancellation
-  aborts.
+  aborts — and (**Lead group 3 review, next train**, both SDKs) a failed load whose `idempotencyKey` the SDK generated, which
+  nobody could resume: pass your own key.
 - **A key whose job already committed returns that job** (`alreadyCompleted: true`, `rowsLoaded`, `token`) and sends nothing;
   it used to fail `409 BULK_LOAD_INVALID_STATE`.
 - **No NDJSON**: rows no frame carries, and every body to a server that does not advertise frames, go as JSON column arrays.
@@ -945,7 +946,7 @@ remained the format for curl and hand-written clients; the server decoded it wit
 dictionary per row. (**Lead S12, next train; breaking**) NDJSON is gone: `:begin` advertises
 `["column-batch-v2", "column-arrays"]`, and what a frame cannot carry — and anything curl or a hand-written client sends — is one
 JSON column-array body (`application/json`, `{ "columns", "data", "absent"? }`) per `:append`. An NDJSON body is refused
-`415 ROW_OBJECTS_UNSUPPORTED`. `Aouda.Client` of this train sends column arrays; `@aouda/client` follows in its own next train. The format is specified in the [HTTP API reference](../reference/http-api.md).
+`415 ROW_OBJECTS_UNSUPPORTED`. Both SDKs of this train send column arrays (`@aouda/client` from **Lead S14**). The format is specified in the [HTTP API reference](../reference/http-api.md).
 On the 1 M-trade benchmark the load ran 10–25 % faster, with about 10 % less CPU per row while loading.
 
 (**IngestAtSpeed S07, 0.1.40**) **The post-commit wait is gone.** A committed load hands its
