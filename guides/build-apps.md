@@ -307,8 +307,11 @@ Add the gate **now**, on day one. Adding it after ten named queries exist means 
 
 ```bash
 # Verify, do not assume
-curl -s -o /dev/null -w '%{http_code}\n' -X POST https://data.example.com/api/databases/appdb/query   # expect 404
-curl -s -o /dev/null -w '%{http_code}\n' -X POST https://admin.internal/api/databases/appdb/query    # expect 200/401
+Q='{"database":"appdb","table":"Order","limit":1}'
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://data.example.com/api/databases/appdb/query \
+  -H "Content-Type: application/json" -d "$Q"   # expect 404
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://admin.internal/api/databases/appdb/query \
+  -H "Content-Type: application/json" -d "$Q"   # expect 200 (401 without a credential when auth is on)
 ```
 
 Configuration, the full data-plane allowlist, and the quota surface: [Direct client access](direct-client-access.md). What that listener refuses and why: [What a browser-tier read cannot do](browser-tier-read-limits.md).

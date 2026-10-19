@@ -364,11 +364,13 @@ Databases for internal services, caching, or analytics that don't need end-user 
 # With server auth (recommended for production)
 curl -X POST http://localhost:5433/api/databases \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "cache" }'
 
 # Create a server API key for your service, scoped to the one database
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{
     "name": "cache-service",
     "roles": [{ "role": "db_writer", "scope": "cache" }]
@@ -386,20 +388,24 @@ The complete setup for user-facing applications in production.
 ```bash
 # 1. Bootstrap server admin (one-time)
 curl -X POST http://localhost:5433/api/auth/setup \
+  -H "Content-Type: application/json" \
   -d '{ "email": "admin@company.com", "password": "AdminPass123!" }'
 
 # 2. Create database with app auth
 TOKEN=$(curl -s http://localhost:5433/api/auth/signin \
+  -H "Content-Type: application/json" \
   -d '{ "email": "admin@company.com", "password": "AdminPass123!" }' | jq -r .accessToken)
 
 curl -X POST http://localhost:5433/api/databases \
   -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "production", "auth": { "enabled": true } }'
 # → Returns anonKey + serviceRoleKey
 
 # 3. Create a server API key for CI/CD or cross-database services
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{
     "name": "ci-pipeline",
     "roles": [{ "role": "db_admin", "scope": "production" }]

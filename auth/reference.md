@@ -39,6 +39,7 @@ aouda start --port 5433 --data-dir ./data
 # Sign up a user
 curl -H "Authorization: Bearer mk_anon_a1b2c3..." \
   -X POST http://localhost:5433/api/databases/myapp/auth/signup \
+  -H "Content-Type: application/json" \
   -d '{ "email": "testuser@example.com", "password": "Test123!" }'
 
 # Use the returned JWT for data access
@@ -53,20 +54,24 @@ curl -X POST -H "Authorization: Bearer eyJ..." \
 ```bash
 # 1. Bootstrap server admin
 curl -X POST http://localhost:5433/api/auth/setup \
+  -H "Content-Type: application/json" \
   -d '{ "email": "admin@test.local", "password": "AdminPass123!" }'
 
 # 2. Sign in
 TOKEN=$(curl -s http://localhost:5433/api/auth/signin \
+  -H "Content-Type: application/json" \
   -d '{ "email": "admin@test.local", "password": "AdminPass123!" }' | jq -r .accessToken)
 
 # 3. Create auth-enabled database
 curl -X POST http://localhost:5433/api/databases \
   -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "myapp", "auth": { "enabled": true } }'
 
 # 4. Create a scoped server API key
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "myapp-backend", "roles": [{ "role": "db_writer", "scope": "myapp" }] }'
 
 # 5. Test the complete flow

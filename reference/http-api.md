@@ -626,8 +626,10 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SETUP_REQUIRED` | 503 | The server has no admin yet and is in setup mode: only setup status and a local `POST /api/auth/setup` are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
+| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, next train**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
+| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, next train**) `POST …/tables/{name}/rows/batch` only: operation `k` (`k` ≥ 1) was refused for capacity. Operations `0` to `k − 1` **were applied**; operation `k` and the ones after it were not. `details` names `appliedOperations=k`, `totalOperations=n` and the refusal's own code. **No `Retry-After`**, deliberately: re-sending the whole batch would apply its first `k` operations twice. Re-send only the remaining operations (`operations[k..]`) as a new batch. A refusal of operation `0` is still the plain `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` with `Retry-After`: nothing was applied. It used to be that plain refusal whatever `k` was, which both SDKs re-send |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -2830,11 +2832,23 @@ is freed at once; it is still one log record and atomic for readers. Subscribers
 #### `POST /api/databases/{db}/tables/{name}/rows/batch`
 
 Execute multiple update and/or delete operations against the same table in a single request.
-All operations are applied sequentially in the order given. ⚠️ **Each operation commits on its own** — the batch is not one
-transaction (**BL-843**): when an operation fails (a duplicate key, a `503 MEMORY_BUDGET_EXCEEDED` refusal past the read
-budget, **0.3.0**), the operations before it have been applied, so a retry of the whole batch applies them again. Make
-operations that a retry may repeat idempotent (literal `set`, not `setExpr` arithmetic), or retry from the failed operation. The same
-holds for a `409 WRITE_CONFLICT` (**BL-881, 0.3.0**): the refused operation applied nothing, the ones before it stand.
+All operations are applied sequentially in the order given. ⚠️ **A batch is not one transaction: each operation commits on its
+own** (**BL-843**). When an operation fails, the operations before it have been applied and stay applied, so a retry of the
+whole batch applies them again. Make operations that a retry may repeat idempotent (literal `set`, not `setExpr` arithmetic), or
+retry from the failed operation. What each answer means for what was applied:
+
+- **`400 INVALID_REQUEST` for the request's shape** (see Errors below) **and `403`** (RLS / PLS): nothing was applied — every
+  operation is translated and checked against the caller's row and partition rules before the first one runs.
+- **`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`**, with `Retry-After`: the **first** operation was refused for capacity
+  and nothing was applied. Retry the whole batch after `Retry-After` (**0.3.0**).
+- **`503 BATCH_PARTIALLY_APPLIED`**, no `Retry-After`: operation `k` ≥ 1 was refused for capacity. Operations `0` to `k − 1` were
+  applied, operation `k` and the later ones were not; `details` names `appliedOperations=k` and `totalOperations=n`. Re-send only
+  `operations[k..]` (**Lead group 3 review, next train**; it was the plain capacity refusal, which re-sent the whole batch).
+- **`409 WRITE_CONFLICT`** (**BL-881, 0.3.0**) and **`409 DUPLICATE_PRIMARY_KEY`**: the refused operation applied nothing, the
+  operations before it stand and the ones after it did not run. The answer does not name the refused operation: read the data
+  before retrying anything but idempotent operations.
+- **`500 WRITE_APPLIED_RESPONSE_FAILED`**: every operation was applied and the server failed while answering. Do not re-send the
+  batch (**Lead group 3 review, next train**). A `504 WRITE_CONCERN_TIMEOUT` likewise comes after every operation was applied.
 
 **Request Body:**
 
@@ -2889,6 +2903,10 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 | Code | Status | When |
 |------|--------|------|
 | `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE |
+| `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
+| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, next train**) Operation `k` ≥ 1 was refused for capacity; operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were |
+| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, next train**) The batch was applied; the answer failed. Do not re-send |
 
 ---
 

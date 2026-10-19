@@ -877,7 +877,7 @@ curl -s http://localhost:5000/api/databases
 | `409 CONFLICT` on `POST /api/databases` | Database already exists | Check `GET /api/databases`; database is `Active` or `Creating` |
 | `503 SERVICE_UNAVAILABLE` on all requests | Server at concurrency limit | Increase `MaxConcurrentRequests`; check for runaway queries holding connections |
 | `504 REQUEST_TIMEOUT` on heavy query | Query exceeded `RequestTimeoutMs` | Increase timeout or add predicates to reduce scan scope |
-| `403 Forbidden` on `POST /api/server/shutdown` | Non-loopback caller | Only call from same machine (e.g., `curl http://localhost:5000/api/server/shutdown`) |
+| `403 Forbidden` on `POST /api/server/shutdown` | Non-loopback caller | Only call from same machine (e.g., `curl -X POST http://localhost:5000/api/server/shutdown`) |
 | `/ready` returns 503 shortly after start | Startup delay window active | Wait for `StartupDelaySeconds` (default 10 s) before load-balancer routing |
 | `/ready` returns 503 after startup | Catalog or WAL check failing | Call `/health/detailed`; check `catalog` and `wal` component statuses; inspect logs |
 | Database stays in `Creating` state after restart | Process crashed during `CreateDatabaseAsync` | Delete partial directory and retry `POST /api/databases`; or call admin cleanup |

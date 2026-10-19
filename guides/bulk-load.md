@@ -448,8 +448,11 @@ What it shares with C#, and what changed for it in the same session:
 - **A failed load leaves the job open; the same call with the same `idempotencyKey` resumes it** from `:begin`'s
   `resumeFromRow`, inside a batch if need be (until Lead S14 it resumed from `rowsDurablyCommitted`, which duplicates the rows a
   live session still buffers; and it aborted the job on any failure, so there was nothing to resume). Only a cancellation
-  aborts — and (**Lead group 3 review, next train**, both SDKs) a failed load whose `idempotencyKey` the SDK generated, which
-  nobody could resume: pass your own key.
+  aborts — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the SDK generated, which nobody
+  else could resume: pass your own key. The two SDKs differ here. The TypeScript SDK aborts such a load on **any** failure,
+  `:commit` included, and its error does not carry the generated key. The C# SDK keeps the job after a transient `:append`
+  failure, whose `BulkLoadAppendFailedException` hands over the generated key so the load can resume with it, and does not
+  abort once `:commit` has been sent.
 - **A key whose job already committed returns that job** (`alreadyCompleted: true`, `rowsLoaded`, `token`) and sends nothing;
   it used to fail `409 BULK_LOAD_INVALID_STATE`.
 - **No NDJSON**: rows no frame carries, and every body to a server that does not advertise frames, go as JSON column arrays.

@@ -24,6 +24,7 @@ curl http://localhost:5433/api/databases/myapp/auth/me \
 ```bash
 curl -X PATCH http://localhost:5433/api/databases/myapp/auth/me \
   -H "Authorization: Bearer <user-access-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "metadata": { "displayName": "Alice Johnson" } }'
 ```
 
@@ -32,6 +33,7 @@ curl -X PATCH http://localhost:5433/api/databases/myapp/auth/me \
 ```bash
 curl -X PUT http://localhost:5433/api/databases/myapp/auth/password \
   -H "Authorization: Bearer <user-access-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "currentPassword": "OldPass123!", "newPassword": "NewPass456!" }'
 ```
 
@@ -49,6 +51,7 @@ Aouda as a standalone identity provider. No data tables — only auth.
 # Create auth-enabled database (the database holds no user data)
 curl -X POST http://localhost:5433/api/databases \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "myapp", "auth": { "enabled": true } }'
 ```
 
@@ -80,9 +83,11 @@ Multiple databases sharing one auth database = single sign-on.
 ```bash
 # All auto-link to the same _auth database
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "orders-service", "auth": { "enabled": true } }'
 
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "products-service", "auth": { "enabled": true } }'
 ```
 
@@ -102,8 +107,10 @@ For separate user pools, create separate auth databases:
 
 ```bash
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "product-a", "auth": { "database": "product_a_auth" } }'
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "product-b", "auth": { "database": "product_b_auth" } }'
 ```
 

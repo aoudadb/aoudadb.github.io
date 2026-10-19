@@ -117,9 +117,11 @@ For multiple auth databases (separate user pools for different products):
 
 ```bash
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "product-a", "auth": { "database": "product_a_auth" } }'
 
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "product-b", "auth": { "database": "product_b_auth" } }'
 ```
 

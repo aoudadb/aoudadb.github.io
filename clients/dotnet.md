@@ -464,7 +464,10 @@ server already applied would apply it twice:
   `BULK_LOAD_CURSOR_MISMATCH` as `BulkLoadCursorMismatchException`. A `400` for the body's rows leaves the job open, so the
   same key resumes it from the row the server needs next — and fails there again until the source is fixed.
 - **Set your own `IdempotencyKey` if you may need to resume.** (**Lead group 3 review, next train**) A failed load whose key
-  the SDK generated is aborted, since nobody could name it to resume.
+  the SDK generated is aborted (a best-effort `:abort`), since nobody else knows the key — with two exceptions. A transient
+  `:append` failure keeps the job: its `BulkLoadAppendFailedException` hands you the generated key in `IdempotencyKey`, and
+  running the load again with that key resumes it. And once `:commit` has been sent the job is not aborted: the server's
+  commit decides it. A job under your own key is never aborted for a failure, only for a cancellation (§7).
 - `:begin` carries the idempotency key, so a repeat of it finds the same job.
 
 A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was lost surfaces as an error, never silently.

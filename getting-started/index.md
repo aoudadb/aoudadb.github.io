@@ -1498,7 +1498,7 @@ Include the access token in the `Authorization` header on database requests:
 curl http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer eyJhbG..." \
   -H "Content-Type: application/json" \
-  -d '{ "table": "orders", "limit": 10 }'
+  -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
 ```
 
 ### Step 4: Token Refresh
@@ -1657,17 +1657,20 @@ Use the API key as a bearer token:
 # Access myapp — allowed (db_writer)
 curl http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer mk_abc123..." \
-  -d '{ "table": "orders", "limit": 10 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
 
 # Access analytics — allowed (db_reader, read-only)
 curl http://localhost:5433/api/databases/analytics/query \
   -H "Authorization: Bearer mk_abc123..." \
-  -d '{ "table": "events", "limit": 10 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "analytics", "table": "events", "limit": 10 }'
 
 # Access cache — DENIED (no role for this database)
 curl http://localhost:5433/api/databases/cache/query \
   -H "Authorization: Bearer mk_abc123..." \
-  -d '{ "table": "data", "limit": 10 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "cache", "table": "data", "limit": 10 }'
 # → 403 AUTHORIZATION_DENIED
 ```
 
@@ -1776,12 +1779,15 @@ A single Aouda server can host many databases. Each database is independent — 
 ```bash
 # Create databases for different purposes
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "app_production", "enableWal": true }'
 
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "app_staging", "enableWal": true }'
 
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "cache", "enableWal": false }'
 
 # List all databases

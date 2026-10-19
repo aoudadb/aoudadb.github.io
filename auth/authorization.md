@@ -219,7 +219,7 @@ When Alice queries `messages` without specifying a `room_id` filter, Aouda autom
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
   -H "Content-Type: application/json" \
-  -d '{ "table": "messages", "orderBy": "sent_at", "limit": 50 }'
+  -d '{ "database": "myapp", "table": "messages", "orderBy": [{ "column": "sent_at", "descending": true }], "limit": 50 }'
 ```
 
 This is the **cross-partition fan-out** pattern — the most common query for chat, financial, and group-membership applications. Alice's granted partitions form the implicit filter. See [Cross-Partition Fan-Out Queries](#197-cross-partition-fan-out-queries) for more detail.
@@ -232,12 +232,14 @@ When Alice specifies a partition filter, Aouda validates that she has access to 
 # Returns messages from room 42 — Alice has a grant, succeeds
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "table": "messages", "where": [{ "column": "room_id", "op": "=", "value": "42" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "table": "messages", "where": { "and": [{ "column": "room_id", "op": "eq", "value": "42" }] } }'
 
 # Returns 403 — Alice has no grant for room 99
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "table": "messages", "where": [{ "column": "room_id", "op": "=", "value": "99" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "table": "messages", "where": { "and": [{ "column": "room_id", "op": "eq", "value": "99" }] } }'
 ```
 
 Multi-partition `IN` filter: Aouda intersects the requested set with Alice's grants and routes only to the allowed intersection:
@@ -246,9 +248,11 @@ Multi-partition `IN` filter: Aouda intersects the requested set with Alice's gra
 # Rooms 42 and 55 are in Alice's grants; room 99 is not — only 42 and 55 are queried
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
+  -H "Content-Type: application/json" \
   -d '{
+    "database": "myapp",
     "table": "messages",
-    "where": [{ "column": "room_id", "op": "in", "values": ["42", "55", "99"] }]
+    "where": { "and": [{ "column": "room_id", "op": "in", "value": ["42", "55", "99"] }] }
   }'
 ```
 
@@ -266,6 +270,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/query \
 # Grant Bob read-only access to room 42 (he can view but not post)
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/usr_bob/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{
     "dimension": "chat_room",
     "partitionKey": "42",
@@ -285,6 +290,7 @@ For that case, link a `custom` API key to a user instead of minting sessions for
 # 1. Create a user to hold the service identity (it never signs in interactively)
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "email": "svc-quote-feeder@internal" }'
 # → { "id": "usr_feeder", ... }
 
@@ -292,11 +298,13 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
 #    `dimension` must match the table permissionDimension byte-for-byte (case-sensitive).
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_feeder/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "write" }'
 
 # 3. Create a custom API key linked to that user
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{
     "name": "oslo-bors-feeder",
     "kind": "custom",
@@ -722,20 +730,24 @@ A user belongs to hundreds of chat rooms. In this use case the `messages` table 
 # Grant Alice write access to 3 rooms (repeat at join time for each room)
 curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/usr_alice/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "chat_room", "partitionKey": "room_42", "accessLevel": "write" }'
 
 curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/usr_alice/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "chat_room", "partitionKey": "room_55", "accessLevel": "write" }'
 
 curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/usr_alice/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "chat_room", "partitionKey": "room_99", "accessLevel": "read" }'
 
 # Alice's "all my latest messages" query — fan-out across all her granted rooms
 curl -X POST http://localhost:5433/api/databases/chat/query \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "table": "messages", "orderBy": "sent_at", "limit": 50 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "chat", "table": "messages", "orderBy": [{ "column": "sent_at", "descending": true }], "limit": 50 }'
 # → Returns 50 most recent messages drawn from room_42, room_55, and room_99
 
 # Alice posts to room_42 (write access) — succeeds
@@ -894,13 +906,15 @@ curl -X POST http://localhost:5433/api/databases/crm/auth/admin/rls-resolvers \
 # Regular user queries — injected predicate: owner_id = 'usr_alice' OR team_id IN ('team_west')
 curl -X POST http://localhost:5433/api/databases/crm/query \
   -H "Authorization: Bearer <user-jwt>" \
-  -d '{ "table": "sales", "where": [{ "column": "company_id", "op": "=", "value": "acme" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "crm", "table": "sales", "where": { "and": [{ "column": "company_id", "op": "eq", "value": "acme" }] } }'
 # → Returns only Alice's own sales or sales shared with her teams
 
 # Company admin queries — no predicate injected (null = full partition access)
 curl -X POST http://localhost:5433/api/databases/crm/query \
   -H "Authorization: Bearer <admin-jwt>" \
-  -d '{ "table": "sales", "where": [{ "column": "company_id", "op": "=", "value": "acme" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "crm", "table": "sales", "where": { "and": [{ "column": "company_id", "op": "eq", "value": "acme" }] } }'
 # → Returns all sales records for acme
 
 # Regular user tries to insert a record owned by someone else — rejected
@@ -942,19 +956,23 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
 # Grant an analyst access to two data sources
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_analyst/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "read" }'
 
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_analyst/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "quote_source", "partitionKey": "nasdaq", "accessLevel": "read" }'
 
 # Fan-out: latest AAPL quotes from all authorized sources
 curl -X POST http://localhost:5433/api/databases/finance/query \
   -H "Authorization: Bearer <analyst-jwt>" \
+  -H "Content-Type: application/json" \
   -d '{
+    "database": "finance",
     "table": "quotes",
-    "where": [{ "column": "instrument_id", "op": "=", "value": "AAPL" }],
-    "orderBy": "timestamp",
+    "where": { "and": [{ "column": "instrument_id", "op": "eq", "value": "AAPL" }] },
+    "orderBy": [{ "column": "timestamp", "descending": true }],
     "limit": 10
   }'
 # → Returns AAPL quotes from oslo_bors and nasdaq only
