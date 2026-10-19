@@ -449,13 +449,42 @@ What it shares with C#, and what changed for it in the same session:
   `resumeFromRow`, inside a batch if need be (until Lead S14 it resumed from `rowsDurablyCommitted`, which duplicates the rows a
   live session still buffers; and it aborted the job on any failure, so there was nothing to resume). Only a cancellation
   aborts — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the SDK generated, which nobody
-  else could resume: pass your own key. The two SDKs differ here. The TypeScript SDK aborts such a load on **any** failure,
-  `:commit` included, and its error does not carry the generated key. The C# SDK keeps the job after a transient `:append`
-  failure, whose `BulkLoadAppendFailedException` hands over the generated key so the load can resume with it, and does not
-  abort once `:commit` has been sent.
+  else could resume: pass your own key. The two SDKs differ here. The TypeScript SDK aborts such a load on any failure before
+  `:commit` is sent, and its error does not carry the generated key. The C# SDK keeps the job after a transient `:append`
+  failure, whose `BulkLoadAppendFailedException` hands over the generated key so the load can resume with it. Neither aborts
+  once `:commit` has been sent, except on a cancellation.
 - **A key whose job already committed returns that job** (`alreadyCompleted: true`, `rowsLoaded`, `token`) and sends nothing;
   it used to fail `409 BULK_LOAD_INVALID_STATE`.
 - **No NDJSON**: rows no frame carries, and every body to a server that does not advertise frames, go as JSON column arrays.
+
+### Several jobs into one table, pipelined (**Lead S18b, next train**)
+
+A load that arrives as several jobs — a file per day, a batch per hour — should not wait for each job's `:commit` before
+beginning the next. The server already lets a second job's `:begin` and `:append`s in while the first commits: the second job's
+rows decode and queue (up to `Aouda:BulkLoad:MaxQueuedAppendBytes`, 64 MB) behind the table's bulk-load lock, and its row loop starts when
+the first job's commit releases the lock. Both SDKs do this for you:
+
+```csharp
+await foreach (var handle in client.BulkLoadJobsAsync("trades", days))   // C#: each job a list or stream of ColumnBatch, or rows
+    Console.WriteLine($"{handle.JobId}: {handle.RowsLoaded}");
+```
+
+```typescript
+for await (const handle of client.bulkLoadJobs('trades', days)) console.log(handle.jobId, handle.rowsLoaded);
+```
+
+- **Nothing about a job changes.** Each is committed, visible and answered on its own, in job order; a later job is never visible
+  before an earlier one, because it cannot take the table's lock before the earlier commit released it.
+- **One `:append` and one `:commit` in flight per loader.** That is what keeps the server's `:append` lane (4 requests at once by
+  default, `Aouda:BulkLoad:MaxConcurrentStreamingRequests`) from starving: up to four loaders into one table finish, each `:commit` running on
+  no lane at all. More loaders into one table than the lane has permits can still starve the lock holder's next `:append` until
+  the others time out on the lock (30 s) — keep it to as many loaders a table as the lane allows.
+- **The first failure ends the sequence** after every earlier job's handle; the job being sent behind a failed commit is aborted.
+  A caller's idempotency key keys job `i` as `{key}.{i}`, so a repeated call replays what committed and resumes the rest.
+- **`FailFast` runs the jobs one at a time**: a job queued behind the lock would be refused.
+- What overlaps today is a commit with the next job's begin, send and decode; the next job's row loop still waits for the
+  commit. Raw HTTP clients can pipeline the same way: send job N+1's `:begin` / `:append`s after N's `:commit` is sent, and
+  N+1's `:commit` only after N's returned.
 
 ### Sizing a session: fewer, longer, one commit
 

@@ -406,6 +406,39 @@ middle of a batch. **Cancelling a load is not a failure to resume from:** when i
 job (a best-effort `:abort`), and a re-run with the same key starts a fresh job and sends every row again. So does a re-run
 after a server restart, which an open job does not survive.
 
+### Several jobs into one table (**Lead S18b, next train**)
+
+A load that arrives as several jobs — a file per day, a batch per hour — goes through `BulkLoadJobsAsync`, not a loop of
+`BulkLoadAsync` calls. It sends job N+1's `:begin` and `:append`s while job N's `:commit` runs (the server queues them behind the
+table's bulk-load lock), so a commit overlaps the next job's sending instead of adding to it, and it yields each job's handle in
+job order, as its commit returns:
+
+```csharp
+IEnumerable<IReadOnlyList<ColumnBatch>> days = ReadDays();   // or IAsyncEnumerable<ColumnBatch> per job, or row streams
+
+await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLoadOptions { IdempotencyKey = "trades-2026-10" }))
+    Console.WriteLine($"{handle.JobId}: {handle.RowsLoaded} rows, token {handle.Token}");
+```
+
+| Method | Each job is |
+|---|---|
+| `AoudaClient.BulkLoadJobsAsync(string tableName, IEnumerable<IAsyncEnumerable<ColumnBatch>> jobs, BulkLoadOptions? options = null, CancellationToken ct = default)` | a stream of batches |
+| `AoudaClient.BulkLoadJobsAsync(string tableName, IEnumerable<IReadOnlyList<ColumnBatch>> jobs, …)` | a list of batches |
+| `AoudaClient.BulkLoadJobsAsync(string tableName, IEnumerable<IAsyncEnumerable<IReadOnlyDictionary<string, object?>>> jobs, …)` | a stream of row objects |
+
+- **Each job is a job of its own**: committed, visible and answered on its own, in order. Its handle is exactly what
+  `BulkLoadAsync` would have returned for it.
+- **At most one `:append` and one `:commit` in flight.** The next job is begun while a commit runs; its own `:commit` is sent only
+  after the one before it returned. The next job is asked of `jobs` once the previous job's rows are all sent.
+- **The first failure ends the sequence**, after every earlier job's handle. The job being sent behind a failed commit is stopped
+  and aborted; so is the job in flight when you stop reading (`break`) early.
+- **`IdempotencyKey` keys each job**: job `i` is keyed `{key}.{i}`. Repeating the call with the same key and the same jobs replays
+  the jobs that committed (their handles say `WasResumed`) and resumes the first that did not.
+- **`ConflictPolicy = FailFast` runs the jobs one at a time**: a job queued behind the lock would be refused.
+- `Progress` may be called from two jobs at once.
+- Each commit still drains its job into segments of its own: prefer one long job where you can
+  ([Sizing a session](../guides/bulk-load.md#sizing-a-session-fewer-longer-one-commit)). Jobs are for loads that arrive as several.
+
 ### Options that matter
 
 `BulkLoadOptions` is a record; set what you need with an object initializer.

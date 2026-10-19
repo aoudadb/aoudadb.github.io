@@ -635,8 +635,8 @@ On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.
   SDK skips the rows it already accepted, inside a batch if need be, from `resumeFromRow` (until Lead S14 the SDK skipped
   only the durable count, which against a live session sends the buffered rows twice). `handle.wasResumed` says so. Only a
   cancellation (`signal`) aborts the job — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the
-  SDK generated, since nothing could resume it: on any failure, `:commit` included, and the error does not carry the
-  generated key. (The C# SDK keeps the job after a transient `:append` failure and hands over its key.) A job does not survive a server restart: the same key then starts a fresh job
+  SDK generated, since nothing could resume it: on any failure before `:commit` is sent (once it is sent, only a cancellation
+  aborts — the commit may have landed), and the error does not carry the generated key. (The C# SDK keeps the job after a transient `:append` failure and hands over its key.) A job does not survive a server restart: the same key then starts a fresh job
   and the load is sent from its first row.
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
@@ -651,6 +651,24 @@ try {
   handle.wasResumed; handle.alreadyCompleted;
 }
 ```
+
+### Several jobs into one table (**Lead S18b, next train**)
+
+A load that arrives as several jobs goes through `bulkLoadJobs`, not a loop of `bulkLoad` calls. It sends job N+1's `:begin`
+and `:append`s while job N's `:commit` runs — the server queues them behind the table's load lock — and yields each job's handle
+in job order as its commit returns:
+
+```typescript
+for await (const handle of client.table('trades').bulkLoadJobs(days, { idempotencyKey: 'trades-2026-10' })) {
+  console.log(`${handle.jobId}: ${handle.rowsLoaded} rows`);   // days: an (async) iterable of bulkLoad sources
+}
+```
+
+Each job is any source `bulkLoad` takes (batches or row objects) and is committed, visible and answered on its own. At most one
+`:append` and one `:commit` are in flight. The first failure ends the sequence after every earlier job's handle; the job being
+sent behind a failed commit — or in flight when you `break` — is aborted. With `idempotencyKey`, job `i` is keyed `{key}.{i}`,
+so repeating the call replays the jobs that committed. `conflictPolicy: "failFast"` runs the jobs one at a time.
+`client.bulkLoadJobs(table, jobs, options)` is the same call.
 
 ### Update
 
