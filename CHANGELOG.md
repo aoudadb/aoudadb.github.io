@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A replica no longer answers a bulk load's token before it has the load, and `:commit` leaves the `:append` lane (Lead S18a,
+  next train).** A read presenting a token on a secondary is served only once that node holds every bulk load committed at or
+  below the token: until then it waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`, and
+  [`GET /admin/replication/status`](reference/http-api.md#get-adminreplicationstatus) names the load (`bulkLoadHold`,
+  `tokenCoveredPosition`). Before, the token was covered the moment the load's closing frame arrived — and no server fetches a
+  load's segments to its replicas yet (**BL-1116**), so a replica covered tokens for rows it never had. Separately, `:commit` is on
+  no admission lane any more: four `:append`s waiting behind an earlier job on the same table could hold all four permits
+  of `Aouda:BulkLoad:MaxConcurrentStreamingRequests` while that job's `:commit` — the one request that would let them drain —
+  waited for one, until the waiting jobs failed on the 30 s lock timeout. Run no more loaders into one table at once than that
+  setting (**BL-1117**).
 - **The TypeScript SDK takes column batches, and speaks the column-array wire (Lead S14, next train).** Data a TypeScript
   application already holds as columns (Arrow, Parquet, typed arrays) is bulk-loaded and inserted with no row object in between:
   build columns with the `column` factories (`column.int64`, `double`, `bool`, `string`, `dictionary`, `timestamp`, `decimal`, …;

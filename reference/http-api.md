@@ -3616,14 +3616,29 @@ Get replication status.
 
 ```json
 {
-  "role": "Standalone",
-  "currentPrimary": null,
+  "role": "Secondary",
+  "currentPrimary": "primary:5000",
   "walPosition": 12345,
   "lagBytes": 0,
   "fencingToken": 1,
-  "canAcceptWrites": true
+  "canAcceptWrites": false,
+  "perDatabaseLag": {
+    "mydb": {
+      "walPosition": 12345,
+      "primaryPosition": 12345,
+      "lagBytes": 0,
+      "tokenCoveredPosition": 9999,
+      "bulkLoadHold": { "jobId": "3f2a…", "position": 10000, "sinceUtc": "2026-10-19T20:01:02Z", "loadsHeld": 1 }
+    }
+  }
 }
 ```
+
+`perDatabaseLag` has one entry per database this node has a position for. (**Lead S18a, next train**) `tokenCoveredPosition` is
+the position a consistency token for that database is covered at here: `walPosition`, or one below `bulkLoadHold.position` while a
+replica has seen a bulk load committed and not fetched all of its segments (`jobId` empty when its closing frame could not be
+decoded; `loadsHeld` counts every such load). `bulkLoadHold` is `null` when there is none. A read presenting a token at or past
+the hold waits, then answers `TOKEN_UNSATISFIED` or `TOKEN_FETCH_PRIMARY` as for any lagging replica.
 
 ---
 
@@ -4833,7 +4848,7 @@ A table with no write-time compute needs neither flag.
 |---|---|---|
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` | `600000` (10 min) | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. `0` disables the deadline on them. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
-| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` and `:commit` run in. They do **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. |
+| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` runs in. It does **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. (**Lead S18a, next train**) `:commit` is on no lane, so it never waits behind `:append`s gated on the job it would finish; keep the loaders into one table at or below this setting (**BL-1117**). |
 | `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
 | `Aouda:MaxConnections` | `0` (unlimited) as of **BL-419, 0.1.22** — was `100` through 0.1.21 | Kestrel's concurrent-connection ceiling. `0` (Kestrel's own default) means the request limiter (`MaxConcurrentRequests` + `RequestQueueLimit`) is the first thing an overloaded server hits, and it sheds with a retryable HTTP status; the old `100` default sat *below* that budget (150) on every stock deployment, so the connection ceiling — which Kestrel enforces by silently closing the socket with **no HTTP response** — bit first instead. If you do set a finite value, keep it above `MaxConcurrentRequests + RequestQueueLimit`. On 0.1.20 and earlier, `0` fails validation at startup (`MaxConnections must be at least 1`) — check your server version before relying on the unlimited default. |
 
@@ -5050,7 +5065,7 @@ Commit the session. All sealed segments become queryable.
 | `segmentsCreated` | number | Total segments created. |
 | `committedAtUtc` | string | ISO 8601 UTC commit timestamp. |
 | `deferredWorkCompleted` | boolean | Whether deferred work completed before this response was sent. |
-| `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load. (**WorkloadCore S09, 0.3.0**) On a single node, where a load writes no closing frame, it is the WAL head at the load's commit (it used to carry position 0): a read with it requires the load, and so waits for the load's materialized queries. |
+| `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load (**Lead S18a, next train**: a replica now covers it only once every segment is fetched; see `bulkLoadHold` on [`GET /admin/replication/status`](#get-adminreplicationstatus)). (**WorkloadCore S09, 0.3.0**) On a single node, where a load writes no closing frame, it is the WAL head at the load's commit (it used to carry position 0): a read with it requires the load, and so waits for the load's materialized queries. |
 | `writeConcernRequested` | string | Echo of `writeConcern` from request. |
 | `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
