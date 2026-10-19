@@ -87,13 +87,13 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
 | `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. |
 | `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): no user's grants, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. |
-| `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, next train**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. |
+| `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, 0.5.0**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. |
 | `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants. A custom `mk_` minted on server auth is a scoped server key (BL-1017). PLS / RLS enforced. |
 | `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. Application end-user JWTs on the data-plane listener are browser-tier (named artifacts only). Operator JWTs via Studio use the admin listener (ad-hoc allowed). |
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
 
-**Named service keys and overlapping rotation (**BL-1032, next train**).** A server key (`mk_srv_`) mints extra service keys for a database that has a linked auth database:
+**Named service keys and overlapping rotation (**BL-1032, 0.5.0**).** A server key (`mk_srv_`) mints extra service keys for a database that has a linked auth database:
 
 | Method | Path | Body | Result |
 |--------|------|------|--------|
@@ -520,7 +520,7 @@ All errors return a JSON body with this structure:
 | `INVALID_OPERATOR` | 400 | Invalid comparison operator in where clause |
 | `INVALID_COLUMN` | 400 | Invalid column name or reference |
 | `INVALID_VALUE` | 400 | Invalid value type or format |
-| `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, next train**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
+| `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, 0.5.0**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
 
 #### Resource Errors (4xx)
 
@@ -1219,7 +1219,7 @@ when it was — rows, columns, `aggregates` / `groupBy` and `…/query/count` ar
 answer ([routing](../guides/materialized.md#routing-a-read-to-a-maintained-result)); omitted when the table was read. The
 answer is the same either way. It is in the frame response's `X-Aouda-Stats` too.
 
-**`stats.windowCompletionRows` (**Horizon, next train**):** a read of a windowed materialized query's result that reached below
+**`stats.windowCompletionRows` (**Horizon, 0.5.0**):** a read of a windowed materialized query's result that reached below
 its horizon — the number of source rows read to compute that part with the query's own build code. Omitted when nothing was
 computed. A read of a windowed result is complete for any range: groups at or after the horizon come from the result, the rest from
 the source ([Materialized Queries](../guides/materialized.md)).
@@ -1250,7 +1250,7 @@ batch stays JSON.
   every column. Every frame carries every column, in result order. A result that names a column twice is answered as JSON.
   A reader should check that the frames' rows add up to `X-Aouda-Row-Count`: a body cut between two frames is otherwise a
   shorter, well-formed answer.
-- **One query exports every row (**LoadScan, next train**).** A `POST …/query` asked for frames with **no page** (`limit: 0`,
+- **One query exports every row (**LoadScan, 0.5.0**).** A `POST …/query` asked for frames with **no page** (`limit: 0`,
   no `offset`) and no `orderBy`, `distinct`, grouping, aggregate, join or computed column is **streamed**: the server counts the
   rows first — so `X-Aouda-Row-Count` is exact and arrives before the first frame — then writes the frames while it reads the
   table, holding one batch of frames (tens of MB, sized to a quarter of the read path's memory ceiling) instead of the
@@ -1530,7 +1530,7 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 **Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the row array; every other field is unchanged.
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of array elements bound. `insert` and `upsert` return `rows` too when the definition declares `returning` — the rows written, an upsert's one per key as stored (**NativeClients, 0.4.0**; BL-639).
-(**Horizon, next train**) On a table with [retention](../guides/retention.md), `insert` and `upsert` results carry `expiredRows` —
+(**Horizon, 0.5.0**) On a table with [retention](../guides/retention.md), `insert` and `upsert` results carry `expiredRows` —
 rows whose time lies below the table's horizon or is an explicit `null` — omitted when 0. Such a row is left out before it is logged,
 except an upsert row that replaces a key a read returns: it is logged and buffered, hidden by every read and dropped by the next
 flush (the key disappears from reads), and counted in `rowsUpdated` **and** in `expiredRows`. The two counts overlap only for such a
@@ -1656,7 +1656,7 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 | `type` | number | Yes | `1` LatestPerKey, `2` FirstPerKey (MIN of `orderBy`, not arrival order), `3` Aggregate, `4` Filter, `5` TopNPerGroup (N rows per group; source must have a PK). |
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
 | `config` | object | Yes* | Alternative: embedded object; server serializes to JSON if `configJson` omitted. |
-| `window` | object? | No | (**Horizon, next train**) `{ "keep": "7d", "column"? }`, beside `config`: keep only the result's groups whose window column lies within `keep` of the server's clock; older ones are computed from the source on read. Only an `aggregate` with a time bucket (`truncateToMinute` / `Hour` / `Day` / `Week`) or a `topNPerGroup` grouped by a time column takes one; `keep` is a whole number of `m` / `h` / `d` / `w` and a whole multiple of the bucket; `column` names the bucket's output when there is more than one, and is required on a `topNPerGroup`. Every other declaration — a `latestPerKey`, `firstPerKey` or `filter`, no bucket, a month or year bucket, a source with retention — is `400` naming its reason, and nothing is created. Omitted: an unbounded query. See [Materialized Queries](../guides/materialized.md). |
+| `window` | object? | No | (**Horizon, 0.5.0**) `{ "keep": "7d", "column"? }`, beside `config`: keep only the result's groups whose window column lies within `keep` of the server's clock; older ones are computed from the source on read. Only an `aggregate` with a time bucket (`truncateToMinute` / `Hour` / `Day` / `Week`) or a `topNPerGroup` grouped by a time column takes one; `keep` is a whole number of `m` / `h` / `d` / `w` and a whole multiple of the bucket; `column` names the bucket's output when there is more than one, and is required on a `topNPerGroup`. Every other declaration — a `latestPerKey`, `firstPerKey` or `filter`, no bucket, a month or year bucket, a source with retention — is `400` naming its reason, and nothing is created. Omitted: an unbounded query. See [Materialized Queries](../guides/materialized.md). |
 
 `configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000). AggregateConfig's `groupByColumns` entries are objects — `{ "column": "region" }`, or `{ "column": "time", "function": "TruncateToHour" }` for a time bucket. (**BL-980, 0.4.0**) The v1 plain-string form (`"groupByColumns": ["region"]`) is `400 INVALID_REQUEST`, and a stored definition in that form is refused when it is read; up to 0.3.x both were read.
 
@@ -1676,7 +1676,7 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 
 `token` is the MQ **maintenance watermark** (the source position the MQ has incorporated), not this node's WAL offset. Token-bearing MQ reads wait on that watermark. GET list/status objects include the same field.
 
-(**Horizon, next train**) On a windowed query, the answer is complete for any range, and `stats.windowCompletionRows` counts the
+(**Horizon, 0.5.0**) On a windowed query, the answer is complete for any range, and `stats.windowCompletionRows` counts the
 source rows read to compute the part below its horizon (omitted when nothing was computed), as on `POST …/query`.
 
 ### Status response: `GET /api/databases/{db}/materialized-queries/{name}`
@@ -1732,8 +1732,8 @@ The list route returns an array of the same object.
 | `frontierLagBytes` | integer? | (**WorkloadCore, 0.3.0**) How many WAL bytes the query's frontier is behind the head. **Omitted** when it is at the head. A size, not a position: positions are only ever on the wire as tokens. |
 | `amplification` | object? | Per-query write- and read-amplification. **Omitted** when the query has neither ingested nor scanned anything — treat absent as "no data yet", not as zero. |
 | `token` | string? | The query's **frontier** (**WorkloadCore, 0.3.0**; the maintenance watermark before): the WAL position its result incorporates, encoded as a consistency token. A position to wait for, not a claim that the result is current — `current` is the claim. |
-| `window` | object? | (**Horizon, next train**) The query's window as declared — `{ "keep": "7d" }`, with `column` when one was named. Absent for an unbounded query. |
-| `horizon` | string? | (**Horizon, next train**) The result's current horizon (UTC): groups at or after it are stored, older ones are computed from the source on read. It follows the server's clock minus `keep` on the query's bucket, is persisted before any reader sees it, and never moves back. Absent without a window. |
+| `window` | object? | (**Horizon, 0.5.0**) The query's window as declared — `{ "keep": "7d" }`, with `column` when one was named. Absent for an unbounded query. |
+| `horizon` | string? | (**Horizon, 0.5.0**) The result's current horizon (UTC): groups at or after it are stored, older ones are computed from the source on read. It follows the server's clock minus `keep` on the query's bucket, is persisted before any reader sees it, and never moves back. Absent without a window. |
 
 #### ⚠️ Is this query current? Read `isStale`, `staleReason` and `currentLag` — not `state`
 
@@ -1912,7 +1912,7 @@ List all tables with statistics.
 |-------|------|-------------|
 | `name` | string | Table name |
 | `columnCount` | number | Number of columns |
-| `rowCount` | number | Total row count across all segments — always the exact total. (**BL-980, 0.4.0**) `rowCountIsExact` is gone: a catalog segment entry without a row count (only an older build wrote one) is refused rather than counted as a lower bound, so the flag had nothing left to say. Both SDKs drop it (`TableSummary.rowCountIsExact` in `@aouda/client`). (**Horizon, next train**) It is the stored count: on a table with [retention](../guides/retention.md) it includes rows hidden below the horizon until they leave the table. |
+| `rowCount` | number | Total row count across all segments — always the exact total. (**BL-980, 0.4.0**) `rowCountIsExact` is gone: a catalog segment entry without a row count (only an older build wrote one) is refused rather than counted as a lower bound, so the flag had nothing left to say. Both SDKs drop it (`TableSummary.rowCountIsExact` in `@aouda/client`). (**Horizon, 0.5.0**) It is the stored count: on a table with [retention](../guides/retention.md) it includes rows hidden below the horizon until they leave the table. |
 | `createdAt` | string | ISO 8601 timestamp when table was created. (**BL-980, 0.4.0**) Always set — including for a table a replica or a point-in-time replay registered from the log, which carried none before |
 | `lastModifiedAt` | string | ISO 8601 timestamp when table/data was last modified. (**BL-980, 0.4.0**) Always set, as `createdAt` |
 | `sizeBytes` | number | Approximate size in bytes across all segments |
@@ -1962,7 +1962,7 @@ Get table detail with columns.
 }
 ```
 
-(**Horizon, next train**) A table with [retention](../guides/retention.md) reports `policy.retention` (`{ "keep": "90d" }`) and
+(**Horizon, 0.5.0**) A table with [retention](../guides/retention.md) reports `policy.retention` (`{ "keep": "90d" }`) and
 `policy.horizon` — the instant (UTC) below which its rows are gone. Both are omitted for a table without retention.
 
 **Column Detail Fields:**
@@ -2213,7 +2213,7 @@ Both are required: `"type": "Decimal"` without them is `400` — *A Decimal colu
 (Decimal(p,s), 1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* — and a precision above 18 is `400`
 *Decimal precision above 18 is not supported (got N).* A `Decimal(p,s)` partition key is refused.
 
-(**Horizon, next train**) `policy.retention` — `{ "keep": "90d" }`, a whole number of minutes, hours, days or weeks (`m` / `h` /
+(**Horizon, 0.5.0**) `policy.retention` — `{ "keep": "90d" }`, a whole number of minutes, hours, days or weeks (`m` / `h` /
 `d` / `w`) — declares [retention](../guides/retention.md): rows whose first cluster column is older than the server's clock minus
 `keep` are not returned, not written (counted as `expiredRows`) and dropped by whole segments. The table's first cluster column
 (lowest `clusterOrder`) must be a `Timestamp` or `Date`; it may be nullable. A refused declaration — no such column, a `keep` that is
@@ -2264,7 +2264,7 @@ materialized query's result table (whose name is the query's name).
 |---|---|---|
 | `database` | string | Required. |
 | `storageTemperature` | string | `Auto`, `HotOnly` or `ColdPreferred`. |
-| `retention` | object? | (**Horizon, next train**) `{ "keep": "30d" }`: declares or changes the table's [retention](../guides/retention.md). Omitted = unchanged. A body that sets only `retention` may leave `storageTemperature` out (the temperature is kept). Once declared, retention **cannot be removed**: an omitted or `null` `retention` leaves it as it is (only the embedded `SetTablePolicyAsync` refuses a policy without it); a longer `keep` leaves the horizon where it is. Refused (`400`) on a table whose first cluster column is not a `Timestamp` or `Date`, on a table a windowed query completes from, and on a table a query reads that does not group by the retention column (BL-1060). |
+| `retention` | object? | (**Horizon, 0.5.0**) `{ "keep": "30d" }`: declares or changes the table's [retention](../guides/retention.md). Omitted = unchanged. A body that sets only `retention` may leave `storageTemperature` out (the temperature is kept). Once declared, retention **cannot be removed**: an omitted or `null` `retention` leaves it as it is (only the embedded `SetTablePolicyAsync` refuses a policy without it); a longer `keep` leaves the horizon where it is. Refused (`400`) on a table whose first cluster column is not a `Timestamp` or `Date`, on a table a windowed query completes from, and on a table a query reads that does not group by the retention column (BL-1060). |
 | `memoryRowCap` | integer? | Cap on resident (hot) rows for this table. |
 | `targetMemoryBytes` | integer? | Per-table hot-byte budget. On a `HotOnly` table this is the **pin's reservation size**; on an `Auto` table it is a demotion target. |
 | `memoryFilter` | string? | JSON predicate naming which rows are preferred-hot. Operators: `eq`, `ne`, `lt`, `lte`, `gt`, `gte`. Affects demotion *ordering* only: a segment whose statistics rule out every row for the filter is demoted first. (**ColumnarRead S14, 0.3.0**: the server now applies it; before, the preference only ever took effect in the engine's tests.) |
@@ -2285,7 +2285,7 @@ than here: see [Hot/Cold Storage](../guides/hot-cold.md#mq-result-tables).
 🔎 **Enforcement is a convergence target reached by a periodic sweep, not an instantaneous ceiling**
 — a burst can exceed the target between sweeps. The process ceiling is the hard one.
 
-(**Horizon, next train**) The policy detail carries `retention` and `horizon` (the instant, UTC, below which the table's rows are
+(**Horizon, 0.5.0**) The policy detail carries `retention` and `horizon` (the instant, UTC, below which the table's rows are
 gone) when the table has retention; both are omitted otherwise.
 
 **Response:** `200 OK` with policy detail
@@ -2390,7 +2390,7 @@ Insert one or more rows into a table.
 | `executionMs` | number | Server-side execution time in milliseconds |
 | `generatedValues` | object? | Generated values for auto-increment columns. Keys are row indices (as strings), values are objects mapping column names to generated values. Only present when the server allocated IDs. Absent or empty for that row/column under `identityInsert: true` (client-supplied values are stored as-is). |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"` (no replication wait). See `WriteConcernStatus` below. |
-| `expiredRows` | number? | (**Horizon, next train**) Rows of the request accepted and left out because their time lay below the table's [retention](../guides/retention.md) horizon, or was an explicit `null` in a nullable time column — never stored, never returned, not in `rowsInserted`. A row that omits the column is not counted (it is stored, hidden by every read and dropped by the next flush). **Omitted when 0** (always, on a table without retention). Not reported by `POST …/rows/batch` or the WebSocket write stream. |
+| `expiredRows` | number? | (**Horizon, 0.5.0**) Rows of the request accepted and left out because their time lay below the table's [retention](../guides/retention.md) horizon, or was an explicit `null` in a nullable time column — never stored, never returned, not in `rowsInserted`. A row that omits the column is not counted (it is stored, hidden by every read and dropped by the next flush). **Omitted when 0** (always, on a table without retention). Not reported by `POST …/rows/batch` or the WebSocket write stream. |
 
 **Materialized queries follow the insert, off its commit (**WorkloadCore S09, 0.3.0**).** An insert hands its change batch to its
 table's queries' maintainers at its commit, in the table's commit order and without waiting, and they apply it in the
@@ -2587,7 +2587,7 @@ two ran one after the other: at its commit it re-checks every row it matched and
 again from its scan. One answer changes with it: a DELETE whose `WHERE` a concurrent upsert moved a row out of (`WHERE k = 'a'`, the
 upsert set `k = 'b'`) now **leaves that row**, where it used to delete it.
 
-**Deleting everything before a time (**Horizon, next train**).** A `DELETE` whose whole `where` is one condition, `lt` or `lte`,
+**Deleting everything before a time (**Horizon, 0.5.0**).** A `DELETE` whose whole `where` is one condition, `lt` or `lte`,
 on the table's first cluster column (a `Timestamp` or `Date`) — with no `limit`, `orderBy` or `returning`, on a tabular table (an
 edge table takes the row path) with no vector column that no foreign key references — does not delete row by row:
 
@@ -2730,7 +2730,7 @@ authorization scope — `db_writer` alone is insufficient.
 }
 ```
 
-(**Horizon, next train**) A truncate retires the table's segments instead of writing a deletion mask over every row, so the disk
+(**Horizon, 0.5.0**) A truncate retires the table's segments instead of writing a deletion mask over every row, so the disk
 is freed at once; it is still one log record and atomic for readers. Subscribers are sent nothing — no `change` and no notice.
 
 **Errors:**
@@ -4229,9 +4229,9 @@ Marks the end of the paged snapshot. Clients must not treat accumulated `snapsho
 | `total_matches` | number? | Present when the named query declared `count: true` — total matching rows, ignoring limit/offset |
 | `warnings` | object[]? | Optional (e.g. `NAMED_QUERY_DEPRECATED` on hash subscribe; `CONFLATE_NOOP` when default `conflate` cannot collapse inserts) |
 | `token` | string? | Same C-1 string as every preceding snapshot page |
-| `horizon` | string? | (**Horizon, next train**) The subscribed table's horizon, ISO-8601 UTC with seven fractional digits (`"2026-10-11T12:34:00.0000000Z"`), when it has one — a windowed materialized query's result or a table with retention. It is read after the snapshot, so for a moment the snapshot can hold a row below it; a `horizon` message then follows. Apply it to the snapshot as to a notice: drop every row whose `horizon_column` lies below it or is null. Omitted for any other table. A windowed result's snapshot (and a named-query subscribe's `total_matches`) is its **stored** part: nothing below the horizon is computed for a subscription. |
-| `horizon_column` | string? | (**Horizon, next train**) The column `horizon` applies to; present with it. |
-| `horizon_column_type` | string? | (**Horizon, next train**) `"date"` when `horizon_column` is a `Date` column — its row values are day numbers (days since the Unix epoch), not Unix milliseconds. Omitted for a `Timestamp`. |
+| `horizon` | string? | (**Horizon, 0.5.0**) The subscribed table's horizon, ISO-8601 UTC with seven fractional digits (`"2026-10-11T12:34:00.0000000Z"`), when it has one — a windowed materialized query's result or a table with retention. It is read after the snapshot, so for a moment the snapshot can hold a row below it; a `horizon` message then follows. Apply it to the snapshot as to a notice: drop every row whose `horizon_column` lies below it or is null. Omitted for any other table. A windowed result's snapshot (and a named-query subscribe's `total_matches`) is its **stored** part: nothing below the horizon is computed for a subscription. |
+| `horizon_column` | string? | (**Horizon, 0.5.0**) The column `horizon` applies to; present with it. |
+| `horizon_column_type` | string? | (**Horizon, 0.5.0**) `"date"` when `horizon_column` is a `Date` column — its row values are day numbers (days since the Unix epoch), not Unix milliseconds. Omitted for a `Timestamp`. |
 
 ```json
 {
@@ -4323,7 +4323,7 @@ Incremental row change on an active subscription. Sent whenever a row matching t
 
 #### `horizon`
 
-(**Horizon, next train**) The subscribed table's horizon rose — a windowed materialized query's result, or a table with retention
+(**Horizon, 0.5.0**) The subscribed table's horizon rose — a windowed materialized query's result, or a table with retention
 (the server's clock advanced, or a `DELETE` before a time expired rows early). Every row whose `column` lies below `horizon`, or is
 null there, is gone: drop what you hold below it and keep no later row below it. No `change` is sent for those rows. One per published
 advance.
@@ -4346,7 +4346,7 @@ advance.
 
 #### `range_delete`
 
-(**Horizon, next train**) On a table **without** retention, one `DELETE` whose whole predicate was `column lt X` (`before` = `X`) or
+(**Horizon, 0.5.0**) On a table **without** retention, one `DELETE` whose whole predicate was `column lt X` (`before` = `X`) or
 `column lte X` (`before` = the successor of `X` at the column's resolution) deleted every row whose `column` lay below `before`, at
 this point of the stream. Drop what you hold below it; a row with a null time was not deleted. No horizon is installed: rows that
 arrive after this message are live whatever their time. No per-row `change` is sent.
@@ -4605,7 +4605,7 @@ Content-Type: application/json
 }
 ```
 
-**Authorization (**BL-1031, next train**).** `:begin` returns `403` `AUTHORIZATION_DENIED` when any table the load will
+**Authorization (**BL-1031, 0.5.0**).** `:begin` returns `403` `AUTHORIZATION_DENIED` when any table the load will
 write — the tables in the request, plus transform targets when `applyTransforms` is set — has partition-level or
 row-level security, unless the caller is an app `service_role` key (`mk_svc_`). A user JWT, a server API key (`mk_srv_`),
 and a `custom` key are refused, including one whose grants would allow an ordinary insert of the same rows. A table with
@@ -4724,7 +4724,7 @@ Commit the session. All sealed segments become queryable.
 | `jobId` | string | Echo of job ID. |
 | `tables` | string[] | Tables involved in the load. |
 | `rowsLoaded` | number | Total rows durably committed across all tables. |
-| `expiredRows` | number? | (**Horizon, next train**) Rows the load sent that were left out because their time lay below their table's [retention](../guides/retention.md) horizon, or was an explicit `null` — accepted, never written, never visible, not in `rowsLoaded`. **Omitted when 0.** Such a table is loaded one segment per time slice and never spilled ([Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention)). |
+| `expiredRows` | number? | (**Horizon, 0.5.0**) Rows the load sent that were left out because their time lay below their table's [retention](../guides/retention.md) horizon, or was an explicit `null` — accepted, never written, never visible, not in `rowsLoaded`. **Omitted when 0.** Such a table is loaded one segment per time slice and never spilled ([Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention)). |
 | `perTableRowCounts` | object | Per-table row counts (`{ tableName: count }`). Always present. |
 | `segmentsCreated` | number | Total segments created. |
 | `committedAtUtc` | string | ISO 8601 UTC commit timestamp. |
@@ -4849,4 +4849,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.9 | 0.3.0 (ColumnarRead) | **Architecture review:** a join (ad hoc, `…/query/count` or a named query) needs the base table's grant on every joined table, and one onto a table the caller's RLS / PLS restricts is answered with that security applied on the joined side, not refused (BL-818; it was `403 AUTHORIZATION_DENIED` until ColumnarRead2 S05), with `joins[i].where` to filter the joined table; `Retry-After` is CORS-exposed; `stats.distinctServedFromPartitionMetadata` is no longer set; the frame response's JSON fallbacks, its abort after the headers and the decimal kind's choice documented. **ColumnarRead S18 (additive):** query responses' `stats` gain `routedTo` (the materialized query a routed read was answered from; omitted otherwise); `/query` and `/query/count` route to current materialized results. **ColumnarRead S16 (additive on the wire):** `QueryMessage` gains `aggregates` (`count`, `sum`, `min`, `max`, `avg`, `countDistinct`) and `groupBy` (columns and `Timestamp` buckets), answered as an ordinary query response. `POST …/query` and `POST …/named-queries/{name}/query` answer with column-batch frames when `Accept` lists `application/vnd.aouda.column-batch` (the envelope in `X-Aouda-Column-Types`, `X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats`, `X-Aouda-Warnings`), advertised by `features.queryColumnBatch`; both SDKs ask for it by default. JSON query bodies are written from the columns and streamed, with the same bytes. A non-finite floating-point cell in a JSON answer is a `500` before the first byte. |
 | 2.10 | 0.3.0 (WorkloadCore) | **WorkloadCore S09:** materialized-query maintenance is off the commit — an insert's `200` and an `"auto"` load's `:commit` no longer wait for their queries to be written. Bulk-load `:commit` gains `mqWaitMs` (a bounded wait for the load's queries, default 30000) and answers `mqStatus`, `mqFrontierToken` and `mqWaitedMs`; `mqRebuildStatus` is never `"completed"` from the commit itself; a single-node load's `token` is the WAL head at its commit. **WorkloadCore S10:** every load but a `"skip"` one is a pending job brought in by the table's pass (`"auto"` starts it at the commit); the ingest-fed path is gone; a query owing a load reports `isStale: true`, `pendingDeferredJobs` ≥ 1 and `current: false` with a new `staleReason` wording, and is not selected by `staleOnly`; a rebuild refused memory waits for room instead of being retried on timers. No field added or removed. **WorkloadCore S17:** `GET /api/server/memory` loses `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the `headroom` block (the resource mode is deleted); a memory refusal's `Retry-After` is the queue's estimate, or 10 s, never a constant 1 s. **Release blockers:** every endpoint answers a capacity refusal `503` + `Retry-After` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) and a write conflict `409 WRITE_CONFLICT` — some answered `400`, `409` or `500` before (BL-921, BL-881); the result ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (it was `503`); a token refresh refused for capacity is `503` and keeps its token, and of two concurrent refreshes with one token exactly one succeeds (BL-841); a materialized-query create whose first build is refused for capacity answers `204` with the query behind (BL-884); bulk-load `:append` is refused `503` before it decodes when memory is short (BL-831). No field added or removed. |
 | 2.11 | 0.4.0 (LoadSpeed) | **LoadSpeed M.2:** bulk-load `:commit`'s `mqWaitMs` defaults to `0` (it was `30000`) — a commit with queries answers `mqStatus: "behind"` at once unless the request asks to wait. No field added or removed. **LoadSpeed K31 (breaking):** `postLoadMqBehavior: "deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` (use `"auto"`); `mqStatus` and `mqRebuildStatus` lose `"deferred"`. **LoadSpeed K5 (BL-980, BL-944; breaking):** `GET /api/tables` drops `rowCountIsExact` (`rowCount` is always exact) and always carries `createdAt` / `lastModifiedAt`; an aggregate materialized query whose `groupByColumns` are plain strings is `400`; an application database accepts only its URL issuer on access tokens; a point-in-time restore of a backup without a WAL-root incarnation fails at staging. Refusals: a refusal no other code names is `503 SERVICE_UNAVAILABLE` + `Retry-After`, `SERVER_STARTING` carries `Retry-After: 5`, a refused notification-provider `DELETE` is `503`, and a wrapped refusal on `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE`), not `400 INVALID_REQUEST`. **LoadSpeed S13 (breaking):** `Decimal(p,s)` is the only decimal type — `"type": "Decimal"` without `precision` / `scale` is `400`, as is a precision above 18; a computed output's `type` and `cast`'s target spell it `"Decimal(p,s)"`; the column-batch frame's 128-bit `Decimal` kind (6) is deleted and refused `400`, and query results send a decimal column as `ScaledDecimal` at its declared scale; a decimal `sum` past 18 digits is refused in a query as in a materialized query. |
-| 2.12 | next train (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
+| 2.12 | 0.5.0 (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |

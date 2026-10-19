@@ -114,7 +114,7 @@ What is different in Aouda vs many systems:
 | API parity and missing surfaces | `2.11 API and CLI coverage reference` |
 | What is verified now | `2.15 Verification ledger`, `2.16 Test coverage matrix` |
 | Current known limits and backlog items | `2.18 Known gaps and undone work` |
-| How do I keep only the recent candles, and what does a read of older ones do? | [`2.11e Windows`](#windows) (**Horizon, next train**) |
+| How do I keep only the recent candles, and what does a read of older ones do? | [`2.11e Windows`](#windows) (**Horizon, 0.5.0**) |
 
 ### Role-based map
 
@@ -188,7 +188,7 @@ If you create a materialized query with standard helpers and no special options:
 | `MaterializedQueryDefinition.UpdateMode` | `Async` | Base writes usually stay fast; result visibility can lag |
 | `MaterializedQueryDefinition.CreatedUtc` | set to `DateTime.UtcNow` when missing | Definitions always have creation timestamp |
 | `MaterializedQueryDefinition.ResultTableName` | `Name` (BL-021) | Query/subscription uses normal table name |
-| `window` | none — every group is kept | (**Horizon, next train**) An `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column may keep only its groups at or after a horizon; a read of anything older is computed from the source. [2.11e](#windows) |
+| `window` | none — every group is kept | (**Horizon, 0.5.0**) An `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column may keep only its groups at or after a horizon; a read of anything older is computed from the source. [2.11e](#windows) |
 | `TableQuery` routing mode | auto-routing enabled | Compatible base-table queries — rows, columns, aggregates and GROUP BY, over HTTP too, and latest-per-key in the embedded API only (HTTP and TypeScript: **BL-801**) — are served from MQ result tables that hold every commit the read can see, unless `WithDirectScan()` is used ([routing](#routing-a-read-to-a-maintained-result)) |
 | Result table temperature (**every** query type) | `Auto` | Hot while the tier has room, cold when it does not — the same default an ordinary table has. Declare `storage.storageTemperature` to choose instead. [2.3.1](#where-a-materialized-querys-result-lives) |
 | `SubscriptionManagerOptions.MaxLag` | `1 second` | Threshold for lag/backpressure signaling |
@@ -305,7 +305,7 @@ buckets resident, send historical ones to cold*. Measured end to end: **400 minu
 clustering on it would cost a sort on every seal and buy nothing; a second bucket over the same
 column is already ordered by the first. `filter`, `latestPerKey`, `firstPerKey` and `topNPerGroup`
 results are keyed by identity rather than time, and are not clustered.
-(**Horizon, next train**) A **windowed** result is the exception both ways: it is clustered by its window column alone — an
+(**Horizon, 0.5.0**) A **windowed** result is the exception both ways: it is clustered by its window column alone — an
 aggregate's window bucket even when another bucket comes first, a `topNPerGroup`'s window column — and its segments are cut by
 time slice ([2.11e](#window-expiry)).
 
@@ -328,7 +328,7 @@ time slice ([2.11e](#window-expiry)).
 - Table-based result storage:
   - MQ results are regular catalog tables (compaction/hot-cold/persistence integration).
   - Unified namespace (no `_mq_` prefix).
-- Windows (**Horizon, next train**): an `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column may declare
+- Windows (**Horizon, 0.5.0**): an `aggregate` with a time bucket or a `topNPerGroup` grouped by a time column may declare
   `window: { keep }`. Its result keeps only the groups at or after its horizon, maintenance builds nothing below it, a read below it
   is computed from the source, and expiry drops whole segments without writing. See [2.11e](#windows).
 - Planner integration:
@@ -511,7 +511,7 @@ and the cases below are what is provable:
 | **LatestPerKey / FirstPerKey** | `TableQuery.LatestPerKey(orderBy, keys…)` / `FirstPerKey(…)` with the same keys, order column and direction | the predicate only on the keys (filtering anything else does not commute with "the latest row per key"), the table has a primary key the result breaks ties by, and neither the order column nor a key part is a `String`. The rows come back in key order, as from the table (**group-6 review, 0.3.0**: a routed page was in the result's own order) |
 | **TopNPerGroup** | — | never routed; read it by name |
 
-(**Horizon, next train**) **A windowed result** is routed to only when the question's lower time bound lies at or after the
+(**Horizon, 0.5.0**) **A windowed result** is routed to only when the question's lower time bound lies at or after the
 result's horizon; a question reaching below it runs on the source ([2.11e](#routing-inside-the-window)). A read of a table with
 retention is not routed at all (**Known limitation (BL-1061)**, [2.11e](#queries-over-a-table-with-retention)).
 
@@ -657,7 +657,7 @@ Key implementation anchors:
 3. Runtime behavior:
    - snapshot sent first,
    - incremental changes follow when result-table rows change,
-   - (**Horizon, next train**) for a windowed result the snapshot is its stored part and carries its horizon, and a `horizon`
+   - (**Horizon, 0.5.0**) for a windowed result the snapshot is its stored part and carries its horizon, and a `horizon`
      message follows each advance ([2.11e](#window-subscriptions)).
 4. Observability:
    - standard streaming subsystem counters/events, plus MQ update counters.
@@ -705,7 +705,7 @@ Key implementation anchors:
 | `MaterializedQueryDefinition.ConfigJson` | JSON string | none (required) | type-specific schema | .NET definition/helper APIs | Serialized pattern config |
 | `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | (**WorkloadCore S09, 0.3.0**) No longer changes how updates are fed: both are queued at the commit and never dropped below the backlog's bound. A `Sync` query ignores `maxCoalesceMs` |
 | `MaterializedQueryDefinition.MaxCoalesceMs` (`maxCoalesceMs`) | int | `0` | `0`–`60000` | `aouda.schema.json`; `SetMaterializedQueryMaxCoalesceMsAsync` | **ColumnarMerge S10, 0.2.0.** Batches of an `Async` query coalesce this long before one apply |
-| `window` (`keep`, `column`) | object | none (no window) | `keep`: `<n>m` / `h` / `d` / `w`, a multiple of the bucket; `column`: the window column | `aouda.schema.json`; `window` beside `config` on `POST …/materialized-queries`; both SDKs | (**Horizon, next train**) `aggregate` with a time bucket and `topNPerGroup` only; part of the definition, so changing it replaces the query. [2.11e](#windows) |
+| `window` (`keep`, `column`) | object | none (no window) | `keep`: `<n>m` / `h` / `d` / `w`, a multiple of the bucket; `column`: the window column | `aouda.schema.json`; `window` beside `config` on `POST …/materialized-queries`; both SDKs | (**Horizon, 0.5.0**) `aggregate` with a time bucket and `topNPerGroup` only; part of the definition, so changing it replaces the query. [2.11e](#windows) |
 | `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` | .NET definition/helper APIs | Optional override; else defaults by type |
 | `SubscriptionManagerOptions.MaxLag` | `TimeSpan` | `1s` | positive | Engine wiring | Lag threshold/backpressure signal |
 | `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound; past it, a lane's backlog (**WorkloadCore S09, 0.3.0**) |
@@ -1544,7 +1544,7 @@ code, and so a future improvement is checkable.
 Nothing about how a query is maintained. The counters are a handful of interlocked adds per commit
 batch — never per row — on a path that has just done a keyed read-back and an engine write.
 
-## 2.11e Windows: keep the recent part, compute the rest (**Horizon, next train**) {#windows}
+## 2.11e Windows: keep the recent part, compute the rest (**Horizon, 0.5.0**) {#windows}
 
 A time-bucketed `aggregate` keeps one group per series per bucket **for ever**. Minute candles over 1,634 instruments and 60
 days are 26.3 million groups; over ten years they would be billions — every one built by a history load and stored, and almost
@@ -1686,7 +1686,7 @@ writes two catalog records — the horizon's and the batch — however many rows
 - When a result's write buffer holds **a quarter** of its rows below `H`, its flush is asked for, and writes none of them.
 - A segment with no time facts on the window column is kept and reported (unknown keeps).
 - A crash between the catalog batch and the files loses nothing and brings nothing back; the restart removes the leftover files.
-- **Replicas:** a windowed result's horizon on a replica is the primary's (**Horizon, next train**). A replica's result rows are
+- **Replicas:** a windowed result's horizon on a replica is the primary's (**Horizon, 0.5.0**). A replica's result rows are
   the primary's, so the primary logs each advance (`AdvanceTableHorizon`, one catalog record) and a replica advances none on its
   own clock. (A table's [retention](retention.md#replicas) horizon still advances on each engine's own clock; an early expiry
   reaches replicas as a logged record.) An engine that is not a replica also logs every horizon once when it opens, so a horizon
@@ -1729,7 +1729,7 @@ segments. A materialized query over such a table is **not** windowed — it **ke
   result's groups below that cut into the new result as they were — across a `:refresh` and a restart's rebuild alike. A
   query's **first** build carries nothing: it computes every group from the rows the table holds, so a query created after the
   table has expired rows starts without them, and its group straddling the horizon counts only the rows at or after it.
-- **`TRUNCATE`** (**Horizon, next train**) empties the table; its results are rebuilt and keep their history below the cut, as
+- **`TRUNCATE`** (**Horizon, 0.5.0**) empties the table; its results are rebuilt and keep their history below the cut, as
   every rebuild over the table does, and the group straddling the horizon is carried as it was (BL-1063, below), so it may still
   count truncated rows from between the horizon and the cut. The groups at or after the cut are recomputed from the empty table,
   so they are gone. An unfiltered `DELETE` instead retracts exactly the visible rows. Use `TRUNCATE` to empty the table and keep the
@@ -1855,7 +1855,7 @@ Monitor first:
   - `SubscriptionQueueDepth`, `SubscriptionLagMs`
 - Routing outcomes:
   - `MaterializedQueryRoutes`, `MaterializedQueryRouteMisses`
-- A windowed query's reach — `window` and `horizon` on the status route (**Horizon, next train**); `stats.windowCompletionRows`
+- A windowed query's reach — `window` and `horizon` on the status route (**Horizon, 0.5.0**); `stats.windowCompletionRows`
   on a read says what its part below the horizon read from the source. See [2.11e](#window-status).
 - Per-query cost — `amplification` on the status route, not a counter. `writeAmplification` and
   `readAmplification`, plus the totals behind them. See [2.11d](#amplification).
@@ -1982,7 +1982,7 @@ Last verification date (UTC): `2026-03-31`.
 - BL-053 (open):
   - No distinct error code for MQ-not-ready subscriptions (`TABLE_NOT_FOUND` is used).
   - User impact: clients cannot distinguish "table missing" vs "MQ exists but not ready" from error code alone.
-- Windows and retention (**Horizon, next train**):
+- Windows and retention (**Horizon, 0.5.0**):
   - A question that reaches below a windowed result's horizon is not routed to it; a routed union across the horizon is not built.
   - Known limitation (BL-1060): only a query that splits its groups by the retention column may read a table with retention.
   - Known limitation (BL-1061): a read of a table with retention is not routed to a materialized result.

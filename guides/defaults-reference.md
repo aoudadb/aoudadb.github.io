@@ -182,12 +182,12 @@ See [Materialized queries — windows](materialized.md#windows) and [Retention](
 
 | Setting | Default | Config key | Notes |
 |---|---|---|---|
-| Time-slice width | the largest of hour, day, week or month that is at most `keep / 4`, never smaller than the bucket (the bucket itself when none fits) — a day for `7d`, a week for `35d` | — (not configurable) | (**Horizon, next train**) Every segment of a table with a horizon lies in one slice of its time column, and the coalescers merge only within one slice; a slice that falls behind the horizon is dropped whole. A table with retention uses the minute as its bucket, so a `keep` under four hours slices by the minute. At most about one slice is stored beyond `keep`. |
-| Horizon advance cadence | one slice / 8, at least 1 minute (a month counts 30 days) — every 3 h for a `7d` window, 21 h for `35d` | — (not configurable) | (**Horizon, next train**) The `horizon-advance` housekeeping job raises each horizon to the clock's value, persists it, then publishes it, and runs expiry for the table in the same round. Readers use only the persisted horizon, so up to one tick beyond `keep` is still stored (a windowed result) or still returned (a table with retention). |
-| Windowed result's horizon | `server clock − keep`, rounded down to the query's bucket (a `topNPerGroup`: to its `keep`'s unit) | `window.keep` on the query | (**Horizon, next train**) Never moves back. A query over a windowed result takes the higher of its own and its upstream's, raised to its own bucket. |
-| Retention horizon | `server clock − keep`, on the minute | `policy.retention.keep` on the table | (**Horizon, next train**) Persisted with the declaration, raised by the same job, never lowered — a longer `keep` leaves it where it is. A `DELETE` before a time on the table can raise it early. |
-| Expiry's forced flush | a quarter of the table's buffered committed rows below its horizon | — (not configurable) | (**Horizon, next train**) At that point expiry asks for the table's flush, which writes none of those rows (a partitioned table's flush does not yet leave them out, BL-1069). |
-| Cold rewrite of a partly deleted segment | at least 25 % of its rows deleted, whatever its size | — (not configurable) | (**Horizon, next train**) Rewritten alone within one cold-coalescer tick, when the segment's metadata is resident (one not loaded is judged when it is next loaded); before, only segments under 65,536 rows were ever merged. On a table with a horizon only a segment wholly inside the window (one slice, at or after the horizon) is rewritten; one reaching below it is expiry's to drop. Rows below a retention horizon do not count as deleted here (BL-1059). A segment with no live row is retired whole, with no rewrite. |
+| Time-slice width | the largest of hour, day, week or month that is at most `keep / 4`, never smaller than the bucket (the bucket itself when none fits) — a day for `7d`, a week for `35d` | — (not configurable) | (**Horizon, 0.5.0**) Every segment of a table with a horizon lies in one slice of its time column, and the coalescers merge only within one slice; a slice that falls behind the horizon is dropped whole. A table with retention uses the minute as its bucket, so a `keep` under four hours slices by the minute. At most about one slice is stored beyond `keep`. |
+| Horizon advance cadence | one slice / 8, at least 1 minute (a month counts 30 days) — every 3 h for a `7d` window, 21 h for `35d` | — (not configurable) | (**Horizon, 0.5.0**) The `horizon-advance` housekeeping job raises each horizon to the clock's value, persists it, then publishes it, and runs expiry for the table in the same round. Readers use only the persisted horizon, so up to one tick beyond `keep` is still stored (a windowed result) or still returned (a table with retention). |
+| Windowed result's horizon | `server clock − keep`, rounded down to the query's bucket (a `topNPerGroup`: to its `keep`'s unit) | `window.keep` on the query | (**Horizon, 0.5.0**) Never moves back. A query over a windowed result takes the higher of its own and its upstream's, raised to its own bucket. |
+| Retention horizon | `server clock − keep`, on the minute | `policy.retention.keep` on the table | (**Horizon, 0.5.0**) Persisted with the declaration, raised by the same job, never lowered — a longer `keep` leaves it where it is. A `DELETE` before a time on the table can raise it early. |
+| Expiry's forced flush | a quarter of the table's buffered committed rows below its horizon | — (not configurable) | (**Horizon, 0.5.0**) At that point expiry asks for the table's flush, which writes none of those rows (a partitioned table's flush does not yet leave them out, BL-1069). |
+| Cold rewrite of a partly deleted segment | at least 25 % of its rows deleted, whatever its size | — (not configurable) | (**Horizon, 0.5.0**) Rewritten alone within one cold-coalescer tick, when the segment's metadata is resident (one not loaded is judged when it is next loaded); before, only segments under 65,536 rows were ever merged. On a table with a horizon only a segment wholly inside the window (one slice, at or after the horizon) is rewritten; one reaching below it is expiry's to drop. Rows below a retention horizon do not count as deleted here (BL-1059). A segment with no live row is retired whole, with no rewrite. |
 
 ---
 
@@ -299,14 +299,14 @@ in no guide before).
 ## Runtime: GC and thread pool
 
 Set in the server's `runtimeconfig.json`; nothing needs setting. .NET's own `DOTNET_*` variables override them (their numbers
-are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing.md#garbage-collection-and-the-thread-pool-columnarcore-s14-020-loadscan-next-train).
+are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing.md#garbage-collection-and-the-thread-pool-columnarcore-s14-020-loadscan-050).
 
 | Setting | Default | Override | Why |
 |---|---|---|---|
 | Server GC | on | `DOTNET_gcServer=0` | one heap per core; the write and read paths allocate in parallel |
 | Heap hard limit | 85 % of the memory the process may use | — (the memory budget lowers it further) | a second ceiling under the governed budget |
 | DATAS (dynamic adaptation) | on | `DOTNET_GCDynamicAdaptationMode=0` | the heap count and gen-0 budget follow the load, not the core count; off is cheaper on a bulk load but keeps one heap per visible core |
-| Thread-pool spin limit | **10** (.NET's default 70) (**LoadScan, next train**) | `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=46` (hexadecimal) | idle workers spin less before they sleep: 6–11 % less CPU per row on a steady bulk load, 15–20 % on a fresh server's first million; reads within ±10 % |
+| Thread-pool spin limit | **10** (.NET's default 70) (**LoadScan, 0.5.0**) | `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=46` (hexadecimal) | idle workers spin less before they sleep: 6–11 % less CPU per row on a steady bulk load, 15–20 % on a fresh server's first million; reads within ±10 % |
 
 The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
