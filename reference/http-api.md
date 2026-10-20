@@ -5018,7 +5018,7 @@ Content-Type: application/json
 |---|---|---|
 | `rowsAppended` | number | Rows accepted in **this** append call. Not necessarily durable yet. |
 | `rowsAppendedToBuffer` | number | Cumulative rows accepted into the session buffer since `:begin`. Not necessarily durable (lost on server crash before sealing). |
-| `rowsDurablyCommitted` | number | Cumulative rows in sealed segments with commit markers that have been fsync'd to WAL — what a crash cannot take away. **Not the resume offset** (**Lead S14, next train**: this said it was): after a reconnect, send the same `:begin` with the same idempotency key and resume from its cursor's `resumeFromRow` (else its `rowsDurablyCommitted`) — see the `:begin` response above. |
+| `rowsDurablyCommitted` | number | Cumulative rows sealed into segments so far in this session. **Not durable until `:commit` returns**: a server crash before the job commits discards the whole job, these rows included, and the job's idempotency key then loads afresh (**Lead S20b, next train**: this said "what a crash cannot take away", which no build has done). **Not the resume offset** (**Lead S14, next train**: this said it was): after a reconnect, send the same `:begin` with the same idempotency key and resume from its cursor's `resumeFromRow` (else its `rowsDurablyCommitted`) — see the `:begin` response above. |
 | `acceptedAtUtc` | string | ISO 8601 UTC timestamp. |
 | `segmentsSealedSoFar` | number | Segments sealed across all tables in this job so far. |
 

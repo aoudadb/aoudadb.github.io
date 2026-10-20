@@ -355,7 +355,9 @@ difference is *when* the work is paid — per load, or once for many — not how
 3. Multi-table jobs require a `_table` discriminator column in every append body: each row names its table.
 4. `ForceLogShipBulkLoad=true` disallows skip/snapshot replication modes.
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
-6. A load's segment files are fsynced before its frames name them, so a committed load survives a power loss. If the catalog
+6. A load's segment files are fsynced before its commit point — the closing frame, or on a single node the commit record — so a
+   committed load survives a power loss. The files of a job's segments sync in parallel while the job runs, and the commit waits
+   for them (**Lead S20b, next train**: each segment was synced before its own frame). If the catalog
    registration after the commit point still fails after its retries, the commit call returns an error but the load is **not**
    lost: its rows become visible at the next restart, which catalogues it (`BulkLoadCommittedUncataloguedPinsHeld` counts such
    jobs). Do not re-run such a load blindly: check `:status`, or use an idempotency key. Before this, such a load could be swept
