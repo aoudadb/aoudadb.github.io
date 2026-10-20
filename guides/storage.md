@@ -278,6 +278,10 @@ If you run server defaults and do not set per-database overrides:
     whole segments are retired; 10: a table's retention), and a materialized-query definition file is version **2**. A directory
     written by 0.4.0 (catalog format 7), or by any other format, is refused at open naming the version found and the version
     expected; there is no migration. The WAL gains a `RangeDelete` frame (tag 73), which an older build does not know.
+  - (**Lead S20a, next train**) The catalog format is **11**: a bulk load's commit record (a catalog journal record) carries the
+    job's idempotency key, rows, commit time and token, and a table's shard keeps those for the idempotency window. The two side
+    files `bulk-load-idempotency.log` and `bulk-load-outcomes.log` are gone. A directory in catalog format 10 (0.5.0) is refused at
+    open naming 10 and 11; there is no migration — reload the data from its source.
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.

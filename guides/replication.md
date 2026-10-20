@@ -206,6 +206,11 @@ If you do nothing:
   disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). This is why replication is not
   supported in 0.3.0 (see the note at the top of this page). Streamed rows are held in memory on the
   replica and are not re-applied after a replica restart (**BL-839**).
+- ⚠️ (**Lead S20, next train**) **Bulk loads are not yet replicated** (**BL-1116**): no server wires a replica's side of a bulk load
+  (the coordinator, the segment fetch, the registration), so a replica does not receive a load's segments when it commits. Its
+  tokens stop below the load (a read presenting one waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`), and the rows
+  reach it only with a checkpoint re-bootstrap. Load into the primary and read loaded rows there. See
+  [Bulk load](bulk-load.md).
 - Public admin API for WAL slot inspection/listing (proposed in task follow-up notes).
 - Per-replica slot-lag metrics endpoint (proposed in task follow-up notes).
 - TS/.NET first-class write concern request API (protocol field exists; SDK convenience surface incomplete).
