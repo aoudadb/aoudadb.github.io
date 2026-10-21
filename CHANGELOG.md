@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Database catalog credentials (BL-1128).** `GET /api/databases` and `POST /api/databases` need a server credential
+  (`mk_srv_` or a scoped server key). A live application `mk_svc_` / `mk_adm_` on those routes is **403**
+  `AUTH_KEY_ROUTE_MISMATCH` (not 401 `AUTH_API_KEY_INVALID` / "Unknown API key"). `GET /api/databases/{name}` accepts a
+  read credential for that database, including its `mk_svc_`. A service process checks existence with get-by-name; it
+  does not list or create databases. [HTTP API](reference/http-api.md#database-catalog-api),
+  [Getting Started](getting-started/index.md#creating-databases-via-api).
+
 ## 0.5.0 — 2026-10-19
 
 Docs for **server 0.5.0**, **`@aouda/client` 0.5.0** (the three Horizon changesets, plus the BL-1032 prefix check),
