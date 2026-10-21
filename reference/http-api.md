@@ -851,9 +851,13 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, 0.4.0:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
 | `dataDurability` | string | No | `DiskBacked` (default) or `MemoryOnly`. |
-| `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database. Mutually exclusive with `auth`. |
+| `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database; both may include `auth`. `kind: "auth"` together with an `auth` object is rejected (400). |
+| `allowSelfSignup` | bool | No | When `kind` is `"auth"`, whether self-service signup is enabled on the new database. Omitted: off. |
+| `selfSignupRole` | string \| null | No | When `kind` is `"auth"`, role granted to self-service signups. Null or omitted: `db_writer`. |
 | `auth.enabled` | bool | No | Shorthand: link to the single existing auth database (400 if none or more than one). |
 | `auth.database` | string | No | Link to (or create) a named auth database. |
+| `auth.allowSelfSignup` | bool | No | Whether self-service signup is enabled on the linked application database. Omitted: off. |
+| `auth.selfSignupRole` | string \| null | No | Role granted to self-service signups on the linked application database. Null or omitted: `db_writer`. |
 
 **Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them.
 

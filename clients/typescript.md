@@ -570,6 +570,10 @@ early expiry), on any other table it is one log record and whole segments retire
 
 ## 8) Schema Management
 
+### Databases
+
+`client.databases.create(name, options)` (**BL-1123, next train**) sends `kind`, `auth`, `allowSelfSignup`, and `selfSignupRole` only when the caller sets each one, and sends both `kind` and `auth` when the caller sets both. On `auth`, `enabled`, `database`, `allowSelfSignup`, and `selfSignupRole` are included only when set there. The server rejects `kind: "auth"` together with an `auth` object (400). `kind: "data"` with `auth` is valid.
+
 ### Table Operations
 
 ```typescript
