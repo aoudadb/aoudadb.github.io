@@ -185,7 +185,7 @@ Scope boundaries:
   - (**LoadSpeed M.2, 0.4.0**) **`mqWaitMs` defaults to `0`**: `:commit` answers as soon as the load is durable and does not wait for its queries unless the request says how long (it waited up to 30 s). A load whose queries are still catching up answers `mqStatus: "behind"` with `mqFrontierToken`; that is not an error. To go on only once they are current, send `mqWaitMs` (up to `600000`), or read with the commit's `token`, which waits for them.
   - (**WorkloadCore S16, 0.3.0**) The wait does not wait for a query only a rebuild can bring current (holed, in `Error`, or waiting for memory to rebuild): `mqStatus` is `"behind"` as soon as the others are current, instead of after the whole `mqWaitMs`.
   - (**WorkloadCore S16, 0.3.0**) **`:append` can be paced.** When the database's debt — WAL fill, materialized-query maintenance lag, unflushed rows or hot bytes — is past its soft line, each batch of an `:append` waits (at most 10 s) before it is queued — whatever the batch's size (**WorkloadCore group 5 review, 0.3.0**) — so the load settles at the rate the debt drains; see the sizing guide, *Debt slows the writer*. An `:append` whose load already failed for capacity answers `503` with `Retry-After`, as `:commit` does, rather than `409`. A load's buffer growth refused for a moment's queue no longer caps the buffer for the rest of the load.
-  - (**BL-831, 0.3.0**) **A column-batch `:append` asks for its memory before it decodes.** Each column's array is a grant from the memory queue first (waiting at most one sampling tick), so when memory is short the `:append` is refused `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` **before** the frame is decoded, instead of failing on the heap part-way through it (`500`). The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume with the same idempotency key from the cursor `:begin` answers (`resumeFromRow`, else `rowsDurablyCommitted`; **Lead S14, next train**: it said `rowsDurablyCommitted`, which re-sends the rows a live session still buffers). JSON column-array bodies (NDJSON bodies, until **Lead S12, next train**) take no such grant.
+  - (**BL-831, 0.3.0**) **A column-batch `:append` asks for its memory before it decodes.** Each column's array is a grant from the memory queue first (waiting at most one sampling tick), so when memory is short the `:append` is refused `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` **before** the frame is decoded, instead of failing on the heap part-way through it (`500`). The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume with the same idempotency key from the frame `:begin` answers (`nextSequence`, **Lead S21a, next train**: it was `resumeFromRow`, else `rowsDurablyCommitted`). JSON column-array bodies (NDJSON bodies, until **Lead S12, next train**) take no such grant.
   - (**BL-831, BL-928, 0.3.0**) **A `:commit` that runs out of memory is a `503`, never a `500` or a damaged segment.** A commit whose spill merge meets the managed heap's hard limit answers `503` with `Retry-After` (it answered `500 INTERNAL_ERROR`), and a merge that runs out of memory part-way through a row is refused with nothing published — it used to seal a segment whose columns held different row counts. As for every refused `:commit`, the session is failed and nothing was applied: run the load again from `:begin`.
   - (**release blockers, 0.3.0**) `mqWaitMs` does not wait on a query that is behind only because a query it is built on (its upstream) is being rebuilt — waiting cannot bring it in, so `mqStatus` is `"behind"` as soon as the others are current. And a wait that itself fails (the heap, say) answers the commit as committed with `mqStatus: "behind"`: the load is durable, so it must not be sent again (it was answered `503` "not applied", and a client that resent it loaded the rows twice).
   - Replica coordinator: `MqRebuildScheduler` delegate triggers rebuild after all segments fetched.
@@ -459,15 +459,17 @@ const handle = await client.bulkLoad('trades', batchesOf(source), { idempotencyK
 The factories and `validate()` are on the [TypeScript Client page](../clients/typescript.md#column-batches-lead-s14-next-train).
 What it shares with C#, and what changed for it in the same session:
 
-- **An `:append` is never re-sent**, under any `retryPolicy` (until Lead S14 a policy re-sent it — a duplicate-rows hazard).
-- **A failed load leaves the job open; the same call with the same `idempotencyKey` resumes it** from `:begin`'s
-  `resumeFromRow`, inside a batch if need be (until Lead S14 it resumed from `rowsDurablyCommitted`, which duplicates the rows a
-  live session still buffers; and it aborted the job on any failure, so there was nothing to resume). Only a cancellation
-  aborts — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the SDK generated, which nobody
-  else could resume: pass your own key. The two SDKs differ here. The TypeScript SDK aborts such a load on any failure before
-  `:commit` is sent, and its error does not carry the generated key. The C# SDK keeps the job after a transient `:append`
-  failure, whose `BulkLoadAppendFailedException` hands over the generated key so the load can resume with it. Neither aborts
-  once `:commit` has been sent, except on a cancellation.
+- **A transport policy never re-sends an `:append`** (until Lead S14 a `retryPolicy` re-sent it — a duplicate-rows hazard). Since
+  **Lead S22, next train**, the SDK's own recovery does, safely: after a lost connection, a timeout or a `503` it asks the server
+  where the job is (a `:begin` with the job's key) and sends the same body again, up to 4 times; the server skips the frames it
+  holds, so a body sent twice is applied once — as the C# SDK has done since Lead S21a.
+- **A failed load leaves the job open; the same call with the same `idempotencyKey` resumes it** from `:begin`'s `nextSequence`
+  (**Lead S22, next train**; it was `resumeFromRow`, gone): the bodies the server holds are not sent, and the rows of the frames
+  skipped are checked against the server's count, so a load framed differently is refused `BULK_LOAD_CURSOR_MISMATCH` instead of
+  loading rows twice. A job that already holds every frame is committed with `:commit` (**Lead group 5 review, next train**).
+  Only a cancellation aborts — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the SDK generated,
+  which nobody else could resume: pass your own key. Neither SDK aborts a job whose commit may be running (a lost answer, a
+  "committing" refusal), except on a cancellation: the server's commit decides it.
 - **A key whose job already committed returns that job** (`alreadyCompleted: true`, `rowsLoaded`, `token`) and sends nothing;
   it used to fail `409 BULK_LOAD_INVALID_STATE`.
 - **No NDJSON**: rows no frame carries, and every body to a server that does not advertise frames, go as JSON column arrays.
@@ -529,7 +531,9 @@ The `:commit` boundary does not decide segment size by itself — the engine sea
 **Do this:**
 - Open **one** session (`:begin`), stream the whole migration through repeated `:append` calls, and `:commit` **once** at the end.
 - Size `:append` batches for the network, not for segment size — 10 000–100 000 rows per call is fine.
-- Track your upstream cursor at `rowsDurablyCommitted`, never at rows appended to the buffer.
+- Track your upstream cursor at the commit: a job's rows are durable only once `:commit` answers (**Lead S20b, next train**:
+  `rowsDurablyCommitted` mid-job counts what segments have sealed, which are not durable until the commit and are not a resume
+  offset). To resume an open job, use `:begin`'s `nextSequence` with the same idempotency key.
 
 **Not this:**
 - One `:begin` / `:append` / `:commit` cycle per batch. Each commit forces a full drain, so this is the shape that produces tiny segments regardless of anything the engine does.
@@ -1087,7 +1091,8 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 | `BulkLoadCursorMismatch` from client | Client send position diverges from server durable cursor expectations | Retry from returned durable cursor and keep same idempotency key. |
 | `BulkLoadTableLocked` | Concurrent load holds table lock | Retry with same idempotency key or wait for lock release. |
 | `AlreadyTerminal` on force-abort | Job already completed/aborted/failed | Treat as no-op; inspect job history instead. |
-| `503 MEMORY_BUDGET_EXCEEDED` on a column-batch `:append` (**BL-831, 0.3.0**) | Memory is short; the frame was refused before it was decoded | Wait `Retry-After` and resume with the same idempotency key from `:begin`'s `resumeFromRow` (else `rowsDurablyCommitted`); the session is still open. |
+| `503 MEMORY_BUDGET_EXCEEDED` on a column-batch `:append` (**BL-831, 0.3.0**) | Memory is short; the frame was refused before it was decoded | Wait `Retry-After` and resume with the same idempotency key from `:begin`'s `nextSequence` (**Lead S21a, next train**); the session is still open. Both SDKs do it themselves. |
+| `409 BULK_LOAD_COMMIT_QUEUED` on a committing `:append` (**Lead group 5 review, next train**) | The job is still queued behind another load on its tables; the body's frames were applied | Send `:commit` for the job; send no row again. Both SDKs do it themselves. |
 | `503` on `:commit` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) | The commit was refused for capacity — (**BL-831, BL-928, 0.3.0**) its spill merge running out of heap included; nothing was applied | Wait `Retry-After`, then run the load again from `:begin`. A `500` that says the load committed is the opposite case: do not resend. |
 | Commit reports timed-out write concern | Replica barrier not achieved in timeout window | Inspect replica lag, then decide retry/read policy. |
 

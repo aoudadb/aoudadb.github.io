@@ -4820,7 +4820,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | Field | Type | Default | Allowed values | Description |
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
-| `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, next train**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, next train**). |
+| `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, next train**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, next train**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, next train**). |
 | `pkUniquenessOverride` | string? | null | `"strict"`, `"recent"`, `"bestEffort"`, null | Override primary-key uniqueness enforcement for this load. Null = use table default. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
@@ -4964,11 +4964,22 @@ every job: it saves the `:commit` round trip and lets the next job overlap this 
 - **Sent again after its answer was lost**, the body is safe: a frame below `nextSequence` is skipped, so if the job had not yet
   read the end frame it commits once with every row once; if it is committing, the body is refused `409 BULK_LOAD_INVALID_STATE`
   with `details: state=Committing` — wait and ask again; once it has committed, a `:begin` with the job's idempotency key replays it
-  (`alreadyCompleted`, its `token`). The C# SDK does all of this itself.
+  (`alreadyCompleted`, its `token`). A body refused `state=Deferred` (the job committed and its deferred work is running) or
+  `state=Completed` is past its commit point too: its rows are durable — wait, then `:begin` with the key, exactly as for
+  `Committing`; never treat it as a failure, and never `:abort` it (**Lead group 5 review, next train**). Both SDKs do all of this
+  themselves (`@aouda/client` from **Lead S22, next train**).
+- **A job still queued behind another load does not commit in its body** (**Lead group 5 review, next train**): if the job does
+  not hold its tables yet — another job's rows are streaming into them, or it is waiting for the job it follows — the commit is
+  declined `409 BULK_LOAD_COMMIT_QUEUED`, the body's frames applied (`details` name `nextSequence` and `rowsAppended`) and nothing
+  committed. Send [`:commit`](#post-jobidcommit) for the job, and no row again. A commit in a body holds the body's `:append` lane
+  permit until it answers; one that waited for another job's rows held a permit that job's next body needed, and four of them
+  stalled every loader on the server until the lock timeout. A job just begun is given a moment (1 s) to take its tables before it
+  is declined. Both SDKs send `:commit` themselves.
 
 A JSON column-array body cannot commit its job: one that carries `commit` is refused `400 INVALID_REQUEST`, nothing appended; send
 it, then `:commit`. A body that commits holds its place on the `:append` lane until its commit answers (see
-`Aouda:BulkLoad:MaxConcurrentStreamingRequests`).
+`Aouda:BulkLoad:MaxConcurrentStreamingRequests`); it waits there only for the jobs before it that are past their rows' end, since a
+job that does not hold its tables is declined (above).
 
 **Content-Type:** `application/vnd.aouda.column-batch-v2` (column-batch frames, then an end frame; layout below), or
 `application/json` — **one** body of [column arrays](#column-arrays-the-write-body), `{"columns": […], "data": [[…], …], "absent"?: {…}}`
@@ -5115,6 +5126,7 @@ Content-Type: application/json
 | `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, next train**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) (**Lead S21b, next train**) Also a body whose end frame commits and names fewer frames than the job holds: nothing committed. |
 | `BULK_LOAD_INVALID_STATE` | 409 | The job is committing, committed, aborted or failed. (**Lead S21b, next train**) `details` name the state (`state=Committing`, …): a body sent again while its own commit runs reads `Committing` — wait, then `:begin` with the job's key. |
 | `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | (**Lead S21b, next train**) A body that commits a job begun with `afterJobId`: the job it follows failed or was aborted, so this one is not committed and none of its rows is loaded. `details` name `afterJobId`. Also answered by `:commit`. |
+| `BULK_LOAD_COMMIT_QUEUED` | 409 | (**Lead group 5 review, next train**) A body whose end frame commits its job, for a job still queued behind another load on its tables: the body's frames were applied (`details`: `nextSequence`, `rowsAppended`), nothing was committed, and the job is open. Send `:commit`; send no row again. |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
 
 ---
@@ -5132,7 +5144,7 @@ A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NO
 |---|---|---|---|---|
 | `database` | string | Yes | — | Database name. |
 | `jobId` | string | Yes | — | Job identifier (also in the path). |
-| `nextSequence` | number? | No | — | (**Lead S21a, next train**) The frames this client sent (the number after its last). When given, the commit is refused `409 BULK_LOAD_CURSOR_MISMATCH` — nothing committed, the job still open — unless the job applied exactly these; `details` name the job's `nextSequence`. Omitted: the job commits what it applied. The C# SDK sends it. |
+| `nextSequence` | number? | No | — | (**Lead S21a, next train**) The frames this client sent (the number after its last). When given, the commit is refused `409 BULK_LOAD_CURSOR_MISMATCH` — nothing committed, the job still open — unless the job applied exactly these; `details` name the job's `nextSequence`. Omitted: the job commits what it applied. Both SDKs send it (`@aouda/client` from **Lead S22, next train**). |
 | `waitForDeferredWork` | bool | No | `false` | If `true`, the response is held until all post-processing (PK index rebuild, CSC mirror, RaBitQ encodings) completes. |
 | `writeConcern` | string? | No | `"acknowledged"` | Replication barrier. Allowed: `"acknowledged"`, `"majority"`, `"all"`. |
 | `writeConcernTimeoutMs` | number? | No | `300000` (5 min) | Max wait for the write-concern barrier. On timeout, returns 200 OK with `writeConcernTimedOut: true`. The data is durable; replicas catch up at their own pace. |

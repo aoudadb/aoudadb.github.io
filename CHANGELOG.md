@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A committed bulk load is never reported failed, a queued job commits by `:commit`, and a multi-table load commits on every table
+  or none (Lead group 5 review, next train).** A committing body sent again and refused `state=Deferred` or `state=Completed` is past
+  its commit point — wait, then `:begin` with the key (both SDKs do; they used to report it aborted). A body whose job is still queued
+  behind another load is declined `409 BULK_LOAD_COMMIT_QUEUED`, its frames kept: send `:commit` (both SDKs do) — four such bodies used
+  to hold every `:append` lane permit until the lock timeout. A job that loads several tables writes its closing frame on a single
+  node too, so a crash cannot leave one table's rows without the other's. `afterJobId` naming a job on other tables waits for its
+  outcome. See [`:append`](reference/http-api.md#post-jobidappend) and [the bulk-load guide](guides/bulk-load.md).
 - **Database catalog credentials (BL-1128).** `GET /api/databases` and `POST /api/databases` need a server credential
   (`mk_srv_` or a scoped server key). A live application `mk_svc_` / `mk_adm_` on those routes is **403**
   `AUTH_KEY_ROUTE_MISMATCH` (not 401 `AUTH_API_KEY_INVALID` / "Unknown API key"). `GET /api/databases/{name}` accepts a
