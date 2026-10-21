@@ -43,6 +43,7 @@ _Repo: `aouda-client-ts`_
 | Stream real-time changes | §10 Streaming |
 | Execute named queries / batch | [Named queries](../guides/named-queries.md) — `client.namedQueries.execute(name, args)`, `.batch([{ name, args }])`, `subscribe(name)` |
 | Execute named mutations | [Named queries](../guides/named-queries.md#named-mutations) — `client.namedMutations.execute(name, args)` |
+| Claim work from a queue | [Queues](#queues) — `client.queues` (**BL-1121, next train**) |
 | Manage cluster via API | §11 Admin APIs |
 | Use MCP tools for AI | §12 MCP Tools |
 
@@ -1231,6 +1232,31 @@ IndexedDB.
 
 A `Timestamp` read through JSON could come back one millisecond early, because a JavaScript number cannot hold its
 .NET ticks exactly. It now reads as the millisecond the ticks round to, on both paths.
+
+---
+
+## Queues
+
+`client.queues` is the lease queue for the current database (**BL-1121, next train**). It is not a table, and it is not the server's internal materialized-query update queue. The routes are in [HTTP API — Queue Endpoints](../reference/http-api.md#queue-endpoints).
+
+```typescript
+await client.queues.create("work", 3);                 // default visibility 90s
+const { itemId } = await client.queues.enqueue("work", { n: 1 });
+const claimed = await client.queues.claim("work");     // null when this call takes nothing (HTTP 204)
+if (claimed) {
+  await client.queues.renew("work", claimed.itemId, claimed.generation);
+  await client.queues.acknowledge("work", claimed.itemId, claimed.generation); // HTTP 204
+}
+const again = await client.queues.claim("work");
+if (again) {
+  const retried = await client.queues.retry("work", again.itemId, again.generation);
+  // retried.disposition is "ready" or "deadLetter"
+}
+const dead = await client.queues.listDeadLetter("work");
+await client.queues.delete("work");                    // HTTP 204
+```
+
+`generation` is sent on renew, acknowledge, and retry. A generation that is not the current unexpired lease rejects with `STALE_GENERATION` (HTTP 409) and leaves the item as it was. Acknowledge removes the item. `list()` returns `{ database, queues }`.
 
 ---
 

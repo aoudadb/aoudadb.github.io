@@ -1879,6 +1879,42 @@ Apply idempotent seed data. Tables must already exist.
 
 ---
 
+### Queue Endpoints
+
+A named queue is its own product surface (**BL-1121, next train**). It is not a table: a queue name may equal a table name, deleting the queue does not drop that table, and the queue does not appear in `GET /api/tables` or `GET /api/databases/{db}/tables`. Internal materialized-query update queues are not this API.
+
+`{name}` matches `^[A-Za-z][A-Za-z0-9_.]{0,127}$`. `{itemId}` is a server-minted GUID (`8-4-4-4-12`). A path segment that is not a GUID is `400 INVALID_REQUEST`. A GUID the queue does not hold is `404 QUEUE_NOT_FOUND`. Payload is one opaque JSON value, including `null`. The limit is the UTF-8 byte length of that value's JSON text, 65536. The engine does not interpret it.
+
+`visibilityTimeoutMs` omitted on create stores **90000**. Allowed range is **1** through **900000**. The client sends a duration. The server computes `visibilityDeadline` from its own clock. Renew extends from now, not from the previous deadline.
+
+A claim takes the oldest ready item and fences it until `visibilityDeadline`. A second claim does not receive that item: the queue exists and this call took nothing, which is **`204`** with an empty body (also an empty queue, and a queue whose items are all dead-lettered). Unknown queue is `404`, not `204`. Two concurrent claims never both receive the same item. `generation` and `attempt` start at 0 and both increase by 1 only on a successful claim. Renew does not change either. Acknowledge removes the item. Retry, or the next claim after the deadline, returns it to ready, or dead-letters it once `attempt >= maxAttempts`. A renew, acknowledge, or retry that is not the current unexpired lease — wrong generation, deadline already passed, ready, or dead-lettered — is `409 STALE_GENERATION` and does not change the item. There is no timer thread: expiry is applied by the next claim.
+
+Create and delete require Admin. Enqueue, claim, renew, acknowledge, and retry require Write. List and dead-letter require Read. A missing database is `404 DATABASE_NOT_FOUND` before any queue lookup.
+
+| Method | Route | Body | Success |
+|--------|-------|------|---------|
+| `POST` | `/api/databases/{db}/queues` | `{ "name", "maxAttempts", "visibilityTimeoutMs"? }` | `201` `QueueInfo`: `name`, `maxAttempts`, `visibilityTimeoutMs` |
+| `GET` | `/api/databases/{db}/queues` | — | `200` `{ "database", "queues": [ QueueInfo ] }`. None is `"queues": []` |
+| `DELETE` | `/api/databases/{db}/queues/{name}` | — | `204` empty body, including when the queue still has items |
+| `POST` | `/api/databases/{db}/queues/{name}/enqueue` | `{ "payload" }` | `201` `{ "itemId" }` |
+| `POST` | `/api/databases/{db}/queues/{name}/claim` | `{ "visibilityTimeoutMs"? }` or an empty body | `200` `ClaimedItem`, or `204` empty body when this call takes no item |
+| `POST` | `/api/databases/{db}/queues/{name}/items/{itemId}/renew` | `{ "generation", "visibilityTimeoutMs"? }` | `200` `{ "generation", "visibilityDeadline" }` |
+| `POST` | `/api/databases/{db}/queues/{name}/items/{itemId}/acknowledge` | `{ "generation" }` | `204` empty body, item removed |
+| `POST` | `/api/databases/{db}/queues/{name}/items/{itemId}/retry` | `{ "generation" }` | `200` `{ "disposition": "ready" \| "deadLetter" }` |
+| `GET` | `/api/databases/{db}/queues/{name}/dead-letter` | — | `200` `{ "database", "items": [ { "itemId", "payload", "generation", "attempt" } ] }`. None is `"items": []` |
+
+`ClaimedItem`: `itemId`, `generation` (int64), `payload`, `attempt` (int32, 1-based), `visibilityDeadline` (UTC, ISO-8601).
+
+| Code | HTTP | When |
+|------|------|------|
+| `QUEUE_NOT_FOUND` | 404 | Unknown queue, or a well-formed item id the queue does not hold. The message names which |
+| `QUEUE_ALREADY_EXISTS` | 409 | Create of a name that already exists |
+| `STALE_GENERATION` | 409 | Renew, acknowledge, or retry that is not the current unexpired lease. The item is unchanged |
+| `INVALID_REQUEST` | 400 | Bad name, missing `maxAttempts`, `maxAttempts` below 1, a non-integer `maxAttempts`, `generation`, or timeout, timeout outside 1..900000, payload over 65536 UTF-8 bytes, missing `payload`, item id that is not a GUID |
+| `DATABASE_NOT_FOUND` | 404 | Unknown database |
+
+---
+
 ### Tables Endpoints
 
 #### `GET /api/tables`
