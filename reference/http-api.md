@@ -85,7 +85,7 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 |--------|------|--------|-------------|
 | `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
-| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. |
+| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. Does **not** list or create databases (`GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH`); use `GET /api/databases/{name}` to check existence. |
 | `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): no user's grants, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. |
 | `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, 0.5.0**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. |
 | `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants. A custom `mk_` minted on server auth is a scoped server key (BL-1017). PLS / RLS enforced. |
@@ -140,7 +140,7 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 | `mk_pub_*` | Data plane only | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
 | User JWT (application end user) | Data plane | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
 | User JWT (Studio operator) | Admin | ✅ | ✅ | ✅ enforced | ✅ per RBAC |
-| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Audited bypass | Per RBAC on admin |
+| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Audited bypass | Per RBAC on admin for that database's routes. **Not** `GET`/`POST /api/databases` (server-auth catalog — **403** `AUTH_KEY_ROUTE_MISMATCH`) |
 | `mk_anon_*` | Data plane (auth endpoints) | ❌ | ❌ | n/a | ❌ — auth endpoints only |
 
 **Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
@@ -564,12 +564,13 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
-| `AUTH_API_KEY_INVALID` | 401 | API key invalid, revoked, or expired |
+| `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
 | `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
 | `NOT_AUTHENTICATED` | 401 | Authentication required (database has auth enabled but no valid token) |
 | `AUTHORIZATION_DENIED` | 403 | Authenticated but no role for the target database |
 | `INSUFFICIENT_PERMISSIONS` | 403 | Authenticated but role lacks required operation (e.g. read-only role attempting write) |
+| `AUTH_KEY_ROUTE_MISMATCH` | 403 | A live application key (`mk_svc_` / `mk_adm_`) on a server-auth catalog route (`GET`/`POST /api/databases`). The key is recognized; the route is not for that kind (**BL-1128**). |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Signin credentials are invalid (wrong password or non-existent email) |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
 | `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
@@ -692,6 +693,8 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 
 Lists databases visible to the caller.
 
+**Credentials:** server auth only — a server admin key (`mk_srv_…`), a scoped server key (`mk_…` from `/api/auth/admin/api-keys`), or a server-auth user JWT with admin rights. An application service key (`mk_svc_`) or auth-admin key (`mk_adm_`) is refused with **403** `AUTH_KEY_ROUTE_MISMATCH` (the key is live; this route is not for it). Do not treat that as `AUTH_API_KEY_INVALID`.
+
 **Query Parameters:**
 
 | Param | Values | Description |
@@ -762,7 +765,9 @@ Default list: include iff isInternal == false
 
 #### `GET /api/databases/{name}`
 
-Direct lookup of a specific database by name. Returns the database if it exists and is still serving, regardless of `isInternal`. Requires server credentials (`mk_srv_...`).
+Direct lookup of a specific database by name. Returns the database if it exists and is still serving, regardless of `isInternal`.
+
+**Credentials:** a **read** credential for that database is enough — including the database's own application service key (`mk_svc_…`). A server credential also works. This is how a service process checks that its database exists; it does **not** need `GET /api/databases` (list).
 
 **Metadata-only.** Capture `mk_*` keys from `POST /api/databases` (or regenerate). GET never re-emits keys. `auth` is always an object — `auth.enabled: false` means unlinked; do not treat a missing or null `auth` as the signal (older servers omitted it).
 
@@ -827,6 +832,8 @@ Unknown database → 404 `DATABASE_NOT_FOUND`. Requires read authorization when 
 #### `POST /api/databases`
 
 Creates a new operator-facing database. The `isInternal` flag cannot be set by clients — it is always `false` for user-created databases. Internal databases are only created by Aouda bootstrap services.
+
+**Credentials:** server auth only — same as [`GET /api/databases`](#get-apidatabases). A live `mk_svc_` / `mk_adm_` is **403** `AUTH_KEY_ROUTE_MISMATCH`. Schema apply (or an operator with a server key) creates databases for a service process; the service key itself does not.
 
 **Request body:**
 
