@@ -4820,6 +4820,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | Field | Type | Default | Allowed values | Description |
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
+| `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, next train**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22**). |
 | `pkUniquenessOverride` | string? | null | `"strict"`, `"recent"`, `"bestEffort"`, null | Override primary-key uniqueness enforcement for this load. Null = use table default. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
@@ -4859,7 +4860,7 @@ A table with no write-time compute needs neither flag.
 |---|---|---|
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` | `600000` (10 min) | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. `0` disables the deadline on them. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
-| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` runs in. It does **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. (**Lead S18a, next train**) `:commit` is on no lane, so it never waits behind `:append`s gated on the job it would finish; keep the loaders into one table at or below this setting (**BL-1117**). |
+| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` runs in. It does **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. (**Lead S18a, next train**) `:commit` is on no lane, so it never waits behind `:append`s gated on the job it would finish; keep the loaders into one table at or below this setting (**BL-1117**). (**Lead S21b, next train**) A body that commits its job keeps its permit until its commit answers; a pipelined loader has one job sending rows and one committing, and four such loaders into one table finish on the default lane. |
 | `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: a rejected `:append` must be recovered by its client (a keyed `:begin`, then the same body: see [the frame numbers](#a-jobs-frames-are-numbered-lead-s21a-next-train)), so a rejection costs the load a round of recovery or, in a client that does not recover, the load. |
 | `Aouda:MaxConnections` | `0` (unlimited) as of **BL-419, 0.1.22** — was `100` through 0.1.21 | Kestrel's concurrent-connection ceiling. `0` (Kestrel's own default) means the request limiter (`MaxConcurrentRequests` + `RequestQueueLimit`) is the first thing an overloaded server hits, and it sheds with a retryable HTTP status; the old `100` default sat *below* that budget (150) on every stock deployment, so the connection ceiling — which Kestrel enforces by silently closing the socket with **no HTTP response** — bit first instead. If you do set a finite value, keep it above `MaxConcurrentRequests + RequestQueueLimit`. On 0.1.20 and earlier, `0` fails validation at startup (`MaxConnections must be at least 1`) — check your server version before relying on the unlimited default. |
 
@@ -4934,6 +4935,34 @@ used to give up and hand the caller the key. A `:commit` may name the frames it 
 job applied exactly those. An end frame still takes the number after its body's last data frame, which is also the next body's
 first.
 
+#### A body that commits its job (**Lead S21b, next train**)
+
+A column-batch body may end the job's rows and commit the job in one request: its **end frame carries `commit`**, an object of the
+[`:commit`](#post-jobidcommit) options — `waitForDeferredWork`, `writeConcern`, `writeConcernTimeoutMs`, `mqWaitMs`, each optional
+(`{}` takes every default):
+
+```json
+{"rowCount": 50000, "status": "ok", "commit": {"mqWaitMs": 0}}
+```
+
+Its frames are applied as any body's are, then the job commits, and **the response is the `:commit` response** — the same fields,
+the same errors. The job's rows end the moment the body has been read, so its segments are finalized and synced while the client is
+already sending its next job; only the commit point waits for the jobs before it on the same tables. Use it for the last body of
+every job: it saves the `:commit` round trip and lets the next job overlap this one's commit. Three rules:
+
+- **The end frame's number is the job's frame count.** If the job holds more frames than the body's end frame names (an older body
+  sent again with `commit`), nothing is committed: `409 BULK_LOAD_CURSOR_MISMATCH`, `details` naming `nextSequence`. A body of only
+  an end frame (`rowCount: 0`, numbered `nextSequence`) commits what the job holds.
+- **A bad option commits nothing**: `400 BULK_LOAD_INVALID_OPTIONS`, the body's frames applied and the job still open.
+- **Sent again after its answer was lost**, the body is safe: a frame below `nextSequence` is skipped, so if the job had not yet
+  read the end frame it commits once with every row once; if it is committing, the body is refused `409 BULK_LOAD_INVALID_STATE`
+  with `details: state=Committing` — wait and ask again; once it has committed, a `:begin` with the job's idempotency key replays it
+  (`alreadyCompleted`, its `token`). The C# SDK does all of this itself.
+
+A JSON column-array body cannot commit its job: one that carries `commit` is refused `400 INVALID_REQUEST`, nothing appended; send
+it, then `:commit`. A body that commits holds its place on the `:append` lane until its commit answers (see
+`Aouda:BulkLoad:MaxConcurrentStreamingRequests`).
+
 **Content-Type:** `application/vnd.aouda.column-batch-v2` (column-batch frames, then an end frame; layout below), or
 `application/json` — **one** body of [column arrays](#column-arrays-the-write-body), `{"columns": […], "data": [[…], …], "absent"?: {…}}`
 (**Lead S12, next train**). The retired `application/vnd.aouda.column-batch` is refused `415 FRAME_VERSION_UNSUPPORTED` (**Lead S09,
@@ -4983,7 +5012,8 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   numbers run across the job's bodies, so a body starts at the job's next number ([above](#a-jobs-frames-are-numbered-lead-s21a-next-train));
   a gap or a repeat *inside* a body is still refused. The end frame's payload is a JSON object:
   `rowCount` (the data frames' rows, checked), `status` (`"ok"`, or `"error"` with `error: { code, message, status }`), and on a
-  query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`. A body that
+  query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`; a bulk load's
+  may add `commit` (**Lead S21b, next train**: [a body that commits its job](#a-body-that-commits-its-job-lead-s21b-next-train)). A body that
   ends without an end frame, has bytes after it, carries a frame out of sequence, counts other rows than its frames, or holds an
   unknown frame kind is refused `400 INVALID_REQUEST`, naming what was wrong; so is a request body whose end frame reports an error.
   A body may hold no data frame — one end frame with `rowCount: 0`. ⚠️ **On `:append`, "refused" keeps the frames before the
@@ -5075,14 +5105,19 @@ Content-Type: application/json
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job; none of its frame's rows is applied (**Lead S21a, next train**). `details: frame={f}, row={n}, …` (**Lead S12, next train**: was `lineNumber=N`). |
 | `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, next train**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
 | `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). |
-| `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, next train**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) |
+| `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, next train**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) (**Lead S21b, next train**) Also a body whose end frame commits and names fewer frames than the job holds: nothing committed. |
+| `BULK_LOAD_INVALID_STATE` | 409 | The job is committing, committed, aborted or failed. (**Lead S21b, next train**) `details` name the state (`state=Committing`, …): a body sent again while its own commit runs reads `Committing` — wait, then `:begin` with the job's key. |
+| `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | (**Lead S21b, next train**) A body that commits a job begun with `afterJobId`: the job it follows failed or was aborted, so this one is not committed and none of its rows is loaded. `details` name `afterJobId`. Also answered by `:commit`. |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
 
 ---
 
 ### `POST {jobId}:commit`
 
-Commit the session. All sealed segments become queryable.
+Commit the session. All sealed segments become queryable. (**Lead S21b, next train**) A job whose last body is column-batch frames
+can [commit in that body's end frame](#a-body-that-commits-its-job-lead-s21b-next-train) instead, with the same options and the same
+answer; `:commit` is for a job whose last rows went as JSON, a resumed job whose bodies the server already holds, or an empty job.
+A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED`, if the job it follows did not commit.
 
 **Request body:**
 

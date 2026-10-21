@@ -409,9 +409,10 @@ after a server restart, which an open job does not survive.
 ### Several jobs into one table (**Lead S18b, next train**)
 
 A load that arrives as several jobs — a file per day, a batch per hour — goes through `BulkLoadJobsAsync`, not a loop of
-`BulkLoadAsync` calls. It sends job N+1's `:begin` and `:append`s while job N's `:commit` runs (the server queues them behind the
+`BulkLoadAsync` calls. It sends job N+1's `:begin` and `:append`s while job N commits (the server queues them behind the
 table's bulk-load lock), so a commit overlaps the next job's sending instead of adding to it, and it yields each job's handle in
-job order, as its commit returns:
+job order, as its commit returns. (**Lead S21b, next train**) A job's last column-batch body commits it in its end frame — no
+`:commit` request — and job N+1 is begun once that body of job N is written, so N's finalize and commit overlap N+1's rows too:
 
 ```csharp
 IEnumerable<IReadOnlyList<ColumnBatch>> days = ReadDays();   // or IAsyncEnumerable<ColumnBatch> per job, or row streams
@@ -428,10 +429,12 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 
 - **Each job is a job of its own**: committed, visible and answered on its own, in order. Its handle is exactly what
   `BulkLoadAsync` would have returned for it.
-- **At most one `:append` and one `:commit` in flight.** The next job is begun while a commit runs; its own `:commit` is sent only
-  after the one before it returned. The next job is asked of `jobs` once the previous job's rows are all sent.
-- **The first failure ends the sequence**, after every earlier job's handle. The job being sent behind a failed commit is stopped
-  and aborted; so is the job in flight when you stop reading (`break`) early.
+- **One job sending and one committing** (**Lead S21b, next train**; it was "one `:append` and one `:commit` in flight"). Job
+  N+2 is begun only after job N's handle. The next job is asked of `jobs` once the previous job's rows are all sent.
+- **The first failure ends the sequence**, after every earlier job's handle, and no later job commits: (**Lead S21b, next
+  train**) each job is begun naming the one before it (`afterJobId`), and the server refuses the commit of a job whose predecessor
+  did not commit. The job in flight when you stop reading (`break`) early is aborted — unless its commit point had passed, in which
+  case it is committed (its handle is not yielded).
 - **`IdempotencyKey` keys each job**: job `i` is keyed `{key}.{i}`. Repeating the call with the same key and the same jobs replays
   the jobs that committed (their handles say `WasResumed`) and resumes the first that did not.
 - **`ConflictPolicy = FailFast` runs the jobs one at a time**: a job queued behind the lock would be refused.
@@ -495,7 +498,10 @@ server already applied would apply it twice:
   and the SDK sends nothing below it — and throws `BulkLoadCursorMismatchException`, sending nothing, if the frames it skips do
   not carry the rows the server holds (until Lead S21a it resumed by rows, from `resumeFromRow`, and threw on the first failed
   `:append`). Do not add a retry of your own around `:append`. A `:commit` names the frames the SDK sent, and the server commits
-  nothing unless it applied exactly those.
+  nothing unless it applied exactly those. (**Lead S21b, next train**) The body that commits a job is recovered the same way, with
+  two more outcomes: if the job committed before the answer was lost, the keyed `:begin` replays it and the SDK returns its handle
+  (`WasResumed`); if its commit is still running, the server says so and the SDK waits (not counted as an attempt, up to
+  `RequestTimeout`), then asks again.
 - **Other `:append` failures are not wrapped.** A `500`, a `413` or another `4xx` surfaces as the exception for its status
   (§9: `AoudaException`, `AoudaRequestException`, …), and three codes as their own exceptions: `BULK_LOAD_INVALID_STATE` (the job is no longer
   open) as `BulkLoadAbortedException`, `BULK_LOAD_MISSING_DISCRIMINATOR` as `BulkLoadMissingDiscriminatorException` and

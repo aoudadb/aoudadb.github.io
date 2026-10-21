@@ -490,17 +490,28 @@ for await (const handle of client.bulkLoadJobs('trades', days)) console.log(hand
   its own job is durable and visible, as before; `commitWaitMs` on the server's commit line says how long it waited for the job
   ahead of it. An update, delete or other write to the table waits for every load that was in flight when it arrived — loading or
   committing — and not for loads that start after it.
-- **One `:append` and one `:commit` in flight per loader.** That is what keeps the server's `:append` lane (4 requests at once by
-  default, `Aouda:BulkLoad:MaxConcurrentStreamingRequests`) from starving: up to four loaders into one table finish, each `:commit` running on
-  no lane at all. More loaders into one table than the lane has permits can still starve the lock holder's next `:append` until
-  the others time out on the lock (30 s) — keep it to as many loaders a table as the lane allows.
-- **The first failure ends the sequence** after every earlier job's handle; the job being sent behind a failed commit is aborted.
-  A caller's idempotency key keys job `i` as `{key}.{i}`, so a repeated call replays what committed and resumes the rest.
+- (**Lead S21b, next train**) **A job's last body commits it.** The C# SDK puts the commit in the end frame of a job's last
+  column-batch body ([HTTP API](../reference/http-api.md#a-body-that-commits-its-job-lead-s21b-next-train)), so a job needs no
+  `:commit` round trip, and it begins job N+1 as soon as job N's last body is written: N's rows end on the server the moment the
+  body is read, its segments are finalized and synced while N+1's rows arrive, and only N's commit point waits for the jobs before
+  it. `@aouda/client` does the same from **Lead S22**; until then it sends job N+1's `:commit` after N's returned.
+- **One job sending and one committing per loader** (**Lead S21b, next train**; it was "one `:append` and one `:commit` in
+  flight"). That is what keeps the server's `:append` lane (4 requests at once by default,
+  `Aouda:BulkLoad:MaxConcurrentStreamingRequests`) from starving: up to four loaders into one table finish. A body that commits keeps
+  its place on the lane until its commit answers; a separate `:commit` runs on no lane at all. More loaders into one table than the
+  lane has permits can still starve the lock holder's next `:append` until the others time out on the lock (30 s) — keep it to as
+  many loaders a table as the lane allows.
+- **The first failure ends the sequence** after every earlier job's handle, and **no job after the failed one commits**: (**Lead
+  S21b, next train**) each job names the one before it as the job it follows (`afterJobId`), so the server takes them in order and
+  refuses the commit of a job whose predecessor did not commit — even one whose commit was already on its way. A caller who stops
+  reading early gets the job sent behind the last handle aborted, unless its commit point had already passed. A caller's
+  idempotency key keys job `i` as `{key}.{i}`, so a repeated call replays what committed and resumes the rest.
 - **`FailFast` runs the jobs one at a time**: a job queued behind the lock would be refused.
 - What overlaps is a commit with the next job's begin, send, decode and (**Lead S19, next train**) row loop: the next job's rows
   are accrued while the earlier job drains, writes and commits. Two jobs' ingest buffers are then held at once, each under its own
-  memory grant. Raw HTTP clients can pipeline the same way: send job N+1's `:begin` / `:append`s after N's `:commit` is sent, and
-  N+1's `:commit` only after N's returned.
+  memory grant. Raw HTTP clients can pipeline the same way (**Lead S21b, next train**): begin job N+1 with `afterJobId` set to N's
+  `jobId` once N's last body (committing in its end frame) is written, and send N+1's bodies, its last one committing too; N+1
+  commits after N, and not at all if N fails. Without `afterJobId`, send N+1's commit only after N's returned.
 
 ### Sizing a session: fewer, longer, one commit
 

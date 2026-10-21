@@ -28,6 +28,15 @@ Public, user-facing release notes. Engine phase status lives in the server
   name the frames it sent, refusing to commit a job that applied others. The C# SDK now recovers a failed `:append` itself — a
   keyed `:begin`, then the same body — where it used to throw on the first connection error, and resumes a job by frames, refusing
   a resume whose framing changed. `@aouda/client` follows in Lead S22. See [the frame numbers](reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train).
+- **A bulk-load job commits in its last body, and a job sent behind a failed one never commits (Lead S21b, next train).** A
+  column-batch `:append` body whose end frame carries `commit` (the `:commit` options) ends the job's rows and commits it, and is
+  answered as `:commit` — so a job needs no `:commit` round trip, its segments are finalized while the client sends the next job,
+  and only its commit point waits for the jobs before it. Sent again after its answer was lost, such a body commits each row once
+  (a job still committing says `state=Committing`; one already committed replays on a keyed `:begin`). `:begin` takes
+  `afterJobId`: the job then takes its place after that one and commits only if it committed, else `409
+  BULK_LOAD_PREDECESSOR_NOT_COMMITTED` with none of its rows loaded. The C# SDK's `BulkLoadJobsAsync` uses both, so a sequence of
+  jobs commits a prefix of them, in order, whatever fails. `:commit` stays for jobs whose last rows are not frames; a JSON body
+  that carries `commit` is refused. See [a body that commits its job](reference/http-api.md#a-body-that-commits-its-job-lead-s21b-next-train).
 - **Pipelined loads into one table overlap their commits with the next job's rows (Lead S19, next train).** A table's bulk-load
   lock now passes to the next queued job when a job's rows end, not when its `:commit` returns, so job N+1's rows load while job N
   drains, writes and commits. Nothing a client sees changes: a `:commit` still returns after its own job is durable and visible,
