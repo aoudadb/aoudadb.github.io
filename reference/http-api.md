@@ -4860,7 +4860,7 @@ A table with no write-time compute needs neither flag.
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` | `600000` (10 min) | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. `0` disables the deadline on them. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
 | `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` runs in. It does **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. (**Lead S18a, next train**) `:commit` is on no lane, so it never waits behind `:append`s gated on the job it would finish; keep the loaders into one table at or below this setting (**BL-1117**). |
-| `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
+| `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: a rejected `:append` must be recovered by its client (a keyed `:begin`, then the same body: see [the frame numbers](#a-jobs-frames-are-numbered-lead-s21a-next-train)), so a rejection costs the load a round of recovery or, in a client that does not recover, the load. |
 | `Aouda:MaxConnections` | `0` (unlimited) as of **BL-419, 0.1.22** — was `100` through 0.1.21 | Kestrel's concurrent-connection ceiling. `0` (Kestrel's own default) means the request limiter (`MaxConcurrentRequests` + `RequestQueueLimit`) is the first thing an overloaded server hits, and it sheds with a retryable HTTP status; the old `100` default sat *below* that budget (150) on every stock deployment, so the connection ceiling — which Kestrel enforces by silently closing the socket with **no HTTP response** — bit first instead. If you do set a finite value, keep it above `MaxConcurrentRequests + RequestQueueLimit`. On 0.1.20 and earlier, `0` fails validation at startup (`MaxConnections must be at least 1`) — check your server version before relying on the unlimited default. |
 
 
@@ -4871,9 +4871,10 @@ A table with no write-time compute needs neither flag.
 | `jobId` | string | Server-assigned job identifier. Include in all subsequent requests for this load. |
 | `tables` | string[] | Echo of the requested tables. |
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
-| `maxRowsPerAppend` | number | Maximum rows allowed per single `:append` call. Clients must chunk larger payloads. |
+| `maxRowsPerAppend` | number | The most rows **one frame** of an `:append` body carries (a JSON column-array body is one frame). A larger frame is refused whole. (**Lead S21a, next train**) It counted across all the frames of one `:append`; a body may now hold any number of frames under it. |
+| `nextSequence` | number | (**Lead S21a, next train**) The number of the job's next frame: `0` for a new job; for a reconnect to a live job, the first frame it has not applied. A job's frames are [numbered across all its bodies](#a-jobs-frames-are-numbered-lead-s21a-next-train). Send from this frame. |
 | `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, next train**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
-| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count) and `resumeFromRow` (number?). **Resume from `resumeFromRow`**: the index of the first row to send next — the rows the job has accepted, buffered ones included. `rowsDurablyCommitted` counts only the durable ones; against a session that is still live, skipping only that many re-sends the buffered rows, and the commit writes them twice. `resumeFromRow` is absent when the server cannot offer a safe position (a cursor rebuilt after a restart, whose buffered rows are gone); then resume from `rowsDurablyCommitted`. ⚠️ No server rebuilds one yet (BL-067): an open job does not survive a restart, and a `:begin` with its key afterwards starts a fresh job with no cursor, so the load is sent from its first row. (Documented by **Lead S14, next train**; both SDKs resume this way — `@aouda/client` since Lead S14.) |
+| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count) and `rowsAppended` (number?). **Resume from `nextSequence`** (above): the frames below it are applied, buffered ones included, and `rowsAppended` is the rows they carry — a client that resumes by frames checks that the frames it skips carry exactly that many, so a client whose framing changed (another source, other body bounds) stops instead of loading rows twice or not at all. `rowsDurablyCommitted` counts only the durable rows and is not a position. (**Lead S21a, next train; breaking**) This replaces `resumeFromRow`, a row cursor, which is gone. ⚠️ No server rebuilds a cursor after a restart yet (BL-067): an open job does not survive one, and a `:begin` with its key afterwards starts a fresh job (`nextSequence: 0`), so the load is sent from its first frame. The C# SDK resumes this way; `@aouda/client` from **Lead S22**. |
 | `alreadyCompleted` | bool | `true` when the idempotency key matched a job that already **committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`): no session is opened, and `:append` / `:commit` on this `jobId` are refused `409 BULK_LOAD_INVALID_STATE`. Read the job's result from `rowsDurablyCommitted` and `token` below. `false` otherwise. |
 | `rowsDurablyCommitted` | number? | With `alreadyCompleted`: the committed job's rows. |
 | `token` | string? | With `alreadyCompleted`: the committed job's consistency token — the one its `:commit` returned. (**Lead S20a, next train**) A single-node job's too: it was `null` for a load that wrote no closing frame, so a client that lost the `:commit` response could not read its own write with a token. |
@@ -4910,7 +4911,28 @@ no PLS and no RLS policy is not affected. The refusal happens before a session e
 
 ### `POST {jobId}:append`
 
-Append a chunk of rows to an in-flight session.
+Append frames of rows to an in-flight session.
+
+#### A job's frames are numbered (**Lead S21a, next train**)
+
+(**Lead S21a, next train; breaking**) A job's frames are numbered **across all its `:append` bodies**, from 0: a body's first frame
+carries the job's next number, not 0 (a JSON column-array body is one frame and carries its number as `seq`). The server applies
+the frame numbered `next`, and:
+
+- **a frame below `next` is acknowledged and not applied again** — so a body sent again after its answer was lost, or after its
+  connection dropped part-way, loads each row once. The response's `framesSkipped` counts them;
+- **a frame above `next` is refused** `409 BULK_LOAD_CURSOR_MISMATCH` (*Frame 5 of bulk-load job '…' arrived where frame 3 is
+  next …*), nothing of the body applied;
+- **a frame is applied whole or not at all.** A frame over `maxRowsPerAppend` rows, or a multi-table frame with one row that cannot
+  be routed, is refused with none of its rows queued (the frames before it in the body stay applied).
+
+So `nextSequence` is always a frame boundary, and it is the resume point: in the `:begin` response (a reconnect with the job's
+idempotency key, which also stops a stale `:append` still reading a cut body), in every `:append` response and refusal (`details:
+nextSequence=N`), and in [`GET {jobId}`](#get-jobid). **To recover a failed `:append`**: `:begin` again with the same key, then send
+the same body again — or only its frames from `nextSequence` on. The C# SDK does this itself (a bounded number of times), where it
+used to give up and hand the caller the key. A `:commit` may name the frames it sent (`nextSequence`) and is then refused unless the
+job applied exactly those. An end frame still takes the number after its body's last data frame, which is also the next body's
+first.
 
 **Content-Type:** `application/vnd.aouda.column-batch-v2` (column-batch frames, then an end frame; layout below), or
 `application/json` — **one** body of [column arrays](#column-arrays-the-write-body), `{"columns": […], "data": [[…], …], "absent"?: {…}}`
@@ -4922,14 +4944,16 @@ next train**).
 only NDJSON could before — a vector, a nested value, a column whose rows disagree on type — and it is read by the same reader as every
 other write body. A JSON body is one batch: it is decoded whole before any row of it is queued, so a body that is not valid column
 arrays appends nothing (`400 INVALID_REQUEST`, or `400 ROW_OBJECTS_UNSUPPORTED` for a body with `rows`). `maxRowsPerAppend` counts
-its rows.
+its rows. (**Lead S21a, next train; breaking**) It is one frame of its job and carries its number: `"seq": N` beside `columns`
+and `data` (`0` for a job's first body). A body without `seq` is refused `400 INVALID_REQUEST` and nothing is appended.
 
 When the session was begun with more than one table, each row must name its destination in a **`_table` column**: a
 multi-table body carries `_table` in `columns`, with each row's table name in its slot. The `_table` column is stripped before
 inserting. A row whose `_table` is missing (absent or `null`) or names a table outside the job is refused
-`400 BULK_LOAD_MISSING_DISCRIMINATOR`: *Row {n} of this :append is missing the '_table' discriminator …* or *… references table
-'{t}' which is not in this job's table set.*, with `details: row={n}` (1-based, counted over this `:append`). The rows before it
-stay credited (**Lead S12, next train**: the message said "Row at line N", with `lineNumber=N`).
+`400 BULK_LOAD_MISSING_DISCRIMINATOR`: *Row {n} of frame {f} is missing the '_table' discriminator …* or *… references table
+'{t}' which is not in this job's table set …*, with `details: frame={f}, row={n}, …` (the row 1-based within its frame). (**Lead
+S21a, next train**) None of that frame's rows is applied — the rows before it in the frame were queued and credited until this
+train — and the frames before it stay applied (**Lead S12, next train**: the message said "Row at line N", with `lineNumber=N`).
 
 #### The column-batch frame (`ACB2`)
 
@@ -4955,16 +4979,19 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
 ```
 
 - **The sequence and the end frame** (**Lead S09, next train**). Every frame carries `seq`, its number in the body: 0, 1, 2, …
-  with no gap or repeat; the end frame takes the number after the last data frame. The end frame's payload is a JSON object:
+  with no gap or repeat; the end frame takes the number after the last data frame. (**Lead S21a, next train**) In a bulk load the
+  numbers run across the job's bodies, so a body starts at the job's next number ([above](#a-jobs-frames-are-numbered-lead-s21a-next-train));
+  a gap or a repeat *inside* a body is still refused. The end frame's payload is a JSON object:
   `rowCount` (the data frames' rows, checked), `status` (`"ok"`, or `"error"` with `error: { code, message, status }`), and on a
   query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`. A body that
   ends without an end frame, has bytes after it, carries a frame out of sequence, counts other rows than its frames, or holds an
   unknown frame kind is refused `400 INVALID_REQUEST`, naming what was wrong; so is a request body whose end frame reports an error.
   A body may hold no data frame — one end frame with `rowCount: 0`. ⚠️ **On `:append`, "refused" keeps the frames before the
   fault** (**Lead group 2 review, next train**: said so): each data frame is queued as it is read, and the rows queued before the
-  error stay credited, as for every `:append` that ends in an error. The error's `details` name them (`rowsAppended=N`). Do not
-  send the body again: resume from the job's cursor (`rowsAppendedToBuffer`, or `:begin` again with the same idempotency key), or
-  the frames before the fault load twice. `/rows` is all or nothing and inserts nothing from a refused body.
+  error stay credited, as for every `:append` that ends in an error. The error's `details` name them (`rowsAppended=N,
+  nextSequence=M`). (**Lead S21a, next train**) Sending the body again is safe — its frames below `nextSequence` are skipped — but
+  a body refused for its own content is refused again: fix the frame first. `/rows` is all or nothing and inserts nothing from a
+  refused body.
 - **`ACB1` is refused by name** (**Lead S09, next train; breaking**). The version before (`"ACB1" rowCount:u32 columnCount:u16
   column*`, frames back to back, the body ending where the stream ended) and its media type `application/vnd.aouda.column-batch`
   are answered `415 FRAME_VERSION_UNSUPPORTED`: `ACB1 frames are no longer read; this server reads ACB2
@@ -4978,9 +5005,9 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   UTF-8 bytes; a string up to 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would
   decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, 0.1.40**:
   the last two, and the C# SDK no longer writes a name or string the reader refuses).
-  `maxRowsPerAppend` applies across all the frames of one `:append`.
+  `maxRowsPerAppend` is the most rows of one frame (**Lead S21a, next train**: it applied across all the frames of one `:append`).
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
-  earlier, well-formed frames in the same body are kept and counted.
+  earlier, well-formed frames in the same body are kept and counted, and `nextSequence` names the first frame not applied.
 - (**LoadSpeed S13, 0.4.0; breaking**) **Kind 6, the 128-bit `Decimal`, is retired.** It was
   `rowCount × 4 × i32` in the .NET decimal layout. A frame that carries it — on `:append` or on
   `POST …/tables/{name}/rows` — is refused `400`: `Column '<name>': kind 6, the 128-bit Decimal, is retired
@@ -4999,6 +5026,7 @@ POST /api/databases/my_db/bulk-load/blj_abc123:append
 Content-Type: application/json
 
 {
+  "seq": 0,
   "columns": ["sensor_id", "value", "recorded_at"],
   "data": [
     [1, 2],
@@ -5011,6 +5039,7 @@ Content-Type: application/json
 **Example (multi-table, a `_table` column required):** a column only one table has is `absent` in the other table's rows.
 ```
 {
+  "seq": 0,
   "columns": ["_table", "id", "type", "event_id", "browser"],
   "data": [
     ["events", "event_meta"],
@@ -5028,8 +5057,10 @@ Content-Type: application/json
 | Field | Type | Description |
 |---|---|---|
 | `rowsAppended` | number | Rows accepted in **this** append call. Not necessarily durable yet. |
+| `framesSkipped` | number | (**Lead S21a, next train**) Frames of this body below the job's next number: applied by an earlier body, acknowledged and not applied again. |
+| `nextSequence` | number | (**Lead S21a, next train**) The job's next frame once this body was read; every frame below it is applied. |
 | `rowsAppendedToBuffer` | number | Cumulative rows accepted into the session buffer since `:begin`. Not necessarily durable (lost on server crash before sealing). |
-| `rowsDurablyCommitted` | number | Cumulative rows sealed into segments so far in this session. **Not durable until `:commit` returns**: a server crash before the job commits discards the whole job, these rows included, and the job's idempotency key then loads afresh (**Lead S20b, next train**: this said "what a crash cannot take away", which no build has done). **Not the resume offset** (**Lead S14, next train**: this said it was): after a reconnect, send the same `:begin` with the same idempotency key and resume from its cursor's `resumeFromRow` (else its `rowsDurablyCommitted`) — see the `:begin` response above. |
+| `rowsDurablyCommitted` | number | Cumulative rows sealed into segments so far in this session. **Not durable until `:commit` returns**: a server crash before the job commits discards the whole job, these rows included, and the job's idempotency key then loads afresh (**Lead S20b, next train**: this said "what a crash cannot take away", which no build has done). **Not the resume offset** (**Lead S14, next train**: this said it was): after a reconnect, send the same `:begin` with the same idempotency key and resume from its `nextSequence` (**Lead S21a, next train**; it was the cursor's `resumeFromRow`) — see the `:begin` response above. |
 | `acceptedAtUtc` | string | ISO 8601 UTC timestamp. |
 | `segmentsSealedSoFar` | number | Segments sealed across all tables in this job so far. |
 
@@ -5040,11 +5071,11 @@ Content-Type: application/json
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, 0.3.0**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
-| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its cursor's `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
-| `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job. `details: row={n}` (**Lead S12, next train**: was `lineNumber=N`). |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, next train**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
+| `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job; none of its frame's rows is applied (**Lead S21a, next train**). `details: frame={f}, row={n}, …` (**Lead S12, next train**: was `lineNumber=N`). |
 | `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, next train**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
 | `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). |
-| `BULK_LOAD_CURSOR_MISMATCH` | 409 | Client resumed from an incorrect cursor (sent rows below `rowsDurablyCommitted`). |
+| `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, next train**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
 
 ---
@@ -5059,6 +5090,7 @@ Commit the session. All sealed segments become queryable.
 |---|---|---|---|---|
 | `database` | string | Yes | — | Database name. |
 | `jobId` | string | Yes | — | Job identifier (also in the path). |
+| `nextSequence` | number? | No | — | (**Lead S21a, next train**) The frames this client sent (the number after its last). When given, the commit is refused `409 BULK_LOAD_CURSOR_MISMATCH` — nothing committed, the job still open — unless the job applied exactly these; `details` name the job's `nextSequence`. Omitted: the job commits what it applied. The C# SDK sends it. |
 | `waitForDeferredWork` | bool | No | `false` | If `true`, the response is held until all post-processing (PK index rebuild, CSC mirror, RaBitQ encodings) completes. |
 | `writeConcern` | string? | No | `"acknowledged"` | Replication barrier. Allowed: `"acknowledged"`, `"majority"`, `"all"`. |
 | `writeConcernTimeoutMs` | number? | No | `300000` (5 min) | Max wait for the write-concern barrier. On timeout, returns 200 OK with `writeConcernTimedOut: true`. The data is durable; replicas catch up at their own pace. |
@@ -5126,6 +5158,7 @@ Get current session state and progress.
 | `tables` | string[] | Tables being loaded. |
 | `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`. |
 | `rowsAppendedToBuffer` | number | Rows in buffer (not yet durable). |
+| `nextSequence` | number | (**Lead S21a, next train**) The job's next frame; every frame below it is applied. |
 | `rowsDurablyCommitted` | number | Durably committed rows. |
 | `segmentsSealed` | number | Segments sealed so far. |
 | `startedAtUtc` | string | ISO 8601 session start time. |

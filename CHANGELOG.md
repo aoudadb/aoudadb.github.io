@@ -19,6 +19,15 @@ Public, user-facing release notes. Engine phase status lives in the server
   read credential for that database, including its `mk_svc_`. A service process checks existence with get-by-name; it
   does not list or create databases. [HTTP API](reference/http-api.md#database-catalog-api),
   [Getting Started](getting-started/index.md#creating-databases-via-api).
+- **A bulk-load body sent again loads none of its rows twice (Lead S21a, next train; breaking on the wire).** A job's frames are
+  now numbered across all its `:append` bodies, and the server applies each number once: a frame below the job's `nextSequence`
+  is acknowledged and skipped, one above it is refused `409 BULK_LOAD_CURSOR_MISMATCH`, and a frame is applied whole or not at all
+  (a frame over `maxRowsPerAppend` — now a per-frame limit — or a multi-table frame with one unroutable row is refused with none of
+  its rows queued). `nextSequence` replaces the row cursor `resumeFromRow` in `:begin`, and appears in every `:append` response and
+  refusal and in `GET {jobId}`; a JSON column-array body carries its frame number as `seq` (refused without it); and a `:commit` may
+  name the frames it sent, refusing to commit a job that applied others. The C# SDK now recovers a failed `:append` itself — a
+  keyed `:begin`, then the same body — where it used to throw on the first connection error, and resumes a job by frames, refusing
+  a resume whose framing changed. `@aouda/client` follows in Lead S22. See [the frame numbers](reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train).
 - **Pipelined loads into one table overlap their commits with the next job's rows (Lead S19, next train).** A table's bulk-load
   lock now passes to the next queued job when a job's rows end, not when its `:commit` returns, so job N+1's rows load while job N
   drains, writes and commits. Nothing a client sees changes: a `:commit` still returns after its own job is durable and visible,

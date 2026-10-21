@@ -405,16 +405,24 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
 (`BulkLoadMultiTableAsync`) takes batches that carry a `_table` string column.
 
 - **How batches map to `:append` bodies.** A body holds up to `AppendBatchSize` rows (capped by the server's `maxRowsPerAppend`)
-  and about `MaxAppendBytes` bytes, as consecutive frames numbered from 0 and closed by the body's end frame. Several small
+  and about `MaxAppendBytes` bytes, as consecutive frames closed by the body's end frame. (**Lead S21a, next train**) The frames
+  are numbered across the job's bodies, from 0, so the server applies each one once. Several small
   batches share one body, a frame each; a large batch is cut across several bodies. Batches of a few thousand rows or more load
   fastest, since each batch is at least one frame. Sizing the session itself is unchanged: see
   [Sizing a session](#sizing-a-session-fewer-longer-one-commit).
 - **Checked before it is sent.** Each batch is validated before any of it is written: a malformed batch throws `ArgumentException`
   naming the column and row, and the load is not committed. Rows from earlier batches already appended stay in the open session
   until the server reclaims it.
-- **Resume inside a batch.** A failed `:append` is never re-sent; it throws `BulkLoadAppendFailedException`. Run the same load
-  again with the same `IdempotencyKey` and the same batches from the start: `:begin` answers with the row the session needs next,
-  and the SDK skips every row before it, even when that row is in the middle of a batch.
+- **A failed `:append` is re-sent by the SDK** (**Lead S21a, next train**). A job's frames are numbered and the server applies each
+  number once, so after a connection that dropped, a timeout or a `503`, the SDK sends a `:begin` with the job's key (which stops
+  the server's stale request and answers the job's `nextSequence`) and then the same body again; the frames the server already
+  applied are skipped, not loaded twice. Only after four attempts does it throw `BulkLoadAppendFailedException` (it used to throw
+  on the first failure).
+- **Resume by frames.** Run the same load again with the same `IdempotencyKey`, the same batches from the start and the same body
+  bounds: `:begin` answers with the job's next frame, and the SDK does not send the bodies below it (a body that straddles it goes
+  whole, and the server skips its prefix). It checks that the frames it skips carry the rows the server holds, and throws
+  `BulkLoadCursorMismatchException` — sending nothing — when they do not (another source, or another `AppendBatchSize` /
+  `MaxAppendBytes`). Until **Lead S21a** it resumed by rows, from `resumeFromRow`.
 - **The JSON fallback.** A batch with a column no frame can carry (an object column from `ColumnBatchBuilder`) is sent as a JSON
   column-array body of the same rows, after the frames before it. So is every batch when `:begin` does not list
   `column-batch-v2` in `acceptedAppendFormats`. The values loaded are the same either way.
@@ -729,16 +737,16 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` — *since 0.1.22* | int | `600000` | `>=0` (`0` disables) | Server config | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. Not the bound on an abandoned session — `SessionIdleTimeoutMinutes` is. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | int | `10` | `>=0` (`0` disables) | Server config | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock and ingest budget. |
 | `Aouda:BulkLoad:MaxConcurrentStreamingRequests` — *since 0.1.22* | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` runs in. It does not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. (**Lead S18a, next train**) `:commit` is on no lane: it waits for its table lock and the engine (whose segment I/O is bounded server-wide), and on the lane four `:append`s gated behind an earlier job could hold every permit while that job's `:commit` waited for one. Run no more loaders into one table at once than this setting (**BL-1117**). |
-| `Aouda:BulkLoad:StreamingRequestQueueLimit` — *since 0.1.22* | int | `100` | `>=0` | Server config | How many streaming requests may wait for a lane slot; beyond it, 503. Generous by design: `:append` is not idempotent and clients do not retry it, so a rejection fails the load outright. |
+| `Aouda:BulkLoad:StreamingRequestQueueLimit` — *since 0.1.22* | int | `100` | `>=0` | Server config | How many streaming requests may wait for a lane slot; beyond it, 503. Generous by design: a rejected `:append` must be recovered by its client (a keyed `:begin`, then the same body — **Lead S21a, next train**), so a rejection costs the load a round of recovery or, in a client that does not recover, the load. |
 | `Aouda:MaxConnections` | int | `0` | `>=0` (`0` = unlimited). On 0.1.20 and earlier the default was `100` and `0` failed startup | Server config | Kestrel's concurrent-connection ceiling. `0` (unlimited) is the default from 0.1.22. A finite value must stay above `MaxConcurrentRequests + RequestQueueLimit`, or Kestrel closes sockets with no HTTP response. |
 
-**`:append` is not retried, and must not be.** The server writes each accepted row into the
-session's row channel before responding, so replaying an `:append` whose response was lost
-duplicates every row the first attempt landed — silently. The official clients exclude it from
-their retry policy for that reason (`@aouda/client` since **Lead S14, next train**: before, a configured retry
-policy re-sent it); a caller who wraps `bulkLoad` in a retry of their own is
-opting into duplicate rows. Resume with the same idempotency key instead, from the cursor `:begin`
-answers — `resumeFromRow` when it is there, else `rowsDurablyCommitted` (see 2.14).
+**`:append` is not retried blindly.** (**Lead S21a, next train**) A job's frames are numbered across its bodies and the server
+applies each number once — a frame below the job's `nextSequence` is acknowledged and skipped — so sending a body again after its
+answer was lost no longer duplicates its rows. The recovery is still not a blind re-post: a stale request may still be reading the
+cut body, so first send `:begin` with the job's idempotency key (it stops that request and answers `nextSequence`), then send the
+body again, or its frames from `nextSequence` on. The C# SDK does exactly that, a bounded number of times; `@aouda/client` excludes
+`:append` from its retry policy until **Lead S22**. Before Lead S21a the server applied every frame it was sent, and a replayed
+`:append` duplicated every row the first attempt landed — silently (see the [HTTP reference](../reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train)).
 
 Precedence notes:
 - Begin-time options (`BulkLoadOptionsDto`) set per-job ingest and replication behavior.

@@ -384,8 +384,8 @@ var handle = await client.BulkLoadAsync("trades", ReadBatchesAsync(), new BulkLo
 | `RemoteTableQuery.BulkLoadAsync(IAsyncEnumerable<ColumnBatch>` / `IReadOnlyList<ColumnBatch>` / `ColumnBatch, …)` | the same three, on `client.GetTable("trades")` |
 
 **How batches become `:append` bodies.** A body holds up to `AppendBatchSize` rows (lowered to the server's `maxRowsPerAppend`
-when that is smaller) and about `MaxAppendBytes` bytes, as consecutive frames. Several small batches share one body, one frame
-each; a large batch is cut across several bodies. Batches of a few thousand rows or more load fastest, since each batch is at
+when that is smaller) and about `MaxAppendBytes` bytes, as consecutive frames, numbered across the job's bodies (**Lead S21a, next
+train**). Several small batches share one body, one frame each; a large batch is cut across several bodies. Batches of a few thousand rows or more load fastest, since each batch is at
 least one frame. Your source is read on a thread-pool thread, one batch at a time and at most one body ahead of what the server
 has accepted: the next body is built while the previous one is in flight.
 
@@ -485,17 +485,23 @@ server already applied would apply it twice:
 - **A `:commit` refused for capacity has failed its job.** The server answers every repeat of it with the same `503`, so the
   SDK's re-sends end in `AoudaCapacityException`. Wait its `RetryAfter`, then run the load again: it starts a fresh job and
   sends every row (the key is free again).
-- **A bulk-load `:append` is never re-sent.** The server writes each accepted row into the session as it reads it, so
-  replaying a body that partly landed would duplicate those rows. An `:append` that fails in transit (a connection error, a
-  timeout, a `503`) throws `BulkLoadAppendFailedException`, carrying the `IdempotencyKey`, `RowsSent` and
-  `RowsDurablyCommitted`. Recover by running the same load again with the same `IdempotencyKey`: the SDK sends `:begin` with
-  that key, the server answers with the row it needs next, and the SDK skips the rows before it (mid-batch included) and
-  continues. Do not add a retry of your own around `:append`.
+- **A bulk-load `:append` is re-sent only by the SDK, after asking where the job is** (**Lead S21a, next train**). A job's frames
+  are numbered and the server applies each number once, so a body sent again loads none of its rows twice. An `:append` that
+  fails in transit (a connection error, a timeout, a `503`) is answered by a `:begin` with the job's key — which stops the
+  server's stale request and answers the job's `nextSequence` — and then the same body again, up to four attempts with a short
+  back-off (a `503`'s `Retry-After` when it gives one). Only then does it throw `BulkLoadAppendFailedException`, carrying the
+  `IdempotencyKey`, `RowsSent` and `RowsDurablyCommitted`. Recover by running the same load again with the same `IdempotencyKey`,
+  the same source and the same body bounds: the SDK sends `:begin` with that key, the server answers with the job's next frame,
+  and the SDK sends nothing below it — and throws `BulkLoadCursorMismatchException`, sending nothing, if the frames it skips do
+  not carry the rows the server holds (until Lead S21a it resumed by rows, from `resumeFromRow`, and threw on the first failed
+  `:append`). Do not add a retry of your own around `:append`. A `:commit` names the frames the SDK sent, and the server commits
+  nothing unless it applied exactly those.
 - **Other `:append` failures are not wrapped.** A `500`, a `413` or another `4xx` surfaces as the exception for its status
   (§9: `AoudaException`, `AoudaRequestException`, …), and three codes as their own exceptions: `BULK_LOAD_INVALID_STATE` (the job is no longer
   open) as `BulkLoadAbortedException`, `BULK_LOAD_MISSING_DISCRIMINATOR` as `BulkLoadMissingDiscriminatorException` and
-  `BULK_LOAD_CURSOR_MISMATCH` as `BulkLoadCursorMismatchException`. A `400` for the body's rows leaves the job open, so the
-  same key resumes it from the row the server needs next — and fails there again until the source is fixed.
+  `BULK_LOAD_CURSOR_MISMATCH` as `BulkLoadCursorMismatchException` (its `NextSequence`, `ServerRows` and `ClientRows` say where
+  the job and the load disagree). A `400` for the body's rows leaves the job open, so the same key resumes it from the frame the
+  server needs next — and fails there again until the source is fixed.
 - **Set your own `IdempotencyKey` if you may need to resume.** (**Lead group 3 review, next train**) A failed load whose key
   the SDK generated is aborted (a best-effort `:abort`), since nobody else knows the key — with two exceptions. A transient
   `:append` failure keeps the job: its `BulkLoadAppendFailedException` hands you the generated key in `IdempotencyKey`, and
