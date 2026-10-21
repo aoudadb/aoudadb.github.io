@@ -217,6 +217,14 @@ The 42-hex string encodes epoch and position. Write volume is visible to anyone 
 
 When a token or lag budget is in play, the read may wait up to `waitMs` (default 250 ms) before `onExceeded`. Existing traffic with neither is unchanged.
 
+### A token from an accepted bulk load (**Lead S30, next train**)
+
+A bulk load answered `accepted` ([Bulk Load](bulk-load.md#answered-before-the-commit-accepted-lead-s30-next-train)) hands out a token
+before its rows are visible. A read presenting it — or any later write's token — waits until the job is visible: the primary, every
+materialized query over the loading tables and every replica hold their covered position below the job until then. That wait is head
+of line behind the load's commit; a read without a token is not held. If the job is then lost, its token reads as covered once the
+log moves past it, with none of its rows: the job's outcome, not the token, says whether they are there.
+
 ### Hub cannot provision the replica yet
 
 This engine work makes a regional replica *safe*. Hub region-aware scheduling (`CP-B4`) is a commercial dependency, not shipped here.

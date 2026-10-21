@@ -522,6 +522,41 @@ for await (const handle of client.bulkLoadJobs('trades', days)) console.log(hand
   `jobId` once N's last body (committing in its end frame) is written, and send N+1's bodies, its last one committing too; N+1
   commits after N, and not at all if N fails. Without `afterJobId`, send N+1's commit only after N's returned.
 
+### Answered before the commit: `accepted` (**Lead S30, next train**)
+
+By default a job's commit answers once the job is committed. A loader that has more to send, and learns the outcome later, can ask
+to be answered sooner: with `wait: "accepted"` ([HTTP API](../reference/http-api.md#post-jobidcommit)) the commit answers once the
+job's rows have ended and it holds its place in its tables' commit order, and the job commits on without the caller.
+
+```csharp
+var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { CommitWait = BulkLoadCommitWait.Accepted });
+// handle.State == BulkLoadCommitState.Accepted: not durable yet
+var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost
+```
+
+```typescript
+const handle = await client.table('trades').bulkLoad(batches, { commitWait: 'accepted' });
+const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
+```
+
+- ⚠️ **An accepted job is not durable and may be lost.** If the server stops before the job's commit point, or its commit fails,
+  nothing of it is kept, and the job's outcome says `lost`. "Accepted" is never reported as committed: the handle claims no durable
+  rows (`RowsDurablyCommitted` / `rowsDurablyCommitted` 0, no commit time) until its outcome says so. The default (`visible`) is
+  unchanged, and so is what a committed job promises under `strict` durability.
+- **A read with the handle's token waits until the job is visible** — on the primary, for the materialized queries over the loading
+  tables, and on a replica — so reading your own load with the token never shows it half there. Do not read the outcome off the
+  token: a lost job's token reads as covered once the log moves past it.
+- **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. After a
+  restart that cut the job off, the server answers it `lost`; once its log has moved past the job, `404` — the same answer for an
+  accepted job: load it again.
+- **It frees the loader, not the table.** A write into a table the job loads still waits for the job.
+- With `BulkLoadJobsAsync` / `bulkLoadJobs`, each handle is yielded once its job is accepted. A loader keeps at most **two** accepted
+  jobs before it waits for the oldest one's outcome (an accepted job still holds its buffers on the server until it commits), and a
+  lost one ends the sequence (`BulkLoadLostException` / `BulkLoadLostError`): the jobs after it follow it, so none of them commits.
+- A job the server cannot accept — a load that writes no closing log frame, or a database without a WAL — is answered committed.
+  `wait: "accepted"` is refused with `waitForDeferredWork`, `mqWaitMs` above 0 or a write concern above `acknowledged`, which each
+  wait for the commit.
+
 ### Sizing a session: fewer, longer, one commit
 
 > **Fewer, longer sessions produce well-sized segments. Many short sessions do not.**

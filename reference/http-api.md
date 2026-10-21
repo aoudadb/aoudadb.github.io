@@ -5127,6 +5127,7 @@ Content-Type: application/json
 | `BULK_LOAD_INVALID_STATE` | 409 | The job is committing, committed, aborted or failed. (**Lead S21b, next train**) `details` name the state (`state=Committing`, …): a body sent again while its own commit runs reads `Committing` — wait, then `:begin` with the job's key. |
 | `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | (**Lead S21b, next train**) A body that commits a job begun with `afterJobId`: the job it follows failed or was aborted, so this one is not committed and none of its rows is loaded. `details` name `afterJobId`. Also answered by `:commit`. |
 | `BULK_LOAD_COMMIT_QUEUED` | 409 | (**Lead group 5 review, next train**) A body whose end frame commits its job, for a job still queued behind another load on its tables: the body's frames were applied (`details`: `nextSequence`, `rowsAppended`), nothing was committed, and the job is open. Send `:commit`; send no row again. |
+| `BULK_LOAD_LOST` | — | (**Lead S30, next train**) Not a response's status: the `errorCode` of a job `GET {jobId}` reports `"lost"` — answered `accepted` by `:commit` (`wait: "accepted"`), then lost before its commit point. Nothing of it is durable; load it again. |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
 
 ---
@@ -5137,6 +5138,28 @@ Commit the session. All sealed segments become queryable. (**Lead S21b, next tra
 can [commit in that body's end frame](#a-body-that-commits-its-job-lead-s21b-next-train) instead, with the same options and the same
 answer; `:commit` is for a job whose last rows went as JSON, a resumed job whose bodies the server already holds, or an empty job.
 A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED`, if the job it follows did not commit.
+
+(**Lead S30, next train**) **`wait: "accepted"` answers before the commit point.** By default `:commit` answers once the job is
+committed. With `wait: "accepted"` it answers once the job's rows have ended and it holds its place in its tables' commit order — its
+commit then runs on without the caller. That answer says `state: "accepted"`, and **the job is not durable yet and may be lost**: if
+the server stops before the job's commit point, or its commit fails, nothing of it is kept. `accepted` never means committed:
+
+- The answer carries the job's `rowsLoaded`, `tables` and a `token`. A read presenting that token **waits until the job is visible**
+  (on the primary, for a materialized query over the loading tables, and on a replica), so a client that reads its own load with the
+  token never reads it half there. `committedAtUtc` is `null`, `perTableRowCounts` is empty, `segmentsCreated` is `0`,
+  `writeConcernAchieved` is `"none"` and `mqStatus` is `"behind"`.
+- **The outcome comes from [`GET {jobId}`](#get-jobid)**: `state` is `"accepted"` while the commit runs, then `"completed"` (with the
+  job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`). Ask with `waitMs` to be answered when it settles. After a
+  restart that cut the job off, `GET {jobId}` answers `"lost"`; once the server's log has moved past the job (a checkpoint), it answers
+  `404 BULK_LOAD_JOB_NOT_FOUND`, which for an accepted job means the same thing: nothing of it is durable, load it again. Don't infer
+  the outcome from the token: a lost job's token reads as covered once the log moves past it, and its rows are not there.
+- **"Accepted" frees the loader, not the table.** A write into a table the job loads still waits for the job, as it does for any load.
+- A job the server cannot accept — one that writes no closing log frame, or a database without a WAL — is answered when committed,
+  `state: "committed"`: a stronger answer than asked for, never a weaker one.
+- It is not combined with `waitForDeferredWork: true`, `mqWaitMs` above `0` or a `writeConcern` other than `"acknowledged"`, which
+  each wait for the commit: those are refused `400 BULK_LOAD_INVALID_OPTIONS`, nothing committed. Both SDKs expose it
+  (`BulkLoadOptions.CommitWait = Accepted` / `commitWait: "accepted"`): an accepted handle, and an outcome that completes at the
+  job's outcome.
 
 **Request body:**
 
@@ -5149,18 +5172,20 @@ A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NO
 | `writeConcern` | string? | No | `"acknowledged"` | Replication barrier. Allowed: `"acknowledged"`, `"majority"`, `"all"`. |
 | `writeConcernTimeoutMs` | number? | No | `300000` (5 min) | Max wait for the write-concern barrier. On timeout, returns 200 OK with `writeConcernTimedOut: true`. The data is durable; replicas catch up at their own pace. |
 | `mqWaitMs` | number? | No | `0` (**LoadSpeed M.2, 0.4.0**; `30000` in 0.3.0) | (**WorkloadCore S09, 0.3.0**) How long `:commit` waits, after the load is durable and its table locks are released, for every materialized query the load's rows reach to be current for the load. `0` = do not wait. `0`–`600000`; outside that, `400 BULK_LOAD_INVALID_OPTIONS`, checked before anything is committed. The answer is `mqStatus` below. |
+| `wait` | string? | No | `"visible"` | (**Lead S30, next train**) `"visible"`: answered once the job is committed. `"accepted"`: answered once the job is accepted, before its commit point — not durable yet (see above). Any other value is refused `400 BULK_LOAD_INVALID_OPTIONS`. Also taken by a body's end frame that commits its job. |
 
 **Response body:**
 
 | Field | Type | Description |
 |---|---|---|
 | `jobId` | string | Echo of job ID. |
+| `state` | string | (**Lead S30, next train**) `"committed"`: the job is committed, and the fields below are its result. `"accepted"` (only with `wait: "accepted"`): its rows have ended and its commit is running — **not durable yet**; its outcome comes from `GET {jobId}`. |
 | `tables` | string[] | Tables involved in the load. |
 | `rowsLoaded` | number | Total rows durably committed across all tables. |
 | `expiredRows` | number? | (**Horizon, 0.5.0**) Rows the load sent that were left out because their time lay below their table's [retention](../guides/retention.md) horizon, or was an explicit `null` — accepted, never written, never visible, not in `rowsLoaded`. **Omitted when 0.** Such a table is loaded one segment per time slice and never spilled ([Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention)). |
 | `perTableRowCounts` | object | Per-table row counts (`{ tableName: count }`). Always present. |
 | `segmentsCreated` | number | Total segments created. |
-| `committedAtUtc` | string | ISO 8601 UTC commit timestamp. (**Lead S20a, next train**) The time of the job's commit record — its closing `BulkLoadCommitted` frame's when it wrote one, else the catalog record that published its segments — not the time the response was written. |
+| `committedAtUtc` | string? | ISO 8601 UTC commit timestamp; `null` in an `accepted` answer (**Lead S30, next train**). (**Lead S20a, next train**) The time of the job's commit record — its closing `BulkLoadCommitted` frame's when it wrote one, else the catalog record that published its segments — not the time the response was written. |
 | `deferredWorkCompleted` | boolean | Whether deferred work completed before this response was sent. |
 | `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load (**Lead S18a, next train**: a replica now covers it only once every segment is fetched; see `bulkLoadHold` on [`GET /admin/replication/status`](#get-adminreplicationstatus)). (**WorkloadCore S09, 0.3.0**) On a single node, where a load writes no closing frame, it is the WAL head at the load's commit (it used to carry position 0): a read with it requires the load, and so waits for the load's materialized queries. (**Lead S20a, next train**) What the token names, exactly: a position at which this node already shows the load — the closing frame's when the load wrote one, else the WAL head read at the commit point, else position 0 on a database without a WAL (covered at once). It is kept in the job's commit record, so a replayed `:begin` returns the same token. |
 | `writeConcernRequested` | string | Echo of `writeConcern` from request. |
@@ -5204,13 +5229,18 @@ _The route is `GET /api/databases/{db}/bulk-load/{jobId}` (no `:status` suffix).
 
 Get current session state and progress.
 
+(**Lead S30, next train**) **Query parameter `waitMs`** (`0`–`60000`, default `0`; outside that `400 BULK_LOAD_INVALID_OPTIONS`):
+for a job whose commit is running — `committing`, or `accepted` — the answer waits up to that long for the job to settle (committed,
+failed, lost or aborted), then answers as it stands. This is how a client learns an accepted job's outcome without polling.
+
 **Response body:**
 
 | Field | Type | Description |
 |---|---|---|
 | `jobId` | string | Job identifier. |
 | `tables` | string[] | Tables being loaded. |
-| `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`. |
+| `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`; (**Lead S30, next train**) `"accepted"` — answered `accepted` by `:commit`, its commit running, not durable yet — and `"lost"` — accepted, then lost before its commit point (the server stopped, or its commit failed): nothing of it is durable, `errorCode` is `BULK_LOAD_LOST`. A restart that cut an accepted job off answers `"lost"` for it while the server's log still holds the job. |
+| `token` | string? | (**Lead S30, next train**) The job's commit token once `"completed"` (from its commit record after a restart too); the `accepted` answer's token while `"accepted"`. Absent otherwise. |
 | `rowsAppendedToBuffer` | number | Rows in buffer (not yet durable). |
 | `nextSequence` | number | (**Lead S21a, next train**) The job's next frame; every frame below it is applied. |
 | `rowsDurablyCommitted` | number | Durably committed rows. |
@@ -5220,8 +5250,8 @@ Get current session state and progress.
 | `progress` | object? | Deferred work progress. Same structure as in commit response. Null if no deferred work is in progress. |
 | `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
 | `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"` (and `"deferred"` until the 0.4.0). Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"deferred"` (BatchFirst, 0.1.40; gone in the 0.4.0, LoadSpeed K31)** meant the load was `postLoadMqBehavior: "deferred"` and its job was pending the table's deferred pass. An `"auto"` load whose table is still loading is `"pending"` until the catch-up has brought it in (**LoadSpeed M.3**), and `"failed"` if a pass after its commit leaves it owed only by queries in `error` (their rebuild failed; they are retried, or `:refresh` them). **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone (**Lead S20a, next train**: from the job's commit record, which keeps its rows past any checkpoint; an aborted job reads as not found after a restart, as an unknown one does) — neither records rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
-| `error` | string? | Human-readable error message. Set when `state = "failed"`. |
-| `errorCode` | string? | Error code when `state = "failed"`. |
+| `error` | string? | Human-readable error message. Set when `state = "failed"` or `"lost"`. |
+| `errorCode` | string? | Error code when `state = "failed"`, or `BULK_LOAD_LOST` when `"lost"`. |
 
 ---
 

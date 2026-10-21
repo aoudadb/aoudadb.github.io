@@ -208,6 +208,14 @@ When you do not set durability knobs explicitly:
   - Durability can be set at db level, optionally overridden at table level, optionally overridden per write.
 - Recovery:
   - On restart, WAL is replayed from `{db}/wal/CHECKPOINT` (`redoStartPosition`); whole `wal_%09d.log` files below that horizon are skipped.
+- A bulk load answered `accepted` is not durable yet (**Lead S30, next train**):
+  - A bulk load's commit may ask to be answered before its commit point (`wait: "accepted"`, [Bulk Load](bulk-load.md#answered-before-the-commit-accepted-lead-s30-next-train)).
+    Such a job is **not durable until its commit point**, whatever its durability level: a crash before it loses the job whole, and
+    its outcome (`GET .../bulk-load/{jobId}`) says `lost`. It is opt-in per job and reported as its own state, so a `strict` load's
+    acknowledgement never means less than it did: `strict` + `accepted` means "durable once committed; the answer did not wait for it".
+  - Its token is a visible watermark: a read presenting it waits until the job is visible, on the primary, for materialized queries
+    and on replicas. After a crash, recovery records each accepted job with no commit point lost and writes its abort to the log, so a
+    replica stops holding its tokens at it.
 
 ## 2.8 How Aouda implements it
 
