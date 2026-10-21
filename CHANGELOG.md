@@ -19,6 +19,14 @@ Public, user-facing release notes. Engine phase status lives in the server
   read credential for that database, including its `mk_svc_`. A service process checks existence with get-by-name; it
   does not list or create databases. [HTTP API](reference/http-api.md#database-catalog-api),
   [Getting Started](getting-started/index.md#creating-databases-via-api).
+- **`@aouda/client` on the bulk-load contract of Lead S21a / S21b (Lead S22, next train).** Its frames are numbered across a job,
+  a resume goes by `nextSequence` (refusing a load framed differently, `BULK_LOAD_CURSOR_MISMATCH`), the job's last frame body
+  commits it, and a failed `:append` is sent again by the SDK after a keyed `:begin` — a body sent twice is applied once (BL-404).
+  `bulkLoadJobs` begins job N+1 with `afterJobId` once N's last body is written (Node), or commits each job by `:commit` while the
+  next is sent where the `fetch` cannot say when a body was written. See [the TypeScript client](clients/typescript.md#bulk-load-a-body-sent-again-resume-and-a-committed-job-lead-s14-s22-next-train).
+- **A bulk load checks less than an insert — now said (Lead S22).** A null in a non-nullable column is stored as the type's zero
+  (an `Int64` primary key as `0`; BL-1129), a column the table does not have is dropped (BL-1130), and a duplicate key is loaded as
+  a second row; an insert refuses all three. See [`:append`](reference/http-api.md#post-jobidappend).
 - **A bulk-load body sent again loads none of its rows twice (Lead S21a, next train; breaking on the wire).** A job's frames are
   now numbered across all its `:append` bodies, and the server applies each number once: a frame below the job's `nextSequence`
   is acknowledged and skipped, one above it is refused `409 BULK_LOAD_CURSOR_MISMATCH`, and a frame is applied whole or not at all
@@ -27,7 +35,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   refusal and in `GET {jobId}`; a JSON column-array body carries its frame number as `seq` (refused without it); and a `:commit` may
   name the frames it sent, refusing to commit a job that applied others. The C# SDK now recovers a failed `:append` itself — a
   keyed `:begin`, then the same body — where it used to throw on the first connection error, and resumes a job by frames, refusing
-  a resume whose framing changed. `@aouda/client` follows in Lead S22. See [the frame numbers](reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train).
+  a resume whose framing changed. `@aouda/client` does the same from Lead S22. See [the frame numbers](reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train).
 - **A bulk-load job commits in its last body, and a job sent behind a failed one never commits (Lead S21b, next train).** A
   column-batch `:append` body whose end frame carries `commit` (the `:commit` options) ends the job's rows and commits it, and is
   answered as `:commit` — so a job needs no `:commit` round trip, its segments are finalized while the client sends the next job,

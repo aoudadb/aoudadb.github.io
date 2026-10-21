@@ -428,6 +428,11 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
   `column-batch-v2` in `acceptedAppendFormats`. The values loaded are the same either way.
 - **Absent is not null, and a bulk load applies no defaults.** A cell marked absent is stored as null, except that an absent
   `autoIncrement` cell is generated (BL-1104, as for any `:append`). An insert (`InsertAsync(ColumnBatch)`) does apply defaults.
+- ⚠️ **A bulk load checks less than an insert** (found by Lead S22). A null in a column that is not nullable is stored as the
+  type's zero — an `Int64` primary key as `0` — where an insert refuses the row (**BL-1129**); a column the table does not have is
+  dropped without a word, where an insert refuses it (**BL-1130**); and a key the table already holds, or one a job holds twice, is
+  loaded as a second row, `pkUniquenessOverride: "strict"` or not (Lead S27's ground). Check these in your source until they are
+  fixed.
 - **The arrays are not copied.** A batch's arrays are read while its rows are written, which happens before the SDK asks your
   source for the next batch; reuse them from then on.
 
@@ -494,7 +499,9 @@ for await (const handle of client.bulkLoadJobs('trades', days)) console.log(hand
   column-batch body ([HTTP API](../reference/http-api.md#a-body-that-commits-its-job-lead-s21b-next-train)), so a job needs no
   `:commit` round trip, and it begins job N+1 as soon as job N's last body is written: N's rows end on the server the moment the
   body is read, its segments are finalized and synced while N+1's rows arrive, and only N's commit point waits for the jobs before
-  it. `@aouda/client` does the same from **Lead S22**; until then it sends job N+1's `:commit` after N's returned.
+  it. `@aouda/client` does the same (**Lead S22, next train**) where its `fetch` streams a request body (Node's); with one that
+  cannot say when a body was written (a browser's, or a `fetch` passed in the options) it commits each job by `:commit`, still
+  naming the job before as `afterJobId`, while the next job's rows are sent.
 - **One job sending and one committing per loader** (**Lead S21b, next train**; it was "one `:append` and one `:commit` in
   flight"). That is what keeps the server's `:append` lane (4 requests at once by default,
   `Aouda:BulkLoad:MaxConcurrentStreamingRequests`) from starving: up to four loaders into one table finish. A body that commits keeps
@@ -755,8 +762,9 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 applies each number once — a frame below the job's `nextSequence` is acknowledged and skipped — so sending a body again after its
 answer was lost no longer duplicates its rows. The recovery is still not a blind re-post: a stale request may still be reading the
 cut body, so first send `:begin` with the job's idempotency key (it stops that request and answers `nextSequence`), then send the
-body again, or its frames from `nextSequence` on. The C# SDK does exactly that, a bounded number of times; `@aouda/client` excludes
-`:append` from its retry policy until **Lead S22**. Before Lead S21a the server applied every frame it was sent, and a replayed
+body again, or its frames from `nextSequence` on. The C# SDK does exactly that, a bounded number of times, and so does
+`@aouda/client` (**Lead S22, next train**: 4 attempts; until then it left a failed `:append` to the caller). Neither SDK's retry
+policy re-sends an `:append` on its own. Before Lead S21a the server applied every frame it was sent, and a replayed
 `:append` duplicated every row the first attempt landed — silently (see the [HTTP reference](../reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train)).
 
 Precedence notes:

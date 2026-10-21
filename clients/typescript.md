@@ -531,7 +531,8 @@ read. A capacity refusal is re-sent no sooner than its `Retry-After`. **Any othe
 until this train one with a `Retry-After` was; a proxy may answer it after forwarding the request, and the server answers
 `503 BATCH_PARTIALLY_APPLIED` and `500 WRITE_APPLIED_RESPONSE_FAILED` for writes it applied at least in part (see the
 [error codes](../reference/http-api.md#server-errors-5xx)). This is the C# SDK's rule. Reads — `GET`s, and the queries, counts and
-diffs sent as a `POST` — are re-sent after any transient failure, as before; a bulk load's `:append` is never re-sent (below).
+diffs sent as a `POST` — are re-sent after any transient failure, as before; a bulk load's `:append` is never re-sent by the retry
+policy — the bulk loader recovers it itself, after asking the server where the job is (below).
 
 **`expiredRows`** (**Horizon, 0.5.0**): on a table with [retention](../guides/retention.md), a row whose time lies below the
 table's horizon — or is an explicit `null` in a nullable time column — is accepted and left out, and `InsertResult.expiredRows`
@@ -626,21 +627,36 @@ batches.
 On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.32 s and 0.57 CPU-s as batches**, 5.7 s and
 7.4 CPU-s as row objects — the same 42 MB of frames either way.
 
-### Bulk load: resume, a committed job, and no re-sent append (**Lead S14, next train**)
+### Bulk load: a body sent again, resume, and a committed job (**Lead S14, S22, next train**)
 
-- **An `:append` is never re-sent**, whatever the `retryPolicy`: a body the server partly applied would be applied twice.
-  (Until Lead S14 a retry policy re-sent it.)
+- **The job's last body commits it** (**Lead S22, next train**). A load's frame bodies are numbered across the job, and the last
+  one carries the commit in its end frame, so a job is `:begin` and its `:append`s — no `:commit` round trip. `:commit` is sent
+  only for a job whose last rows went as JSON column arrays (a value no frame carries) or that has no rows, and names the frames
+  sent (`nextSequence`). `writeConcern`, `writeConcernTimeoutMs`, `mqWaitMs` and `waitForDeferredWork` go where they always did,
+  as far as you can see.
+- **A failed `:append` is sent again, safely** (**Lead S22, next train**; until then it was yours). On a lost connection, a timeout,
+  a `503` or a capacity refusal the SDK asks the server where the job is — a `:begin` with the job's idempotency key, which also
+  stops a stale request still reading the cut body — and sends the same body again: the server skips the frames it already holds,
+  so **a body sent twice is applied once**. A body the server applied whole is not sent again. Up to 4 attempts, 250 ms doubling
+  between them (or the server's `Retry-After`, at most 30 s). The retry policy (`retryPolicy`) still never re-sends an `:append`
+  itself: until Lead S14 it did, and a body the server partly applied was applied twice. A committing body whose answer was lost
+  returns the committed job (`alreadyCompleted: true`); one sent again while the first one's commit runs waits for it.
 - **A failed load leaves its job open** (holding its tables until the session's idle timeout). Run the same `bulkLoad` again
-  with the **same `idempotencyKey`** — pass one if you may need to — and it resumes: `:begin` answers the job's cursor, and the
-  SDK skips the rows it already accepted, inside a batch if need be, from `resumeFromRow` (until Lead S14 the SDK skipped
-  only the durable count, which against a live session sends the buffered rows twice). `handle.wasResumed` says so. Only a
-  cancellation (`signal`) aborts the job — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the
-  SDK generated, since nothing could resume it: on any failure before `:commit` is sent (once it is sent, only a cancellation
-  aborts — the commit may have landed), and the error does not carry the generated key. (The C# SDK keeps the job after a transient `:append` failure and hands over its key.) A job does not survive a server restart: the same key then starts a fresh job
-  and the load is sent from its first row.
+  with the **same `idempotencyKey`** — pass one if you may need to — and it resumes from the server's `nextSequence`: bodies the
+  server holds are not sent, a body that straddles it is sent whole (the server skips its first frames), and the frames skipped
+  must carry exactly the rows the server holds — so the call must send the same rows with the same `appendBatchSize` /
+  `maxAppendBytes`; otherwise it is refused `409 BULK_LOAD_CURSOR_MISMATCH` and sends nothing (**Lead S22, next train**; it
+  resumed by rows, from `resumeFromRow`, which is gone). `handle.wasResumed` says so. Only a cancellation (`signal`) aborts the
+  job — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the SDK generated, since nothing could resume
+  it: on any failure before the commit is sent, and on a refusal of it; a lost answer after the last attempt aborts nothing, since
+  the commit may be running. The error does not carry the generated key. A job does not survive a server restart: the same key
+  then starts a fresh job and the load is sent from its first frame.
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
   `409 BULK_LOAD_INVALID_STATE`).
+- ⚠️ **A bulk load checks less than an insert** (found by Lead S22): a null in a non-nullable column is stored as the type's zero
+  (**BL-1129**), a column the table does not have is dropped (**BL-1130**), and a duplicate key is loaded as a second row. See the
+  [HTTP reference](../reference/http-api.md#post-jobidappend).
 
 ```typescript
 const key = `orders-${day}`;
@@ -652,11 +668,10 @@ try {
 }
 ```
 
-### Several jobs into one table (**Lead S18b, next train**)
+### Several jobs into one table (**Lead S18b, S22, next train**)
 
-A load that arrives as several jobs goes through `bulkLoadJobs`, not a loop of `bulkLoad` calls. It sends job N+1's `:begin`
-and `:append`s while job N's `:commit` runs — the server queues them behind the table's load lock — and yields each job's handle
-in job order as its commit returns:
+A load that arrives as several jobs goes through `bulkLoadJobs`, not a loop of `bulkLoad` calls. It sends job N+1 while job N
+commits — the server queues it behind the table's load lock — and yields each job's handle in job order as its commit returns:
 
 ```typescript
 for await (const handle of client.table('trades').bulkLoadJobs(days, { idempotencyKey: 'trades-2026-10' })) {
@@ -664,10 +679,16 @@ for await (const handle of client.table('trades').bulkLoadJobs(days, { idempoten
 }
 ```
 
-Each job is any source `bulkLoad` takes (batches or row objects) and is committed, visible and answered on its own. At most one
-`:append` and one `:commit` are in flight. The first failure ends the sequence after every earlier job's handle; the job being
-sent behind a failed commit — or in flight when you `break` — is aborted. With `idempotencyKey`, job `i` is keyed `{key}.{i}`,
-so repeating the call replays the jobs that committed. `conflictPolicy: "failFast"` runs the jobs one at a time.
+Each job is any source `bulkLoad` takes (batches or row objects) and is committed, visible and answered on its own. **One job
+sends while one commits** (**Lead S22, next train**; it was "one `:append` and one `:commit` in flight"): job N's last body commits
+it, and job N+1 is begun — naming N as its `afterJobId` — as soon as that body has been written, so the server commits N+1 only
+after N, and only if N committed. Node's `fetch` says when a body was written (the SDK streams the last body, `duplex: "half"`); a
+browser's `fetch`, or one passed in the client options, does not, and there each job is committed by `:commit` while the next job's
+rows are sent (Lead S18b's shape, `afterJobId` still set). The first failure ends the sequence after every earlier job's handle, and
+no job after it commits; the job being sent behind a failure — or in flight when you `break` — is aborted (a committing one is
+aborted unless its commit point came first, in which case it is committed and its handle is not yielded). With `idempotencyKey`,
+job `i` is keyed `{key}.{i}`, so repeating the call replays the jobs that committed. `conflictPolicy: "failFast"` runs the jobs
+one at a time.
 `client.bulkLoadJobs(table, jobs, options)` is the same call.
 
 ### Update
