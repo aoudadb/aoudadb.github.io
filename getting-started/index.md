@@ -553,7 +553,7 @@ docker compose -f docker-compose.cluster.yml up
 
 ### Creating Databases via API
 
-Once the server is running, create databases via HTTP:
+Once the server is running, create databases via HTTP. **List and create** (`GET` / `POST /api/databases`) need a **server** credential (`mk_srv_…` or a scoped server key). A service process with an application `mk_svc_` does not list or create databases — it checks existence with `GET /api/databases/{name}` (that key is enough for a read of its own database).
 
 ```bash
 # Create a database
@@ -1696,9 +1696,10 @@ For a backend that only needs one database with app auth, the `mk_svc_` key is t
 | `AUTH_TOKEN_INVALID` | 401 | Malformed or tampered JWT |
 | `AUTH_TOKEN_EXPIRED` | 401 | JWT has expired — refresh it |
 | `AUTH_TOKEN_REVOKED` | 401 | Session was signed out |
-| `AUTH_API_KEY_INVALID` | 401 | API key not recognized or revoked |
+| `AUTH_API_KEY_INVALID` | 401 | API key not recognized or revoked (not a live `mk_svc_` on list/create — that is `AUTH_KEY_ROUTE_MISMATCH`) |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Wrong email or password |
 | `AUTHORIZATION_DENIED` | 403 | Valid token, insufficient permissions |
+| `AUTH_KEY_ROUTE_MISMATCH` | 403 | Live `mk_svc_` / `mk_adm_` on `GET`/`POST /api/databases` — use a server key, or `GET /api/databases/{name}` |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts |
 | `AUTH_RATE_LIMITED` | 429 | Rate limit exceeded |
 

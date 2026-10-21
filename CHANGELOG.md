@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Database catalog credentials (BL-1128).** `GET /api/databases` and `POST /api/databases` need a server credential
+  (`mk_srv_` or a scoped server key). A live application `mk_svc_` / `mk_adm_` on those routes is **403**
+  `AUTH_KEY_ROUTE_MISMATCH` (not 401 `AUTH_API_KEY_INVALID` / "Unknown API key"). `GET /api/databases/{name}` accepts a
+  read credential for that database, including its `mk_svc_`. A service process checks existence with get-by-name; it
+  does not list or create databases. [HTTP API](reference/http-api.md#database-catalog-api),
+  [Getting Started](getting-started/index.md#creating-databases-via-api).
 - **Pipelined loads into one table overlap their commits with the next job's rows (Lead S19, next train).** A table's bulk-load
   lock now passes to the next queued job when a job's rows end, not when its `:commit` returns, so job N+1's rows load while job N
   drains, writes and commits. Nothing a client sees changes: a `:commit` still returns after its own job is durable and visible,

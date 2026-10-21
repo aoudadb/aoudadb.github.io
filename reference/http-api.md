@@ -85,7 +85,7 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 |--------|------|--------|-------------|
 | `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
-| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. |
+| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. Does **not** list or create databases (`GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH`); use `GET /api/databases/{name}` to check existence. |
 | `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): no user's grants, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. |
 | `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, 0.5.0**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. |
 | `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants. A custom `mk_` minted on server auth is a scoped server key (BL-1017). PLS / RLS enforced. |
@@ -140,7 +140,7 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 | `mk_pub_*` | Data plane only | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
 | User JWT (application end user) | Data plane | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
 | User JWT (Studio operator) | Admin | ✅ | ✅ | ✅ enforced | ✅ per RBAC |
-| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Audited bypass | Per RBAC on admin |
+| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Audited bypass | Per RBAC on admin for that database's routes. **Not** `GET`/`POST /api/databases` (server-auth catalog — **403** `AUTH_KEY_ROUTE_MISMATCH`) |
 | `mk_anon_*` | Data plane (auth endpoints) | ❌ | ❌ | n/a | ❌ — auth endpoints only |
 
 **Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
@@ -566,12 +566,13 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
-| `AUTH_API_KEY_INVALID` | 401 | API key invalid, revoked, or expired |
+| `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
 | `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
 | `NOT_AUTHENTICATED` | 401 | Authentication required (database has auth enabled but no valid token) |
 | `AUTHORIZATION_DENIED` | 403 | Authenticated but no role for the target database |
 | `INSUFFICIENT_PERMISSIONS` | 403 | Authenticated but role lacks required operation (e.g. read-only role attempting write) |
+| `AUTH_KEY_ROUTE_MISMATCH` | 403 | A live application key (`mk_svc_` / `mk_adm_`) on a server-auth catalog route (`GET`/`POST /api/databases`). The key is recognized; the route is not for that kind (**BL-1128**). |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Signin credentials are invalid (wrong password or non-existent email) |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
 | `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
@@ -696,6 +697,8 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 
 Lists databases visible to the caller.
 
+**Credentials:** server auth only — a server admin key (`mk_srv_…`), a scoped server key (`mk_…` from `/api/auth/admin/api-keys`), or a server-auth user JWT with admin rights. An application service key (`mk_svc_`) or auth-admin key (`mk_adm_`) is refused with **403** `AUTH_KEY_ROUTE_MISMATCH` (the key is live; this route is not for it). Do not treat that as `AUTH_API_KEY_INVALID`.
+
 **Query Parameters:**
 
 | Param | Values | Description |
@@ -766,7 +769,9 @@ Default list: include iff isInternal == false
 
 #### `GET /api/databases/{name}`
 
-Direct lookup of a specific database by name. Returns the database if it exists and is still serving, regardless of `isInternal`. Requires server credentials (`mk_srv_...`).
+Direct lookup of a specific database by name. Returns the database if it exists and is still serving, regardless of `isInternal`.
+
+**Credentials:** a **read** credential for that database is enough — including the database's own application service key (`mk_svc_…`). A server credential also works. This is how a service process checks that its database exists; it does **not** need `GET /api/databases` (list).
 
 **Metadata-only.** Capture `mk_*` keys from `POST /api/databases` (or regenerate). GET never re-emits keys. `auth` is always an object — `auth.enabled: false` means unlinked; do not treat a missing or null `auth` as the signal (older servers omitted it).
 
@@ -832,6 +837,8 @@ Unknown database → 404 `DATABASE_NOT_FOUND`. Requires read authorization when 
 
 Creates a new operator-facing database. The `isInternal` flag cannot be set by clients — it is always `false` for user-created databases. Internal databases are only created by Aouda bootstrap services.
 
+**Credentials:** server auth only — same as [`GET /api/databases`](#get-apidatabases). A live `mk_svc_` / `mk_adm_` is **403** `AUTH_KEY_ROUTE_MISMATCH`. Schema apply (or an operator with a server key) creates databases for a service process; the service key itself does not.
+
 **Request body:**
 
 ```json
@@ -855,9 +862,13 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, 0.4.0:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
 | `dataDurability` | string | No | `DiskBacked` (default) or `MemoryOnly`. |
-| `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database. Mutually exclusive with `auth`. |
+| `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database; both may include `auth`. `kind: "auth"` together with an `auth` object is rejected (400). |
+| `allowSelfSignup` | bool | No | When `kind` is `"auth"`, whether self-service signup is enabled on the new database. Omitted: off. |
+| `selfSignupRole` | string \| null | No | When `kind` is `"auth"`, role granted to self-service signups. Null or omitted: `db_writer`. |
 | `auth.enabled` | bool | No | Shorthand: link to the single existing auth database (400 if none or more than one). |
 | `auth.database` | string | No | Link to (or create) a named auth database. |
+| `auth.allowSelfSignup` | bool | No | Whether self-service signup is enabled on the linked application database. Omitted: off. |
+| `auth.selfSignupRole` | string \| null | No | Role granted to self-service signups on the linked application database. Null or omitted: `db_writer`. |
 
 **Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them.
 
@@ -2606,7 +2617,7 @@ Update rows matching a WHERE filter.
 | `executionMs` | number | Server-side execution time in milliseconds |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"`. Same structure as in insert response. |
 
-**Note:** Returns `rowsUpdated: 0` with 200 status when WHERE predicates match no rows. This is not an error.
+**Note:** `where` is the compare. Returns `rowsUpdated: 0` with 200 status when the predicates match no rows, on the first scan or on the scan the update runs again after another writer changed a matched row (**BL-1120, next train**). That 0 is not an error: this call leaves the row unchanged. A predicate that matches N rows updates those N rows in the one transaction and returns N.
 
 **Errors:**
 
@@ -2615,7 +2626,7 @@ Update rows matching a WHERE filter.
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
-| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts (each re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst). Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, next train** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
 #### `DELETE /api/databases/{db}/tables/{name}/rows`
 
