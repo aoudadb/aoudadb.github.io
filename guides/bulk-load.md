@@ -435,11 +435,9 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
   `column-batch-v2` in `acceptedAppendFormats`. The values loaded are the same either way.
 - **Absent is not null, and a bulk load applies no defaults.** A cell marked absent is stored as null, except that an absent
   `autoIncrement` cell is generated (BL-1104, as for any `:append`). An insert (`InsertAsync(ColumnBatch)`) does apply defaults.
-- ⚠️ **A bulk load checks less than an insert** (found by Lead S22). A null in a column that is not nullable is stored as the
-  type's zero — an `Int64` primary key as `0` — where an insert refuses the row (**BL-1129**); a column the table does not have is
-  dropped without a word, where an insert refuses it (**BL-1130**); and a key the table already holds, or one a job holds twice, is
-  loaded as a second row, `pkUniquenessOverride: "strict"` or not (Lead S27's ground). Check these in your source until they are
-  fixed.
+- **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, next train**; BL-1130, BL-1129: the
+  column used to be dropped, the key stored as `0`). A null in another NOT NULL column is stored as the type's default unless the
+  load asks for `Validation = BulkLoadValidation.Strict`; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
 - **The arrays are not copied.** A batch's arrays are read while its rows are written, which happens before the SDK asks your
   source for the next batch; reuse them from then on.
 
@@ -621,6 +619,49 @@ In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Str
 - **Reported:** `:begin` answers `durability`, the level the job will commit at (for a replayed completed job, the level it
   committed at); `:commit` always answers it, an `accepted` answer included; `GET {jobId}` and `:list` give each job's, omitted
   when it is unknown — an accepted job lost before its commit point.
+
+### A load's validation: `coerce` or `strict` (**Lead S27a, next train**)
+
+A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../reference/http-api.md#post-begin)):
+
+| Level | A null or absent cell in a NOT NULL column | A primary key the job holds twice, or the table already holds |
+|---|---|---|
+| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column** | Loaded as a second row (not checked) |
+| `strict` | Refused | The job fails at its commit, nothing committed |
+
+Every load, at either level, **refuses a column its table does not have** (names are case-sensitive). The server checks each
+`:append` frame before any of it is applied: a frame it refuses answers `400 INVALID_REQUEST` naming the column, the frame and the
+row, with none of that frame's rows applied and the frames before it kept, so the job stays open. An auto-increment column is exempt
+from the null check — a missing value takes the next id.
+
+```csharp
+var handle = await client.BulkLoadAsync("trades", batches,
+    new BulkLoadOptions { Validation = BulkLoadValidation.Strict });
+// handle.Validation: the level the job was checked at
+```
+
+```typescript
+const handle = await client.table('trades').bulkLoad(batches, { validation: 'strict' });
+// handle.validation: the level the job was checked at
+```
+
+- **`coerce` is ClickHouse's default** (`input_format_null_as_default`); **`strict` is DuckDB's constraints**. A key is never
+  coerced: a load that would store a key nobody sent is refused at either level.
+- **`strict` needs a table that checks its keys**: on a table whose key mode (`pkUniqueness`) is `Recent` or `BestEffort`, a strict
+  load is refused at `:begin` (`400 BULK_LOAD_INVALID_OPTIONS`) — a job is never stricter than its table. So is a strict load with
+  `applyTransforms`.
+- **A strict job's keys are checked at its commit**, after every earlier job on the table has committed, against the table and
+  against each other: a duplicate answers `409 BULK_LOAD_DUPLICATE_PK` (C#: `BulkLoadDuplicatePkException`, its `SampleKeys` naming
+  the key; the CLI exits 5) and nothing of the job is committed. The check waits for the inserts, upserts and updates that were in
+  flight on the table when the job began, so a load and a racing insert never both write one key; writes that arrive after the job
+  began wait for the job, as they always did.
+- **What `strict` costs:** it keeps every row's key until the commit and probes the table for each, as an insert does — memory and
+  time in proportion to the rows. `coerce` costs nothing beyond the frame check.
+- **Reported:** `:begin`, `:commit` and `GET {jobId}` answer `validation`; `BulkLoadJobHandle.Validation` (C#) and
+  `handle.validation` (TypeScript) name it. A job answered from its commit record after a restart has none on the wire (the SDKs
+  report the level they asked for).
+- `pkUniquenessOverride` is gone (**breaking**): no server applied it, and a `:begin` that sends it is refused naming `validation`.
+  The CLI's `--pk-uniqueness` is refused the same way; use `--validation coerce|strict`.
 
 ### Sizing a session: fewer, longer, one commit
 
@@ -842,7 +883,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables. |
 | `BulkLoadOptions.MaxRowsPerSegment` | int? | `TargetRowsPerPage * 16` | positive int | Engine/API/client | Segment sizing knob. |
 | `BulkLoadOptions.ConflictPolicy` | enum | `Block` | `Block`, `FailFast` | Engine/API/client | Controls behavior for concurrent regular writes. |
-| `BulkLoadOptions.PkUniquenessOverride` | enum? | `null` | `Strict`, `Recent`, `BestEffort` | Engine/API/client | Falls back to table config when null. |
+| `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, next train**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |
 | `BulkLoadOptions.PrincipalId` | `Guid` | `Guid.Empty` | valid guid | Engine/API | Stamped into bulk-load WAL frames. |
 | `BulkLoadOptions.LockAcquisitionTimeout` | `TimeSpan` | `30s` | positive duration | Engine/API | Lock wait bound. |
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |

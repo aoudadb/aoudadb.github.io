@@ -59,6 +59,12 @@ Public, user-facing release notes. Engine phase status lives in the server
   commits it, and a failed `:append` is sent again by the SDK after a keyed `:begin` — a body sent twice is applied once (BL-404).
   `bulkLoadJobs` begins job N+1 with `afterJobId` once N's last body is written (Node), or commits each job by `:commit` while the
   next is sent where the `fetch` cannot say when a body was written. See [the TypeScript client](clients/typescript.md#bulk-load-a-body-sent-again-resume-and-a-committed-job-lead-s14-s22-next-train).
+- **A bulk load checks its rows, and names a validation level (Lead S27a, next train; breaking).** Every load now refuses a
+  column its table does not have and a missing primary key — each `:append` frame is checked before any of it is applied, `400
+  INVALID_REQUEST` naming the column and the row (BL-1130, BL-1129: the column was dropped, the key stored as `0`). `validation`
+  (`coerce`, the default, or `strict`) says what else: `strict` refuses a null in any NOT NULL column and fails the job at its
+  commit on a duplicate key (`409 BULK_LOAD_DUPLICATE_PK`), only on a table whose key mode is `Strict`. `pkUniquenessOverride`,
+  which nothing applied, is removed and refused. See [A load's validation](guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
 - **A bulk load checks less than an insert — now said (Lead S22).** A null in a non-nullable column is stored as the type's zero
   (an `Int64` primary key as `0`; BL-1129), a column the table does not have is dropped (BL-1130), and a duplicate key is loaded as
   a second row; an insert refuses all three. See [`:append`](reference/http-api.md#post-jobidappend).

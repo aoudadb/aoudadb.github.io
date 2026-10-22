@@ -4832,7 +4832,8 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, next train**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, next train**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, next train**). |
-| `pkUniquenessOverride` | string? | null | `"strict"`, `"recent"`, `"bestEffort"`, null | Override primary-key uniqueness enforcement for this load. Null = use table default. |
+| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, next train**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+| `pkUniquenessOverride` | — | — | — | (**Lead S27a, next train; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
@@ -4891,6 +4892,7 @@ A table with no write-time compute needs neither flag.
 | `alreadyCompleted` | bool | `true` when the idempotency key matched a job that already **committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`): no session is opened, and `:append` / `:commit` on this `jobId` are refused `409 BULK_LOAD_INVALID_STATE`. Read the job's result from `rowsDurablyCommitted` and `token` below. `false` otherwise. |
 | `rowsDurablyCommitted` | number? | With `alreadyCompleted`: the committed job's rows. |
 | `durability` | string | (**Lead S26c, next train**) The level the job will commit at, `"strict"` or `"os"`; for a replayed completed job (`alreadyCompleted`), the level it committed at. |
+| `validation` | string? | (**Lead S27a, next train**) The job's validation, `"coerce"` or `"strict"`. Omitted for a job answered from its commit record after a restart (the record does not keep it). |
 | `token` | string? | With `alreadyCompleted`: the committed job's consistency token — the one its `:commit` returned. (**Lead S20a, next train**) A single-node job's too: it was `null` for a load that wrote no closing frame, so a client that lost the `:commit` response could not read its own write with a token. |
 
 **Example:**
@@ -4927,11 +4929,19 @@ no PLS and no RLS policy is not affected. The refusal happens before a session e
 
 Append frames of rows to an in-flight session.
 
-⚠️ **An `:append` checks its rows less than an insert does** (found by Lead S22). A null in a column that is not nullable is stored
-as the type's zero — an `Int64` primary key as `0` — where `POST …/rows` refuses the row `400 INVALID_REQUEST` (**BL-1129**). A
-column the table does not have is dropped without a word, where an insert refuses it (**BL-1130**). A key the table already holds,
-or one the job holds twice, is loaded as a second row whatever `pkUniquenessOverride` says. Check these in the source until they
-are fixed.
+**Each frame is checked against its table before any of it is applied** (**Lead S27a, next train**). A frame is refused
+`400 INVALID_REQUEST` — none of its rows applied, the frames before it credited (`nextSequence` unchanged past them), the job still
+open — when it carries:
+
+- **a column the table does not have** (**BL-1130**: it used to be dropped without a word). Names are case-sensitive; the message
+  names the column the table does have when only the case differs;
+- **no value for a primary-key column** — a null or absent cell, or the column missing (**BL-1129**: it used to be stored as the
+  type's zero, an `Int64` key as `0`). An auto-increment key is exempt: a missing value takes the next id;
+- at `validation: "strict"`, **no value for any NOT NULL column**. At `"coerce"` (the default) such a cell is stored as the type's
+  default (`0`, `""`).
+
+The message names the column, the frame and the row (`details`: `frame=…, row=…, table=…, column=…`). A JSON column-array body is
+checked the same way. Key uniqueness is checked at the commit, and only at `"strict"` (`409 BULK_LOAD_DUPLICATE_PK`).
 
 #### A job's frames are numbered (**Lead S21a, next train**)
 
@@ -5207,6 +5217,7 @@ the server stops before the job's commit point, or its commit fails, nothing of 
 | `deferredWorkCompleted` | boolean | Whether deferred work completed before this response was sent. |
 | `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load (**Lead S18a, next train**: a replica now covers it only once every segment is fetched; see `bulkLoadHold` on [`GET /admin/replication/status`](#get-adminreplicationstatus)). (**WorkloadCore S09, 0.3.0**) On a single node, where a load writes no closing frame, it is the WAL head at the load's commit (it used to carry position 0): a read with it requires the load, and so waits for the load's materialized queries. (**Lead S20a, next train**) What the token names, exactly: a position at which this node already shows the load — the closing frame's when the load wrote one, else the WAL head read at the commit point, else position 0 on a database without a WAL (covered at once). It is kept in the job's commit record, so a replayed `:begin` returns the same token. |
 | `durability` | string | (**Lead S26c, next train**) The job's level, `"strict"` or `"os"`. Always present, an `accepted` answer included. |
+| `validation` | string? | (**Lead S27a, next train**) The validation the job was checked at, `"coerce"` or `"strict"`. |
 | `writeConcernRequested` | string | Echo of `writeConcern` from request. |
 | `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
@@ -5228,6 +5239,8 @@ queries current, read with the commit's `token` (which waits for them, as for an
 
 | Code | Status | When |
 |---|---|---|
+| `BULK_LOAD_DUPLICATE_PK` | 409 | (**Lead S27a, next train**) A job at `validation: "strict"` holds a primary key twice, or one the table already holds. Nothing of it was committed; the message names the table and the key, and `details` is `{"table", "sampleKeys", "totalDuplicateCount", "withinJob"}` (the check stops at the first key). Deduplicate the source and load it again, load at `"coerce"`, or upsert the rows. The check waits for the writes that were in flight on the table when the job began to commit, so an insert racing the load and the load never both write one key. |
+| `INVALID_REQUEST` | 400 | (**Lead S27a, next train**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, 0.3.0**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, 0.3.0**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, 0.3.0**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. (**BL-956, 0.4.0**) At most **30 s** (half of the 60 s a bulk-load request may be refused in a row), and `10` before any rate is measured — it was the time between periodic checkpoints, 300 s by default. |
 
@@ -5260,6 +5273,7 @@ failed, lost or aborted), then answers as it stands. This is how a client learns
 | `tables` | string[] | Tables being loaded. |
 | `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`; (**Lead S30, next train**) `"accepted"` — answered `accepted` by `:commit`, its commit running, not durable yet — and `"lost"` — accepted, then lost before its commit point (the server stopped, or its commit failed): nothing of it is durable, `errorCode` is `BULK_LOAD_LOST`. A restart that cut an accepted job off answers `"lost"` for it while the server's log still holds the job. (**Lead S26c, next train**) `"lost"` is also an `"os"` job dropped at the open after a power loss — its files did not match the length and xxHash128 its commit record names — answered with `durability: "os"`; its idempotency key no longer names a commit, so a `:begin` with the same key loads it again. |
 | `durability` | string? | (**Lead S26c, next train**) The job's level, `"strict"` or `"os"`. Omitted when unknown — an accepted job lost before its commit point. |
+| `validation` | string? | (**Lead S27a, next train**) The job's validation, `"coerce"` or `"strict"`. Omitted when the server no longer knows it (after a restart). |
 | `token` | string? | (**Lead S30, next train**) The job's commit token once `"completed"` (from its commit record after a restart too); the `accepted` answer's token while `"accepted"`. Absent otherwise. |
 | `rowsAppendedToBuffer` | number | Rows in buffer (not yet durable). |
 | `nextSequence` | number | (**Lead S21a, next train**) The job's next frame; every frame below it is applied. |

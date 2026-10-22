@@ -654,9 +654,10 @@ On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.
 - **A key whose job already committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`, 10) returns that job's handle with
   `alreadyCompleted: true` — `rowsLoaded` its durable rows, `token` its commit token — and sends nothing (it used to fail
   `409 BULK_LOAD_INVALID_STATE`).
-- ⚠️ **A bulk load checks less than an insert** (found by Lead S22): a null in a non-nullable column is stored as the type's zero
-  (**BL-1129**), a column the table does not have is dropped (**BL-1130**), and a duplicate key is loaded as a second row. See the
-  [HTTP reference](../reference/http-api.md#post-jobidappend).
+- **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, next train**; BL-1130, BL-1129). With
+  `validation: "strict"` it also refuses a null in any NOT NULL column, and a key the job holds twice or the table already holds
+  fails the job (`409 BULK_LOAD_DUPLICATE_PK`, an `AoudaApiError` with that `code`); `handle.validation` names the level.
+  `pkUniquenessOverride` is gone (**breaking**). See [A load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
 
 ```typescript
 const key = `orders-${day}`;
