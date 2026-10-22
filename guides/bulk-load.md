@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Complete
 Primary owner: Engineering
-Last updated: 2026-10-18
+Last updated: 2026-10-22
 
 Coverage phases: P20, BL (Post20-S1, Post20-S3), P31, P46
 Primary task folders: `docs/tasks/P20/`, `docs/tasks/BL-COMPLETION.md`, `docs/tasks/P31/`, `docs/tasks/P46/`
@@ -345,8 +345,10 @@ difference is *when* the work is paid — per load, or once for many — not how
 
 - **Streaming phase vs commit phase:** rows are appended in chunks — column-batch frames, or JSON column arrays (**Lead S12, next train**: NDJSON is no longer read) — then closed by a commit call.
 - **Durability unit:** durability is represented by WAL-visible segment/job events, not by row-level WAL entries.
-- **Durability level** (**Lead S26, next train**): a bulk load is fsynced as before, whatever the target table's
-  [durability level](write-durability.md#durability-levels-lead-s26-next-train) — `strict`, `os` and `unlogged` tables load alike.
+- **Durability level** (**Lead S26, next train**): the target table's
+  [durability level](write-durability.md#durability-levels-lead-s26-next-train) does not change how it is loaded — `strict`,
+  `os` and `unlogged` tables load alike. (**Lead S26c, next train**) A load has a level of its own, `strict` or `os`, which
+  follows the database's level, not the table's: see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train).
   A bulk load into a table at `memory` (the old `MemoryOnly`) is refused, naming the level: "Bulk load is not supported for table
   '…' at durability 'memory'" — a load writes segment files, which a memory table never has.
 - **Job-level atomicity:** query visibility is tied to closing-frame commit completion.
@@ -359,8 +361,9 @@ difference is *when* the work is paid — per load, or once for many — not how
 3. Multi-table jobs require a `_table` discriminator column in every append body: each row names its table.
 4. `ForceLogShipBulkLoad=true` disallows skip/snapshot replication modes.
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
-6. A load's segment files are fsynced before its commit point — the closing frame, or on a single node the commit record — so a
-   committed load survives a power loss. The files of a job's segments sync in parallel while the job runs, and the commit waits
+6. A `strict` load's segment files are fsynced before its commit point — the closing frame, or on a single node the commit record —
+   so a committed load survives a power loss (an `os` load's are not: [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train),
+   **Lead S26c, next train**). The files of a job's segments sync in parallel while the job runs, and the commit waits
    for them (**Lead S20b, next train**: each segment was synced before its own frame). If the catalog
    registration after the commit point still fails after its retries, the commit call returns an error but the load is **not**
    lost: its rows become visible at the next restart, which catalogues it (`BulkLoadCommittedUncataloguedPinsHeld` counts such
@@ -569,6 +572,55 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
 - A job the server cannot accept — a load that writes no closing log frame, or a database without a WAL (durability `unlogged` or `memory`) — is answered committed.
   `wait: "accepted"` is refused with `waitForDeferredWork`, `mqWaitMs` above 0 or a write concern above `acknowledged`, which each
   wait for the commit.
+
+### A load's durability: `strict` or `os` (**Lead S26c, next train**)
+
+A load names its own level in `:begin`'s `options.durability` ([HTTP API](../reference/http-api.md#post-begin)):
+
+| Level | Before the job is visible | After a process crash | After a power loss |
+|---|---|---|---|
+| `strict` | Every segment file, its directory and the job's commit record are fsynced | Committed | Committed |
+| `os` | The files are written and renamed, and the commit record written, without fsync | Committed | Kept whole, or dropped whole and reported `lost` — never half |
+
+Omitted, a load takes its database's level for a load: `os` in a database at `os`, `strict` everywhere else. A table's own level
+does not change it — an `unlogged` table still gets a `strict` load. `strict` is what every load did before.
+
+```csharp
+var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { Durability = BulkLoadDurability.Os });
+// handle.Durability: the level the job committed at
+```
+
+```typescript
+const handle = await client.table('trades').bulkLoad(batches, { durability: 'os' });
+// handle.durability: the level the job committed at
+```
+
+In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Strict`, `Os`; `null` = the database's level) and
+`BulkLoadJobHandle.Durability` reports it. In `@aouda/client` the option is `durability?: 'strict' | 'os'` and the handle's
+`durability` reports it (being added to the SDK for the same train). The CLI's `aouda table bulk-load` and `aouda bulk-load` take
+`--durability strict|os`, and their summary and `--json` output name the level.
+
+- **What `os` buys is the commit's sync wait, at most.** Choose it for data you can load again.
+- ⚠️ **After a power loss an `os` job is kept whole or dropped whole, never half.** At the next open the server checks every file
+  of every `os` job it had not yet synced against the length and xxHash128 its commit record names. A job that does not match is
+  dropped entirely and reported **lost**: `GET .../bulk-load/{jobId}` answers `state: "lost"`, `errorCode: "BULK_LOAD_LOST"`,
+  `durability: "os"`. Its idempotency key no longer names a commit, so **load it again with the same key** — the `:begin` starts a
+  fresh job instead of answering `alreadyCompleted`.
+- **Until it is synced, an `os` load holds up its database's durable writes.** The server syncs ("promotes") an `os` job in the
+  background, starting at its commit. Until then every durable write on that database waits for it: inserts, updates and deletes
+  that write the WAL, catalog segment changes such as merges and compaction, materialized-query passes and result checkpoints. The
+  wait is at most about the fsync time a `strict` load pays up front.
+- **An `os` load writes no WAL frame.** Bulk loads are not replicated anyway (**BL-1116**).
+- **Refused at `:begin`**, `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level:
+  - any other value — `unlogged` and `memory` are table and database levels, not a load's, and names are case-sensitive;
+  - `strict` in a database at `os` (its WAL is not written through);
+  - `os` for a job of several tables, or for a table with vector columns, or an edge or vector table.
+
+  So a multi-table load into an `os` database is refused whatever it asks for, and so is a load into a table with vector columns,
+  or an edge or vector table, there.
+- **Reported:** `:begin` answers `durability`, the level the job will commit at (for a replayed completed job, the level it
+  committed at); `:commit` always answers it, an `accepted` answer included; `GET {jobId}` and `:list` give each job's, omitted
+  when it is unknown — an accepted job lost before its commit point.
 
 ### Sizing a session: fewer, longer, one commit
 
@@ -795,6 +847,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.LockAcquisitionTimeout` | `TimeSpan` | `30s` | positive duration | Engine/API | Lock wait bound. |
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |
 | `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
+| `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, next train**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
 | `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and the whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
 | `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, 0.1.40**). |
@@ -1134,6 +1187,8 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 |---|---|---|
 | `403 AUTHORIZATION_DENIED` on `:begin` (**BL-1031, 0.5.0**) | A table in the load has PLS or RLS, and the caller is not a `service_role` key | Load with that database's `mk_svc_` key. Ordinary inserts remain the per-user write path. |
 | "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, next train**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
+| `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, next train**) | The level is not `strict` or `os` (lower case); `strict` in a database at `os`; or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into a table with vector columns or an edge or vector table, has no level it may use in an `os` database. |
+| `GET {jobId}` answers `lost` with `durability: "os"` (**Lead S26c, next train**) | The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was dropped whole | Load it again with the same idempotency key: it no longer names a commit. |
 | `BulkLoadInvalidOptions` on begin with `skipReplication` | Multi-node safety/policy check failed | Use `logShipSegments` or explicit bypass where allowed. |
 | `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Give every row a `_table` value within the declared table set. |
 | `415 ROW_OBJECTS_UNSUPPORTED` on append | The body is NDJSON (`application/x-ndjson`), no longer read (**Lead S12, next train**) | Send column-batch frames, or the rows as one JSON column-array body (`application/json`); upgrade the client library. |

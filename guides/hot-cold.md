@@ -252,7 +252,7 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
   - Cold tier: encoded/compressed on disk; demoted from hot
 - **Durability axis** — controls persistence (**Lead S26, next train**: one level per table, inherited from the database unless the table names its own; see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)):
   - `memory`: writes nothing to disk; data lives only in the running process (was `MemoryOnly`)
-  - `unlogged`: persists per representation (`.hot`, `.col`, `.hra`), no WAL — rows not yet flushed are lost on a crash
+  - `unlogged`: persists per representation (`.hot`, `.col`, `.hra`), no WAL — (**Lead S26c, next train**) the table is emptied by an open that does not follow a clean close ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train))
   - `strict` / `os`: persists per representation and writes the WAL (forced to disk at `strict`)
 
 **Key types:**

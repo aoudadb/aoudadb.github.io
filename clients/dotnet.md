@@ -457,12 +457,14 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 | `PostLoadMqBehavior` | `ClientPostLoadMqBehavior.Auto` | `Skip` leaves the load's materialized queries behind until you refresh them. |
 | `WriteConcern` / `WriteConcernTimeout` | `Acknowledged` / 5 minutes | Replica acknowledgement at commit. |
 | `IdentityInsert` | `false` | Store explicit `autoIncrement` values as they are; every row must give them. |
+| `Durability` | `null` (the database's level for a load) | (**Lead S26c, next train**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os`, `Strict` everywhere else. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train). |
 | `ApplyTransforms` / `PreTransformed` | `false` / `false` | A table with derived columns, checks or transforms needs exactly one of them. |
 | `ConflictPolicy` | `BulkLoadConflictPolicy.Block` | `FailFast` fails at once when another load holds the table. |
 | `Progress` | none | An `IProgress<BulkLoadProgress>` called after each `:append` and at commit. `BulkLoadProgress` carries deferred-work counters, not rows: the per-`:append` report is empty, so count rows in your source. |
 
 The handle reports `RowsLoaded`, `PerTableRowCounts`, `SegmentsCreated`, `ExpiredRows`, `WasResumed`, `Token` (the commit's
-consistency token), `MqStatus` / `MqFrontierToken`, and offers `WaitForMaterializedQueriesAsync()` and `GetProgressAsync()`.
+consistency token), `Durability` (the job's level; **Lead S26c, next train**), `MqStatus` / `MqFrontierToken`, and offers
+`WaitForMaterializedQueriesAsync()` and `GetProgressAsync()`.
 A handle returned for a key whose job had already committed (nothing sent) has the job's `RowsLoaded` and `Token`, but an empty
 `PerTableRowCounts` and `SegmentsCreated` 0.
 

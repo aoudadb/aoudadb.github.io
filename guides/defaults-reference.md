@@ -130,11 +130,13 @@ What a write survives is one level per database, optionally narrowed per table. 
 | Value | Default | Allowed | Key |
 |---|---|---|---|
 | Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `Aouda:Databases:<db>:Durability`; embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
+| Bulk-load durability (**Lead S26c, next train**) | **inherits** the database's level for a load: `strict`; `os` in a database at `os` (an `unlogged` table still gets `strict`) | `strict`, `os` — `strict` not in an `os` database; `os` not for a multi-table job, a table with vector columns, or an edge or vector table | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
 | Table durability | **inherits** the database's level | `strict` (only in a `strict` database), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
 
 The database's level is read at every open; one with a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory`. A table's
 change to or from `memory` after creation is refused. These replace `enableWal` / `EnableWal` (default `true`), `dataDurability`
-(`DiskBacked`) and `durability.walEnabled`, which are now refused by name.
+(`DiskBacked`) and `durability.walEnabled`, which are now refused by name. (**Lead S26c, next train**) An open that does not
+follow a clean close empties every `unlogged` table ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train)).
 
 ---
 

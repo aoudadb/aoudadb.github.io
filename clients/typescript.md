@@ -668,6 +668,22 @@ try {
 }
 ```
 
+### Bulk load durability: `strict` or `os` (**Lead S26c, next train**)
+
+`bulkLoad` (and `bulkLoadJobs`) take `durability?: 'strict' | 'os'`, sent as `:begin`'s `options.durability`, and the handle's
+`durability` says the level the job committed at. This is being added to `@aouda/client` for the same train. Omitted, the load
+takes the database's level for a load: `'os'` in a database at `os`, `'strict'` everywhere else.
+
+```typescript
+const handle = await client.table('trades').bulkLoad(batches, { durability: 'os' });
+handle.durability;   // 'os'
+```
+
+`'os'` skips the fsync before the commit. After a power loss before the server has synced the job, the job is dropped whole and
+`GET .../bulk-load/{jobId}` reads `state: "lost"`, `errorCode: "BULK_LOAD_LOST"`: run the same `bulkLoad` again with the same
+`idempotencyKey`. `'strict'` in an `os` database, and `'os'` for a multi-table job, a table with vector columns, or an edge or
+vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train).
+
 ### Several jobs into one table (**Lead S18b, S22, next train**)
 
 A load that arrives as several jobs goes through `bulkLoadJobs`, not a loop of `bulkLoad` calls. It sends job N+1 while job N

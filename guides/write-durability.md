@@ -43,7 +43,7 @@ with no alias (see [Refusals](#refusals-of-the-retired-names)). There are four l
 |---|---|---|---|
 | `strict` (**default**, server and embedded alike) | WAL frames written through (fsync) before the rows are visible and acknowledged | Yes | Yes |
 | `os` | WAL frames written to the operating system, not forced to disk, before the rows are visible | Yes | No |
-| `unlogged` | No WAL: visible at once, durable when flushed to segments (a graceful shutdown flushes) | No — unflushed rows are lost | No |
+| `unlogged` | No WAL: visible at once. A clean close keeps the table whole; any other open empties it (**Lead S26c, next train**; [below](#unlogged-after-a-crash-lead-s26c-next-train)) | No — the table is emptied | No |
 | `memory` | No WAL and no data files (a memory-only table) | No | No — lost on any shutdown |
 
 `memory` is what used to be `MemoryOnly`; `unlogged` is what used to be `EnableWal = false`.
@@ -86,6 +86,20 @@ A table may name its own level, or inherit the database's:
 table's writes actually get, and where it came from. It is the effective level — a table that named `strict` in an `os` database reads
 `os`. `policy.residency.dataDurability` is gone.
 
+### `unlogged` after a crash (**Lead S26c, next train**)
+
+An `unlogged` table — or every table of an `unlogged` database — writes no WAL, and after a crash its segments could hold part
+of one statement: an UPDATE's deletions reach the segments when it commits but its new row versions only
+at the next flush, so a crash could keep the deletes and lose the rows; a large INSERT can be cut by a flush; a DELETE's marks are
+written segment by segment.
+
+So **an open that does not follow a clean close empties every `unlogged` table** — after a crash, a kill, a close whose snapshot
+failed, or a restore — as PostgreSQL truncates unlogged tables after a crash. The server logs a warning naming each table it
+emptied and its row count. A clean close snapshots the table's in-memory rows, and the open after it keeps the table whole. Keep
+only data you can load again in an `unlogged` table. (Earlier versions of this page said flushed `unlogged` rows survive a crash.
+They could survive as part of a statement, which is why the table is now emptied instead.) A `memory` table is empty after any
+restart, as it always was.
+
 ### Replication
 
 A table at `unlogged` or `memory` writes no WAL frames, so **a replica receives none of its inserts**; asking for per-table
@@ -94,8 +108,19 @@ primary's promise to the writer, not the replica's.
 
 ### Bulk loads
 
-Unchanged: a bulk load is fsynced as today, whatever the table's level. A bulk load into a `memory` table is refused, naming the
-level — a load writes segment files, which a memory table never has. See [Bulk Load](bulk-load.md).
+A bulk load writes segment files, not WAL frames, and has a level of its own: `strict` or `os` (**Lead S26c, next train**), `:begin`'s
+`options.durability`. Omitted, it takes the database's level for a load — `os` in a database at `os`, `strict` everywhere else; a
+table's own level does not change it, so an `unlogged` table still gets a `strict` load.
+
+| Load level | Before the job is visible | Survives a process crash | Survives a power loss |
+|---|---|---|---|
+| `strict` (default; what every load did before) | Every segment file, its directory and the job's commit record fsynced | Yes | Yes |
+| `os` | Files written and renamed, the commit record written, none of it fsynced | Yes | Kept whole, or dropped whole and reported `lost` — never half |
+
+Until the server has synced an `os` load in the background, every durable write on its database waits for it. `strict` is refused
+in a database at `os` (its WAL is not written through), and `os` for a multi-table job, a table with vector columns, or an edge
+or vector table. A bulk load into a `memory` table is refused, naming the level — a load writes segment files, which a memory table never has. See
+[Bulk Load — a load's durability](bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train).
 
 ### Refusals of the retired names
 
@@ -238,6 +263,8 @@ When you do not set durability knobs explicitly:
   and both SDKs (**Lead S26, next train**).
 - Per-table durability level (`strict` / `unlogged` / `memory`) via the declarative schema and the engine/catalog model, with
   inheritance and validation; reported by `GET .../tables/{table}` as `durability` (**Lead S26, next train**).
+- A bulk load's own level (`strict` / `os`) via `:begin`'s `options.durability`, both SDKs and the CLI (**Lead S26c, next train**).
+- An `unlogged` table emptied by any open that does not follow a clean close (**Lead S26c, next train**).
 - Health and metrics endpoints that expose key operational durability indicators.
 
 ### Planned / proposed
@@ -584,8 +611,16 @@ Operational guidance:
 
 - "Writes acknowledged but missing after crash"
   - Check the table's effective level (`GET .../tables/{table}` → `durability.level`). Only `strict` survives a power loss; `os`
-    survives a process crash; `unlogged` loses rows not yet flushed; `memory` loses everything (**Lead S26, next train**).
+    survives a process crash; `unlogged` is emptied by an open that does not follow a clean close (**Lead S26c, next
+    train**); `memory` loses everything (**Lead S26, next train**).
   - Check replay logs and crash safety tests for torn-tail repair behavior.
+- "An `unlogged` table is empty after a restart" (**Lead S26c, next train**)
+  - The open did not follow a clean close (a crash, a kill, a close whose snapshot failed, a restore), so the server emptied the
+    table and logged a warning naming it and its row count. That is the level's contract
+    ([`unlogged` after a crash](#unlogged-after-a-crash-lead-s26c-next-train)): load the table again from its source.
+- "`GET .../bulk-load/{jobId}` answers `lost` for an `os` load" (**Lead S26c, next train**)
+  - The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was
+    dropped whole. Load it again with the same idempotency key.
 - "High write latency on primary"
   - Inspect write concern level and timeout policy.
   - Review replication lag and ACK paths.

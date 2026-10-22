@@ -742,7 +742,7 @@ Cold-page integrity (**BL-815, 0.3.0**):
 Recovery/restart expectations:
 
 - Restart should reload catalog and segment state and replay WAL deltas.
-- If a DB/table is at `unlogged` or `memory`, those writes are not WAL-durable by design: `unlogged` keeps what was flushed, `memory` nothing.
+- If a DB/table is at `unlogged` or `memory`, those writes are not WAL-durable by design: `unlogged` is kept whole by a clean close and emptied by any other open (**Lead S26c, next train**), `memory` keeps nothing.
 - Backup/restore engine flows are deterministic when using verified manifests and available WAL archives.
 
 Suggested tuning sequence:
