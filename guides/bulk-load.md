@@ -552,11 +552,16 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
   token: a lost job's token reads as covered once the log moves past it.
 - **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. After a
   restart that cut the job off, the server answers it `lost`; once its log has moved past the job, `404` — the same answer for an
-  accepted job: load it again.
+  accepted job: load it again. ⚠️ Read the outcome promptly: a committed job's record is kept for at least an hour after its commit
+  (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer), and a `404` asked after that cannot tell a lost job from a committed one
+  the server has forgotten. A job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is
+  committed and its rows become visible at the next restart (note 6 below; **Lead group 7 review, next train**).
 - **It frees the loader, not the table.** A write into a table the job loads still waits for the job.
 - With `BulkLoadJobsAsync` / `bulkLoadJobs`, each handle is yielded once its job is accepted. A loader keeps at most **two** accepted
   jobs before it waits for the oldest one's outcome (an accepted job still holds its buffers on the server until it commits), and a
   lost one ends the sequence (`BulkLoadLostException` / `BulkLoadLostError`): the jobs after it follow it, so none of them commits.
+  The sequence ends only once every job it accepted has settled, so a normal end means every job committed (**Lead group 7 review,
+  next train**: the last jobs' outcomes were not awaited, and a lost one among them ended the sequence normally).
 - A job the server cannot accept — a load that writes no closing log frame, or a database without a WAL — is answered committed.
   `wait: "accepted"` is refused with `waitForDeferredWork`, `mqWaitMs` above 0 or a write concern above `acknowledged`, which each
   wait for the commit.
