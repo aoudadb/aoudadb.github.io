@@ -597,7 +597,7 @@ const handle = await client.table('trades').bulkLoad(batches, { durability: 'os'
 
 In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Strict`, `Os`; `null` = the database's level) and
 `BulkLoadJobHandle.Durability` reports it. In `@aouda/client` the option is `durability?: 'strict' | 'os'` and the handle's
-`durability` reports it (being added to the SDK for the same train). The CLI's `aouda table bulk-load` and `aouda bulk-load` take
+`durability` reports it. The CLI's `aouda table bulk-load` and `aouda bulk-load` take
 `--durability strict|os`, and their summary and `--json` output name the level.
 
 - **What `os` buys is the commit's sync wait, at most.** Choose it for data you can load again.

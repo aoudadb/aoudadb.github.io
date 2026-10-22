@@ -671,7 +671,7 @@ try {
 ### Bulk load durability: `strict` or `os` (**Lead S26c, next train**)
 
 `bulkLoad` (and `bulkLoadJobs`) take `durability?: 'strict' | 'os'`, sent as `:begin`'s `options.durability`, and the handle's
-`durability` says the level the job committed at. This is being added to `@aouda/client` for the same train. Omitted, the load
+`durability` says the level the job committed at (`BulkLoadDurability`; an outcome read from `:status` carries it too). Omitted, the load
 takes the database's level for a load: `'os'` in a database at `os`, `'strict'` everywhere else.
 
 ```typescript
