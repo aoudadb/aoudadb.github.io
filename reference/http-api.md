@@ -5186,7 +5186,7 @@ the server stops before the job's commit point, or its commit fails, nothing of 
 | `jobId` | string | Echo of job ID. |
 | `state` | string | (**Lead S30, next train**) `"committed"`: the job is committed, and the fields below are its result. `"accepted"` (only with `wait: "accepted"`): its rows have ended and its commit is running — **not durable yet**; its outcome comes from `GET {jobId}`. |
 | `tables` | string[] | Tables involved in the load. |
-| `rowsLoaded` | number | Total rows durably committed across all tables. |
+| `rowsLoaded` | number | Total rows the job loaded across all tables: durably committed when `state` is `"committed"`. When it is `"accepted"` (**Lead S30, next train**), the rows the job took, **not durable yet**: its outcome (`GET {jobId}`) says whether they are. |
 | `expiredRows` | number? | (**Horizon, 0.5.0**) Rows the load sent that were left out because their time lay below their table's [retention](../guides/retention.md) horizon, or was an explicit `null` — accepted, never written, never visible, not in `rowsLoaded`. **Omitted when 0.** Such a table is loaded one segment per time slice and never spilled ([Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention)). |
 | `perTableRowCounts` | object | Per-table row counts (`{ tableName: count }`). Always present. |
 | `segmentsCreated` | number | Total segments created. |
