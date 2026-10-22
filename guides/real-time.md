@@ -259,6 +259,14 @@ Documented intent that is not currently fully productized:
     0.3.x such a write could race the re-open and fail the stream for good ("No open stream with id …"), or hang.
 - Transport strategy:
   - primary WebSocket, optional long-poll fallback for restricted environments.
+- Bulk loads (**Lead S27b, next train**: documented; the behaviour is not new):
+  - **A bulk load emits no change events on the table it loads.** Its rows become visible at the job's commit, but a
+    subscriber to that table receives no `change` event for them, and no other signal: no gap, no notice. A client that
+    must see them re-reads the table (or re-subscribes for a fresh snapshot) after the load's `:commit` answers. Inserts,
+    updates, deletes, upserts and merges are announced as before.
+  - A subscriber to a **materialized query's result** does see a load's effect: when the load's pass folds it in, or a
+    rebuild publishes, the result's changed groups arrive as ordinary `change` events (a rebuild announces the difference
+    between the old result and the new one).
 
 Invariants:
 

@@ -59,6 +59,12 @@ Public, user-facing release notes. Engine phase status lives in the server
   commits it, and a failed `:append` is sent again by the SDK after a keyed `:begin` — a body sent twice is applied once (BL-404).
   `bulkLoadJobs` begins job N+1 with `afterJobId` once N's last body is written (Node), or commits each job by `:commit` while the
   next is sent where the `fetch` cannot say when a body was written. See [the TypeScript client](clients/typescript.md#bulk-load-a-body-sent-again-resume-and-a-committed-job-lead-s14-s22-next-train).
+- **A materialized query names its currency: `current` or `rebuild` (Lead S27b, next train).** `"currency": "rebuild"` (in
+  `aouda.schema.json`, or on `POST …/materialized-queries`) keeps a result by rebuilding it, never incrementally: a change to its
+  source leaves it behind and unused for reads until it is rebuilt — once the source is quiet, after a load, or on `:refresh`.
+  Omitted is `current`, as before. The status reports `currency`. See [Materialized queries](guides/materialized.md#27-core-concepts-and-mental-model).
+- **A bulk load emits no change events on the table it loads — now said (Lead S27b).** A subscriber to the table sees none of
+  the load's rows; a subscriber to a materialized query's result sees the result's changes. See [Real-time](guides/real-time.md#27-core-concepts-and-mental-model).
 - **A bulk load checks its rows, and names a validation level (Lead S27a, next train; breaking).** Every load now refuses a
   column its table does not have and a missing primary key — each `:append` frame is checked before any of it is applied, `400
   INVALID_REQUEST` naming the column and the row (BL-1130, BL-1129: the column was dropped, the key stored as `0`). `validation`

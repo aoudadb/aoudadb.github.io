@@ -449,6 +449,20 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
     by the knob plus one commit; a flush (and a clean shutdown) applies what is held at once. Set it on the query in
     `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
     query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
+- Currency, `currency` (**Lead S27b, next train**; ADR 0066 `D-4`) — how the result is kept, declared per query:
+  - `current` (the default): maintained off each commit, as everything above describes.
+  - `rebuild`: **never maintained incrementally.** A commit to a source marks the query behind — `current: false`,
+    `isStale: true` with a `staleReason` naming its currency — and it is not routed to, so a read of the source is answered
+    from the source (never from a stale result). It is rebuilt, one scan of the source for every `rebuild` query over it,
+    once the source has been quiet for 2 s (at most 60 s after the first change under a steady stream of writes), after a bulk
+    load into it (the load's pass rebuilds it rather than folding the load in), or on `:refresh`. A restart rebuilds it if its
+    source changed after its checkpoint, rather than folding the change forward. Choose it for a query over a table that
+    takes its data in bursts — loads, batch jobs — where keeping the result current through every commit costs more than one
+    rebuild after the burst, and where readers can wait for the burst to settle (DuckDB's "rebuild after the load").
+  - A `:commit` that waits for its queries (`mqWaitMs`) does not wait for a `rebuild` query: its rebuild runs after the commit,
+    when the source is quiet. `updateMode: "sync"` and `maxCoalesceMs` are refused beside `rebuild` (there is no incremental
+    batch to shape). Declared in `aouda.schema.json` (`"currency": "rebuild"`) or `currency` on `POST …/materialized-queries`;
+    the status reports it (`currency`). A change of level replaces the query.
   - (**BL-935, 0.3.0**) A change in place is durable and safe to run concurrently: the query's `definition.json` is
     written whole to a temp file of its own, fsynced and renamed into place, one writer at a time. Before, two changes of
     one query at once failed one of them, and a cancelled change could leave the definition empty — and the next open
@@ -706,6 +720,7 @@ Key implementation anchors:
 | `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | (**WorkloadCore S09, 0.3.0**) No longer changes how updates are fed: both are queued at the commit and never dropped below the backlog's bound. A `Sync` query ignores `maxCoalesceMs` |
 | `MaterializedQueryDefinition.MaxCoalesceMs` (`maxCoalesceMs`) | int | `0` | `0`–`60000` | `aouda.schema.json`; `SetMaterializedQueryMaxCoalesceMsAsync` | **ColumnarMerge S10, 0.2.0.** Batches of an `Async` query coalesce this long before one apply |
 | `window` (`keep`, `column`) | object | none (no window) | `keep`: `<n>m` / `h` / `d` / `w`, a multiple of the bucket; `column`: the window column | `aouda.schema.json`; `window` beside `config` on `POST …/materialized-queries`; both SDKs | (**Horizon, 0.5.0**) `aggregate` with a time bucket and `topNPerGroup` only; part of the definition, so changing it replaces the query. [2.11e](#windows) |
+| `currency` | string | `current` | `current`, `rebuild` | `aouda.schema.json`; `currency` on `POST …/materialized-queries`; the .NET `Create*Async` helpers' `currency` | (**Lead S27b, next train**) `rebuild`: never maintained incrementally; rebuilt once its sources are quiet, after a load, or on `:refresh`; routed only when current. Not with `Sync` or `maxCoalesceMs`. Part of the definition, so changing it replaces the query |
 | `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` | .NET definition/helper APIs | Optional override; else defaults by type |
 | `SubscriptionManagerOptions.MaxLag` | `TimeSpan` | `1s` | positive | Engine wiring | Lag threshold/backpressure signal |
 | `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound; past it, a lane's backlog (**WorkloadCore S09, 0.3.0**) |
