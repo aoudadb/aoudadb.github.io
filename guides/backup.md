@@ -105,7 +105,7 @@ Zero-config reality:
 
 - Azure Blob Storage and Google Cloud Storage archive destinations (`azure://` / `gcs://` throw `NotSupportedException`).
 - `aouda backup create/list/restore` CLI subcommands.
-- Branches: branch engines open with WAL off and sit outside backup/PITR.
+- Branches: branch engines open at durability `unlogged` (no WAL) and sit outside backup/PITR.
 - Sub-commit (row-level) PITR — the finest boundary is a transaction commit.
 
 ## 2.5 Phase coverage matrix
@@ -203,7 +203,7 @@ High-level flow:
 - HTTP: `POST /admin/backup/restore` with `{ "backupId", "targetTime" }`, or omit `backupId` to pick the newest run at or before that time. Pre-flight refusals (future target, target at or before the backup, WAL position `0`, no run before the time) return `4xx` without stopping engines. See [HTTP API](../reference/http-api.md#post-adminbackuprestoreid).
 - Engine: `RestoreEngine.RestoreAsync` with `TargetTime` set **stages** the restore; replay happens on the next `AoudaEngine.OpenAsync`.
 - **A point-in-time restore needs the WAL-root incarnation the backup was taken in** (the epoch and root id its manifest records).
-  (**BL-980, 0.4.0**) A backup that records none — one of a database without a WAL, or one taken by an older build — is
+  (**BL-980, 0.4.0**) A backup that records none — one of a database without a WAL (durability `unlogged` or `memory`), or one taken by an older build — is
   **refused** for a point-in-time restore (`PitrWindowException` naming what the manifest holds; nothing is staged). Up to 0.3.x
   the server inferred the epoch from the archive and fell back to byte-offset coverage, which a recreated WAL root could pass.
   An **exact** restore of such a backup (no `targetTime`) is unchanged, and `pitrEligible` on the backup list is `false` for it.
@@ -725,7 +725,7 @@ _Added 2026-06-07 (MemTiering S12 — closes Gap C)._
 
 ### What is covered
 
-An **exact backup** captures a point-in-time snapshot of every `DiskBacked` table that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
+An **exact backup** captures a point-in-time snapshot of every table with data files (any durability level but `memory`; `DiskBacked` before **Lead S26, next train**) that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
 
 - **Never-sealing mutable-tier tables** (those with `MemoryIntent = Mutable` that never exceed the seal threshold) are **fully covered** by an exact backup. Their data lives entirely in HRA, and a `.hra` snapshot file is written for each such table at the backup checkpoint.
 - **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism. ⚠️ Until the **architecture review (0.3.0)** this held for the backup only: a restore did not catalogue the `.hot` files, and their rows were lost (see [Restore exact backup](#b-restore-exact-backup)).
@@ -733,7 +733,7 @@ An **exact backup** captures a point-in-time snapshot of every `DiskBacked` tabl
 
 ### What is exempt
 
-- **`MemoryOnly` tables** produce no HRA snapshot. By design (ADR 0034), they write nothing to disk and lose their data on shutdown. They are invisible to backup and intentionally so.
+- **`memory` tables** (the `memory` durability level, `MemoryOnly` before **Lead S26, next train**) produce no HRA snapshot. By design (ADR 0034), they write nothing to disk and lose their data on shutdown. They are invisible to backup and intentionally so.
 
 ### Exact restore
 

@@ -452,7 +452,7 @@ This is a full, versioned example set you can keep in git and run end-to-end.
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
     },
@@ -470,14 +470,9 @@ This is a full, versioned example set you can keep in git and run end-to-end.
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
-    }
-  },
-  "settings": {
-    "durability": {
-      "walEnabled": true
     }
   }
 }
@@ -508,7 +503,7 @@ Changes from v1:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
     },
@@ -528,7 +523,7 @@ Changes from v1:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
     },
@@ -547,14 +542,9 @@ Changes from v1:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
-    }
-  },
-  "settings": {
-    "durability": {
-      "walEnabled": true
     }
   }
 }
@@ -584,7 +574,7 @@ Changes from v2:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
     },
@@ -603,7 +593,7 @@ Changes from v2:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
     },
@@ -622,14 +612,9 @@ Changes from v2:
       ],
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "ColdPreferred" },
-      "durability": { "walEnabled": true },
+      "durability": { "level": "strict" },
       "partitionLevelSecurity": false,
       "authMode": "jwt-claim"
-    }
-  },
-  "settings": {
-    "durability": {
-      "walEnabled": true
     }
   }
 }
@@ -649,11 +634,6 @@ Overlay examples:
     "payments": {
       "policy": { "storageTemperature": "Auto" }
     }
-  },
-  "settings": {
-    "durability": {
-      "walEnabled": true
-    }
   }
 }
 ```
@@ -666,11 +646,6 @@ Overlay examples:
   "tables": {
     "payments": {
       "policy": { "storageTemperature": "ColdPreferred" }
-    }
-  },
-  "settings": {
-    "durability": {
-      "walEnabled": true
     }
   }
 }
@@ -736,9 +711,9 @@ When you add `Aouda.Schema.Contract` to your project, you get:
 | `ColumnDefinition` | `Aouda.Engine.Schema.Models` | Per-column: `type`, `primaryKey`, `autoIncrement`, `nullable`, `references`, `default`, `description` |
 | `PartitionKeyEntry` | `Aouda.Engine.Schema.Models` | Partition key entry: `column`, `function` |
 | `TablePolicyDto` | `Aouda.Engine.Schema.Models` | Table policy: `storageTemperature` |
-| `TableDurabilityDto` | `Aouda.Engine.Schema.Models` | Table durability: `walEnabled`, `replicationFactor` |
+| `TableDurabilityDto` | `Aouda.Engine.Schema.Models` | Table durability: `level`, `replicationFactor` (**Lead S26, next train**: `level` replaces `walEnabled`) |
 | `SchemaSettings` | `Aouda.Engine.Schema.Models` | Database-level settings container |
-| `SchemaSettingsDurability` | `Aouda.Engine.Schema.Models` | Database-level durability: `walEnabled`, `replicationFactor` |
+| `SchemaSettingsDurability` | `Aouda.Engine.Schema.Models` | Database-level durability: `replicationFactor` (**Lead S26, next train**: no level — a database's level is set where the database is created) |
 | `ApplyOptions` | `Aouda.Engine.Schema.Apply` | Apply request options: `AllowDestructive`, `DryRun` |
 | `ApplyStatus` | `Aouda.Engine.Schema.Apply` | Outcome of a single applied change (see section D below) |
 | `ApplyResultEntry` | `Aouda.Engine.Schema.Apply` | Per-change apply outcome: `ChangeType`, `TableName`, `ColumnName`, `Status`, `Reason` |
@@ -783,10 +758,10 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `CreateTable` | No | A table exists in desired but not in actual. |
 | `AddColumn` | No | A column exists in desired table but not in actual. |
 | `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
-| `UpdateDurability` | No | The `walEnabled` (or `replicationFactor`) in the table's `durability` changed. |
+| `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, next train**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies. |
 | `UpdatePartitionLevelSecurity` | No | The `partitionLevelSecurity` flag on the table changed. |
 | `UpdateAuthorizationOptions` | No | One or more of `authMode`, `permissionDimension`, or `rlsResolverName` changed. |
-| `UpdateSettings` | No | The database-level `settings.durability` changed. |
+| `UpdateSettings` | No | The database-level `settings.durability` (its `replicationFactor`) changed. |
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
 | `UpdateColumnNullable` | No | Nullability flip; nullable→non-null validates that no nulls exist. |
@@ -883,7 +858,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `partitionKey` | `partitionKey` | `PartitionKeyEntry[]` | None | Ordered list of partition key columns. Omit for non-partitioned tables. |
 | `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. |
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
-| `durability` | `durability` | `TableDurabilityDto` | None | WAL and replication settings for this table. |
+| `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, next train**) and replication settings for this table. |
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
 | `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. `auth-db-pls` implies partition-level security even when `partitionLevelSecurity` is omitted; a partition key is required. |
 | `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. Partition-grant `dimension` must match this string **byte-for-byte** (case-sensitive) — `"source"` does not match `"Source"`. See [Data Authorization §19.8](../auth/authorization.md#198-admin-api-partition-grants). |
@@ -1014,7 +989,7 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
     ],
     "clusterColumns": ["ts"],
     "policy": { "storageTemperature": "Auto" },
-    "durability": { "walEnabled": true }
+    "durability": { "level": "strict" }
   }
 }
 ```
@@ -1036,7 +1011,7 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
     ],
     "clusterColumns": ["created_at"],
     "policy": { "storageTemperature": "Auto" },
-    "durability": { "walEnabled": true },
+    "durability": { "level": "strict" },
     "partitionLevelSecurity": true,
     "authMode": "jwt-claim"
   }
@@ -1053,7 +1028,7 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Whether WAL is enabled for this table. Null = inherit database default. Allowed values: `true`, `false`, `null`. |
+| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, next train**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database is at `strict`; a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train). The retired `walEnabled` is a validation error naming `durability.level`. |
 | `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). Allowed values: non-negative integer, or `null` (inherit database default). |
 
 #### SchemaSettings (value of `settings`)
@@ -1064,9 +1039,12 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
 
 #### SchemaSettingsDurability (value of `settings.durability`)
 
+(**Lead S26, next train**) No durability level here: a database's level is set where the database is created (`durability` on
+`POST /api/databases`, `Aouda:Databases:<db>:Durability`, the embedded options) and read at every open. A `walEnabled` in
+`settings.durability` is a schema validation error saying so. Export no longer writes `settings`.
+
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `walEnabled` | `walEnabled` | `bool` | `null` (inherit) | Database-level WAL default. `true` maps to `DiskBacked` durability mode; `false` maps to `MemoryOnly`. Allowed values: `true`, `false`, `null`. |
 | `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Database-level replication factor. Informational in schema; not currently applied by the apply engine. Allowed values: non-negative integer, or `null` (inherit engine default). |
 
 ---

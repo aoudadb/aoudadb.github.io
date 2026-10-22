@@ -718,7 +718,7 @@ Lists databases visible to the caller.
       "options": {
         "maxMemoryShareBytes": null,
         "defaultTemperature": "Auto",
-        "enableWal": true,
+        "durability": "strict",
         "replicationMode": "Replicate"
       },
       "isInternal": false,
@@ -785,7 +785,7 @@ Direct lookup of a specific database by name. Returns the database if it exists 
   "options": {
     "maxMemoryShareBytes": null,
     "defaultTemperature": "Auto",
-    "enableWal": true,
+    "durability": "strict",
     "replicationMode": "Replicate"
   },
   "auth": {
@@ -797,6 +797,8 @@ Direct lookup of a specific database by name. Returns the database if it exists 
   "authDatabaseKind": "none"
 }
 ```
+
+`options.durability` is the database's durability level — `strict`, `os`, `unlogged` or `memory` (**Lead S26, next train**; it replaces the boolean `options.enableWal`, which is gone). See [Write Path Durability](../guides/write-durability.md).
 
 `authDatabaseKind: "none"` on this payload is expected for a **data** database. Linkage is `auth.enabled` / `auth.database`.
 
@@ -844,11 +846,10 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 ```json
 {
   "name": "myapp",
-  "enableWal": true,
+  "durability": "strict",
   "replicationMode": "Replicate",
   "maxMemoryShareBytes": null,
   "defaultTemperature": "Auto",
-  "dataDurability": "DiskBacked",
   "kind": "data",
   "auth": { "enabled": true }
 }
@@ -857,11 +858,10 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `name` | string | Yes | Database name. |
-| `enableWal` | bool | No | Default `true`. |
+| `durability` | string | No | The database's durability level (**Lead S26, next train**): `strict` (default — WAL written through before a write is visible), `os` (WAL written to the operating system, not forced to disk), `unlogged` (no WAL; durable when flushed), `memory` (no WAL, no data files). Lower case, exactly these four: anything else — `"Strict"`, `"MemoryOnly"`, `"everysec"` — is **400** `INVALID_REQUEST` naming the four levels. Read at every open; tables that name no level inherit it. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
 | `replicationMode` | string | No | `Replicate` (default) or `DoNotReplicate`. |
 | `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, 0.4.0:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
-| `dataDurability` | string | No | `DiskBacked` (default) or `MemoryOnly`. |
 | `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database; both may include `auth`. `kind: "auth"` together with an `auth` object is rejected (400). |
 | `allowSelfSignup` | bool | No | When `kind` is `"auth"`, whether self-service signup is enabled on the new database. Omitted: off. |
 | `selfSignupRole` | string \| null | No | When `kind` is `"auth"`, role granted to self-service signups. Null or omitted: `db_writer`. |
@@ -869,6 +869,8 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `auth.database` | string | No | Link to (or create) a named auth database. |
 | `auth.allowSelfSignup` | bool | No | Whether self-service signup is enabled on the linked application database. Omitted: off. |
 | `auth.selfSignupRole` | string \| null | No | Role granted to self-service signups on the linked application database. Null or omitted: `db_writer`. |
+
+(**Lead S26, next train**) `enableWal` and `dataDurability` are gone, with no alias: a body carrying either is **400** `INVALID_REQUEST` naming `durability` (`enableWal: false` is `"unlogged"`, `dataDurability: "MemoryOnly"` is `"memory"`).
 
 **Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them.
 
@@ -2000,12 +2002,21 @@ Get table detail with columns.
   "policy": {
     "storageTemperature": "Auto",
     "residency": {
-      "dataDurability": "DiskAndRam",
-      "pinAllInMemory": false
+      "hotOnlyBackstop": "RefuseWrites"
     }
+  },
+  "durability": {
+    "level": "strict",
+    "source": "database"
   }
 }
 ```
+
+(**Lead S26, next train**) `durability` is the level the table's writes actually get — `strict`, `os`, `unlogged` or `memory` —
+and `source` says where it came from: `table` when the table named its own level, `database` when it inherits the database's. It
+is the effective level, not the requested one: a table that named `strict` in a database at `os` reads `os`. A table that inherits
+from a database since reopened at `memory` reads `unlogged`. `policy.residency.dataDurability` is gone (its `MemoryOnly` is the
+`memory` level). See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train).
 
 (**Horizon, 0.5.0**) A table with [retention](../guides/retention.md) reports `policy.retention` (`{ "keep": "90d" }`) and
 `policy.horizon` — the instant (UTC) below which its rows are gone. Both are omitted for a table without retention.

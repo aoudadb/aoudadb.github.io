@@ -13,6 +13,17 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **One word for what a write survives: `durability` — `strict`, `os`, `unlogged` or `memory` (Lead S26, next train; ADR 0066).**
+  It replaces a database's `enableWal`, the memory-only mode (`dataDurability: MemoryOnly`), the per-table `EnableWal` and the
+  schema's `durability.walEnabled`. `strict` (the default, server and embedded) writes the WAL through to disk before a write is
+  visible; `os` writes it to the operating system (survives a process crash, not a power loss); `unlogged` has no WAL (the old
+  `enableWal: false`); `memory` has no WAL and no data files (the old `MemoryOnly`). A database's level is set at create
+  (`POST /api/databases` `durability`, `Aouda:Databases:<db>:Durability`, embedded `Durability`, `--durability`, both SDKs) and read
+  at every open; a database with a WAL cannot be reopened without one (BL-1145). A table may name `strict`, `unlogged` or `memory`
+  (`"durability": { "level": … }`) or inherit; `GET …/tables/{table}` reports `durability: { level, source }` and
+  `GET /api/databases/{db}` `options.durability`. The old names are refused, not aliased (`400 INVALID_REQUEST`, a startup or
+  schema validation error, a throwing open), and a data directory from an earlier build is refused (catalog format 12, registry
+  format 3). See [Write Path Durability](guides/write-durability.md#durability-levels-lead-s26-next-train).
 - **Pipelined bulk loaders into one table: keep to two on the default lane once jobs fill their queue (Lead S31, next train;
   BL-1117).** The guide said up to four pipelined loaders into one table finish. That holds while no job's queue
   (`Aouda:BulkLoad:MaxQueuedAppendBytes`, 64 MB) fills; with larger jobs an `:append` waiting for room keeps its lane permit, a

@@ -252,7 +252,7 @@ Steps 1–4 are load-bearing: everything after them assumes the schema file exis
       "partitionKey":   [{ "column": "tenantId" }],
       "clusterColumns": ["createdAt"],
       "policy":         { "storageTemperature": "Auto" },
-      "durability":     { "walEnabled": true }
+      "durability":     { "level": "strict" }
     }
   }
 }
@@ -273,7 +273,7 @@ What each choice buys you, in the order you should think about it:
 | Tenancy / sharding | `partitionKey` | The single highest-leverage decision on this page — including the decision **not** to set it, which is right for more tables than not. Partition a key only when each individual key value will hold on the order of a million rows; below that it buys no useful pruning and costs `PARTITION_FILTER_REQUIRED` on every read and every subscribe for the life of the table. Read [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45) **before** you pick |
 | Physical ordering | `clusterColumns` | Time-ordered data scans dramatically better clustered — and on an unpartitioned table this is what gives you segment pruning, with no query-shape guard attached. [Time-series and clustering](time-series.md) |
 | Memory residency | `policy.storageTemperature` | `Hot` / `Auto` / `ColdPreferred` / mutable tiers. You control what stays in RAM. [Hot/cold storage](hot-cold.md) |
-| Durability | `durability.walEnabled` | Per-table write-ahead logging. [Write path durability](write-durability.md) |
+| Durability | `durability.level` | What a write survives: `strict` (WAL forced to disk), `unlogged` (no WAL; durable once flushed) or `memory` (no files at all); omitted, the table inherits its database's level (default `strict`). Replaces `walEnabled` (**Lead S26, next train**). [Write path durability](write-durability.md#durability-levels-lead-s26-next-train) |
 | Browser visibility | `dataPlaneAccess` | Defaults to **false**. Fail-closed. Every table a browser-tier read touches needs it, **including join tables and materialized-query result tables** |
 
 Indexes are deliberately absent: zone maps, bloom filters, and sparse primary-key indexes are maintained for you and there is no index DDL to get wrong. See [Primary key indexing and memory](pk-indexing.md) for what that costs in RAM and how to bound it.
@@ -583,7 +583,7 @@ The showcase, and the table to check your feature list against. If something you
 | Server-side validation nobody can bypass | `checks`, `unique`, `references` — all enforced on write | [Insert-time transforms](insert-transforms.md) |
 | A bulk import or a migration | Bulk load, multi-table atomic, idempotency keys, identity-insert | [Bulk load](bulk-load.md) |
 | A high-rate event or telemetry ingest | Write stream (`insert`/`upsert`), plus `route`/`tee` to fan rows out | [Real-time](real-time.md) · [Insert-time transforms](insert-transforms.md) |
-| An append-only audit or event log | Table clustered on time, `ColdPreferred` temperature, WAL on | [Time-series](time-series.md) · [Hot/cold](hot-cold.md) |
+| An append-only audit or event log | Table clustered on time, `ColdPreferred` temperature, durability `strict` | [Time-series](time-series.md) · [Hot/cold](hot-cold.md) |
 | Multi-tenant row isolation (SaaS) | `auth-db-rls` with a named resolver, or `auth-db-pls` if you want grant-level access tiers. **Whether the table also gets a `partitionKey` is a separate, volume-only decision** | [Layout vs mode](../auth/authorization.md#layout-and-authorization-mode-are-independent-choices) · [Partitioning](partitioning.md) |
 | "Only rows I own" | `auth-db-rls` with a named resolver | [Mode 3: auth-db-rls](../auth/authorization.md#195-mode-3-auth-db-rls-row-level-security) |
 | Users who span many tenants/rooms/tickers | `auth-db-pls` with `permissionDimension` and partition grants — **needs a `partitionKey`**; or `auth-db-rls` with a `PartitionGrant` rule, which does not and takes the same grants | [Mode 2: auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) · [The unpartitioned variant](../auth/authorization.md#the-unpartitioned-variant--same-grants-no-partition-key) |

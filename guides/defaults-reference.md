@@ -122,6 +122,22 @@ The server starts as before; remove the key.
 
 ---
 
+## Durability (**Lead S26, next train**)
+
+What a write survives is one level per database, optionally narrowed per table. See
+[Write Path Durability — durability levels](write-durability.md#durability-levels-lead-s26-next-train).
+
+| Value | Default | Allowed | Key |
+|---|---|---|---|
+| Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `Aouda:Databases:<db>:Durability`; embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
+| Table durability | **inherits** the database's level | `strict` (only in a `strict` database), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
+
+The database's level is read at every open; one with a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory`. A table's
+change to or from `memory` after creation is refused. These replace `enableWal` / `EnableWal` (default `true`), `dataDurability`
+(`DiskBacked`) and `durability.walEnabled`, which are now refused by name.
+
+---
+
 ## WAL size ladder
 
 Per WAL root, derived — none of these is a configuration key. See [Sizing — the WAL's cap](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-030)

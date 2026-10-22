@@ -298,7 +298,7 @@ await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync(
     new AoudaEmbeddedOptions
     {
         DataPath = "./my-database",  // Data stored here, survives restarts
-        EnableWal = true,            // Write-ahead log for crash recovery (default: true)
+        Durability = "strict",       // WAL written through before a write is visible (default: "strict")
     });
 
 await db.GetTable("users").InsertAsync(new Dictionary<string, object?>
@@ -399,7 +399,7 @@ var recent = await db.Engine.Table("sensors")
 | Option | Type | Default | Allowed values | Description |
 |--------|------|---------|----------------|-------------|
 | `DataPath` | `string?` | `null` | `null` (ephemeral); any valid filesystem path | Directory for data files. `null` = ephemeral (temp dir, auto-deleted). |
-| `EnableWal` | `bool` | `true` | `true`, `false` | Enable write-ahead log for crash recovery. |
+| `Durability` | `string` | `"strict"` | `"strict"`, `"os"`, `"unlogged"`, `"memory"` | (**Lead S26, next train**) The database's durability level: `strict` writes the WAL through to disk before a write is visible (survives a power loss), `os` writes it to the operating system (survives a process crash), `unlogged` has no WAL (rows are durable once flushed), `memory` has no WAL and no data files. Also set by config `Aouda:Durability`. It replaces `EnableWal`: setting `EnableWal` (in code or as `Aouda:EnableWal`) makes the open throw, naming `Durability`. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
 | `MemoryBudget` | `long?` | `null` | `null` (no limit); any non-negative `long` (bytes) | Maximum memory in bytes. `null` = no limit. |
 | `TreatMissingAsEmpty` | `bool` | `true` | `true`, `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
@@ -465,7 +465,7 @@ For local development, you may place an optional `appsettings.json` in the direc
     "Port": 5433,
     "Databases": {
       "myapp": {
-        "EnableWal": true
+        "Durability": "strict"
       }
     }
   }
@@ -561,12 +561,12 @@ curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
   -d '{ "name": "myapp" }'
 
-# Create a database with WAL and memory limits
+# Create a database with a durability level and memory limits
 curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
   -d '{
     "name": "analytics",
-    "enableWal": true,
+    "durability": "strict",
     "maxMemoryShareBytes": 1073741824
   }'
 
@@ -1781,15 +1781,15 @@ A single Aouda server can host many databases. Each database is independent — 
 # Create databases for different purposes
 curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
-  -d '{ "name": "app_production", "enableWal": true }'
+  -d '{ "name": "app_production", "durability": "strict" }'
 
 curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
-  -d '{ "name": "app_staging", "enableWal": true }'
+  -d '{ "name": "app_staging", "durability": "strict" }'
 
 curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
-  -d '{ "name": "cache", "enableWal": false }'
+  -d '{ "name": "cache", "durability": "unlogged" }'
 
 # List all databases
 curl http://localhost:5433/api/databases
@@ -1802,9 +1802,9 @@ Or declare them in an optional `appsettings.json` for local dev (API-created dat
   "Aouda": {
     "DataPath": "./data",
     "Databases": {
-      "production": { "EnableWal": true },
-      "staging": { "EnableWal": true },
-      "cache": { "EnableWal": false }
+      "production": { "Durability": "strict" },
+      "staging": { "Durability": "strict" },
+      "cache": { "Durability": "unlogged" }
     }
   }
 }

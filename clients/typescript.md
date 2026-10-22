@@ -721,6 +721,20 @@ early expiry), on any other table it is one log record and whole segments retire
 
 `client.databases.create(name, options)` (**BL-1123, next train**) sends `kind`, `auth`, `allowSelfSignup`, and `selfSignupRole` only when the caller sets each one, and sends both `kind` and `auth` when the caller sets both. On `auth`, `enabled`, `database`, `allowSelfSignup`, and `selfSignupRole` are included only when set there. The server rejects `kind: "auth"` together with an `auth` object (400). `kind: "data"` with `auth` is valid.
 
+(**Lead S26, next train**) A database's durability level is `options.durability` — `'strict'` (the server's default when
+omitted), `'os'`, `'unlogged'` or `'memory'` (the `DurabilityLevel` type), sent only when set. It replaces `enableWal` (`false` is
+`'unlogged'`) and `dataDurability` (`'MemoryOnly'` is `'memory'`); the client no longer sends either, and the server refuses both with
+`400 INVALID_REQUEST`. `DatabaseOptionsInfo` reads `durability` in place of the boolean `enableWal`; a table's detail carries
+`durability: { level, source }` (`TableDurabilityInfo`) in place of `policy.residency.dataDurability`; and the schema document's
+table `durability` takes `level` (`'strict'`, `'unlogged'` or `'memory'`). See
+[Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train).
+
+```typescript
+await client.databases.create('events', { durability: 'os' });
+const db = await client.databases.get('events');
+db.options.durability; // 'os'
+```
+
 ### Table Operations
 
 ```typescript

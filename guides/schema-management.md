@@ -44,10 +44,15 @@ In your project root, create `aouda.schema.json`:
     }
   },
   "settings": {
-    "durability": { "walEnabled": true, "replicationFactor": 1 }
+    "durability": { "replicationFactor": 1 }
   }
 }
 ```
+
+(**Lead S26, next train**) `settings.durability` carries only `replicationFactor`. A database's durability level (`strict`, `os`,
+`unlogged` or `memory`) is set where the database is created, not in the schema; a table may name its own with
+`"durability": { "level": "unlogged" }` (`strict`, `unlogged` or `memory`). The retired `walEnabled` is a validation error. See
+[Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train).
 
 Set `database` to the database name your Aouda server uses. Your IDE can validate and autocomplete if `$schema` points to the JSON Schema (see [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-declarative-schema-management.md)).
 
@@ -258,7 +263,7 @@ From here on:
 
 ### Environment overlays
 
-Use overlays to keep one schema definition and vary only settings (e.g. replication, WAL) per environment:
+Use overlays to keep one schema definition and vary only settings (e.g. replication, a table's durability level) per environment:
 
 - `aouda.schema.json` — base (dev defaults).
 - `aouda.schema.staging.json` — staging overrides.

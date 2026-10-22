@@ -118,7 +118,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Tracing | `false` | OpenTelemetry disabled until opt-in |
 | Structured (JSON) logging | `false` | Simple console formatter; enable via `Logging:Console:FormatterName: json` |
 | Health startup delay | `10 s` | `/ready` suppresses failures during startup window |
-| Database WAL | `true` per-db | WAL-backed durability by default |
+| Database durability | `strict` per-db (**Lead S26, next train**) | WAL written through to disk before a write is visible; `os`, `unlogged` and `memory` are opt-in ([levels](write-durability.md#durability-levels-lead-s26-next-train)) |
 | Replication mode | `Replicate` per-db | Tables replicated to secondaries by default |
 | Write concern | `One` per-db | Acknowledged by primary WAL only |
 | Write concern timeout | `5 000 ms` | Applies when `majority` or `all` is requested |
@@ -350,7 +350,8 @@ Process start
 
 - `DatabaseManager` constructor accepts an optional `ServerMemoryBudgetManager?`; it is null in isolated test contexts.
 - `DatabasesController` validates that the `database` field in request bodies matches the `{db}` path segment; mismatch → `400 INVALID_REQUEST`.
-- `TableDurabilityOptions` null fields inherit database-level defaults. `EnableWal=true` is invalid when the database-level WAL is disabled.
+- `TableDurabilityOptions` null fields inherit database-level defaults. (**Lead S26, next train**) A table's `Level` may be `strict`, `unlogged` or `memory`; `os` is refused (a database level only), and `strict` is refused unless the database is at `strict`.
+- (**Lead S26, next train**) A database's `Durability` is read at every open. A database that has a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory` — the open is refused, since it would ignore the writes the WAL holds (no path yet: BL-1145).
 - Write concern resolution order: per-write → table → database → `One`.
 
 ---
@@ -464,7 +465,7 @@ POST /api/server/shutdown  (must originate from loopback)
 ### Walk-through 4: Server startup reconcile with pre-configured databases
 
 ```
-Startup config: { "Aouda": { "Databases": { "analytics": { "EnableWal": true, "MaxMemoryShareBytes": 1073741824 } } } }
+Startup config: { "Aouda": { "Databases": { "analytics": { "Durability": "strict", "MaxMemoryShareBytes": 1073741824 } } } }
   → AoudaServerOptions binds DatabaseConfigSection entries
   → AoudaHostedService (or server startup middleware) reads Aouda:Databases
   → foreach entry name in config:
@@ -543,7 +544,7 @@ These can be declared in config to provision databases at startup or to set defa
 
 | Setting | Type | Default | Notes |
 |---|---|---|---|
-| `Aouda:Databases:<name>:EnableWal` | `bool` | `true` | WAL for this database |
+| `Aouda:Databases:<name>:Durability` | `string` | `strict` | (**Lead S26, next train**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-next-train)). It replaces `EnableWal` and `DataDurability`: either key here fails startup validation, naming `Durability`. |
 | `Aouda:Databases:<name>:ReplicationMode` | `string` | `Replicate` | `Replicate` or `DoNotReplicate` |
 | `Aouda:Databases:<name>:MaxMemoryShareBytes` | `long?` | `null` | Optional cap on this database's share of the server budget |
 | `Aouda:Databases:<name>:DefaultTemperature` | `string` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` |
@@ -625,7 +626,7 @@ foreach (var db in list.Databases)
 // Create a database with a cap on its share of the server budget (HTTP field maxMemoryShareBytes)
 var created = await client.Databases.CreateAsync("trading", new CreateDatabaseOptions
 {
-    EnableWal = true,
+    Durability = "strict",   // Lead S26, next train: "strict" (default), "os", "unlogged", "memory"
     ReplicationMode = "Replicate",
     MaxMemoryShareBytes = 2L * 1024 * 1024 * 1024,
     DefaultTemperature = "Auto"
@@ -653,7 +654,7 @@ long count = await tradeClient.Table("orders")
 # Create a database
 curl -s -X POST http://localhost:5000/api/databases \
      -H "Content-Type: application/json" \
-     -d '{"name":"analytics","enableWal":true,"replicationMode":"Replicate","maxMemoryShareBytes":1073741824}'
+     -d '{"name":"analytics","durability":"strict","replicationMode":"Replicate","maxMemoryShareBytes":1073741824}'
 # → 201 + { "name": "analytics", "state": "Active", ... }
 
 # List databases
@@ -718,7 +719,7 @@ printf '%s' "s3cret" | aouda init --admin-email admin@example.com --admin-passwo
 # 3. Create a database
 curl -s -X POST http://localhost:5000/api/databases \
      -H "Content-Type: application/json" \
-     -d '{"name":"app","enableWal":true}'
+     -d '{"name":"app","durability":"strict"}'
 
 # 4. Verify readiness
 curl -s http://localhost:5000/ready

@@ -345,6 +345,10 @@ difference is *when* the work is paid — per load, or once for many — not how
 
 - **Streaming phase vs commit phase:** rows are appended in chunks — column-batch frames, or JSON column arrays (**Lead S12, next train**: NDJSON is no longer read) — then closed by a commit call.
 - **Durability unit:** durability is represented by WAL-visible segment/job events, not by row-level WAL entries.
+- **Durability level** (**Lead S26, next train**): a bulk load is fsynced as before, whatever the target table's
+  [durability level](write-durability.md#durability-levels-lead-s26-next-train) — `strict`, `os` and `unlogged` tables load alike.
+  A bulk load into a table at `memory` (the old `MemoryOnly`) is refused, naming the level: "Bulk load is not supported for table
+  '…' at durability 'memory'" — a load writes segment files, which a memory table never has.
 - **Job-level atomicity:** query visibility is tied to closing-frame commit completion.
 - **Replica catch-up model:** replicas consume WAL events and fetch segment files out-of-band. ⚠️ (**Lead S18a, next train**) A replica that has not fetched every segment of a committed load does not cover that load's token, or any later one, until it has: a read presenting the token waits or is answered `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`, and `GET /admin/replication/status` names the load (`bulkLoadHold`). Today no server wires the replica-side fetch (**BL-1116**), so a replicated database's bulk loads are on its replicas only after a checkpoint re-bootstrap — read them with a token, which sends the read to the primary, or from the primary. ⚠️ (**Lead S20, next train**) **Bulk-loaded rows are not yet replicated** (**BL-1116**): a replica does not receive a load's segments as it is committed. Load into the primary and read the loaded rows there until this is done.
 
@@ -562,7 +566,7 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
   lost one ends the sequence (`BulkLoadLostException` / `BulkLoadLostError`): the jobs after it follow it, so none of them commits.
   The sequence ends only once every job it accepted has settled, so a normal end means every job committed (**Lead group 7 review,
   next train**: the last jobs' outcomes were not awaited, and a lost one among them ended the sequence normally).
-- A job the server cannot accept — a load that writes no closing log frame, or a database without a WAL — is answered committed.
+- A job the server cannot accept — a load that writes no closing log frame, or a database without a WAL (durability `unlogged` or `memory`) — is answered committed.
   `wait: "accepted"` is refused with `waitForDeferredWork`, `mqWaitMs` above 0 or a write concern above `acknowledged`, which each
   wait for the commit.
 
@@ -1129,6 +1133,7 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `403 AUTHORIZATION_DENIED` on `:begin` (**BL-1031, 0.5.0**) | A table in the load has PLS or RLS, and the caller is not a `service_role` key | Load with that database's `mk_svc_` key. Ordinary inserts remain the per-user write path. |
+| "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, next train**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
 | `BulkLoadInvalidOptions` on begin with `skipReplication` | Multi-node safety/policy check failed | Use `logShipSegments` or explicit bypass where allowed. |
 | `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Give every row a `_table` value within the declared table set. |
 | `415 ROW_OBJECTS_UNSUPPORTED` on append | The body is NDJSON (`application/x-ndjson`), no longer read (**Lead S12, next train**) | Send column-batch frames, or the rows as one JSON column-array body (`application/json`); upgrade the client library. |

@@ -113,7 +113,7 @@ If you do nothing except install artifacts:
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
 | `Aouda.Embedded` data location | Temp directory when `DataPath` null | Zero-setup embedded trial path; data lost after dispose |
-| `Aouda.Embedded` WAL | `EnableWal = true` in embedded options | Durable writes when using persistent path |
+| `Aouda.Embedded` durability | `Durability = "strict"` in embedded options (**Lead S26, next train**; replaces `EnableWal`, which now makes the open throw) | Writes forced to disk through the WAL when using persistent path; see [durability levels](../guides/write-durability.md#durability-levels-lead-s26-next-train) |
 | `aouda start --port` | `5433` (from config) | Predictable local URL (`http://localhost:5433`) |
 | Database name | from API / config | Create via `POST /api/databases` or appsettings `Databases` |
 | `aouda start --data-dir` | `./data` typical | Persistent server data |
@@ -356,7 +356,7 @@ Configuration precedence and operational notes:
 await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync(new AoudaEmbeddedOptions
 {
     DataPath = "./data",
-    EnableWal = true
+    Durability = "strict"   // the default (Lead S26, next train)
 });
 
 await db.GetTable("orders").InsertAsync(new Dictionary<string, object?>

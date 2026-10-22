@@ -183,6 +183,9 @@ If you do nothing:
   - Per-database broadcasters, subscriptions, and per-database ACKs.
   - Per-table subscription filtering (`All`, `Include`, `Exclude`) with coverage endpoint.
   - Per-database lag tracking in status/topology and health checks.
+  - (**Lead S26, next train**) Only tables at durability `strict` or `os` replicate: a table at `unlogged` or `memory` writes no
+    WAL frames, so a replica receives none of its inserts, and asking for per-table replication on one is refused. The level is
+    the primary's promise to the writer; see [durability levels](write-durability.md#durability-levels-lead-s26-next-train).
 - Write concern:
   - Database-level defaults + table-level durability overrides + per-request override.
   - `w:1`, `w:majority`, `w:all` with timeout behavior (`Fail`, `Degrade`, `DegradeAndLog`).
