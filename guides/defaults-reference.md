@@ -136,7 +136,7 @@ What a write survives is one level per database, optionally narrowed per table. 
 The database's level is read at every open; one with a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory`. A table's
 change to or from `memory` after creation is refused. These replace `enableWal` / `EnableWal` (default `true`), `dataDurability`
 (`DiskBacked`) and `durability.walEnabled`, which are now refused by name. (**Lead S26c, next train**) An open that does not
-follow a clean close empties every `unlogged` table ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train)).
+follow a clean close empties an `unlogged` table that was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train)).
 
 ---
 

@@ -20,9 +20,10 @@ Public, user-facing release notes. Engine phase status lives in the server
   an `os` database and `strict` everywhere else. Until the server has synced an `os` job, the database's durable writes wait for it.
   `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused
   `400 BULK_LOAD_INVALID_OPTIONS`. `:begin`, `:commit` and `GET {jobId}` report `durability`; `BulkLoadOptions.Durability` /
-  `BulkLoadJobHandle.Durability`, `@aouda/client`'s `durability` (in progress) and the CLI's `--durability`. Separately, an open
-  that does not follow a clean close now **empties every `unlogged` table**, with a warning naming each: its segments could hold
-  part of a statement. See [Bulk Load](guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train) and
+  `BulkLoadJobHandle.Durability`, `@aouda/client`'s `durability` and the CLI's `--durability`. Separately, an open
+  that does not follow a clean close now **empties an `unlogged` table that was being changed** (a statement in flight, or rows
+  only partly flushed), with a warning naming each: its segments could hold part of a statement. A table that was not keeps its
+  flushed rows. See [Bulk Load](guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train) and
   [`unlogged` after a crash](guides/write-durability.md#unlogged-after-a-crash-lead-s26c-next-train).
 - **One word for what a write survives: `durability` — `strict`, `os`, `unlogged` or `memory` (Lead S26, next train; ADR 0066).**
   It replaces a database's `enableWal`, the memory-only mode (`dataDurability: MemoryOnly`), the per-table `EnableWal` and the

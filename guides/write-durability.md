@@ -43,7 +43,7 @@ with no alias (see [Refusals](#refusals-of-the-retired-names)). There are four l
 |---|---|---|---|
 | `strict` (**default**, server and embedded alike) | WAL frames written through (fsync) before the rows are visible and acknowledged | Yes | Yes |
 | `os` | WAL frames written to the operating system, not forced to disk, before the rows are visible | Yes | No |
-| `unlogged` | No WAL: visible at once. A clean close keeps the table whole; any other open empties it (**Lead S26c, next train**; [below](#unlogged-after-a-crash-lead-s26c-next-train)) | No — the table is emptied | No |
+| `unlogged` | No WAL: visible at once. A clean close keeps the table whole; after any other stop it keeps its flushed rows, or is emptied if it was being changed (**Lead S26c, next train**; [below](#unlogged-after-a-crash-lead-s26c-next-train)) | Flushed rows, or emptied — see below | No |
 | `memory` | No WAL and no data files (a memory-only table) | No | No — lost on any shutdown |
 
 `memory` is what used to be `MemoryOnly`; `unlogged` is what used to be `EnableWal = false`.
@@ -93,12 +93,16 @@ of one statement: an UPDATE's deletions reach the segments when it commits but i
 at the next flush, so a crash could keep the deletes and lose the rows; a large INSERT can be cut by a flush; a DELETE's marks are
 written segment by segment.
 
-So **an open that does not follow a clean close empties every `unlogged` table** — after a crash, a kill, a close whose snapshot
-failed, or a restore — as PostgreSQL truncates unlogged tables after a crash. The server logs a warning naming each table it
-emptied and its row count. A clean close snapshots the table's in-memory rows, and the open after it keeps the table whole. Keep
-only data you can load again in an `unlogged` table. (Earlier versions of this page said flushed `unlogged` rows survive a crash.
-They could survive as part of a statement, which is why the table is now emptied instead.) A `memory` table is empty after any
-restart, as it always was.
+So the server keeps a mark on disk while an `unlogged` table may hold part of a statement: from the start of an UPDATE, DELETE,
+MERGE or TRUNCATE until its deletion marks are written and its new rows flushed, and from a flush that leaves rows in memory until
+a flush empties it. **An open that does not follow a clean close** — after a crash, a kill, a close whose snapshot failed, or a
+restore — **empties every `unlogged` table that carries the mark**, as PostgreSQL truncates unlogged tables after a crash, and logs
+a warning naming each table and its row count. A table without the mark keeps its flushed rows; rows that were only in memory are
+lost, whole statements at a time. A clean close snapshots the table's in-memory rows, and the open after it keeps the table whole.
+Keep only data you can load again in an `unlogged` table. (Earlier versions of this page said flushed `unlogged` rows survive a
+crash. They could survive as part of a statement — an UPDATE's deletions without its new rows — which is why a table that was
+being changed is now emptied instead.) A `memory` table is empty after any restart, as it always was. A branch's `unlogged` tables
+do not have this rule yet (BL-1147).
 
 ### Replication
 
@@ -264,7 +268,7 @@ When you do not set durability knobs explicitly:
 - Per-table durability level (`strict` / `unlogged` / `memory`) via the declarative schema and the engine/catalog model, with
   inheritance and validation; reported by `GET .../tables/{table}` as `durability` (**Lead S26, next train**).
 - A bulk load's own level (`strict` / `os`) via `:begin`'s `options.durability`, both SDKs and the CLI (**Lead S26c, next train**).
-- An `unlogged` table emptied by any open that does not follow a clean close (**Lead S26c, next train**).
+- An `unlogged` table that was being changed emptied by an open that does not follow a clean close (**Lead S26c, next train**).
 - Health and metrics endpoints that expose key operational durability indicators.
 
 ### Planned / proposed
@@ -611,12 +615,12 @@ Operational guidance:
 
 - "Writes acknowledged but missing after crash"
   - Check the table's effective level (`GET .../tables/{table}` → `durability.level`). Only `strict` survives a power loss; `os`
-    survives a process crash; `unlogged` is emptied by an open that does not follow a clean close (**Lead S26c, next
-    train**); `memory` loses everything (**Lead S26, next train**).
+    survives a process crash; `unlogged` keeps its flushed rows after a crash, or is emptied if it was being changed (**Lead
+    S26c, next train**); `memory` loses everything (**Lead S26, next train**).
   - Check replay logs and crash safety tests for torn-tail repair behavior.
 - "An `unlogged` table is empty after a restart" (**Lead S26c, next train**)
-  - The open did not follow a clean close (a crash, a kill, a close whose snapshot failed, a restore), so the server emptied the
-    table and logged a warning naming it and its row count. That is the level's contract
+  - The open did not follow a clean close (a crash, a kill, a close whose snapshot failed, a restore) and the table was being
+    changed at the time, so the server emptied it and logged a warning naming it and its row count. That is the level's contract
     ([`unlogged` after a crash](#unlogged-after-a-crash-lead-s26c-next-train)): load the table again from its source.
 - "`GET .../bulk-load/{jobId}` answers `lost` for an `os` load" (**Lead S26c, next train**)
   - The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was
