@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Pipelined bulk loaders into one table: keep to two on the default lane once jobs fill their queue (Lead S31, next train;
+  BL-1117).** The guide said up to four pipelined loaders into one table finish. That holds while no job's queue
+  (`Aouda:BulkLoad:MaxQueuedAppendBytes`, 64 MB) fills; with larger jobs an `:append` waiting for room keeps its lane permit, a
+  pipelined loader has two `:append`s, and three loaders can starve the lock holder until the 30 s lock timeout. See
+  [the bulk-load guide](guides/bulk-load.md).
 - **A committed bulk load is never reported failed, a queued job commits by `:commit`, and a multi-table load commits on every table
   or none (Lead group 5 review, next train).** A committing body sent again and refused `state=Deferred` or `state=Completed` is past
   its commit point — wait, then `:begin` with the key (both SDKs do; they used to report it aborted). A body whose job is still queued
