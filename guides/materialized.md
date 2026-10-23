@@ -456,9 +456,11 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
     from the source (never from a stale result). It is rebuilt, one scan of the source for every `rebuild` query over it,
     once the source has been quiet for 2 s (at most 60 s after the first change under a steady stream of writes), after a bulk
     load into it (the load's pass rebuilds it rather than folding the load in), or on `:refresh`. A restart rebuilds it if its
-    source changed after its checkpoint, rather than folding the change forward. Choose it for a query over a table that
-    takes its data in bursts — loads, batch jobs — where keeping the result current through every commit costs more than one
-    rebuild after the burst, and where readers can wait for the burst to settle (DuckDB's "rebuild after the load").
+    source changed after its checkpoint, rather than folding the change forward. It is meant for a query over a table that
+    takes its data in bursts — loads, batch jobs — where readers can wait for the burst to settle (DuckDB's "rebuild after the
+    load"). It is **not yet the cheaper level on a bulk load** (**Lead S27c, next train**): one 1 M-row load into the six
+    Equity trade results cost 59.1 CPU-s per million rows at `rebuild` against 36.4 at `current`, because a rebuild reads the
+    source row by row and writes the whole result through the insert path (BL-1148).
   - A `:commit` that waits for its queries (`mqWaitMs`) does not wait for a `rebuild` query: its rebuild runs after the commit,
     when the source is quiet. `updateMode: "sync"` and `maxCoalesceMs` are refused beside `rebuild` (there is no incremental
     batch to shape). Declared in `aouda.schema.json` (`"currency": "rebuild"`) or `currency` on `POST …/materialized-queries`;
