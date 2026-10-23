@@ -454,15 +454,22 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
   - `rebuild`: **never maintained incrementally.** A commit to a source marks the query behind — `current: false`,
     `isStale: true` with a `staleReason` naming its currency — and it is not routed to, so a read of the source is answered
     from the source (never from a stale result). It is rebuilt, one scan of the source for every `rebuild` query over it,
-    once the source has been quiet for 2 s (at most 60 s after the first change under a steady stream of writes), after a bulk
-    load into it (the load's pass rebuilds it rather than folding the load in), or on `:refresh`. A restart rebuilds it if its
+    once the source has been quiet for 2 s, after a bulk load into it (the load's pass rebuilds it rather than folding the load
+    in), or on `:refresh`. ⚠️ **Under a steady stream of writes it may never be current** (**Lead group 6 review, next train**):
+    a rebuild also starts at most 60 s after the first change, but a commit that lands while it runs leaves the query behind
+    again, so a source written more often than a rebuild takes keeps a `rebuild` query behind — and rebuilding about once a
+    minute (BL-1149). Choose `current` for a source that never goes quiet. A restart rebuilds it if its
     source changed after its checkpoint, rather than folding the change forward. It is meant for a query over a table that
     takes its data in bursts — loads, batch jobs — where readers can wait for the burst to settle (DuckDB's "rebuild after the
     load"). It is **not yet the cheaper level on a bulk load** (**Lead S27c, next train**): one 1 M-row load into the six
     Equity trade results cost 59.1 CPU-s per million rows at `rebuild` against 36.4 at `current`, because a rebuild reads the
     source row by row and writes the whole result through the insert path (BL-1148).
   - A `:commit` that waits for its queries (`mqWaitMs`) does not wait for a `rebuild` query: its rebuild runs after the commit,
-    when the source is quiet. `updateMode: "sync"` and `maxCoalesceMs` are refused beside `rebuild` (there is no incremental
+    when the source is quiet. A read that presents a token (`?at_least=`) to a `rebuild` query waits until the query is current,
+    which takes the quiet period (2 s) plus the rebuild: with the default `waitMs` (250 ms) such a read right after a write answers
+    `409 TOKEN_UNSATISFIED`, so give it a `waitMs` above that. `POST …/materialized-queries/{name}/query` still answers from the
+    result while it is behind, with the token of what the result holds — honest, and between a change and its rebuild that is the
+    normal state. `updateMode: "sync"` and `maxCoalesceMs` are refused beside `rebuild` (there is no incremental
     batch to shape). Declared in `aouda.schema.json` (`"currency": "rebuild"`) or `currency` on `POST …/materialized-queries`;
     the status reports it (`currency`). A change of level replaces the query.
   - (**BL-935, 0.3.0**) A change in place is durable and safe to run concurrently: the query's `definition.json` is

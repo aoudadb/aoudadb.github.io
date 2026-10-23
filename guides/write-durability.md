@@ -104,6 +104,11 @@ crash. They could survive as part of a statement — an UPDATE's deletions witho
 being changed is now emptied instead.) A `memory` table is empty after any restart, as it always was. A branch's `unlogged` tables
 do not have this rule yet (BL-1147).
 
+The mark is not forced to disk, so the rule holds for a process crash or a kill, **not for a power loss**: after a power loss an
+`unlogged` table may come back holding part of a statement. And the rule is about the table, not about who wrote to it: a bulk load
+into an `unlogged` table is `strict`, but if the table carries the mark at a crash — another statement was changing it — the open
+empties it, the load's rows with it, although the load answered committed.
+
 ### Replication
 
 A table at `unlogged` or `memory` writes no WAL frames, so **a replica receives none of its inserts**; asking for per-table
@@ -121,7 +126,10 @@ table's own level does not change it, so an `unlogged` table still gets a `stric
 | `strict` (default; what every load did before) | Every segment file, its directory and the job's commit record fsynced | Yes | Yes |
 | `os` | Files written and renamed, the commit record written, none of it fsynced | Yes | Kept whole, or dropped whole and reported `lost` — never half |
 
-Until the server has synced an `os` load in the background, every durable write on its database waits for it. `strict` is refused
+Until the server has synced an `os` load in the background, every durable write on its database waits for it — and so does a job
+that follows it (`afterJobId`) at its commit, and the creation of a branch (**Lead group 6 review, next train**): neither may outlive
+a power loss that drops the load. **If that background sync fails**, every later durable write on the database is refused, naming the
+job, until the server is restarted; the restart verifies the job and keeps it whole or reports it lost. `strict` is refused
 in a database at `os` (its WAL is not written through), and `os` for a multi-table job, a table with vector columns, or an edge
 or vector table. A bulk load into a `memory` table is refused, naming the level — a load writes segment files, which a memory table never has. See
 [Bulk Load — a load's durability](bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train).

@@ -13,6 +13,13 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Bulk loads and `unlogged` tables: what the Lead group 6 review corrected (next train).** In a multi-table load, a value in a
+  column the row's own table does not have is refused, even when another table of the job has it (it was dropped). A job that follows
+  an `os` job (`afterJobId`) commits only once that job is synced, so a power loss never keeps the follower and drops the job it
+  follows; a branch's creation waits for it too. If an `os` job's background sync fails, the database refuses durable writes until a
+  restart — now said. An `unlogged` table's after-crash rule holds for a process crash, not a power loss — now said. A `rebuild` query
+  may never be current under a steady stream of writes (BL-1149), and a token read of one waits for its rebuild — now said. See
+  [Write durability](guides/write-durability.md) and [Materialized queries](guides/materialized.md).
 - **A bulk load's own durability, `strict` or `os`; and `unlogged` tables emptied after a crash (Lead S26c, next train).**
   `:begin` takes `options.durability`: `strict` fsyncs every segment file, its directory and the commit record before the job is
   visible (what every load did); `os` skips the fsync, survives a process crash, and after a power loss is kept whole or dropped
@@ -73,7 +80,9 @@ Public, user-facing release notes. Engine phase status lives in the server
   which nothing applied, is removed and refused. See [A load's validation](guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
 - **A bulk load checks less than an insert — now said (Lead S22).** A null in a non-nullable column is stored as the type's zero
   (an `Int64` primary key as `0`; BL-1129), a column the table does not have is dropped (BL-1130), and a duplicate key is loaded as
-  a second row; an insert refuses all three. See [`:append`](reference/http-api.md#post-jobidappend).
+  a second row; an insert refuses all three. See [`:append`](reference/http-api.md#post-jobidappend). (Since **Lead S27a** in the same
+  train, a missing key and a column the table does not have are refused at every level, and a duplicate key at `validation: "strict"`;
+  see the entry above.)
 - **A bulk-load body sent again loads none of its rows twice (Lead S21a, next train; breaking on the wire).** A job's frames are
   now numbered across all its `:append` bodies, and the server applies each number once: a frame below the job's `nextSequence`
   is acknowledged and skipped, one above it is refused `409 BULK_LOAD_CURSOR_MISMATCH`, and a frame is applied whole or not at all

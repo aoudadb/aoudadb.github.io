@@ -607,8 +607,12 @@ In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Str
   fresh job instead of answering `alreadyCompleted`.
 - **Until it is synced, an `os` load holds up its database's durable writes.** The server syncs ("promotes") an `os` job in the
   background, starting at its commit. Until then every durable write on that database waits for it: inserts, updates and deletes
-  that write the WAL, catalog segment changes such as merges and compaction, materialized-query passes and result checkpoints. The
-  wait is at most about the fsync time a `strict` load pays up front.
+  that write the WAL, catalog segment changes such as merges and compaction, materialized-query passes and result checkpoints, a
+  branch's creation, and the commit of a job that follows it (`afterJobId`; **Lead group 6 review, next train** — so a power loss
+  never keeps the follower and drops the job it follows). The wait is at most about the fsync time a `strict` load pays up front.
+- ⚠️ **If the background sync fails, the database stops taking durable writes.** Every later insert, update, delete, merge, pass and
+  checkpoint on it is refused, naming the job, until the server is restarted; the restart verifies the job and keeps it whole or
+  reports it lost. Meanwhile `:status` still answers the job committed at `os`.
 - **An `os` load writes no WAL frame.** Bulk loads are not replicated anyway (**BL-1116**).
 - **Refused at `:begin`**, `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level:
   - any other value — `unlogged` and `memory` are table and database levels, not a load's, and names are case-sensitive;
@@ -630,7 +634,9 @@ A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../re
 | `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column** | Loaded as a second row (not checked) |
 | `strict` | Refused | The job fails at its commit, nothing committed |
 
-Every load, at either level, **refuses a column its table does not have** (names are case-sensitive). The server checks each
+Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value
+in a column the row's own table (`_table`) does not have, even when another table of the job has it (**Lead group 6 review, next
+train**; a null there carries nothing and passes). The server checks each
 `:append` frame before any of it is applied: a frame it refuses answers `400 INVALID_REQUEST` naming the column, the frame and the
 row, with none of that frame's rows applied and the frames before it kept, so the job stays open. An auto-increment column is exempt
 from the null check — a missing value takes the next id.
