@@ -116,7 +116,7 @@ Scope boundaries:
 | Server `Aouda:BulkLoad:IngestBufferBudgetFraction` | `0.04` | Fraction of the governed memory budget one job's ingest buffers may hold, floored at 8 MB. As of P45, the ceiling is no longer a fixed 256 MB — it grows with the server's own memory governor (shared with other concurrent loads and background work), so a well-provisioned host's fraction actually means something. Nothing changes on a small host, where `0.04 × governed` was already under 256 MB. |
 | Server `Aouda:BulkLoad:MaxIngestBufferBudgetBytes` | `0` (derive, per above) | Set to a specific byte count to pin the ceiling explicitly — `268435456` reproduces the pre-P45 fixed 256 MB behavior exactly. |
 | Server `Aouda:BulkLoad:FlushConcurrency` | `1` | Server-wide bound on concurrent bulk-load segment-write I/O, shared across every in-flight job. Fixed by measurement, not core count — a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95. (**LoadScan, 0.5.0**) It bounds how many segment writes run at once; inside one, the segment's columns are encoded and written in parallel on up to the load's CPU share — a bulk load is `Ingest` work, half the schedulable cores — for a segment of four or more pages. |
-| Cluster `Aouda:BulkLoad:EmitFramesOnSingleNode` | `false` | On a detected single-node topology, `LogShipSegments` elides `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames by default — no per-segment re-read/hash. `true` restores frames on a single node. |
+| Cluster `Aouda:BulkLoad:EmitFramesOnSingleNode` | `false` | On a database whose `ReplicationMode` is `DoNotReplicate`, a single-table `LogShipSegments` load writes no `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames — no per-segment re-read/hash. `true` restores frames there. ⚠️ (**BL-1118**) It is the **database's replication mode**, not the server's topology, that decides: a database left at the default `Replicate` writes frames for every load even when the server has no replica. A multi-table load always writes them (one commit point across its tables), and an `os` load never does. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | `64` | Segment count above which, combined with a low median rows/segment, a job's commit logs one advisory warning. See `2.13`. |
 | Cluster `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | `1000` | Median rows/segment below which the same warning can fire. |
 
@@ -405,8 +405,18 @@ var batch = ColumnBatch.Of(
     ColumnBatchColumn.FromTimestamps("ts", times));                  // DateTime[] or DateTime?[]
 
 var handle = await client.BulkLoadAsync("trades", batches,          // IAsyncEnumerable<ColumnBatch>, a list, or one batch
-    new BulkLoadOptions { IdempotencyKey = "trades-2026-10-18" });
+    new BulkLoadOptions
+    {
+        IdempotencyKey = "trades-2026-10-18",
+        // The default validation is Coerce: a null in a NOT NULL column that is not a key is stored as the type's default
+        // (0, ""), as ClickHouse does. Validation = BulkLoadValidation.Strict refuses the job instead, naming the column and row.
+    });
 ```
+
+**A load coerces by default** (**Lead S27a, next train**). Unless the load asks for `validation: strict`, a null sent for a NOT
+NULL column that is not part of the key is stored as the type's default, not refused — what an insert through `/rows` would refuse.
+A key is never coerced, and a column the table does not have is refused at either level. See
+[A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
 
 The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatch.Validate()` are described on the
 [.NET Client page](../clients/dotnet.md#6-building-column-batches-lead-s13-next-train). A multi-table load
@@ -421,6 +431,14 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
 - **Checked before it is sent.** Each batch is validated before any of it is written: a malformed batch throws `ArgumentException`
   naming the column and row, and the load is not committed. Rows from earlier batches already appended stay in the open session
   until the server reclaims it.
+- **A failed load with your own key keeps its table locked until you resume it or abort it.** When you pass an
+  `IdempotencyKey`, both SDKs leave a load that fails part-way (a bad batch, a source that throws, an `:append` that fails four
+  times) **open**, so that the same call with the same key resumes it. Until then the job holds the table's load lock: other loads
+  into the table, and writes queued behind them, wait — for up to `Aouda:BulkLoad:SessionIdleTimeoutMinutes` (**10 minutes** by
+  default), after which the sweeper aborts the session and releases the lock. Resume the load, or abort it by its job id
+  (`POST /api/databases/{db}/bulk-load/{jobId}:abort`), rather than leaving it for the sweeper. With no key of your own, the SDK
+  aborts the job itself — nothing could resume it — except once its commit has been sent, and in C# after an `:append` that failed
+  for a transient reason, where `BulkLoadAppendFailedException` hands you the key it used.
 - **A failed `:append` is re-sent by the SDK** (**Lead S21a, next train**). A job's frames are numbered and the server applies each
   number once, so after a connection that dropped, a timeout or a `503`, the SDK sends a `:begin` with the job's key (which stops
   the server's stale request and answers the job's `nextSequence`) and then the same body again; the frames the server already
@@ -459,7 +477,10 @@ const batch = ColumnBatch.of(
   column.scaledDecimal('price', unscaled, 4),
   column.timestampTicks('ts', ticks),     // BigInt64Array of 100-ns ticks since the Unix epoch; column.timestamp takes Dates
 ).validate();
-const handle = await client.bulkLoad('trades', batchesOf(source), { idempotencyKey: 'trades-2026-10-19' });
+const handle = await client.bulkLoad('trades', batchesOf(source), {
+  idempotencyKey: 'trades-2026-10-19',
+  // validation: 'coerce' is the default — a null in a NOT NULL column that is not a key is stored as 0 / ''; 'strict' refuses the job.
+});
 ```
 
 The factories and `validate()` are on the [TypeScript Client page](../clients/typescript.md#column-batches-lead-s14-next-train).
@@ -726,7 +747,7 @@ column; a window inside an `OR` reads as before. A keyed table's bulk-loaded seg
 sidecars — the index and keymap other writers already built — shortly after the commit, so a uniqueness
 check that has to consult one stays cheap.
 
-On top of segment shape, this engine also removes a per-segment fixed cost that shape alone cannot: on a detected single-node deployment, `LogShipSegments`'s default no longer re-reads and BLAKE3-hashes every written segment file or appends a WAL frame for it. Measured on the first worked row above collapsed to `Auto`/16 buckets (250 partitions × 40 rows, 16 sealed segments): `finalizeMs` dropped from 13 ms to 0 ms and `walMs` from 2 ms to 0 ms (`walPosition` becomes `-1` — the same shape `SkipReplication` already used). See [Single-Node Deployment](single-node-deployment.md) for the durability trade-off that default makes.
+On top of segment shape, this engine also removes a per-segment fixed cost that shape alone cannot: on a database that does not replicate (`ReplicationMode: DoNotReplicate`, the [single-node profile](single-node-deployment.md)), `LogShipSegments`'s default no longer re-reads and BLAKE3-hashes every written segment file or appends a WAL frame for it. ⚠️ (**BL-1118**) A database left at the default `Replicate` still writes the frames on a server with no replica — the switch is the database's replication mode, not a detected topology — and a multi-table load writes them everywhere; the frames cost about 4 ms a job (Lead `S20b`). Measured on the first worked row above collapsed to `Auto`/16 buckets (250 partitions × 40 rows, 16 sealed segments): `finalizeMs` dropped from 13 ms to 0 ms and `walMs` from 2 ms to 0 ms (`walPosition` becomes `-1` — the same shape `SkipReplication` already used). See [Single-Node Deployment](single-node-deployment.md) for the durability trade-off that default makes.
 
 For the engineering detail behind these triggers and the ingest buffer budget's own formula, see the private companion guide `docs/dev/BulkLoad-Ingest-Sizing-Guide.md` in the engine repository.
 
