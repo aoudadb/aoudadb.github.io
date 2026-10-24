@@ -608,12 +608,15 @@ In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Str
 - **Until it is synced, an `os` load holds up its database's durable writes.** The server syncs ("promotes") an `os` job in the
   background, starting at its commit. Until then every durable write on that database waits for it: inserts, updates and deletes
   that write the WAL, catalog segment changes such as merges and compaction, materialized-query passes and result checkpoints, a
-  branch's creation, and the commit of a job that follows it (`afterJobId`; **Lead group 6 review, next train** — so a power loss
-  never keeps the follower and drops the job it follows). The wait is at most about the fsync time a `strict` load pays up front.
+  branch's creation, a backup and a replica's checkpoint image, a rewrite of a derived column's stored values, and the commit of a
+  job that follows it (`afterJobId`; **Lead group 6 review and whole-branch review, next train** — so a power loss never keeps a
+  copy or a follower of a job it drops, and a process crash never drops it). The wait is at most about the fsync time a `strict`
+  load pays up front.
 - ⚠️ **If the background sync fails, the database stops taking durable writes.** Every later insert, update, delete, merge, pass and
   checkpoint on it is refused, naming the job, until the server is restarted; the restart verifies the job and keeps it whole or
   reports it lost. Meanwhile `:status` still answers the job committed at `os`.
-- **An `os` load writes no WAL frame.** Bulk loads are not replicated anyway (**BL-1116**).
+- **An `os` load writes no WAL frame.** Bulk loads are not replicated anyway (**BL-1116**), and on a replica an `os` load's
+  consistency token can read as covered without its rows (**BL-1162**): read an `os` load's rows on the primary.
 - **Refused at `:begin`**, `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level:
   - any other value — `unlogged` and `memory` are table and database levels, not a load's, and names are case-sensitive;
   - `strict` in a database at `os` (its WAL is not written through);

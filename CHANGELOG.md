@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Bulk loads: what the Lead whole-branch review corrected (next train).** A load at `validation: "strict"` finds a `Date` key the
+  table already holds when the body carries the date as text (it was missed, and the key stored twice). A backup, a replica's
+  checkpoint image and a branch wait for every `os` load they copy, so a power loss never leaves a copy holding a load the database
+  dropped; and a change to a derived column's expression no longer makes a process crash drop an `os` load. A table made `memory` or
+  `unlogged` is that on its replicas too. `GET .../bulk-load/{jobId}?waitMs=` waits its full time (it was cut at 30 s with `504`).
+  See [Bulk load](guides/bulk-load.md).
 - **Bulk loads and `unlogged` tables: what the Lead group 6 review corrected (next train).** In a multi-table load, a value in a
   column the row's own table does not have is refused, even when another table of the job has it (it was dropped). A job that follows
   an `os` job (`afterJobId`) commits only once that job is synced, so a power loss never keeps the follower and drops the job it
