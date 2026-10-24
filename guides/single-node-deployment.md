@@ -35,7 +35,7 @@ a safe fraction from detected host memory whether or not you have replicas — s
 
 | Concern | `Replicate` (default) | `DoNotReplicate` (single-node profile) |
 |---|---|---|
-| Bulk-load `LogShipSegments` WAL frames | Emitted for every segment | Elided by default — no per-segment re-read/hash, no fsync'd WAL frame. The job's commit point becomes its durable catalog registration instead. Override with `Aouda:BulkLoad:EmitFramesOnSingleNode=true` to keep a WAL trail ready ahead of a later join (see below). |
+| Bulk-load `LogShipSegments` WAL frames | Emitted for every segment | Elided by default — no per-segment re-read/hash, no fsync'd WAL frame. The job's commit point becomes its durable catalog registration instead. Override with `Aouda:BulkLoad:EmitFramesOnSingleNode=true` to keep a WAL trail ready ahead of a later join (see below). A job that loads **several tables** emits its frames anyway (**Lead group 5 review, next train**): its closing frame is what commits it on every table at once — without it a crash between two tables' catalog records left one table's rows loaded and the other's lost. |
 | Replication streaming | Runs for this database | Not started for this database |
 | Per-table replication override | May be enabled | Rejected — a table cannot opt into replication while its database has it disabled |
 

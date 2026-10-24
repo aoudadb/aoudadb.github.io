@@ -340,7 +340,7 @@ time slice ([2.11e](#window-expiry)).
   - No protocol-level MQ target-kind required.
 - MQ rebuild (P31 / ADR 0036, ingest-fed path P46):
   - `engine.RefreshMaterializedQueryAsync(name, ct)`: explicit on-demand full rebuild using a shadow-build pattern (still a scan of the source). The result table remains readable throughout (with stale data). State transitions `Rebuilding` → `Ready`; errors transition to `Error` (never left in `Rebuilding`).
-  - Auto after `BulkLoadAsync`: (**WorkloadCore S10, 0.3.0**) when `PostLoadMqBehavior.Auto` (the default), the load records a pending job and the table's [deferred pass](#deferred-loads) starts at its commit and brings affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) current: a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: a background rebuild job, started after the pass, not inside it). Multi-table and transform loads take the same path. The load does no materialized-query work while its rows stream and is not paced to a drain. Before S10 the queries accumulated during the load's own pass over rows and were published by shadow-swap at commit (the ingest-fed path, P46), with the exception that follows. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load was folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written (gone in **WorkloadCore S10**: the pass reads the load's segments), or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, 0.3.0**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`, `current: false`) until it is done. The work under `MqRebuildStatus.InProgress` reads only the load's segments, not a second full scan of the table; a query the pass can neither fold nor apply is rebuilt, by a background rebuild job after the pass (**WorkloadCore S17, 0.3.0**), and `MqRebuildCompleted` waits for that rebuild too. `MemoryOnly` source tables are a no-op. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
+  - Auto after `BulkLoadAsync`: (**WorkloadCore S10, 0.3.0**) when `PostLoadMqBehavior.Auto` (the default), the load records a pending job and the table's [deferred pass](#deferred-loads) starts at its commit and brings affected materialized queries of **all four types** (`Aggregate`, `Filter`, `LatestPerKey`/`FirstPerKey`, `TopNPerGroup`) current: a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: a background rebuild job, started after the pass, not inside it). Multi-table and transform loads take the same path. The load does no materialized-query work while its rows stream and is not paced to a drain. Before S10 the queries accumulated during the load's own pass over rows and were published by shadow-swap at commit (the ingest-fed path, P46), with the exception that follows. (**BatchFirst S12, 0.1.40**) When every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold, the load was folded after its commit by the table's [deferred pass](#deferred-loads) instead, started at once — from the fold the load made while its segments were written (gone in **WorkloadCore S10**: the pass reads the load's segments), or, for a load whose fold the memory governor refused, that spilled, or whose table's queries changed during it, from its segments. (**WorkloadCore S09, 0.3.0**) Every `Auto` load's maintenance runs after the commit point, in the background, and `mqRebuildStatus` at commit is `Pending` or `InProgress`; `:commit` waits for the queries up to `mqWaitMs` and reports `mqStatus`. In 0.2.0 (**ColumnarCore S12**) such a load wrote its queries before it returned, with `mqRebuildStatus` `completed`. `MqRebuildCompleted` waits for it and for the queries built on the results, and each query is visibly behind (`isStale`, `currentLag`, `pendingDeferredJobs`, `current: false`) until it is done. The work under `MqRebuildStatus.InProgress` reads only the load's segments, not a second full scan of the table; a query the pass can neither fold nor apply is rebuilt, by a background rebuild job after the pass (**WorkloadCore S17, 0.3.0**), and `MqRebuildCompleted` waits for that rebuild too. Source tables at durability `memory` (`MemoryOnly` before **Lead S26, next train**) are a no-op — a bulk load into one is refused. **Do not** also call `:refresh` for those tables — wait on `MqRebuildCompleted` / `mqRebuildStatus` instead ([Bulk load — do not hand-refresh](bulk-load.md)).
   - `BulkLoadJobHandle.MqRebuildStatus` enum (`Pending / InProgress / Completed / Skipped / Failed`) and `MqRebuildCompleted` Task for callers that need to await completion before querying.
   - Replica rebuild: `BulkLoadReplicaCoordinator.MqRebuildScheduler` delegate triggers rebuild after all bulk-load segments are fetched on the replica.
   - HTTP: `POST /api/databases/{db}/materialized-queries/{name}:refresh` with `?await=true/false`.
@@ -419,7 +419,7 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
 | Derived time-bucket group-by expressions | Yes | No | No | P28 S2, `GroupByExpression`, `TimeBucketTruncator` | `TruncateToHour` and `TruncateToMinute`; group keys stored as Int64 epoch ms |
 | ~~`AggregateConfig` v1 backward compatibility~~ | No | — | — | P28 S2; removed by BL-980 | (**0.4.0**) A v1 plain-string `groupByColumns` is refused (`400` on create; a stored one is refused when read) |
 | Explicit on-demand MQ rebuild | Yes | No | No | P31 S1, `engine.RefreshMaterializedQueryAsync(name, ct)` | Shadow-build; result readable with stale data throughout; state `Rebuilding` → `Ready` |
-| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, the table's pass (WorkloadCore S10) | All four MQ types brought current by the table's pass, started at the commit (**WorkloadCore S10, 0.3.0**; they accumulated during the load before); queries it cannot fold or apply are rebuilt. `MemoryOnly` sources skipped |
+| Auto-rebuild after `BulkLoadAsync` | Yes | No | No | P31 S1 + P46, `PostLoadMqBehavior.Auto`, the table's pass (WorkloadCore S10) | All four MQ types brought current by the table's pass, started at the commit (**WorkloadCore S10, 0.3.0**; they accumulated during the load before); queries it cannot fold or apply are rebuilt. `memory` sources skipped (`MemoryOnly` before Lead S26) |
 | `BulkLoadJobHandle.MqRebuildStatus` / `MqRebuildCompleted` | Yes | No | No | P31 S1, `BulkLoadJobHandle.cs` | Enum: Pending/InProgress/Completed/Skipped/Failed; awaitable Task |
 | Replica MQ rebuild after bulk-load | Yes | No | No | P31 S1, `BulkLoadReplicaCoordinator.MqRebuildScheduler` | Triggered after all segments fetched; factory via `engine.CreateReplicaMqRebuildScheduler()` |
 | HTTP `POST .../materialized-queries/{name}:refresh` | Yes | No | No | P31 S2, `MaterializedQueriesController` | `?await=true` waits; `?await=false` fire-and-forget |
@@ -449,6 +449,29 @@ Note: TypeScript and HTTP management surfaces for MQ lifecycle (create/drop/list
     by the knob plus one commit; a flush (and a clean shutdown) applies what is held at once. Set it on the query in
     `aouda.schema.json` (`"maxCoalesceMs": 100`; 0 to 60000; part of the query's body, so changing it replaces the
     query) or in place with `SetMaterializedQueryMaxCoalesceMsAsync`. Ignored by a `Sync` query.
+- Currency, `currency` (**Lead S27b, next train**; ADR 0066 `D-4`) — how the result is kept, declared per query:
+  - `current` (the default): maintained off each commit, as everything above describes.
+  - `rebuild`: **never maintained incrementally.** A commit to a source marks the query behind — `current: false`,
+    `isStale: true` with a `staleReason` naming its currency — and it is not routed to, so a read of the source is answered
+    from the source (never from a stale result). It is rebuilt, one scan of the source for every `rebuild` query over it,
+    once the source has been quiet for 2 s, after a bulk load into it (the load's pass rebuilds it rather than folding the load
+    in), or on `:refresh`. ⚠️ **Under a steady stream of writes it may never be current** (**Lead group 6 review, next train**):
+    a rebuild also starts at most 60 s after the first change, but a commit that lands while it runs leaves the query behind
+    again, so a source written more often than a rebuild takes keeps a `rebuild` query behind — and rebuilding about once a
+    minute (BL-1149). Choose `current` for a source that never goes quiet. A restart rebuilds it if its
+    source changed after its checkpoint, rather than folding the change forward. It is meant for a query over a table that
+    takes its data in bursts — loads, batch jobs — where readers can wait for the burst to settle (DuckDB's "rebuild after the
+    load"). It is **not yet the cheaper level on a bulk load** (**Lead S27c, next train**): one 1 M-row load into the six
+    Equity trade results cost 59.1 CPU-s per million rows at `rebuild` against 36.4 at `current`, because a rebuild reads the
+    source row by row and writes the whole result through the insert path (BL-1148).
+  - A `:commit` that waits for its queries (`mqWaitMs`) does not wait for a `rebuild` query: its rebuild runs after the commit,
+    when the source is quiet. A read that presents a token (`?at_least=`) to a `rebuild` query waits until the query is current,
+    which takes the quiet period (2 s) plus the rebuild: with the default `waitMs` (250 ms) such a read right after a write answers
+    `409 TOKEN_UNSATISFIED`, so give it a `waitMs` above that. `POST …/materialized-queries/{name}/query` still answers from the
+    result while it is behind, with the token of what the result holds — honest, and between a change and its rebuild that is the
+    normal state. `updateMode: "sync"` and `maxCoalesceMs` are refused beside `rebuild` (there is no incremental
+    batch to shape). Declared in `aouda.schema.json` (`"currency": "rebuild"`) or `currency` on `POST …/materialized-queries`;
+    the status reports it (`currency`). A change of level replaces the query.
   - (**BL-935, 0.3.0**) A change in place is durable and safe to run concurrently: the query's `definition.json` is
     written whole to a temp file of its own, fsynced and renamed into place, one writer at a time. Before, two changes of
     one query at once failed one of them, and a cancelled change could leave the definition empty — and the next open
@@ -554,11 +577,11 @@ after it, so a crash in between cannot bring the old column back (**BL-810, 0.3.
 column, and a column's new type, do the same: both rewrite stored values no change event carries. (**0.3.0**)
 
 The answer says where it came from: `QueryStats.RoutedToMaterializedQuery` / `MaterializedQueryName` in the .NET API,
-`stats.routedTo` over HTTP (JSON and the frame response's `X-Aouda-Stats`), `ClientQueryStats.RoutedTo` in the C# SDK,
+`stats.routedTo` over HTTP (JSON, and the frame response's end frame — **Lead S09, next train**: it was the `X-Aouda-Stats` header), `ClientQueryStats.RoutedTo` in the C# SDK,
 `result.stats.routedTo` in the TypeScript SDK.
 `ExplainRoutingAsync` gives the decision with its reason, every candidate's included.
 - A `Rebuilding` MQ state means a rebuild is in progress; reads from the result table return stale but consistent data.
-- `MemoryOnly` source tables are never subject to MQ auto-rebuild after bulk-load.
+- Source tables at durability `memory` (`MemoryOnly` before **Lead S26, next train**) are never subject to MQ auto-rebuild after bulk-load: a bulk load into one is refused.
 
 ## 2.8 How Aouda implements it
 
@@ -706,6 +729,7 @@ Key implementation anchors:
 | `MaterializedQueryDefinition.UpdateMode` | enum | `Async` | `Async`, `Sync` | .NET definition/helper APIs | (**WorkloadCore S09, 0.3.0**) No longer changes how updates are fed: both are queued at the commit and never dropped below the backlog's bound. A `Sync` query ignores `maxCoalesceMs` |
 | `MaterializedQueryDefinition.MaxCoalesceMs` (`maxCoalesceMs`) | int | `0` | `0`–`60000` | `aouda.schema.json`; `SetMaterializedQueryMaxCoalesceMsAsync` | **ColumnarMerge S10, 0.2.0.** Batches of an `Async` query coalesce this long before one apply |
 | `window` (`keep`, `column`) | object | none (no window) | `keep`: `<n>m` / `h` / `d` / `w`, a multiple of the bucket; `column`: the window column | `aouda.schema.json`; `window` beside `config` on `POST …/materialized-queries`; both SDKs | (**Horizon, 0.5.0**) `aggregate` with a time bucket and `topNPerGroup` only; part of the definition, so changing it replaces the query. [2.11e](#windows) |
+| `currency` | string | `current` | `current`, `rebuild` | `aouda.schema.json`; `currency` on `POST …/materialized-queries`; the .NET `Create*Async` helpers' `currency` | (**Lead S27b, next train**) `rebuild`: never maintained incrementally; rebuilt once its sources are quiet, after a load, or on `:refresh`; routed only when current. Not with `Sync` or `maxCoalesceMs`. Part of the definition, so changing it replaces the query |
 | `MaterializedQueryDefinition.Storage.StorageTemperature` | enum | type-derived | `Auto`, `HotOnly`, `ColdPreferred` | .NET definition/helper APIs | Optional override; else defaults by type |
 | `SubscriptionManagerOptions.MaxLag` | `TimeSpan` | `1s` | positive | Engine wiring | Lag threshold/backpressure signal |
 | `SubscriptionManagerOptions.MaxQueueDepth` | int | `10000` | positive | Engine wiring | Async queue upper bound; past it, a lane's backlog (**WorkloadCore S09, 0.3.0**) |
@@ -973,6 +997,10 @@ Content-Type: application/json
 
 {}
 ```
+
+The answer is column arrays — `{ "columns": [...], "data": [[...], ...], "rowCount": N, "stats": {...}, "token": "..." }`, one array
+per column in the result's declared order (**Lead S12, next train; breaking**: it was `"rows": [{…}]`, one object per row). See the
+[HTTP reference](../reference/http-api.md#materialized-query-endpoints).
 
 **Query MQ result table via standard query endpoint (same as normal table):**
 

@@ -316,7 +316,7 @@ Full examples are also under `examples/github-actions/schema-deploy-typescript.y
   Use `schema validate` in a job that should **fail** if the server has drifted from the schema file (e.g. someone changed the DB by hand). Exit code 0 = in sync, 1 = drift.
 
 - **Environment overlays**  
-  Use `--env prod` when applying to production so the CLI merges `aouda.schema.prod.json` (replication factor, WAL, etc.) before sending to the server.
+  Use `--env prod` when applying to production so the CLI merges `aouda.schema.prod.json` (replication factor, table durability levels, etc.) before sending to the server.
 
 ---
 

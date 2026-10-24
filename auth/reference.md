@@ -20,9 +20,10 @@ One of Aouda's key qualities is that AI agents can build and test complete appli
 aouda start --port 5433 --data-dir ./data
 # Create database via API or appsettings — see setup.md
 
-# Agent uses it immediately — zero setup
+# Agent uses it immediately — zero setup (rows as column arrays: Lead S12, next train)
 curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
-  -d '{ "rows": [{ "id": 1, "customer": "Acme", "total": 249.99 }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "columns": ["id", "customer", "total"], "data": [[1], ["Acme"], [249.99]] }'
 ```
 
 ### Level 1: Database with Auth (API setup)
@@ -38,6 +39,7 @@ aouda start --port 5433 --data-dir ./data
 # Sign up a user
 curl -H "Authorization: Bearer mk_anon_a1b2c3..." \
   -X POST http://localhost:5433/api/databases/myapp/auth/signup \
+  -H "Content-Type: application/json" \
   -d '{ "email": "testuser@example.com", "password": "Test123!" }'
 
 # Use the returned JWT for data access
@@ -52,20 +54,24 @@ curl -X POST -H "Authorization: Bearer eyJ..." \
 ```bash
 # 1. Bootstrap server admin
 curl -X POST http://localhost:5433/api/auth/setup \
+  -H "Content-Type: application/json" \
   -d '{ "email": "admin@test.local", "password": "AdminPass123!" }'
 
 # 2. Sign in
 TOKEN=$(curl -s http://localhost:5433/api/auth/signin \
+  -H "Content-Type: application/json" \
   -d '{ "email": "admin@test.local", "password": "AdminPass123!" }' | jq -r .accessToken)
 
 # 3. Create auth-enabled database
 curl -X POST http://localhost:5433/api/databases \
   -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "myapp", "auth": { "enabled": true } }'
 
 # 4. Create a scoped server API key
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "myapp-backend", "roles": [{ "role": "db_writer", "scope": "myapp" }] }'
 
 # 5. Test the complete flow
@@ -427,7 +433,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 | `roles` | array | No | RBAC roles for this key: `[{ "role": "db_writer", "scope": null }]`. `scope` is a database name or `null` for all databases — same shape as user role assignments. |
 | `expiresAt` | string? | No | ISO-8601 timestamp. Omit for a non-expiring key. |
 | `kind` | string | No | Defaults to `"custom"`. `"anon"`, `"service_role"`, `"public"`, and `"server_admin"` are reserved — they are singleton, system-managed keys and this endpoint rejects creating them (`400 INVALID_REQUEST`). |
-| `userId` | string? | No | Links this key to an existing user. The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
+| `userId` | string? (GUID) | No | Links this key to an existing user (its `id`). The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
 
 ```json
 {
@@ -440,7 +446,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
   "createdAt": "2026-01-15T10:30:00Z",
   "kind":      "custom",
   "isSystem":  false,
-  "userId":    "usr_feeder"
+  "userId":    "550e8400-e29b-41d4-a716-446655440002"
 }
 ```
 

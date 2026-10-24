@@ -41,7 +41,7 @@ Aouda query execution exists to make one query contract work consistently across
   - Keep query behavior stable as data moves between hot and cold storage.
   - Expose a single API family across server HTTP, .NET client, and TypeScript client.
 - Operational outcomes:
-  - Predictable defaults (`columnar` format, bounded limits, strict validation).
+  - Predictable defaults (column-array results, bounded limits, strict validation).
   - Observable execution through performance counters and query stats.
   - Incremental optimization through pruning and vectorized paths without API changes.
 - Scope boundaries:
@@ -92,7 +92,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
-| HTTP query response format | `columnar` | Lower payload overhead by default; row format is opt-in (`format=rows`). A request whose `Accept` lists `application/vnd.aouda.column-batch` gets binary column-batch frames instead, and both SDKs ask for them by default (**ColumnarRead S16, 0.3.0**; [HTTP reference](../reference/http-api.md#post-apidatabasesdbquery)). |
+| HTTP query response format | column arrays | `columns`, `types`, `data` (one array per column), `rowCount`. (**Lead S12, next train; breaking**) It is the only JSON shape: the row format (`format=rows`) and the `format` parameter are gone, and any `format=` is refused `400 INVALID_FORMAT`. A request whose `Accept` lists `application/vnd.aouda.column-batch-v2` gets binary column-batch frames instead, and both SDKs ask for them by default (**ColumnarRead S16, 0.3.0**; `ACB2`, its envelope in an end frame, since **Lead S09, next train**; [HTTP reference](../reference/http-api.md#post-apidatabasesdbquery)). |
 | `limit` when omitted/negative | `1000` (`ProtocolConstants.DefaultLimit`) | Prevents accidental unbounded results. With `aggregates` / `groupBy` it counts **groups** (**ColumnarRead S16, 0.3.0**): set `limit` and page with `offset` when a query can make more. |
 | `limit` upper bound | `10000` (`ProtocolConstants.MaxLimit`) | Oversized client limits are capped server-side. |
 | `limit = 0` | Unlimited | Still valid on `/query` for unbounded reads; remote `.CountAsync()` uses `/query/count` instead. |
@@ -108,7 +108,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 
 - Server query endpoint: `POST /api/databases/{db}/query` with protocol validation and typed error payloads.
 - Server count endpoint: `POST /api/databases/{db}/query/count` — same request body shape as `/query` (where/cross-partition); `limit`/`offset`/`orderBy`/`select` ignored for translation; returns `CountResult` with aggregate stats.
-- `columnar` and `rows` output formats, with explicit format validation.
+- One JSON result shape, column arrays (**Lead S12, next train**: the `rows` format and the `format` parameter are removed; a request naming `format` is refused `400 INVALID_FORMAT`), and binary column-batch frames on request (`Accept`).
 - **Expression SELECT projections** — `selectExpr` field on `QueryMessage` adds server-side computed columns to query results without storing them (P27 / S7 / BL-080). See `guides/bulk-mutations.md` §8.
 - Fluent query APIs:
   - Engine-side `TableQuery` (`Where`, `Select`, `SelectExpr`, `Skip`, `Limit`, `OrderBy`, `ThenBy`, aggregates).
@@ -216,7 +216,7 @@ At a high level:
    - a current materialized result that holds the answer, when one does ([routing](materialized.md#routing-a-read-to-a-maintained-result)),
    - otherwise the one scan (`TableScan`) for rows, columns, aggregates, GROUP BY, top-K and `DISTINCT` alike (**ColumnarRead, 0.3.0**).
 6. The scan reads the segments the table's catalog names; no directory is listed (**ColumnarRead, 0.3.0**).
-7. Results are returned as columnar by default and converted to row format when requested.
+7. Results are returned as column arrays (JSON) or column-batch frames (**Lead S12, next train**: no row format).
 
 Runtime notes:
 
@@ -230,10 +230,10 @@ Runtime notes:
 ### Path A: HTTP query request -> translated query -> response
 
 1. Entry point: `QueryController.ExecuteQuery`.
-2. Validates format (`columnar`/`rows`), database/path consistency, and query payload.
+2. Refuses a `format` parameter (`400 INVALID_FORMAT`, **Lead S12, next train**), then validates database/path consistency and the query payload.
 3. Applies authorization and partition security enforcement.
 4. Translates to `TableQuery` with normalized defaults (`DefaultLimit`, `MaxLimit`, `MaxOrderByColumns`).
-5. Executes and returns `ColumnarResult` or row-converted response.
+5. Executes and returns `ColumnarResult` (JSON column arrays) or column-batch frames.
 6. Tests: `tests/Aouda.Server.Tests/QueryIntegrationTests.cs`, `tests/Aouda.Server.Tests/QueryTranslatorTests.cs`.
 
 ### Path B: Predicate query on cold/mixed segments
@@ -316,7 +316,7 @@ for its history.)
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `format` | Query parameter | `columnar` | `columnar`, `rows` | HTTP request (`/query`) | Invalid values return `InvalidFormat`. |
+| `format` | Query parameter | — | none (**Lead S12, next train**: removed) | HTTP request (`/query`) | Any value, `columnar` included, returns `400 INVALID_FORMAT`; results are always column arrays. |
 | `readPreference` | Query parameter / header | Parsed default | replication preference values | HTTP request (`readPreference` or `X-Read-Preference`) | Query parameter takes precedence over header. |
 | `database` | Request body field | None | existing database name | `QueryMessage` | Must match URL path database. |
 | `table` | Request body field | None | existing table name | `QueryMessage` | Required. |
@@ -332,7 +332,7 @@ for its history.)
 
 Precedence/override notes:
 
-- Response format: request `format` controls projection shape; there is no higher-layer persistent override.
+- Response format: the JSON answer is always column arrays; `Accept` chooses JSON or column-batch frames (**Lead S12, next train**: the `format` parameter is gone).
 - Read preference: query parameter overrides header when both are present.
 - Limit handling: request value is normalized by translator (`0` special-case, negative->default, positive->cap).
 - Cross-partition behavior: request can ask for bypass, but security/authorization/rate-limit layers still gate execution.
@@ -377,8 +377,6 @@ Notes:
 
 | Option | Meaning | Example |
 |---|---|---|
-| `format=columnar` | Return `ColumnarResult` (default) | `POST /query?format=columnar` |
-| `format=rows` | Return row-oriented result payload | `POST /query?format=rows` |
 | `orderBy[].descending=true` | Descending sort for that column | `{ "column":"createdAt", "descending":true }` |
 | `offset` | Skip N rows before returning data | `"offset": 100` |
 | `limit` | Max rows returned (`0` means unlimited) | `"limit": 1000` |
@@ -408,7 +406,7 @@ Notes:
 || DELETE with LIMIT | `.DeleteAsync()` + `.Limit()` | `.delete()` + `.limit()` | `DELETE .../rows` (`limit`, `orderBy`) | Implemented (P27 S2) | Returns `hasMore` sentinel; pair with `orderBy` for deterministic rolling deletes. |
 || TRUNCATE | `.TruncateAsync()` | `.truncate()` | `POST .../truncate` | Implemented (P27 S2) | Requires `Truncate` auth scope; crash-safe. |
 || RETURNING on UPDATE/DELETE | `.UpdateAsync(..., returning:[...])` | `.update(v, { returning:[...] })` | `returning` field on PATCH/DELETE | Implemented (P27 S3) | UPDATE returns post-update; DELETE returns pre-delete values. |
-|| Batch mutation | `.BatchAsync([...])` | `.batch([...])` | `POST .../rows/batch` | Implemented (P27 S4) | Multiple operations, single WAL commit. |
+|| Batch mutation | `.BatchAsync([...])` | `.batch([...])` | `POST .../rows/batch` | Implemented (P27 S4) | Multiple operations in one round-trip, applied in order; **not one transaction** — each commits on its own (BL-843). See [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch). |
 
 ### B) Missing API matrix
 
@@ -458,7 +456,7 @@ Common mistake:
 ### HTTP example
 
 ```http
-POST /api/databases/appdb/query?format=columnar
+POST /api/databases/appdb/query
 Content-Type: application/json
 
 {
@@ -556,7 +554,7 @@ Quick-answer matrix:
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `Invalid format` error | `format` not `columnar` or `rows` | Fix query parameter; use one of supported format values. |
+| `INVALID_FORMAT` error | The request names the `format` query parameter, removed in **Lead S12, next train** | Drop the parameter: results are always column arrays (`columns`, `data`); ask for frames with `Accept` |
 | `Database is required` or path/body mismatch | Missing or inconsistent `database` field | Ensure body `database` matches `/api/databases/{db}` route. |
 | `ThenBy() requires OrderBy()` exception | Secondary sort called first | Add `OrderBy()` before `ThenBy()` in query chain. |
 | Query returns fewer rows than expected | Default/capped limit applied | Set explicit `limit` (or `0` when intentionally unbounded). |

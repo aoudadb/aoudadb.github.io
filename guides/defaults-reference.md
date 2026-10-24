@@ -37,7 +37,7 @@ is now honoured.)
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
-| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB. **On** (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**) | `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
+| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB, and it follows the share when it is recomputed (**Lead S10, next train**). **On** (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). A read whose pages are more than the cache holds admits at most half of it (**Lead S10, next train**) | `Aouda:Memory:MaxPageCacheBytes` (the server's total, scaled to each database's share — **Lead S10, next train**); `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
 | Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host (**WorkloadCore S17, 0.3.0** — `Abundant` raised the fraction to 0.15) | derived |
 | Per-table flush trigger (`T16`) | `clamp(T11 / max(n, 4), min(1 MB, T11 / n), 64 MB)` — `T11` the write buffer's ceiling (15 % of governed, floor 16 MB), `n` the tables sharing it (**WorkloadCore S17, 0.3.0** — `Abundant` raised the ceiling to 1 GB) | derived |
@@ -122,6 +122,24 @@ The server starts as before; remove the key.
 
 ---
 
+## Durability (**Lead S26, next train**)
+
+What a write survives is one level per database, optionally narrowed per table. See
+[Write Path Durability — durability levels](write-durability.md#durability-levels-lead-s26-next-train).
+
+| Value | Default | Allowed | Key |
+|---|---|---|---|
+| Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `Aouda:Databases:<db>:Durability`; embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
+| Bulk-load durability (**Lead S26c, next train**) | **inherits** the database's level for a load: `strict`; `os` in a database at `os` (an `unlogged` table still gets `strict`) | `strict`, `os` — `strict` not in an `os` database; `os` not for a multi-table job, a table with vector columns, or an edge or vector table | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
+| Table durability | **inherits** the database's level | `strict` (only in a `strict` database), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
+
+The database's level is read at every open; one with a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory`. A table's
+change to or from `memory` after creation is refused. These replace `enableWal` / `EnableWal` (default `true`), `dataDurability`
+(`DiskBacked`) and `durability.walEnabled`, which are now refused by name. (**Lead S26c, next train**) An open that does not
+follow a clean close empties an `unlogged` table that was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train)).
+
+---
+
 ## WAL size ladder
 
 Per WAL root, derived — none of these is a configuration key. See [Sizing — the WAL's cap](sizing.md#the-wals-cap-follows-the-disk-and-the-workload-bl-787-030)
@@ -148,7 +166,7 @@ length and how many writes it refused) is one line in the server log, prefixed `
 |---|---|---|---|
 | Segment seal size | 64 MB | `Aouda:BulkLoad:TargetSegmentBytes` | Fixed — matches every other segment the engine writes. Not derived from host size. |
 | Concurrent segment-write I/O budget | `1` | `Aouda:BulkLoad:FlushConcurrency` | A **fixed constant**, not core-scaled. Measured: a higher value buys commit latency the phase does not need, at the expense of concurrent-query p95 during the load. |
-| Single-node WAL frame emission | `false` (elided) | `Aouda:BulkLoad:EmitFramesOnSingleNode` | On a detected single-node topology, `LogShipSegments` no longer re-reads/hashes segment files or appends a WAL frame. See [Single-Node Deployment](single-node-deployment.md). |
+| Single-node WAL frame emission | `false` (elided) | `Aouda:BulkLoad:EmitFramesOnSingleNode` | On a database whose `ReplicationMode` is `DoNotReplicate`, a single-table `LogShipSegments` load no longer re-reads/hashes segment files or appends a WAL frame. ⚠️ (**BL-1118**) The database's replication mode decides, not the server's topology: a database at the default `Replicate` writes the frames even with no replica. See [Single-Node Deployment](single-node-deployment.md). |
 | Job-shape warning — segment count | `64` | `Aouda:BulkLoad:JobShapeWarnSegmentThreshold` | Advisory only, never blocks a commit. See [Bulk Load — Reading `:commit completed`](bulk-load.md#reading-commit-completed-and-the-job-shape-warning). |
 | Job-shape warning — median rows/segment | `1000` | `Aouda:BulkLoad:JobShapeWarnMedianRowsPerSegmentThreshold` | Same. |
 | Post-load Materialized Query | `Auto` | `BulkLoadOptions.PostLoadMqBehavior` | (**WorkloadCore S10, 0.3.0**) Every load but a `Skip` one records a pending job, and the table's pass brings its queries current: `Auto` starts it at the commit (multi-table and transform loads included) — while the table is loading, after the quiet period like `Deferred` (**LoadSpeed M.3, 0.4.0**: coalesced while loading) — `Deferred`, until the 0.4.0, after the quiet period (2 s quiet, at most 60 s); (**LoadSpeed K31, 0.4.0**) `Deferred` is refused `400` — use `Auto`. A load does no materialized-query work while it streams. Before S10, `Auto` accumulated affected MQs of all four types during the load and published after the commit, or, for a table whose every query is an aggregate or latest / first per key, the table's pass wrote them from a fold the load built (**WorkloadCore S09**); in 0.2.0 they were written in the load's own commit, before it returned (**ColumnarCore S12**). Wait on `mqRebuildStatus` / `MqRebuildCompleted`, or read with the commit's `token`; do not also `:refresh`. Set `Skip` to defer in a multi-step pipeline. |

@@ -228,7 +228,8 @@ Ad-hoc from the same client against the data-plane:
 ```bash
 curl -i -X POST https://data.example.com/api/databases/trading/query \
   -H "Authorization: Bearer $JWT" \
-  -d '{"table":"EquityQuote"}'
+  -H "Content-Type: application/json" \
+  -d '{"database":"trading","table":"EquityQuote"}'
 # 404
 ```
 

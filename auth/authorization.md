@@ -199,8 +199,9 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
 Then grant the user access to specific partitions:
 
 ```bash
-# Grant Alice read+write access to chat room 42
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/usr_alice/partition-grants \
+# Grant Alice read+write access to chat room 42. The path takes her user id, a GUID: the `id` that
+# POST …/auth/admin/users returned for her (a name or email in its place is a 404).
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -219,7 +220,7 @@ When Alice queries `messages` without specifying a `room_id` filter, Aouda autom
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
   -H "Content-Type: application/json" \
-  -d '{ "table": "messages", "orderBy": "sent_at", "limit": 50 }'
+  -d '{ "database": "myapp", "table": "messages", "orderBy": [{ "column": "sent_at", "descending": true }], "limit": 50 }'
 ```
 
 This is the **cross-partition fan-out** pattern — the most common query for chat, financial, and group-membership applications. Alice's granted partitions form the implicit filter. See [Cross-Partition Fan-Out Queries](#197-cross-partition-fan-out-queries) for more detail.
@@ -232,12 +233,14 @@ When Alice specifies a partition filter, Aouda validates that she has access to 
 # Returns messages from room 42 — Alice has a grant, succeeds
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "table": "messages", "where": [{ "column": "room_id", "op": "=", "value": "42" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "table": "messages", "where": { "and": [{ "column": "room_id", "op": "eq", "value": "42" }] } }'
 
 # Returns 403 — Alice has no grant for room 99
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "table": "messages", "where": [{ "column": "room_id", "op": "=", "value": "99" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "table": "messages", "where": { "and": [{ "column": "room_id", "op": "eq", "value": "99" }] } }'
 ```
 
 Multi-partition `IN` filter: Aouda intersects the requested set with Alice's grants and routes only to the allowed intersection:
@@ -246,9 +249,11 @@ Multi-partition `IN` filter: Aouda intersects the requested set with Alice's gra
 # Rooms 42 and 55 are in Alice's grants; room 99 is not — only 42 and 55 are queried
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
+  -H "Content-Type: application/json" \
   -d '{
+    "database": "myapp",
     "table": "messages",
-    "where": [{ "column": "room_id", "op": "in", "values": ["42", "55", "99"] }]
+    "where": { "and": [{ "column": "room_id", "op": "in", "value": ["42", "55", "99"] }] }
   }'
 ```
 
@@ -263,9 +268,10 @@ curl -X POST http://localhost:5433/api/databases/myapp/query \
 | `admin` | ✅ | ✅ | ✅ |
 
 ```bash
-# Grant Bob read-only access to room 42 (he can view but not post)
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/usr_bob/partition-grants \
+# Grant Bob (user id 550e8400-…-446655440001) read-only access to room 42 (he can view but not post)
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440001/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{
     "dimension": "chat_room",
     "partitionKey": "42",
@@ -285,35 +291,40 @@ For that case, link a `custom` API key to a user instead of minting sessions for
 # 1. Create a user to hold the service identity (it never signs in interactively)
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "email": "svc-quote-feeder@internal" }'
-# → { "id": "usr_feeder", ... }
+# → { "id": "550e8400-e29b-41d4-a716-446655440002", ... }
 
 # 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user).
 #    `dimension` must match the table permissionDimension byte-for-byte (case-sensitive).
-curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_feeder/partition-grants \
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440002/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "write" }'
 
 # 3. Create a custom API key linked to that user
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{
     "name": "oslo-bors-feeder",
     "kind": "custom",
-    "userId": "usr_feeder",
+    "userId": "550e8400-e29b-41d4-a716-446655440002",
     "roles": [{ "role": "db_writer" }]
   }'
-# → { "key": "mk_...", "userId": "usr_feeder", ... } — the key is shown once; store it like a password
+# → { "key": "mk_...", "userId": "550e8400-e29b-41d4-a716-446655440002", ... } — the key is shown once; store it like a password
 
-# The feeder authenticates with that static key going forward:
+# The feeder authenticates with that static key going forward (rows as column arrays: Lead S12, next train):
 curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
-  -d '{ "rows": [{ "id": 1, "quote_source": "oslo_bors", "instrument_id": "EQNR", "bid": 289.10, "ask": 289.30 }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "finance", "columns": ["id", "quote_source", "instrument_id", "bid", "ask"], "data": [[1], ["oslo_bors"], ["EQNR"], [289.10], [289.30]] }'
 # → 200 — granted partition
 
 curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
-  -d '{ "rows": [{ "id": 2, "quote_source": "bloomberg", "instrument_id": "EQNR", "bid": 289.10, "ask": 289.30 }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "finance", "columns": ["id", "quote_source", "instrument_id", "bid", "ask"], "data": [[2], ["bloomberg"], ["EQNR"], [289.10], [289.30]] }'
 # → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
 ```
 
@@ -526,19 +537,19 @@ This eliminates application-layer aggregation code. The query looks like a norma
 
 Manage which partition keys a user is allowed to access in each dimension.
 
-All endpoints are under `/api/databases/{db}/auth/admin/users/{userId}/partition-grants` and require a `service_role` key, `db_admin` user JWT, or server admin token.
+All endpoints are under `/api/databases/{db}/auth/admin/users/{userId}/partition-grants` and require a `service_role` key, `db_admin` user JWT, or server admin token. `{userId}` is the user's id and `{grantId}` the grant's, both GUIDs — the `id` their create call returned; anything else in their place is a `404`. `grantedBy`, when given, is a user id too.
 
 ### Create a Partition Grant
 
 ```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/partition-grants \
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "dimension": "chat_room",
     "partitionKey": "42",
     "accessLevel": "write",
-    "grantedBy": "usr_admin_123"
+    "grantedBy": "550e8400-e29b-41d4-a716-446655440009"
   }'
 ```
 
@@ -546,12 +557,12 @@ Response (201 Created):
 
 ```json
 {
-  "id": "grnt_xyz789",
-  "userId": "usr_abc",
+  "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
   "dimension": "chat_room",
   "partitionKey": "42",
   "accessLevel": "write",
-  "grantedBy": "usr_admin_123",
+  "grantedBy": "550e8400-e29b-41d4-a716-446655440009",
   "createdAt": "2026-03-26T12:00:00Z"
 }
 ```
@@ -564,18 +575,18 @@ Response (201 Created):
 
 ```bash
 # All grants for a user
-curl http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/partition-grants \
+curl http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
   -H "Authorization: Bearer <admin-token>"
 
 # Filtered by dimension
-curl "http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/partition-grants?dimension=chat_room" \
+curl "http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants?dimension=chat_room" \
   -H "Authorization: Bearer <admin-token>"
 ```
 
 ### Delete a Partition Grant
 
 ```bash
-curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/users/usr_abc/partition-grants/grnt_xyz789 \
+curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants/7c9e6679-7425-40de-944b-e07fc1f90ae7 \
   -H "Authorization: Bearer <admin-token>"
 # 204 No Content on success
 # 404 AUTH_GRANT_NOT_FOUND if grant does not exist
@@ -648,8 +659,10 @@ curl "http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers?targetT
 
 ### Get Resolver (with rules)
 
+`{resolverId}` is a GUID: the `id` the create call returned (or the list shows).
+
 ```bash
-curl http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers/rslvr_abc123 \
+curl http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers/9b2d6c1e-4f3a-4e8b-a5d7-2c1f0e9a8b7c \
   -H "Authorization: Bearer <admin-token>"
 ```
 
@@ -658,7 +671,7 @@ Response includes the resolver metadata and its ordered rules array.
 ### Update Resolver
 
 ```bash
-curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers/rslvr_abc123 \
+curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers/9b2d6c1e-4f3a-4e8b-a5d7-2c1f0e9a8b7c \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -681,7 +694,7 @@ PATCH replaces the full rules list. The permission version counter is incremente
 ### Delete Resolver
 
 ```bash
-curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers/rslvr_abc123 \
+curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers/9b2d6c1e-4f3a-4e8b-a5d7-2c1f0e9a8b7c \
   -H "Authorization: Bearer <admin-token>"
 # 204 No Content on success
 # 404 AUTH_RESOLVER_NOT_FOUND if resolver does not exist
@@ -717,34 +730,40 @@ for most chat applications that is the one to build.
 A user belongs to hundreds of chat rooms. In this use case the `messages` table is partitioned by `room_id` — assume it has cleared the rule above. The application grants partition access at room-join time, and revokes it when the user leaves.
 
 ```bash
-# Grant Alice write access to 3 rooms (repeat at join time for each room)
-curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/usr_alice/partition-grants \
+# Grant Alice (user id 550e8400-…-446655440000) write access to 3 rooms (repeat at join time for each room)
+curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "chat_room", "partitionKey": "room_42", "accessLevel": "write" }'
 
-curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/usr_alice/partition-grants \
+curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "chat_room", "partitionKey": "room_55", "accessLevel": "write" }'
 
-curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/usr_alice/partition-grants \
+curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "chat_room", "partitionKey": "room_99", "accessLevel": "read" }'
 
 # Alice's "all my latest messages" query — fan-out across all her granted rooms
 curl -X POST http://localhost:5433/api/databases/chat/query \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "table": "messages", "orderBy": "sent_at", "limit": 50 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "chat", "table": "messages", "orderBy": [{ "column": "sent_at", "descending": true }], "limit": 50 }'
 # → Returns 50 most recent messages drawn from room_42, room_55, and room_99
 
 # Alice posts to room_42 (write access) — succeeds
 curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "rows": [{ "room_id": "room_42", "body": "Hello!", "user_id": "usr_alice" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "chat", "columns": ["room_id", "body", "user_id"], "data": [["room_42"], ["Hello!"], ["550e8400-e29b-41d4-a716-446655440000"]] }'
 
 # Alice tries to post to room_99 (read-only) — rejected
 curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
   -H "Authorization: Bearer <alice-jwt>" \
-  -d '{ "rows": [{ "room_id": "room_99", "body": "Hi there" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "chat", "columns": ["room_id", "body"], "data": [["room_99"], ["Hi there"]] }'
 # → 403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS
 ```
 
@@ -887,22 +906,25 @@ curl -X POST http://localhost:5433/api/databases/crm/auth/admin/rls-resolvers \
     ]
   }'
 
-# Regular user queries — injected predicate: owner_id = 'usr_alice' OR team_id IN ('team_west')
+# Regular user queries — injected predicate: owner_id = '550e8400-e29b-41d4-a716-446655440000' OR team_id IN ('team_west')
 curl -X POST http://localhost:5433/api/databases/crm/query \
   -H "Authorization: Bearer <user-jwt>" \
-  -d '{ "table": "sales", "where": [{ "column": "company_id", "op": "=", "value": "acme" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "crm", "table": "sales", "where": { "and": [{ "column": "company_id", "op": "eq", "value": "acme" }] } }'
 # → Returns only Alice's own sales or sales shared with her teams
 
 # Company admin queries — no predicate injected (null = full partition access)
 curl -X POST http://localhost:5433/api/databases/crm/query \
   -H "Authorization: Bearer <admin-jwt>" \
-  -d '{ "table": "sales", "where": [{ "column": "company_id", "op": "=", "value": "acme" }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "crm", "table": "sales", "where": { "and": [{ "column": "company_id", "op": "eq", "value": "acme" }] } }'
 # → Returns all sales records for acme
 
 # Regular user tries to insert a record owned by someone else — rejected
 curl -X POST http://localhost:5433/api/databases/crm/tables/sales/rows \
   -H "Authorization: Bearer <user-jwt>" \
-  -d '{ "rows": [{ "company_id": "acme", "owner_id": "usr_other", "amount": 5000 }] }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "crm", "columns": ["company_id", "owner_id", "amount"], "data": [["acme"], ["550e8400-e29b-41d4-a716-446655440004"], [5000]] }'
 # → 403 AUTH_RLS_INSERT_VIOLATION (row would not be visible to the inserter)
 ```
 
@@ -934,29 +956,34 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
     }
   }'
 
-# Grant an analyst access to two data sources
-curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_analyst/partition-grants \
+# Grant an analyst (user id 550e8400-…-446655440003) access to two data sources
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "read" }'
 
-curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/usr_analyst/partition-grants \
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "dimension": "quote_source", "partitionKey": "nasdaq", "accessLevel": "read" }'
 
 # Fan-out: latest AAPL quotes from all authorized sources
 curl -X POST http://localhost:5433/api/databases/finance/query \
   -H "Authorization: Bearer <analyst-jwt>" \
+  -H "Content-Type: application/json" \
   -d '{
+    "database": "finance",
     "table": "quotes",
-    "where": [{ "column": "instrument_id", "op": "=", "value": "AAPL" }],
-    "orderBy": "timestamp",
+    "where": { "and": [{ "column": "instrument_id", "op": "eq", "value": "AAPL" }] },
+    "orderBy": [{ "column": "timestamp", "descending": true }],
     "limit": 10
   }'
 # → Returns AAPL quotes from oslo_bors and nasdaq only
 # → Attempts to access bloomberg or other sources return 403
 
-# Revoke access immediately — effective on the next request, no JWT re-issuance
-curl -X DELETE http://localhost:5433/api/databases/finance/auth/admin/users/usr_analyst/partition-grants/grnt_oslo \
+# Revoke access immediately — effective on the next request, no JWT re-issuance. The last segment is the oslo_bors
+# grant's id: the `id` its create returned, or GET …/partition-grants lists it.
+curl -X DELETE http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/partition-grants/7c9e6679-7425-40de-944b-e07fc1f90ae8 \
   -H "Authorization: Bearer <admin-token>"
 ```
 
