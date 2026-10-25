@@ -583,6 +583,11 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
   (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer), and a `404` asked after that cannot tell a lost job from a committed one
   the server has forgotten. A job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is
   committed and its rows become visible at the next restart (note 6 below; **Lead group 7 review, next train**).
+- **A `validation: "strict"` job's key check runs at its commit point, after the accepted answer**, so a key it holds twice or one the
+  table already holds is its outcome: `GET {jobId}` answers `state: "failed"`, `errorCode: "BULK_LOAD_DUPLICATE_PK"`, and the SDKs
+  raise what they raise for the same load without the accepted wait (`BulkLoadDuplicatePkException`; an `AoudaApiError` coded
+  `BULK_LOAD_DUPLICATE_PK`), ending a pipelined sequence. Nothing of the job is kept; do not load it again unchanged. After a restart
+  that cut the job's session off, it reads `lost` (**BL-1163, next train**).
 - **It frees the loader, not the table.** A write into a table the job loads still waits for the job.
 - With `BulkLoadJobsAsync` / `bulkLoadJobs`, each handle is yielded once its job is accepted. A loader keeps at most **two** accepted
   jobs before it waits for the oldest one's outcome (an accepted job still holds its buffers on the server until it commits), and a

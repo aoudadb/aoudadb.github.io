@@ -13,6 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **An accepted strict load refused for a duplicate key says so (BL-1163, next train).** A `validation: "strict"` load answered
+  `accepted` whose commit finds a duplicate key is reported `failed` / `BULK_LOAD_DUPLICATE_PK` by `GET .../bulk-load/{jobId}`, and the
+  SDKs raise their duplicate-key error — it was reported `lost`, which says to load it again. And a restored backup, or a replica
+  bootstrapped from its checkpoint image, still answers the idempotency keys of the bulk loads it holds (BL-1165). See
+  [Bulk load](guides/bulk-load.md).
 - **Bulk loads: what the Lead whole-branch review corrected (next train).** A load at `validation: "strict"` finds a `Date` key the
   table already holds when the body carries the date as text (it was missed, and the key stored twice). A backup, a replica's
   checkpoint image and a branch wait for every `os` load they copy, so a power loss never leaves a copy holding a load the database
