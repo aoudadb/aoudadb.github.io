@@ -411,11 +411,12 @@ curl -X POST http://localhost:5433/api/databases/trading/tables/VendorTick/rows 
   -d '{
     "database": "trading",
     "table": "VendorTick",
-    "rows": [
-      { "kind": "quote", "ticker": "AAPL", "ts": "2026-08-14T12:00:00Z", "volumeRaw": 100 }
-    ]
+    "columns": ["kind", "ticker", "ts", "volumeRaw"],
+    "data": [["quote"], ["AAPL"], ["2026-08-14T12:00:00Z"], [100]]
   }'
 ```
+
+The body's rows are column arrays (**Lead S12, next train**: `"rows": [{…}]` is refused `400 ROW_OBJECTS_UNSUPPORTED`).
 
 Assert: `GET`/`query` on `VendorTick` does not contain that row; `EquityQuote` does; one change event on `EquityQuote`.
 

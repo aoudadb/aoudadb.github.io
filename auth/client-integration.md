@@ -307,6 +307,7 @@ for `"crossPartitionAccess": true` (audited). For a whole database use that data
 ```bash
 curl -X POST http://localhost:5433/api/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{
     "name": "myapp-backend",
     "roles": [
@@ -323,6 +324,7 @@ curl -X POST http://localhost:5433/api/auth/admin/api-keys \
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/api-keys \
   -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "analytics-pipeline", "roles": [{ "role": "db_reader" }] }'
 # Returns: { "key": "mk_xyz789...", ... }
 ```

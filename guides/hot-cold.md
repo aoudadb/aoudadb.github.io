@@ -130,7 +130,7 @@ If you do nothing beyond default server config:
 - Server memory defaults to:
   - `MaxTotalRamBytes` unset → about **70% of detected host or cgroup memory** (an RSS ceiling, not a 2 GiB constant)
   - `MaxHotBytes = 0` (effective fraction of the governed budget)
-  - `MaxPageCacheBytes = 0` (effective fraction of the governed budget)
+  - `MaxPageCacheBytes = 0` (effective fraction of each database's share of the governed budget)
 - Budget target defaults to a high fraction of the governed budget when unspecified.
 - Over-budget ingest returns **HTTP 503** (`MEMORY_BUDGET_EXCEEDED`) with `Retry-After`; the process stays up.
 
@@ -140,7 +140,7 @@ If you do nothing beyond default server config:
 | Segment temperature on creation | `Hot` | New data is queried on hot path first |
 | `Aouda:Memory:MaxTotalRamBytes` | ~70% of detected RAM | Process RSS ceiling (set explicitly to pin a number) |
 | `Aouda:Memory:MaxHotBytes` | `0` | Auto-computes effective hot budget (`T10`) as 45% of the governed budget, floor 32 MB |
-| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes effective cache budget (`T12`) as 10% of the governed budget, floor 8 MB. The cache is on (**ColumnarRead, 0.3.0**); `Aouda:Memory:PageCacheEnabled = false` turns it off |
+| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes each database's cache budget (`T12`) as 10% of that database's share of the governed budget, floor 8 MB. A value you set is the server's total, divided among the databases by share (**Lead S10, next train** — it used to reach no database). The cache is on (**ColumnarRead, 0.3.0**); `Aouda:Memory:PageCacheEnabled = false` turns it off. A read larger than the cache admits only half of it (**Lead S10, next train**; [sizing](sizing.md)) |
 | `MemoryBudgetOptions.TargetRamBytes` | `0` | Effective target is 90% of max total |
 | Database `DefaultTemperature` | `Auto` | New tables inherit `Auto` unless table policy overrides |
 | `HotColdMaintenanceWorkerOptions` | `SweepInterval=5s`, `AutoHotByteBudgetBytes=64MiB`, `PromotionAccessThreshold=3` | Internal maintenance defaults when worker is active |
@@ -154,7 +154,7 @@ If you do nothing beyond default server config:
 - Temperature model:
   - `StorageTemperaturePolicy` (`Auto`, `HotOnly`, `ColdPreferred`, `Mutable`)
   - `SegmentTemperature` (`Hot`, `Cold`)
-  - `DataDurabilityMode` (`MemoryOnly`, `DiskBacked`) — fully enforced end-to-end (P30)
+  - Durability level (`strict`, `os`, `unlogged`, `memory`) — (**Lead S26, next train**) replaces `DataDurabilityMode` (`MemoryOnly` is now the `memory` level, `DiskBacked` any other); see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)
 - Promotion/demotion lifecycle:
   - Hot->cold demotion pipeline with catalog durability updates and diagnostics.
   - Cold->hot promotion pipeline: **two intents** (P30):
@@ -171,7 +171,7 @@ If you do nothing beyond default server config:
   result, or a table with [retention](retention.md)) the coalescers merge only within one time slice wholly at or after the horizon;
   a segment reaching below it is left for expiry, which drops whole segments and writes nothing. See
   [Storage — Deleted rows and retired segments](storage.md#deleted-rows-and-retired-segments-horizon-050).
-- **Durability gating end-to-end** (P30): `DefaultPageStoreRouter` governs flush/persist path. `MemoryOnly` tables write nothing (no `.hot`, `.col`, `.hra`, WAL). `DiskBacked` tables persist per representation. The old bypass (hardcoded `FilePageStore`) was removed.
+- **Durability gating end-to-end** (P30): `DefaultPageStoreRouter` governs flush/persist path. Tables at the `memory` level (`MemoryOnly` before **Lead S26, next train**) write nothing (no `.hot`, `.col`, `.hra`, WAL). Tables at any other level persist per representation. The old bypass (hardcoded `FilePageStore`) was removed.
 - Query/read correctness over mixed hot/cold:
   - Query paths consult segment temperature and deletion-mask correctness fixes are in place.
 - Management and observability:
@@ -215,7 +215,7 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 | P3 | `P3-HotCold-Implementation-Tasks.md`, Task 4/5/8 reports | Temperature metadata, demotion/promotion pipelines, maintenance worker behavior, management and observability APIs | Advanced heuristics and richer productized memory-intent controls deferred | `docs/BACKLOG.md` (see BL-054 for residency filtering) |
 | P6 | `P6-EpicF-Task1-PerDatabaseMemoryBudgets-Report.md` | Per-database memory budgeting, server memory coordinator, `/api/server/memory`, health integration | Cross-database page-cache sharing and richer per-db metrics labeling deferred | `docs/BACKLOG.md` BL-001 marked complete; future enhancements tracked in later tasks |
 | P7 | `C3-ColdAwareUpdateDelete-Report.md` + correctness reports | Cold-aware mutation correctness hardened via deletion masks across query paths | Further optimization of cold mutation paths may continue separately | No new hot/cold backlog item created by C3 report |
-| P30 | `MemTiering-S1` through `MemTiering-S14`, Bug/Perf reports | Hot-first flush invariant enforced; `MemoryOnly`/`DiskBacked` end-to-end; mutable keyed tier; representation selector; hot segment merge; intent-aware promotion + two-phase dissolution; hot L2; replication Gap A; segment ship; catalog authority Gap B; backup Gap C; retention/durability hardening | Dictionary string encoding in mutable tier; cross-tier replication; mutation-rate hysteresis tuning | ADR 0034, ADR 0035 |
+| P30 | `MemTiering-S1` through `MemTiering-S14`, Bug/Perf reports | Hot-first flush invariant enforced; `MemoryOnly`/`DiskBacked` end-to-end (the `memory` level and the others since Lead S26); mutable keyed tier; representation selector; hot segment merge; intent-aware promotion + two-phase dissolution; hot L2; replication Gap A; segment ship; catalog authority Gap B; backup Gap C; retention/durability hardening | Dictionary string encoding in mutable tier; cross-tier replication; mutation-rate hysteresis tuning | ADR 0034, ADR 0035 |
 | BL-091 | `docs/tasks/BL/BL-091-S1` through `BL-091-S5` (all Reports) | Filter grammar + validation (`MemoryFilterGrammar`, `MemoryFilterParseException`); segment-level enforcement in `HotColdMaintenanceWorker` (filter ordering, row-cap, per-table byte target); `MemoryFilterSegmentEvaluator`; `DemotionReason.PolicyRowCapExceeded`; `HotColdInspector` extensions (`GetSegmentResidencyExplanation`, `TablePolicyInfo` fields); `Perf` counters (`MemoryFilterDemotionsPrioritized`, `RowCapDemotions`); HTTP exposure on existing create-table + update-policy endpoints; `PinAllInMemory` write path now enabled | Row/page-granularity; `LIKE`/`IN`/`IS NULL` operators; cross-table budgets; reactive pressure path (BL-124); promotion-side filter awareness (BL-125); `HotOnly`/`ColdPreferred` validation (BL-126); Studio UI | `docs/BACKLOG.md` BL-091 closed |
 
 ## 2.6 Capability coverage matrix
@@ -224,8 +224,8 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 |---|---|---|---|---|---|
 | Table-level storage temperature (`Auto`/`HotOnly`/`ColdPreferred`) | Yes | No | No | P3 Task 1 report, `Policies.cs`, tables integration tests | Fully available across catalog + protocol + TS client |
 | `Mutable` intent flag on `StorageTemperaturePolicy` | Yes | No | No | P30 S4, `RepresentationSelector.cs` | Routes write streams to mutable keyed tier instead of immutable hot |
-| `MemoryOnly` durability enforcement (writes nothing) | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, storage tests | Fully enforced end-to-end — no `.hot`, `.col`, `.hra`, or WAL written |
-| `DiskBacked` durability enforcement | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs` | Persists per representation; old bypass removed |
+| `memory` durability level enforcement (writes nothing) | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, storage tests | Fully enforced end-to-end — no `.hot`, `.col`, `.hra`, or WAL written. `MemoryOnly` before **Lead S26, next train** |
+| `strict` / `os` / `unlogged` durability enforcement | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, Lead S26 | Persists per representation; old bypass removed. `unlogged` writes no WAL (**Lead S26, next train**; `DiskBacked` before) |
 | Hot-first flush invariant | Yes | No | No | P30 S1, `HraCompactor.cs`, flush tests | Flush produces only immutable hot segment; cold segments come from demotion only |
 | Mutable keyed tier (`MutableKeyedStore`) | Yes | No | No | P30 S3, `MutableKeyedStore.cs` | In-place upsert by PK; O(1) point lookup; dead-row reclamation |
 | Representation selector | Yes | No | No | P30 S4, `RepresentationSelector.cs` | Routes by intent → mutation rate → size |
@@ -250,14 +250,15 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
   - Mutable keyed tier: in-place upsert by PK; serves cache and UPSERT workloads
   - Immutable hot tier: append-optimised columnar; serves read-heavy workloads
   - Cold tier: encoded/compressed on disk; demoted from hot
-- **Durability axis** — controls persistence:
-  - `MemoryOnly`: writes nothing to disk; data lives only in the running process
-  - `DiskBacked`: persists per representation (`.hot`, `.col`, `.hra`, WAL)
+- **Durability axis** — controls persistence (**Lead S26, next train**: one level per table, inherited from the database unless the table names its own; see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)):
+  - `memory`: writes nothing to disk; data lives only in the running process (was `MemoryOnly`)
+  - `unlogged`: persists per representation (`.hot`, `.col`, `.hra`), no WAL — (**Lead S26c, next train**) the table is emptied by an open that does not follow a clean close if it was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train))
+  - `strict` / `os`: persists per representation and writes the WAL (forced to disk at `strict`)
 
 **Key types:**
 
 - `StorageTemperaturePolicy`: Table-level intent for the temperature axis. Values: `Auto`, `HotOnly`, `ColdPreferred`, `Mutable` (P30).
-- `DataDurabilityMode`: Table-level durability intent. Values: `MemoryOnly`, `DiskBacked`.
+- `DurabilityLevel` (**Lead S26, next train**; replaces `DataDurabilityMode`): Values `Strict`, `Os`, `Unlogged`, `Memory`. A table names `Strict`, `Unlogged` or `Memory` in `TableDurabilityOptions.Level`, or inherits the database's; a change to or from `Memory` after creation is refused.
 - `SegmentTemperature`: Actual per-segment state (`Hot`, `Cold`) used by execution and maintenance.
 - `MutableKeyedStore`: In-place upsert by PK. Dead-row reclamation via tombstone compaction. Serves `LatestPerKey` and cache workloads.
 - `RepresentationSelector`: Routes incoming write streams to the appropriate tier based on intent → mutation rate → segment size.
@@ -317,7 +318,7 @@ Per-table residency is a **convergence target reached by a periodic sweep**, not
 
 - Temperature is not inferred from file type; it is explicit in catalog metadata.
 - Demotion/promotion are explicit transitions, not implicit process-lifecycle side effects.
-- `MemoryOnly` tables produce zero disk writes. No `.hot`, `.col`, `.hra`, or WAL records.
+- `memory` tables (`MemoryOnly` before Lead S26) produce zero disk writes. No `.hot`, `.col`, `.hra`, or WAL records.
 - WAL records contain only concrete resolved values — never unevaluated expression ASTs.
 - All three residency fields (`MemoryFilter`, `MemoryRowCap`, `TargetMemoryBytes`) are validated at catalog write time; unsupported operators or column names are rejected with a descriptive error before any mutation.
 
@@ -538,7 +539,7 @@ Primary proving tests:
 |---|---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | long | `0`: derived from the host (70 % of a cgroup limit, else 40 % of RAM) | `0` or `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
-| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of the governed budget (floor 8 MB); on (**ColumnarRead, 0.3.0**) |
+| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, next train**); on (**ColumnarRead, 0.3.0**) |
 | `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or positive | startup config | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
@@ -576,7 +577,7 @@ Configuration precedence and operational notes:
 ```csharp
 var engine = await AoudaEngine.OpenAsync(
     basePath: "./data",
-    enableWal: true,
+    durability: DurabilityLevel.Strict,   // Lead S26, next train (replaces enableWal)
     budgetOptions: new MemoryBudgetOptions(MaxTotalRamBytes: 4L * 1024 * 1024 * 1024));
 
 await engine.CreateTableAsync(
@@ -897,7 +898,7 @@ Last verification date (UTC): `2026-03-31`.
 | Hot->cold demotion lifecycle | `HotToColdDemotionTests.cs` | Pass | Strong | Includes sealed checks, cold manifest rebuild, query fallback, restart semantics |
 | Cold->hot promotion lifecycle | `ColdToHotPromotionTests.cs` | Pass | Strong | Includes access-threshold promotion, idempotency, restart persistence, counters |
 | Hot-first flush output shape + IPageStore routing | `Aouda.Engine.Storage.Tests` (P30 S1) | Pass | Strong | Verifies only `.hot` produced at flush; cold output absent |
-| `MemoryOnly` writes nothing | `Aouda.Engine.Storage.Tests` (P30 S2) | Pass | Strong | No file written for MemoryOnly table |
+| `memory` table writes nothing | `Aouda.Engine.Storage.Tests` (P30 S2) | Pass | Strong | No file written for a `memory` table (`MemoryOnly` before Lead S26) |
 | Mutable keyed store in-place upsert + reclaim | `Aouda.Engine.Storage.Tests` (P30 S3) | Pass | Strong | Upsert correctness + dead-row ratio trigger |
 | Representation selector routing | `Aouda.Engine.Storage.Tests` (P30 S4) | Pass | Strong | Intent/rate/size routing decisions |
 | Hot-segment merge coalescing | `Aouda.Engine.Storage.Tests` (P30 S5) | Pass | Strong | Merge worker behavior |

@@ -390,6 +390,21 @@ nothing in any cache, on 1 M trades: a full GROUP BY 38 → 32 ms, an export of 
 100 M trades a two-hour range over every segment 11–23 % faster. With the data already in a cache it changes
 nothing.
 
+**A read larger than the page cache keeps half of it** (**Lead S10, next train**). Each read plans the cold pages
+it will touch before it reads them. If they fit in the database's page cache (`T12`), every page it reads is kept,
+as before. If they do not — a full pass over a table many times the cache, such as a GROUP BY over 100 M rows —
+the read keeps pages until it **holds** half the cache and reads the rest into buffers it hands back as soon as
+each page is decoded. The pages it finds already cached count toward that half (**Lead S22a, next train**), so
+repeating the read hits the half its first run kept and keeps nothing more; the other half keeps what other reads
+had. An export streamed as column-batch frames (a `/query` with no page that asks for frames with `Accept`) is one
+read for this rule, however many batches the server scans it in (**Lead S22a, next train**: before, each batch counted as a read
+of its own and always fitted, so an export of a large table cycled every page it read through the cache). The
+server no longer allocates a new array for every page of such a read, which the garbage collector then had to hold
+and collect and which showed as resident memory well above the cache's size: at 100 M rows a full export now
+allocates about 0.4 GB a call (it was 1 GB), and a server that loads 100 M rows and reads them back peaks at about
+0.7 GB of resident memory (it was 2 GB). A read that fits behaves as before.
+The answers are the same either way.
+
 Promotions and restart-time segment loads ask the same question. A promotion that would not fit is
 simply not made — the rows are already readable from cold, so nothing is lost but the speed-up.
 

@@ -147,7 +147,7 @@ If you create a table/database without tuning partition or multidb options:
   - Cross-partition reads require explicit opt-in (`crossPartitionAccess` / `.WithCrossPartitionAccess()` in supported clients). That flag is **admin-tier**. It is not a named-query field and is unreachable from `mk_pub_*` on the data-plane. Browser-tier rule: [partition-filter rule](#partition-filter-rule-p40).
 - Multitenancy:
   - Database-scoped HTTP routes are the default API shape.
-  - Database creation defaults to WAL enabled, replication mode `Replicate`, default temperature `Auto`.
+  - Database creation defaults to durability `strict` (WAL written through; **Lead S26, next train**), replication mode `Replicate`, default temperature `Auto`.
   - Per-database memory cap is unlimited unless configured (`MaxMemoryShareBytes = null`).
 
 | Setting / behavior | Default | Allowed values | Practical impact |
@@ -161,7 +161,7 @@ If you create a table/database without tuning partition or multidb options:
 | ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other |
 | ~~`MigrationOptions.Strategy`~~ | — | — | Removed (**WorkloadCore S17, 0.3.0**): the retrospective migration workers it configured were never started by any production path. A catalog that still carries `"Migration"` loads; the property is ignored |
 | `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
-| `DatabaseOptions.EnableWal` | `true` | `true`, `false` | DB has WAL enabled unless explicitly disabled |
+| `DatabaseOptions.Durability` | `strict` | `strict`, `os`, `unlogged`, `memory` | (**Lead S26, next train**; replaces `EnableWal`) DB writes its WAL through before a write is visible unless set otherwise; see [durability levels](write-durability.md#durability-levels-lead-s26-next-train) |
 | `DatabaseOptions.ReplicationMode` | `Replicate` | `Replicate`, `DoNotReplicate` | DB participates in replication by default |
 | `DatabaseOptions.MaxMemoryShareBytes` | `null` | `null` (no cap); or any non-negative `long` (bytes) | No explicit per-database cap unless set |
 | `PlsCrossPartitionRateLimitOptions.Enabled` | `false` | `true`, `false` | Cross-partition bypass rate limiting is opt-in |
@@ -614,7 +614,7 @@ Core modules:
 | `CreateTableRequest.initialBucketCount` / `TableDefinition.initialBucketCount` (P45) | int? | `null` (engine derives `16` or `128` — see `2.7`) | `>= 1`; `Auto`/`Shared` only | table create payload / declarative schema | **Immutable after table creation.** Declaring it alongside `partitionStorage: "Dedicated"` is rejected — a dedicated table has no bucket count. A differing value against an *existing* table is reported as drift by `aouda schema diff` and never auto-applied. |
 | `CreateTableRequest.promotionRowThreshold` / `TableDefinition.promotionRowThreshold` (P45) | long? | `null` (engine uses `10_000_000`) | `>= 0` | table create payload / declarative schema | Mutable after creation — takes effect at the next promotion check. |
 | `CreateTableRequest.promotionByteThreshold` / `TableDefinition.promotionByteThreshold` (P45) | long? | `null` (engine uses `1_000_000_000`) | `>= 0` | table create payload / declarative schema | Mutable after creation — takes effect at the next promotion check. |
-| `CreateTableRequest.pkUniqueness` / `TableDefinition.pkUniqueness` (P45) | string? | `null` (engine uses `Strict`) | `Strict`, `Recent`, `BestEffort` | table create payload / declarative schema | Not partition-key-scoped — valid on any table. Mutable after creation — takes effect on the next insert. Previously reachable only per bulk-load job (`pkUniquenessOverride`). |
+| `CreateTableRequest.pkUniqueness` / `TableDefinition.pkUniqueness` (P45) | string? | `null` (engine uses `Strict`) | `Strict`, `Recent`, `BestEffort` | table create payload / declarative schema | Not partition-key-scoped — valid on any table. Mutable after creation — takes effect on the next insert. (A bulk-load job's `pkUniquenessOverride` was never applied, and is refused from **Lead S27a, next train**; a job's own check is `validation`.) |
 | `PartitionOptions.StorageMode` | enum | `Auto` | `Auto`, `Dedicated`, `Shared` | catalog policy | Core partition routing mode |
 | `PartitionOptions.RequirePartitionFilter` | bool | `true` | `true/false` | catalog policy | Query guard for partitioned tables |
 | `PartitionOptions.PromotionRowThreshold` | long | `10_000_000` | `>= 0` | catalog policy | Auto-promotion row trigger |
@@ -624,12 +624,12 @@ Core modules:
 | ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, 0.3.0**) with `MigrationOptions` (its workers were never started by a production path); an old catalog's property is ignored on load |
 | `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default table temperature in DB |
-| `Aouda:Databases:{db}:EnableWal` | bool | `true` | `true/false` | startup config | Per-db WAL default |
+| `Aouda:Databases:{db}:Durability` | string | `strict` | `strict`, `os`, `unlogged`, `memory` | startup config | Per-db durability level (**Lead S26, next train**; replaces `EnableWal`) |
 | `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | Per-db replication mode |
 | `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`, `Majority`, `All` | startup config | Per-db write concern |
 | `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | positive | startup config | Per-db write concern timeout |
 | `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | startup config | Per-db timeout behavior |
-| `CreateDatabaseRequest.enableWal` | bool | `true` | `true/false` | create-db API | DB create-time operational setting |
+| `CreateDatabaseRequest.durability` | string? | `null` (`strict`) | `strict`, `os`, `unlogged`, `memory` | create-db API | DB create-time durability level (**Lead S26, next train**; replaces `enableWal`, now refused) |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | create-db API | DB create-time operational setting |
 | `CreateDatabaseRequest.maxMemoryShareBytes` | long? | `null` | null or non-negative | create-db API | DB create-time cap on its share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`) |
 | `CreateDatabaseRequest.defaultTemperature` | string? | `null` (`Auto` in options) | `Auto`, `HotOnly`, `ColdPreferred` | create-db API | DB create-time default table temp |

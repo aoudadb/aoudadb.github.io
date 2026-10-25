@@ -59,6 +59,10 @@ await client.GetTable("events").InsertAsync(new Dictionary<string, object?>
 var rows = await client.GetTable("events").ToListAsync();
 ```
 
+Data already held as columns inserts and bulk-loads as a `ColumnBatch` (`ColumnBatch.Of(ColumnBatchColumn.FromInt64s(...), ...)`,
+then `InsertAsync(batch)` or `client.BulkLoadAsync(table, batches)`), without a dictionary per row (**Lead S13, next train**). See
+[.NET client](../clients/dotnet.md).
+
 ---
 
 ## Option B — Embedded (in-process, zero setup)
@@ -164,4 +168,5 @@ For full capability details see [AI Agents](index.md).
 - [HTTP API reference](../reference/http-api.md) — all endpoints
 - [Named queries](../guides/named-queries.md) — execute by name; do not compose ad-hoc queries with `mk_pub_*`
 - [Direct client access](../guides/direct-client-access.md) — data-plane vs admin. PKCE is not shipped.
+- [.NET client](../clients/dotnet.md) — full `Aouda.Client` reference, including column batches and bulk load
 - [TypeScript client](../clients/typescript.md) — full SDK reference

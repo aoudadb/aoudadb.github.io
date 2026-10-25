@@ -117,9 +117,11 @@ For multiple auth databases (separate user pools for different products):
 
 ```bash
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "product-a", "auth": { "database": "product_a_auth" } }'
 
 curl -X POST http://localhost:5433/api/databases \
+  -H "Content-Type: application/json" \
   -d '{ "name": "product-b", "auth": { "database": "product_b_auth" } }'
 ```
 
@@ -179,7 +181,7 @@ Response:
 ```json
 {
   "user": {
-    "id": "usr_abc123",
+    "id": "550e8400-e29b-41d4-a716-446655440000",
     "email": "alice@example.com",
     "createdAt": "2026-03-18T12:00:00Z"
   },

@@ -13,12 +13,167 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Bulk loads: what the Lead whole-branch review corrected (next train).** A load at `validation: "strict"` finds a `Date` key the
+  table already holds when the body carries the date as text (it was missed, and the key stored twice). A backup, a replica's
+  checkpoint image and a branch wait for every `os` load they copy, so a power loss never leaves a copy holding a load the database
+  dropped; and a change to a derived column's expression no longer makes a process crash drop an `os` load. A table made `memory` or
+  `unlogged` is that on its replicas too. `GET .../bulk-load/{jobId}?waitMs=` waits its full time (it was cut at 30 s with `504`).
+  See [Bulk load](guides/bulk-load.md).
+- **Bulk loads and `unlogged` tables: what the Lead group 6 review corrected (next train).** In a multi-table load, a value in a
+  column the row's own table does not have is refused, even when another table of the job has it (it was dropped). A job that follows
+  an `os` job (`afterJobId`) commits only once that job is synced, so a power loss never keeps the follower and drops the job it
+  follows; a branch's creation waits for it too. If an `os` job's background sync fails, the database refuses durable writes until a
+  restart — now said. An `unlogged` table's after-crash rule holds for a process crash, not a power loss — now said. A `rebuild` query
+  may never be current under a steady stream of writes (BL-1149), and a token read of one waits for its rebuild — now said. See
+  [Write durability](guides/write-durability.md) and [Materialized queries](guides/materialized.md).
+- **A bulk load's own durability, `strict` or `os`; and `unlogged` tables emptied after a crash (Lead S26c, next train).**
+  `:begin` takes `options.durability`: `strict` fsyncs every segment file, its directory and the commit record before the job is
+  visible (what every load did); `os` skips the fsync, survives a process crash, and after a power loss is kept whole or dropped
+  whole and reported `lost` (`BULK_LOAD_LOST`, `durability: "os"`) — load it again with the same key. Omitted, a load takes `os` in
+  an `os` database and `strict` everywhere else. Until the server has synced an `os` job, the database's durable writes wait for it.
+  `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused
+  `400 BULK_LOAD_INVALID_OPTIONS`. `:begin`, `:commit` and `GET {jobId}` report `durability`; `BulkLoadOptions.Durability` /
+  `BulkLoadJobHandle.Durability`, `@aouda/client`'s `durability` and the CLI's `--durability`. Separately, an open
+  that does not follow a clean close now **empties an `unlogged` table that was being changed** (a statement in flight, or rows
+  only partly flushed), with a warning naming each: its segments could hold part of a statement. A table that was not keeps its
+  flushed rows. See [Bulk Load](guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train) and
+  [`unlogged` after a crash](guides/write-durability.md#unlogged-after-a-crash-lead-s26c-next-train).
+- **One word for what a write survives: `durability` — `strict`, `os`, `unlogged` or `memory` (Lead S26, next train; ADR 0066).**
+  It replaces a database's `enableWal`, the memory-only mode (`dataDurability: MemoryOnly`), the per-table `EnableWal` and the
+  schema's `durability.walEnabled`. `strict` (the default, server and embedded) writes the WAL through to disk before a write is
+  visible; `os` writes it to the operating system (survives a process crash, not a power loss); `unlogged` has no WAL (the old
+  `enableWal: false`); `memory` has no WAL and no data files (the old `MemoryOnly`). A database's level is set at create
+  (`POST /api/databases` `durability`, `Aouda:Databases:<db>:Durability`, embedded `Durability`, `--durability`, both SDKs) and read
+  at every open; a database with a WAL cannot be reopened without one (BL-1145). A table may name `strict`, `unlogged` or `memory`
+  (`"durability": { "level": … }`) or inherit; `GET …/tables/{table}` reports `durability: { level, source }` and
+  `GET /api/databases/{db}` `options.durability`. The old names are refused, not aliased (`400 INVALID_REQUEST`, a startup or
+  schema validation error, a throwing open), and a data directory from an earlier build is refused (catalog format 12, registry
+  format 3). See [Write Path Durability](guides/write-durability.md#durability-levels-lead-s26-next-train).
+- **Pipelined bulk loaders into one table: keep to two on the default lane once jobs fill their queue (Lead S31, next train;
+  BL-1117).** The guide said up to four pipelined loaders into one table finish. That holds while no job's queue
+  (`Aouda:BulkLoad:MaxQueuedAppendBytes`, 64 MB) fills; with larger jobs an `:append` waiting for room keeps its lane permit, a
+  pipelined loader has two `:append`s, and three loaders can starve the lock holder until the 30 s lock timeout. See
+  [the bulk-load guide](guides/bulk-load.md).
+- **A committed bulk load is never reported failed, a queued job commits by `:commit`, and a multi-table load commits on every table
+  or none (Lead group 5 review, next train).** A committing body sent again and refused `state=Deferred` or `state=Completed` is past
+  its commit point — wait, then `:begin` with the key (both SDKs do; they used to report it aborted). A body whose job is still queued
+  behind another load is declined `409 BULK_LOAD_COMMIT_QUEUED`, its frames kept: send `:commit` (both SDKs do) — four such bodies used
+  to hold every `:append` lane permit until the lock timeout. A job that loads several tables writes its closing frame on a single
+  node too, so a crash cannot leave one table's rows without the other's. `afterJobId` naming a job on other tables waits for its
+  outcome. See [`:append`](reference/http-api.md#post-jobidappend) and [the bulk-load guide](guides/bulk-load.md).
 - **Database catalog credentials (BL-1128).** `GET /api/databases` and `POST /api/databases` need a server credential
   (`mk_srv_` or a scoped server key). A live application `mk_svc_` / `mk_adm_` on those routes is **403**
   `AUTH_KEY_ROUTE_MISMATCH` (not 401 `AUTH_API_KEY_INVALID` / "Unknown API key"). `GET /api/databases/{name}` accepts a
   read credential for that database, including its `mk_svc_`. A service process checks existence with get-by-name; it
   does not list or create databases. [HTTP API](reference/http-api.md#database-catalog-api),
   [Getting Started](getting-started/index.md#creating-databases-via-api).
+- **`@aouda/client` on the bulk-load contract of Lead S21a / S21b (Lead S22, next train).** Its frames are numbered across a job,
+  a resume goes by `nextSequence` (refusing a load framed differently, `BULK_LOAD_CURSOR_MISMATCH`), the job's last frame body
+  commits it, and a failed `:append` is sent again by the SDK after a keyed `:begin` — a body sent twice is applied once (BL-404).
+  `bulkLoadJobs` begins job N+1 with `afterJobId` once N's last body is written (Node), or commits each job by `:commit` while the
+  next is sent where the `fetch` cannot say when a body was written. See [the TypeScript client](clients/typescript.md#bulk-load-a-body-sent-again-resume-and-a-committed-job-lead-s14-s22-next-train).
+- **A materialized query names its currency: `current` or `rebuild` (Lead S27b, next train).** `"currency": "rebuild"` (in
+  `aouda.schema.json`, or on `POST …/materialized-queries`) keeps a result by rebuilding it, never incrementally: a change to its
+  source leaves it behind and unused for reads until it is rebuilt — once the source is quiet, after a load, or on `:refresh`.
+  Omitted is `current`, as before. The status reports `currency`. See [Materialized queries](guides/materialized.md#27-core-concepts-and-mental-model).
+- **A bulk load emits no change events on the table it loads — now said (Lead S27b).** A subscriber to the table sees none of
+  the load's rows; a subscriber to a materialized query's result sees the result's changes. See [Real-time](guides/real-time.md#27-core-concepts-and-mental-model).
+- **A bulk load checks its rows, and names a validation level (Lead S27a, next train; breaking).** Every load now refuses a
+  column its table does not have and a missing primary key — each `:append` frame is checked before any of it is applied, `400
+  INVALID_REQUEST` naming the column and the row (BL-1130, BL-1129: the column was dropped, the key stored as `0`). `validation`
+  (`coerce`, the default, or `strict`) says what else: `strict` refuses a null in any NOT NULL column and fails the job at its
+  commit on a duplicate key (`409 BULK_LOAD_DUPLICATE_PK`), only on a table whose key mode is `Strict`. `pkUniquenessOverride`,
+  which nothing applied, is removed and refused. See [A load's validation](guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
+- **A bulk load checks less than an insert — now said (Lead S22).** A null in a non-nullable column is stored as the type's zero
+  (an `Int64` primary key as `0`; BL-1129), a column the table does not have is dropped (BL-1130), and a duplicate key is loaded as
+  a second row; an insert refuses all three. See [`:append`](reference/http-api.md#post-jobidappend). (Since **Lead S27a** in the same
+  train, a missing key and a column the table does not have are refused at every level, and a duplicate key at `validation: "strict"`;
+  see the entry above.)
+- **A bulk-load body sent again loads none of its rows twice (Lead S21a, next train; breaking on the wire).** A job's frames are
+  now numbered across all its `:append` bodies, and the server applies each number once: a frame below the job's `nextSequence`
+  is acknowledged and skipped, one above it is refused `409 BULK_LOAD_CURSOR_MISMATCH`, and a frame is applied whole or not at all
+  (a frame over `maxRowsPerAppend` — now a per-frame limit — or a multi-table frame with one unroutable row is refused with none of
+  its rows queued). `nextSequence` replaces the row cursor `resumeFromRow` in `:begin`, and appears in every `:append` response and
+  refusal and in `GET {jobId}`; a JSON column-array body carries its frame number as `seq` (refused without it); and a `:commit` may
+  name the frames it sent, refusing to commit a job that applied others. The C# SDK now recovers a failed `:append` itself — a
+  keyed `:begin`, then the same body — where it used to throw on the first connection error, and resumes a job by frames, refusing
+  a resume whose framing changed. `@aouda/client` does the same from Lead S22. See [the frame numbers](reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train).
+- **A bulk-load job commits in its last body, and a job sent behind a failed one never commits (Lead S21b, next train).** A
+  column-batch `:append` body whose end frame carries `commit` (the `:commit` options) ends the job's rows and commits it, and is
+  answered as `:commit` — so a job needs no `:commit` round trip, its segments are finalized while the client sends the next job,
+  and only its commit point waits for the jobs before it. Sent again after its answer was lost, such a body commits each row once
+  (a job still committing says `state=Committing`; one already committed replays on a keyed `:begin`). `:begin` takes
+  `afterJobId`: the job then takes its place after that one and commits only if it committed, else `409
+  BULK_LOAD_PREDECESSOR_NOT_COMMITTED` with none of its rows loaded. The C# SDK's `BulkLoadJobsAsync` uses both, so a sequence of
+  jobs commits a prefix of them, in order, whatever fails. `:commit` stays for jobs whose last rows are not frames; a JSON body
+  that carries `commit` is refused. See [a body that commits its job](reference/http-api.md#a-body-that-commits-its-job-lead-s21b-next-train).
+- **Pipelined loads into one table overlap their commits with the next job's rows (Lead S19, next train).** A table's bulk-load
+  lock now passes to the next queued job when a job's rows end, not when its `:commit` returns, so job N+1's rows load while job N
+  drains, writes and commits. Nothing a client sees changes: a `:commit` still returns after its own job is durable and visible,
+  commits on a table stay first in, first out (a later job waits at its commit point for the earlier one — the commit line's new
+  `commitWaitMs`), and an update, delete or other write waits for every load in flight when it arrived. `lockHoldMs` now ends at
+  the hand-over. See [Several jobs into one table](guides/bulk-load.md#several-jobs-into-one-table-pipelined-lead-s18b-next-train).
+- **A replica no longer answers a bulk load's token before it has the load, and `:commit` leaves the `:append` lane (Lead S18a,
+  next train).** A read presenting a token on a secondary is served only once that node holds every bulk load committed at or
+  below the token: until then it waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`, and
+  [`GET /admin/replication/status`](reference/http-api.md#get-adminreplicationstatus) names the load (`bulkLoadHold`,
+  `tokenCoveredPosition`). Before, the token was covered the moment the load's closing frame arrived — and no server fetches a
+  load's segments to its replicas yet (**BL-1116**), so a replica covered tokens for rows it never had. Separately, `:commit` is on
+  no admission lane any more: four `:append`s waiting behind an earlier job on the same table could hold all four permits
+  of `Aouda:BulkLoad:MaxConcurrentStreamingRequests` while that job's `:commit` — the one request that would let them drain —
+  waited for one, until the waiting jobs failed on the 30 s lock timeout. Run no more loaders into one table at once than that
+  setting (**BL-1117**).
+- **The TypeScript SDK takes column batches, and speaks the column-array wire (Lead S14, next train).** Data a TypeScript
+  application already holds as columns (Arrow, Parquet, typed arrays) is bulk-loaded and inserted with no row object in between:
+  build columns with the `column` factories (`column.int64`, `double`, `bool`, `string`, `dictionary`, `timestamp`, `decimal`, …;
+  `null` a null cell, `undefined` an absent one), make a `ColumnBatch`, and pass it to `bulkLoad` or `insert`. On kb2 a million
+  rows go through the SDK in 0.32 s as batches against 5.7 s as row objects. The client now speaks Lead S12's column arrays on
+  every surface it used to send or read rows on, so it works against a server of this train again; `generatedValues` is
+  `{columns, data}` with `forRow(i)`. A bulk load's `:append` is never re-sent, whatever the retry policy (it could duplicate
+  rows); a failed load can be resumed by running it again with the same `idempotencyKey`, from the row the server needs next; and
+  a key whose job already committed returns that job instead of failing `409`. An insert is re-sent only after a refusal that
+  proves it was not applied, never after a timeout. A subscription snapshot with pages missing is an error, not a short snapshot.
+  The HTTP reference now documents `resumeFromRow` and `:begin`'s `alreadyCompleted`, and no longer calls `rowsDurablyCommitted`
+  the resume offset.
+- **The C# SDK takes column batches, and has its own page (Lead S13, next train).** A .NET application that already holds its
+  data as columns (Parquet or Arrow row groups, a data frame, another database's export) can insert and bulk-load it without
+  building a dictionary per row: build columns with `ColumnBatchColumn`'s typed factories (`FromInt64s`, `FromDoubles`, `FromBools`,
+  `FromTimestamps`, `FromDecimals`, `FromStrings`, `FromDictionary`, …, with optional null and absent bitmaps), make a batch with
+  `ColumnBatch.Of`, and pass it to `InsertAsync(batch)` (which returns the inserted count and the generated values as column
+  arrays) or a stream of them to `BulkLoadAsync(table, batches)`. Each batch is written as column-batch frames straight from its
+  arrays; small batches share an `:append` body, a large one is split across several, and a resumed load skips rows inside a
+  batch. A malformed batch is refused before it is sent, naming its column and row. The row and object APIs are unchanged. The
+  new [.NET Client](clients/dotnet.md) page documents `Aouda.Client` as a whole — connecting, options, inserts, bulk load, what
+  is and is not re-sent after a failure, and errors — which until now was spread across Getting Started and the guides.
+- **The REST API speaks column arrays (Lead S12, next train; breaking on the wire).** Every JSON write body now sends its rows the
+  way a query result already arrives: `columns` (the names), `data` (one array per column) and, for a cell that is not given,
+  `absent` — which, unlike `null`, lets an auto-increment id be generated or a default apply. That holds for `POST …/rows`, a
+  branch insert, a WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed (`aouda.seed.json` too); a
+  body that still sends `rows` is refused `400 ROW_OBJECTS_UNSUPPORTED`, naming the shape to send. A bulk-load `:append` takes
+  frames or one JSON column-array body — NDJSON is refused `415` — and a JSON body now carries what only NDJSON could (a vector, a
+  nested value). On the read side the `format` parameter is gone (`400 INVALID_FORMAT`; results are always column arrays), and the
+  materialized-query read, `generatedValues` (one cell per request row), WebSocket `snapshot` pages, vector `:nearest`, graph
+  `:khop` and the policy inspector's samples answer column arrays too. A row-shaped body cost a key per value on every row; column
+  arrays name each column once and are read by one decoder on every surface. The C# SDK of this train speaks the new wire with
+  the same public API; `@aouda/client` and Studio follow in their own next trains. See
+  [the write body](reference/http-api.md#column-arrays-the-write-body).
+- **The graph and vector REST endpoints are documented (Pass-10).** The server has long exposed edge tables (create, insert,
+  `edges:traverse`, `edges:khop`, `edges:shortest-path`) and vector columns (create, insert, `:nearest`) over HTTP; the graph and
+  vector guide said they were not exposed. See [the HTTP reference](reference/http-api.md#graph-and-vector-endpoints).
+- **Column-batch frames are version 2, `ACB2` (Lead S09, next train; breaking on the wire).** Every frame body — a query response
+  read as frames, a bulk-load `:append`, a `/rows` insert — ends with an **end frame**, and every frame carries a sequence number.
+  A query response's row count, statistics, total matches and warnings now travel in that end frame (the `X-Aouda-Row-Count`,
+  `-Stats`, `-Total-Matches` and `-Warnings` headers are gone), so the server streams a whole-table export from its first row
+  instead of holding a batch and counting the rows first. A response cut anywhere is an error in both SDKs, never a shorter
+  result, and a failure after the response started reaches the caller as its own typed error instead of a dropped connection that
+  was retried. The media type is `application/vnd.aouda.column-batch-v2` (`"column-batch-v2"` on `:begin`); an `ACB1` body or the
+  old type is refused `415 FRAME_VERSION_UNSUPPORTED`. Upgrade the server and both clients together. See the
+  [HTTP reference](reference/http-api.md#the-column-batch-frame-acb2).
+- **The server is precompiled in the image, the archives and the `aouda` tool (Lead S06, next train).** Every published server is
+  ReadyToRun, so a fresh or restarted server spends less of its first minute compiling: on the project's test machine the image's
+  first-impression run (start, sign-in, schema, a 1 M-row load, three first queries) takes 6.6 s instead of 8.5, and a restart answers
+  its first aggregate in 3.2 s instead of 4.2. Steady query speed is unchanged. The image is ~30 MB larger, an unpacked archive ~23 MB. Still
+  framework-dependent: nothing to install or configure differently.
 
 ## 0.5.0 — 2026-10-19
 

@@ -44,10 +44,15 @@ In your project root, create `aouda.schema.json`:
     }
   },
   "settings": {
-    "durability": { "walEnabled": true, "replicationFactor": 1 }
+    "durability": { "replicationFactor": 1 }
   }
 }
 ```
+
+(**Lead S26, next train**) `settings.durability` carries only `replicationFactor`. A database's durability level (`strict`, `os`,
+`unlogged` or `memory`) is set where the database is created, not in the schema; a table may name its own with
+`"durability": { "level": "unlogged" }` (`strict`, `unlogged` or `memory`). The retired `walEnabled` is a validation error. See
+[Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train).
 
 Set `database` to the database name your Aouda server uses. Your IDE can validate and autocomplete if `$schema` points to the JSON Schema (see [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-declarative-schema-management.md)).
 
@@ -183,6 +188,8 @@ Five shapes, discriminated by `type`:
 
 **`window`** (**Horizon, 0.5.0**) — `"window": { "keep": "7d" }` (plus `"column"` where it must be named) on an `aggregate` with a `TruncateToMinute` / `Hour` / `Day` / `Week` bucket, or on a `topNPerGroup` grouped by a time column: the result keeps only its groups at or after the horizon (the server's clock minus `keep`), and a read of anything older is computed from the source, so the answer does not change. Every other declaration is refused at apply with its reason — the full list is in [Materialized queries — what is refused](materialized.md#window-refusals). `schema export` writes it, and changing it replaces the query.
 
+**`currency`** (**Lead S27b, next train**) — `"currency": "rebuild"` on any materialized query: never maintained incrementally; a change to its source leaves it behind (not routed to) until it is rebuilt, once the source is quiet, after a load, or on `:refresh`. Omitted is `"current"` (maintained off each commit). Not with `"updateMode": "sync"` or `maxCoalesceMs`. Part of the query's body, so changing it replaces the query. See [Materialized queries](materialized.md#27-core-concepts-and-mental-model).
+
 **Public aggregate columns are the declared `outputName`s** (plus group keys), on every read path — `engine.Table(mq)`, `POST /tables/{mq}/query`, named query, subscribe. Physical state columns (`_count`, `_max_bid`, `_first_open_val`, …) are not selectable. A named query over `ohlc_1m` selects `high` / `open`, not `_max_price`.
 
 `firstPerKey` is MIN of the order column (the same maintainer as `latestPerKey` with `descending: false`). It is **not** chronological first-arrival. `topNPerGroup` keeps a working set of every observed source row in process memory so ranks can demote without a refresh; point it at a compact per-key table (`latestPerKey` or `aggregate` result), not a million-row fact table. Result-table commits on that source MQ feed the Top-N maintainer incrementally. Query / subscribe the result table by name — the planner does not auto-route Top-N. The source table must have a primary key. Changing `n` or `orderBy` is a Replace (drop+create).
@@ -258,7 +265,7 @@ From here on:
 
 ### Environment overlays
 
-Use overlays to keep one schema definition and vary only settings (e.g. replication, WAL) per environment:
+Use overlays to keep one schema definition and vary only settings (e.g. replication, a table's durability level) per environment:
 
 - `aouda.schema.json` — base (dev defaults).
 - `aouda.schema.staging.json` — staging overrides.

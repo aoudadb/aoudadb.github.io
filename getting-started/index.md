@@ -298,7 +298,7 @@ await using IAoudaDatabase db = await AoudaEmbedded.OpenDatabaseAsync(
     new AoudaEmbeddedOptions
     {
         DataPath = "./my-database",  // Data stored here, survives restarts
-        EnableWal = true,            // Write-ahead log for crash recovery (default: true)
+        Durability = "strict",       // WAL written through before a write is visible (default: "strict")
     });
 
 await db.GetTable("users").InsertAsync(new Dictionary<string, object?>
@@ -399,7 +399,7 @@ var recent = await db.Engine.Table("sensors")
 | Option | Type | Default | Allowed values | Description |
 |--------|------|---------|----------------|-------------|
 | `DataPath` | `string?` | `null` | `null` (ephemeral); any valid filesystem path | Directory for data files. `null` = ephemeral (temp dir, auto-deleted). |
-| `EnableWal` | `bool` | `true` | `true`, `false` | Enable write-ahead log for crash recovery. |
+| `Durability` | `string` | `"strict"` | `"strict"`, `"os"`, `"unlogged"`, `"memory"` | (**Lead S26, next train**) The database's durability level: `strict` writes the WAL through to disk before a write is visible (survives a power loss), `os` writes it to the operating system (survives a process crash), `unlogged` has no WAL (kept whole by a clean close; after any other stop it keeps its flushed rows, or is emptied if it was being changed — (**Lead S26c, next train**)), `memory` has no WAL and no data files. Also set by config `Aouda:Durability`. It replaces `EnableWal`: setting `EnableWal` (in code or as `Aouda:EnableWal`) makes the open throw, naming `Durability`. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
 | `MemoryBudget` | `long?` | `null` | `null` (no limit); any non-negative `long` (bytes) | Maximum memory in bytes. `null` = no limit. |
 | `TreatMissingAsEmpty` | `bool` | `true` | `true`, `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
@@ -465,7 +465,7 @@ For local development, you may place an optional `appsettings.json` in the direc
     "Port": 5433,
     "Databases": {
       "myapp": {
-        "EnableWal": true
+        "Durability": "strict"
       }
     }
   }
@@ -561,12 +561,12 @@ curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
   -d '{ "name": "myapp" }'
 
-# Create a database with WAL and memory limits
+# Create a database with a durability level and memory limits
 curl -X POST http://localhost:5433/api/databases \
   -H "Content-Type: application/json" \
   -d '{
     "name": "analytics",
-    "enableWal": true,
+    "durability": "strict",
     "maxMemoryShareBytes": 1073741824
   }'
 
@@ -618,6 +618,24 @@ var cheap = await client.GetTable("products")
     .Limit(50)
     .ToListAsync();
 ```
+
+**Data you already hold as columns** (**Lead S13, next train**) — read from Parquet or Arrow, a data frame, another database —
+goes in as a `ColumnBatch`, without a dictionary per row. It is the fast path for inserts and bulk loads alike:
+
+```csharp
+using Aouda.Protocol.BulkLoad;
+
+var batch = ColumnBatch.Of(
+    ColumnBatchColumn.FromInt64s("id", new long[] { 3, 4 }),
+    ColumnBatchColumn.FromStrings("name", new[] { "Sprocket", "Gizmo" }),
+    ColumnBatchColumn.FromDecimals("price", new[] { 4.50m, 12.00m }, scale: 2));
+
+var inserted = await client.GetTable("products").InsertAsync(batch);   // InsertResult: RowsInserted, GeneratedValues
+await client.BulkLoadAsync("products", batches);                       // IAsyncEnumerable<ColumnBatch>, a list, or one batch
+```
+
+The full .NET client reference — options, inserts, column batches, bulk load, what is retried, errors — is
+[.NET Client](../clients/dotnet.md).
 
 #### Client Options
 
@@ -1126,9 +1144,14 @@ Content-Type: application/json
   "database": "mydb",
   "table": "orders",
   "identityInsert": true,
-  "rows": [{ "id": 1000, "status": "seeded" }]
+  "columns": ["id", "status"],
+  "data": [[1000], ["seeded"]]
 }
 ```
+
+Over HTTP the rows are column arrays: `columns`, and `data` with one array per column (**Lead S12, next train**: a `rows` array of
+objects is refused `400 ROW_OBJECTS_UNSUPPORTED`; see [the write body](../reference/http-api.md#column-arrays-the-write-body)).
+The SDK calls above still take rows.
 
 Rules of thumb:
 - Prefer identity-insert over temporarily disabling `autoIncrement` for one-shot seeds.
@@ -1475,7 +1498,7 @@ Include the access token in the `Authorization` header on database requests:
 curl http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer eyJhbG..." \
   -H "Content-Type: application/json" \
-  -d '{ "table": "orders", "limit": 10 }'
+  -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
 ```
 
 ### Step 4: Token Refresh
@@ -1634,17 +1657,20 @@ Use the API key as a bearer token:
 # Access myapp — allowed (db_writer)
 curl http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer mk_abc123..." \
-  -d '{ "table": "orders", "limit": 10 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
 
 # Access analytics — allowed (db_reader, read-only)
 curl http://localhost:5433/api/databases/analytics/query \
   -H "Authorization: Bearer mk_abc123..." \
-  -d '{ "table": "events", "limit": 10 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "analytics", "table": "events", "limit": 10 }'
 
 # Access cache — DENIED (no role for this database)
 curl http://localhost:5433/api/databases/cache/query \
   -H "Authorization: Bearer mk_abc123..." \
-  -d '{ "table": "data", "limit": 10 }'
+  -H "Content-Type: application/json" \
+  -d '{ "database": "cache", "table": "data", "limit": 10 }'
 # → 403 AUTHORIZATION_DENIED
 ```
 
@@ -1754,13 +1780,16 @@ A single Aouda server can host many databases. Each database is independent — 
 ```bash
 # Create databases for different purposes
 curl -X POST http://localhost:5433/api/databases \
-  -d '{ "name": "app_production", "enableWal": true }'
+  -H "Content-Type: application/json" \
+  -d '{ "name": "app_production", "durability": "strict" }'
 
 curl -X POST http://localhost:5433/api/databases \
-  -d '{ "name": "app_staging", "enableWal": true }'
+  -H "Content-Type: application/json" \
+  -d '{ "name": "app_staging", "durability": "strict" }'
 
 curl -X POST http://localhost:5433/api/databases \
-  -d '{ "name": "cache", "enableWal": false }'
+  -H "Content-Type: application/json" \
+  -d '{ "name": "cache", "durability": "unlogged" }'
 
 # List all databases
 curl http://localhost:5433/api/databases
@@ -1773,9 +1802,9 @@ Or declare them in an optional `appsettings.json` for local dev (API-created dat
   "Aouda": {
     "DataPath": "./data",
     "Databases": {
-      "production": { "EnableWal": true },
-      "staging": { "EnableWal": true },
-      "cache": { "EnableWal": false }
+      "production": { "Durability": "strict" },
+      "staging": { "Durability": "strict" },
+      "cache": { "Durability": "unlogged" }
     }
   }
 }
@@ -1894,6 +1923,7 @@ await client.branches.delete("feature-x");
 
 ### General
 
+- **[.NET Client](../clients/dotnet.md)** — `Aouda.Client`: connecting, queries, inserts, column batches, bulk load, retries and errors.
 - **[Testing with Aouda.Testing](testing.md)** — In-process integration tests, including Application Auth, xUnit/NUnit/MSTest fixtures, and CI-friendly `dotnet test` workflows.
 - **[Architecture](https://github.com/aoudadb/aouda/blob/main/docs/ARCHITECTURE.md)** — Deep dive into Aouda's technical design.
 - **[ADR Index](https://github.com/aoudadb/aouda/tree/main/docs/decisions)** — All architecture decision records.
