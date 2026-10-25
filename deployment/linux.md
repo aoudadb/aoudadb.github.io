@@ -49,7 +49,7 @@ gh release download v<version> --repo aoudadb/aouda --pattern 'aouda-server-*-li
 tar -xzf aouda-server-*-linux-x64.tar.gz
 ```
 
-The server in each archive is precompiled (ReadyToRun) for its platform (**Lead S06, next train**): it starts and answers its first
+The server in each archive is precompiled (ReadyToRun) for its platform (**Lead S06, 0.6.0**): it starts and answers its first
 queries sooner, and an archive unpacks to ~40 MB instead of ~17. It is still framework-dependent — the .NET 10 runtime must be
 installed first ([Before you start](#before-you-start)).
 

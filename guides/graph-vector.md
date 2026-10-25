@@ -524,7 +524,7 @@ fields are in the [HTTP reference](../reference/http-api.md#graph-and-vector-end
 
 The answers that list several results are **column arrays**, like every row-shaped answer of the API: `:khop` answers `nodeIds`
 and `hops` with node *i* at index *i* of both, and `:nearest` answers `rowKeys` and `distances`, nearest first
-(**Lead S12, next train; breaking**: they were `"nodes": [{"nodeId", "hops"}]` and `"results": [{"rowKey", "distance"}]`, one
+(**Lead S12, 0.6.0; breaking**: they were `"nodes": [{"nodeId", "hops"}]` and `"results": [{"rowKey", "distance"}]`, one
 object per result). `vectorData` is row-major: the vectors one after another, `rowKeys.length × dimensions` numbers.
 
 ```bash

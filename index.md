@@ -123,7 +123,7 @@ docker compose up
 → [Getting Started](getting-started/index.md) — embedded mode, server mode, data operations, schema, and auth
 
 **Using the .NET client?**
-→ [.NET Client](clients/dotnet.md) — connecting, queries, inserts, bulk load, column batches (**Lead S13, next train**), retries
+→ [.NET Client](clients/dotnet.md) — connecting, queries, inserts, bulk load, column batches (**Lead S13, 0.6.0**), retries
 
 **Using the TypeScript client?**
 → [TypeScript Client](clients/typescript.md) — query builder, typed queries, auth, MCP tools

@@ -399,7 +399,7 @@ var recent = await db.Engine.Table("sensors")
 | Option | Type | Default | Allowed values | Description |
 |--------|------|---------|----------------|-------------|
 | `DataPath` | `string?` | `null` | `null` (ephemeral); any valid filesystem path | Directory for data files. `null` = ephemeral (temp dir, auto-deleted). |
-| `Durability` | `string` | `"strict"` | `"strict"`, `"os"`, `"unlogged"`, `"memory"` | (**Lead S26, next train**) The database's durability level: `strict` writes the WAL through to disk before a write is visible (survives a power loss), `os` writes it to the operating system (survives a process crash), `unlogged` has no WAL (kept whole by a clean close; after any other stop it keeps its flushed rows, or is emptied if it was being changed — (**Lead S26c, next train**)), `memory` has no WAL and no data files. Also set by config `Aouda:Durability`. It replaces `EnableWal`: setting `EnableWal` (in code or as `Aouda:EnableWal`) makes the open throw, naming `Durability`. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
+| `Durability` | `string` | `"strict"` | `"strict"`, `"os"`, `"unlogged"`, `"memory"` | (**Lead S26, 0.6.0**) The database's durability level: `strict` writes the WAL through to disk before a write is visible (survives a power loss), `os` writes it to the operating system (survives a process crash), `unlogged` has no WAL (kept whole by a clean close; after any other stop it keeps its flushed rows, or is emptied if it was being changed — (**Lead S26c, 0.6.0**)), `memory` has no WAL and no data files. Also set by config `Aouda:Durability`. It replaces `EnableWal`: setting `EnableWal` (in code or as `Aouda:EnableWal`) makes the open throw, naming `Durability`. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
 | `MemoryBudget` | `long?` | `null` | `null` (no limit); any non-negative `long` (bytes) | Maximum memory in bytes. `null` = no limit. |
 | `TreatMissingAsEmpty` | `bool` | `true` | `true`, `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
@@ -619,7 +619,7 @@ var cheap = await client.GetTable("products")
     .ToListAsync();
 ```
 
-**Data you already hold as columns** (**Lead S13, next train**) — read from Parquet or Arrow, a data frame, another database —
+**Data you already hold as columns** (**Lead S13, 0.6.0**) — read from Parquet or Arrow, a data frame, another database —
 goes in as a `ColumnBatch`, without a dictionary per row. It is the fast path for inserts and bulk loads alike:
 
 ```csharp
@@ -1149,7 +1149,7 @@ Content-Type: application/json
 }
 ```
 
-Over HTTP the rows are column arrays: `columns`, and `data` with one array per column (**Lead S12, next train**: a `rows` array of
+Over HTTP the rows are column arrays: `columns`, and `data` with one array per column (**Lead S12, 0.6.0**: a `rows` array of
 objects is refused `400 ROW_OBJECTS_UNSUPPORTED`; see [the write body](../reference/http-api.md#column-arrays-the-write-body)).
 The SDK calls above still take rows.
 

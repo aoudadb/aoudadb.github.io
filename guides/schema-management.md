@@ -49,7 +49,7 @@ In your project root, create `aouda.schema.json`:
 }
 ```
 
-(**Lead S26, next train**) `settings.durability` carries only `replicationFactor`. A database's durability level (`strict`, `os`,
+(**Lead S26, 0.6.0**) `settings.durability` carries only `replicationFactor`. A database's durability level (`strict`, `os`,
 `unlogged` or `memory`) is set where the database is created, not in the schema; a table may name its own with
 `"durability": { "level": "unlogged" }` (`strict`, `unlogged` or `memory`). The retired `walEnabled` is a validation error. See
 [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train).
@@ -188,7 +188,7 @@ Five shapes, discriminated by `type`:
 
 **`window`** (**Horizon, 0.5.0**) — `"window": { "keep": "7d" }` (plus `"column"` where it must be named) on an `aggregate` with a `TruncateToMinute` / `Hour` / `Day` / `Week` bucket, or on a `topNPerGroup` grouped by a time column: the result keeps only its groups at or after the horizon (the server's clock minus `keep`), and a read of anything older is computed from the source, so the answer does not change. Every other declaration is refused at apply with its reason — the full list is in [Materialized queries — what is refused](materialized.md#window-refusals). `schema export` writes it, and changing it replaces the query.
 
-**`currency`** (**Lead S27b, next train**) — `"currency": "rebuild"` on any materialized query: never maintained incrementally; a change to its source leaves it behind (not routed to) until it is rebuilt, once the source is quiet, after a load, or on `:refresh`. Omitted is `"current"` (maintained off each commit). Not with `"updateMode": "sync"` or `maxCoalesceMs`. Part of the query's body, so changing it replaces the query. See [Materialized queries](materialized.md#27-core-concepts-and-mental-model).
+**`currency`** (**Lead S27b, 0.6.0**) — `"currency": "rebuild"` on any materialized query: never maintained incrementally; a change to its source leaves it behind (not routed to) until it is rebuilt, once the source is quiet, after a load, or on `:refresh`. Omitted is `"current"` (maintained off each commit). Not with `"updateMode": "sync"` or `maxCoalesceMs`. Part of the query's body, so changing it replaces the query. See [Materialized queries](materialized.md#27-core-concepts-and-mental-model).
 
 **Public aggregate columns are the declared `outputName`s** (plus group keys), on every read path — `engine.Table(mq)`, `POST /tables/{mq}/query`, named query, subscribe. Physical state columns (`_count`, `_max_bid`, `_first_open_val`, …) are not selectable. A named query over `ohlc_1m` selects `high` / `open`, not `_max_price`.
 

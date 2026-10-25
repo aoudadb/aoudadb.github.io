@@ -725,7 +725,7 @@ _Added 2026-06-07 (MemTiering S12 — closes Gap C)._
 
 ### What is covered
 
-An **exact backup** captures a point-in-time snapshot of every table with data files (any durability level but `memory`; `DiskBacked` before **Lead S26, next train**) that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
+An **exact backup** captures a point-in-time snapshot of every table with data files (any durability level but `memory`; `DiskBacked` before **Lead S26, 0.6.0**) that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
 
 - **Never-sealing mutable-tier tables** (those with `MemoryIntent = Mutable` that never exceed the seal threshold) are **fully covered** by an exact backup. Their data lives entirely in HRA, and a `.hra` snapshot file is written for each such table at the backup checkpoint.
 - **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism. ⚠️ Until the **architecture review (0.3.0)** this held for the backup only: a restore did not catalogue the `.hot` files, and their rows were lost (see [Restore exact backup](#b-restore-exact-backup)).
@@ -733,7 +733,7 @@ An **exact backup** captures a point-in-time snapshot of every table with data f
 
 ### What is exempt
 
-- **`memory` tables** (the `memory` durability level, `MemoryOnly` before **Lead S26, next train**) produce no HRA snapshot. By design (ADR 0034), they write nothing to disk and lose their data on shutdown. They are invisible to backup and intentionally so.
+- **`memory` tables** (the `memory` durability level, `MemoryOnly` before **Lead S26, 0.6.0**) produce no HRA snapshot. By design (ADR 0034), they write nothing to disk and lose their data on shutdown. They are invisible to backup and intentionally so.
 
 ### Exact restore
 

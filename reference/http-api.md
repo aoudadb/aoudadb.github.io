@@ -14,7 +14,7 @@ This document specifies the JSON-based wire protocol for Aouda client-server com
 
 - **Transport**: HTTP/1.1 and HTTP/2
 - **Format**: JSON for all messages
-- **Rows on the wire**: column arrays — `columns` and `data`, one array per column — in every JSON result and every JSON write body (**Lead S12, next train**: the row-object forms, `format=rows` and `"rows": [{…}]` bodies, are gone); binary [column-batch frames](#the-column-batch-frame-acb2) on request
+- **Rows on the wire**: column arrays — `columns` and `data`, one array per column — in every JSON result and every JSON write body (**Lead S12, 0.6.0**: the row-object forms, `format=rows` and `"rows": [{…}]` bodies, are gone); binary [column-batch frames](#the-column-batch-frame-acb2) on request
 - **Content Type**: `application/json`
 
 ## Protocol Version
@@ -514,14 +514,14 @@ All errors return a JSON body with this structure:
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path |
-| `INVALID_FORMAT` | 400 | (**Lead S12, next train**) The request names the `format` query parameter (`/query`, a named query's execute or batch). It is no longer read: every JSON result is column arrays (`columns`, `data`), and the binary form is asked for with `Accept: application/vnd.aouda.column-batch-v2`. Any value is refused, `columnar` included, so an old client asking for `rows` is told rather than handed a body it misreads. Drop the parameter |
-| `ROW_OBJECTS_UNSUPPORTED` | 400 / 415 | (**Lead S12, next train**) A write body carries row objects (`rows`, or a named mutation's batch argument given as an array of objects), which no surface reads any more: `POST …/rows`, a branch insert, a named mutation's `batchParam`, the schema seed and `aouda.seed.json`, and a WebSocket `stream_rows` (as its `error` code). A bulk-load `:append` sent as NDJSON (`application/x-ndjson`) is refused the same way with `415`. Send [column arrays](#column-arrays-the-write-body) — `columns`, `data` and, for a cell that is not given, `absent` — or upgrade the client library. Nothing was written |
+| `INVALID_FORMAT` | 400 | (**Lead S12, 0.6.0**) The request names the `format` query parameter (`/query`, a named query's execute or batch). It is no longer read: every JSON result is column arrays (`columns`, `data`), and the binary form is asked for with `Accept: application/vnd.aouda.column-batch-v2`. Any value is refused, `columnar` included, so an old client asking for `rows` is told rather than handed a body it misreads. Drop the parameter |
+| `ROW_OBJECTS_UNSUPPORTED` | 400 / 415 | (**Lead S12, 0.6.0**) A write body carries row objects (`rows`, or a named mutation's batch argument given as an array of objects), which no surface reads any more: `POST …/rows`, a branch insert, a named mutation's `batchParam`, the schema seed and `aouda.seed.json`, and a WebSocket `stream_rows` (as its `error` code). A bulk-load `:append` sent as NDJSON (`application/x-ndjson`) is refused the same way with `415`. Send [column arrays](#column-arrays-the-write-body) — `columns`, `data` and, for a cell that is not given, `absent` — or upgrade the client library. Nothing was written |
 | `MISSING_TABLE` | 400 | Table name is missing from request |
 | `MISSING_DATABASE` | 400 | Database name is missing or empty in request (v2: set the `database` field in the request body) |
 | `INVALID_OPERATOR` | 400 | Invalid comparison operator in where clause |
 | `INVALID_COLUMN` | 400 | Invalid column name or reference |
 | `INVALID_VALUE` | 400 | Invalid value type or format |
-| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) A column-batch body of a version this server no longer reads: an `ACB1` frame, or the retired media type `application/vnd.aouda.column-batch`. The message names the version found and the one expected (`ACB2`, `application/vnd.aouda.column-batch-v2`). Upgrade the client; nothing of the request was applied |
+| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) A column-batch body of a version this server no longer reads: an `ACB1` frame, or the retired media type `application/vnd.aouda.column-batch`. The message names the version found and the one expected (`ACB2`, `application/vnd.aouda.column-batch-v2`). Upgrade the client; nothing of the request was applied |
 | `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, 0.5.0**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
 
 #### Resource Errors (4xx)
@@ -627,10 +627,10 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SETUP_REQUIRED` | 503 | The server has no admin yet and is in setup mode: only setup status and a local `POST /api/auth/setup` are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
-| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, next train**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice |
+| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
-| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, next train**) `POST …/tables/{name}/rows/batch` only: operation `k` (`k` ≥ 1) was refused for capacity. Operations `0` to `k − 1` **were applied**; operation `k` and the ones after it were not. `details` names `appliedOperations=k`, `totalOperations=n` and the refusal's own code. **No `Retry-After`**, deliberately: re-sending the whole batch would apply its first `k` operations twice. Re-send only the remaining operations (`operations[k..]`) as a new batch. A refusal of operation `0` is still the plain `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` with `Retry-After`: nothing was applied. It used to be that plain refusal whatever `k` was, which both SDKs re-send |
+| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) `POST …/tables/{name}/rows/batch` only: operation `k` (`k` ≥ 1) was refused for capacity. Operations `0` to `k − 1` **were applied**; operation `k` and the ones after it were not. `details` names `appliedOperations=k`, `totalOperations=n` and the refusal's own code. **No `Retry-After`**, deliberately: re-sending the whole batch would apply its first `k` operations twice. Re-send only the remaining operations (`operations[k..]`) as a new batch. A refusal of operation `0` is still the plain `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` with `Retry-After`: nothing was applied. It used to be that plain refusal whatever `k` was, which both SDKs re-send |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -798,7 +798,7 @@ Direct lookup of a specific database by name. Returns the database if it exists 
 }
 ```
 
-`options.durability` is the database's durability level — `strict`, `os`, `unlogged` or `memory` (**Lead S26, next train**; it replaces the boolean `options.enableWal`, which is gone). See [Write Path Durability](../guides/write-durability.md).
+`options.durability` is the database's durability level — `strict`, `os`, `unlogged` or `memory` (**Lead S26, 0.6.0**; it replaces the boolean `options.enableWal`, which is gone). See [Write Path Durability](../guides/write-durability.md).
 
 `authDatabaseKind: "none"` on this payload is expected for a **data** database. Linkage is `auth.enabled` / `auth.database`.
 
@@ -858,7 +858,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `name` | string | Yes | Database name. |
-| `durability` | string | No | The database's durability level (**Lead S26, next train**): `strict` (default — WAL written through before a write is visible), `os` (WAL written to the operating system, not forced to disk), `unlogged` (no WAL; (**Lead S26c, next train**) emptied by an open that does not follow a clean close if it was being changed), `memory` (no WAL, no data files). Lower case, exactly these four: anything else — `"Strict"`, `"MemoryOnly"`, `"everysec"` — is **400** `INVALID_REQUEST` naming the four levels. Read at every open; tables that name no level inherit it. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
+| `durability` | string | No | The database's durability level (**Lead S26, 0.6.0**): `strict` (default — WAL written through before a write is visible), `os` (WAL written to the operating system, not forced to disk), `unlogged` (no WAL; (**Lead S26c, 0.6.0**) emptied by an open that does not follow a clean close if it was being changed), `memory` (no WAL, no data files). Lower case, exactly these four: anything else — `"Strict"`, `"MemoryOnly"`, `"everysec"` — is **400** `INVALID_REQUEST` naming the four levels. Read at every open; tables that name no level inherit it. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
 | `replicationMode` | string | No | `Replicate` (default) or `DoNotReplicate`. |
 | `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, 0.4.0:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
@@ -870,7 +870,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `auth.allowSelfSignup` | bool | No | Whether self-service signup is enabled on the linked application database. Omitted: off. |
 | `auth.selfSignupRole` | string \| null | No | Role granted to self-service signups on the linked application database. Null or omitted: `db_writer`. |
 
-(**Lead S26, next train**) `enableWal` and `dataDurability` are gone, with no alias: a body carrying either is **400** `INVALID_REQUEST` naming `durability` (`enableWal: false` is `"unlogged"`, `dataDurability: "MemoryOnly"` is `"memory"`).
+(**Lead S26, 0.6.0**) `enableWal` and `dataDurability` are gone, with no alias: a body carrying either is **400** `INVALID_REQUEST` naming `durability` (`enableWal: false` is `"unlogged"`, `dataDurability: "MemoryOnly"` is `"memory"`).
 
 **Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them.
 
@@ -943,7 +943,7 @@ Execute a query against a table.
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `format` | — | (**Lead S12, next train**) **Removed.** Any `format=` (even `columnar`) is refused `400 INVALID_FORMAT`; the JSON result is always column arrays (below), and frames are asked for with `Accept` |
+| `format` | — | (**Lead S12, 0.6.0**) **Removed.** Any `format=` (even `columnar`) is refused `400 INVALID_FORMAT`; the JSON result is always column arrays (below), and frames are asked for with `Accept` |
 | `readPreference` | `Primary` | Read preference (overrides header) |
 | `at_least` | _(omitted)_ | Consistency token. Wins over `X-Aouda-Token`. |
 | `waitMs` | 250 when gate active | Freshness wait; cap 30 000 |
@@ -1217,7 +1217,7 @@ accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 `columns` names the result's columns, `types` their types, and `data` holds **one array per column**, in the order of
 `columns`, all `rowCount` long: row *i* is index *i* of every array.
 
-(**Lead S12, next train; breaking**) **This is the only JSON shape.** The row-object response (`format=rows`, `{"rows": [{…}]}`)
+(**Lead S12, 0.6.0; breaking**) **This is the only JSON shape.** The row-object response (`format=rows`, `{"rows": [{…}]}`)
 is gone, and with it the `format` parameter: a request that still sends `format=` — any value, `columnar` included — is refused
 `400 INVALID_FORMAT`, so an old client is told instead of being handed a body it would misread. To get row objects, zip the
 arrays on the client (both SDKs do this for you); for the binary form, ask for frames with `Accept` (below).
@@ -1225,7 +1225,7 @@ arrays on the client (both SDKs do this for you); for the binary form, ask for f
 **`stats.routedTo` (**ColumnarRead S18, 0.3.0**):** the materialized query the answer was read from instead of the table,
 when it was — rows, columns, `aggregates` / `groupBy` and `…/query/count` are all routed to a current result that holds the
 answer ([routing](../guides/materialized.md#routing-a-read-to-a-maintained-result)); omitted when the table was read. The
-answer is the same either way. It is in the frame response's end frame too (**Lead S09, next train**: it was the
+answer is the same either way. It is in the frame response's end frame too (**Lead S09, 0.6.0**: it was the
 `X-Aouda-Stats` header).
 
 **`stats.windowCompletionRows` (**Horizon, 0.5.0**):** a read of a windowed materialized query's result that reached below
@@ -1239,7 +1239,7 @@ the same as before for every type. One case changes: a `Double` / `Float32` resu
 cannot represent, is now a clean `500 INTERNAL_ERROR` naming the column before anything is sent. Before, the response broke
 after its headers. Ask for the frame response below, which carries these values.
 
-**Column-batch frame response (**ColumnarRead, 0.3.0**; `ACB2` since **Lead S09, next train**):** a request whose `Accept`
+**Column-batch frame response (**ColumnarRead, 0.3.0**; `ACB2` since **Lead S09, 0.6.0**):** a request whose `Accept`
 header lists `application/vnd.aouda.column-batch-v2` gets the result as **column-batch frames**: the same binary format
 `POST …/rows` and bulk-load `:append` accept, described under [the column-batch frame](#the-column-batch-frame-acb2). Both SDKs
 ask for it by default. Send `Accept: application/vnd.aouda.column-batch-v2, application/json;q=0.5` and **branch on the
@@ -1248,7 +1248,7 @@ only the retired `application/vnd.aouda.column-batch` (`ACB1`). A frame cannot c
 column whose values are not its declared type, more than 4,096 columns, a column name it cannot hold (empty, or over 1,024 UTF-8
 bytes), a single row that would decode past half the reader's 256 MB frame budget, or a string value over 16 MB of UTF-8. Errors
 before the response starts are JSON `ProtocolError`s with their status. **An error after the response has started is the body's
-end frame** (**Lead S09, next train**): `status: "error"` with the code, the message and the status the JSON error would have had,
+end frame** (**Lead S09, 0.6.0**): `status: "error"` with the code, the message and the status the JSON error would have had,
 after the frames already sent — which are not a result. Both SDKs drop those frames and raise the same typed error the JSON error
 body raises, retried or not by its code as any error is (before, the server aborted the connection and both SDKs retried it as a
 connection error, failing again at the same place). The request timeout (`Aouda:RequestTimeoutMs`, 30 s by default) still bounds a
@@ -1257,11 +1257,11 @@ Only a server that dies mid-body still cuts a response, and a body without its e
 The same applies to `POST …/named-queries/{name}/query`; the named-query batch stays JSON.
 
 - **Body:** data frames, each at most 65,536 rows — fewer for a wide result, so that no frame decodes past the reader's 256 MB a
-  frame — then **one end frame** (**Lead S09, next train**). There is always at least one data frame: an empty result is one frame
+  frame — then **one end frame** (**Lead S09, 0.6.0**). There is always at least one data frame: an empty result is one frame
   of 0 rows that still names every column. Every frame carries every column, in result order. A result that names a column twice
   is answered as JSON. The end frame's `rowCount` is the frames' rows, checked by the reader: a body cut anywhere — between two
   frames included — is an error, not a shorter answer.
-- **One query exports every row (**LoadScan, 0.5.0**; streamed from its first row since **Lead S09, next train**).** A
+- **One query exports every row (**LoadScan, 0.5.0**; streamed from its first row since **Lead S09, 0.6.0**).** A
   `POST …/query` asked for frames with **no page** (`limit: 0`, no `offset`) and no `orderBy`, `distinct`, grouping, aggregate,
   join or computed column is **streamed**: the server writes the frames while it reads the table, a batch at a time (tens of MB,
   sized to a quarter of the read path's memory ceiling), and states the row count and the statistics in the end frame. It no
@@ -1273,10 +1273,10 @@ The same applies to `POST …/named-queries/{name}/query`; the named-query batch
   become much wider partway through can still pass the ceiling in one batch, and that read then ends with an error end frame
   (`MEMORY_BUDGET_EXCEEDED`). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
   budget) and come in the order the JSON answer's rows have. Its `stats.rowsScanned` is the rows the scan read (the rows of the row
-  groups no statistic ruled out) and `executionMs` the time to the last frame (**Lead S09, next train**: before, `rowsScanned`
+  groups no statistic ruled out) and `executionMs` the time to the last frame (**Lead S09, 0.6.0**: before, `rowsScanned`
   repeated `rowsReturned` and `executionMs` was the time to the count). A string value over 16 MB fails a streamed read with an
   error end frame where a held read is answered as JSON.
-- **Headers** carry only what is known before the first frame (**Lead S09, next train**); the rest of the JSON envelope is the
+- **Headers** carry only what is known before the first frame (**Lead S09, 0.6.0**); the rest of the JSON envelope is the
   end frame's:
 
 | Header | Content |
@@ -1293,7 +1293,7 @@ The same applies to `POST …/named-queries/{name}/query`; the named-query batch
 | `totalMatches` | `totalMatches`, when the query asked for it (a named query with `count: true`) |
 | `warnings` | The JSON body's `warnings` array, when there are any |
 
-`X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats` and `X-Aouda-Warnings` are gone (**Lead S09, next train**).
+`X-Aouda-Row-Count`, `X-Aouda-Total-Matches`, `X-Aouda-Stats` and `X-Aouda-Warnings` are gone (**Lead S09, 0.6.0**).
 Every CORS policy lists these headers in `Access-Control-Expose-Headers`, so a browser client reads them cross-origin —
 together with `X-Request-Id`, `X-Aouda-Protocol-Version`, `Accept-Post` and `Retry-After` (**architecture review, next
 train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
@@ -1368,7 +1368,7 @@ Execute one named query by unique name.
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
-**Query parameters:** `readPreference` as on ad-hoc query. (**Lead S12, next train**) There is no `format` parameter any more: any `format=` is refused `400 INVALID_FORMAT`, and the result is always column arrays. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`. The named query’s declared `freshness` is keyed by `{name}`. A name with no `freshness` block is fail-safe: primary-only + `readYourWrites`. Loosening (call site weaker than the declared budget, or non-`Primary` on fail-safe) is 400 `FRESHNESS_LOOSENED`.
+**Query parameters:** `readPreference` as on ad-hoc query. (**Lead S12, 0.6.0**) There is no `format` parameter any more: any `format=` is refused `400 INVALID_FORMAT`, and the result is always column arrays. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`. The named query’s declared `freshness` is keyed by `{name}`. A name with no `freshness` block is fail-safe: primary-only + `readYourWrites`. Loosening (call site weaker than the declared budget, or non-`Primary` on fail-safe) is 400 `FRESHNESS_LOOSENED`.
 
 **Success (200):** same column-array shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset — counted by the same read as the page, over the same snapshot (**ColumnarRead, 0.3.0**)). When the name is deprecated, `warnings` is present:
 
@@ -1464,7 +1464,7 @@ A named-mutation name in `queries`:
 
 On the **data-plane listener**, unsigned or unentitled batch is **request-level 404** `NAMED_QUERY_NOT_FOUND` (not HTTP 200 with positional slots). Entitled callers still get HTTP 200 with positional `NAMED_QUERY_NOT_FOUND` for unknown names. The admin listener keeps 401/403 for unsigned/unentitled batch.
 
-`INVALID_FORMAT` when the request names `?format=` at all (**Lead S12, next train**: every slot is column arrays; it used to choose `columnar` or `rows`).
+`INVALID_FORMAT` when the request names `?format=` at all (**Lead S12, 0.6.0**: every slot is column arrays; it used to choose `columnar` or `rows`).
 
 Do **not** reuse `POST …/tables/{name}/rows/batch` (`BatchMutationMessage`) — that is ad-hoc update/delete on one table.
 
@@ -1504,7 +1504,7 @@ The object shape is reserved for those two one-key forms, because `{ "param": �
 
 To store a JSON document in a `String` column, send it as a JSON **string** (`"Meta": "{\"a\":1}"`), not as a bare object.
 
-**Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying **many rows of arguments**, so one `execute` call inserts many rows. (**Lead S12, next train; breaking**) That argument is **column arrays**: `columns` names parameters, `data` holds one array per parameter (all the same length, one value per row), and the optional `absent` lists, per parameter, the rows that do not give it. Row *i*'s given cells fill that row's `{"param": …}` holes, overriding the top-level `args` of the same name, exactly as a row object's keys did before; a parameter a row does not give falls back to `args`. An **array of row objects is refused `400 ROW_OBJECTS_UNSUPPORTED`** (it was the only form before). `values` stays the per-row template. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT` — `upsert` is allowed, being row-shaped; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap (`maxItems` counts rows) and every row are checked before any row is inserted — one bad row fails the whole call and names its row index in `rowErrors`, the same shape as insert-transform per-row errors.
+**Batch insert (`batchParam`, BL-416).** An `op: "insert"` definition may declare `batchParam`, the name of a parameter carrying **many rows of arguments**, so one `execute` call inserts many rows. (**Lead S12, 0.6.0; breaking**) That argument is **column arrays**: `columns` names parameters, `data` holds one array per parameter (all the same length, one value per row), and the optional `absent` lists, per parameter, the rows that do not give it. Row *i*'s given cells fill that row's `{"param": …}` holes, overriding the top-level `args` of the same name, exactly as a row object's keys did before; a parameter a row does not give falls back to `args`. An **array of row objects is refused `400 ROW_OBJECTS_UNSUPPORTED`** (it was the only form before). `values` stays the per-row template. The batch parameter's `NamedQueryParamConstraint` **must** declare `maxItems` — schema apply rejects a `batchParam`-bearing definition without one (`NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED`) and rejects `batchParam` on `update` / `delete` (`NAMED_MUTATION_BATCH_NON_INSERT` — `upsert` is allowed, being row-shaped; batching those is a separate, still-deferred predicate-shaped question — see [Named mutations](../guides/named-queries.md#named-mutations)). Bind is **all-or-nothing**: the cap (`maxItems` counts rows) and every row are checked before any row is inserted — one bad row fails the whole call and names its row index in `rowErrors`, the same shape as insert-transform per-row errors.
 
 Definition:
 
@@ -1552,7 +1552,7 @@ See [Insert rows](#post-apidatabasesdbtablesnamerows).
 
 #### `POST /api/databases/{db}/named-mutations/{name}/execute`
 
-**Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the rows as column arrays (`{columns, data, absent?}`, **Lead S12, next train**; it was an array of row objects, now refused `ROW_OBJECTS_UNSUPPORTED`); every other field is unchanged.
+**Request body:** `{ "args": { … } }`. For a `batchParam` definition, `args[batchParam]` is the rows as column arrays (`{columns, data, absent?}`, **Lead S12, 0.6.0**; it was an array of row objects, now refused `ROW_OBJECTS_UNSUPPORTED`); every other field is unchanged.
 
 **Success (200):** the same mutation result the corresponding ad-hoc insert/update/delete returns (`rowsInserted` / `rowsUpdated` / `rowsDeleted`, optional `rows` for `RETURNING`), plus optional `warnings` (`NAMED_MUTATION_DEPRECATED`). A batch insert's `rowsInserted` is the number of batch rows bound. `insert` and `upsert` return `rows` too when the definition declares `returning` — the rows written, an upsert's one per key as stored (**NativeClients, 0.4.0**; BL-639).
 (**Horizon, 0.5.0**) On a table with [retention](../guides/retention.md), `insert` and `upsert` results carry `expiredRows` —
@@ -1596,7 +1596,7 @@ Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` a
 #### `POST /api/databases/{db}/branches/{name}/insert`
 
 Insert rows into a table on a branch; they are written to the branch's own segments only. The body is the table and the rows as
-[column arrays](#column-arrays-the-write-body) (**Lead S12, next train; breaking**: it was `{"table", "rows": [{…}]}`, now refused
+[column arrays](#column-arrays-the-write-body) (**Lead S12, 0.6.0; breaking**: it was `{"table", "rows": [{…}]}`, now refused
 `400 ROW_OBJECTS_UNSUPPORTED`). The rows are inserted as `POST …/tables/{name}/rows` inserts them.
 
 ```json
@@ -1617,7 +1617,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | GET | `/{name}` | Read | Status for one query; `404` if missing. |
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. (**BL-884, 0.3.0**) A create whose first build is refused for capacity (memory, or a full WAL) still answers `204`: the definition is durable, the query exists **behind** (`current: false`) and is built once there is room. It used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists". |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
-| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, next train**: they were row objects). |
+| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). |
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
@@ -1694,11 +1694,11 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
 | `config` | object | Yes* | Alternative: embedded object; server serializes to JSON if `configJson` omitted. |
 | `window` | object? | No | (**Horizon, 0.5.0**) `{ "keep": "7d", "column"? }`, beside `config`: keep only the result's groups whose window column lies within `keep` of the server's clock; older ones are computed from the source on read. Only an `aggregate` with a time bucket (`truncateToMinute` / `Hour` / `Day` / `Week`) or a `topNPerGroup` grouped by a time column takes one; `keep` is a whole number of `m` / `h` / `d` / `w` and a whole multiple of the bucket; `column` names the bucket's output when there is more than one, and is required on a `topNPerGroup`. Every other declaration — a `latestPerKey`, `firstPerKey` or `filter`, no bucket, a month or year bucket, a source with retention — is `400` naming its reason, and nothing is created. Omitted: an unbounded query. See [Materialized Queries](../guides/materialized.md). |
-| `currency` | string? | No | (**Lead S27b, next train**) How the result is kept: `"current"` (omitted: the default — maintained off each commit) or `"rebuild"` — never maintained incrementally: a change to a source leaves it behind (`current: false`, `isStale: true`, never routed to) until it is rebuilt, once its sources have been quiet for a moment (2 s), after a bulk load into them, or on `:refresh`. Under a steady stream of writes a rebuild also starts 60 s after the first change, but a commit during it leaves the query behind again: a source written more often than a rebuild takes keeps it behind (BL-1149; **Lead group 6 review, next train**). A token read (`?at_least=`) waits for the rebuild — give it a `waitMs` above the quiet period. Part of the definition: a change of level is a drop and a create. Any other name is a `400` naming the two; `"rebuild"` with `updateMode` sync or `maxCoalesceMs` is a `400` (a rebuild query applies no incremental batch). |
+| `currency` | string? | No | (**Lead S27b, 0.6.0**) How the result is kept: `"current"` (omitted: the default — maintained off each commit) or `"rebuild"` — never maintained incrementally: a change to a source leaves it behind (`current: false`, `isStale: true`, never routed to) until it is rebuilt, once its sources have been quiet for a moment (2 s), after a bulk load into them, or on `:refresh`. Under a steady stream of writes a rebuild also starts 60 s after the first change, but a commit during it leaves the query behind again: a source written more often than a rebuild takes keeps it behind (BL-1149; **Lead group 6 review, 0.6.0**). A token read (`?at_least=`) waits for the rebuild — give it a `waitMs` above the quiet period. Part of the definition: a change of level is a drop and a create. Any other name is a `400` naming the two; `"rebuild"` with `updateMode` sync or `maxCoalesceMs` is a `400` (a rebuild query applies no incremental batch). |
 
 `configJson` / `config` must provide valid **FilterConfig**, **LatestPerKeyConfig**, **AggregateConfig**, or **TopNPerGroupConfig** JSON for types `4`, `1`/`2`, `3`, and `5` respectively (see engine storage types under `Aouda.Engine.Storage.Materialized`). FirstPerKey uses LatestPerKeyConfig with `descending: false`. TopNPerGroupConfig adds required `n` (1..10000). AggregateConfig's `groupByColumns` entries are objects — `{ "column": "region" }`, or `{ "column": "time", "function": "TruncateToHour" }` for a time bucket. (**BL-980, 0.4.0**) The v1 plain-string form (`"groupByColumns": ["region"]`) is `400 INVALID_REQUEST`, and a stored definition in that form is refused when it is read; up to 0.3.x both were read.
 
-**Query response** (`POST .../query`) — column arrays (**Lead S12, next train; breaking**: it was `"rows": [{…}]`, one object per
+**Query response** (`POST .../query`) — column arrays (**Lead S12, 0.6.0; breaking**: it was `"rows": [{…}]`, one object per
 row):
 
 ```json
@@ -1779,7 +1779,7 @@ The list route returns an array of the same object.
 | `token` | string? | The query's **frontier** (**WorkloadCore, 0.3.0**; the maintenance watermark before): the WAL position its result incorporates, encoded as a consistency token. A position to wait for, not a claim that the result is current — `current` is the claim. |
 | `window` | object? | (**Horizon, 0.5.0**) The query's window as declared — `{ "keep": "7d" }`, with `column` when one was named. Absent for an unbounded query. |
 | `horizon` | string? | (**Horizon, 0.5.0**) The result's current horizon (UTC): groups at or after it are stored, older ones are computed from the source on read. It follows the server's clock minus `keep` on the query's bucket, is persisted before any reader sees it, and never moves back. Absent without a window. |
-| `currency` | string | (**Lead S27b, next train**) The query's currency as declared: `"current"` or `"rebuild"`. Always present. A `rebuild` query a change has left behind reads `current: false` and `isStale: true`, with a `staleReason` that names its currency, until its rebuild publishes; a `:commit` that waits for its queries (`mqWaitMs`) does not wait for it. |
+| `currency` | string | (**Lead S27b, 0.6.0**) The query's currency as declared: `"current"` or `"rebuild"`. Always present. A `rebuild` query a change has left behind reads `current: false` and `isStale: true`, with a `staleReason` that names its currency, until its rebuild publishes; a `:commit` that waits for its queries (`mqWaitMs`) does not wait for it. |
 
 #### ⚠️ Is this query current? Read `isStale`, `staleReason` and `currentLag` — not `state`
 
@@ -1904,7 +1904,7 @@ query through `POST .../schema/apply`, or set the result table's policy afterwar
 Apply idempotent seed data. Tables must already exist.
 
 **Request:** seed document root — the same format as `aouda.seed.json`. Each table's rows are
-[column arrays](#column-arrays-the-write-body) (**Lead S12, next train; breaking**: they were `"rows": [{…}]`, which is now refused
+[column arrays](#column-arrays-the-write-body) (**Lead S12, 0.6.0; breaking**: they were `"rows": [{…}]`, which is now refused
 `400 ROW_OBJECTS_UNSUPPORTED`):
 
 ```json
@@ -2014,7 +2014,7 @@ Get table detail with columns.
 }
 ```
 
-(**Lead S26, next train**) `durability` is the level the table's writes actually get — `strict`, `os`, `unlogged` or `memory` —
+(**Lead S26, 0.6.0**) `durability` is the level the table's writes actually get — `strict`, `os`, `unlogged` or `memory` —
 and `source` says where it came from: `table` when the table named its own level, `database` when it inherits the database's. It
 is the effective level, not the requested one: a table that named `strict` in a database at `os` reads `os`. A table that inherits
 from a database since reopened at `memory` reads `unlogged`. `policy.residency.dataDurability` is gone (its `MemoryOnly` is the
@@ -2397,7 +2397,7 @@ Drop a column.
 
 #### Column arrays: the write body
 
-(**Lead S12, next train; breaking**) **Every JSON write body sends its rows as column arrays** — the shape a query result already
+(**Lead S12, 0.6.0; breaking**) **Every JSON write body sends its rows as column arrays** — the shape a query result already
 has. It is read the same way on every surface: `POST …/tables/{name}/rows`, a bulk-load [`:append`](#post-jobidappend) sent as JSON,
 a WebSocket [`stream_rows`](#stream_rows), a [branch insert](#post-apidatabasesdbbranchesnameinsert), a named mutation's
 [`batchParam`](#named-mutations) argument, and the [schema seed](#schema-seed) (`aouda.seed.json` too). Each surface keeps its own
@@ -2446,7 +2446,7 @@ in `absent[column]`.
 
 Insert one or more rows into a table.
 
-**Request Body** (**Lead S12, next train**: [column arrays](#column-arrays-the-write-body); it was `"rows": [{…}]`, now refused
+**Request Body** (**Lead S12, 0.6.0**: [column arrays](#column-arrays-the-write-body); it was `"rows": [{…}]`, now refused
 `400 ROW_OBJECTS_UNSUPPORTED`):
 
 ```json
@@ -2466,9 +2466,9 @@ The `id` column (an `autoIncrement` key) is left out of `columns`, so both rows'
 |-------|------|----------|-------------|
 | `database` | string | Yes (v2) | Database name; must match URL path `{db}` |
 | `table` | string | Yes | Table name (should match URL path `{name}`) |
-| `columns` | string[] | Yes | (**Lead S12, next train**) The column names. See [column arrays](#column-arrays-the-write-body). |
-| `data` | array[] | Yes | (**Lead S12, next train**) One array of values per column, all the same length. |
-| `absent` | object? | No | (**Lead S12, next train**) Per column, the rows whose cell is not given (not null). |
+| `columns` | string[] | Yes | (**Lead S12, 0.6.0**) The column names. See [column arrays](#column-arrays-the-write-body). |
+| `data` | array[] | Yes | (**Lead S12, 0.6.0**) One array of values per column, all the same length. |
+| `absent` | object? | No | (**Lead S12, 0.6.0**) Per column, the rows whose cell is not given (not null). |
 | `writeConcern` | string? | No | Write-concern override for this request. Allowed: `"one"`, `"majority"`, `"all"`. Null/omitted = use table/database default. |
 | `identityInsert` | bool? | No | When `true`, enable **identity-insert** for this request (SQL Server `IDENTITY_INSERT` / Bond `isAutoIncrementDisabled: true`). Every `autoIncrement` column must be given (not absent) and non-null on every row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful** insert the runtime counter advances to `max(inserted)` per autoIncrement column so subsequent normal inserts do not collide. Null/`false` = default behavior: `0` means auto-generate and `generatedValues` returns the allocated id; **omitting** the column (leaving it out of `columns`, or listing the row in `absent`) means the same as `0`. An explicit non-zero id without the flag is stored, and the counter moves past it before the insert commits, so a later generated id cannot repeat it (**ColumnarMerge S02, 0.2.0**) — as a JSON integer, a numeric string (`"300"`) or an integral number (`5.0`, `1e2`) alike, each stored as that integer (**BL-703, 0.2.0**; a string id used to be stored without moving the counter, and a fractional form failed with a `500`). |
 
@@ -2496,7 +2496,7 @@ The `id` column (an `autoIncrement` key) is left out of `columns`, so both rows'
 |-------|------|-------------|
 | `rowsInserted` | number | Number of rows successfully inserted |
 | `executionMs` | number | Server-side execution time in milliseconds |
-| `generatedValues` | object? | Generated values for auto-increment columns, as column arrays (**Lead S12, next train; breaking**: it was an object keyed by row index, `{"0": {"id": 42}}`): `columns` names the generated columns and `data` holds one array per column with **one cell per request row** — the value generated for that row, or `null` where the row gave its own value. Row *i* of the request is index *i*. Only present when the server allocated IDs — so not under `identityInsert: true`, where client-supplied values are stored as-is. |
+| `generatedValues` | object? | Generated values for auto-increment columns, as column arrays (**Lead S12, 0.6.0; breaking**: it was an object keyed by row index, `{"0": {"id": 42}}`): `columns` names the generated columns and `data` holds one array per column with **one cell per request row** — the value generated for that row, or `null` where the row gave its own value. Row *i* of the request is index *i*. Only present when the server allocated IDs — so not under `identityInsert: true`, where client-supplied values are stored as-is. |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"` (no replication wait). See `WriteConcernStatus` below. |
 | `expiredRows` | number? | (**Horizon, 0.5.0**) Rows of the request accepted and left out because their time lay below the table's [retention](../guides/retention.md) horizon, or was an explicit `null` in a nullable time column — never stored, never returned, not in `rowsInserted`. A row that omits the column is not counted (it is stored, hidden by every read and dropped by the next flush). **Omitted when 0** (always, on a table without retention). Not reported by `POST …/rows/batch` or the WebSocket write stream. |
 
@@ -2528,7 +2528,7 @@ S11**) an insert wrote its table's aggregate and latest / first-per-key queries 
 **The column-batch frame body** (**BL-695 / ColumnarCore S06, 0.2.0**):
 
 The same endpoint also accepts **one column-batch frame** — `Content-Type: application/vnd.aouda.column-batch-v2` (`ACB2`,
-**Lead S09, next train**: one data frame, then the body's end frame), the binary layout bulk-load
+**Lead S09, 0.6.0**: one data frame, then the body's end frame), the binary layout bulk-load
 [`:append`](#the-column-batch-frame-acb2) takes. An `ACB1` body or the retired `application/vnd.aouda.column-batch` type is
 `415 FRAME_VERSION_UNSUPPORTED`, and nothing is inserted. The rows
 insert exactly as the same rows sent as JSON would: the same values, defaults, generated ids, errors and messages. A
@@ -2557,7 +2557,7 @@ does: a `415` on a frame is an error like any other — the fallback existed onl
 and pre-1.0 the client and server are upgraded together. The advertisement itself is unchanged.
 
 **JSON is read into columns too.** A JSON body is not deserialized into one dictionary per row: the server reads each
-array of `data` straight into the table's typed columns (**Lead S12, next train**: the arrays are the body's own, where it located
+array of `data` straight into the table's typed columns (**Lead S12, 0.6.0**: the arrays are the body's own, where it located
 `rows` before), with the same conversions as before (a number in a `String` column is stored as its JSON text; `"12"` in an integer
 column is parsed). It accepts `application/json`, `text/json` and `application/*+json`, with or without a UTF-8
 byte-order mark. Two visible differences: a body that is not valid JSON is now a `ProtocolError` `400 INVALID_REQUEST`,
@@ -2578,10 +2578,10 @@ like every other error of this endpoint, and an empty body is `400 MISSING_DATAB
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `ROW_OBJECTS_UNSUPPORTED` | 400 | (**Lead S12, next train**) A JSON body with `rows` (row objects). Send [column arrays](#column-arrays-the-write-body). Nothing is inserted |
+| `ROW_OBJECTS_UNSUPPORTED` | 400 | (**Lead S12, 0.6.0**) A JSON body with `rows` (row objects). Send [column arrays](#column-arrays-the-write-body). Nothing is inserted |
 | `INVALID_REQUEST` | 400 | Missing `columns` / `data`, column arrays that do not match (see [column arrays](#column-arrays-the-write-body)), invalid column name, schema mismatch, `identityInsert: true` with a missing, absent or `null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
 | — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch-v2` |
-| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` frame body, or the retired `application/vnd.aouda.column-batch` type. The message names the version found and the one expected. Nothing is inserted |
+| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) An `ACB1` frame body, or the retired `application/vnd.aouda.column-batch` type. The message names the version found and the one expected. Nothing is inserted |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
 
 #### `PATCH /api/databases/{db}/tables/{name}/rows`
@@ -2630,7 +2630,7 @@ Update rows matching a WHERE filter.
 | `executionMs` | number | Server-side execution time in milliseconds |
 | `writeConcernStatus` | object? | Write-concern acknowledgement details. Null when `writeConcern` is `"one"`. Same structure as in insert response. |
 
-**Note:** `where` is the compare. Returns `rowsUpdated: 0` with 200 status when the predicates match no rows, on the first scan or on the scan the update runs again after another writer changed a matched row (**BL-1120, next train**). That 0 is not an error: this call leaves the row unchanged. A predicate that matches N rows updates those N rows in the one transaction and returns N.
+**Note:** `where` is the compare. Returns `rowsUpdated: 0` with 200 status when the predicates match no rows, on the first scan or on the scan the update runs again after another writer changed a matched row (**BL-1120, 0.6.0**). That 0 is not an error: this call leaves the row unchanged. A predicate that matches N rows updates those N rows in the one transaction and returns N.
 
 **Errors:**
 
@@ -2639,7 +2639,7 @@ Update rows matching a WHERE filter.
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
-| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, next train** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
+| `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
 #### `DELETE /api/databases/{db}/tables/{name}/rows`
 
@@ -2867,12 +2867,12 @@ retry from the failed operation. What each answer means for what was applied:
   and nothing was applied. Retry the whole batch after `Retry-After` (**0.3.0**).
 - **`503 BATCH_PARTIALLY_APPLIED`**, no `Retry-After`: operation `k` ≥ 1 was refused for capacity. Operations `0` to `k − 1` were
   applied, operation `k` and the later ones were not; `details` names `appliedOperations=k` and `totalOperations=n`. Re-send only
-  `operations[k..]` (**Lead group 3 review, next train**; it was the plain capacity refusal, which re-sent the whole batch).
+  `operations[k..]` (**Lead group 3 review, 0.6.0**; it was the plain capacity refusal, which re-sent the whole batch).
 - **`409 WRITE_CONFLICT`** (**BL-881, 0.3.0**) and **`409 DUPLICATE_PRIMARY_KEY`**: the refused operation applied nothing, the
   operations before it stand and the ones after it did not run. The answer does not name the refused operation: read the data
   before retrying anything but idempotent operations.
 - **`500 WRITE_APPLIED_RESPONSE_FAILED`**: every operation was applied and the server failed while answering. Do not re-send the
-  batch (**Lead group 3 review, next train**). A `504 WRITE_CONCERN_TIMEOUT` likewise comes after every operation was applied.
+  batch (**Lead group 3 review, 0.6.0**). A `504 WRITE_CONCERN_TIMEOUT` likewise comes after every operation was applied.
 
 **Request Body:**
 
@@ -2928,9 +2928,9 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 |------|--------|------|
 | `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
-| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, next train**) Operation `k` ≥ 1 was refused for capacity; operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
+| `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity; operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were |
-| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, next train**) The batch was applied; the answer failed. Do not re-send |
+| `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The batch was applied; the answer failed. Do not re-send |
 
 ---
 
@@ -3086,7 +3086,7 @@ included.
 
 The k-hop neighbourhood: every node reachable from `startNodeId` within `k` hops (`k` > 0), with its smallest hop distance
 (from 1; the start node not included), ordered by distance and then node id. The answer is column arrays: `nodeIds[i]` is at
-`hops[i]` hops (**Lead S12, next train; breaking**: it was `"nodes": [{"nodeId", "hops"}]`, one object per node).
+`hops[i]` hops (**Lead S12, 0.6.0; breaking**: it was `"nodes": [{"nodeId", "hops"}]`, one object per node).
 
 ```json
 { "startNodeId": 1, "k": 2 }
@@ -3143,7 +3143,7 @@ partition when omitted). Empty `rowKeys` or `vectorData`, or a length that does 
 #### `POST /api/databases/{db}/tables/{name}/vectors/{column}:nearest`
 
 Approximate nearest neighbours of `queryEmbedding` (its length is the column's `dimensions`): up to `k` (> 0) hits, nearest first.
-The answer is column arrays: `rowKeys[i]` is at `distances[i]` (**Lead S12, next train; breaking**: it was
+The answer is column arrays: `rowKeys[i]` is at `distances[i]` (**Lead S12, 0.6.0; breaking**: it was
 `"results": [{"rowKey", "distance"}]`, one object per hit). `token` is the cut the search read.
 
 ```json
@@ -3408,8 +3408,8 @@ million rows, bytes allocated per row, share of wall time paused for GC.
 | `gen0Collections` / `gen1Collections` / `gen2Collections` | integer | Collections of each generation since start. |
 | `lastGen2LiveBytes` | integer | Live bytes after the most recent gen-2 collection (heap minus fragmentation), or `-1` before the first one. Read when the response is built; `managedHeapBytes` is the same reading as of the last reconciliation (**WorkloadCore, 0.3.0**: before, `managedHeapBytes` counted garbage not yet collected, and under a fast ingest the two differed by gigabytes). |
 | `heapSizeBytes` | integer | Heap size as of the most recent collection of any generation. |
-| `jitCompiledMethods` | integer | Methods the JIT has compiled since start, every tier and on-stack replacement included (**Lead group 2 review, next train**). A precompiled (ReadyToRun) method counts when it is recompiled at tier 1. Its difference across a piece of work says whether the process was still compiling: the benchmark's steady reads start where it stops growing. |
-| `jitCompilationMs` | number | Time spent in the JIT since start, every thread (**Lead group 2 review, next train**). |
+| `jitCompiledMethods` | integer | Methods the JIT has compiled since start, every tier and on-stack replacement included (**Lead group 2 review, 0.6.0**). A precompiled (ReadyToRun) method counts when it is recompiled at tier 1. Its difference across a piece of work says whether the process was still compiling: the benchmark's steady reads start where it stops growing. |
+| `jitCompilationMs` | number | Time spent in the JIT since start, every thread (**Lead group 2 review, 0.6.0**). |
 | `lastGen2` | object | The most recent gen-2 collection as the runtime reports it (**WorkloadCore, 0.3.0**): `index`, `kind` (`Background` or `FullBlocking`), `compacted`, `concurrent`, `heapSizeBytes`, `fragmentedBytes`, `promotedBytes` (what it traced live), `totalCommittedBytes`, `pinnedObjectsCount`, `finalizationPendingCount`, and per generation — 0, 1, 2, the large-object heap, the pinned-object heap — `generationSizeAfterBytes`, `generationFragmentationAfterBytes` and `generationSizeBeforeBytes`. `null` before the first. |
 
 🔎 All six provenance fields also appear in the `memory` health component's `details` —
@@ -3658,7 +3658,7 @@ Get replication status.
 }
 ```
 
-`perDatabaseLag` has one entry per database this node has a position for. (**Lead S18a, next train**) `tokenCoveredPosition` is
+`perDatabaseLag` has one entry per database this node has a position for. (**Lead S18a, 0.6.0**) `tokenCoveredPosition` is
 the position a consistency token for that database is covered at here: `walPosition`, or one below `bulkLoadHold.position` while a
 replica has seen a bulk load committed and not fetched all of its segments (`jobId` empty when its closing frame could not be
 decoded; `loadsHeld` counts every such load). `bulkLoadHold` is `null` when there is none. A read presenting a token at or past
@@ -4331,11 +4331,11 @@ Send a batch of rows on an open write stream.
 | `type` | string | Yes | Always `"stream_rows"` |
 | `id` | string | Yes | Stream ID (must match a prior `stream_open`). |
 | `seq` | number | Yes | Monotonically increasing sequence number for this batch. Must start at 1 and increment by 1 per batch. The server uses this to detect gaps and for acknowledgement. |
-| `columns` | string[] | Yes | (**Lead S12, next train**) The column names. |
-| `data` | array[] | Yes | (**Lead S12, next train**) One array of values per column, all the same length (at least one row). |
-| `absent` | object? | No | (**Lead S12, next train**) Per column, the rows whose cell is not given (not null). |
+| `columns` | string[] | Yes | (**Lead S12, 0.6.0**) The column names. |
+| `data` | array[] | Yes | (**Lead S12, 0.6.0**) One array of values per column, all the same length (at least one row). |
+| `absent` | object? | No | (**Lead S12, 0.6.0**) Per column, the rows whose cell is not given (not null). |
 
-The batch is [column arrays](#column-arrays-the-write-body), the same body the HTTP insert takes (**Lead S12, next train; breaking**:
+The batch is [column arrays](#column-arrays-the-write-body), the same body the HTTP insert takes (**Lead S12, 0.6.0; breaking**:
 it was `"rows": [{…}]`). A message that still carries `rows` gets an `error` with code `ROW_OBJECTS_UNSUPPORTED`; column arrays that
 do not match get `INVALID_STREAM_ROWS`. Either way nothing of that batch is written. The long-poll fallback's `stream_rows` is read the same way. Rows are still applied and acknowledged one by
 one (a `stream_ack` error's `index` is the row's index in the batch).
@@ -4496,8 +4496,8 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 |---|---|---|
 | `type` | string | Always `"snapshot"` |
 | `id` | string | Subscription ID this snapshot belongs to. |
-| `columns` | string[] | (**Lead S12, next train**) The page's column names. |
-| `data` | array[] | (**Lead S12, next train**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
+| `columns` | string[] | (**Lead S12, 0.6.0**) The page's column names. |
+| `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
 
@@ -4516,7 +4516,7 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 }
 ```
 
-(**Lead S12, next train; breaking**) A page is column arrays, as a query result is; it was `"rows": [{…}]`, one object per row.
+(**Lead S12, 0.6.0; breaking**) A page is column arrays, as a query result is; it was `"rows": [{…}]`, one object per row.
 `snapshot_complete` and `change` are unchanged: a change event still carries one row.
 
 ---
@@ -4800,7 +4800,7 @@ Client                                  Server
 
 The Bulk Load API provides high-throughput batch data ingestion with durability guarantees, idempotency, and optional replication barriers. It uses a begin/append/commit pattern over HTTP.
 
-All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is the binary column-batch frame (`application/vnd.aouda.column-batch-v2`) or one JSON body of [column arrays](#column-arrays-the-write-body) (`application/json`); see [`:append`](#post-jobidappend). (**Lead S12, next train; breaking**) NDJSON (`application/x-ndjson`) is no longer read: it is refused `415 ROW_OBJECTS_UNSUPPORTED`. All other bodies are JSON.
+All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append` request body is the binary column-batch frame (`application/vnd.aouda.column-batch-v2`) or one JSON body of [column arrays](#column-arrays-the-write-body) (`application/json`); see [`:append`](#post-jobidappend). (**Lead S12, 0.6.0; breaking**) NDJSON (`application/x-ndjson`) is no longer read: it is refused `415 ROW_OBJECTS_UNSUPPORTED`. All other bodies are JSON.
 
 ### Endpoints
 
@@ -4833,9 +4833,9 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | Field | Type | Default | Allowed values | Description |
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
-| `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, next train**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, next train**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, next train**). |
-| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, next train**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
-| `pkUniquenessOverride` | — | — | — | (**Lead S27a, next train; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
+| `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
+| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+| `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
 | `maxRowsPerSegment` | number? | null | Any positive integer | Override the maximum rows per sealed segment. Null = use server default. |
@@ -4844,7 +4844,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
 | `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. |
-| `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, next train**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), `"strict"` in a database at `os` (its WAL is not written through), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database is refused. See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train). |
+| `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, 0.6.0**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), `"strict"` in a database at `os` (its WAL is not written through), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database is refused. See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train). |
 
 **Transform intent is mandatory for a table with write-time compute.**
 
@@ -4875,7 +4875,7 @@ A table with no write-time compute needs neither flag.
 |---|---|---|
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` | `600000` (10 min) | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. `0` disables the deadline on them. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | `10` | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock. This — not the request deadline — is what bounds a client that walked away. `0` disables idle aborts. |
-| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` runs in. It does **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. (**Lead S18a, next train**) `:commit` is on no lane, so it never waits behind `:append`s gated on the job it would finish; keep the loaders into one table at or below this setting (**BL-1117**). (**Lead S21b, next train**) A body that commits its job keeps its permit until its commit answers; a pipelined loader has one job sending rows and one committing, and four such loaders into one table finish on the default lane while no job's queue fills. (**Lead S31, next train**) An `:append` waiting for room in its job's queue (`Aouda:BulkLoad:MaxQueuedAppendBytes`) keeps its permit, so with jobs larger than that queue three pipelined loaders into one table can starve the lock holder's next `:append`: keep it to half this setting's pipelined loaders a table (**BL-1117**). |
+| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` | `4` | Size of the admission lane `:append` runs in. It does **not** draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. `0` = unlimited. (**Lead S18a, 0.6.0**) `:commit` is on no lane, so it never waits behind `:append`s gated on the job it would finish; keep the loaders into one table at or below this setting (**BL-1117**). (**Lead S21b, 0.6.0**) A body that commits its job keeps its permit until its commit answers; a pipelined loader has one job sending rows and one committing, and four such loaders into one table finish on the default lane while no job's queue fills. (**Lead S31, 0.6.0**) An `:append` waiting for room in its job's queue (`Aouda:BulkLoad:MaxQueuedAppendBytes`) keeps its permit, so with jobs larger than that queue three pipelined loaders into one table can starve the lock holder's next `:append`: keep it to half this setting's pipelined loaders a table (**BL-1117**). |
 | `Aouda:BulkLoad:StreamingRequestQueueLimit` | `100` | How many streaming requests may wait for a lane slot. Beyond it, 503. Generous by design: a rejected `:append` must be recovered by its client (a keyed `:begin`, then the same body: see [the frame numbers](#a-jobs-frames-are-numbered-lead-s21a-next-train)), so a rejection costs the load a round of recovery or, in a client that does not recover, the load. |
 | `Aouda:MaxConnections` | `0` (unlimited) as of **BL-419, 0.1.22** — was `100` through 0.1.21 | Kestrel's concurrent-connection ceiling. `0` (Kestrel's own default) means the request limiter (`MaxConcurrentRequests` + `RequestQueueLimit`) is the first thing an overloaded server hits, and it sheds with a retryable HTTP status; the old `100` default sat *below* that budget (150) on every stock deployment, so the connection ceiling — which Kestrel enforces by silently closing the socket with **no HTTP response** — bit first instead. If you do set a finite value, keep it above `MaxConcurrentRequests + RequestQueueLimit`. On 0.1.20 and earlier, `0` fails validation at startup (`MaxConnections must be at least 1`) — check your server version before relying on the unlimited default. |
 
@@ -4887,15 +4887,15 @@ A table with no write-time compute needs neither flag.
 | `jobId` | string | Server-assigned job identifier. Include in all subsequent requests for this load. |
 | `tables` | string[] | Echo of the requested tables. |
 | `acquiredAtUtc` | string | ISO 8601 UTC timestamp when table locks were acquired. |
-| `maxRowsPerAppend` | number | The most rows **one frame** of an `:append` body carries (a JSON column-array body is one frame). A larger frame is refused whole. (**Lead S21a, next train**) It counted across all the frames of one `:append`; a body may now hold any number of frames under it. |
-| `nextSequence` | number | (**Lead S21a, next train**) The number of the job's next frame: `0` for a new job; for a reconnect to a live job, the first frame it has not applied. A job's frames are [numbered across all its bodies](#a-jobs-frames-are-numbered-lead-s21a-next-train). Send from this frame. |
-| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, next train**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
-| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count) and `rowsAppended` (number?). **Resume from `nextSequence`** (above): the frames below it are applied, buffered ones included, and `rowsAppended` is the rows they carry — a client that resumes by frames checks that the frames it skips carry exactly that many, so a client whose framing changed (another source, other body bounds) stops instead of loading rows twice or not at all. `rowsDurablyCommitted` counts only the durable rows and is not a position. (**Lead S21a, next train; breaking**) This replaces `resumeFromRow`, a row cursor, which is gone. ⚠️ No server rebuilds a cursor after a restart yet (BL-067): an open job does not survive one, and a `:begin` with its key afterwards starts a fresh job (`nextSequence: 0`), so the load is sent from its first frame. Both SDKs resume this way (`@aouda/client` from **Lead S22, next train**). |
+| `maxRowsPerAppend` | number | The most rows **one frame** of an `:append` body carries (a JSON column-array body is one frame). A larger frame is refused whole. (**Lead S21a, 0.6.0**) It counted across all the frames of one `:append`; a body may now hold any number of frames under it. |
+| `nextSequence` | number | (**Lead S21a, 0.6.0**) The number of the job's next frame: `0` for a new job; for a reconnect to a live job, the first frame it has not applied. A job's frames are [numbered across all its bodies](#a-jobs-frames-are-numbered-lead-s21a-next-train). Send from this frame. |
+| `acceptedAppendFormats` | string[]? | (**IngestAtSpeed S09, 0.1.40**) The `:append` body formats this server decodes: `["column-batch-v2", "column-arrays"]` — frames, and one JSON column-array body (**Lead S12, 0.6.0**: it was `["ndjson", "column-batch-v2"]`; `"ndjson"` is gone, and `"column-batch"`, `ACB1`, went in **Lead S09**). Absent from older servers, which read NDJSON only. The SDKs send the frame only when it is listed. |
+| `resumedFromDurableCursor` | object? | Present when this `:begin` resumed an in-flight job via idempotency-key match. Null for fresh jobs. Contains `rowsDurablyCommitted` (number), `segmentsCommitted` (number), `perTable` (object mapping table name to durable row count) and `rowsAppended` (number?). **Resume from `nextSequence`** (above): the frames below it are applied, buffered ones included, and `rowsAppended` is the rows they carry — a client that resumes by frames checks that the frames it skips carry exactly that many, so a client whose framing changed (another source, other body bounds) stops instead of loading rows twice or not at all. `rowsDurablyCommitted` counts only the durable rows and is not a position. (**Lead S21a, 0.6.0; breaking**) This replaces `resumeFromRow`, a row cursor, which is gone. ⚠️ No server rebuilds a cursor after a restart yet (BL-067): an open job does not survive one, and a `:begin` with its key afterwards starts a fresh job (`nextSequence: 0`), so the load is sent from its first frame. Both SDKs resume this way (`@aouda/client` from **Lead S22, 0.6.0**). |
 | `alreadyCompleted` | bool | `true` when the idempotency key matched a job that already **committed** (within `Aouda:BulkLoad:IdempotencyWindowMinutes`): no session is opened, and `:append` / `:commit` on this `jobId` are refused `409 BULK_LOAD_INVALID_STATE`. Read the job's result from `rowsDurablyCommitted` and `token` below. `false` otherwise. |
 | `rowsDurablyCommitted` | number? | With `alreadyCompleted`: the committed job's rows. |
-| `durability` | string | (**Lead S26c, next train**) The level the job will commit at, `"strict"` or `"os"`; for a replayed completed job (`alreadyCompleted`), the level it committed at. |
-| `validation` | string? | (**Lead S27a, next train**) The job's validation, `"coerce"` or `"strict"`. Omitted for a job answered from its commit record after a restart (the record does not keep it). |
-| `token` | string? | With `alreadyCompleted`: the committed job's consistency token — the one its `:commit` returned. (**Lead S20a, next train**) A single-node job's too: it was `null` for a load that wrote no closing frame, so a client that lost the `:commit` response could not read its own write with a token. |
+| `durability` | string | (**Lead S26c, 0.6.0**) The level the job will commit at, `"strict"` or `"os"`; for a replayed completed job (`alreadyCompleted`), the level it committed at. |
+| `validation` | string? | (**Lead S27a, 0.6.0**) The job's validation, `"coerce"` or `"strict"`. Omitted for a job answered from its commit record after a restart (the record does not keep it). |
+| `token` | string? | With `alreadyCompleted`: the committed job's consistency token — the one its `:commit` returned. (**Lead S20a, 0.6.0**) A single-node job's too: it was `null` for a load that wrote no closing frame, so a client that lost the `:commit` response could not read its own write with a token. |
 
 **Example:**
 ```
@@ -4931,7 +4931,7 @@ no PLS and no RLS policy is not affected. The refusal happens before a session e
 
 Append frames of rows to an in-flight session.
 
-**Each frame is checked against its table before any of it is applied** (**Lead S27a, next train**). A frame is refused
+**Each frame is checked against its table before any of it is applied** (**Lead S27a, 0.6.0**). A frame is refused
 `400 INVALID_REQUEST` — none of its rows applied, the frames before it credited (`nextSequence` unchanged past them), the job still
 open — when it carries:
 
@@ -4945,9 +4945,9 @@ open — when it carries:
 The message names the column, the frame and the row (`details`: `frame=…, row=…, table=…, column=…`). A JSON column-array body is
 checked the same way. Key uniqueness is checked at the commit, and only at `"strict"` (`409 BULK_LOAD_DUPLICATE_PK`).
 
-#### A job's frames are numbered (**Lead S21a, next train**)
+#### A job's frames are numbered (**Lead S21a, 0.6.0**)
 
-(**Lead S21a, next train; breaking**) A job's frames are numbered **across all its `:append` bodies**, from 0: a body's first frame
+(**Lead S21a, 0.6.0; breaking**) A job's frames are numbered **across all its `:append` bodies**, from 0: a body's first frame
 carries the job's next number, not 0 (a JSON column-array body is one frame and carries its number as `seq`). The server applies
 the frame numbered `next`, and:
 
@@ -4962,12 +4962,12 @@ So `nextSequence` is always a frame boundary, and it is the resume point: in the
 idempotency key, which also stops a stale `:append` still reading a cut body), in every `:append` response and refusal (`details:
 nextSequence=N`), and in [`GET {jobId}`](#get-jobid). **To recover a failed `:append`**: `:begin` again with the same key, then send
 the same body again — or only its frames from `nextSequence` on. The C# SDK does this itself (a bounded number of times), where it
-used to give up and hand the caller the key; so does `@aouda/client` (**Lead S22, next train**), where it left the failure to the
+used to give up and hand the caller the key; so does `@aouda/client` (**Lead S22, 0.6.0**), where it left the failure to the
 caller. A `:commit` may name the frames it sent (`nextSequence`) and is then refused unless the
 job applied exactly those. An end frame still takes the number after its body's last data frame, which is also the next body's
 first.
 
-#### A body that commits its job (**Lead S21b, next train**)
+#### A body that commits its job (**Lead S21b, 0.6.0**)
 
 A column-batch body may end the job's rows and commit the job in one request: its **end frame carries `commit`**, an object of the
 [`:commit`](#post-jobidcommit) options — `waitForDeferredWork`, `writeConcern`, `writeConcernTimeoutMs`, `mqWaitMs`, each optional
@@ -4991,9 +4991,9 @@ every job: it saves the `:commit` round trip and lets the next job overlap this 
   with `details: state=Committing` — wait and ask again; once it has committed, a `:begin` with the job's idempotency key replays it
   (`alreadyCompleted`, its `token`). A body refused `state=Deferred` (the job committed and its deferred work is running) or
   `state=Completed` is past its commit point too: its rows are durable — wait, then `:begin` with the key, exactly as for
-  `Committing`; never treat it as a failure, and never `:abort` it (**Lead group 5 review, next train**). Both SDKs do all of this
-  themselves (`@aouda/client` from **Lead S22, next train**).
-- **A job still queued behind another load does not commit in its body** (**Lead group 5 review, next train**): if the job does
+  `Committing`; never treat it as a failure, and never `:abort` it (**Lead group 5 review, 0.6.0**). Both SDKs do all of this
+  themselves (`@aouda/client` from **Lead S22, 0.6.0**).
+- **A job still queued behind another load does not commit in its body** (**Lead group 5 review, 0.6.0**): if the job does
   not hold its tables yet — another job's rows are streaming into them, or it is waiting for the job it follows — the commit is
   declined `409 BULK_LOAD_COMMIT_QUEUED`, the body's frames applied (`details` name `nextSequence` and `rowsAppended`) and nothing
   committed. Send [`:commit`](#post-jobidcommit) for the job, and no row again. A commit in a body holds the body's `:append` lane
@@ -5008,15 +5008,15 @@ job that does not hold its tables is declined (above).
 
 **Content-Type:** `application/vnd.aouda.column-batch-v2` (column-batch frames, then an end frame; layout below), or
 `application/json` — **one** body of [column arrays](#column-arrays-the-write-body), `{"columns": […], "data": [[…], …], "absent"?: {…}}`
-(**Lead S12, next train**). The retired `application/vnd.aouda.column-batch` is refused `415 FRAME_VERSION_UNSUPPORTED` (**Lead S09,
-next train**).
+(**Lead S12, 0.6.0**). The retired `application/vnd.aouda.column-batch` is refused `415 FRAME_VERSION_UNSUPPORTED` (**Lead S09,
+0.6.0**).
 
-(**Lead S12, next train; breaking**) **NDJSON is gone.** A body sent as `application/x-ndjson` (one row object per line) is refused
+(**Lead S12, 0.6.0; breaking**) **NDJSON is gone.** A body sent as `application/x-ndjson` (one row object per line) is refused
 `415 ROW_OBJECTS_UNSUPPORTED` and nothing is appended. Send the same rows as one JSON column-array body instead: it carries what
 only NDJSON could before — a vector, a nested value, a column whose rows disagree on type — and it is read by the same reader as every
 other write body. A JSON body is one batch: it is decoded whole before any row of it is queued, so a body that is not valid column
 arrays appends nothing (`400 INVALID_REQUEST`, or `400 ROW_OBJECTS_UNSUPPORTED` for a body with `rows`). `maxRowsPerAppend` counts
-its rows. (**Lead S21a, next train; breaking**) It is one frame of its job and carries its number: `"seq": N` beside `columns`
+its rows. (**Lead S21a, 0.6.0; breaking**) It is one frame of its job and carries its number: `"seq": N` beside `columns`
 and `data` (`0` for a job's first body). A body without `seq` is refused `400 INVALID_REQUEST` and nothing is appended.
 
 When the session was begun with more than one table, each row must name its destination in a **`_table` column**: a
@@ -5024,12 +5024,12 @@ multi-table body carries `_table` in `columns`, with each row's table name in it
 inserting. A row whose `_table` is missing (absent or `null`) or names a table outside the job is refused
 `400 BULK_LOAD_MISSING_DISCRIMINATOR`: *Row {n} of frame {f} is missing the '_table' discriminator …* or *… references table
 '{t}' which is not in this job's table set …*, with `details: frame={f}, row={n}, …` (the row 1-based within its frame). (**Lead
-S21a, next train**) None of that frame's rows is applied — the rows before it in the frame were queued and credited until this
-train — and the frames before it stay applied (**Lead S12, next train**: the message said "Row at line N", with `lineNumber=N`).
+S21a, 0.6.0**) None of that frame's rows is applied — the rows before it in the frame were queued and credited until this
+train — and the frames before it stay applied (**Lead S12, 0.6.0**: the message said "Row at line N", with `lineNumber=N`).
 
 #### The column-batch frame (`ACB2`)
 
-(**IngestAtSpeed S09, 0.1.40**; version 2, `ACB2`, since **Lead S09, next train**.) A binary, column-major body the SDKs send
+(**IngestAtSpeed S09, 0.1.40**; version 2, `ACB2`, since **Lead S09, 0.6.0**.) A binary, column-major body the SDKs send
 when `:begin` lists `"column-batch-v2"`, and the body of [`POST …/rows`](#post-apidatabasesdbtablesnamerows)
 and of a [frame query response](#post-apidatabasesdbquery). It carries the same rows, and the server loads the same values from
 it, without parsing one JSON document per row. **A body is its data frames, then exactly one end frame.** All integers are
@@ -5050,22 +5050,22 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
 ```
 
-- **The sequence and the end frame** (**Lead S09, next train**). Every frame carries `seq`, its number in the body: 0, 1, 2, …
-  with no gap or repeat; the end frame takes the number after the last data frame. (**Lead S21a, next train**) In a bulk load the
+- **The sequence and the end frame** (**Lead S09, 0.6.0**). Every frame carries `seq`, its number in the body: 0, 1, 2, …
+  with no gap or repeat; the end frame takes the number after the last data frame. (**Lead S21a, 0.6.0**) In a bulk load the
   numbers run across the job's bodies, so a body starts at the job's next number ([above](#a-jobs-frames-are-numbered-lead-s21a-next-train));
   a gap or a repeat *inside* a body is still refused. The end frame's payload is a JSON object:
   `rowCount` (the data frames' rows, checked), `status` (`"ok"`, or `"error"` with `error: { code, message, status }`), and on a
   query response `stats`, `totalMatches` and `warnings`. A request body's end frame is `{"rowCount":N,"status":"ok"}`; a bulk load's
-  may add `commit` (**Lead S21b, next train**: [a body that commits its job](#a-body-that-commits-its-job-lead-s21b-next-train)). A body that
+  may add `commit` (**Lead S21b, 0.6.0**: [a body that commits its job](#a-body-that-commits-its-job-lead-s21b-next-train)). A body that
   ends without an end frame, has bytes after it, carries a frame out of sequence, counts other rows than its frames, or holds an
   unknown frame kind is refused `400 INVALID_REQUEST`, naming what was wrong; so is a request body whose end frame reports an error.
   A body may hold no data frame — one end frame with `rowCount: 0`. ⚠️ **On `:append`, "refused" keeps the frames before the
-  fault** (**Lead group 2 review, next train**: said so): each data frame is queued as it is read, and the rows queued before the
+  fault** (**Lead group 2 review, 0.6.0**: said so): each data frame is queued as it is read, and the rows queued before the
   error stay credited, as for every `:append` that ends in an error. The error's `details` name them (`rowsAppended=N,
-  nextSequence=M`). (**Lead S21a, next train**) Sending the body again is safe — its frames below `nextSequence` are skipped — but
+  nextSequence=M`). (**Lead S21a, 0.6.0**) Sending the body again is safe — its frames below `nextSequence` are skipped — but
   a body refused for its own content is refused again: fix the frame first. `/rows` is all or nothing and inserts nothing from a
   refused body.
-- **`ACB1` is refused by name** (**Lead S09, next train; breaking**). The version before (`"ACB1" rowCount:u32 columnCount:u16
+- **`ACB1` is refused by name** (**Lead S09, 0.6.0; breaking**). The version before (`"ACB1" rowCount:u32 columnCount:u16
   column*`, frames back to back, the body ending where the stream ended) and its media type `application/vnd.aouda.column-batch`
   are answered `415 FRAME_VERSION_UNSUPPORTED`: `ACB1 frames are no longer read; this server reads ACB2
   (application/vnd.aouda.column-batch-v2).` Nothing of the request is applied. The column layout inside a data frame is
@@ -5078,7 +5078,7 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   UTF-8 bytes; a string up to 16 MB; a timestamp outside what a `DateTime` holds; or a frame that would
   decode to more than 256 MB (a boolean column decodes to a byte per row) (**BatchFirst S03, 0.1.40**:
   the last two, and the C# SDK no longer writes a name or string the reader refuses).
-  `maxRowsPerAppend` is the most rows of one frame (**Lead S21a, next train**: it applied across all the frames of one `:append`).
+  `maxRowsPerAppend` is the most rows of one frame (**Lead S21a, 0.6.0**: it applied across all the frames of one `:append`).
 - A malformed frame is refused with `400` and code `INVALID_REQUEST`, naming what was wrong. Rows from
   earlier, well-formed frames in the same body are kept and counted, and `nextSequence` names the first frame not applied.
 - (**LoadSpeed S13, 0.4.0; breaking**) **Kind 6, the 128-bit `Decimal`, is retired.** It was
@@ -5087,9 +5087,9 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
   (LoadSpeed S13); send a decimal as ScaledDecimal (kind 8).` Send decimals as `ScaledDecimal`: 64-bit
   unscaled integers and one scale per column.
 
-**A frame loads the same values as the JSON column-array body of the same rows** (the NDJSON body, until **Lead S12, next train**). Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a .NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's JSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as JSON (NDJSON before **Lead S12**). A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). (**Lead S12, next train**) Both SDKs of this train send what a frame cannot carry as a JSON column-array body instead of NDJSON (`@aouda/client` from **Lead S14**); an older client's NDJSON is refused by this server. The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as JSON (NDJSON before **Lead S12**) rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON — from **Lead S14, next train**, as a JSON column-array body, since a server of **Lead S12** onwards refuses NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
+**A frame loads the same values as the JSON column-array body of the same rows** (the NDJSON body, until **Lead S12, 0.6.0**). Decimals travel as the `ScaledDecimal` kind — what a `Decimal(p,s)` column stores (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) It is the only decimal kind: up to 0.3.x a decimal could also travel as the 16-byte `Decimal` kind (6), which the C# SDK sent for a .NET `decimal`. Both SDKs send a decimal column that fits 64 bits at its largest scale as `ScaledDecimal`, and the C# SDK, like the server's JSON reader, reads a JSON fraction's text straight into that kind at the scale it is written with; a column that does not fit goes as JSON (NDJSON before **Lead S12**). A frame carries **one scale per decimal column**, its largest: a value at a smaller scale is scaled up exactly, and a value with more places than the target column's scale is refused, as in JSON. A number a frame sends into a `String` column is stored at that scale (`2.50` stays `2.50`; `3` beside `2.50` becomes `3.00`). A caller building a `ColumnBatch` can add a scaled column directly (`ColumnBatchBuilder.SetScaledDecimal`). The C# SDK sends frames to a server that advertises them and NDJSON otherwise; the TypeScript SDK does the same from its next release (earlier releases send NDJSON). (**Lead S12, 0.6.0**) Both SDKs of this train send what a frame cannot carry as a JSON column-array body instead of NDJSON (`@aouda/client` from **Lead S14**); an older client's NDJSON is refused by this server. The C# SDK gives every number the kind its JSON text would take on the server (an integral number is an integer, a fractional one a decimal, one past decimal's range a double), sends a `DateTime` that is not UTC and every `DateTimeOffset` as its JSON text, and sends a row as JSON (NDJSON before **Lead S12**) rather than put in a frame a value the frame would change (an integer past 2^53 in a column that has become double) (**BatchFirst S03, 0.1.40** — before, a double loaded into a decimal column rounded to 15 digits, a `float` was widened, and a timestamp loaded into a text column took the server's culture format). The TypeScript SDK's frame writer follows the same rule: a JavaScript number goes as the kind its JSON text takes (an integer as an integer, a fraction as a decimal, digit for digit), and a batch holding one it cannot write that way (exponent notation, an integer only an unsigned 64-bit value holds) goes as NDJSON — from **Lead S14, 0.6.0**, as a JSON column-array body, since a server of **Lead S12** onwards refuses NDJSON (**BL-704, 0.2.0** — before, a fraction went as a double, which a decimal column could store differently).
 
-**JSON column arrays** are the body for curl and for any client without the frame (**Lead S12, next train**; NDJSON was, until
+**JSON column arrays** are the body for curl and for any client without the frame (**Lead S12, 0.6.0**; NDJSON was, until
 this train). The server decodes them straight into a column batch, as it does a frame. A column whose rows mix integers and
 fractions is read as decimal for every row.
 
@@ -5130,10 +5130,10 @@ Content-Type: application/json
 | Field | Type | Description |
 |---|---|---|
 | `rowsAppended` | number | Rows accepted in **this** append call. Not necessarily durable yet. |
-| `framesSkipped` | number | (**Lead S21a, next train**) Frames of this body below the job's next number: applied by an earlier body, acknowledged and not applied again. |
-| `nextSequence` | number | (**Lead S21a, next train**) The job's next frame once this body was read; every frame below it is applied. |
+| `framesSkipped` | number | (**Lead S21a, 0.6.0**) Frames of this body below the job's next number: applied by an earlier body, acknowledged and not applied again. |
+| `nextSequence` | number | (**Lead S21a, 0.6.0**) The job's next frame once this body was read; every frame below it is applied. |
 | `rowsAppendedToBuffer` | number | Cumulative rows accepted into the session buffer since `:begin`. Not necessarily durable (lost on server crash before sealing). |
-| `rowsDurablyCommitted` | number | Cumulative rows sealed into segments so far in this session. **Not durable until `:commit` returns**: a server crash before the job commits discards the whole job, these rows included, and the job's idempotency key then loads afresh (**Lead S20b, next train**: this said "what a crash cannot take away", which no build has done). **Not the resume offset** (**Lead S14, next train**: this said it was): after a reconnect, send the same `:begin` with the same idempotency key and resume from its `nextSequence` (**Lead S21a, next train**; it was the cursor's `resumeFromRow`) — see the `:begin` response above. |
+| `rowsDurablyCommitted` | number | Cumulative rows sealed into segments so far in this session. **Not durable until `:commit` returns**: a server crash before the job commits discards the whole job, these rows included, and the job's idempotency key then loads afresh (**Lead S20b, 0.6.0**: this said "what a crash cannot take away", which no build has done). **Not the resume offset** (**Lead S14, 0.6.0**: this said it was): after a reconnect, send the same `:begin` with the same idempotency key and resume from its `nextSequence` (**Lead S21a, 0.6.0**; it was the cursor's `resumeFromRow`) — see the `:begin` response above. |
 | `acceptedAtUtc` | string | ISO 8601 UTC timestamp. |
 | `segmentsSealedSoFar` | number | Segments sealed across all tables in this job so far. |
 
@@ -5144,27 +5144,27 @@ Content-Type: application/json
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, 0.3.0**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
-| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, next train**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
-| `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job; none of its frame's rows is applied (**Lead S21a, next train**). `details: frame={f}, row={n}, …` (**Lead S12, next train**: was `lineNumber=N`). |
-| `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, next train**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
+| `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, 0.6.0**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
+| `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job; none of its frame's rows is applied (**Lead S21a, 0.6.0**). `details: frame={f}, row={n}, …` (**Lead S12, 0.6.0**: was `lineNumber=N`). |
+| `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, 0.6.0**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
 | `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). |
-| `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, next train**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) (**Lead S21b, next train**) Also a body whose end frame commits and names fewer frames than the job holds: nothing committed. |
-| `BULK_LOAD_INVALID_STATE` | 409 | The job is committing, committed, aborted or failed. (**Lead S21b, next train**) `details` name the state (`state=Committing`, …): a body sent again while its own commit runs reads `Committing` — wait, then `:begin` with the job's key. |
-| `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | (**Lead S21b, next train**) A body that commits a job begun with `afterJobId`: the job it follows failed or was aborted, so this one is not committed and none of its rows is loaded. `details` name `afterJobId`. Also answered by `:commit`. |
-| `BULK_LOAD_COMMIT_QUEUED` | 409 | (**Lead group 5 review, next train**) A body whose end frame commits its job, for a job still queued behind another load on its tables: the body's frames were applied (`details`: `nextSequence`, `rowsAppended`), nothing was committed, and the job is open. Send `:commit`; send no row again. |
-| `BULK_LOAD_LOST` | — | (**Lead S30, next train**) Not a response's status: the `errorCode` of a job `GET {jobId}` reports `"lost"` — answered `accepted` by `:commit` (`wait: "accepted"`), then lost before its commit point. Nothing of it is durable; load it again. (**Lead S26c, next train**) Also an `"os"` job dropped at the open after a power loss (`durability: "os"`): load it again with the same idempotency key. |
-| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, next train**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
+| `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, 0.6.0**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) (**Lead S21b, 0.6.0**) Also a body whose end frame commits and names fewer frames than the job holds: nothing committed. |
+| `BULK_LOAD_INVALID_STATE` | 409 | The job is committing, committed, aborted or failed. (**Lead S21b, 0.6.0**) `details` name the state (`state=Committing`, …): a body sent again while its own commit runs reads `Committing` — wait, then `:begin` with the job's key. |
+| `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | (**Lead S21b, 0.6.0**) A body that commits a job begun with `afterJobId`: the job it follows failed or was aborted, so this one is not committed and none of its rows is loaded. `details` name `afterJobId`. Also answered by `:commit`. |
+| `BULK_LOAD_COMMIT_QUEUED` | 409 | (**Lead group 5 review, 0.6.0**) A body whose end frame commits its job, for a job still queued behind another load on its tables: the body's frames were applied (`details`: `nextSequence`, `rowsAppended`), nothing was committed, and the job is open. Send `:commit`; send no row again. |
+| `BULK_LOAD_LOST` | — | (**Lead S30, 0.6.0**) Not a response's status: the `errorCode` of a job `GET {jobId}` reports `"lost"` — answered `accepted` by `:commit` (`wait: "accepted"`), then lost before its commit point. Nothing of it is durable; load it again. (**Lead S26c, 0.6.0**) Also an `"os"` job dropped at the open after a power loss (`durability: "os"`): load it again with the same idempotency key. |
+| `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) An `ACB1` body, or the retired `application/vnd.aouda.column-batch` type. Nothing is queued. Upgrade the client. |
 
 ---
 
 ### `POST {jobId}:commit`
 
-Commit the session. All sealed segments become queryable. (**Lead S21b, next train**) A job whose last body is column-batch frames
+Commit the session. All sealed segments become queryable. (**Lead S21b, 0.6.0**) A job whose last body is column-batch frames
 can [commit in that body's end frame](#a-body-that-commits-its-job-lead-s21b-next-train) instead, with the same options and the same
 answer; `:commit` is for a job whose last rows went as JSON, a resumed job whose bodies the server already holds, or an empty job.
 A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED`, if the job it follows did not commit.
 
-(**Lead S30, next train**) **`wait: "accepted"` answers before the commit point.** By default `:commit` answers once the job is
+(**Lead S30, 0.6.0**) **`wait: "accepted"` answers before the commit point.** By default `:commit` answers once the job is
 committed. With `wait: "accepted"` it answers once the job's rows have ended and it holds its place in its tables' commit order — its
 commit then runs on without the caller. That answer says `state: "accepted"`, and **the job is not durable yet and may be lost**: if
 the server stops before the job's commit point, or its commit fails, nothing of it is kept. `accepted` never means committed:
@@ -5175,7 +5175,7 @@ the server stops before the job's commit point, or its commit fails, nothing of 
   `writeConcernAchieved` is `"none"` and `mqStatus` is `"behind"`.
 - **The outcome comes from [`GET {jobId}`](#get-jobid)**: `state` is `"accepted"` while the commit runs, then `"completed"` (with the
   job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`) — or, for a `validation: "strict"` job whose commit
-  found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, next train**: it read `"lost"`). Ask with
+  found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, 0.6.0**: it read `"lost"`). Ask with
   `waitMs` to be answered when it settles. After a
   restart that cut the job off, `GET {jobId}` answers `"lost"`; once the server's log has moved past the job (a checkpoint), it answers
   `404 BULK_LOAD_JOB_NOT_FOUND`, which for an accepted job means the same thing: nothing of it is durable, load it again. ⚠️ That
@@ -5183,7 +5183,7 @@ the server stops before the job's commit point, or its commit fails, nothing of 
   `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer), and may forget it after that, so a `404` asked later cannot tell a lost job
   from a committed one. Ask for the outcome as soon as you have the accepted answer; both SDKs ask when you first read it, so read
   it promptly. A job that passed its commit point is never answered `"lost"`, even when work after it failed (**Lead group 7
-  review, next train**). Don't infer the outcome from the token: a lost job's token reads as covered once the log moves past it, and
+  review, 0.6.0**). Don't infer the outcome from the token: a lost job's token reads as covered once the log moves past it, and
   its rows are not there.
 - **"Accepted" frees the loader, not the table.** A write into a table the job loads still waits for the job, as it does for any load.
 - A job the server cannot accept — one that writes no closing log frame, or a database without a WAL — is answered when committed,
@@ -5199,29 +5199,29 @@ the server stops before the job's commit point, or its commit fails, nothing of 
 |---|---|---|---|---|
 | `database` | string | Yes | — | Database name. |
 | `jobId` | string | Yes | — | Job identifier (also in the path). |
-| `nextSequence` | number? | No | — | (**Lead S21a, next train**) The frames this client sent (the number after its last). When given, the commit is refused `409 BULK_LOAD_CURSOR_MISMATCH` — nothing committed, the job still open — unless the job applied exactly these; `details` name the job's `nextSequence`. Omitted: the job commits what it applied. Both SDKs send it (`@aouda/client` from **Lead S22, next train**). |
+| `nextSequence` | number? | No | — | (**Lead S21a, 0.6.0**) The frames this client sent (the number after its last). When given, the commit is refused `409 BULK_LOAD_CURSOR_MISMATCH` — nothing committed, the job still open — unless the job applied exactly these; `details` name the job's `nextSequence`. Omitted: the job commits what it applied. Both SDKs send it (`@aouda/client` from **Lead S22, 0.6.0**). |
 | `waitForDeferredWork` | bool | No | `false` | If `true`, the response is held until all post-processing (PK index rebuild, CSC mirror, RaBitQ encodings) completes. |
 | `writeConcern` | string? | No | `"acknowledged"` | Replication barrier. Allowed: `"acknowledged"`, `"majority"`, `"all"`. |
 | `writeConcernTimeoutMs` | number? | No | `300000` (5 min) | Max wait for the write-concern barrier. On timeout, returns 200 OK with `writeConcernTimedOut: true`. The data is durable; replicas catch up at their own pace. |
 | `mqWaitMs` | number? | No | `0` (**LoadSpeed M.2, 0.4.0**; `30000` in 0.3.0) | (**WorkloadCore S09, 0.3.0**) How long `:commit` waits, after the load is durable and its table locks are released, for every materialized query the load's rows reach to be current for the load. `0` = do not wait. `0`–`600000`; outside that, `400 BULK_LOAD_INVALID_OPTIONS`, checked before anything is committed. The answer is `mqStatus` below. |
-| `wait` | string? | No | `"visible"` | (**Lead S30, next train**) `"visible"`: answered once the job is committed. `"accepted"`: answered once the job is accepted, before its commit point — not durable yet (see above). Any other value is refused `400 BULK_LOAD_INVALID_OPTIONS`. Also taken by a body's end frame that commits its job. |
+| `wait` | string? | No | `"visible"` | (**Lead S30, 0.6.0**) `"visible"`: answered once the job is committed. `"accepted"`: answered once the job is accepted, before its commit point — not durable yet (see above). Any other value is refused `400 BULK_LOAD_INVALID_OPTIONS`. Also taken by a body's end frame that commits its job. |
 
 **Response body:**
 
 | Field | Type | Description |
 |---|---|---|
 | `jobId` | string | Echo of job ID. |
-| `state` | string | (**Lead S30, next train**) `"committed"`: the job is committed, and the fields below are its result. `"accepted"` (only with `wait: "accepted"`): its rows have ended and its commit is running — **not durable yet**; its outcome comes from `GET {jobId}`. |
+| `state` | string | (**Lead S30, 0.6.0**) `"committed"`: the job is committed, and the fields below are its result. `"accepted"` (only with `wait: "accepted"`): its rows have ended and its commit is running — **not durable yet**; its outcome comes from `GET {jobId}`. |
 | `tables` | string[] | Tables involved in the load. |
-| `rowsLoaded` | number | Total rows the job loaded across all tables: durably committed when `state` is `"committed"`. When it is `"accepted"` (**Lead S30, next train**), the rows the job took, **not durable yet**: its outcome (`GET {jobId}`) says whether they are. |
+| `rowsLoaded` | number | Total rows the job loaded across all tables: durably committed when `state` is `"committed"`. When it is `"accepted"` (**Lead S30, 0.6.0**), the rows the job took, **not durable yet**: its outcome (`GET {jobId}`) says whether they are. |
 | `expiredRows` | number? | (**Horizon, 0.5.0**) Rows the load sent that were left out because their time lay below their table's [retention](../guides/retention.md) horizon, or was an explicit `null` — accepted, never written, never visible, not in `rowsLoaded`. **Omitted when 0.** Such a table is loaded one segment per time slice and never spilled ([Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention)). |
 | `perTableRowCounts` | object | Per-table row counts (`{ tableName: count }`). Always present. |
 | `segmentsCreated` | number | Total segments created. |
-| `committedAtUtc` | string? | ISO 8601 UTC commit timestamp; `null` in an `accepted` answer (**Lead S30, next train**). (**Lead S20a, next train**) The time of the job's commit record — its closing `BulkLoadCommitted` frame's when it wrote one, else the catalog record that published its segments — not the time the response was written. |
+| `committedAtUtc` | string? | ISO 8601 UTC commit timestamp; `null` in an `accepted` answer (**Lead S30, 0.6.0**). (**Lead S20a, 0.6.0**) The time of the job's commit record — its closing `BulkLoadCommitted` frame's when it wrote one, else the catalog record that published its segments — not the time the response was written. |
 | `deferredWorkCompleted` | boolean | Whether deferred work completed before this response was sent. |
-| `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load (**Lead S18a, next train**: a replica now covers it only once every segment is fetched; see `bulkLoadHold` on [`GET /admin/replication/status`](#get-adminreplicationstatus)). (**WorkloadCore S09, 0.3.0**) On a single node, where a load writes no closing frame, it is the WAL head at the load's commit (it used to carry position 0): a read with it requires the load, and so waits for the load's materialized queries. (**Lead S20a, next train**) What the token names, exactly: a position at which this node already shows the load — the closing frame's when the load wrote one, else the WAL head read at the commit point, else position 0 on a database without a WAL (covered at once). It is kept in the job's commit record, so a replayed `:begin` returns the same token. |
-| `durability` | string | (**Lead S26c, next train**) The job's level, `"strict"` or `"os"`. Always present, an `accepted` answer included. |
-| `validation` | string? | (**Lead S27a, next train**) The validation the job was checked at, `"coerce"` or `"strict"`. |
+| `token` | string | Commit consistency token of the closing `BulkLoadCommitted` frame (42-hex). Replaces the former `walPosition` number. Replicas that have applied this token have the complete load (**Lead S18a, 0.6.0**: a replica now covers it only once every segment is fetched; see `bulkLoadHold` on [`GET /admin/replication/status`](#get-adminreplicationstatus)). (**WorkloadCore S09, 0.3.0**) On a single node, where a load writes no closing frame, it is the WAL head at the load's commit (it used to carry position 0): a read with it requires the load, and so waits for the load's materialized queries. (**Lead S20a, 0.6.0**) What the token names, exactly: a position at which this node already shows the load — the closing frame's when the load wrote one, else the WAL head read at the commit point, else position 0 on a database without a WAL (covered at once). It is kept in the job's commit record, so a replayed `:begin` returns the same token. |
+| `durability` | string | (**Lead S26c, 0.6.0**) The job's level, `"strict"` or `"os"`. Always present, an `accepted` answer included. |
+| `validation` | string? | (**Lead S27a, 0.6.0**) The validation the job was checked at, `"coerce"` or `"strict"`. |
 | `writeConcernRequested` | string | Echo of `writeConcern` from request. |
 | `writeConcernAchieved` | string | Strongest write concern achieved before return. May be weaker than `writeConcernRequested` if `writeConcernTimedOut`. |
 | `writeConcernTimedOut` | boolean | `true` when requested write concern was not satisfied within the timeout. The load is still durable. |
@@ -5243,8 +5243,8 @@ queries current, read with the commit's `token` (which waits for them, as for an
 
 | Code | Status | When |
 |---|---|---|
-| `BULK_LOAD_DUPLICATE_PK` | 409 | (**Lead S27a, next train**) A job at `validation: "strict"` holds a primary key twice, or one the table already holds. Nothing of it was committed; the message names the table and the key, and `details` is `{"table", "sampleKeys", "totalDuplicateCount", "withinJob"}` (the check stops at the first key). Deduplicate the source and load it again, load at `"coerce"`, or upsert the rows. The check waits for the writes that were in flight on the table when the job began to commit, so an insert racing the load and the load never both write one key. |
-| `INVALID_REQUEST` | 400 | (**Lead S27a, next train**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
+| `BULK_LOAD_DUPLICATE_PK` | 409 | (**Lead S27a, 0.6.0**) A job at `validation: "strict"` holds a primary key twice, or one the table already holds. Nothing of it was committed; the message names the table and the key, and `details` is `{"table", "sampleKeys", "totalDuplicateCount", "withinJob"}` (the check stops at the first key). Deduplicate the source and load it again, load at `"coerce"`, or upsert the rows. The check waits for the writes that were in flight on the table when the job began to commit, so an insert racing the load and the load never both write one key. |
+| `INVALID_REQUEST` | 400 | (**Lead S27a, 0.6.0**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, 0.3.0**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, 0.3.0**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, 0.3.0**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. (**BL-956, 0.4.0**) At most **30 s** (half of the 60 s a bulk-load request may be refused in a row), and `10` before any rate is measured — it was the time between periodic checkpoints, 300 s by default. |
 
@@ -5265,7 +5265,7 @@ _The route is `GET /api/databases/{db}/bulk-load/{jobId}` (no `:status` suffix).
 
 Get current session state and progress.
 
-(**Lead S30, next train**) **Query parameter `waitMs`** (`0`–`60000`, default `0`; outside that `400 BULK_LOAD_INVALID_OPTIONS`):
+(**Lead S30, 0.6.0**) **Query parameter `waitMs`** (`0`–`60000`, default `0`; outside that `400 BULK_LOAD_INVALID_OPTIONS`):
 for a job whose commit is running — `committing`, or `accepted` — the answer waits up to that long for the job to settle (committed,
 failed, lost or aborted), then answers as it stands. This is how a client learns an accepted job's outcome without polling.
 
@@ -5275,21 +5275,21 @@ failed, lost or aborted), then answers as it stands. This is how a client learns
 |---|---|---|
 | `jobId` | string | Job identifier. |
 | `tables` | string[] | Tables being loaded. |
-| `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`; (**Lead S30, next train**) `"accepted"` — answered `accepted` by `:commit`, its commit running, not durable yet — and `"lost"` — accepted, then lost before its commit point (the server stopped, or its commit failed): nothing of it is durable, `errorCode` is `BULK_LOAD_LOST`. A restart that cut an accepted job off answers `"lost"` for it while the server's log still holds the job. (**Lead S26c, next train**) `"lost"` is also an `"os"` job dropped at the open after a power loss — its files did not match the length and xxHash128 its commit record names — answered with `durability: "os"`; its idempotency key no longer names a commit, so a `:begin` with the same key loads it again. |
-| `durability` | string? | (**Lead S26c, next train**) The job's level, `"strict"` or `"os"`. Omitted when unknown — an accepted job lost before its commit point. |
-| `validation` | string? | (**Lead S27a, next train**) The job's validation, `"coerce"` or `"strict"`. Omitted when the server no longer knows it (after a restart). |
-| `token` | string? | (**Lead S30, next train**) The job's commit token once `"completed"` (from its commit record after a restart too); the `accepted` answer's token while `"accepted"`. Absent otherwise. |
+| `state` | string | Current state. Allowed values: `"acquired"`, `"appending"`, `"committing"`, `"deferred"`, `"completed"`, `"failed"`, `"aborted"`; (**Lead S30, 0.6.0**) `"accepted"` — answered `accepted` by `:commit`, its commit running, not durable yet — and `"lost"` — accepted, then lost before its commit point (the server stopped, or its commit failed): nothing of it is durable, `errorCode` is `BULK_LOAD_LOST`. A restart that cut an accepted job off answers `"lost"` for it while the server's log still holds the job. (**Lead S26c, 0.6.0**) `"lost"` is also an `"os"` job dropped at the open after a power loss — its files did not match the length and xxHash128 its commit record names — answered with `durability: "os"`; its idempotency key no longer names a commit, so a `:begin` with the same key loads it again. |
+| `durability` | string? | (**Lead S26c, 0.6.0**) The job's level, `"strict"` or `"os"`. Omitted when unknown — an accepted job lost before its commit point. |
+| `validation` | string? | (**Lead S27a, 0.6.0**) The job's validation, `"coerce"` or `"strict"`. Omitted when the server no longer knows it (after a restart). |
+| `token` | string? | (**Lead S30, 0.6.0**) The job's commit token once `"completed"` (from its commit record after a restart too); the `accepted` answer's token while `"accepted"`. Absent otherwise. |
 | `rowsAppendedToBuffer` | number | Rows in buffer (not yet durable). |
-| `nextSequence` | number | (**Lead S21a, next train**) The job's next frame; every frame below it is applied. |
+| `nextSequence` | number | (**Lead S21a, 0.6.0**) The job's next frame; every frame below it is applied. |
 | `rowsDurablyCommitted` | number | Durably committed rows. |
 | `segmentsSealed` | number | Segments sealed so far. |
 | `startedAtUtc` | string | ISO 8601 session start time. |
 | `lastUpdatedUtc` | string | ISO 8601 last state update time. |
 | `progress` | object? | Deferred work progress. Same structure as in commit response. Null if no deferred work is in progress. |
 | `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
-| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"` (and `"deferred"` until the 0.4.0). Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"deferred"` (BatchFirst, 0.1.40; gone in the 0.4.0, LoadSpeed K31)** meant the load was `postLoadMqBehavior: "deferred"` and its job was pending the table's deferred pass. An `"auto"` load whose table is still loading is `"pending"` until the catch-up has brought it in (**LoadSpeed M.3**), and `"failed"` if a pass after its commit leaves it owed only by queries in `error` (their rebuild failed; they are retried, or `:refresh` them). **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone (**Lead S20a, next train**: from the job's commit record, which keeps its rows past any checkpoint; an aborted job reads as not found after a restart, as an unknown one does) — neither records rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
+| `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"` (and `"deferred"` until the 0.4.0). Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"deferred"` (BatchFirst, 0.1.40; gone in the 0.4.0, LoadSpeed K31)** meant the load was `postLoadMqBehavior: "deferred"` and its job was pending the table's deferred pass. An `"auto"` load whose table is still loading is `"pending"` until the catch-up has brought it in (**LoadSpeed M.3**), and `"failed"` if a pass after its commit leaves it owed only by queries in `error` (their rebuild failed; they are retried, or `:refresh` them). **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone (**Lead S20a, 0.6.0**: from the job's commit record, which keeps its rows past any checkpoint; an aborted job reads as not found after a restart, as an unknown one does) — neither records rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
 | `error` | string? | Human-readable error message. Set when `state = "failed"` or `"lost"`. |
-| `errorCode` | string? | Error code when `state = "failed"` — `BULK_LOAD_DUPLICATE_PK` for an accepted strict job its commit refused (**BL-1163, next train**) — or `BULK_LOAD_LOST` when `"lost"`. |
+| `errorCode` | string? | Error code when `state = "failed"` — `BULK_LOAD_DUPLICATE_PK` for an accepted strict job its commit refused (**BL-1163, 0.6.0**) — or `BULK_LOAD_LOST` when `"lost"`. |
 
 ---
 
@@ -5352,5 +5352,5 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.10 | 0.3.0 (WorkloadCore) | **WorkloadCore S09:** materialized-query maintenance is off the commit — an insert's `200` and an `"auto"` load's `:commit` no longer wait for their queries to be written. Bulk-load `:commit` gains `mqWaitMs` (a bounded wait for the load's queries, default 30000) and answers `mqStatus`, `mqFrontierToken` and `mqWaitedMs`; `mqRebuildStatus` is never `"completed"` from the commit itself; a single-node load's `token` is the WAL head at its commit. **WorkloadCore S10:** every load but a `"skip"` one is a pending job brought in by the table's pass (`"auto"` starts it at the commit); the ingest-fed path is gone; a query owing a load reports `isStale: true`, `pendingDeferredJobs` ≥ 1 and `current: false` with a new `staleReason` wording, and is not selected by `staleOnly`; a rebuild refused memory waits for room instead of being retried on timers. No field added or removed. **WorkloadCore S17:** `GET /api/server/memory` loses `resourceMode`, `headroomRatio`, `resourceModeTransitions` and the `headroom` block (the resource mode is deleted); a memory refusal's `Retry-After` is the queue's estimate, or 10 s, never a constant 1 s. **Release blockers:** every endpoint answers a capacity refusal `503` + `Retry-After` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) and a write conflict `409 WRITE_CONFLICT` — some answered `400`, `409` or `500` before (BL-921, BL-881); the result ceiling is `400 RESULT_TOO_LARGE` with no `Retry-After` (it was `503`); a token refresh refused for capacity is `503` and keeps its token, and of two concurrent refreshes with one token exactly one succeeds (BL-841); a materialized-query create whose first build is refused for capacity answers `204` with the query behind (BL-884); bulk-load `:append` is refused `503` before it decodes when memory is short (BL-831). No field added or removed. |
 | 2.11 | 0.4.0 (LoadSpeed) | **LoadSpeed M.2:** bulk-load `:commit`'s `mqWaitMs` defaults to `0` (it was `30000`) — a commit with queries answers `mqStatus: "behind"` at once unless the request asks to wait. No field added or removed. **LoadSpeed K31 (breaking):** `postLoadMqBehavior: "deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` (use `"auto"`); `mqStatus` and `mqRebuildStatus` lose `"deferred"`. **LoadSpeed K5 (BL-980, BL-944; breaking):** `GET /api/tables` drops `rowCountIsExact` (`rowCount` is always exact) and always carries `createdAt` / `lastModifiedAt`; an aggregate materialized query whose `groupByColumns` are plain strings is `400`; an application database accepts only its URL issuer on access tokens; a point-in-time restore of a backup without a WAL-root incarnation fails at staging. Refusals: a refusal no other code names is `503 SERVICE_UNAVAILABLE` + `Retry-After`, `SERVER_STARTING` carries `Retry-After: 5`, a refused notification-provider `DELETE` is `503`, and a wrapped refusal on `POST …/materialized-queries/{name}/query` is `503` (or `400 RESULT_TOO_LARGE`), not `400 INVALID_REQUEST`. **LoadSpeed S13 (breaking):** `Decimal(p,s)` is the only decimal type — `"type": "Decimal"` without `precision` / `scale` is `400`, as is a precision above 18; a computed output's `type` and `cast`'s target spell it `"Decimal(p,s)"`; the column-batch frame's 128-bit `Decimal` kind (6) is deleted and refused `400`, and query results send a decimal column as `ScaledDecimal` at its declared scale; a decimal `sum` past 18 digits is refused in a query as in a materialized query. |
 | 2.12 | 0.5.0 (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
-| 2.13 | next train (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |
-| 2.14 | next train (Lead) | **Lead S12 (breaking on the wire): the REST API as column arrays.** Every JSON write body sends its rows as [column arrays](#column-arrays-the-write-body) — `columns`, `data` (one array per column), optional `absent` (per column, the rows whose cell is not given, which is not null) — on `POST …/tables/{name}/rows`, a branch insert, WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed / `aouda.seed.json`; a body with `rows` (row objects) is refused `400 ROW_OBJECTS_UNSUPPORTED` (new code). Bulk-load `:append` takes frames or one JSON column-array body; NDJSON is refused `415 ROW_OBJECTS_UNSUPPORTED`, `:begin`'s `acceptedAppendFormats` is `["column-batch-v2", "column-arrays"]`, and an unroutable multi-table row is named "Row {n} of this :append" with `details: row={n}`. Reads: the `format` query parameter is removed from `/query` and the named-query execute and batch routes (any `format=` is `400 INVALID_FORMAT`; results are always `{columns, types, data, rowCount, …}`); the materialized-query `POST …/{name}/query` answers `{columns, data, rowCount, stats, token}`; `generatedValues` is `{columns, data}` with one cell per request row; a WebSocket `snapshot` page is `{type, id, columns, data, version, token?}` (`snapshot_complete` and `change` unchanged); vector `:nearest` answers `{rowKeys, distances, executionMs, token}` and graph `:khop` `{nodeIds, hops, executionMs}`; the policy inspector's table and materialized-query `sample` is `{columns, data}`. **Pass-10 (documentation only):** the [graph and vector endpoints](#graph-and-vector-endpoints) are documented. |
+| 2.13 | 0.6.0 (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |
+| 2.14 | 0.6.0 (Lead) | **Lead S12 (breaking on the wire): the REST API as column arrays.** Every JSON write body sends its rows as [column arrays](#column-arrays-the-write-body) — `columns`, `data` (one array per column), optional `absent` (per column, the rows whose cell is not given, which is not null) — on `POST …/tables/{name}/rows`, a branch insert, WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed / `aouda.seed.json`; a body with `rows` (row objects) is refused `400 ROW_OBJECTS_UNSUPPORTED` (new code). Bulk-load `:append` takes frames or one JSON column-array body; NDJSON is refused `415 ROW_OBJECTS_UNSUPPORTED`, `:begin`'s `acceptedAppendFormats` is `["column-batch-v2", "column-arrays"]`, and an unroutable multi-table row is named "Row {n} of this :append" with `details: row={n}`. Reads: the `format` query parameter is removed from `/query` and the named-query execute and batch routes (any `format=` is `400 INVALID_FORMAT`; results are always `{columns, types, data, rowCount, …}`); the materialized-query `POST …/{name}/query` answers `{columns, data, rowCount, stats, token}`; `generatedValues` is `{columns, data}` with one cell per request row; a WebSocket `snapshot` page is `{type, id, columns, data, version, token?}` (`snapshot_complete` and `change` unchanged); vector `:nearest` answers `{rowKeys, distances, executionMs, token}` and graph `:khop` `{nodeIds, hops, executionMs}`; the policy inspector's table and materialized-query `sample` is `{columns, data}`. **Pass-10 (documentation only):** the [graph and vector endpoints](#graph-and-vector-endpoints) are documented. |

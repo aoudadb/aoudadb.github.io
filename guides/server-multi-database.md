@@ -111,14 +111,14 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Database layout | `./data/Databases/{name}/…` | Per-db subtree created on first `POST /api/databases` |
 | Memory ceiling | ~70% of detected RAM | One process RSS ceiling, shared as **weighted shares** across databases |
 | Hot segment budget | Auto (45% of the governed budget, floor 32 MB) | Allocated from total RAM |
-| Page cache budget | Auto (10% of each database's share of the governed budget, floor 8 MB); on (**ColumnarRead, 0.3.0**) | Allocated from total RAM; follows the share when databases are added or removed (**Lead S10, next train**) |
+| Page cache budget | Auto (10% of each database's share of the governed budget, floor 8 MB); on (**ColumnarRead, 0.3.0**) | Allocated from total RAM; follows the share when databases are added or removed (**Lead S10, 0.6.0**) |
 | Request timeout | `30 000 ms` | Returns HTTP 504 on breach |
 | Max concurrent requests | `50` | Returns HTTP 503 when exceeded; queue up to 100 |
 | HTTP/2 | `true` | Kestrel serves HTTP/1.1 and HTTP/2 simultaneously |
 | Tracing | `false` | OpenTelemetry disabled until opt-in |
 | Structured (JSON) logging | `false` | Simple console formatter; enable via `Logging:Console:FormatterName: json` |
 | Health startup delay | `10 s` | `/ready` suppresses failures during startup window |
-| Database durability | `strict` per-db (**Lead S26, next train**) | WAL written through to disk before a write is visible; `os`, `unlogged` and `memory` are opt-in ([levels](write-durability.md#durability-levels-lead-s26-next-train)) |
+| Database durability | `strict` per-db (**Lead S26, 0.6.0**) | WAL written through to disk before a write is visible; `os`, `unlogged` and `memory` are opt-in ([levels](write-durability.md#durability-levels-lead-s26-next-train)) |
 | Replication mode | `Replicate` per-db | Tables replicated to secondaries by default |
 | Write concern | `One` per-db | Acknowledged by primary WAL only |
 | Write concern timeout | `5 000 ms` | Applies when `majority` or `all` is requested |
@@ -350,8 +350,8 @@ Process start
 
 - `DatabaseManager` constructor accepts an optional `ServerMemoryBudgetManager?`; it is null in isolated test contexts.
 - `DatabasesController` validates that the `database` field in request bodies matches the `{db}` path segment; mismatch → `400 INVALID_REQUEST`.
-- `TableDurabilityOptions` null fields inherit database-level defaults. (**Lead S26, next train**) A table's `Level` may be `strict`, `unlogged` or `memory`; `os` is refused (a database level only), and `strict` is refused unless the database is at `strict`.
-- (**Lead S26, next train**) A database's `Durability` is read at every open. A database that has a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory` — the open is refused, since it would ignore the writes the WAL holds (no path yet: BL-1145).
+- `TableDurabilityOptions` null fields inherit database-level defaults. (**Lead S26, 0.6.0**) A table's `Level` may be `strict`, `unlogged` or `memory`; `os` is refused (a database level only), and `strict` is refused unless the database is at `strict`.
+- (**Lead S26, 0.6.0**) A database's `Durability` is read at every open. A database that has a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory` — the open is refused, since it would ignore the writes the WAL holds (no path yet: BL-1145).
 - Write concern resolution order: per-write → table → database → `One`.
 
 ---
@@ -516,7 +516,7 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "Durability": "strict
 |---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | `long` | ~70% of detected RAM | `AOUDA_MEMORY__MAXTOTALRAMBYTES` | Process RSS ceiling; shared as per-database shares |
 | `Aouda:Memory:MaxHotBytes` | `long` | `0` (auto: 45% of the governed budget) | `AOUDA_MEMORY__MAXHOTBYTES` | Hot segment budget; 0 = auto |
-| `Aouda:Memory:MaxPageCacheBytes` | `long` | `0` (auto: 10% of each database's share) | `AOUDA_MEMORY__MAXPAGECACHEBYTES` | Page cache budget for the whole server, divided among the databases by share (**Lead S10, next train** — before, it reached no database); 0 = auto |
+| `Aouda:Memory:MaxPageCacheBytes` | `long` | `0` (auto: 10% of each database's share) | `AOUDA_MEMORY__MAXPAGECACHEBYTES` | Page cache budget for the whole server, divided among the databases by share (**Lead S10, 0.6.0** — before, it reached no database); 0 = auto |
 
 ### Tracing settings (`Aouda:Tracing`)
 
@@ -544,7 +544,7 @@ These can be declared in config to provision databases at startup or to set defa
 
 | Setting | Type | Default | Notes |
 |---|---|---|---|
-| `Aouda:Databases:<name>:Durability` | `string` | `strict` | (**Lead S26, next train**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-next-train)). It replaces `EnableWal` and `DataDurability`: either key here fails startup validation, naming `Durability`. |
+| `Aouda:Databases:<name>:Durability` | `string` | `strict` | (**Lead S26, 0.6.0**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-next-train)). It replaces `EnableWal` and `DataDurability`: either key here fails startup validation, naming `Durability`. |
 | `Aouda:Databases:<name>:ReplicationMode` | `string` | `Replicate` | `Replicate` or `DoNotReplicate` |
 | `Aouda:Databases:<name>:MaxMemoryShareBytes` | `long?` | `null` | Optional cap on this database's share of the server budget |
 | `Aouda:Databases:<name>:DefaultTemperature` | `string` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` |
@@ -626,7 +626,7 @@ foreach (var db in list.Databases)
 // Create a database with a cap on its share of the server budget (HTTP field maxMemoryShareBytes)
 var created = await client.Databases.CreateAsync("trading", new CreateDatabaseOptions
 {
-    Durability = "strict",   // Lead S26, next train: "strict" (default), "os", "unlogged", "memory"
+    Durability = "strict",   // Lead S26, 0.6.0: "strict" (default), "os", "unlogged", "memory"
     ReplicationMode = "Replicate",
     MaxMemoryShareBytes = 2L * 1024 * 1024 * 1024,
     DefaultTemperature = "Auto"
@@ -725,7 +725,7 @@ curl -s -X POST http://localhost:5000/api/databases \
 curl -s http://localhost:5000/ready
 # → { "status": "healthy", ... }
 
-# 5. Insert and query data (an insert's rows are column arrays: Lead S12, next train)
+# 5. Insert and query data (an insert's rows are column arrays: Lead S12, 0.6.0)
 curl -s -X POST http://localhost:5000/api/databases/app/tables/users/rows \
      -H "Content-Type: application/json" \
      -d '{"database":"app","columns":["id","name","age"],"data":[[1],["Alice"],[30]]}'
