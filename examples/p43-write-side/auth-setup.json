@@ -6,7 +6,6 @@
   "resolvers": [
     {
       "name": "rooms_visibility",
-      "targetTable": "rooms",
       "resolverType": "ColumnMatch",
       "rules": [
         {
@@ -29,7 +28,6 @@
     },
     {
       "name": "messages_access",
-      "targetTable": "messages",
       "resolverType": "ColumnMatch",
       "rules": [
         {

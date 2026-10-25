@@ -13,6 +13,20 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **An `auth-db-pls` table declares the column its grants filter (BL-1176, next train; breaking).** A table names
+  `permissionDimension` — the grant namespace, an opaque name such as `fx_source` — and `permissionColumn`, the column the grant
+  keys are compared with. Both are required, and neither is inferred: a dimension spelled like a column no longer selects it, and
+  the partition key is no longer a fallback. One `MORN` grant can now be scoped per product (`fx_source`, `rates_source`) while the
+  column stays `Source`. A table created without the column denies per-user access until it declares one. See
+  [Data Authorization §19.4](auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls).
+- **An RLS resolver names no table, and its name is unique (BL-1176, next train; breaking).** `targetTable` is gone from the
+  resolver admin API and its list filter; a table binds a resolver by `rlsResolverName`. A `PartitionGrant` rule names its
+  dimension (`{"dimension":"team"}`); a bare name is refused. See [§19.9](auth/authorization.md#199-admin-api-rls-resolvers).
+- **The authorization guide's create-table examples use the real request shape.** They wrapped the auth fields in a `security`
+  object, flagged keys with `isPrimaryKey` / `isPartitionKey` and left out `database`, none of which the create-table request
+  takes — the server refused them (`MISSING_DATABASE`). They now send `database`, `primaryKeyOrder` / `partitionKeyOrder` and the
+  auth fields at the top level.
+
 ## 0.6.0 — 2026-10-25
 
 **Server / NuGet / `@aouda/client` / Studio:** all **0.6.0**. Lead train (ADR 0064–0066). Inline version markers for what this train ships now name `0.6.0`.

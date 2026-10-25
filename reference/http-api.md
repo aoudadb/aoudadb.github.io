@@ -2277,6 +2277,31 @@ Both are required: `"type": "Decimal"` without them is `400` — *A Decimal colu
 (lowest `clusterOrder`) must be a `Timestamp` or `Date`; it may be nullable. A refused declaration — no such column, a `keep` that is
 not a duration, an edge table, a table with a vector column — is `400` naming its reason. The response's `policy` carries `retention` and `horizon`.
 
+**Authorization fields** (top-level, beside `columns`): `partitionLevelSecurity`, `authMode` (`jwt-claim`, `auth-db-pls`,
+`auth-db-rls`), `permissionDimension`, `permissionColumn`, `rlsResolverName`, `plsClaimBinding`. (**BL-1176, next train; breaking**)
+`authMode: "auth-db-pls"` requires both `permissionDimension` — the grant namespace, an opaque name matched byte-for-byte against a
+partition grant's `dimension` — and `permissionColumn`, the column the grant keys are compared with, which must name one of the
+table's columns exactly. Neither is inferred: a dimension spelled like a column does not select it, and the partition key is not a
+fallback. Missing or unmatched, the create is `400 INVALID_REQUEST` naming the field; `permissionColumn` with another `authMode` is
+`400` too. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
+table stays `auth-db-pls` and dropped when the request moves it to another mode. The table detail and `…/schema` responses carry
+`permissionColumn`. See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls).
+
+```json
+{
+  "database": "markets",
+  "name": "SpotQuote",
+  "columns": [
+    { "name": "SecurityId", "type": "String", "primaryKeyOrder": 1, "partitionKeyOrder": 1 },
+    { "name": "Source", "type": "String", "primaryKeyOrder": 2, "partitionKeyOrder": 2 },
+    { "name": "Bid", "type": "Double", "isNullable": true }
+  ],
+  "authMode": "auth-db-pls",
+  "permissionDimension": "fx_source",
+  "permissionColumn": "Source"
+}
+```
+
 **Response:** `201 Created` with table detail
 
 #### `DELETE /api/tables/{name}`
@@ -3030,7 +3055,7 @@ Neither SDK wraps them yet.
 | `POST` | `/api/databases/{db}/tables/{name}/edges:traverse` | `{ startNodeId, hops? }` | `200` `{ "neighborIds", "executionMs" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/edges:khop` | `{ startNodeId, k }` | `200` `{ "nodeIds", "hops", "executionMs" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/edges:shortest-path` | `{ a, b }` | `200` `{ "path", "executionMs" }` |
-| `POST` | `/api/databases/{db}/tables/{name}:create-vector-column` | `{ columnName, dimensions, distance?, quantization?, ivfCells?, embeddingModel?, authMode?, permissionDimension?, rlsResolverName?, rlsColumn? }` | `201` `{ "columnName" }` |
+| `POST` | `/api/databases/{db}/tables/{name}:create-vector-column` | `{ columnName, dimensions, distance?, quantization?, ivfCells?, embeddingModel?, authMode?, permissionDimension?, permissionColumn?, rlsResolverName?, rlsColumn? }` | `201` `{ "columnName" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}` | `{ rowKeys, vectorData, embeddingModelVersion?, partitionKey? }` | `200` `{ "rowsInserted", "token" }` |
 | `POST` | `/api/databases/{db}/tables/{name}/vectors/{column}:nearest` | `{ queryEmbedding, k }` | `200` `{ "rowKeys", "distances", "executionMs", "token" }` |
 
@@ -3045,7 +3070,7 @@ Create an edge table: two `Int64` columns, the source and the destination node i
 | `edgeLabel` | string? | No | A label for the table's edges. |
 | `storeCsc` | bool | No | Also keep the reverse (destination → source) index, which lets a shortest path search from both ends. Default `false`. |
 | `authMode` | string? | No | `jwt-claim` (default), `auth-db-pls` or `auth-db-rls`. |
-| `permissionDimension` | string? | With `auth-db-pls` | The partition dimension the caller's grants are matched on. |
+| `permissionDimension` | string? | With `auth-db-pls` | The grant dimension the caller's grants are matched on. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
 | `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. |
 | `rlsColumn` | string? | No | Adds a `String` column for grant-sourced RLS (for example `org`). |
@@ -3122,6 +3147,7 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
 | `embeddingModel` | string? | No | The embedding model's name. |
 | `authMode`, `permissionDimension`, `rlsResolverName`, `rlsColumn` | | No | As for an edge table. |
+| `permissionColumn` | string? | With `auth-db-pls` | (**BL-1176, next train**) The column the grant keys are compared with — in practice the `rlsColumn`. The vector table is an ordinary table for its reads, so it declares the column like any `auth-db-pls` table. |
 
 `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance`, `quantization` or `authMode`;
 `409 TABLE_EXISTS` when the table exists.
