@@ -140,7 +140,7 @@ If you do nothing beyond default server config:
 | Segment temperature on creation | `Hot` | New data is queried on hot path first |
 | `Aouda:Memory:MaxTotalRamBytes` | ~70% of detected RAM | Process RSS ceiling (set explicitly to pin a number) |
 | `Aouda:Memory:MaxHotBytes` | `0` | Auto-computes effective hot budget (`T10`) as 45% of the governed budget, floor 32 MB |
-| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes each database's cache budget (`T12`) as 10% of that database's share of the governed budget, floor 8 MB. A value you set is the server's total, divided among the databases by share (**Lead S10, next train** — it used to reach no database). The cache is on (**ColumnarRead, 0.3.0**); `Aouda:Memory:PageCacheEnabled = false` turns it off. A read larger than the cache admits only half of it (**Lead S10, next train**; [sizing](sizing.md)) |
+| `Aouda:Memory:MaxPageCacheBytes` | `0` | Auto-computes each database's cache budget (`T12`) as 10% of that database's share of the governed budget, floor 8 MB. A value you set is the server's total, divided among the databases by share (**Lead S10, 0.6.0** — it used to reach no database). The cache is on (**ColumnarRead, 0.3.0**); `Aouda:Memory:PageCacheEnabled = false` turns it off. A read larger than the cache admits only half of it (**Lead S10, 0.6.0**; [sizing](sizing.md)) |
 | `MemoryBudgetOptions.TargetRamBytes` | `0` | Effective target is 90% of max total |
 | Database `DefaultTemperature` | `Auto` | New tables inherit `Auto` unless table policy overrides |
 | `HotColdMaintenanceWorkerOptions` | `SweepInterval=5s`, `AutoHotByteBudgetBytes=64MiB`, `PromotionAccessThreshold=3` | Internal maintenance defaults when worker is active |
@@ -154,7 +154,7 @@ If you do nothing beyond default server config:
 - Temperature model:
   - `StorageTemperaturePolicy` (`Auto`, `HotOnly`, `ColdPreferred`, `Mutable`)
   - `SegmentTemperature` (`Hot`, `Cold`)
-  - Durability level (`strict`, `os`, `unlogged`, `memory`) — (**Lead S26, next train**) replaces `DataDurabilityMode` (`MemoryOnly` is now the `memory` level, `DiskBacked` any other); see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)
+  - Durability level (`strict`, `os`, `unlogged`, `memory`) — (**Lead S26, 0.6.0**) replaces `DataDurabilityMode` (`MemoryOnly` is now the `memory` level, `DiskBacked` any other); see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)
 - Promotion/demotion lifecycle:
   - Hot->cold demotion pipeline with catalog durability updates and diagnostics.
   - Cold->hot promotion pipeline: **two intents** (P30):
@@ -171,7 +171,7 @@ If you do nothing beyond default server config:
   result, or a table with [retention](retention.md)) the coalescers merge only within one time slice wholly at or after the horizon;
   a segment reaching below it is left for expiry, which drops whole segments and writes nothing. See
   [Storage — Deleted rows and retired segments](storage.md#deleted-rows-and-retired-segments-horizon-050).
-- **Durability gating end-to-end** (P30): `DefaultPageStoreRouter` governs flush/persist path. Tables at the `memory` level (`MemoryOnly` before **Lead S26, next train**) write nothing (no `.hot`, `.col`, `.hra`, WAL). Tables at any other level persist per representation. The old bypass (hardcoded `FilePageStore`) was removed.
+- **Durability gating end-to-end** (P30): `DefaultPageStoreRouter` governs flush/persist path. Tables at the `memory` level (`MemoryOnly` before **Lead S26, 0.6.0**) write nothing (no `.hot`, `.col`, `.hra`, WAL). Tables at any other level persist per representation. The old bypass (hardcoded `FilePageStore`) was removed.
 - Query/read correctness over mixed hot/cold:
   - Query paths consult segment temperature and deletion-mask correctness fixes are in place.
 - Management and observability:
@@ -224,8 +224,8 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 |---|---|---|---|---|---|
 | Table-level storage temperature (`Auto`/`HotOnly`/`ColdPreferred`) | Yes | No | No | P3 Task 1 report, `Policies.cs`, tables integration tests | Fully available across catalog + protocol + TS client |
 | `Mutable` intent flag on `StorageTemperaturePolicy` | Yes | No | No | P30 S4, `RepresentationSelector.cs` | Routes write streams to mutable keyed tier instead of immutable hot |
-| `memory` durability level enforcement (writes nothing) | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, storage tests | Fully enforced end-to-end — no `.hot`, `.col`, `.hra`, or WAL written. `MemoryOnly` before **Lead S26, next train** |
-| `strict` / `os` / `unlogged` durability enforcement | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, Lead S26 | Persists per representation; old bypass removed. `unlogged` writes no WAL (**Lead S26, next train**; `DiskBacked` before) |
+| `memory` durability level enforcement (writes nothing) | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, storage tests | Fully enforced end-to-end — no `.hot`, `.col`, `.hra`, or WAL written. `MemoryOnly` before **Lead S26, 0.6.0** |
+| `strict` / `os` / `unlogged` durability enforcement | Yes | No | No | P30 S2, `DefaultPageStoreRouter.cs`, Lead S26 | Persists per representation; old bypass removed. `unlogged` writes no WAL (**Lead S26, 0.6.0**; `DiskBacked` before) |
 | Hot-first flush invariant | Yes | No | No | P30 S1, `HraCompactor.cs`, flush tests | Flush produces only immutable hot segment; cold segments come from demotion only |
 | Mutable keyed tier (`MutableKeyedStore`) | Yes | No | No | P30 S3, `MutableKeyedStore.cs` | In-place upsert by PK; O(1) point lookup; dead-row reclamation |
 | Representation selector | Yes | No | No | P30 S4, `RepresentationSelector.cs` | Routes by intent → mutation rate → size |
@@ -250,15 +250,15 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
   - Mutable keyed tier: in-place upsert by PK; serves cache and UPSERT workloads
   - Immutable hot tier: append-optimised columnar; serves read-heavy workloads
   - Cold tier: encoded/compressed on disk; demoted from hot
-- **Durability axis** — controls persistence (**Lead S26, next train**: one level per table, inherited from the database unless the table names its own; see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)):
+- **Durability axis** — controls persistence (**Lead S26, 0.6.0**: one level per table, inherited from the database unless the table names its own; see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)):
   - `memory`: writes nothing to disk; data lives only in the running process (was `MemoryOnly`)
-  - `unlogged`: persists per representation (`.hot`, `.col`, `.hra`), no WAL — (**Lead S26c, next train**) the table is emptied by an open that does not follow a clean close if it was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train))
+  - `unlogged`: persists per representation (`.hot`, `.col`, `.hra`), no WAL — (**Lead S26c, 0.6.0**) the table is emptied by an open that does not follow a clean close if it was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train))
   - `strict` / `os`: persists per representation and writes the WAL (forced to disk at `strict`)
 
 **Key types:**
 
 - `StorageTemperaturePolicy`: Table-level intent for the temperature axis. Values: `Auto`, `HotOnly`, `ColdPreferred`, `Mutable` (P30).
-- `DurabilityLevel` (**Lead S26, next train**; replaces `DataDurabilityMode`): Values `Strict`, `Os`, `Unlogged`, `Memory`. A table names `Strict`, `Unlogged` or `Memory` in `TableDurabilityOptions.Level`, or inherits the database's; a change to or from `Memory` after creation is refused.
+- `DurabilityLevel` (**Lead S26, 0.6.0**; replaces `DataDurabilityMode`): Values `Strict`, `Os`, `Unlogged`, `Memory`. A table names `Strict`, `Unlogged` or `Memory` in `TableDurabilityOptions.Level`, or inherits the database's; a change to or from `Memory` after creation is refused.
 - `SegmentTemperature`: Actual per-segment state (`Hot`, `Cold`) used by execution and maintenance.
 - `MutableKeyedStore`: In-place upsert by PK. Dead-row reclamation via tombstone compaction. Serves `LatestPerKey` and cache workloads.
 - `RepresentationSelector`: Routes incoming write streams to the appropriate tier based on intent → mutation rate → segment size.
@@ -539,7 +539,7 @@ Primary proving tests:
 |---|---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | long | `0`: derived from the host (70 % of a cgroup limit, else 40 % of RAM) | `0` or `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
-| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, next train**); on (**ColumnarRead, 0.3.0**) |
+| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, 0.6.0**); on (**ColumnarRead, 0.3.0**) |
 | `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or positive | startup config | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
@@ -577,7 +577,7 @@ Configuration precedence and operational notes:
 ```csharp
 var engine = await AoudaEngine.OpenAsync(
     basePath: "./data",
-    durability: DurabilityLevel.Strict,   // Lead S26, next train (replaces enableWal)
+    durability: DurabilityLevel.Strict,   // Lead S26, 0.6.0 (replaces enableWal)
     budgetOptions: new MemoryBudgetOptions(MaxTotalRamBytes: 4L * 1024 * 1024 * 1024));
 
 await engine.CreateTableAsync(

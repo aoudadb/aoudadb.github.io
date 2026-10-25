@@ -106,7 +106,7 @@ Scope boundaries:
 | Server `Aouda:BulkLoad:MaxRowsPerAppend` | `100000` | Hard cap per `:append` call. |
 | Server `Aouda:BulkLoad:MaxQueuedAppendBytes` | `67108864` (64 MB) | (**IngestAtSpeed S10, 0.1.40**) How many bytes of decoded rows a job may hold for the engine before an `:append` waits (TCP backpressure follows). The queued rows are charged to the memory governor. One batch always fits an empty queue. Before this, the queue was bounded at `4 × MaxRowsPerAppend` rows, whatever their width, and charged nothing. |
 | Server `Aouda:BulkLoad:SessionRetentionMinutes` | `10` | Completed/failed/aborted sessions remain queryable for 10 minutes before sweep. Idempotency does not depend on this (see the next row). |
-| Server `Aouda:BulkLoad:IdempotencyWindowMinutes` | `10` | How long after **commit** a `:begin` with the same idempotency key answers with the committed job (`alreadyCompleted: true`) instead of loading again. This holds after the session has been swept and after a server restart, because committed keys are journalled per database (`bulk-load-idempotency.log`; **Lead S20a, next train**: the key is in the job's commit record itself — the catalog record that publishes its segments — so nothing is written after the commit and a crash right after it cannot lose the key; the side file is gone, and a data directory written before this release is refused at open, catalog format 11). (**IngestAtSpeed S02, 0.1.40.** Before this, the setting was read nowhere: a key stopped matching once `SessionRetentionMinutes` swept its session, and at any restart. A retried `:begin` then committed the whole window a second time.) |
+| Server `Aouda:BulkLoad:IdempotencyWindowMinutes` | `10` | How long after **commit** a `:begin` with the same idempotency key answers with the committed job (`alreadyCompleted: true`) instead of loading again. This holds after the session has been swept and after a server restart, because committed keys are journalled per database (`bulk-load-idempotency.log`; **Lead S20a, 0.6.0**: the key is in the job's commit record itself — the catalog record that publishes its segments — so nothing is written after the commit and a crash right after it cannot lose the key; the side file is gone, and a data directory written before this release is refused at open, catalog format 11). (**IngestAtSpeed S02, 0.1.40.** Before this, the setting was read nowhere: a key stopped matching once `SessionRetentionMinutes` swept its session, and at any restart. A retried `:begin` then committed the whole window a second time.) |
 | Server `Aouda:BulkLoad:AllowWritePermission` | `false` | Bulk load remains admin-only unless compatibility mode is enabled. |
 | Cluster `Aouda:BulkLoad:ForceLogShipBulkLoad` | `false` | When true, non-log-ship replication modes are rejected. |
 | Client `AppendBatchSize` | `50000` | Client sends up to 50K rows per append, then honors server lower cap if returned. |
@@ -145,7 +145,7 @@ Scope boundaries:
   - `AoudaClient.BulkLoadMultiTableAsync`
   - `RemoteTableQuery.BulkLoadAsync`
   - `AoudaTable<T>.BulkLoadAsync`
-  - (**Lead S13, next train**) `AoudaClient.BulkLoadAsync` / `RemoteTableQuery.BulkLoadAsync` over `ColumnBatch`es (a stream, a list
+  - (**Lead S13, 0.6.0**) `AoudaClient.BulkLoadAsync` / `RemoteTableQuery.BulkLoadAsync` over `ColumnBatch`es (a stream, a list
     or one batch) and `AoudaClient.BulkLoadMultiTableAsync` over a stream of them; see
     [Column batches (C#)](#column-batches-c-lead-s13-next-train).
 - Typed client exception family for lock/cursor/discriminator/options/duplicate-PK failures.
@@ -155,7 +155,7 @@ Scope boundaries:
 - **Materialized Query auto-refresh after bulk-load (P31 / ADR 0036, ingest-fed path P46):**
   - `PostLoadMqBehavior` option on `BulkLoadOptions`: `Auto` (default) accumulated, until **WorkloadCore S10** (next bullet), every affected MQ of all four types **during** the load's own pass and published at commit — except (**BatchFirst S12, 0.1.40**) when every query over the table is an `Aggregate` or `LatestPerKey`/`FirstPerKey` the engine can fold: then the load writes only the table, and the table's pass (the one a `Deferred` load waits for) starts at the commit and folds the load into every query at once. (**ColumnarCore S12, 0.2.0**) Such a load was maintained **in its own commit**: its queries, and the queries built on them, were written before the load returned, with `mqRebuildStatus` already `completed`. (**WorkloadCore S09, 0.3.0**) That is gone: the load still folded its rows as its segments were written, but the table's pass wrote its queries from that fold **after** the commit, in the background, as for every other `Auto` load (**WorkloadCore S10, 0.3.0**: the load no longer folds anything; see the next bullet). What you see: the handle (and the `:commit` response) comes back with `mqRebuildStatus` `pending` or `inProgress`; the server's `:commit` waits for the queries up to `mqWaitMs` (`MqWait` in `Aouda.Client`; default 30 s in 0.3.0, **0 — no wait — from the 0.4.0**, LoadSpeed M.2) and says in `mqStatus` whether they were current by then. `MqRebuildCompleted` still resolves only when the queries **and the queries built on them** are current; until then each reports `isStale`, a reason naming the pending load, `currentLag` and `pendingDeferredJobs`. Loads that commit while a pass runs are taken together by the next one. A table with any other query (a filter, a direct top-N) kept the accumulate-during-the-load path until **WorkloadCore S10** (next bullet); `Skip` creates no sinks and leaves existing results as they were — and marks every affected query **stale**, so `staleOnly` finds them and a restart before you refresh rebuilds them rather than reattaching a result missing this load's rows (BL-474). See [What a `Skip` load leaves behind](materialized.md#what-a-skip-load-leaves-behind). `Deferred` (**BatchFirst S08, 0.1.40**) is `Skip` with a record: the load writes only the table, the queries are marked behind, and the job is kept as pending so the engine can bring every query on the table current in one pass over the load's segments — see [Deferred loads and the table's pass](#deferred-loads-and-the-tables-pass) below and [Deferred loads](materialized.md#deferred-loads). (**LoadSpeed K31, 0.4.0**) `Deferred` is gone: folded into `Auto`, which now leaves a loading table's pass to the quiet period the same way; `"deferred"` is refused `400`.
   - (**WorkloadCore S10, 0.3.0**) **One maintenance path.** Every load into a table with materialized queries, except a `Skip` load, records a pending job, and the table's pass is its maintenance: a fold of the job's segments for every query the fold can plan, the job's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the table's other queries are not held behind it). `Auto` starts each written table's pass as soon as the load commits — multi-table and transform loads included — and `:commit` waits for it up to `mqWaitMs` and answers `mqStatus` as before; `Deferred` leaves the pass to the quiet period (2 s quiet, at most 60 s) — until **LoadSpeed K31** (0.4.0), which folds it into `Auto`. A load does no materialized-query work while its rows stream, so its segment writes cost what they cost on a table without queries, and it is no longer paced to a materialized-query drain. The accumulate-during-the-load ("ingest-fed") path is gone, and with it the fold built inside the load's segment writes, the merging of waiting publishes, the heap-pressure deferral and the drain pacer. `:refresh`, restore and a fallback rebuild read the table, as before. Until its pass has run, a query the load reaches is readable and behind — `isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false` — but not marked stale: the load owes it work, it does not leave a hole.
-  - (**Lead S27b, next train**) A query whose `currency` is `rebuild` is never folded or replayed into: the load's pass rebuilds it (one scan of the table with the table's other rebuilds). And a load emits **no change events** on the table it loads — a subscriber to the table sees none of its rows (see [Real-time](real-time.md#27-core-concepts-and-mental-model)); a subscriber to a query's result sees the result's changes.
+  - (**Lead S27b, 0.6.0**) A query whose `currency` is `rebuild` is never folded or replayed into: the load's pass rebuilds it (one scan of the table with the table's other rebuilds). And a load emits **no change events** on the table it loads — a subscriber to the table sees none of its rows (see [Real-time](real-time.md#27-core-concepts-and-mental-model)); a subscriber to a query's result sees the result's changes.
     (**BL-980, 0.4.0**) A pending-job record without its commit time (only an older build wrote one) is set aside as
     corrupt when the database opens, and every materialized query of the database is rebuilt rather than caught up from it.
   - (**LoadSpeed M.3, 0.4.0**) **`auto` coalesces while a table is loading.** An `auto` load whose table is busy — another load
@@ -186,7 +186,7 @@ Scope boundaries:
   - (**LoadSpeed M.2, 0.4.0**) **`mqWaitMs` defaults to `0`**: `:commit` answers as soon as the load is durable and does not wait for its queries unless the request says how long (it waited up to 30 s). A load whose queries are still catching up answers `mqStatus: "behind"` with `mqFrontierToken`; that is not an error. To go on only once they are current, send `mqWaitMs` (up to `600000`), or read with the commit's `token`, which waits for them.
   - (**WorkloadCore S16, 0.3.0**) The wait does not wait for a query only a rebuild can bring current (holed, in `Error`, or waiting for memory to rebuild): `mqStatus` is `"behind"` as soon as the others are current, instead of after the whole `mqWaitMs`.
   - (**WorkloadCore S16, 0.3.0**) **`:append` can be paced.** When the database's debt — WAL fill, materialized-query maintenance lag, unflushed rows or hot bytes — is past its soft line, each batch of an `:append` waits (at most 10 s) before it is queued — whatever the batch's size (**WorkloadCore group 5 review, 0.3.0**) — so the load settles at the rate the debt drains; see the sizing guide, *Debt slows the writer*. An `:append` whose load already failed for capacity answers `503` with `Retry-After`, as `:commit` does, rather than `409`. A load's buffer growth refused for a moment's queue no longer caps the buffer for the rest of the load.
-  - (**BL-831, 0.3.0**) **A column-batch `:append` asks for its memory before it decodes.** Each column's array is a grant from the memory queue first (waiting at most one sampling tick), so when memory is short the `:append` is refused `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` **before** the frame is decoded, instead of failing on the heap part-way through it (`500`). The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume with the same idempotency key from the frame `:begin` answers (`nextSequence`, **Lead S21a, next train**: it was `resumeFromRow`, else `rowsDurablyCommitted`). JSON column-array bodies (NDJSON bodies, until **Lead S12, next train**) take no such grant.
+  - (**BL-831, 0.3.0**) **A column-batch `:append` asks for its memory before it decodes.** Each column's array is a grant from the memory queue first (waiting at most one sampling tick), so when memory is short the `:append` is refused `503 MEMORY_BUDGET_EXCEEDED` with `Retry-After` **before** the frame is decoded, instead of failing on the heap part-way through it (`500`). The session stays open and the rows queued before the refusal stay credited: wait `Retry-After` and resume with the same idempotency key from the frame `:begin` answers (`nextSequence`, **Lead S21a, 0.6.0**: it was `resumeFromRow`, else `rowsDurablyCommitted`). JSON column-array bodies (NDJSON bodies, until **Lead S12, 0.6.0**) take no such grant.
   - (**BL-831, BL-928, 0.3.0**) **A `:commit` that runs out of memory is a `503`, never a `500` or a damaged segment.** A commit whose spill merge meets the managed heap's hard limit answers `503` with `Retry-After` (it answered `500 INTERNAL_ERROR`), and a merge that runs out of memory part-way through a row is refused with nothing published — it used to seal a segment whose columns held different row counts. As for every refused `:commit`, the session is failed and nothing was applied: run the load again from `:begin`.
   - (**release blockers, 0.3.0**) `mqWaitMs` does not wait on a query that is behind only because a query it is built on (its upstream) is being rebuilt — waiting cannot bring it in, so `mqStatus` is `"behind"` as soon as the others are current. And a wait that itself fails (the heap, say) answers the commit as committed with `mqStatus: "behind"`: the load is durable, so it must not be sent again (it was answered `503` "not applied", and a client that resent it loaded the rows twice).
   - Replica coordinator: `MqRebuildScheduler` delegate triggers rebuild after all segments fetched.
@@ -344,16 +344,16 @@ difference is *when* the work is paid — per load, or once for many — not how
 
 ### Core concepts
 
-- **Streaming phase vs commit phase:** rows are appended in chunks — column-batch frames, or JSON column arrays (**Lead S12, next train**: NDJSON is no longer read) — then closed by a commit call.
+- **Streaming phase vs commit phase:** rows are appended in chunks — column-batch frames, or JSON column arrays (**Lead S12, 0.6.0**: NDJSON is no longer read) — then closed by a commit call.
 - **Durability unit:** durability is represented by WAL-visible segment/job events, not by row-level WAL entries.
-- **Durability level** (**Lead S26, next train**): the target table's
+- **Durability level** (**Lead S26, 0.6.0**): the target table's
   [durability level](write-durability.md#durability-levels-lead-s26-next-train) does not change how it is loaded — `strict`,
-  `os` and `unlogged` tables load alike. (**Lead S26c, next train**) A load has a level of its own, `strict` or `os`, which
+  `os` and `unlogged` tables load alike. (**Lead S26c, 0.6.0**) A load has a level of its own, `strict` or `os`, which
   follows the database's level, not the table's: see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train).
   A bulk load into a table at `memory` (the old `MemoryOnly`) is refused, naming the level: "Bulk load is not supported for table
   '…' at durability 'memory'" — a load writes segment files, which a memory table never has.
 - **Job-level atomicity:** query visibility is tied to closing-frame commit completion.
-- **Replica catch-up model:** replicas consume WAL events and fetch segment files out-of-band. ⚠️ (**Lead S18a, next train**) A replica that has not fetched every segment of a committed load does not cover that load's token, or any later one, until it has: a read presenting the token waits or is answered `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`, and `GET /admin/replication/status` names the load (`bulkLoadHold`). Today no server wires the replica-side fetch (**BL-1116**), so a replicated database's bulk loads are on its replicas only after a checkpoint re-bootstrap — read them with a token, which sends the read to the primary, or from the primary. ⚠️ (**Lead S20, next train**) **Bulk-loaded rows are not yet replicated** (**BL-1116**): a replica does not receive a load's segments as it is committed. Load into the primary and read the loaded rows there until this is done.
+- **Replica catch-up model:** replicas consume WAL events and fetch segment files out-of-band. ⚠️ (**Lead S18a, 0.6.0**) A replica that has not fetched every segment of a committed load does not cover that load's token, or any later one, until it has: a read presenting the token waits or is answered `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`, and `GET /admin/replication/status` names the load (`bulkLoadHold`). Today no server wires the replica-side fetch (**BL-1116**), so a replicated database's bulk loads are on its replicas only after a checkpoint re-bootstrap — read them with a token, which sends the read to the primary, or from the primary. ⚠️ (**Lead S20, 0.6.0**) **Bulk-loaded rows are not yet replicated** (**BL-1116**): a replica does not receive a load's segments as it is committed. Load into the primary and read the loaded rows there until this is done.
 
 ### Invariants
 
@@ -364,8 +364,8 @@ difference is *when* the work is paid — per load, or once for many — not how
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
 6. A `strict` load's segment files are fsynced before its commit point — the closing frame, or on a single node the commit record —
    so a committed load survives a power loss (an `os` load's are not: [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train),
-   **Lead S26c, next train**). The files of a job's segments sync in parallel while the job runs, and the commit waits
-   for them (**Lead S20b, next train**: each segment was synced before its own frame). If the catalog
+   **Lead S26c, 0.6.0**). The files of a job's segments sync in parallel while the job runs, and the commit waits
+   for them (**Lead S20b, 0.6.0**: each segment was synced before its own frame). If the catalog
    registration after the commit point still fails after its retries, the commit call returns an error but the load is **not**
    lost: its rows become visible at the next restart, which catalogues it (`BulkLoadCommittedUncataloguedPinsHeld` counts such
    jobs). Do not re-run such a load blindly: check `:status`, or use an idempotency key. Before this, such a load could be swept
@@ -381,14 +381,14 @@ difference is *when* the work is paid — per load, or once for many — not how
 ### What a frame carries is what JSON carries
 
 The C# SDK appends column-batch frames where the server accepts them, and JSON column arrays where a
-batch holds something a frame cannot carry (a nested value, a list) (**Lead S12, next train**: it was
+batch holds something a frame cannot carry (a nested value, a list) (**Lead S12, 0.6.0**: it was
 NDJSON, which the server no longer reads). Either way the table ends up with the same values: a frame
 gives each number the kind its JSON text would have, a `DateTime` that is not UTC and a
 `DateTimeOffset` travel as their JSON text, and a value a frame would have to change is sent as JSON
 instead (**BatchFirst S03, 0.1.40**). A load that mixes the two formats mid-stream is still one load,
 with one resume cursor.
 
-### Column batches (C#) (**Lead S13, next train**)
+### Column batches (C#) (**Lead S13, 0.6.0**)
 
 When the data is already columnar (Parquet or Arrow row groups, a data frame, another database's export), `Aouda.Client` loads
 it as `ColumnBatch`es (namespace `Aouda.Protocol.BulkLoad`) and skips building a dictionary per row. This is the fast path: each
@@ -413,7 +413,7 @@ var handle = await client.BulkLoadAsync("trades", batches,          // IAsyncEnu
     });
 ```
 
-**A load coerces by default** (**Lead S27a, next train**). Unless the load asks for `validation: strict`, a null sent for a NOT
+**A load coerces by default** (**Lead S27a, 0.6.0**). Unless the load asks for `validation: strict`, a null sent for a NOT
 NULL column that is not part of the key is stored as the type's default, not refused — what an insert through `/rows` would refuse.
 A key is never coerced, and a column the table does not have is refused at either level. See
 [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
@@ -423,7 +423,7 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
 (`BulkLoadMultiTableAsync`) takes batches that carry a `_table` string column.
 
 - **How batches map to `:append` bodies.** A body holds up to `AppendBatchSize` rows (capped by the server's `maxRowsPerAppend`)
-  and about `MaxAppendBytes` bytes, as consecutive frames closed by the body's end frame. (**Lead S21a, next train**) The frames
+  and about `MaxAppendBytes` bytes, as consecutive frames closed by the body's end frame. (**Lead S21a, 0.6.0**) The frames
   are numbered across the job's bodies, from 0, so the server applies each one once. Several small
   batches share one body, a frame each; a large batch is cut across several bodies. Batches of a few thousand rows or more load
   fastest, since each batch is at least one frame. Sizing the session itself is unchanged: see
@@ -439,7 +439,7 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
   (`POST /api/databases/{db}/bulk-load/{jobId}:abort`), rather than leaving it for the sweeper. With no key of your own, the SDK
   aborts the job itself — nothing could resume it — except once its commit has been sent, and in C# after an `:append` that failed
   for a transient reason, where `BulkLoadAppendFailedException` hands you the key it used.
-- **A failed `:append` is re-sent by the SDK** (**Lead S21a, next train**). A job's frames are numbered and the server applies each
+- **A failed `:append` is re-sent by the SDK** (**Lead S21a, 0.6.0**). A job's frames are numbered and the server applies each
   number once, so after a connection that dropped, a timeout or a `503`, the SDK sends a `:begin` with the job's key (which stops
   the server's stale request and answers the job's `nextSequence`) and then the same body again; the frames the server already
   applied are skipped, not loaded twice. Only after four attempts does it throw `BulkLoadAppendFailedException` (it used to throw
@@ -454,7 +454,7 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
   `column-batch-v2` in `acceptedAppendFormats`. The values loaded are the same either way.
 - **Absent is not null, and a bulk load applies no defaults.** A cell marked absent is stored as null, except that an absent
   `autoIncrement` cell is generated (BL-1104, as for any `:append`). An insert (`InsertAsync(ColumnBatch)`) does apply defaults.
-- **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, next train**; BL-1130, BL-1129: the
+- **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129: the
   column used to be dropped, the key stored as `0`). A null in another NOT NULL column is stored as the type's default unless the
   load asks for `Validation = BulkLoadValidation.Strict`; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
 - **The arrays are not copied.** A batch's arrays are read while its rows are written, which happens before the SDK asks your
@@ -462,7 +462,7 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
 
 The row and object overloads of `BulkLoadAsync` are unchanged and remain the convenient path; they are sent as frames too.
 
-### Column batches (TypeScript) (**Lead S14, next train**)
+### Column batches (TypeScript) (**Lead S14, 0.6.0**)
 
 `@aouda/client` takes the same thing as `ColumnBatch`es built from typed arrays — `bulkLoad(table, batches)` and
 `insert(batch)` — packed into bodies the same way (up to `appendBatchSize` rows, about `maxAppendBytes`, consecutive frames,
@@ -487,26 +487,26 @@ The factories and `validate()` are on the [TypeScript Client page](../clients/ty
 What it shares with C#, and what changed for it in the same session:
 
 - **A transport policy never re-sends an `:append`** (until Lead S14 a `retryPolicy` re-sent it — a duplicate-rows hazard). Since
-  **Lead S22, next train**, the SDK's own recovery does, safely: after a lost connection, a timeout or a `503` it asks the server
+  **Lead S22, 0.6.0**, the SDK's own recovery does, safely: after a lost connection, a timeout or a `503` it asks the server
   where the job is (a `:begin` with the job's key) and sends the same body again, up to 4 times; the server skips the frames it
   holds, so a body sent twice is applied once — as the C# SDK has done since Lead S21a.
 - **A failed load leaves the job open; the same call with the same `idempotencyKey` resumes it** from `:begin`'s `nextSequence`
-  (**Lead S22, next train**; it was `resumeFromRow`, gone): the bodies the server holds are not sent, and the rows of the frames
+  (**Lead S22, 0.6.0**; it was `resumeFromRow`, gone): the bodies the server holds are not sent, and the rows of the frames
   skipped are checked against the server's count, so a load framed differently is refused `BULK_LOAD_CURSOR_MISMATCH` instead of
-  loading rows twice. A job that already holds every frame is committed with `:commit` (**Lead group 5 review, next train**).
-  Only a cancellation aborts — and (**Lead group 3 review, next train**) a failed load whose `idempotencyKey` the SDK generated,
+  loading rows twice. A job that already holds every frame is committed with `:commit` (**Lead group 5 review, 0.6.0**).
+  Only a cancellation aborts — and (**Lead group 3 review, 0.6.0**) a failed load whose `idempotencyKey` the SDK generated,
   which nobody else could resume: pass your own key. Neither SDK aborts a job whose commit may be running (a lost answer, a
   "committing" refusal), except on a cancellation: the server's commit decides it.
 - **A key whose job already committed returns that job** (`alreadyCompleted: true`, `rowsLoaded`, `token`) and sends nothing;
   it used to fail `409 BULK_LOAD_INVALID_STATE`.
 - **No NDJSON**: rows no frame carries, and every body to a server that does not advertise frames, go as JSON column arrays.
 
-### Several jobs into one table, pipelined (**Lead S18b, next train**)
+### Several jobs into one table, pipelined (**Lead S18b, 0.6.0**)
 
 A load that arrives as several jobs — a file per day, a batch per hour — should not wait for each job's `:commit` before
 beginning the next. The server already lets a second job's `:begin` and `:append`s in while the first commits: the second job's
 rows decode and queue (up to `Aouda:BulkLoad:MaxQueuedAppendBytes`, 64 MB) behind the table's bulk-load lock, and its row loop starts when
-the first job's rows end — (**Lead S19, next train**) the lock passes to the next job as soon as the first job's `:commit` has
+the first job's rows end — (**Lead S19, 0.6.0**) the lock passes to the next job as soon as the first job's `:commit` has
 closed its rows, so the second job's rows load while the first one writes and commits. Both SDKs do this for you:
 
 ```csharp
@@ -519,41 +519,41 @@ for await (const handle of client.bulkLoadJobs('trades', days)) console.log(hand
 ```
 
 - **Nothing about a job changes.** Each is committed, visible and answered on its own, in job order; a later job is never visible
-  before an earlier one: (**Lead S19, next train**) commits on a table are first in, first out — a job that took the table's lock
+  before an earlier one: (**Lead S19, 0.6.0**) commits on a table are first in, first out — a job that took the table's lock
   later reaches its commit point only after every earlier job is committed (or aborted). A `:commit` therefore still returns after
   its own job is durable and visible, as before; `commitWaitMs` on the server's commit line says how long it waited for the job
   ahead of it. An update, delete or other write to the table waits for every load that was in flight when it arrived — loading or
   committing — and not for loads that start after it.
-- (**Lead S21b, next train**) **A job's last body commits it.** The C# SDK puts the commit in the end frame of a job's last
+- (**Lead S21b, 0.6.0**) **A job's last body commits it.** The C# SDK puts the commit in the end frame of a job's last
   column-batch body ([HTTP API](../reference/http-api.md#a-body-that-commits-its-job-lead-s21b-next-train)), so a job needs no
   `:commit` round trip, and it begins job N+1 as soon as job N's last body is written: N's rows end on the server the moment the
   body is read, its segments are finalized and synced while N+1's rows arrive, and only N's commit point waits for the jobs before
-  it. `@aouda/client` does the same (**Lead S22, next train**) where its `fetch` streams a request body (Node's); with one that
+  it. `@aouda/client` does the same (**Lead S22, 0.6.0**) where its `fetch` streams a request body (Node's); with one that
   cannot say when a body was written (a browser's, or a `fetch` passed in the options) it commits each job by `:commit`, still
   naming the job before as `afterJobId`, while the next job's rows are sent.
-- **One job sending and one committing per loader** (**Lead S21b, next train**; it was "one `:append` and one `:commit` in
+- **One job sending and one committing per loader** (**Lead S21b, 0.6.0**; it was "one `:append` and one `:commit` in
   flight"). That is what keeps the server's `:append` lane (4 requests at once by default,
   `Aouda:BulkLoad:MaxConcurrentStreamingRequests`) from starving: up to four loaders into one table finish while no job's queue
   fills. A body that commits keeps its place on the lane until its commit answers (with `commitWait` accepted, until its job is
-  accepted); a separate `:commit` runs on no lane at all. (**Lead S31, next train**) A job queued behind another loader's job holds
+  accepted); a separate `:commit` runs on no lane at all. (**Lead S31, 0.6.0**) A job queued behind another loader's job holds
   its `:append`'s place on the lane while that `:append` waits for room in the job's queue (`Aouda:BulkLoad:MaxQueuedAppendBytes`,
   64 MB of decoded rows), and a pipelined loader has two `:append`s on the lane — so once jobs are larger than that queue, **three
   pipelined loaders into one table can starve the lock holder's next `:append`** until the others time out on the lock (30 s).
   Keep it to **two pipelined loaders a table** on the default lane (half its permits), or to as many unpipelined loaders as it has
   permits (**BL-1117**).
 - **The first failure ends the sequence** after every earlier job's handle, and **no job after the failed one commits**: (**Lead
-  S21b, next train**) each job names the one before it as the job it follows (`afterJobId`), so the server takes them in order and
+  S21b, 0.6.0**) each job names the one before it as the job it follows (`afterJobId`), so the server takes them in order and
   refuses the commit of a job whose predecessor did not commit — even one whose commit was already on its way. A caller who stops
   reading early gets the job sent behind the last handle aborted, unless its commit point had already passed. A caller's
   idempotency key keys job `i` as `{key}.{i}`, so a repeated call replays what committed and resumes the rest.
 - **`FailFast` runs the jobs one at a time**: a job queued behind the lock would be refused.
-- What overlaps is a commit with the next job's begin, send, decode and (**Lead S19, next train**) row loop: the next job's rows
+- What overlaps is a commit with the next job's begin, send, decode and (**Lead S19, 0.6.0**) row loop: the next job's rows
   are accrued while the earlier job drains, writes and commits. Two jobs' ingest buffers are then held at once, each under its own
-  memory grant. Raw HTTP clients can pipeline the same way (**Lead S21b, next train**): begin job N+1 with `afterJobId` set to N's
+  memory grant. Raw HTTP clients can pipeline the same way (**Lead S21b, 0.6.0**): begin job N+1 with `afterJobId` set to N's
   `jobId` once N's last body (committing in its end frame) is written, and send N+1's bodies, its last one committing too; N+1
   commits after N, and not at all if N fails. Without `afterJobId`, send N+1's commit only after N's returned.
 
-### Answered before the commit: `accepted` (**Lead S30, next train**)
+### Answered before the commit: `accepted` (**Lead S30, 0.6.0**)
 
 By default a job's commit answers once the job is committed. A loader that has more to send, and learns the outcome later, can ask
 to be answered sooner: with `wait: "accepted"` ([HTTP API](../reference/http-api.md#post-jobidcommit)) the commit answers once the
@@ -582,23 +582,23 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
   accepted job: load it again. ⚠️ Read the outcome promptly: a committed job's record is kept for at least an hour after its commit
   (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer), and a `404` asked after that cannot tell a lost job from a committed one
   the server has forgotten. A job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is
-  committed and its rows become visible at the next restart (note 6 below; **Lead group 7 review, next train**).
+  committed and its rows become visible at the next restart (note 6 below; **Lead group 7 review, 0.6.0**).
 - **A `validation: "strict"` job's key check runs at its commit point, after the accepted answer**, so a key it holds twice or one the
   table already holds is its outcome: `GET {jobId}` answers `state: "failed"`, `errorCode: "BULK_LOAD_DUPLICATE_PK"`, and the SDKs
   raise what they raise for the same load without the accepted wait (`BulkLoadDuplicatePkException`; an `AoudaApiError` coded
   `BULK_LOAD_DUPLICATE_PK`), ending a pipelined sequence. Nothing of the job is kept; do not load it again unchanged. After a restart
-  that cut the job's session off, it reads `lost` (**BL-1163, next train**).
+  that cut the job's session off, it reads `lost` (**BL-1163, 0.6.0**).
 - **It frees the loader, not the table.** A write into a table the job loads still waits for the job.
 - With `BulkLoadJobsAsync` / `bulkLoadJobs`, each handle is yielded once its job is accepted. A loader keeps at most **two** accepted
   jobs before it waits for the oldest one's outcome (an accepted job still holds its buffers on the server until it commits), and a
   lost one ends the sequence (`BulkLoadLostException` / `BulkLoadLostError`): the jobs after it follow it, so none of them commits.
   The sequence ends only once every job it accepted has settled, so a normal end means every job committed (**Lead group 7 review,
-  next train**: the last jobs' outcomes were not awaited, and a lost one among them ended the sequence normally).
+  0.6.0**: the last jobs' outcomes were not awaited, and a lost one among them ended the sequence normally).
 - A job the server cannot accept — a load that writes no closing log frame, or a database without a WAL (durability `unlogged` or `memory`) — is answered committed.
   `wait: "accepted"` is refused with `waitForDeferredWork`, `mqWaitMs` above 0 or a write concern above `acknowledged`, which each
   wait for the commit.
 
-### A load's durability: `strict` or `os` (**Lead S26c, next train**)
+### A load's durability: `strict` or `os` (**Lead S26c, 0.6.0**)
 
 A load names its own level in `:begin`'s `options.durability` ([HTTP API](../reference/http-api.md#post-begin)):
 
@@ -635,7 +635,7 @@ In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Str
   background, starting at its commit. Until then every durable write on that database waits for it: inserts, updates and deletes
   that write the WAL, catalog segment changes such as merges and compaction, materialized-query passes and result checkpoints, a
   branch's creation, a backup and a replica's checkpoint image, a rewrite of a derived column's stored values, and the commit of a
-  job that follows it (`afterJobId`; **Lead group 6 review and whole-branch review, next train** — so a power loss never keeps a
+  job that follows it (`afterJobId`; **Lead group 6 review and whole-branch review, 0.6.0** — so a power loss never keeps a
   copy or a follower of a job it drops, and a process crash never drops it). The wait is at most about the fsync time a `strict`
   load pays up front.
 - ⚠️ **If the background sync fails, the database stops taking durable writes.** Every later insert, update, delete, merge, pass and
@@ -654,7 +654,7 @@ In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Str
   committed at); `:commit` always answers it, an `accepted` answer included; `GET {jobId}` and `:list` give each job's, omitted
   when it is unknown — an accepted job lost before its commit point.
 
-### A load's validation: `coerce` or `strict` (**Lead S27a, next train**)
+### A load's validation: `coerce` or `strict` (**Lead S27a, 0.6.0**)
 
 A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../reference/http-api.md#post-begin)):
 
@@ -708,7 +708,7 @@ The `:commit` boundary does not decide segment size by itself — the engine sea
 **Do this:**
 - Open **one** session (`:begin`), stream the whole migration through repeated `:append` calls, and `:commit` **once** at the end.
 - Size `:append` batches for the network, not for segment size — 10 000–100 000 rows per call is fine.
-- Track your upstream cursor at the commit: a job's rows are durable only once `:commit` answers (**Lead S20b, next train**:
+- Track your upstream cursor at the commit: a job's rows are durable only once `:commit` answers (**Lead S20b, 0.6.0**:
   `rowsDurablyCommitted` mid-job counts what segments have sealed, which are not durable until the commit and are not a resume
   offset). To resume an open job, use `:begin`'s `nextSequence` with the same idempotency key.
 
@@ -867,7 +867,7 @@ High-level architecture path:
 
 1. Client calls `POST .../bulk-load:begin` with tables and optional options.
 2. Controller validates database/table list/options and starts/returns session from `BulkLoadSessionRegistry`.
-3. Client streams batches to `POST .../{jobId}:append`: column-batch frames (`application/vnd.aouda.column-batch-v2`) or one JSON column-array body per call (`application/json`) (**Lead S12, next train**: NDJSON, `application/x-ndjson`, is refused `415 ROW_OBJECTS_UNSUPPORTED`).
+3. Client streams batches to `POST .../{jobId}:append`: column-batch frames (`application/vnd.aouda.column-batch-v2`) or one JSON column-array body per call (`application/json`) (**Lead S12, 0.6.0**: NDJSON, `application/x-ndjson`, is refused `415 ROW_OBJECTS_UNSUPPORTED`).
 4. Rows are pushed into session channel; engine consumes channel via `AoudaEngine.BulkLoadAsync`.
 5. Client calls `POST .../{jobId}:commit`; controller completes channel and awaits engine task.
 6. Engine returns `BulkLoadJobHandle`; controller sets session completed and returns commit response.
@@ -879,7 +879,7 @@ Tests: `BulkLoadControllerBeginTests`, `BulkLoadControllerAppendTests`, `BulkLoa
 1. Primary emits `BulkSegmentCommitted` frames as segments are sealed and persisted.
 2. Replica replay (`FrameApplier`) dispatches tag 60 to `BulkLoadReplicaCoordinator`.
 3. Coordinator tracks segment expectation and schedules fetch through `SegmentFetcher`.
-4. On closing frame tag 61, coordinator transitions to staged/committed depending on fetched set completeness. (**Lead S18a, next train**) The replica's tokens stop below that frame until it is committed there (ADR 0065 `D-5`); later frames still apply. ⚠️ No server constructs the coordinator or the fetcher yet (**BL-1116**): the steps above run in tests only.
+4. On closing frame tag 61, coordinator transitions to staged/committed depending on fetched set completeness. (**Lead S18a, 0.6.0**) The replica's tokens stop below that frame until it is committed there (ADR 0065 `D-5`); later frames still apply. ⚠️ No server constructs the coordinator or the fetcher yet (**BL-1116**): the steps above run in tests only.
 5. Tag 62 marks job aborted and replica state transitions accordingly.
 
 Tests: `BulkLoadReplicaCoordinatorTests`, `BulkSegmentFetchTests`, `BulkLoadCompactionWatermarkTests`.
@@ -919,12 +919,12 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables. |
 | `BulkLoadOptions.MaxRowsPerSegment` | int? | `TargetRowsPerPage * 16` | positive int | Engine/API/client | Segment sizing knob. |
 | `BulkLoadOptions.ConflictPolicy` | enum | `Block` | `Block`, `FailFast` | Engine/API/client | Controls behavior for concurrent regular writes. |
-| `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, next train**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |
+| `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, 0.6.0**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |
 | `BulkLoadOptions.PrincipalId` | `Guid` | `Guid.Empty` | valid guid | Engine/API | Stamped into bulk-load WAL frames. |
 | `BulkLoadOptions.LockAcquisitionTimeout` | `TimeSpan` | `30s` | positive duration | Engine/API | Lock wait bound. |
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |
 | `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
-| `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, next train**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
+| `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, 0.6.0**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
 | `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and the whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
 | `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, 0.1.40**). |
@@ -936,16 +936,16 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.MaxAppendBytes` — *since 0.1.22* | int | `8 MiB` | `>=0` (`0` disables) | Client | Maximum serialized size of one `:append` body. A chunk closes at this bound or `AppendBatchSize` rows, whichever comes first. Raising `AppendBatchSize` alone does not send larger appends — this is the bound that governs, and it is what keeps a wide row under ASP.NET's 30 MB request-body limit (which answers with a body-less `413`). (**LoadScan, 0.5.0**) The C# client builds the next `:append` body while the previous one is in flight — still one `:append` at a time, in order — so your row source is read at most one body ahead of what the server has accepted, and two bodies may be held at once. Your source is read on a thread-pool thread, by one call at a time. A load that fails or is cancelled stops reading your rows before it returns — and waits for the row your source is producing to do so: an iterator that waits for its rows (a feed) should honour its cancellation token (`[EnumeratorCancellation]`), or a failed load returns only when the feed's next row arrives. |
 | `Aouda:BulkLoad:StreamingRequestTimeoutMs` — *since 0.1.22* | int | `600000` | `>=0` (`0` disables) | Server config | Request deadline for `:append` and `:commit` only. These two opt out of `Aouda:RequestTimeoutMs` (30 s), which still governs every other endpoint. Not the bound on an abandoned session — `SessionIdleTimeoutMinutes` is. |
 | `Aouda:BulkLoad:SessionIdleTimeoutMinutes` | int | `10` | `>=0` (`0` disables) | Server config | How long an in-flight session may make no progress before the sweeper aborts it and releases its table lock and ingest budget. |
-| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` — *since 0.1.22* | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` runs in. It does not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. (**Lead S18a, next train**) `:commit` is on no lane: it waits for its table lock and the engine (whose segment I/O is bounded server-wide), and on the lane four `:append`s gated behind an earlier job could hold every permit while that job's `:commit` waited for one. Run no more loaders into one table at once than this setting — (**Lead S31, next train**) and, once jobs are larger than `Aouda:BulkLoad:MaxQueuedAppendBytes`, no more than half as many pipelined loaders (two `:append`s each) (**BL-1117**). |
-| `Aouda:BulkLoad:StreamingRequestQueueLimit` — *since 0.1.22* | int | `100` | `>=0` | Server config | How many streaming requests may wait for a lane slot; beyond it, 503. Generous by design: a rejected `:append` must be recovered by its client (a keyed `:begin`, then the same body — **Lead S21a, next train**), so a rejection costs the load a round of recovery or, in a client that does not recover, the load. |
+| `Aouda:BulkLoad:MaxConcurrentStreamingRequests` — *since 0.1.22* | int | `4` | `>=0` (`0` = unlimited) | Server config | Size of the admission lane `:append` runs in. It does not draw on `Aouda:MaxConcurrentRequests` (50), because a multi-minute call would hold one of those permits for its whole duration. (**Lead S18a, 0.6.0**) `:commit` is on no lane: it waits for its table lock and the engine (whose segment I/O is bounded server-wide), and on the lane four `:append`s gated behind an earlier job could hold every permit while that job's `:commit` waited for one. Run no more loaders into one table at once than this setting — (**Lead S31, 0.6.0**) and, once jobs are larger than `Aouda:BulkLoad:MaxQueuedAppendBytes`, no more than half as many pipelined loaders (two `:append`s each) (**BL-1117**). |
+| `Aouda:BulkLoad:StreamingRequestQueueLimit` — *since 0.1.22* | int | `100` | `>=0` | Server config | How many streaming requests may wait for a lane slot; beyond it, 503. Generous by design: a rejected `:append` must be recovered by its client (a keyed `:begin`, then the same body — **Lead S21a, 0.6.0**), so a rejection costs the load a round of recovery or, in a client that does not recover, the load. |
 | `Aouda:MaxConnections` | int | `0` | `>=0` (`0` = unlimited). On 0.1.20 and earlier the default was `100` and `0` failed startup | Server config | Kestrel's concurrent-connection ceiling. `0` (unlimited) is the default from 0.1.22. A finite value must stay above `MaxConcurrentRequests + RequestQueueLimit`, or Kestrel closes sockets with no HTTP response. |
 
-**`:append` is not retried blindly.** (**Lead S21a, next train**) A job's frames are numbered across its bodies and the server
+**`:append` is not retried blindly.** (**Lead S21a, 0.6.0**) A job's frames are numbered across its bodies and the server
 applies each number once — a frame below the job's `nextSequence` is acknowledged and skipped — so sending a body again after its
 answer was lost no longer duplicates its rows. The recovery is still not a blind re-post: a stale request may still be reading the
 cut body, so first send `:begin` with the job's idempotency key (it stops that request and answers `nextSequence`), then send the
 body again, or its frames from `nextSequence` on. The C# SDK does exactly that, a bounded number of times, and so does
-`@aouda/client` (**Lead S22, next train**: 4 attempts; until then it left a failed `:append` to the caller). Neither SDK's retry
+`@aouda/client` (**Lead S22, 0.6.0**: 4 attempts; until then it left a failed `:append` to the caller). Neither SDK's retry
 policy re-sends an `:append` on its own. Before Lead S21a the server applied every frame it was sent, and a replayed
 `:append` duplicated every row the first attempt landed — silently (see the [HTTP reference](../reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train)).
 
@@ -963,7 +963,7 @@ Precedence notes:
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
 | Begin bulk-load session | Client coordinator via `BulkLoadAsync`/`BulkLoadMultiTableAsync` | Reported in P20 completion (`client.table(...).bulkLoad`, `bulkLoadMultiTable`) | `POST .../bulk-load:begin` | Implemented | TS evidence is completion-doc based in this repo. |
-| Append a chunk | Internal client coordinator (frames, or JSON column arrays) | Reported in completion docs | `POST .../{jobId}:append` | Implemented | `application/vnd.aouda.column-batch-v2` or `application/json` column arrays (**Lead S12, next train**; `application/x-ndjson` is refused `415 ROW_OBJECTS_UNSUPPORTED`). |
+| Append a chunk | Internal client coordinator (frames, or JSON column arrays) | Reported in completion docs | `POST .../{jobId}:append` | Implemented | `application/vnd.aouda.column-batch-v2` or `application/json` column arrays (**Lead S12, 0.6.0**; `application/x-ndjson` is refused `415 ROW_OBJECTS_UNSUPPORTED`). |
 | Commit load | `BulkLoadAsync` returns `BulkLoadJobHandle` | Reported in completion docs | `POST .../{jobId}:commit` | Implemented | Includes write-concern fields. |
 | Abort load | Best-effort abort in coordinator cancellation path | Reported in completion docs | `POST .../{jobId}:abort` | Implemented | Explicit operator abort route also exists. |
 | Get status/progress | `BulkLoadJobHandle.GetProgressAsync` via status polling path | Reported in completion docs | `GET .../{jobId}` | Implemented | Deferred work + replica progress DTOs. |
@@ -993,7 +993,7 @@ var handle = await client.BulkLoadAsync(
     },
     ct);
 
-// (Lead S13, next train) Columnar data: ColumnBatch streams, written as frames straight from their arrays
+// (Lead S13, 0.6.0) Columnar data: ColumnBatch streams, written as frames straight from their arrays
 var batchHandle = await client.BulkLoadAsync(
     "orders",
     batches, // IAsyncEnumerable<ColumnBatch>, IReadOnlyList<ColumnBatch> or one ColumnBatch
@@ -1071,11 +1071,11 @@ When to use: normalized imports where rows for multiple tables must commit toget
 
 Steps:
 1. `POST .../bulk-load:begin` with `tables: ["runs","steps","messages"]`.
-2. Send rows to `:append` with a `_table` column naming each row's table (**Lead S12, next train**: column arrays, where it was NDJSON rows each carrying `_table`; see the [HTTP reference](../reference/http-api.md#post-jobidappend)).
+2. Send rows to `:append` with a `_table` column naming each row's table (**Lead S12, 0.6.0**: column arrays, where it was NDJSON rows each carrying `_table`; see the [HTTP reference](../reference/http-api.md#post-jobidappend)).
 3. `POST ...:commit` with optional `waitForDeferredWork` and `mqWaitMs` (**WorkloadCore S09, 0.3.0**).
 
 Expected checks:
-- A row without `_table` is rejected with `BULK_LOAD_MISSING_DISCRIMINATOR`: *Row {n} of this :append …*, `details: row={n}` (1-based; **Lead S12, next train**: it said "Row at line N"). The rows before it stay credited.
+- A row without `_table` is rejected with `BULK_LOAD_MISSING_DISCRIMINATOR`: *Row {n} of this :append …*, `details: row={n}` (1-based; **Lead S12, 0.6.0**: it said "Row at line N"). The rows before it stay credited.
 - Commit response includes `perTableRowCounts`.
 - Any abort leaves session in `aborted` and no successful commit response.
 
@@ -1098,7 +1098,7 @@ When to use: large seed/reseed/ingestion where you must preserve upstream IDs (i
 
 Steps:
 1. `POST .../bulk-load:begin` with `options: { "identityInsert": true }` (or C#/TS `IdentityInsert` / `identityInsert: true`).
-2. Append rows that give every autoIncrement column on every row — not absent, not `null` (frames or JSON column arrays; **Lead S12, next train**: NDJSON is refused).
+2. Append rows that give every autoIncrement column on every row — not absent, not `null` (frames or JSON column arrays; **Lead S12, 0.6.0**: NDJSON is refused).
 3. Commit successfully — only then does the server call `EnsureMinimumValue` to `max(inserted)` per column.
 4. Verify a subsequent ordinary insert with `id: 0` returns `max + 1`.
 
@@ -1152,11 +1152,11 @@ Logging__LogLevel__Aouda=Information
 | Field | What it tells you |
 |---|---|
 | `commitMs` | How long the `:commit` call itself took, measured server-side across the whole request. This is the number a client experiences. (**WorkloadCore S09, 0.3.0**) It is the commit itself, to durable: it no longer includes the wait for the load's materialized queries, which follows it as `mqWaitMs`. |
-| `lockHoldMs` | How long the exclusive table lock was held — the **whole session**, from `:begin`; (**Lead S19, next train**) until the job's rows ended, when the lock passes to the next job queued on the table. `lockHoldMs` far exceeding `commitMs` means the session was long, which is the recommended shape. Another writer to those tables waits for the lock and for the commit after it. |
+| `lockHoldMs` | How long the exclusive table lock was held — the **whole session**, from `:begin`; (**Lead S19, 0.6.0**) until the job's rows ended, when the lock passes to the next job queued on the table. `lockHoldMs` far exceeding `commitMs` means the session was long, which is the recommended shape. Another writer to those tables waits for the lock and for the commit after it. |
 | `mqPublishBacklog` | Materialized-query publishes outstanding on this database once this job queued its own, **including this one**, so `1` is the normal value for a load with a query attached. A figure that climbs job over job means the loader is committing faster than its materialized queries can publish. (**WorkloadCore S10, 0.3.0**) It counts the database's pending bulk-load jobs — loads whose table's pass has not yet run, this one included. See [Materialized queries](materialized.md). |
 | `mqKeyedLive`, `mqKeyedAbsent`, `mqKeyedUnresolved`, `mqKeyedLocated` | (**BL-662 / BL-664, 0.1.39**) — appended at the end of the line. How this database's materialized-query publishes found the existing result row for each group they touched, counted since the server opened the database:<br>• `live`: found in memory by primary key.<br>• `absent`: proven not to exist anywhere, cold storage included (**BL-663**).<br>• `unresolved`: neither, so the result table was read for it.<br>• `located`: the part of `unresolved` that exists in a segment, so its row had to be read. The rest of `unresolved` is keys nothing could decide.<br>They count lookups, not distinct rows. Read them as a ratio, and as the difference between two lines: a publish runs after its own commit, so each line includes every publish that has finished so far. A growing share of undecided keys (`unresolved` minus `located`) means publishes are searching again. |
 | `rowLoopMs`, `rowWaitMs`, ~~`mqFeedMs`, `mqDrainMs`, `mqStageWaitMs`~~ | (**WorkloadCore S10, 0.3.0**) `mqFeedMs`, `mqDrainMs` and `mqStageWaitMs` are removed: a load does no materialized-query work while it streams, so there is no stage to report. (**IngestAtSpeed S01 / S13, 0.1.40**) — appended at the end of the line. Where the session's row loop spent its time. `rowLoopMs` is the loop's wall time across the **whole session**, every `:append` included, so it can exceed `commitMs`. `rowWaitMs` is the part spent waiting for your client's next row (the append channel empty): it is your loader's time, not the server's. The materialized-query work runs on a stage beside the loop (**S13**): `mqFeedMs` is the stage's per-row feed, `mqDrainMs` its spill and build-buffer work, and both overlap `rowLoopMs` rather than adding to it. `mqStageWaitMs` is how long the loop waited for that stage; a large share of `rowLoopMs − rowWaitMs` there means the materialized queries, not the table write, set the ingest rate. (`mqInlineDrainMs`, from S01, is gone: the drains are no longer inline.) |
-| `commitWaitMs` | (**Lead S19, next train**) — appended at the end of the line. The part of `commitMs` this job's commit point waited for an earlier job on the same table to commit: commits on a table are first in, first out. `0` unless jobs were pipelined into one table. |
+| `commitWaitMs` | (**Lead S19, 0.6.0**) — appended at the end of the line. The part of `commitMs` this job's commit point waited for an earlier job on the same table to commit: commits on a table are first in, first out. `0` unless jobs were pipelined into one table. |
 | `postCommitMs`, `mqWaitMs`, `mqStatus` | (**WorkloadCore S09, 0.3.0**) — appended at the end of the line. `postCommitMs` is the time the engine spent after the load's commit point, outside the table lock: since the queries' maintenance no longer runs there, the hand-off of that maintenance. `mqWaitMs` is how long `:commit` then waited for the load's queries (the response's `mqWaitedMs`), and `mqStatus` how that ended (as in the response). BL-789's `mqPassWaitMs` and `mqPassMs` are gone with the pass that ran inside `:commit`. |
 
 ⚠️ **The phase fields do not have to sum to `commitMs`, and the gap is the point.** `segmentWriteMs`, `finalizeMs`, `walMs` and `catalogSaveMs` cover the coordinator's own work. Anything left over — buffer drain, spill merge waits, admission — is time nobody has attributed yet. Before `commitMs` existed there was no way to notice that there was a remainder at all.
@@ -1193,7 +1193,7 @@ batch, no JSON per row. Nothing changes in how you call `BulkLoadAsync` / `bulkL
 or in the resume cursor. A batch holding something the frame cannot carry (a nested object, an array, a
 column whose rows disagree on type) is sent as NDJSON, and so is every batch to an older server. NDJSON
 remained the format for curl and hand-written clients; the server decoded it without building a
-dictionary per row. (**Lead S12, next train; breaking**) NDJSON is gone: `:begin` advertises
+dictionary per row. (**Lead S12, 0.6.0; breaking**) NDJSON is gone: `:begin` advertises
 `["column-batch-v2", "column-arrays"]`, and what a frame cannot carry — and anything curl or a hand-written client sends — is one
 JSON column-array body (`application/json`, `{ "columns", "data", "absent"? }`) per `:append`. An NDJSON body is refused
 `415 ROW_OBJECTS_UNSUPPORTED`. Both SDKs of this train send column arrays (`@aouda/client` from **Lead S14**). The format is specified in the [HTTP API reference](../reference/http-api.md).
@@ -1263,17 +1263,17 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `403 AUTHORIZATION_DENIED` on `:begin` (**BL-1031, 0.5.0**) | A table in the load has PLS or RLS, and the caller is not a `service_role` key | Load with that database's `mk_svc_` key. Ordinary inserts remain the per-user write path. |
-| "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, next train**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
-| `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, next train**) | The level is not `strict` or `os` (lower case); `strict` in a database at `os`; or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into a table with vector columns or an edge or vector table, has no level it may use in an `os` database. |
-| `GET {jobId}` answers `lost` with `durability: "os"` (**Lead S26c, next train**) | The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was dropped whole | Load it again with the same idempotency key: it no longer names a commit. |
+| "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, 0.6.0**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
+| `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, 0.6.0**) | The level is not `strict` or `os` (lower case); `strict` in a database at `os`; or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into a table with vector columns or an edge or vector table, has no level it may use in an `os` database. |
+| `GET {jobId}` answers `lost` with `durability: "os"` (**Lead S26c, 0.6.0**) | The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was dropped whole | Load it again with the same idempotency key: it no longer names a commit. |
 | `BulkLoadInvalidOptions` on begin with `skipReplication` | Multi-node safety/policy check failed | Use `logShipSegments` or explicit bypass where allowed. |
 | `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Give every row a `_table` value within the declared table set. |
-| `415 ROW_OBJECTS_UNSUPPORTED` on append | The body is NDJSON (`application/x-ndjson`), no longer read (**Lead S12, next train**) | Send column-batch frames, or the rows as one JSON column-array body (`application/json`); upgrade the client library. |
+| `415 ROW_OBJECTS_UNSUPPORTED` on append | The body is NDJSON (`application/x-ndjson`), no longer read (**Lead S12, 0.6.0**) | Send column-batch frames, or the rows as one JSON column-array body (`application/json`); upgrade the client library. |
 | `BulkLoadCursorMismatch` from client | Client send position diverges from server durable cursor expectations | Retry from returned durable cursor and keep same idempotency key. |
 | `BulkLoadTableLocked` | Concurrent load holds table lock | Retry with same idempotency key or wait for lock release. |
 | `AlreadyTerminal` on force-abort | Job already completed/aborted/failed | Treat as no-op; inspect job history instead. |
-| `503 MEMORY_BUDGET_EXCEEDED` on a column-batch `:append` (**BL-831, 0.3.0**) | Memory is short; the frame was refused before it was decoded | Wait `Retry-After` and resume with the same idempotency key from `:begin`'s `nextSequence` (**Lead S21a, next train**); the session is still open. Both SDKs do it themselves. |
-| `409 BULK_LOAD_COMMIT_QUEUED` on a committing `:append` (**Lead group 5 review, next train**) | The job is still queued behind another load on its tables; the body's frames were applied | Send `:commit` for the job; send no row again. Both SDKs do it themselves. |
+| `503 MEMORY_BUDGET_EXCEEDED` on a column-batch `:append` (**BL-831, 0.3.0**) | Memory is short; the frame was refused before it was decoded | Wait `Retry-After` and resume with the same idempotency key from `:begin`'s `nextSequence` (**Lead S21a, 0.6.0**); the session is still open. Both SDKs do it themselves. |
+| `409 BULK_LOAD_COMMIT_QUEUED` on a committing `:append` (**Lead group 5 review, 0.6.0**) | The job is still queued behind another load on its tables; the body's frames were applied | Send `:commit` for the job; send no row again. Both SDKs do it themselves. |
 | `503` on `:commit` (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`) | The commit was refused for capacity — (**BL-831, BL-928, 0.3.0**) its spill merge running out of heap included; nothing was applied | Wait `Retry-After`, then run the load again from `:begin`. A `500` that says the load committed is the opposite case: do not resend. |
 | Commit reports timed-out write concern | Replica barrier not achieved in timeout window | Inspect replica lag, then decide retry/read policy. |
 

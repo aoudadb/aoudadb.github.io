@@ -183,7 +183,7 @@ If you do nothing:
   - Per-database broadcasters, subscriptions, and per-database ACKs.
   - Per-table subscription filtering (`All`, `Include`, `Exclude`) with coverage endpoint.
   - Per-database lag tracking in status/topology and health checks.
-  - (**Lead S26, next train**) Only tables at durability `strict` or `os` replicate: a table at `unlogged` or `memory` writes no
+  - (**Lead S26, 0.6.0**) Only tables at durability `strict` or `os` replicate: a table at `unlogged` or `memory` writes no
     WAL frames, so a replica receives none of its inserts, and asking for per-table replication on one is refused. The level is
     the primary's promise to the writer; see [durability levels](write-durability.md#durability-levels-lead-s26-next-train).
 - Write concern:
@@ -209,7 +209,7 @@ If you do nothing:
   disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). This is why replication is not
   supported in 0.3.0 (see the note at the top of this page). Streamed rows are held in memory on the
   replica and are not re-applied after a replica restart (**BL-839**).
-- ⚠️ (**Lead S20, next train**) **Bulk loads are not yet replicated** (**BL-1116**): no server wires a replica's side of a bulk load
+- ⚠️ (**Lead S20, 0.6.0**) **Bulk loads are not yet replicated** (**BL-1116**): no server wires a replica's side of a bulk load
   (the coordinator, the segment fetch, the registration), so a replica does not receive a load's segments when it commits. Its
   tokens stop below the load (a read presenting one waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`), and the rows
   reach it only with a checkpoint re-bootstrap. Load into the primary and read loaded rows there. See
@@ -586,7 +586,7 @@ Expected:
 - exactly one member with `role = "Primary"`
 - secondaries present in `members`.
 
-2. Write to primary (the rows as column arrays, **Lead S12, next train**):
+2. Write to primary (the rows as column arrays, **Lead S12, 0.6.0**):
 
 ```http
 POST http://127.0.0.1:5001/api/databases/appdb/tables/orders/rows

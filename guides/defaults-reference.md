@@ -37,7 +37,7 @@ is now honoured.)
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
 | Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
-| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB, and it follows the share when it is recomputed (**Lead S10, next train**). **On** (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). A read whose pages are more than the cache holds admits at most half of it (**Lead S10, next train**) | `Aouda:Memory:MaxPageCacheBytes` (the server's total, scaled to each database's share — **Lead S10, next train**); `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
+| Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB, and it follows the share when it is recomputed (**Lead S10, 0.6.0**). **On** (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). A read whose pages are more than the cache holds admits at most half of it (**Lead S10, 0.6.0**) | `Aouda:Memory:MaxPageCacheBytes` (the server's total, scaled to each database's share — **Lead S10, 0.6.0**); `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
 | Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host (**WorkloadCore S17, 0.3.0** — `Abundant` raised the fraction to 0.15) | derived |
 | Per-table flush trigger (`T16`) | `clamp(T11 / max(n, 4), min(1 MB, T11 / n), 64 MB)` — `T11` the write buffer's ceiling (15 % of governed, floor 16 MB), `n` the tables sharing it (**WorkloadCore S17, 0.3.0** — `Abundant` raised the ceiling to 1 GB) | derived |
@@ -122,7 +122,7 @@ The server starts as before; remove the key.
 
 ---
 
-## Durability (**Lead S26, next train**)
+## Durability (**Lead S26, 0.6.0**)
 
 What a write survives is one level per database, optionally narrowed per table. See
 [Write Path Durability — durability levels](write-durability.md#durability-levels-lead-s26-next-train).
@@ -130,12 +130,12 @@ What a write survives is one level per database, optionally narrowed per table. 
 | Value | Default | Allowed | Key |
 |---|---|---|---|
 | Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `Aouda:Databases:<db>:Durability`; embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
-| Bulk-load durability (**Lead S26c, next train**) | **inherits** the database's level for a load: `strict`; `os` in a database at `os` (an `unlogged` table still gets `strict`) | `strict`, `os` — `strict` not in an `os` database; `os` not for a multi-table job, a table with vector columns, or an edge or vector table | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
+| Bulk-load durability (**Lead S26c, 0.6.0**) | **inherits** the database's level for a load: `strict`; `os` in a database at `os` (an `unlogged` table still gets `strict`) | `strict`, `os` — `strict` not in an `os` database; `os` not for a multi-table job, a table with vector columns, or an edge or vector table | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
 | Table durability | **inherits** the database's level | `strict` (only in a `strict` database), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
 
 The database's level is read at every open; one with a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory`. A table's
 change to or from `memory` after creation is refused. These replace `enableWal` / `EnableWal` (default `true`), `dataDurability`
-(`DiskBacked`) and `durability.walEnabled`, which are now refused by name. (**Lead S26c, next train**) An open that does not
+(`DiskBacked`) and `durability.walEnabled`, which are now refused by name. (**Lead S26c, 0.6.0**) An open that does not
 follow a clean close empties an `unlogged` table that was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train)).
 
 ---

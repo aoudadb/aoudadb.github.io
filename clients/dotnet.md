@@ -17,11 +17,11 @@ _Repo: `aouda` (`src/Aouda.Client/`)_
 `Aouda.Client` is the official .NET client for an Aouda server. It provides:
 
 - **Queries**: a fluent query builder over `client.GetTable(name)` (untyped) and `client.GetTable<T>()` (typed)
-- **Inserts**: single rows, lists of rows, typed objects, batched writers, and column batches (**Lead S13, next train**)
+- **Inserts**: single rows, lists of rows, typed objects, batched writers, and column batches (**Lead S13, 0.6.0**)
 - **Bulk load**: the `:begin` / `:append` / `:commit` protocol behind one call, from rows or from column batches
-  (**Lead S13, next train**), with resume after a failure
+  (**Lead S13, 0.6.0**), with resume after a failure
 - **Schema, materialized queries, named queries and mutations, streaming, backup and admin APIs**
-- **Resilience**: retries that never duplicate a write (**Lead S02, next train**), and a circuit breaker
+- **Resilience**: retries that never duplicate a write (**Lead S02, 0.6.0**), and a circuit breaker
 - **Authentication**: server auth and application auth
 
 For the same API in-process, without a server, use `Aouda.Embedded` (see
@@ -175,7 +175,7 @@ For rows that arrive one at a time, `orders.CreateBatchWriter()` buffers them an
 every 1,000 rows or 20 ms). Its `AddAsync` returns once the row is buffered; a failure surfaces on a later call, on
 `FlushAsync`, or on disposal.
 
-### Column batches (**Lead S13, next train**)
+### Column batches (**Lead S13, 0.6.0**)
 
 When your data is already in columns (read from Parquet or Arrow, a data frame, another database's export), insert it as a
 `ColumnBatch` and skip building a dictionary per row:
@@ -231,7 +231,7 @@ Like every insert, a column-batch insert is re-sent only after a failure that pr
 
 ---
 
-## 6) Building column batches (**Lead S13, next train**)
+## 6) Building column batches (**Lead S13, 0.6.0**)
 
 A `ColumnBatch` (namespace `Aouda.Protocol.BulkLoad`) is a set of named columns of the same length. Build each column with a
 static factory on `ColumnBatchColumn`, then the batch with `ColumnBatch.Of(...)`.
@@ -348,7 +348,7 @@ Overloads take an `IAsyncEnumerable<IReadOnlyDictionary<string, object?>>` or an
 and a typed table loads objects (`client.GetTable<Order>().BulkLoadAsync(orders)`, from an `IEnumerable<T>` or
 `IAsyncEnumerable<T>`). The SDK packs the rows into column-batch frames itself.
 
-### From column batches (**Lead S13, next train**)
+### From column batches (**Lead S13, 0.6.0**)
 
 The fast path for columnar data: each batch is written to the server as frames **straight from its arrays**, with no row objects
 in between.
@@ -406,12 +406,12 @@ middle of a batch. **Cancelling a load is not a failure to resume from:** when i
 job (a best-effort `:abort`), and a re-run with the same key starts a fresh job and sends every row again. So does a re-run
 after a server restart, which an open job does not survive.
 
-### Several jobs into one table (**Lead S18b, next train**)
+### Several jobs into one table (**Lead S18b, 0.6.0**)
 
 A load that arrives as several jobs — a file per day, a batch per hour — goes through `BulkLoadJobsAsync`, not a loop of
 `BulkLoadAsync` calls. It sends job N+1's `:begin` and `:append`s while job N commits (the server queues them behind the
 table's bulk-load lock), so a commit overlaps the next job's sending instead of adding to it, and it yields each job's handle in
-job order, as its commit returns. (**Lead S21b, next train**) A job's last column-batch body commits it in its end frame — no
+job order, as its commit returns. (**Lead S21b, 0.6.0**) A job's last column-batch body commits it in its end frame — no
 `:commit` request — and job N+1 is begun once that body of job N is written, so N's finalize and commit overlap N+1's rows too:
 
 ```csharp
@@ -429,7 +429,7 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 
 - **Each job is a job of its own**: committed, visible and answered on its own, in order. Its handle is exactly what
   `BulkLoadAsync` would have returned for it.
-- **One job sending and one committing** (**Lead S21b, next train**; it was "one `:append` and one `:commit` in flight"). Job
+- **One job sending and one committing** (**Lead S21b, 0.6.0**; it was "one `:append` and one `:commit` in flight"). Job
   N+2 is begun only after job N's handle. The next job is asked of `jobs` once the previous job's rows are all sent.
 - **The first failure ends the sequence**, after every earlier job's handle, and no later job commits: (**Lead S21b, next
   train**) each job is begun naming the one before it (`afterJobId`), and the server refuses the commit of a job whose predecessor
@@ -457,13 +457,13 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 | `PostLoadMqBehavior` | `ClientPostLoadMqBehavior.Auto` | `Skip` leaves the load's materialized queries behind until you refresh them. |
 | `WriteConcern` / `WriteConcernTimeout` | `Acknowledged` / 5 minutes | Replica acknowledgement at commit. |
 | `IdentityInsert` | `false` | Store explicit `autoIncrement` values as they are; every row must give them. |
-| `Durability` | `null` (the database's level for a load) | (**Lead S26c, next train**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os`, `Strict` everywhere else. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train). |
+| `Durability` | `null` (the database's level for a load) | (**Lead S26c, 0.6.0**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os`, `Strict` everywhere else. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train). |
 | `ApplyTransforms` / `PreTransformed` | `false` / `false` | A table with derived columns, checks or transforms needs exactly one of them. |
 | `ConflictPolicy` | `BulkLoadConflictPolicy.Block` | `FailFast` fails at once when another load holds the table. |
 | `Progress` | none | An `IProgress<BulkLoadProgress>` called after each `:append` and at commit. `BulkLoadProgress` carries deferred-work counters, not rows: the per-`:append` report is empty, so count rows in your source. |
 
 The handle reports `RowsLoaded`, `PerTableRowCounts`, `SegmentsCreated`, `ExpiredRows`, `WasResumed`, `Token` (the commit's
-consistency token), `Durability` (the job's level; **Lead S26c, next train**), `MqStatus` / `MqFrontierToken`, and offers
+consistency token), `Durability` (the job's level; **Lead S26c, 0.6.0**), `MqStatus` / `MqFrontierToken`, and offers
 `WaitForMaterializedQueriesAsync()` and `GetProgressAsync()`.
 A handle returned for a key whose job had already committed (nothing sent) has the job's `RowsLoaded` and `Token`, but an empty
 `PerTableRowCounts` and `SegmentsCreated` 0.
@@ -477,7 +477,7 @@ cannot change, at most `MaxRetries` times (3 by default: four attempts in all), 
 refusal** — `503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` or `429 SERVER_AT_CAPACITY` (`AoudaCapacityException`) —
 is waited out: a `Retry-After` in seconds is the least the SDK waits before the next attempt; without one (or with an HTTP
 date, which is not read) the backoff applies. A write whose repeat is **not** a no-op is treated differently
-(**Lead S02, next train**; before, a timed-out insert was re-sent and could insert its rows twice), because re-sending one the
+(**Lead S02, 0.6.0**; before, a timed-out insert was re-sent and could insert its rows twice), because re-sending one the
 server already applied would apply it twice:
 
 - **Inserts** (rows, typed objects, column batches), updates, deletes, named mutations and a bulk-load `:commit` are re-sent
@@ -485,12 +485,12 @@ server already applied would apply it twice:
   or a host name that did not resolve), a TLS handshake that failed before the request was sent, or a capacity refusal, which
   the server answers only for a request it did not apply. Any other `503`, a `504`, a **timeout or a lost answer** proves
   nothing — the server may have committed — so the error reaches you instead of a second copy of the rows. Check before you
-  insert again. (**Lead group 3 review, next train**) A failure after a write was applied is never answered as a capacity
+  insert again. (**Lead group 3 review, 0.6.0**) A failure after a write was applied is never answered as a capacity
   refusal.
 - **A `:commit` refused for capacity has failed its job.** The server answers every repeat of it with the same `503`, so the
   SDK's re-sends end in `AoudaCapacityException`. Wait its `RetryAfter`, then run the load again: it starts a fresh job and
   sends every row (the key is free again).
-- **A bulk-load `:append` is re-sent only by the SDK, after asking where the job is** (**Lead S21a, next train**). A job's frames
+- **A bulk-load `:append` is re-sent only by the SDK, after asking where the job is** (**Lead S21a, 0.6.0**). A job's frames
   are numbered and the server applies each number once, so a body sent again loads none of its rows twice. An `:append` that
   fails in transit (a connection error, a timeout, a `503`) is answered by a `:begin` with the job's key — which stops the
   server's stale request and answers the job's `nextSequence` — and then the same body again, up to four attempts with a short
@@ -500,7 +500,7 @@ server already applied would apply it twice:
   and the SDK sends nothing below it — and throws `BulkLoadCursorMismatchException`, sending nothing, if the frames it skips do
   not carry the rows the server holds (until Lead S21a it resumed by rows, from `resumeFromRow`, and threw on the first failed
   `:append`). Do not add a retry of your own around `:append`. A `:commit` names the frames the SDK sent, and the server commits
-  nothing unless it applied exactly those. (**Lead S21b, next train**) The body that commits a job is recovered the same way, with
+  nothing unless it applied exactly those. (**Lead S21b, 0.6.0**) The body that commits a job is recovered the same way, with
   two more outcomes: if the job committed before the answer was lost, the keyed `:begin` replays it and the SDK returns its handle
   (`WasResumed`); if its commit is still running, the server says so and the SDK waits (not counted as an attempt, up to
   `RequestTimeout`), then asks again.
@@ -510,7 +510,7 @@ server already applied would apply it twice:
   `BULK_LOAD_CURSOR_MISMATCH` as `BulkLoadCursorMismatchException` (its `NextSequence`, `ServerRows` and `ClientRows` say where
   the job and the load disagree). A `400` for the body's rows leaves the job open, so the same key resumes it from the frame the
   server needs next — and fails there again until the source is fixed.
-- **Set your own `IdempotencyKey` if you may need to resume.** (**Lead group 3 review, next train**) A failed load whose key
+- **Set your own `IdempotencyKey` if you may need to resume.** (**Lead group 3 review, 0.6.0**) A failed load whose key
   the SDK generated is aborted (a best-effort `:abort`), since nobody else knows the key — with two exceptions. A transient
   `:append` failure keeps the job: its `BulkLoadAppendFailedException` hands you the generated key in `IdempotencyKey`, and
   running the load again with that key resumes it. And once `:commit` has been sent the job is not aborted: the server's

@@ -275,7 +275,7 @@ Authorization: Bearer <service-key>
 }
 ```
 
-The rows travel as column arrays — one array per column (**Lead S12, next train**: `"rows": [{…}]` is refused
+The rows travel as column arrays — one array per column (**Lead S12, 0.6.0**: `"rows": [{…}]` is refused
 `400 ROW_OBJECTS_UNSUPPORTED`; see [the write body](../reference/http-api.md#column-arrays-the-write-body)).
 
 No `updateMode` makes an insert wait for its queries (**WorkloadCore S09, 0.3.0**): `sync` and `async` queries alike are applied by

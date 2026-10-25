@@ -259,7 +259,7 @@ Documented intent that is not currently fully productized:
     0.3.x such a write could race the re-open and fail the stream for good ("No open stream with id …"), or hang.
 - Transport strategy:
   - primary WebSocket, optional long-poll fallback for restricted environments.
-- Bulk loads (**Lead S27b, next train**: documented; the behaviour is not new):
+- Bulk loads (**Lead S27b, 0.6.0**: documented; the behaviour is not new):
   - **A bulk load emits no change events on the table it loads.** Its rows become visible at the job's commit, but a
     subscriber to that table receives no `change` event for them, and no other signal: no gap, no notice. A client that
     must see them re-reads the table (or re-subscribes for a fresh snapshot) after the load's `:commit` answers. Inserts,
@@ -469,7 +469,7 @@ Primary proving tests:
 
 1. Client opens stream (`stream_open`) with mode (`insert`/`upsert`).
 2. `WriteStreamHandler.HandleOpenAsync(...)` validates stream ID and target table.
-3. Each `stream_rows` frame is read as column arrays (**Lead S12, next train**; a frame with `rows` is refused `ROW_OBJECTS_UNSUPPORTED`) and enforces:
+3. Each `stream_rows` frame is read as column arrays (**Lead S12, 0.6.0**; a frame with `rows` is refused `ROW_OBJECTS_UNSUPPORTED`) and enforces:
    - batch limits and payload limits,
    - sequence continuity,
    - backpressure decision (accept/reject/close),
@@ -680,7 +680,7 @@ Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `
 {"type":"snapshot","id":"sub-orders","columns":["id","status"],"data":[[1],["open"]],"version":456}
 ```
 
-(**Lead S12, next train; breaking**) A `snapshot` page is column arrays — `columns`, and `data` with one array per column — as a
+(**Lead S12, 0.6.0; breaking**) A `snapshot` page is column arrays — `columns`, and `data` with one array per column — as a
 query result is; it was `"rows": [{…}]`. A `change` still carries one row, as an object.
 
 ```json
@@ -715,7 +715,7 @@ Server acknowledges with `stream_ready` before the client may send rows:
 {"type":"stream_rows","id":"stream-1","seq":1,"columns":["id","status"],"data":[[1],["open"]]}
 ```
 
-(**Lead S12, next train; breaking**) A `stream_rows` batch is column arrays (`columns`, `data`, and `absent` for a cell that is not
+(**Lead S12, 0.6.0; breaking**) A `stream_rows` batch is column arrays (`columns`, `data`, and `absent` for a cell that is not
 given), the same body as an HTTP insert; it was `"rows": [{…}]`, which is now answered with an `error` coded
 `ROW_OBJECTS_UNSUPPORTED`. See the [HTTP reference](../reference/http-api.md#column-arrays-the-write-body).
 

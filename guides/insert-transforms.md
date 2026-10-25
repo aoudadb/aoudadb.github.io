@@ -416,7 +416,7 @@ curl -X POST http://localhost:5433/api/databases/trading/tables/VendorTick/rows 
   }'
 ```
 
-The body's rows are column arrays (**Lead S12, next train**: `"rows": [{…}]` is refused `400 ROW_OBJECTS_UNSUPPORTED`).
+The body's rows are column arrays (**Lead S12, 0.6.0**: `"rows": [{…}]` is refused `400 ROW_OBJECTS_UNSUPPORTED`).
 
 Assert: `GET`/`query` on `VendorTick` does not contain that row; `EquityQuote` does; one change event on `EquityQuote`.
 

@@ -60,7 +60,7 @@ var rows = await client.GetTable("events").ToListAsync();
 ```
 
 Data already held as columns inserts and bulk-loads as a `ColumnBatch` (`ColumnBatch.Of(ColumnBatchColumn.FromInt64s(...), ...)`,
-then `InsertAsync(batch)` or `client.BulkLoadAsync(table, batches)`), without a dictionary per row (**Lead S13, next train**). See
+then `InsertAsync(batch)` or `client.BulkLoadAsync(table, batches)`), without a dictionary per row (**Lead S13, 0.6.0**). See
 [.NET client](../clients/dotnet.md).
 
 ---

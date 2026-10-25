@@ -48,7 +48,7 @@ Content-Type: application/json
 { "database": "appdb", "columns": ["id", "status"], "data": [[1], ["open"]] }
 ```
 
-(The insert body's rows are column arrays since **Lead S12, next train**; see [the write body](../reference/http-api.md#column-arrays-the-write-body).)
+(The insert body's rows are column arrays since **Lead S12, 0.6.0**; see [the write body](../reference/http-api.md#column-arrays-the-write-body).)
 
 ```http
 HTTP/1.1 200 OK
@@ -217,7 +217,7 @@ The 42-hex string encodes epoch and position. Write volume is visible to anyone 
 
 When a token or lag budget is in play, the read may wait up to `waitMs` (default 250 ms) before `onExceeded`. Existing traffic with neither is unchanged.
 
-### A token from an accepted bulk load (**Lead S30, next train**)
+### A token from an accepted bulk load (**Lead S30, 0.6.0**)
 
 A bulk load answered `accepted` ([Bulk Load](bulk-load.md#answered-before-the-commit-accepted-lead-s30-next-train)) hands out a token
 before its rows are visible. A read presenting it — or any later write's token — waits until the job is visible: the primary, every

@@ -335,7 +335,7 @@ aouda start --port 5433 --data-dir ./data
 ```
 
 ```bash
-# rows as column arrays (Lead S12, next train)
+# rows as column arrays (Lead S12, 0.6.0)
 curl -X POST http://localhost:5433/api/databases/myapp/tables/orders/rows \
   -H "Content-Type: application/json" \
   -d '{ "database": "myapp", "columns": ["id", "total"], "data": [[1], [99.99]] }'

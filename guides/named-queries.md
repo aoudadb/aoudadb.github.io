@@ -416,7 +416,7 @@ curl -s -X POST \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-Success looks like any other query result: column arrays (`columns`, `types`, `data`, `rowCount`). (**Lead S12, next train**) There is no `format` parameter any more; `?format=` is refused `400 INVALID_FORMAT`. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. On the **data-plane listener**, a missing token or an unentitled caller (`mk_anon_*`, user JWT without `db_reader`) is the **same** 404 — not 401/403 — so names are not enumerable. The **admin listener** still returns 401 (`AUTH_TOKEN_MISSING`) / 403 (`AUTHORIZATION_DENIED`). Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
+Success looks like any other query result: column arrays (`columns`, `types`, `data`, `rowCount`). (**Lead S12, 0.6.0**) There is no `format` parameter any more; `?format=` is refused `400 INVALID_FORMAT`. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. On the **data-plane listener**, a missing token or an unentitled caller (`mk_anon_*`, user JWT without `db_reader`) is the **same** 404 — not 401/403 — so names are not enumerable. The **admin listener** still returns 401 (`AUTH_TOKEN_MISSING`) / 403 (`AUTHORIZATION_DENIED`). Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
 
 ### TypeScript (`@aouda/client`)
 
@@ -753,7 +753,7 @@ Identity columns are the one thing `values` may **not** name: a column with `der
 
 An `op: "insert"` definition can accept **many rows in one execute call** instead of a single row. Declare `batchParam` with the name of a parameter that will carry them; `values` stays the per-row template.
 
-(**Lead S12, next train; breaking**) The batch argument is **column arrays**, like every write body
+(**Lead S12, 0.6.0; breaking**) The batch argument is **column arrays**, like every write body
 ([HTTP reference](../reference/http-api.md#column-arrays-the-write-body)): `columns` names the parameters, `data` holds one array per
 parameter with one value per row, and the optional `absent` lists, per parameter, the rows that do not give it. Row *i*'s values fill
 that row's `{ "param": … }` holes, overriding a top-level `args` value of the same name; a parameter a row does not give falls back to
@@ -785,7 +785,7 @@ curl -s -X POST \
 ```
 
 ```typescript
-// The SDK sends a batch argument given as rows as column arrays (Lead S14, next train) — the type the generated client
+// The SDK sends a batch argument given as rows as column arrays (Lead S14, 0.6.0) — the type the generated client
 // declares for it (`Array<{…}>`). A ColumnBatch works too.
 await client.namedMutations.execute("tick.record", {
   rows: ticks.map((t) => ({ ticker: t.ticker, px: t.px })),
@@ -818,7 +818,7 @@ For a batch insert where some callers choose the id, bind it instead and send `0
 { "args": { "rows": { "columns": ["id", "ticker", "px"], "data": [[0], ["AAPL"], [189.2]] } } }
 ```
 
-`0` still means auto-generate. Leaving the **column** out of the template means the same as `0` — so the constant form is a convenience rather than a requirement — but leaving a bound **parameter** out of a row does not: a required parameter (the default) refuses the call with `400 NAMED_QUERY_PARAM_REQUIRED`, and one declared optional binds `null`, which is not a request for an id. Send `0`. `generatedValues` in the mutation result carries the allocated id (**Lead S12, next train**: as column arrays, `{ "columns": ["Id"], "data": [[…]] }`, one cell per row). The same rule applies to plain `POST …/tables/{t}/rows`. Under `identityInsert: true`, omitting the column is still an error: you asked to control the identity and then did not supply one.
+`0` still means auto-generate. Leaving the **column** out of the template means the same as `0` — so the constant form is a convenience rather than a requirement — but leaving a bound **parameter** out of a row does not: a required parameter (the default) refuses the call with `400 NAMED_QUERY_PARAM_REQUIRED`, and one declared optional binds `null`, which is not a request for an id. Send `0`. `generatedValues` in the mutation result carries the allocated id (**Lead S12, 0.6.0**: as column arrays, `{ "columns": ["Id"], "data": [[…]] }`, one cell per row). The same rule applies to plain `POST …/tables/{t}/rows`. Under `identityInsert: true`, omitting the column is still an error: you asked to control the identity and then did not supply one.
 
 Bind is **all-or-nothing**, matching the plain multi-row insert path: the cap is checked, then every row is bound, before any row reaches the engine. One malformed row fails the whole call — no partial insert — and the `400` response names the offending row index:
 

@@ -127,7 +127,7 @@ If you run server defaults and do not set per-database overrides:
 
 - Data path is `./data`.
 - Server uses `Databases/{db}` database roots and `tables/{tableName}` table roots.
-- New databases are at durability `strict` by default — WAL written through before a write is visible (**Lead S26, next train**; see [durability levels](write-durability.md#durability-levels-lead-s26-next-train)).
+- New databases are at durability `strict` by default — WAL written through before a write is visible (**Lead S26, 0.6.0**; see [durability levels](write-durability.md#durability-levels-lead-s26-next-train)).
 - Database replication mode defaults to `Replicate`.
 - Database default table temperature is `Auto`.
 - Write concern defaults to `One` with timeout `5000 ms`.
@@ -136,8 +136,8 @@ If you run server defaults and do not set per-database overrides:
 | Setting / behavior | Default | Practical impact |
 |---|---|---|
 | `Aouda:DataPath` | `./data` | Persistent root for all server databases |
-| `CreateDatabaseRequest.durability` | `strict` | New DB writes are WAL-backed and forced to disk by default (**Lead S26, next train**; replaces `enableWal`) |
-| `DatabaseConfigSection.Durability` | `strict` | Config-defined DBs default to `strict` (**Lead S26, next train**; replaces `EnableWal`) |
+| `CreateDatabaseRequest.durability` | `strict` | New DB writes are WAL-backed and forced to disk by default (**Lead S26, 0.6.0**; replaces `enableWal`) |
+| `DatabaseConfigSection.Durability` | `strict` | Config-defined DBs default to `strict` (**Lead S26, 0.6.0**; replaces `EnableWal`) |
 | `DatabaseConfigSection.ReplicationMode` | `Replicate` | DB participates in replication unless overridden |
 | `DatabaseConfigSection.DefaultTemperature` | `Auto` | New tables default to temperature automation |
 | `DatabaseConfigSection.WriteConcern` | `One` | Primary ACK semantics by default |
@@ -193,7 +193,7 @@ If you run server defaults and do not set per-database overrides:
 
 - Some persistence-policy ADR concepts (`DiskOnly`, full policy matrix) are not exposed as explicit end-user policy enums in current HTTP/TS surfaces.
 
-> **Note (P30):** the memory-only mode is fully enforced end-to-end (P30 S2): such tables write nothing to disk — no `.hot`, `.col`, `.hra`, or WAL records. This is no longer a "reserved" surface. (**Lead S26, next train**) It is now the `memory` durability level (was `MemoryOnly`); see [durability levels](write-durability.md#durability-levels-lead-s26-next-train) and `guides/hot-cold.md §2.4`.
+> **Note (P30):** the memory-only mode is fully enforced end-to-end (P30 S2): such tables write nothing to disk — no `.hot`, `.col`, `.hra`, or WAL records. This is no longer a "reserved" surface. (**Lead S26, 0.6.0**) It is now the `memory` durability level (was `MemoryOnly`); see [durability levels](write-durability.md#durability-levels-lead-s26-next-train) and `guides/hot-cold.md §2.4`.
 
 ## 2.5 Phase coverage matrix
 
@@ -212,7 +212,7 @@ If you run server defaults and do not set per-database overrides:
 | Stable server/database/table storage layout | Yes | No | No | `StorageConstants.cs`, layout classes, P6 Task4 report | Table-name path model is active |
 | Catalog snapshot durability (`catalog.json`) | Yes | No | No | `CatalogStore.cs`, catalog tests | Atomic temp-write + move |
 | WAL append durability and replay | Yes | No | No | `WalWriter.cs`, replay/bootstrap paths, restart tests | Core durability path shipped |
-| Per-table durability level | Yes | No | No | P6 Task5 report, `AoudaEngine` durability resolution, Lead S26 | (**Lead S26, next train**) A table names `strict`, `unlogged` or `memory`, or inherits the database's level; `strict` needs a `strict` database, `os` is a database level only |
+| Per-table durability level | Yes | No | No | P6 Task5 report, `AoudaEngine` durability resolution, Lead S26 | (**Lead S26, 0.6.0**) A table names `strict`, `unlogged` or `memory`, or inherits the database's level; `strict` needs a `strict` database, `os` is a database level only |
 | Per-database WAL replication framing | Yes | No | No | P6 EpicE Task1 report, replication streaming code | v2 frame model with DB tagging |
 | Hot segment file persistence and restart hot-load | Yes | No | No | P3 Task7 report + bugfix report, hot persistence tests | Type-complete persistence added |
 | WAL slot lifecycle management (`system/replication/backup/archive`) | Yes | No | No | ADR 0016 + P4 Epic I + BL-186 S05 | Retention boundaries consumer-aware. Archive slot is created when archiving is configured |
@@ -278,11 +278,11 @@ If you run server defaults and do not set per-database overrides:
     whole segments are retired; 10: a table's retention), and a materialized-query definition file is version **2**. A directory
     written by 0.4.0 (catalog format 7), or by any other format, is refused at open naming the version found and the version
     expected; there is no migration. The WAL gains a `RangeDelete` frame (tag 73), which an older build does not know.
-  - (**Lead S20a, next train**) The catalog format is **11**: a bulk load's commit record (a catalog journal record) carries the
+  - (**Lead S20a, 0.6.0**) The catalog format is **11**: a bulk load's commit record (a catalog journal record) carries the
     job's idempotency key, rows, commit time and token, and a table's shard keeps those for the idempotency window. The two side
     files `bulk-load-idempotency.log` and `bulk-load-outcomes.log` are gone. A directory in catalog format 10 (0.5.0) is refused at
     open naming 10 and 11; there is no migration — reload the data from its source.
-  - (**Lead S26, next train**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
+  - (**Lead S26, 0.6.0**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
     a table records its durability level, and a database its level in place of `enableWal`. A data directory written by an
     earlier build is refused at open naming the version found and the version expected; there is no migration.
 - **Durability layering**
@@ -392,7 +392,7 @@ Primary tests:
 
 1. Write enters engine mutation path (`InsertRowsAsync`/update path).
 2. `ResolveWalWriter(tableEntry)` decides effective writer:
-   - Database at `unlogged` or `memory` -> no writer (**Lead S26, next train**).
+   - Database at `unlogged` or `memory` -> no writer (**Lead S26, 0.6.0**).
    - A table at `unlogged` or `memory` (its own level) -> no writer, even when the database has a WAL.
 3. If writer exists, `WalWriter.AppendAsync(...)` writes framed WAL record and flushes.
 4. On restart, `StorageBootstrap` + `WalReplayDriver` consume checkpoint boundaries and replay frames into HRA/storage state.
@@ -537,14 +537,14 @@ Primary tests:
 |---|---|---|---|---|---|
 | `Aouda:DataPath` | string | `./data` | non-empty path | startup config | Server root path |
 | `Aouda:Port` | int | `5000` | 1..65535 | startup config | HTTP port |
-| `Aouda:Databases:{db}:Durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | startup config | (**Lead S26, next train**) DB durability level; replaces `EnableWal` / `DataDurability`, which fail startup validation naming `Durability` |
+| `Aouda:Databases:{db}:Durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | startup config | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which fail startup validation naming `Durability` |
 | `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | DB replication participation |
 | `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | startup config | Default table policy |
 | `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`,`Majority`,`All` | startup config | ACK semantics |
 | `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | >=100 | startup config | Timeout for higher write concerns |
 | `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | startup config | Timeout policy |
-| `CreateDatabaseRequest.durability` | string? | null -> `strict` | `strict`,`os`,`unlogged`,`memory` | HTTP create-db payload | (**Lead S26, next train**) `enableWal` / `dataDurability` are refused (400 `INVALID_REQUEST`) |
+| `CreateDatabaseRequest.durability` | string? | null -> `strict` | `strict`,`os`,`unlogged`,`memory` | HTTP create-db payload | (**Lead S26, 0.6.0**) `enableWal` / `dataDurability` are refused (400 `INVALID_REQUEST`) |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |
 | `CreateDatabaseRequest.maxMemoryShareBytes` | long? | null | null or non-negative | HTTP create-db payload | Optional cap on the database's share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`, now ignored) |
@@ -578,7 +578,7 @@ Configuration precedence and behavior notes:
 ```csharp
 var engine = await AoudaEngine.OpenAsync(
     dataPath: "./data/Databases/appdb",
-    durability: DurabilityLevel.Strict,   // Lead S26, next train (replaces enableWal)
+    durability: DurabilityLevel.Strict,   // Lead S26, 0.6.0 (replaces enableWal)
     enableReplication: true);
 
 await engine.CreateTableAsync(
@@ -638,9 +638,9 @@ Common mistake: using `/api/admin/metrics` backup counters as if they are backup
 
 | Capability | .NET API | TypeScript API | HTTP/Protocol | Status | Notes |
 |---|---|---|---|---|---|
-| Open durable engine at a durability level | `AoudaEngine.OpenAsync(durability: ...)` | `databases.create(name, { durability })` | DB create `durability` sets the DB level (**Lead S26, next train**) | Implemented | DB-level and table-level durability both available |
+| Open durable engine at a durability level | `AoudaEngine.OpenAsync(durability: ...)` | `databases.create(name, { durability })` | DB create `durability` sets the DB level (**Lead S26, 0.6.0**) | Implemented | DB-level and table-level durability both available |
 | Create DB with persistence options | `DatabaseManager.CreateDatabaseAsync` (server-side) | `client.databases.create(...)` | `POST /api/databases` | Implemented | Good parity for core options |
-| Per-table durability overrides | `CreateTableAsync(... durability)` / `AlterTableDurabilityAsync` | Schema document `durability.level` | Declarative schema `durability.level`; table GET reports `durability` (**Lead S26, next train**) | Partial | The level is surfaced; replication / write concern overrides are engine-only |
+| Per-table durability overrides | `CreateTableAsync(... durability)` / `AlterTableDurabilityAsync` | Schema document `durability.level` | Declarative schema `durability.level`; table GET reports `durability` (**Lead S26, 0.6.0**) | Partial | The level is surfaced; replication / write concern overrides are engine-only |
 | Replication persistence status | `ReplicationState`/host services | `client.admin.replication.status/topology/coverage` | `/admin/replication/*` | Implemented | Monitoring and topology surface available |
 | Backup metrics visibility | Perf + metrics collector | `client.admin.metrics.*` | `GET /api/admin/metrics*` | Implemented | Observability only |
 | Execute backup/restore lifecycle | `BackupEngine`, `RestoreEngine`, `BackupLifecycleManager` | `client.admin.backup.*` | `/admin/backup/*` | Implemented | P16 SA4; PITR via `targetTime` (BL-186 S07) |
@@ -742,7 +742,7 @@ Cold-page integrity (**BL-815, 0.3.0**):
 Recovery/restart expectations:
 
 - Restart should reload catalog and segment state and replay WAL deltas.
-- If a DB/table is at `unlogged` or `memory`, those writes are not WAL-durable by design: `unlogged` is kept whole by a clean close; after any other stop it keeps its flushed rows, or is emptied if it was being changed (**Lead S26c, next train**), `memory` keeps nothing.
+- If a DB/table is at `unlogged` or `memory`, those writes are not WAL-durable by design: `unlogged` is kept whole by a clean close; after any other stop it keeps its flushed rows, or is emptied if it was being changed (**Lead S26c, 0.6.0**), `memory` keeps nothing.
 - Backup/restore engine flows are deterministic when using verified manifests and available WAL archives.
 
 Suggested tuning sequence:
@@ -762,11 +762,11 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Data path exists but DB cannot open | Invalid/partial directory state or config mismatch | Check server startup logs, validate `DataPath`, verify required DB subdirectories |
-| `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 12 only" (6 in 0.3.0, 10 in 0.5.0; 12 since **Lead S26, next train**) | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, 0.5.0 wrote 10, a newer build writes more (**architecture review, RR-A2-4, 0.3.0**). A shard or journal naming another version under the root's format is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
+| `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 12 only" (6 in 0.3.0, 10 in 0.5.0; 12 since **Lead S26, 0.6.0**) | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, 0.5.0 wrote 10, a newer build writes more (**architecture review, RR-A2-4, 0.3.0**). A shard or journal naming another version under the root's format is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
 | A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#214-troubleshooting-by-symptom)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
-| WAL file not growing for a table | The table's effective level is `unlogged` or `memory` (its own, or the database's) | Check `GET .../tables/{table}` → `durability` (`level`, `source`) and the database's `options.durability` (**Lead S26, next train**) |
-| Database refuses to open after its `Durability` was set to `unlogged` or `memory` | It has a WAL from an earlier open at `strict` or `os`; opening it without one would ignore the writes the WAL holds (**Lead S26, next train**) | Open it at `strict` or `os`; there is no path to a level without a WAL yet (BL-1145) |
+| WAL file not growing for a table | The table's effective level is `unlogged` or `memory` (its own, or the database's) | Check `GET .../tables/{table}` → `durability` (`level`, `source`) and the database's `options.durability` (**Lead S26, 0.6.0**) |
+| Database refuses to open after its `Durability` was set to `unlogged` or `memory` | It has a WAL from an earlier open at `strict` or `os`; opening it without one would ignore the writes the WAL holds (**Lead S26, 0.6.0**) | Open it at `strict` or `os`; there is no path to a level without a WAL yet (BL-1145) |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
 | Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
 | An `Error` log line `[SegmentScrubber] corrupt page: table …, segment …, column …`, and reads of that table failing with a corruption error (**BL-815, 0.3.0**) | A cold page changed on disk after it was written (a media error, or something other than Aouda wrote to the data directory) | Check the disk. Restore the table from a backup or re-sync it from a replica. The line repeats every 24 hours until the segment is replaced |

@@ -37,7 +37,7 @@ docker run -d --name aouda \
 
 The image's entry point is `dotnet Aouda.Server.dll start`, the data directory is `/data`, and it listens on port 5000.
 
-**The server in the image is precompiled (ReadyToRun)** (**Lead S06, next train**). A fresh container starts and answers its first
+**The server in the image is precompiled (ReadyToRun)** (**Lead S06, 0.6.0**). A fresh container starts and answers its first
 queries with code compiled at build time instead of compiling it on the way: on the project's 4-core test machine, a restart is ready
 in ~2.2 s instead of ~2.7 and answers its first aggregate ~1 s sooner, and a first query of a kind takes a third less (an
 aggregate over 1 M rows: 0.26 s instead of 0.41). Hot code is still recompiled by the runtime as it runs, so steady query speed does not change. The image is ~30 MB larger (250 MB unpacked).

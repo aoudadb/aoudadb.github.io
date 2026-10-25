@@ -126,7 +126,7 @@ Per table, the response reports:
 | `pls` / `rls` | The contributing predicates |
 | `effective` | The conjunction actually injected into reads |
 | `effectiveHash` | SHA-256 of the canonical `WhereClause` — the same hash the diff compares |
-| `sample` / `sampleReason` | Rows the identity would actually get, when `includeSample` is set (`sample_failed` when it could not be produced). A table's or a materialized query's sample is column arrays, `{ "columns": […], "data": [[…], …] }` — one array per column, as a query result (**Lead S12, next train**: it was an array of row objects); a `vectorProbe`'s is `{ "rowKeys": […], "distances": […] }`, as [`:nearest`](graph-vector.md#rest-endpoints) answers |
+| `sample` / `sampleReason` | Rows the identity would actually get, when `includeSample` is set (`sample_failed` when it could not be produced). A table's or a materialized query's sample is column arrays, `{ "columns": […], "data": [[…], …] }` — one array per column, as a query result (**Lead S12, 0.6.0**: it was an array of row objects); a `vectorProbe`'s is `{ "rowKeys": […], "distances": […] }`, as [`:nearest`](graph-vector.md#rest-endpoints) answers |
 
 Errors: `AUTH_IDENTITY_NOT_FOUND`, `AUTH_IDENTITY_INVALID`.
 

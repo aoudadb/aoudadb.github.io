@@ -314,7 +314,7 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/api-keys \
   }'
 # → { "key": "mk_...", "userId": "550e8400-e29b-41d4-a716-446655440002", ... } — the key is shown once; store it like a password
 
-# The feeder authenticates with that static key going forward (rows as column arrays: Lead S12, next train):
+# The feeder authenticates with that static key going forward (rows as column arrays: Lead S12, 0.6.0):
 curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
   -H "Content-Type: application/json" \
