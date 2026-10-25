@@ -5174,7 +5174,9 @@ the server stops before the job's commit point, or its commit fails, nothing of 
   token never reads it half there. `committedAtUtc` is `null`, `perTableRowCounts` is empty, `segmentsCreated` is `0`,
   `writeConcernAchieved` is `"none"` and `mqStatus` is `"behind"`.
 - **The outcome comes from [`GET {jobId}`](#get-jobid)**: `state` is `"accepted"` while the commit runs, then `"completed"` (with the
-  job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`). Ask with `waitMs` to be answered when it settles. After a
+  job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`) — or, for a `validation: "strict"` job whose commit
+  found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, next train**: it read `"lost"`). Ask with
+  `waitMs` to be answered when it settles. After a
   restart that cut the job off, `GET {jobId}` answers `"lost"`; once the server's log has moved past the job (a checkpoint), it answers
   `404 BULK_LOAD_JOB_NOT_FOUND`, which for an accepted job means the same thing: nothing of it is durable, load it again. ⚠️ That
   holds only while the job is recent: the server keeps a committed job's record for at least an hour after its commit (or
@@ -5287,7 +5289,7 @@ failed, lost or aborted), then answers as it stands. This is how a client learns
 | `replicas` | array | Per-replica fetch progress. Empty on single-node deployments. Each element has `serverId` (string), `segmentsFetched` (number), `segmentsTotal` (number), `lagSeconds` (number). |
 | `mqRebuildStatus` | string? | Materialized Query rebuild status after commit. One of `"pending"`, `"inProgress"`, `"completed"`, `"skipped"`, `"failed"`, `"unknown"` (and `"deferred"` until the 0.4.0). Present when the job has committed; null or absent while still in `"appending"` state. `"skipped"` means `postLoadMqBehavior` was `"skip"` or there are no dependent materialized queries. **`"deferred"` (BatchFirst, 0.1.40; gone in the 0.4.0, LoadSpeed K31)** meant the load was `postLoadMqBehavior: "deferred"` and its job was pending the table's deferred pass. An `"auto"` load whose table is still loading is `"pending"` until the catch-up has brought it in (**LoadSpeed M.3**), and `"failed"` if a pass after its commit leaves it owed only by queries in `error` (their rebuild failed; they are retried, or `:refresh` them). **`"unknown"` (BL-419, 0.1.22)** is the answer for a job whose in-memory session is gone (e.g. after a server restart) and is reconstructed from the WAL alone (**Lead S20a, next train**: from the job's commit record, which keeps its rows past any checkpoint; an aborted job reads as not found after a restart, as an unknown one does) — neither records rebuild progress, so this value is **terminal**: it will not transition to another value for this job. Treat it like `"skipped"`/`"completed"` for polling purposes (stop), not like `"pending"`/`"inProgress"` (keep waiting). |
 | `error` | string? | Human-readable error message. Set when `state = "failed"` or `"lost"`. |
-| `errorCode` | string? | Error code when `state = "failed"`, or `BULK_LOAD_LOST` when `"lost"`. |
+| `errorCode` | string? | Error code when `state = "failed"` — `BULK_LOAD_DUPLICATE_PK` for an accepted strict job its commit refused (**BL-1163, next train**) — or `BULK_LOAD_LOST` when `"lost"`. |
 
 ---
 
