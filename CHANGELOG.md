@@ -18,7 +18,8 @@ Public, user-facing release notes. Engine phase status lives in the server
   declare from a table the schema file had just applied, such as a derived `SearchText`. The drop is now refused (`400
   DECLARATIVE_SCHEMA_DDL_FORBIDDEN`), as are rename and drop of the table, its options, and a policy change to its temperature or
   retention. Residency tuning (`memoryRowCap`, `targetMemoryBytes`, `memoryFilter`, `hotOnlyBackstop`) stays open in every mode,
-  `Extend` included. A typed client's first write therefore fails with `AoudaSchemaException` and the column survives. Set
+  `Extend` included. The lock is logged with the create, so a replica and a point-in-time restore hold it too. A typed client's
+  first write therefore fails with `AoudaSchemaException` and the column survives. Set
   `AutoReconcileSchema = false` on clients that write to declarative tables. `InferenceMode` decides only what an insert into a missing
   table does: `On` still does not create one, only `Extend` does. The schema guides now say so, and they also say that bulk load does
   not reconcile. See [Schema § what `InferenceMode` decides](guides/schema.md#what-inferencemode-decides-and-what-it-does-not).

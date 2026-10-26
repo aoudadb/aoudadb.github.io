@@ -150,6 +150,8 @@ If you do not configure schema management explicitly:
   file had just applied, including `DELETE` of a column.) `Off` stops inference. It was never the lock.
 - A table that HTTP DDL created stays open to HTTP DDL in every mode, even after an apply later extends it. Only a table the apply
   created is locked.
+- The lock is logged with the table's create, so a replica, the primary it is promoted to, and a point-in-time restore hold it too
+  (**BL-1177, next train**; before, all three held the table open, even in `Extend`).
 
 > **⚠️ The C# client's default reconcile drops every column your model does not declare.**
 >
@@ -165,7 +167,8 @@ If you do not configure schema management explicitly:
 >
 > **Bulk load does not reconcile.** The two write paths therefore disagree. On a table HTTP DDL created, where the drop is still
 > allowed, a bulk-loaded table keeps a column that a typed insert of the same model removes. `ReconcilePolicy = Safe` only adds
-> columns. It never drops one.
+> columns and never drops one. It is still no fix for a declarative table: an add is refused there too, so a class with a property
+> the table lacks still makes the first write throw. Turn reconcile off.
 
 ---
 

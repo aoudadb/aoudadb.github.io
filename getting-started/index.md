@@ -1117,8 +1117,9 @@ Anything else throws `NotSupportedException` at inference time, naming the type.
 > ```
 >
 > From the next train (**BL-1177**), the server refuses HTTP DDL on a table that schema apply created, in every `InferenceMode`.
-> A default client then fails that first write with `AoudaSchemaException` and the column survives. On 0.7.0 and earlier, under
-> the default `InferenceMode: On`, the drop succeeded and the insert reported success. `ReconcilePolicy = Safe` only adds columns.
+> A default client then fails that first write with `AoudaSchemaException` and the column survives. On 0.7.0 and earlier, in
+> `On` (the default) or `Off`, the drop succeeded and the insert reported success. `ReconcilePolicy = Safe` only adds columns, but
+> it is no fix for a declarative table: when the class has a property the table lacks, the add is refused too, and the write throws.
 > Bulk load never reconciles, so it does not drop a column that a typed insert of the same class would remove.
 
 

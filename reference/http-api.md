@@ -2336,7 +2336,9 @@ Rename a table.
 #### `PUT /api/databases/{db}/tables/{name}/policy`
 
 Update table storage policy and per-table residency. Works on **any** table, including a
-materialized query's result table (whose name is the query's name).
+materialized query's result table (whose name is the query's name). The one limit (**BL-1177, next train**): on a table schema apply
+created, a request that **changes** `storageTemperature` or `retention` is refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN`, because the
+schema file owns both. Restate them and change only the residency fields, or change them in the file.
 
 **Request:**
 
