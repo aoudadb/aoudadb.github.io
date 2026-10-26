@@ -1098,6 +1098,29 @@ Anything else throws `NotSupportedException` at inference time, naming the type.
 > The same trap applies to any property whose C# type you have not checked against the schema
 > file. `bool IsPublic` is `Bool`, not `String`; `DateOnly` is `Date`, not `Timestamp`.
 
+> **⚠️ By default, the first typed insert drops every column your class does not declare.**
+>
+> `AutoReconcileSchema` defaults to `true`, and its `ReconcilePolicy` defaults to `Unsafe`. Before the first typed write to a
+> table, the client adds the columns the class has and the table lacks, and it **drops the columns the table has and the class
+> does not declare**. A derived column such as `SearchText`, a server-stamped column, or a column you left off the row type on
+> purpose is in that set.
+>
+> If the table comes from `aouda.schema.json`, turn reconcile off:
+>
+> ```csharp
+> var client = new AoudaClient(new AoudaClientOptions
+> {
+>     ServerUrl = "http://localhost:5433",
+>     DatabaseName = "myapp",
+>     AutoReconcileSchema = false, // the schema file owns these tables
+> });
+> ```
+>
+> From the next train (**BL-1177**), the server refuses HTTP DDL on a table that schema apply created, in every `InferenceMode`.
+> A default client then fails that first write with `AoudaSchemaException` and the column survives. On 0.7.0 and earlier, under
+> the default `InferenceMode: On`, the drop succeeded and the insert reported success. `ReconcilePolicy = Safe` only adds columns.
+> Bulk load never reconciles, so it does not drop a column that a typed insert of the same class would remove.
+
 
 ### Seeding explicit IDs (identity-insert)
 

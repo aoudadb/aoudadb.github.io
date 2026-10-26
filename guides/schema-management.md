@@ -244,15 +244,30 @@ npx @aouda/client schema export --server http://localhost:5433 --database myapp 
 
 Then add `"$schema": "https://aouda.io/schema/v1.json"` at the top and set `database` to your database name. Commit this file; it becomes your desired state.
 
-### Step 2: Turn off inference (recommended for production)
+### Step 2: Choose `InferenceMode`, and turn off client reconcile
 
-To avoid accidental new tables, configure the server so that tables are only created via schema apply or explicit DDL. Set **InferenceMode: Off** for the database (see server configuration and [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-declarative-schema-management.md)). With inference off:
+`InferenceMode` decides one thing: what an insert into a missing table does. See [the mode table](schema.md#what-inferencemode-decides-and-what-it-does-not)
+and [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-declarative-schema-management.md). With **`Off`** or
+**`On`** (the default):
 
-- Inserts to a **non-existent table** return an error.
+- Inserts to a **non-existent table** return `404`.
 - **New tables** must be created by running `schema apply` (or by direct DDL).
 - Your schema file is the single place you define tables and columns.
 
-You can keep **InferenceMode: On** in dev while you adopt the file; for staging and production, turning it off keeps the catalog aligned with the file.
+**`Extend`** creates a missing table from the first insert's rows. That helps in development. It does not suit an environment whose
+tables the file owns.
+
+**A table that `schema apply` created is locked against HTTP DDL in every mode** (**BL-1177, next train**). Dropping or renaming the
+table, changing its options, its policy's temperature or retention, and adding, altering, reordering or dropping a column are all
+answered `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN`. Residency tuning (`memoryRowCap` and the rest) is not in the file, and it stays
+open. Before this change only `Extend` refused, so in `On` a client could delete a column from a table
+the file had just applied. `Off` stops inference. It is not the lock.
+
+> **⚠️ Set `AutoReconcileSchema = false` on every C# client that writes to these tables.** `Aouda.Client` defaults to
+> `AutoReconcileSchema = true` with `ReconcilePolicy = Unsafe`. Its first typed write to a table drops every column the model does not
+> declare: a derived `SearchText`, a server stamp, any column left off the row type. Since BL-1177 that write fails with
+> `AoudaSchemaException` on a schema-applied table instead of deleting the column. On 0.7.0 and earlier, the column was deleted and
+> the write succeeded. Bulk load does not reconcile, so a bulk-loaded table and a typed-insert table can end up with different columns.
 
 ### Step 3: Use the file for all changes
 
@@ -276,5 +291,5 @@ Overlays can only change **database-level settings** (`settings.durability`) and
 ### Summary
 
 - **Quick start**: Add `aouda.schema.json`, run `schema diff` / `schema apply` with either `dotnet aouda` or `npx @aouda/client`.
-- **Migration**: Export existing schema → optionally set InferenceMode to Off → do all changes via the file and `schema apply`.
+- **Migration**: Export existing schema → optionally set InferenceMode to Off → set `AutoReconcileSchema = false` on C# clients → do all changes via the file and `schema apply`.
 - **CI/CD**: See [Schema CI/CD Guide](schema-cicd.md) for workflows (PR diff comment, apply on merge/release).

@@ -83,6 +83,8 @@ application.
 | `CircuitBreakerPolicy` | `CircuitBreakerPolicy.Default` (opens after 5 failures in 30 s) | While open, calls fail at once with `CircuitBreakerOpenException`. `CircuitBreakerPolicy.Disabled` turns it off. |
 | `ServerAuth` / `AppAuth` | none | Server auth (`ServerAuthOptions`: `ApiKey`, `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`). Mutually exclusive. See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
 | `AutoCreateSchema` | `false` | Typed inserts create a missing table from the type. |
+| `AutoReconcileSchema` | `true` | Before the first typed write to a table, compare it with the type and change the table to match (see `ReconcilePolicy`). ⚠️ Set `false` for tables from `aouda.schema.json`: since **BL-1177 (next train)** the server refuses DDL on them, and the write fails with `AoudaSchemaException`. |
+| `ReconcilePolicy` | `Unsafe` | `Unsafe` adds missing columns **and drops every column the type does not declare**, including derived and server-stamped columns. `Safe` only adds. Bulk load never reconciles. See [Schema § what `InferenceMode` decides](../guides/schema.md#what-inferencemode-decides-and-what-it-does-not). |
 | `TreatMissingAsEmpty` | `false` | A query on a missing table returns no rows instead of an error. |
 | `ConsistencyTokenStore` | in-memory, per client | Holds the read-your-writes token. Share one store between clients that must see each other's writes. See [Freshness](../guides/freshness.md). |
 

@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A table that schema apply created refuses HTTP DDL in every `InferenceMode`, not only `Extend` (BL-1177, next train).** In
+  `On`, the default, a typed C# client's default reconcile (`AutoReconcileSchema` + `Unsafe`) deleted every column its class did not
+  declare from a table the schema file had just applied, such as a derived `SearchText`. The drop is now refused (`400
+  DECLARATIVE_SCHEMA_DDL_FORBIDDEN`), as are rename and drop of the table, its options, and a policy change to its temperature or
+  retention. Residency tuning (`memoryRowCap`, `targetMemoryBytes`, `memoryFilter`, `hotOnlyBackstop`) stays open in every mode,
+  `Extend` included. A typed client's first write therefore fails with `AoudaSchemaException` and the column survives. Set
+  `AutoReconcileSchema = false` on clients that write to declarative tables. `InferenceMode` decides only what an insert into a missing
+  table does: `On` still does not create one, only `Extend` does. The schema guides now say so, and they also say that bulk load does
+  not reconcile. See [Schema § what `InferenceMode` decides](guides/schema.md#what-inferencemode-decides-and-what-it-does-not).
+
 ## 0.7.0 — 2026-10-26
 
 **Server / NuGet / `@aouda/client` / Studio:** all **0.7.0**. BL-1176 — `permissionColumn` on `auth-db-pls`, RLS resolvers without `targetTable`. Inline markers name `0.7.0`. ⚠️ Server NuGet/archives/image for 0.6.0 were not published (pack `NETSDK1094`); this train is the first server tag after 0.5.0 and includes Lead plus BL-1176.
