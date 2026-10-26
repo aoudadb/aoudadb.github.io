@@ -192,9 +192,24 @@ nothing in the rates table; the stored value stays `MORN` and the column stays `
 key: it can be the second partition-key column (`SecurityId`, then `Source`) or no partition-key column at all. Dropping the declared
 column is refused; renaming it carries the binding.
 
+The other direction works the same way: **one grant, differently named columns.** Each table names its own column, so a grant
+`quote_source` / `MORN` reaches both of these tables, compared with `Source` in one and `QuoteSource` in the other:
+
+```jsonc
+{
+  "tables": {
+    "SpotQuote":   { "authMode": "auth-db-pls", "permissionDimension": "quote_source", "permissionColumn": "Source" /* … */ },
+    "VendorQuote": { "authMode": "auth-db-pls", "permissionDimension": "quote_source", "permissionColumn": "QuoteSource" /* … */ }
+  }
+}
+```
+
+A grant whose dimension no table declares is simply not read by Aouda; it is still a valid entitlement for any other consumer of
+the auth database.
+
 Edge tables and vector search keep scoping by the grant set — an edge traversal or a nearest-neighbour search needs at least one grant
 in the dimension and declares no column (an edge table refuses one). A vector-column table is an ordinary table for its reads, so
-`POST …:create-vector-column` with `auth-db-pls` takes a `permissionColumn` too.
+`POST …:create-vector-column` with `auth-db-pls` takes a `permissionColumn` too, and refuses one without `auth-db-pls`.
 
 ### 19.4.1 Setup
 
@@ -319,8 +334,8 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
 # → { "id": "550e8400-e29b-41d4-a716-446655440002", ... }
 
 # 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user).
-#    `dimension` is the table's permissionDimension, byte-for-byte (case-sensitive); the key is compared with its
-#    permissionColumn (`quote_source` here).
+#    `dimension` is the table's permissionDimension (`quote_source`), byte-for-byte (case-sensitive). The grant names no
+#    column: the table's permissionColumn (`Source`) is what the key is compared with.
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440002/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
@@ -342,17 +357,17 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/api-keys \
 curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
   -H "Content-Type: application/json" \
-  -d '{ "database": "finance", "columns": ["id", "quote_source", "instrument_id", "bid", "ask"], "data": [[1], ["oslo_bors"], ["EQNR"], [289.10], [289.30]] }'
+  -d '{ "database": "finance", "columns": ["id", "Source", "instrument_id", "bid", "ask"], "data": [[1], ["oslo_bors"], ["EQNR"], [289.10], [289.30]] }'
 # → 200 — granted partition
 
 curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
   -H "Content-Type: application/json" \
-  -d '{ "database": "finance", "columns": ["id", "quote_source", "instrument_id", "bid", "ask"], "data": [[2], ["bloomberg"], ["EQNR"], [289.10], [289.30]] }'
+  -d '{ "database": "finance", "columns": ["id", "Source", "instrument_id", "bid", "ask"], "data": [[2], ["bloomberg"], ["EQNR"], [289.10], [289.30]] }'
 # → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
 ```
 
-**Do not** reach for `mk_svc_` for this instead. It is a full, audited bypass of PLS and RLS on every table of its database (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to `quote_source=oslo_bors`.
+**Do not** reach for `mk_svc_` for this instead. It is a full, audited bypass of PLS and RLS on every table of its database (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to the `oslo_bors` grant in `quote_source`.
 
 `userId` is only accepted on `kind: "custom"` keys — `anon`, `service_role`, `public`, and `server_admin` stay singleton, system-managed credentials and reject it with `400 INVALID_REQUEST`. Revoke the key (`DELETE .../admin/api-keys/{id}`) to cut the service off immediately, or delete the specific partition grant to narrow its access without rotating the credential.
 
@@ -967,7 +982,7 @@ curl -X POST http://localhost:5433/api/databases/crm/tables/sales/rows \
 
 ### Use Case 3 — Financial Platform (`auth-db-pls`, billions of rows on disk)
 
-A financial platform stores billions of security quotes partitioned by `quote_source`. Users are granted access to specific data providers. Most data resides on disk in a columnar store.
+A financial platform stores billions of security quotes partitioned by their `Source`; grants for it live in the dimension `quote_source`. Users are granted access to specific data providers. Most data resides on disk in a columnar store.
 
 ```bash
 # Create the quotes table
@@ -979,7 +994,7 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
     "name": "quotes",
     "columns": [
       { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
-      { "name": "quote_source", "type": "String", "partitionKeyOrder": 1 },
+      { "name": "Source", "type": "String", "partitionKeyOrder": 1 },
       { "name": "instrument_id", "type": "String" },
       { "name": "bid", "type": "Decimal", "precision": 18, "scale": 6 },
       { "name": "ask", "type": "Decimal", "precision": 18, "scale": 6 },
@@ -987,7 +1002,7 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
     ],
     "authMode": "auth-db-pls",
     "permissionDimension": "quote_source",
-    "permissionColumn": "quote_source"
+    "permissionColumn": "Source"
   }'
 
 # Grant an analyst (user id 550e8400-…-446655440003) access to two data sources
