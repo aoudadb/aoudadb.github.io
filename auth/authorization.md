@@ -132,16 +132,15 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
+    "database": "myapp",
     "name": "orders",
     "columns": [
-      { "name": "id", "type": "Int64", "isPrimaryKey": true },
-      { "name": "tenant_id", "type": "String", "isPartitionKey": true },
+      { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
+      { "name": "tenant_id", "type": "String", "partitionKeyOrder": 1 },
       { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 },
       { "name": "status", "type": "String" }
     ],
-    "security": {
-      "partitionLevelSecurity": true
-    }
+    "partitionLevelSecurity": true
   }'
 ```
 
@@ -172,6 +171,31 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 
 Use `auth-db-pls` when a user needs access to **multiple partitions simultaneously** or when partition grants must change at runtime without re-issuing JWTs.
 
+**A table names two things, and neither is inferred** (**BL-1176, next train**):
+
+- **`permissionDimension`** is the grant namespace. A partition grant in the auth database is only *(user, dimension, key,
+  access level)*: it names no database, table or column, because the auth database is a standalone identity provider and Aouda
+  is one of its consumers. The dimension is an opaque entitlement name such as `fx_source`. It is matched against the grant
+  byte-for-byte, and it selects no column.
+- **`permissionColumn`** is the column the grant keys are compared with, declared beside the dimension. It must name a column of
+  the table (exact name).
+
+Both are **required** for `auth-db-pls` on a table, and the table is refused when either is missing or the column names no column.
+A dimension spelled like a column (`permissionDimension: "Source"`) does **not** select that column, and partition-key order does not
+select one either. Up to 0.6.0 the engine inferred the column: a column named like the dimension (ignoring case), else a `tenant_id`
+partition column, else the first partition-key column. A table persisted that way now **denies** every per-user read and write
+until it declares `permissionColumn` — re-apply its schema or set it through the table's options.
+
+So one key can be scoped per product. An fx table declares `permissionDimension: "fx_source"`, `permissionColumn: "Source"`; a rates
+table declares `"rates_source"` and the same column. A grant `fx_source` / `MORN` admits the fx table's `Source = 'MORN'` rows and
+nothing in the rates table; the stored value stays `MORN` and the column stays `Source`. The column is not tied to the partition
+key: it can be the second partition-key column (`SecurityId`, then `Source`) or no partition-key column at all. Dropping the declared
+column is refused; renaming it carries the binding.
+
+Edge tables and vector search keep scoping by the grant set — an edge traversal or a nearest-neighbour search needs at least one grant
+in the dimension and declares no column (an edge table refuses one). A vector-column table is an ordinary table for its reads, so
+`POST …:create-vector-column` with `auth-db-pls` takes a `permissionColumn` too.
+
 ### 19.4.1 Setup
 
 ```bash
@@ -180,19 +204,18 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
+    "database": "myapp",
     "name": "messages",
     "columns": [
-      { "name": "id", "type": "Int64", "isPrimaryKey": true },
-      { "name": "room_id", "type": "String", "isPartitionKey": true },
+      { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
+      { "name": "room_id", "type": "String", "partitionKeyOrder": 1 },
       { "name": "user_id", "type": "String" },
       { "name": "body", "type": "String" },
       { "name": "sent_at", "type": "Timestamp" }
     ],
-    "security": {
-      "partitionLevelSecurity": true,
-      "authMode": "auth-db-pls",
-      "permissionDimension": "chat_room"
-    }
+    "authMode": "auth-db-pls",
+    "permissionDimension": "chat_room",
+    "permissionColumn": "room_id"
   }'
 ```
 
@@ -296,7 +319,8 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
 # → { "id": "550e8400-e29b-41d4-a716-446655440002", ... }
 
 # 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user).
-#    `dimension` must match the table permissionDimension byte-for-byte (case-sensitive).
+#    `dimension` is the table's permissionDimension, byte-for-byte (case-sensitive); the key is compared with its
+#    permissionColumn (`quote_source` here).
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440002/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
@@ -344,6 +368,15 @@ Aouda RLS does **not** evaluate policies per-row at query time. Instead, it reso
 
 Resolvers are **admin API only** — they are not part of `schema apply`. Create them with `POST /api/databases/{db}/auth/admin/rls-resolvers` (service key or `db_admin`). `resolverType` is required on POST and stored; evaluation **ignores** it. Use `"ColumnMatch"`.
 
+**A resolver names no table** (**BL-1176, next train**). It is a named policy in the auth database: rules over attribute names, with
+values from the user id, a literal or a grant dimension. A table binds it with `rlsResolverName`, and that is the only binding: one
+resolver can serve several tables, in any database linked to the auth database, as long as each has the columns its rules name. A
+resolver **name is unique** in its auth database — a second create with the same name is refused with `AUTH_RESOLVER_NAME_CONFLICT`.
+Up to 0.6.0 a resolver carried a `targetTable`: it bound nothing, and two resolvers with one name but different `targetTable`s were
+both accepted, after which every table naming that resolver got whichever loaded first. The field is gone from the create body, the
+response and the list filter. An auth database created before this change still has the column and refuses resolver creates with a
+message naming the one-time fix (drop `_rls_resolvers.target_table` with the server admin token).
+
 `valueConfig` on the wire is a **string**. Value sources are the code names (`UserId`, `Literal`, `PartitionGrant`). Older docs that said `auth-db-lookup` / `auth-db-grants` / `role-check` named things that were never in the evaluator.
 
 ```bash
@@ -353,7 +386,6 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
   -d '{
     "name": "sales_access",
     "description": "Restricts sales rows to records owned by or shared with the user",
-    "targetTable": "sales",
     "resolverType": "ColumnMatch",
     "rules": [
       {
@@ -387,19 +419,18 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
+    "database": "myapp",
     "name": "sales",
     "columns": [
-      { "name": "id", "type": "Int64", "isPrimaryKey": true },
-      { "name": "company_id", "type": "String", "isPartitionKey": true },
+      { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
+      { "name": "company_id", "type": "String", "partitionKeyOrder": 1 },
       { "name": "owner_id", "type": "String" },
       { "name": "team_id", "type": "String" },
       { "name": "amount", "type": "Decimal", "precision": 18, "scale": 2 }
     ],
-    "security": {
-      "partitionLevelSecurity": true,
-      "authMode": "auth-db-rls",
-      "rlsResolverName": "sales_access"
-    }
+    "partitionLevelSecurity": true,
+    "authMode": "auth-db-rls",
+    "rlsResolverName": "sales_access"
   }'
 ```
 
@@ -464,27 +495,27 @@ The [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/
 
 ## 19.6 Combined PLS + RLS
 
-A table can use **both** partition routing and row filtering. The working configuration is **`authMode: auth-db-pls` plus `rlsResolverName`** (and `permissionDimension` for the PLS grants). Setting `auth-db-rls` together with `permissionDimension` is a **schema validation error** (fail-closed).
+A table can use **both** partition routing and row filtering. The working configuration is **`authMode: auth-db-pls` plus `rlsResolverName`** (and `permissionDimension` plus `permissionColumn` for the PLS grants). Setting `auth-db-rls` together with `permissionDimension` is a **schema validation error** (fail-closed).
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/tables \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
+    "database": "myapp",
     "name": "portfolio_data",
     "columns": [
-      { "name": "id", "type": "Int64", "isPrimaryKey": true },
-      { "name": "portfolio_group_id", "type": "String", "isPartitionKey": true },
+      { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
+      { "name": "portfolio_group_id", "type": "String", "partitionKeyOrder": 1 },
       { "name": "owner_id", "type": "String" },
       { "name": "instrument", "type": "String" },
       { "name": "value", "type": "Decimal", "precision": 18, "scale": 2 }
     ],
-    "security": {
-      "partitionLevelSecurity": true,
-      "authMode": "auth-db-pls",
-      "permissionDimension": "portfolio_group",
-      "rlsResolverName": "portfolio_access"
-    }
+    "partitionLevelSecurity": true,
+    "authMode": "auth-db-pls",
+    "permissionDimension": "portfolio_group",
+    "permissionColumn": "portfolio_group_id",
+    "rlsResolverName": "portfolio_access"
   }'
 ```
 
@@ -569,7 +600,17 @@ Response (201 Created):
 
 `accessLevel` must be `"read"`, `"write"`, or `"admin"`. Missing or empty `dimension` / `partitionKey` returns 400 `AUTH_GRANT_INVALID`.
 
-**`dimension` is case-sensitive.** It must match the table's `permissionDimension` **byte-for-byte** (`StringComparison.Ordinal` — `"source"` ≠ `"Source"`). Creation does **not** validate or normalize against any table: a grant with the wrong casing returns `201` and looks fine on read-back, then every insert/query against the table fails `403` (`Partition '…' is not in the user's grant set for dimension 'Source'`). Copy the `permissionDimension` string from the schema; do not lowercase it. Partition **keys** are also compared ordinal-case-sensitive (they are data). Engine work to case-fold or reject a casing mismatch at grant-create time is BL-430.
+**`dimension` is an opaque entitlement name, and it is case-sensitive** (**BL-1176, next train**). A grant names a dimension and a key,
+nothing else: no database, no table, no column. Every `auth-db-pls` table whose `permissionDimension` is that string honours it, in
+every database linked to this auth database, and compares the key with the column that table declares as `permissionColumn`. The
+dimension does not have to look like a column name, and spelling it like one selects nothing: `fx_source` for the fx tables and
+`rates_source` for the rates tables keeps one `MORN` grant from reaching both, though both compare it with a column named `Source`.
+
+The match is **byte-for-byte** (`StringComparison.Ordinal` — `"fx_source"` ≠ `"FX_Source"`). Creation does **not** validate or
+normalize against any table: a grant with the wrong casing returns `201` and looks fine on read-back, then every insert/query against
+the table fails `403` (`Partition '…' is not in the user's grant set for dimension 'fx_source'`). Copy the `permissionDimension`
+string from the schema; do not lowercase it. Partition **keys** are also compared ordinal-case-sensitive (they are data). Engine work
+to case-fold or reject a casing mismatch at grant-create time is BL-430.
 
 ### List Partition Grants
 
@@ -609,7 +650,6 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
   -d '{
     "name": "my_resolver",
     "description": "Filters rows by owner",
-    "targetTable": "records",
     "resolverType": "ColumnMatch",
     "rules": [
       {
@@ -624,7 +664,8 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
   }'
 ```
 
-`resolverType` is required on create and stored; evaluation ignores it. Use `"ColumnMatch"`.
+`resolverType` is required on create and stored; evaluation ignores it. Use `"ColumnMatch"`. A resolver names no table (it is bound by a
+table's `rlsResolverName`) and its `name` is unique in the auth database (**BL-1176, next train**; `targetTable` is gone).
 
 **Value sources (code names — these are the only ones `Evaluate` understands):**
 
@@ -632,7 +673,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 |---|---|---|
 | `UserId` | `"{}"` (ignored) | Authenticated user's id |
 | `Literal` | the comparison **string** (not an object) | Static value. Bool columns do not match `"true"` — use String |
-| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm |
+| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm. The dimension must be named: a bare `"team"`, `"{}"` or an object without `dimension` is refused at create and PATCH (`AUTH_RESOLVER_INVALID`) and a stored one denies (**BL-1176, next train**; up to 0.6.0 a bare string was read as the dimension) |
 | `PartitionGrant` (pass-through) | `{"role":"<name>","effect":"allow-all"}` | If the user has the role, resolver returns null (full access) |
 | `Claim` | any | Deny sentinel (not implemented — BL-315). Do not use |
 
@@ -648,12 +689,8 @@ database is not upgraded any more (see [defaults](index.md#23-defaults-and-zero-
 ### List Resolvers
 
 ```bash
-# All resolvers
+# All resolvers, with their rules (a resolver names no table, so there is no table filter — BL-1176, next train)
 curl http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers \
-  -H "Authorization: Bearer <admin-token>"
-
-# Filtered to a specific target table
-curl "http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers?targetTable=sales" \
   -H "Authorization: Bearer <admin-token>"
 ```
 
@@ -801,7 +838,6 @@ curl -X POST http://localhost:5433/api/databases/chat/auth/admin/rls-resolvers \
   -H "Content-Type: application/json" \
   -d '{
     "name": "room_thread",
-    "targetTable": "messages",
     "resolverType": "ColumnMatch",
     "rules": [
       { "ruleOrder": 0, "columnName": "room_id", "operator": "In",
@@ -876,7 +912,6 @@ curl -X POST http://localhost:5433/api/databases/crm/auth/admin/rls-resolvers \
   -H "Content-Type: application/json" \
   -d '{
     "name": "sales_access",
-    "targetTable": "sales",
     "resolverType": "ColumnMatch",
     "rules": [
       {
@@ -940,20 +975,19 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
+    "database": "finance",
     "name": "quotes",
     "columns": [
-      { "name": "id", "type": "Int64", "isPrimaryKey": true },
-      { "name": "quote_source", "type": "String", "isPartitionKey": true },
+      { "name": "id", "type": "Int64", "primaryKeyOrder": 1 },
+      { "name": "quote_source", "type": "String", "partitionKeyOrder": 1 },
       { "name": "instrument_id", "type": "String" },
       { "name": "bid", "type": "Decimal", "precision": 18, "scale": 6 },
       { "name": "ask", "type": "Decimal", "precision": 18, "scale": 6 },
       { "name": "timestamp", "type": "Timestamp" }
     ],
-    "security": {
-      "partitionLevelSecurity": true,
-      "authMode": "auth-db-pls",
-      "permissionDimension": "quote_source"
-    }
+    "authMode": "auth-db-pls",
+    "permissionDimension": "quote_source",
+    "permissionColumn": "quote_source"
   }'
 
 # Grant an analyst (user id 550e8400-…-446655440003) access to two data sources

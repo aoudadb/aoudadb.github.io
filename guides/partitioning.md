@@ -217,7 +217,8 @@ the partition value **is** the caller's identity, and you need Option A or Optio
     "RoomMembers": {
       "partitionKey": [{ "column": "UserId" }],
       "authMode": "auth-db-pls",
-      "permissionDimension": "UserId"
+      "permissionDimension": "UserId",
+      "permissionColumn": "UserId"
     }
   }
 }
@@ -227,8 +228,11 @@ Three things that are easy to get wrong here:
 
 - `authMode: "auth-db-pls"` enables PLS on its own. `partitionLevelSecurity: true` is the older, separate
   way to say the same thing and is not needed alongside it.
-- **Either route requires a partition key.** Applying PLS to an unpartitioned table fails with
-  *"Partition-level security can only be enabled on tables with a partition key."*
+- **`permissionColumn` is required, and it is not inferred** (**BL-1176, next train**). The dimension is the grant namespace and
+  selects no column, even when it is spelled like one — `permissionDimension: "UserId"` alone is refused. `auth-db-pls` compares the
+  grant keys with the declared column and needs no partition key for it; `partitionLevelSecurity: true` under `jwt-claim` still
+  requires one (*"Partition-level security can only be enabled on tables with a partition key."*). Option A is about the
+  partitioned layout this section starts from, so keep the key there.
 - `permissionDimension` is only read in `auth-db-pls` mode. On a `jwt-claim` table it validates and then
   does nothing; next to `auth-db-rls` it is a hard apply error (*"authMode 'auth-db-rls' cannot be
   combined with permissionDimension"*).

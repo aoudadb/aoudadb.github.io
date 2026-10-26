@@ -317,6 +317,7 @@ On the Schema **Auth** card:
 - Studio itself stays on the admin listener and never holds `mk_pub_*` in Data Explorer.
 - User-scoped tables should have RLS or PLS before opt-in. Enabling data-plane access on a user table with no ADRA is a product foot-gun — the UI warns.
 - `auth-db-rls` cannot be combined with `permissionDimension` (schema error). The Auth card does not offer that combo.
+- For `auth-db-pls` the card asks for both the **Permission Dimension** (the grant namespace) and the **Permission Column** (a select over the table's columns — the column the grant keys are compared with). Both are required (**BL-1176, next train**).
 - After regenerate-keys, copy **`mk_pub_*`** (`publicKey`) for data-plane apps only. Anon and service-role keys remain.
 
 Details: [Direct client access](direct-client-access.md).

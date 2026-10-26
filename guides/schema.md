@@ -707,7 +707,7 @@ When you add `Aouda.Schema.Contract` to your project, you get:
 | Type | Namespace | Purpose |
 |---|---|---|
 | `SchemaDocument` | `Aouda.Engine.Schema.Models` | Root type for `aouda.schema.json`: `$schema`, `database`, `tables`, `settings`, `extends` |
-| `TableDefinition` | `Aouda.Engine.Schema.Models` | Per-table structure: `columns`, `partitionKey`, `clusterColumns`, `policy`, `durability`, `partitionLevelSecurity`, `authMode`, `permissionDimension`, `rlsResolverName` |
+| `TableDefinition` | `Aouda.Engine.Schema.Models` | Per-table structure: `columns`, `partitionKey`, `clusterColumns`, `policy`, `durability`, `partitionLevelSecurity`, `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` |
 | `ColumnDefinition` | `Aouda.Engine.Schema.Models` | Per-column: `type`, `primaryKey`, `autoIncrement`, `nullable`, `references`, `default`, `description` |
 | `PartitionKeyEntry` | `Aouda.Engine.Schema.Models` | Partition key entry: `column`, `function` |
 | `TablePolicyDto` | `Aouda.Engine.Schema.Models` | Table policy: `storageTemperature` |
@@ -760,7 +760,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
 | `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies. |
 | `UpdatePartitionLevelSecurity` | No | The `partitionLevelSecurity` flag on the table changed. |
-| `UpdateAuthorizationOptions` | No | One or more of `authMode`, `permissionDimension`, or `rlsResolverName` changed. |
+| `UpdateAuthorizationOptions` | No | One or more of `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` or `plsClaimBinding` changed. |
 | `UpdateSettings` | No | The database-level `settings.durability` (its `replicationFactor`) changed. |
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
@@ -860,8 +860,9 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, 0.6.0**) and replication settings for this table. |
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
-| `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. `auth-db-pls` implies partition-level security even when `partitionLevelSecurity` is omitted; a partition key is required. |
-| `permissionDimension` | `permissionDimension` | `string` | None | ADRA permission dimension name. Used with `"auth-db-pls"` mode. Partition-grant `dimension` must match this string **byte-for-byte** (case-sensitive) — `"source"` does not match `"Source"`. See [Data Authorization §19.8](../auth/authorization.md#198-admin-api-partition-grants). |
+| `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. `auth-db-pls` implies partition-level security even when `partitionLevelSecurity` is omitted, and requires `permissionDimension` and `permissionColumn`; it does not require a partition key (**BL-1176, next train** — up to 0.6.0 schema apply required one). |
+| `permissionDimension` | `permissionDimension` | `string` | None | The grant namespace for `"auth-db-pls"`: an opaque entitlement name in the auth database (for example `fx_source`). Partition-grant `dimension` must match this string **byte-for-byte** (case-sensitive). It **selects no column** — `permissionColumn` does (**BL-1176, next train**). See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) and [§19.8](../auth/authorization.md#198-admin-api-partition-grants). |
+| `permissionColumn` | `permissionColumn` | `string` | None | (**BL-1176, next train**) The column the grant keys of `permissionDimension` are compared with. **Required** with `"auth-db-pls"`, and must name a column of the table exactly; refused with any other `authMode`. Never inferred: a dimension spelled like a column does not select it, and neither does partition-key order. The column cannot be dropped while it is declared; a rename carries it. |
 | `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Used with `"auth-db-rls"` mode. The resolver itself is created via the admin API, not schema apply. |
 | `plsClaimBinding` | `plsClaimBinding` | `string` | `claim:tenant_id` | jwt-claim PLS source. `"subject"` or `"claim:<name>"`. Omit keeps `tenant_id`. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
