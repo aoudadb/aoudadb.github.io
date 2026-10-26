@@ -482,7 +482,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, next train**). A casing mismatch still 201s and never matches at check time (BL-430) |
+| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). A casing mismatch still 201s and never matches at check time (BL-430) |
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 
@@ -490,8 +490,8 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/rls-resolvers` | POST | Create a resolver with `name`, `resolverType`, `rules` and optional `writeCheckRules` (returns 201). A resolver names no table — a table binds it by `rlsResolverName` — and its name is unique in the auth database (**BL-1176, next train**). `valueConfig` is a string. Value sources: `UserId`, `Literal`, `PartitionGrant` (`{"dimension":"<name>"}`, named explicitly) |
-| `.../admin/rls-resolvers` | GET | List resolvers with their rules (no table filter since **BL-1176, next train**) |
+| `.../admin/rls-resolvers` | POST | Create a resolver with `name`, `resolverType`, `rules` and optional `writeCheckRules` (returns 201). A resolver names no table — a table binds it by `rlsResolverName` — and its name is unique in the auth database (**BL-1176, 0.7.0**). `valueConfig` is a string. Value sources: `UserId`, `Literal`, `PartitionGrant` (`{"dimension":"<name>"}`, named explicitly) |
+| `.../admin/rls-resolvers` | GET | List resolvers with their rules (no table filter since **BL-1176, 0.7.0**) |
 | `.../admin/rls-resolvers/{id}` | GET | Get resolver with full rules list |
 | `.../admin/rls-resolvers/{id}` | PATCH | Update resolver description and/or replace rules |
 | `.../admin/rls-resolvers/{id}` | DELETE | Delete resolver and all its rules (204 / 404) |
@@ -602,7 +602,7 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_RESOLVER_NOT_FOUND` | 404 | Resolver ID not found | Verify the `resolverId` in the request |
-| `AUTH_RESOLVER_NAME_CONFLICT` | 400 | A resolver with the same name already exists in the auth database (names are unique; **BL-1176, next train**) | Choose a unique resolver name |
+| `AUTH_RESOLVER_NAME_CONFLICT` | 400 | A resolver with the same name already exists in the auth database (names are unique; **BL-1176, 0.7.0**) | Choose a unique resolver name |
 | `AUTH_RESOLVER_INVALID` | 400 | Resolver request has missing or invalid fields, or a `PartitionGrant` rule does not name its dimension | Check that `name`, `resolverType` and at least one rule are present, and that each `PartitionGrant` `valueConfig` is `{"dimension":"<name>"}` or the admin pass-through |
 | `AUTH_CLAIM_INVALID` | 400 | Custom claim key is blank or invalid | Use a non-empty claim name; `PUT …/users/{id}/claims` |
 

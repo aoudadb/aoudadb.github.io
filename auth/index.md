@@ -276,7 +276,7 @@ If you enable auth and keep defaults:
 Invariants:
 
 - App auth endpoints require API key when app auth database is linked.
-- `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, next train**). `auth-db-rls` requires `rlsResolverName`.
+- `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`.
 - Service-key + `X-User-Token` impersonation flow must still validate/revocation-check user token.
 - Only a `service_role` key bypasses PLS / RLS; a principal without a user id gets the deny-by-default context (no partition
   grants, a missing RLS key denies) on HTTP, WebSocket and long-poll alike (0.4.0).
@@ -420,7 +420,7 @@ Primary evidence:
 | `AuthDatabaseOptions.Kind` | enum | `Application` | `Application`, `Server` | auth DB create APIs | Distinguishes `_auth`-style vs `_serverauth` style DBs |
 | Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-pls`, `auth-db-rls` | table create/update payload | Authorization mode per table |
 | Table `permissionDimension` | string? | `null` | non-empty when needed | table payload | Required for `auth-db-pls`; the grant namespace, selects no column |
-| Table `permissionColumn` | string? | `null` | a column of the table (exact name) | table payload | Required for `auth-db-pls`; refused with other modes (**BL-1176, next train**) |
+| Table `permissionColumn` | string? | `null` | a column of the table (exact name) | table payload | Required for `auth-db-pls`; refused with other modes (**BL-1176, 0.7.0**) |
 | Table `rlsResolverName` | string? | `null` | existing resolver name | table payload | Required for `auth-db-rls` |
 
 Precedence and operational notes:

@@ -228,7 +228,7 @@ Three things that are easy to get wrong here:
 
 - `authMode: "auth-db-pls"` enables PLS on its own. `partitionLevelSecurity: true` is the older, separate
   way to say the same thing and is not needed alongside it.
-- **`permissionColumn` is required, and it is not inferred** (**BL-1176, next train**). The dimension is the grant namespace and
+- **`permissionColumn` is required, and it is not inferred** (**BL-1176, 0.7.0**). The dimension is the grant namespace and
   selects no column, even when it is spelled like one — `permissionDimension: "UserId"` alone is refused. `auth-db-pls` compares the
   grant keys with the declared column and needs no partition key for it; `partitionLevelSecurity: true` under `jwt-claim` still
   requires one (*"Partition-level security can only be enabled on tables with a partition key."*). Option A is about the
