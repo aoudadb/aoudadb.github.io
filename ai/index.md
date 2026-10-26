@@ -195,7 +195,7 @@ If you do nothing beyond starting local dev:
 | Auto-link/create auth DB during DB create | Yes | No | No | `DatabasesController.cs` | Handles 0/1/many auth DB shorthand rules |
 | Two-layer app auth gate | Yes | No | No | `AuthenticationMiddleware.cs`, middleware integration tests | App auth endpoints require API key layer |
 | Service key + `X-User-Token` user-context | Yes | No | No | `AuthenticationMiddleware.cs`, integration tests | Validates JWT and revocation; non-service keys ignore header |
-| ADRA auth modes in table schema | Yes | No | No | `TableMessages.cs`, PLS integration tests | `authMode`, `permissionDimension`, `rlsResolverName` exposed |
+| ADRA auth modes in table schema | Yes | No | No | `TableMessages.cs`, PLS integration tests | `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` exposed |
 | TypeScript ADRA admin wrappers | Yes | No | No | `auth-client.ts`, TS auth tests | Partition grants and resolver wrappers available |
 | .NET ADRA admin convenience wrappers | No | Yes | No | `.NET` auth option/client surfaces | HTTP path possible; typed helpers not equivalent to TS |
 | MCP server/tooling package | No | No | Yes | `docs/decisions/0017-ai-native-interface.md`, code search | Direction documented; implementation absent |
@@ -291,7 +291,7 @@ Primary evidence:
 
 ### Walk-through D: ADRA fan-out query on `auth-db-pls`
 
-1. Table includes `authMode = auth-db-pls` and `permissionDimension`.
+1. Table includes `authMode = auth-db-pls`, `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with). Neither is inferred (**BL-1176, next train**).
 2. Request principal resolves grants for the dimension.
 3. Enforcer constrains query to granted partitions and blocks ungranted keys.
 4. Result set contains only rows from authorized partitions.
@@ -330,7 +330,8 @@ Primary evidence:
 | TS `appAuth.refreshThresholdMs` | number | `120000` | positive | `@aouda/client` | Proactive refresh threshold |
 | TS `serverAuth.refreshThresholdMs` | number | `120000` | positive | `@aouda/client` | Proactive refresh threshold |
 | Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-pls`, `auth-db-rls` | Table create/update payload | Per-table auth mode |
-| Table `permissionDimension` | string? | `null` | required for `auth-db-pls` | Table create/update payload | ADRA PLS dimension |
+| Table `permissionDimension` | string? | `null` | required for `auth-db-pls` | Table create/update payload | ADRA PLS grant namespace; selects no column |
+| Table `permissionColumn` | string? | `null` | required for `auth-db-pls`, a column of the table | Table create/update payload | The column the grant keys are compared with (**BL-1176, next train**) |
 | Table `rlsResolverName` | string? | `null` | required for `auth-db-rls` | Table create/update payload | ADRA RLS resolver |
 
 Precedence and operational notes:
@@ -430,7 +431,7 @@ Common mistake: calling app auth endpoints with JWT bearer only and no API key a
 | Create DB with auth and generated keys | HTTP call from .NET/transport | HTTP call from TS/transport | `POST /api/databases` with `auth.enabled` | Implemented | Returns keys only at creation/link time |
 | App auth sign-up/sign-in/refresh/me/password | `.NET` auth client | `client.auth.*` | `/api/databases/{db}/auth/*` | Implemented | Two-layer flow |
 | Service key user-context forwarding | `UserToken` option | `userToken` option | `X-User-Token` header | Implemented | Effective only for service-level API keys |
-| ADRA table mode metadata | Table request DTOs | `CreateTableRequest` fields in TS types | table create/update payloads | Implemented | `authMode`, `permissionDimension`, `rlsResolverName` |
+| ADRA table mode metadata | Table request DTOs | `CreateTableRequest` fields in TS types | table create/update payloads | Implemented | `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` |
 | ADRA admin partition grant wrappers | No first-class helper | `create/list/deletePartitionGrant` | app admin endpoints | Partial | .NET uses raw HTTP path today |
 | ADRA admin resolver wrappers | No first-class helper | `create/list/get/update/deleteRlsResolver` | app admin endpoints | Partial | TS wrapper parity is stronger |
 | MCP auth tools | None | None | None | Missing | Planned in P12 Epic E / ADR 0017 intent |
@@ -486,7 +487,7 @@ When to use:
 - user needs access to multiple partition keys and static claim model is insufficient.
 
 Steps:
-1. Update table to `authMode = auth-db-pls` with `permissionDimension`.
+1. Update table to `authMode = auth-db-pls` with `permissionDimension` and `permissionColumn`.
 2. Create partition grants for target users.
 3. Run fan-out query without explicit partition filter.
 4. Validate only granted partitions are returned.

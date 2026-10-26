@@ -26,6 +26,11 @@ Public, user-facing release notes. Engine phase status lives in the server
   object, flagged keys with `isPrimaryKey` / `isPartitionKey` and left out `database`, none of which the create-table request
   takes — the server refused them (`MISSING_DATABASE`). They now send `database`, `primaryKeyOrder` / `partitionKeyOrder` and the
   auth fields at the top level.
+- **The authorization pages show the dimension and the column as two things (BL-1176).** The feeder and market-data examples
+  use a `quote_source` grant against a column named `Source`, and §19.4 adds one grant scoping two tables whose columns differ
+  (`Source`, `QuoteSource`). `auth/index.md`, `auth/reference.md` and the AI index now list `permissionColumn`, and the resolver
+  rows drop `targetTable`. `AUTH_RESOLVER_NAME_CONFLICT` is documented as the `400` the server returns; the reference said `409`.
+  `POST …:create-vector-column` refuses `permissionColumn` without `auth-db-pls` (`400`).
 
 ## 0.6.0 — 2026-10-25
 

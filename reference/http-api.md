@@ -3147,7 +3147,7 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
 | `embeddingModel` | string? | No | The embedding model's name. |
 | `authMode`, `permissionDimension`, `rlsResolverName`, `rlsColumn` | | No | As for an edge table. |
-| `permissionColumn` | string? | With `auth-db-pls` | (**BL-1176, next train**) The column the grant keys are compared with — in practice the `rlsColumn`. The vector table is an ordinary table for its reads, so it declares the column like any `auth-db-pls` table. |
+| `permissionColumn` | string? | With `auth-db-pls` | (**BL-1176, next train**) The column the grant keys are compared with — in practice the `rlsColumn`. The vector table is an ordinary table for its reads, so it declares the column like any `auth-db-pls` table. Sent with no `authMode` or with `jwt-claim` it is `400`, not ignored. |
 
 `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance`, `quantization` or `authMode`;
 `409 TABLE_EXISTS` when the table exists.
