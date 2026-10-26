@@ -171,7 +171,7 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 
 Use `auth-db-pls` when a user needs access to **multiple partitions simultaneously** or when partition grants must change at runtime without re-issuing JWTs.
 
-**A table names two things, and neither is inferred** (**BL-1176, next train**):
+**A table names two things, and neither is inferred** (**BL-1176, 0.7.0**):
 
 - **`permissionDimension`** is the grant namespace. A partition grant in the auth database is only *(user, dimension, key,
   access level)*: it names no database, table or column, because the auth database is a standalone identity provider and Aouda
@@ -383,7 +383,7 @@ Aouda RLS does **not** evaluate policies per-row at query time. Instead, it reso
 
 Resolvers are **admin API only** — they are not part of `schema apply`. Create them with `POST /api/databases/{db}/auth/admin/rls-resolvers` (service key or `db_admin`). `resolverType` is required on POST and stored; evaluation **ignores** it. Use `"ColumnMatch"`.
 
-**A resolver names no table** (**BL-1176, next train**). It is a named policy in the auth database: rules over attribute names, with
+**A resolver names no table** (**BL-1176, 0.7.0**). It is a named policy in the auth database: rules over attribute names, with
 values from the user id, a literal or a grant dimension. A table binds it with `rlsResolverName`, and that is the only binding: one
 resolver can serve several tables, in any database linked to the auth database, as long as each has the columns its rules name. A
 resolver **name is unique** in its auth database — a second create with the same name is refused with `AUTH_RESOLVER_NAME_CONFLICT`.
@@ -615,7 +615,7 @@ Response (201 Created):
 
 `accessLevel` must be `"read"`, `"write"`, or `"admin"`. Missing or empty `dimension` / `partitionKey` returns 400 `AUTH_GRANT_INVALID`.
 
-**`dimension` is an opaque entitlement name, and it is case-sensitive** (**BL-1176, next train**). A grant names a dimension and a key,
+**`dimension` is an opaque entitlement name, and it is case-sensitive** (**BL-1176, 0.7.0**). A grant names a dimension and a key,
 nothing else: no database, no table, no column. Every `auth-db-pls` table whose `permissionDimension` is that string honours it, in
 every database linked to this auth database, and compares the key with the column that table declares as `permissionColumn`. The
 dimension does not have to look like a column name, and spelling it like one selects nothing: `fx_source` for the fx tables and
@@ -680,7 +680,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 ```
 
 `resolverType` is required on create and stored; evaluation ignores it. Use `"ColumnMatch"`. A resolver names no table (it is bound by a
-table's `rlsResolverName`) and its `name` is unique in the auth database (**BL-1176, next train**; `targetTable` is gone).
+table's `rlsResolverName`) and its `name` is unique in the auth database (**BL-1176, 0.7.0**; `targetTable` is gone).
 
 **Value sources (code names — these are the only ones `Evaluate` understands):**
 
@@ -688,7 +688,7 @@ table's `rlsResolverName`) and its `name` is unique in the auth database (**BL-1
 |---|---|---|
 | `UserId` | `"{}"` (ignored) | Authenticated user's id |
 | `Literal` | the comparison **string** (not an object) | Static value. Bool columns do not match `"true"` — use String |
-| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm. The dimension must be named: a bare `"team"`, `"{}"` or an object without `dimension` is refused at create and PATCH (`AUTH_RESOLVER_INVALID`) and a stored one denies (**BL-1176, next train**; up to 0.6.0 a bare string was read as the dimension) |
+| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm. The dimension must be named: a bare `"team"`, `"{}"` or an object without `dimension` is refused at create and PATCH (`AUTH_RESOLVER_INVALID`) and a stored one denies (**BL-1176, 0.7.0**; up to 0.6.0 a bare string was read as the dimension) |
 | `PartitionGrant` (pass-through) | `{"role":"<name>","effect":"allow-all"}` | If the user has the role, resolver returns null (full access) |
 | `Claim` | any | Deny sentinel (not implemented — BL-315). Do not use |
 
@@ -704,7 +704,7 @@ database is not upgraded any more (see [defaults](index.md#23-defaults-and-zero-
 ### List Resolvers
 
 ```bash
-# All resolvers, with their rules (a resolver names no table, so there is no table filter — BL-1176, next train)
+# All resolvers, with their rules (a resolver names no table, so there is no table filter — BL-1176, 0.7.0)
 curl http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers \
   -H "Authorization: Bearer <admin-token>"
 ```

@@ -13,13 +13,17 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-- **An `auth-db-pls` table declares the column its grants filter (BL-1176, next train; breaking).** A table names
+## 0.7.0 — 2026-10-26
+
+**Server / NuGet / `@aouda/client` / Studio:** all **0.7.0**. BL-1176 — `permissionColumn` on `auth-db-pls`, RLS resolvers without `targetTable`. Inline markers name `0.7.0`. ⚠️ Server NuGet/archives/image for 0.6.0 were not published (pack `NETSDK1094`); this train is the first server tag after 0.5.0 and includes Lead plus BL-1176.
+
+- **An `auth-db-pls` table declares the column its grants filter (BL-1176, 0.7.0; breaking).** A table names
   `permissionDimension` — the grant namespace, an opaque name such as `fx_source` — and `permissionColumn`, the column the grant
   keys are compared with. Both are required, and neither is inferred: a dimension spelled like a column no longer selects it, and
   the partition key is no longer a fallback. One `MORN` grant can now be scoped per product (`fx_source`, `rates_source`) while the
   column stays `Source`. A table created without the column denies per-user access until it declares one. See
   [Data Authorization §19.4](auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls).
-- **An RLS resolver names no table, and its name is unique (BL-1176, next train; breaking).** `targetTable` is gone from the
+- **An RLS resolver names no table, and its name is unique (BL-1176, 0.7.0; breaking).** `targetTable` is gone from the
   resolver admin API and its list filter; a table binds a resolver by `rlsResolverName`. A `PartitionGrant` rule names its
   dimension (`{"dimension":"team"}`); a bare name is refused. See [§19.9](auth/authorization.md#199-admin-api-rls-resolvers).
 - **The authorization guide's create-table examples use the real request shape.** They wrapped the auth fields in a `security`

@@ -336,7 +336,7 @@ Either can be used alone, together, or not at all — [Auth and Authorization](.
 | Mode | Use when | Cost |
 |---|---|---|
 | `jwt-claim` | The user belongs to exactly one tenant/partition, carried as a JWT claim | Cheapest; nothing to maintain |
-| `auth-db-pls` | The user may reach **many** partitions (a watchlist, a set of rooms, a portfolio) | Grants stored in the auth database, plus `permissionDimension` and `permissionColumn` (**BL-1176, next train**) |
+| `auth-db-pls` | The user may reach **many** partitions (a watchlist, a set of rooms, a portfolio) | Grants stored in the auth database, plus `permissionDimension` and `permissionColumn` (**BL-1176, 0.7.0**) |
 | `auth-db-rls` | The filter is a row predicate rather than a partition — "rows I own", "rows my team owns" | A named resolver with rules |
 | `auth-db-pls` + `rlsResolverName` | Both: partition isolation *and* a row predicate inside it | Both of the above |
 
@@ -586,7 +586,7 @@ The showcase, and the table to check your feature list against. If something you
 | An append-only audit or event log | Table clustered on time, `ColdPreferred` temperature, durability `strict` | [Time-series](time-series.md) · [Hot/cold](hot-cold.md) |
 | Multi-tenant row isolation (SaaS) | `auth-db-rls` with a named resolver, or `auth-db-pls` if you want grant-level access tiers. **Whether the table also gets a `partitionKey` is a separate, volume-only decision** | [Layout vs mode](../auth/authorization.md#layout-and-authorization-mode-are-independent-choices) · [Partitioning](partitioning.md) |
 | "Only rows I own" | `auth-db-rls` with a named resolver | [Mode 3: auth-db-rls](../auth/authorization.md#195-mode-3-auth-db-rls-row-level-security) |
-| Users who span many tenants/rooms/tickers | `auth-db-pls` with `permissionDimension`, `permissionColumn` and partition grants (no `partitionKey` needed since **BL-1176, next train**); or `auth-db-rls` with a `PartitionGrant` rule, which takes the same grants | [Mode 2: auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) · [The unpartitioned variant](../auth/authorization.md#the-unpartitioned-variant--same-grants-no-partition-key) |
+| Users who span many tenants/rooms/tickers | `auth-db-pls` with `permissionDimension`, `permissionColumn` and partition grants (no `partitionKey` needed since **BL-1176, 0.7.0**); or `auth-db-rls` with a `PartitionGrant` rule, which takes the same grants | [Mode 2: auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) · [The unpartitioned variant](../auth/authorization.md#the-unpartitioned-variant--same-grants-no-partition-key) |
 | Role-based admin screens | Server auth + RBAC (read/write/delete/admin per table) | [Data authorization](../auth/authorization.md) |
 | Sign-up, sign-in, refresh, password change | Application auth, called directly from the browser | [Setup and flows](../auth/setup.md) |
 | MFA | TOTP enrolment and verification (HTTP; not wrapped by the SDKs) | [Auth reference](../auth/reference.md) |

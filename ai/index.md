@@ -291,7 +291,7 @@ Primary evidence:
 
 ### Walk-through D: ADRA fan-out query on `auth-db-pls`
 
-1. Table includes `authMode = auth-db-pls`, `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with). Neither is inferred (**BL-1176, next train**).
+1. Table includes `authMode = auth-db-pls`, `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with). Neither is inferred (**BL-1176, 0.7.0**).
 2. Request principal resolves grants for the dimension.
 3. Enforcer constrains query to granted partitions and blocks ungranted keys.
 4. Result set contains only rows from authorized partitions.
@@ -331,7 +331,7 @@ Primary evidence:
 | TS `serverAuth.refreshThresholdMs` | number | `120000` | positive | `@aouda/client` | Proactive refresh threshold |
 | Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-pls`, `auth-db-rls` | Table create/update payload | Per-table auth mode |
 | Table `permissionDimension` | string? | `null` | required for `auth-db-pls` | Table create/update payload | ADRA PLS grant namespace; selects no column |
-| Table `permissionColumn` | string? | `null` | required for `auth-db-pls`, a column of the table | Table create/update payload | The column the grant keys are compared with (**BL-1176, next train**) |
+| Table `permissionColumn` | string? | `null` | required for `auth-db-pls`, a column of the table | Table create/update payload | The column the grant keys are compared with (**BL-1176, 0.7.0**) |
 | Table `rlsResolverName` | string? | `null` | required for `auth-db-rls` | Table create/update payload | ADRA RLS resolver |
 
 Precedence and operational notes:
