@@ -454,13 +454,13 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
-| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function |
+| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, next train**; it was "no partition" in one place and a partition in another) |
 
 ### NearestNeighborsAsync query parameters
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
-| `partitionKey` | `string?` | `null` | Filtered ANN layer 1: restricts scan to one partition. Pass `null` to scan all partitions. |
+| `partitionKey` | `string?` | `null` | Filtered ANN layer 1: restricts scan to one partition. Pass `null` to scan all partitions. Any other value, the empty string included, names one partition (**BL-1184, next train**). |
 | `permissions` | `IQueryPermissionContext?` | `null` | ADRA authorization (ADR 0032). `null` = no auth restriction (embedded / service-key). |
 | `k` | `int` | — (required) | Maximum results to return; engine returns ≤ k results ordered by ascending distance |
 
