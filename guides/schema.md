@@ -114,7 +114,7 @@ If you do not configure schema management explicitly:
 
 - Server `InferenceMode` defaults to `On`, which answers `404` to an insert into a missing table. Only `Extend` creates a table on
   insert.
-- A table that schema apply created refuses HTTP DDL in every mode (**BL-1177, next train**). See the table below.
+- A table that schema apply created refuses HTTP DDL in every mode (**BL-1177, 0.7.1**). See the table below.
 - The C# client reconciles a typed model on its first write by default and **drops the columns the model omits**. See the
   warning below.
 - Runtime schema truth is always the server catalog, not a file.
@@ -136,8 +136,8 @@ If you do not configure schema management explicitly:
 
 | Mode | Insert into a missing table | HTTP DDL on a table schema apply created | HTTP DDL on any other table |
 |---|---|---|---|
-| `Off` | `404`; the message names `InferenceMode is Off` | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` (**BL-1177, next train**) | allowed |
-| `On` (default) | `404` | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` (**BL-1177, next train**) | allowed |
+| `Off` | `404`; the message names `InferenceMode is Off` | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` (**BL-1177, 0.7.1**) | allowed |
+| `On` (default) | `404` | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` (**BL-1177, 0.7.1**) | allowed |
 | `Extend` | the table is inferred from the rows and created | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | allowed |
 
 - **`InferenceMode` decides only what an insert into a missing table does.** `On` does not create a missing table; only `Extend`
@@ -146,12 +146,12 @@ If you do not configure schema management explicitly:
   drop or rename the table, its options, add, alter, reorder or drop a column, and a policy change to `storageTemperature` or
   `retention`. Change these through `schema apply`. The residency knobs (`memoryRowCap`, `targetMemoryBytes`, `memoryFilter`,
   `hotOnlyBackstop`) have no place in the file, so `PUT …/policy` that restates the current temperature and changes only them is
-  still served. (**BL-1177, next train**: before this, only `Extend` refused. In `On` and `Off`, HTTP DDL stayed open on a table the
+  still served. (**BL-1177, 0.7.1**: before this, only `Extend` refused. In `On` and `Off`, HTTP DDL stayed open on a table the
   file had just applied, including `DELETE` of a column.) `Off` stops inference. It was never the lock.
 - A table that HTTP DDL created stays open to HTTP DDL in every mode, even after an apply later extends it. Only a table the apply
   created is locked.
 - The lock is logged with the table's create, so a replica, the primary it is promoted to, and a point-in-time restore hold it too
-  (**BL-1177, next train**; before, all three held the table open, even in `Extend`).
+  (**BL-1177, 0.7.1**; before, all three held the table open, even in `Extend`).
 
 > **⚠️ The C# client's default reconcile drops every column your model does not declare.**
 >
@@ -191,7 +191,7 @@ If you do not configure schema management explicitly:
   - cold-page aligned backfill support for new columns.
 - Branch lifecycle with schema diff/merge and copy-on-write segment sharing (server-side branch endpoints and engine support).
 - `InferenceMode: Extend`: an insert into a missing table infers and creates it (BL-022).
-- The declarative DDL lock: a table schema apply created refuses HTTP DDL in every `InferenceMode` (**BL-1177, next train**; before, only in `Extend`).
+- The declarative DDL lock: a table schema apply created refuses HTTP DDL in every `InferenceMode` (**BL-1177, 0.7.1**; before, only in `Extend`).
 - **`autoIncrement` toggle on existing columns** — the `UpdateColumnAutoIncrement` change type enables toggling `autoIncrement` on or off for any existing integer-type column via the declarative schema apply path or the Studio "Toggle AutoId" action. The counter recovers from the column's MAX existing value on first insert after enabling. Available via `POST /schema/apply`, Studio UI, and (Studio-internal) schema export→patch→apply pattern. Tracked in BL-126.
 - **Identity-insert (request-scoped / job-scoped)** — supply explicit IDs on an `autoIncrement` column **without** flipping the schema flag. Ordinary insert: `identityInsert: true` on `POST …/rows` (BL-130). Large ingest: `options.identityInsert: true` on bulk-load `:begin` (BL-131). Complementary to BL-126 (toggle = permanent Auto↔Manual; identity-insert = one request/job). See [Getting Started](../getting-started/index.md), [HTTP API](../reference/http-api.md), [Bulk Load](../guides/bulk-load.md).
 
@@ -224,7 +224,7 @@ If you do not configure schema management explicitly:
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
 | Insert-time table creation (`Extend`) | Yes | No | No | `SchemaOptions.cs`, `TablesController.cs` | Default is `On`, which, like `Off`, answers `404` to an insert into a missing table |
-| Declarative DDL lock | Yes | No | No | `TablesController.RejectIfDeclarativeSchemaDdlForbidden` | Every mode (**BL-1177, next train**); only tables apply created |
+| Declarative DDL lock | Yes | No | No | `TablesController.RejectIfDeclarativeSchemaDdlForbidden` | Every mode (**BL-1177, 0.7.1**); only tables apply created |
 | Imperative table and column lifecycle APIs | Yes | No | No | `TablesController.cs`, P4 report | Mature and well-tested |
 | Declarative schema diff/apply/export/history APIs | Yes | No | No | `SchemaController.cs`, P8 C.4 report | Includes markdown diff format |
 | Destructive-change safety gates | Yes | No | No | `SchemaApplyEngine.cs`, `SchemaCommandHandler.cs` | Explicit opt-in required |
@@ -367,7 +367,7 @@ Key anchors:
 
 | Surface | Key | Default | Effect |
 |---|---|---|---|
-| startup config | `Aouda:Schema:InferenceMode` | `On` | What an insert into a missing table does (`Off`, `On`, `Extend`). The declarative DDL lock does not depend on it (**BL-1177, next train**) |
+| startup config | `Aouda:Schema:InferenceMode` | `On` | What an insert into a missing table does (`Off`, `On`, `Extend`). The declarative DDL lock does not depend on it (**BL-1177, 0.7.1**) |
 | Env var | `AOUDA_SCHEMA_INFERENCE_MODE` | unset | Overrides server inference mode |
 
 ### B) CLI context resolution
@@ -1244,7 +1244,7 @@ Expected result:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Insert fails with "table does not exist... InferenceMode is Off" | Inference disabled on server | Create via schema apply or direct DDL endpoint |
-| `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table or column call | Schema apply created the table, and HTTP DDL is refused there in every mode (**BL-1177, next train**) | Change the schema file and re-apply |
+| `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table or column call | Schema apply created the table, and HTTP DDL is refused there in every mode (**BL-1177, 0.7.1**) | Change the schema file and re-apply |
 | `AoudaSchemaException: … under declarative schema management. Automatic reconciliation cannot drop column …` on the first typed write | The C# client's default reconcile tried to drop a column the model does not declare, such as a derived or server-stamped column | Set `AutoReconcileSchema = false` on that client |
 | A derived or server-stamped column vanished after the first typed insert (0.7.0 and earlier) | Default reconcile (`Unsafe`) dropped it, and `On` / `Off` did not lock the table | Re-apply the schema, and set `AutoReconcileSchema = false` |
 | `schema apply` reports skipped operations | Destructive changes present without opt-in | Re-run only after approval with `--allow-destructive` |

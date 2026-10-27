@@ -532,7 +532,7 @@ All errors return a JSON body with this structure:
 | `COLUMN_NOT_FOUND` | 404 | The specified column does not exist |
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
 | `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
-| `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, next train**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
+| `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
 | `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
 | `BRANCH_EXISTS` | 409 | A branch with the specified name already exists |
@@ -1926,7 +1926,7 @@ A table may carry `absent` as any write body does; a cell left absent is not par
 
 ### Tables Endpoints
 
-🔒 **A table that schema apply created refuses HTTP DDL in every `InferenceMode`** (**BL-1177, next train**; before, only in
+🔒 **A table that schema apply created refuses HTTP DDL in every `InferenceMode`** (**BL-1177, 0.7.1**; before, only in
 `Extend`). `DELETE` and `PATCH` of the table, `PUT …/options`, add, alter, reorder or drop of a column, and a `PUT …/policy` that
 changes `storageTemperature` or `retention` answer `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN`. A `PUT …/policy` that restates the current
 temperature and changes only `memoryRowCap`, `targetMemoryBytes`, `memoryFilter` or `hotOnlyBackstop` is served, because the schema file
@@ -2313,7 +2313,7 @@ table stays `auth-db-pls` and dropped when the request moves it to another mode.
 
 #### `DELETE /api/databases/{db}/tables/{name}`
 
-Delete a table. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, next train**). To drop that
+Delete a table. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
 table, remove it from the schema file and apply with `allowDestructive: true`.
 
 **Response:** `204 No Content`
@@ -2336,7 +2336,7 @@ Rename a table.
 #### `PUT /api/databases/{db}/tables/{name}/policy`
 
 Update table storage policy and per-table residency. Works on **any** table, including a
-materialized query's result table (whose name is the query's name). The one limit (**BL-1177, next train**): on a table schema apply
+materialized query's result table (whose name is the query's name). The one limit (**BL-1177, 0.7.1**): on a table schema apply
 created, a request that **changes** `storageTemperature` or `retention` is refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN`, because the
 schema file owns both. Restate them and change only the residency fields, or change them in the file.
 
@@ -2423,7 +2423,7 @@ request carrying only `encoder` is now refused as having nothing to alter. The e
 #### `DELETE /api/databases/{db}/tables/{name}/columns/{columnName}`
 
 Drop a column. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created, in every `InferenceMode`
-(**BL-1177, next train**). This is the call the C# client's default reconcile (`AutoReconcileSchema`, `Unsafe`) makes for each column
+(**BL-1177, 0.7.1**). This is the call the C# client's default reconcile (`AutoReconcileSchema`, `Unsafe`) makes for each column
 its model does not declare.
 
 **Response:** `204 No Content`

@@ -257,7 +257,7 @@ and [ADR 0019](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0019-de
 **`Extend`** creates a missing table from the first insert's rows. That helps in development. It does not suit an environment whose
 tables the file owns.
 
-**A table that `schema apply` created is locked against HTTP DDL in every mode** (**BL-1177, next train**). Dropping or renaming the
+**A table that `schema apply` created is locked against HTTP DDL in every mode** (**BL-1177, 0.7.1**). Dropping or renaming the
 table, changing its options, its policy's temperature or retention, and adding, altering, reordering or dropping a column are all
 answered `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN`. Residency tuning (`memoryRowCap` and the rest) is not in the file, and it stays
 open. Before this change only `Extend` refused, so in `On` a client could delete a column from a table

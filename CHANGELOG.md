@@ -13,7 +13,11 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-- **A table that schema apply created refuses HTTP DDL in every `InferenceMode`, not only `Extend` (BL-1177, next train).** In
+## 0.7.1 — 2026-10-27
+
+**Server / NuGet:** **0.7.1**. `@aouda/client` / Studio remain **0.7.0**. BL-1177 declarative DDL lock. Inline markers name `0.7.1`.
+
+- **A table that schema apply created refuses HTTP DDL in every `InferenceMode`, not only `Extend` (BL-1177, 0.7.1).** In
   `On`, the default, a typed C# client's default reconcile (`AutoReconcileSchema` + `Unsafe`) deleted every column its class did not
   declare from a table the schema file had just applied, such as a derived `SearchText`. The drop is now refused (`400
   DECLARATIVE_SCHEMA_DDL_FORBIDDEN`), as are rename and drop of the table, its options, and a policy change to its temperature or
