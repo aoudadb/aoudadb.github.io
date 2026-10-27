@@ -154,7 +154,7 @@ If you do nothing beyond default server config:
 - Temperature model:
   - `StorageTemperaturePolicy` (`Auto`, `HotOnly`, `ColdPreferred`, `Mutable`)
   - `SegmentTemperature` (`Hot`, `Cold`)
-  - Durability level (`strict`, `os`, `unlogged`, `memory`) — (**Lead S26, 0.6.0**) replaces `DataDurabilityMode` (`MemoryOnly` is now the `memory` level, `DiskBacked` any other); see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)
+  - Durability level (`strict`, `os`, `unlogged`, `memory`) — (**Lead S26, 0.6.0**) replaces `DataDurabilityMode` (`MemoryOnly` is now the `memory` level, `DiskBacked` any other); see [Write Path Durability](write-durability.md#durability-levels-lead-s26-060)
 - Promotion/demotion lifecycle:
   - Hot->cold demotion pipeline with catalog durability updates and diagnostics.
   - Cold->hot promotion pipeline: **two intents** (P30):
@@ -250,9 +250,9 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
   - Mutable keyed tier: in-place upsert by PK; serves cache and UPSERT workloads
   - Immutable hot tier: append-optimised columnar; serves read-heavy workloads
   - Cold tier: encoded/compressed on disk; demoted from hot
-- **Durability axis** — controls persistence (**Lead S26, 0.6.0**: one level per table, inherited from the database unless the table names its own; see [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train)):
+- **Durability axis** — controls persistence (**Lead S26, 0.6.0**: one level per table, inherited from the database unless the table names its own; see [Write Path Durability](write-durability.md#durability-levels-lead-s26-060)):
   - `memory`: writes nothing to disk; data lives only in the running process (was `MemoryOnly`)
-  - `unlogged`: persists per representation (`.hot`, `.col`, `.hra`), no WAL — (**Lead S26c, 0.6.0**) the table is emptied by an open that does not follow a clean close if it was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-next-train))
+  - `unlogged`: persists per representation (`.hot`, `.col`, `.hra`), no WAL — (**Lead S26c, 0.6.0**) the table is emptied by an open that does not follow a clean close if it was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-060))
   - `strict` / `os`: persists per representation and writes the WAL (forced to disk at `strict`)
 
 **Key types:**

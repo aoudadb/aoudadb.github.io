@@ -18,7 +18,7 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 ## Start Here
 
 If your question is "How durable are writes by default, and how do I change behavior?", start with:
-- [Durability levels](#durability-levels-lead-s26-next-train) — `strict`, `os`, `unlogged`, `memory`, and what each survives
+- [Durability levels](#durability-levels-lead-s26-060) — `strict`, `os`, `unlogged`, `memory`, and what each survives
 - `2.3 Defaults and zero-config behavior`
 - `2.10 Configuration and settings reference`
 - `2.11 API and CLI coverage reference`
@@ -43,7 +43,7 @@ with no alias (see [Refusals](#refusals-of-the-retired-names)). There are four l
 |---|---|---|---|
 | `strict` (**default**, server and embedded alike) | WAL frames written through (fsync) before the rows are visible and acknowledged | Yes | Yes |
 | `os` | WAL frames written to the operating system, not forced to disk, before the rows are visible | Yes | No |
-| `unlogged` | No WAL: visible at once. A clean close keeps the table whole; after any other stop it keeps its flushed rows, or is emptied if it was being changed (**Lead S26c, 0.6.0**; [below](#unlogged-after-a-crash-lead-s26c-next-train)) | Flushed rows, or emptied — see below | No |
+| `unlogged` | No WAL: visible at once. A clean close keeps the table whole; after any other stop it keeps its flushed rows, or is emptied if it was being changed (**Lead S26c, 0.6.0**; [below](#unlogged-after-a-crash-lead-s26c-060)) | Flushed rows, or emptied — see below | No |
 | `memory` | No WAL and no data files (a memory-only table) | No | No — lost on any shutdown |
 
 `memory` is what used to be `MemoryOnly`; `unlogged` is what used to be `EnableWal = false`.
@@ -132,7 +132,7 @@ a power loss that drops the load. **If that background sync fails**, every later
 job, until the server is restarted; the restart verifies the job and keeps it whole or reports it lost. `strict` is refused
 in a database at `os` (its WAL is not written through), and `os` for a multi-table job, a table with vector columns, or an edge
 or vector table. A bulk load into a `memory` table is refused, naming the level — a load writes segment files, which a memory table never has. See
-[Bulk Load — a load's durability](bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train).
+[Bulk Load — a load's durability](bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060).
 
 ### Refusals of the retired names
 
@@ -168,7 +168,7 @@ Aouda durability makes write outcomes explicit instead of implicit.
   - Replay-driven recovery after kill/restart.
   - Replication-aware write concern (`One`, `Majority`, `All`) with timeout policy.
   - Table-level and database-level durability policy layering — one level per database, optionally narrowed per table
-    (**Lead S26, 0.6.0**; [Durability levels](#durability-levels-lead-s26-next-train)).
+    (**Lead S26, 0.6.0**; [Durability levels](#durability-levels-lead-s26-060)).
 - Non-goals (current implementation):
   - Full API surface for per-table write concern and replication controls via REST/SDKs.
 
@@ -176,7 +176,7 @@ Aouda durability makes write outcomes explicit instead of implicit.
 
 ### Question -> section map
 
-- "What does each durability level survive?" -> [Durability levels](#durability-levels-lead-s26-next-train)
+- "What does each durability level survive?" -> [Durability levels](#durability-levels-lead-s26-060)
 - "What are defaults?" -> `2.3`
 - "What is available today?" -> `2.4`, `2.5`, `2.6`
 - "How does the write path work end-to-end?" -> `2.8`, `2.8.1`
@@ -322,7 +322,7 @@ When you do not set durability knobs explicitly:
 
 - Durability level (**Lead S26, 0.6.0**):
   - What a write survives is the table's effective level — `strict`, `os`, `unlogged` or `memory`
-    ([Durability levels](#durability-levels-lead-s26-next-train)). The WAL bullets below describe `strict` and `os`; `unlogged`
+    ([Durability levels](#durability-levels-lead-s26-060)). The WAL bullets below describe `strict` and `os`; `unlogged`
     and `memory` write no WAL frames.
 - WAL frame pipeline:
   - Mutations are encoded as WAL frames and flushed before write results are considered durable (at `strict`; at `os` they are
@@ -348,7 +348,7 @@ When you do not set durability knobs explicitly:
 - Recovery:
   - On restart, WAL is replayed from `{db}/wal/CHECKPOINT` (`redoStartPosition`); whole `wal_%09d.log` files below that horizon are skipped.
 - A bulk load answered `accepted` is not durable yet (**Lead S30, 0.6.0**):
-  - A bulk load's commit may ask to be answered before its commit point (`wait: "accepted"`, [Bulk Load](bulk-load.md#answered-before-the-commit-accepted-lead-s30-next-train)).
+  - A bulk load's commit may ask to be answered before its commit point (`wait: "accepted"`, [Bulk Load](bulk-load.md#answered-before-the-commit-accepted-lead-s30-060)).
     Such a job is **not durable until its commit point**, whatever its durability level: a crash before it loses the job whole, and
     its outcome (`GET .../bulk-load/{jobId}`) says `lost`. It is opt-in per job and reported as its own state, so a `strict` load's
     acknowledgement never means less than it did: `strict` + `accepted` means "durable once committed; the answer did not wait for it".
@@ -629,7 +629,7 @@ Operational guidance:
 - "An `unlogged` table is empty after a restart" (**Lead S26c, 0.6.0**)
   - The open did not follow a clean close (a crash, a kill, a close whose snapshot failed, a restore) and the table was being
     changed at the time, so the server emptied it and logged a warning naming it and its row count. That is the level's contract
-    ([`unlogged` after a crash](#unlogged-after-a-crash-lead-s26c-next-train)): load the table again from its source.
+    ([`unlogged` after a crash](#unlogged-after-a-crash-lead-s26c-060)): load the table again from its source.
 - "`GET .../bulk-load/{jobId}` answers `lost` for an `os` load" (**Lead S26c, 0.6.0**)
   - The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was
     dropped whole. Load it again with the same idempotency key.

@@ -80,8 +80,8 @@ Public, user-facing release notes. Engine phase status lives in the server
   `BulkLoadJobHandle.Durability`, `@aouda/client`'s `durability` and the CLI's `--durability`. Separately, an open
   that does not follow a clean close now **empties an `unlogged` table that was being changed** (a statement in flight, or rows
   only partly flushed), with a warning naming each: its segments could hold part of a statement. A table that was not keeps its
-  flushed rows. See [Bulk Load](guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train) and
-  [`unlogged` after a crash](guides/write-durability.md#unlogged-after-a-crash-lead-s26c-next-train).
+  flushed rows. See [Bulk Load](guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060) and
+  [`unlogged` after a crash](guides/write-durability.md#unlogged-after-a-crash-lead-s26c-060).
 - **One word for what a write survives: `durability` — `strict`, `os`, `unlogged` or `memory` (Lead S26, 0.6.0; ADR 0066).**
   It replaces a database's `enableWal`, the memory-only mode (`dataDurability: MemoryOnly`), the per-table `EnableWal` and the
   schema's `durability.walEnabled`. `strict` (the default, server and embedded) writes the WAL through to disk before a write is
@@ -92,7 +92,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   (`"durability": { "level": … }`) or inherit; `GET …/tables/{table}` reports `durability: { level, source }` and
   `GET /api/databases/{db}` `options.durability`. The old names are refused, not aliased (`400 INVALID_REQUEST`, a startup or
   schema validation error, a throwing open), and a data directory from an earlier build is refused (catalog format 12, registry
-  format 3). See [Write Path Durability](guides/write-durability.md#durability-levels-lead-s26-next-train).
+  format 3). See [Write Path Durability](guides/write-durability.md#durability-levels-lead-s26-060).
 - **Pipelined bulk loaders into one table: keep to two on the default lane once jobs fill their queue (Lead S31, 0.6.0;
   BL-1117).** The guide said up to four pipelined loaders into one table finish. That holds while no job's queue
   (`Aouda:BulkLoad:MaxQueuedAppendBytes`, 64 MB) fills; with larger jobs an `:append` waiting for room keeps its lane permit, a
@@ -115,7 +115,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   a resume goes by `nextSequence` (refusing a load framed differently, `BULK_LOAD_CURSOR_MISMATCH`), the job's last frame body
   commits it, and a failed `:append` is sent again by the SDK after a keyed `:begin` — a body sent twice is applied once (BL-404).
   `bulkLoadJobs` begins job N+1 with `afterJobId` once N's last body is written (Node), or commits each job by `:commit` while the
-  next is sent where the `fetch` cannot say when a body was written. See [the TypeScript client](clients/typescript.md#bulk-load-a-body-sent-again-resume-and-a-committed-job-lead-s14-s22-next-train).
+  next is sent where the `fetch` cannot say when a body was written. See [the TypeScript client](clients/typescript.md#bulk-load-a-body-sent-again-resume-and-a-committed-job-lead-s14-s22-060).
 - **A materialized query names its currency: `current` or `rebuild` (Lead S27b, 0.6.0).** `"currency": "rebuild"` (in
   `aouda.schema.json`, or on `POST …/materialized-queries`) keeps a result by rebuilding it, never incrementally: a change to its
   source leaves it behind and unused for reads until it is rebuilt — once the source is quiet, after a load, or on `:refresh`.
@@ -127,7 +127,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   INVALID_REQUEST` naming the column and the row (BL-1130, BL-1129: the column was dropped, the key stored as `0`). `validation`
   (`coerce`, the default, or `strict`) says what else: `strict` refuses a null in any NOT NULL column and fails the job at its
   commit on a duplicate key (`409 BULK_LOAD_DUPLICATE_PK`), only on a table whose key mode is `Strict`. `pkUniquenessOverride`,
-  which nothing applied, is removed and refused. See [A load's validation](guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
+  which nothing applied, is removed and refused. See [A load's validation](guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060).
 - **A bulk load checks less than an insert — now said (Lead S22).** A null in a non-nullable column is stored as the type's zero
   (an `Int64` primary key as `0`; BL-1129), a column the table does not have is dropped (BL-1130), and a duplicate key is loaded as
   a second row; an insert refuses all three. See [`:append`](reference/http-api.md#post-jobidappend). (Since **Lead S27a** in the same
@@ -141,7 +141,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   refusal and in `GET {jobId}`; a JSON column-array body carries its frame number as `seq` (refused without it); and a `:commit` may
   name the frames it sent, refusing to commit a job that applied others. The C# SDK now recovers a failed `:append` itself — a
   keyed `:begin`, then the same body — where it used to throw on the first connection error, and resumes a job by frames, refusing
-  a resume whose framing changed. `@aouda/client` does the same from Lead S22. See [the frame numbers](reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train).
+  a resume whose framing changed. `@aouda/client` does the same from Lead S22. See [the frame numbers](reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-060).
 - **A bulk-load job commits in its last body, and a job sent behind a failed one never commits (Lead S21b, 0.6.0).** A
   column-batch `:append` body whose end frame carries `commit` (the `:commit` options) ends the job's rows and commits it, and is
   answered as `:commit` — so a job needs no `:commit` round trip, its segments are finalized while the client sends the next job,
@@ -150,13 +150,13 @@ Public, user-facing release notes. Engine phase status lives in the server
   `afterJobId`: the job then takes its place after that one and commits only if it committed, else `409
   BULK_LOAD_PREDECESSOR_NOT_COMMITTED` with none of its rows loaded. The C# SDK's `BulkLoadJobsAsync` uses both, so a sequence of
   jobs commits a prefix of them, in order, whatever fails. `:commit` stays for jobs whose last rows are not frames; a JSON body
-  that carries `commit` is refused. See [a body that commits its job](reference/http-api.md#a-body-that-commits-its-job-lead-s21b-next-train).
+  that carries `commit` is refused. See [a body that commits its job](reference/http-api.md#a-body-that-commits-its-job-lead-s21b-060).
 - **Pipelined loads into one table overlap their commits with the next job's rows (Lead S19, 0.6.0).** A table's bulk-load
   lock now passes to the next queued job when a job's rows end, not when its `:commit` returns, so job N+1's rows load while job N
   drains, writes and commits. Nothing a client sees changes: a `:commit` still returns after its own job is durable and visible,
   commits on a table stay first in, first out (a later job waits at its commit point for the earlier one — the commit line's new
   `commitWaitMs`), and an update, delete or other write waits for every load in flight when it arrived. `lockHoldMs` now ends at
-  the hand-over. See [Several jobs into one table](guides/bulk-load.md#several-jobs-into-one-table-pipelined-lead-s18b-next-train).
+  the hand-over. See [Several jobs into one table](guides/bulk-load.md#several-jobs-into-one-table-pipelined-lead-s18b-060).
 - **A replica no longer answers a bulk load's token before it has the load, and `:commit` leaves the `:append` lane (Lead S18a,
   0.6.0).** A read presenting a token on a secondary is served only once that node holds every bulk load committed at or
   below the token: until then it waits, then answers `TOKEN_UNSATISFIED` / `TOKEN_FETCH_PRIMARY`, and

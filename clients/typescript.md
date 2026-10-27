@@ -506,7 +506,7 @@ frame once the server has advertised that it reads one (`Accept-Post` on an earl
 otherwise — so the first insert on a client, and every insert to an older server, is JSON. (**Lead S14, 0.6.0**)
 The JSON body is [column arrays](../reference/http-api.md#column-arrays-the-write-body) (`{database, columns, data,
 absent?}`), as this server requires (a body of row objects is refused `400 ROW_OBJECTS_UNSUPPORTED`). `insert` and
-`insertMany` also take a [`ColumnBatch`](#column-batches-lead-s14-next-train). Rows holding an object, an
+`insertMany` also take a [`ColumnBatch`](#column-batches-lead-s14-060). Rows holding an object, an
 array, a column whose rows disagree on type, a number in exponent notation (`1e21`), or more than the frame holds (4,096
 columns, 1,000,000 rows, a 16 MB string, an empty or 1 KB+ column name) are sent as JSON; so is everything for five
 minutes after a `415`, whatever a later response advertises (**BL-716, 0.2.0**).
@@ -657,7 +657,7 @@ On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.
 - **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129). With
   `validation: "strict"` it also refuses a null in any NOT NULL column, and a key the job holds twice or the table already holds
   fails the job (`409 BULK_LOAD_DUPLICATE_PK`, an `AoudaApiError` with that `code`); `handle.validation` names the level.
-  `pkUniquenessOverride` is gone (**breaking**). See [A load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
+  `pkUniquenessOverride` is gone (**breaking**). See [A load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060).
 
 ```typescript
 const key = `orders-${day}`;
@@ -683,7 +683,7 @@ handle.durability;   // 'os'
 `'os'` skips the fsync before the commit. After a power loss before the server has synced the job, the job is dropped whole and
 `GET .../bulk-load/{jobId}` reads `state: "lost"`, `errorCode: "BULK_LOAD_LOST"`: run the same `bulkLoad` again with the same
 `idempotencyKey`. `'strict'` in an `os` database, and `'os'` for a multi-table job, a table with vector columns, or an edge or
-vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-next-train).
+vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060).
 
 ### Several jobs into one table (**Lead S18b, S22, 0.6.0**)
 
@@ -744,7 +744,7 @@ omitted), `'os'`, `'unlogged'` or `'memory'` (the `DurabilityLevel` type), sent 
 `400 INVALID_REQUEST`. `DatabaseOptionsInfo` reads `durability` in place of the boolean `enableWal`; a table's detail carries
 `durability: { level, source }` (`TableDurabilityInfo`) in place of `policy.residency.dataDurability`; and the schema document's
 table `durability` takes `level` (`'strict'`, `'unlogged'` or `'memory'`). See
-[Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train).
+[Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-060).
 
 ```typescript
 await client.databases.create('events', { durability: 'os' });

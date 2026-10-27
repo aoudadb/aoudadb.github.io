@@ -1071,7 +1071,7 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database is at `strict`; a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train). The retired `walEnabled` is a validation error naming `durability.level`. |
+| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database is at `strict`; a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-060). The retired `walEnabled` is a validation error naming `durability.level`. |
 | `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). Allowed values: non-negative integer, or `null` (inherit database default). |
 
 #### SchemaSettings (value of `settings`)

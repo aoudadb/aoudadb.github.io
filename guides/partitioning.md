@@ -161,7 +161,7 @@ If you create a table/database without tuning partition or multidb options:
 | ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other |
 | ~~`MigrationOptions.Strategy`~~ | — | — | Removed (**WorkloadCore S17, 0.3.0**): the retrospective migration workers it configured were never started by any production path. A catalog that still carries `"Migration"` loads; the property is ignored |
 | `DatabaseOptions.DefaultTemperature` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | New tables in that DB inherit auto temperature |
-| `DatabaseOptions.Durability` | `strict` | `strict`, `os`, `unlogged`, `memory` | (**Lead S26, 0.6.0**; replaces `EnableWal`) DB writes its WAL through before a write is visible unless set otherwise; see [durability levels](write-durability.md#durability-levels-lead-s26-next-train) |
+| `DatabaseOptions.Durability` | `strict` | `strict`, `os`, `unlogged`, `memory` | (**Lead S26, 0.6.0**; replaces `EnableWal`) DB writes its WAL through before a write is visible unless set otherwise; see [durability levels](write-durability.md#durability-levels-lead-s26-060) |
 | `DatabaseOptions.ReplicationMode` | `Replicate` | `Replicate`, `DoNotReplicate` | DB participates in replication by default |
 | `DatabaseOptions.MaxMemoryShareBytes` | `null` | `null` (no cap); or any non-negative `long` (bytes) | No explicit per-database cap unless set |
 | `PlsCrossPartitionRateLimitOptions.Enabled` | `false` | `true`, `false` | Cross-partition bypass rate limiting is opt-in |
