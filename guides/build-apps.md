@@ -258,9 +258,11 @@ Steps 1–4 are load-bearing: everything after them assumes the schema file exis
 }
 ```
 
-The `partitionKey` line above is illustrative, not a default to copy: it is right for an `Order` table
-where a single tenant will hold ~1 M rows, and wrong for one where tenants hold a few thousand each. The
-row for it below says how to tell which you have.
+The `partitionKey` line above is illustrative, not a default to copy: it is right when the orders table
+will hold many full segments and reads name the tenant, including a tenant that holds only a few thousand
+rows of a much larger table. It is wrong when the whole table is only a handful of segments. A single
+tenant that itself holds ~1 M rows is the later `Dedicated` case. The row for it below says how to tell
+which you have.
 
 What each choice buys you, in the order you should think about it:
 
@@ -270,7 +272,7 @@ What each choice buys you, in the order you should think about it:
 | Primary key | `primaryKey: n`, `autoIncrement` | Composite keys are ordered by `n`. Server-generated ids, or bring your own with identity-insert |
 | Uniqueness | `unique: true` | Enforced on write, not just indexed |
 | Relationships | `references: "Table.col"` | Enforced on write. This is what lets a detail page be one named query with joins instead of three round trips |
-| Tenancy / sharding | `partitionKey` | The single highest-leverage decision on this page — including the decision **not** to set it, which is right for more tables than not. Partition a key only when each individual key value will hold on the order of a million rows; below that it buys no useful pruning and costs `PARTITION_FILTER_REQUIRED` on every read and every subscribe for the life of the table. Read [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45) **before** you pick |
+| Tenancy / sharding | `partitionKey` | The single highest-leverage decision on this page — including the decision **not** to set it, which is right for more tables than not. Partition when the table's total rows will fill many segments (~1 000 000 rows each). A key of a few hundred rows is then a normal shared-bucket key; a key needs about a million rows of its own only for a directory per key. Below a handful of segments a partition key buys no useful pruning and costs `PARTITION_FILTER_REQUIRED` on every read and every subscribe for the life of the table. Read [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45) **before** you pick |
 | Physical ordering | `clusterColumns` | Time-ordered data scans dramatically better clustered — and on an unpartitioned table this is what gives you segment pruning, with no query-shape guard attached. [Time-series and clustering](time-series.md) |
 | Memory residency | `policy.storageTemperature` | `Hot` / `Auto` / `ColdPreferred` / mutable tiers. You control what stays in RAM. [Hot/cold storage](hot-cold.md) |
 | Durability | `durability.level` | What a write survives: `strict` (WAL forced to disk), `unlogged` (no WAL; (**Lead S26c, 0.6.0**) emptied by an open that does not follow a clean close if it was being changed) or `memory` (no files at all); omitted, the table inherits its database's level (default `strict`). Replaces `walEnabled` (**Lead S26, 0.6.0**). [Write path durability](write-durability.md#durability-levels-lead-s26-060) |

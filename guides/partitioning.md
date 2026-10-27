@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
-Last updated: 2026-09-06
+Last updated: 2026-10-27
 
 Coverage phases: P4, P6, P7, P12, P14, P45
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P6/`, `docs/tasks/P7/`, `docs/tasks/P12/`, `docs/tasks/P14/`, `docs/tasks/P45/`
@@ -433,30 +433,75 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 Answer this before choosing a storage mode or a bucket count — those questions only arise once this one
 is settled, and for a large share of application tables the answer here is **no**.
 
-> **Partition on a key only when every key will produce at least one full segment's worth of rows per
-> load cycle.**
+A full segment is on the order of **1 000 000 rows**. Two divisions use that number, and they answer
+different questions. The first decides whether to partition at all:
 
-A full segment is on the order of **1 000 000 rows**. Divide the rows you expect the table to hold by the
-number of distinct values the candidate key will take; if the result is not in that neighbourhood, the key
-does not clear the line.
+> **Partition only when the table's total row count, divided by one full segment, is comfortably more
+> than one.** That quotient is the most buckets the table can hold before a bucket is only a fraction of
+> a segment. A result near one means a partition key buys no pruning: the whole table is already a
+> handful of segments.
 
-Above the line, a per-key or per-bucket directory costs nothing extra and buys exact pruning. Below it,
-more directories just multiply how many small segments the table ends up with — no configuration recovers
-that, and it happens regardless of storage mode. Background coalescing (`2.13`) tidies up *within* a
-bucket; it cannot merge across bucket boundaries, and it cannot merge across partition keys at all.
+Use the size the table will actually reach, not the size on the day it is created — `partitionKey` cannot
+be added later without a drop and a reload. A quotient that is still only a handful at that size is no:
+there is nothing for the buckets to separate.
 
-| Table shape | Rows per key | Right choice |
+**Rows per key is not this test.** A key that holds a few hundred rows, or a few thousand, is a normal
+shared-bucket key once the table is large enough for those keys to share full segments. The
+million-rows-per-key figure is the next question, and it chooses a storage mode:
+
+> **Give a key its own directory (`Dedicated`) only when every key will hold at least one full segment's
+> worth of rows.** Below that, a directory per key is a small segment per key. Background coalescing
+> (`2.13`) merges segments that share a bucket, or that share one dedicated key. It cannot merge across
+> buckets, and it cannot merge across partition keys, so a key that never reaches a full segment stays a
+> small segment however the loads are sized. `Auto`/`Shared` avoids that by hashing many small keys into
+> one bucket — provided the bucket count stays under the quotient above.
+
+| Table shape | Rows per key | Full buckets the table can hold | Right choice |
+|---|---|---|---|
+| **1 million rows, 20 thousand distinct keys** (a chat app's rooms, a SaaS app's small tenants, a membership or roster table) | **~50** | **~1** | **No `partitionKey`.** Add `clusterColumns` on the time column if reads are time-ordered. See below |
+| 200 million rows, 1 million distinct keys | ~200 | ~200 | Partition; `Auto`/`Shared` with a moderate bucket count. Each key is far short of a segment; the buckets are not |
+| 10 billion rows, 10 thousand distinct keys | ~1 000 000 | ~10 000 | Partition; `Dedicated`. Each key is itself about one full segment |
+
+A key that clears the first line still has to be one the reads name. Pruning on it is exact for `eq` and
+`in`, and a range does not select a hash bucket. The same row counts justify three different layouts,
+depending on what is read:
+
+| What you read | The shape | Layout |
 |---|---|---|
-| **1 million rows, 20 thousand distinct keys** (a chat app's rooms, a SaaS app's small tenants, a membership or roster table) | **~50** | **No `partitionKey`.** Add `clusterColumns` on the time column if reads are time-ordered. See below |
-| 200 million rows, 1 million distinct keys | ~200 | Partition; `Auto`/`Shared` with a moderate bucket count |
-| 10 billion rows, 10 thousand distinct keys | ~1 000 000 | Partition; `Dedicated` |
+| A time window, naming no key. Or the whole table is only a handful of segments | A chat room, a screener, "the last hour of every sensor" | **No `partitionKey`.** `clusterColumns` on the time column. If rows older than a window are irrelevant, declare [retention](retention.md) — its time column has to lead the cluster list |
+| One key's history, and the recent tail of it, and each key holds thousands of rows rather than millions. The load is a day of every key | A daily close or a curve: 20 000 keys, one row a day, 7 000 days — 140 million rows | **Partition, `Auto`/`Shared`, bucket count near the ceiling** (here about 140, so the default 128). `clusterColumns` lists the key and then the time column — the key is in both lists. See below |
+| Tens of millions of rows in a single key | An FX or equity tick tape, per ticker | **Partition, and `Dedicated`** — or leave `Auto`, which promotes a key past 10 million rows or 1 GB. `clusterColumns` on the time column only. [Market data](market-data.md) is this fixture |
+
+A partition key is not a cluster column. Declaring `partitionKey` routes a row to a directory or a bucket and, on a shared bucket, the flush writes that bucket in partition-key order and then cluster order. The background merge does not. It orders by `clusterColumns` alone (**BL-1180**), and a merged segment keeps a per-key run only when the key leads that list. A shared table whose chart is one key's history therefore names the key twice: `partitionKey`, and the first `clusterColumns` entry, with the time column after it. A dedicated directory is already one key, so the merge should stay in time order and the time column is the only cluster column.
+
+**A daily history is not "cluster on the key and skip the partition."** A load of one day of every key
+seals as its own segment. Merging combines small segments and then stops, so one key's days sit together
+inside each chunk, and every chunk still holds every key. The run directory finds that key's rows
+([Query](query.md)), but the read opens every chunk, and each chunk's directory lists every key. At the
+20 000-key shape that is thousands of segments for one chart. A shared bucket holds a share of the keys,
+so the same chart opens only that bucket's chunks, and each directory lists only those keys. `Dedicated`
+is the wrong fix there: a key of 7 000 rows never fills a segment, and a day of every key creates one
+segment per key for the merger to clean up. Partition without the key in `clusterColumns` loses the
+other half: the merge rewrites the bucket into time order, the per-key runs are gone, and the chart
+reads every row in the bucket.
+
+**Ticks are the other way round.** A ticker with tens of millions of rows fills its own segments, so a
+directory per ticker costs nothing and a chart of that ticker reads that directory. Clustering on time
+only is right there: the directory is one ticker, and the merge keeps the tail in the latest segments.
+Copying that layout onto the daily-history shape — or the daily-history layout onto a tick tape — is how
+a table comes out slow. The market-data schema is the tick shape; it says so.
+
+**Sensors, where old rows do not matter,** follow the first row. Retention drops whole segments only when
+the time column leads `clusterColumns`, which gives up a per-key run. A partition key belongs on that
+table only when a recent window of every sensor is still many segments and every read names the sensor. A
+"last minute of everything" read names no key, and the filter guard would reject it.
 
 **What you give up by not partitioning: less than you would guess.**
 
 - **Pruning still happens.** `clusterColumns` gives segment elimination from per-segment min/max
   statistics on a physical column — a "last 50 messages in this room" or "this month's rows" read skips
   the segments that provably cannot contain a match. It is best-effort rather than exact, but on a table
-  small enough to fail the rule above, the whole table is a handful of segments anyway.
+  that fails the first line above, the whole table is a handful of segments anyway.
 - **Row isolation still works.** `auth-db-rls` needs no partition key, including its `PartitionGrant`
   value source — see [Live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table).
   Only `auth-db-pls` and `jwt-claim` PLS require one.
@@ -469,12 +514,12 @@ browser-tier reads, and one paid on every query for the life of the table.
 **Partitioning cannot be added or removed later.** `partitionKey` and `clusterColumns` are both
 drop-and-recreate changes (`schema apply` reports them as warnings and refuses to migrate). Both
 directions cost the same migration, so an unpartitioned table is not the timid choice — it is no harder to
-undo than the partitioned one, and the rule above is the only thing that should decide between them.
+undo than the partitioned one. The volume lines and the read shape above are what should decide between them.
 
 ### Choosing `initialBucketCount` at scale (P45)
 
-Once the rule above says to partition, this decides the fan-out. It gives a hard ceiling on how many
-buckets are ever worth having, independent of query selectivity:
+Once the first line above says to partition, this decides the fan-out. It is that same ceiling, now as a
+count of buckets:
 
 > **A table cannot usefully have more buckets than its total row count divided by the row count of one
 > full segment.** Beyond that ceiling, a bucket holds a fraction of a segment no matter how the count is
@@ -482,8 +527,9 @@ buckets are ever worth having, independent of query selectivity:
 > bucket, but it cannot merge across bucket boundaries.
 
 Worked examples, for a table with one high-cardinality identity column and everything else held constant.
-All four have already cleared the previous section's rule — a table that has not does not appear here,
-because its answer is no partition key at all:
+Each has already cleared the first line above — a table that has not does not appear here, because its
+answer is no partition key at all. The first two are still far short of a full segment per key, which is
+why they are `Auto`/`Shared` rather than `Dedicated`:
 
 | Table shape | Rows per key | Right choice | Why |
 |---|---|---|---|
@@ -494,9 +540,9 @@ because its answer is no partition key at all:
 
 **The default bucket count for a newly created `Auto`/`Shared` table now reflects this**, instead of a
 flat `16` regardless of shape: `16` when every partition-key column carries a bounded time-truncation
-`partitionFunction`, `128` otherwise. `128` is chosen to sit safely under the bucket ceiling above for a
-non-time-bounded key at realistic table sizes, without assuming a specific one — a customer whose table
-needs more (or fewer) states `initialBucketCount` explicitly (`2.10`). **This number cannot be changed
+`partitionFunction`, `128` otherwise. `128` sits under the ceiling once the table holds on the order of
+128 million rows or more. A smaller table that still partitions states a lower `initialBucketCount`; a
+count above the ceiling never fills (`2.10`). **This number cannot be changed
 after the table is created** — there is no bucket-count rebalancer yet, so pick it deliberately for a
 table you expect to grow into a high-cardinality shape. If a table is stuck with the wrong storage mode
 or bucket count today, see [Choosing partition storage mode](bulk-load.md#choosing-partition-storage-mode)

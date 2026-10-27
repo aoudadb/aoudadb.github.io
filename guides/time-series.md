@@ -41,7 +41,9 @@ column skips segments that cannot match — on a partitioned *or* an unpartition
 partitioning's query-shape obligations: no `RequirePartitionFilter`, so no `PARTITION_FILTER_REQUIRED`.
 For a table too small to justify a partition key — the common case, see
 [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45) —
-`clusterColumns` on the time column is the whole layout decision.
+`clusterColumns` on the time column is the whole layout decision. A table whose read is one key's history
+is not that case: the same page chooses between a tick tape, a daily series, and a sensor window, and the
+cluster list is different in each.
 
 - User problem solved:
   - Keep range query pruning effective on very large time-oriented tables.

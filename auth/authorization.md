@@ -770,11 +770,12 @@ Use a user JWT on the **admin listener**. RLS/PLS need a principal; do not put t
 
 {: .warning }
 **Check the volume before copying this shape.** This use case partitions `messages` by `room_id`, and that
-is only the right layout when **each room individually** holds on the order of a million rows. A typical
-chat product does not: tens of thousands of rooms and a few thousand messages a day across the whole
-product puts each room in the tens of rows — orders of magnitude below the line. Partitioning there
-creates a directory per room holding almost nothing, and imposes `PARTITION_FILTER_REQUIRED` on every read
-and every subscribe for the life of the table. See
+is only the right layout when the **table** will hold many full segments (a segment is ~1 000 000 rows)
+and reads name the room. A typical chat product does not: tens of thousands of rooms and a few thousand
+messages a day across the whole product is about a million messages a year, which is one segment, so
+there is no bucket for those rooms to share. A directory per room (`Dedicated`) would be a small segment
+per room on top of that. Either way the layout imposes `PARTITION_FILTER_REQUIRED` on every read and
+every subscribe for the life of the table. See
 [Should this table have a partition key?](../guides/partitioning.md#should-this-table-have-a-partition-key-p45),
 then read [the unpartitioned variant](#the-unpartitioned-variant--same-grants-no-partition-key) below —
 for most chat applications that is the one to build.

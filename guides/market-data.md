@@ -8,7 +8,7 @@ parent: "Guides"
 
 Document status: Approved baseline  
 Primary owner: Aouda maintainers  
-Last updated: 2026-10-12
+Last updated: 2026-10-27
 
 This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, a paged screener, and real-time ranking — all from a **browser-tier caller** holding only a `mk_pub_*` key on the data-plane listener. Every recipe in §§2–8 is executable against the published conformance fixture.
 
@@ -235,7 +235,8 @@ All tables, materialized queries, and named queries for the market-data fixture 
 
 Key design decisions:
 
-- **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. One partition tree per `(ticker, source)` pair; simpler candle aggregation. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, 0.4.0**). See [schema](schema.md).
+- **This schema is a tick tape, and that is the layout to copy only for a tick tape.** `quotes` and `trades` partition on `(ticker, source)` and cluster on `time`, because one ticker holds a great many ticks and every read names the ticker and the source. `partitionStorage` is left unset, so the table is `Auto`: a pair that reaches 10 million rows or 1 GB is promoted to its own directory, and a chart of that ticker reads that directory. A daily series — one row per security per day, plotted across years — lists the security as `partitionKey` and again as the first `clusterColumns` entry, then the date. The partition key is not itself a cluster column: the merge orders by `clusterColumns` only (**BL-1180**), so a series that stays in a shared bucket loses its per-key runs unless the key leads that list. A tick tape does not: a promoted ticker is its own directory, and clustering on `time` alone keeps that directory in time order. A sensor feed whose old rows are irrelevant is a third layout. All three are in [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45). Copying the tick schema onto either of the others is the mistake that page is there to prevent.
+- **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. The partition key is the `(ticker, source)` pair, the same columns the candles group by. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, 0.4.0**). See [schema](schema.md).
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
 - **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{name}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
 
@@ -407,6 +408,13 @@ And separate named queries `candles.byTickerDay`, `candles.byTickerMinute`. Same
 **A minute-interval candle MQ is the one to think hardest about.** One row per `(ticker, minute)` is
 1 440 rows per ticker per day — over 5 000 tickers, **7.2 million rows a day**, growing without
 bound. Decide where that result table lives before deploying one: see the next section.
+
+`candles.byTicker` reads a **tail** of that result (`limit` 500). The result is clustered by its time
+bucket, which you do not declare — the engine does — so a recent window skips older buckets. A chart of
+one ticker across years of minute candles is a different read: one ticker's rows are a single row in each
+time bucket, and the history opens every bucket. Serve that chart from a table laid out for a per-key
+history ([partitioning](partitioning.md#should-this-table-have-a-partition-key-p45)), and keep this
+materialized query for the live tail.
 
 ---
 

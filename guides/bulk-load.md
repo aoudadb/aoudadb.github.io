@@ -834,9 +834,10 @@ A table without retention is loaded exactly as before.
 ### Choosing partition storage mode
 
 **This section assumes the table should be partitioned at all.** That is a separate and earlier question,
-answered by a different threshold: partition a key only when each individual key value will hold on the
-order of **one full segment — around a million rows**. A table whose keys fall short of that wants no
-`partitionKey`, and none of the choices below apply to it. See
+and it is about the table's total size, not the rows in one key: partition when total rows divided by
+one full segment — around a million rows — is comfortably more than one. A table whose quotient is a
+handful wants no `partitionKey`, and none of the choices below apply to it. A key that itself holds about
+a million rows is the later choice of `Dedicated`, not this one. See
 [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45).
 
 Given a table that clears it, ask one more question: **will any single partition key, on its own, plausibly reach 10 million rows or 1 GB?** — the *promotion* thresholds, not the partition-or-not line above.
