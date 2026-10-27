@@ -469,10 +469,10 @@ depending on what is read:
 | What you read | The shape | Layout |
 |---|---|---|
 | A time window, naming no key. Or the whole table is only a handful of segments | A chat room, a screener, "the last hour of every sensor" | **No `partitionKey`.** `clusterColumns` on the time column. If rows older than a window are irrelevant, declare [retention](retention.md) — its time column has to lead the cluster list |
-| One key's history, and the recent tail of it, and each key holds thousands of rows rather than millions. The load is a day of every key | A daily close or a curve: 20 000 keys, one row a day, 7 000 days — 140 million rows | **Partition, `Auto`/`Shared`, bucket count near the ceiling** (here about 140, so the default 128). `clusterColumns` lists the key and then the time column — the key is in both lists. See below |
+| One key's history, and the recent tail of it, and each key holds thousands of rows rather than millions. The load is a day of every key | A daily close or a curve: 20 000 keys, one row a day, 7 000 days — 140 million rows | **Partition, `Auto`/`Shared`, bucket count near the ceiling** (here about 140, so the default 128). `clusterColumns` on the time column (**BL-1180, next train**; up to 0.7.1, list the key and then the time column, so the key is in both lists). See below |
 | Tens of millions of rows in a single key | An FX or equity tick tape, per ticker | **Partition, and `Dedicated`** — or leave `Auto`, which promotes a key past 10 million rows or 1 GB. `clusterColumns` on the time column only. [Market data](market-data.md) is this fixture |
 
-A partition key is not a cluster column. Declaring `partitionKey` routes a row to a directory or a bucket and, on a shared bucket, the flush writes that bucket in partition-key order and then cluster order. The background merge does not. It orders by `clusterColumns` alone (**BL-1180**), and a merged segment keeps a per-key run only when the key leads that list. A shared table whose chart is one key's history therefore names the key twice: `partitionKey`, and the first `clusterColumns` entry, with the time column after it. A dedicated directory is already one key, so the merge should stay in time order and the time column is the only cluster column.
+A partition key is not a cluster column, but on a shared bucket it orders the rows first. Declaring `partitionKey` routes a row to a directory or a bucket. A shared bucket holds many keys, so it is written and merged in partition-key order (by the key's value) and then cluster order, and each key keeps one run (**BL-1180, next train**). A dedicated directory of a plain key is already one key, so its order is the cluster order. A key derived by a function (`TruncateToDay` and the like) is not the column's value, so its directories and buckets are merged in cluster order alone. Either way the time column is the only cluster column you need. Up to 0.7.1 the background merge ordered by `clusterColumns` alone, and the flush ordered a non-string or multi-column key by its text. A shared table whose chart is one key's history on those versions names the key twice: as `partitionKey`, and as the first `clusterColumns` entry, followed by the time column. That layout still works.
 
 **A daily history is not "cluster on the key and skip the partition."** A load of one day of every key
 seals as its own segment. Merging combines small segments and then stops, so one key's days sit together
@@ -481,9 +481,9 @@ inside each chunk, and every chunk still holds every key. The run directory find
 20 000-key shape that is thousands of segments for one chart. A shared bucket holds a share of the keys,
 so the same chart opens only that bucket's chunks, and each directory lists only those keys. `Dedicated`
 is the wrong fix there: a key of 7 000 rows never fills a segment, and a day of every key creates one
-segment per key for the merger to clean up. Partition without the key in `clusterColumns` loses the
-other half: the merge rewrites the bucket into time order, the per-key runs are gone, and the chart
-reads every row in the bucket.
+segment per key for the merger to clean up. The merge keeps the bucket in key order, so the per-key
+runs survive it (**BL-1180, next train**). Up to 0.7.1, partitioning without the key in `clusterColumns`
+lost them: the merge rewrote the bucket into time order, and the chart read every row in the bucket.
 
 **Ticks are the other way round.** A ticker with tens of millions of rows fills its own segments, so a
 directory per ticker costs nothing and a chart of that ticker reads that directory. Clustering on time
