@@ -147,7 +147,7 @@ Scope boundaries:
   - `AoudaTable<T>.BulkLoadAsync`
   - (**Lead S13, 0.6.0**) `AoudaClient.BulkLoadAsync` / `RemoteTableQuery.BulkLoadAsync` over `ColumnBatch`es (a stream, a list
     or one batch) and `AoudaClient.BulkLoadMultiTableAsync` over a stream of them; see
-    [Column batches (C#)](#column-batches-c-lead-s13-next-train).
+    [Column batches (C#)](#column-batches-c-lead-s13-060).
 - Typed client exception family for lock/cursor/discriminator/options/duplicate-PK failures.
 - CLI shipped for both single and multi-table:
   - `aouda table bulk-load`
@@ -347,9 +347,9 @@ difference is *when* the work is paid — per load, or once for many — not how
 - **Streaming phase vs commit phase:** rows are appended in chunks — column-batch frames, or JSON column arrays (**Lead S12, 0.6.0**: NDJSON is no longer read) — then closed by a commit call.
 - **Durability unit:** durability is represented by WAL-visible segment/job events, not by row-level WAL entries.
 - **Durability level** (**Lead S26, 0.6.0**): the target table's
-  [durability level](write-durability.md#durability-levels-lead-s26-next-train) does not change how it is loaded — `strict`,
+  [durability level](write-durability.md#durability-levels-lead-s26-060) does not change how it is loaded — `strict`,
   `os` and `unlogged` tables load alike. (**Lead S26c, 0.6.0**) A load has a level of its own, `strict` or `os`, which
-  follows the database's level, not the table's: see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train).
+  follows the database's level, not the table's: see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-060).
   A bulk load into a table at `memory` (the old `MemoryOnly`) is refused, naming the level: "Bulk load is not supported for table
   '…' at durability 'memory'" — a load writes segment files, which a memory table never has.
 - **Job-level atomicity:** query visibility is tied to closing-frame commit completion.
@@ -363,7 +363,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 4. `ForceLogShipBulkLoad=true` disallows skip/snapshot replication modes.
 5. Aborts are WAL-visible (`BulkLoadAborted`), from either watchdog timeout or operator force-abort.
 6. A `strict` load's segment files are fsynced before its commit point — the closing frame, or on a single node the commit record —
-   so a committed load survives a power loss (an `os` load's are not: [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train),
+   so a committed load survives a power loss (an `os` load's are not: [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-060),
    **Lead S26c, 0.6.0**). The files of a job's segments sync in parallel while the job runs, and the commit waits
    for them (**Lead S20b, 0.6.0**: each segment was synced before its own frame). If the catalog
    registration after the commit point still fails after its retries, the commit call returns an error but the load is **not**
@@ -416,10 +416,10 @@ var handle = await client.BulkLoadAsync("trades", batches,          // IAsyncEnu
 **A load coerces by default** (**Lead S27a, 0.6.0**). Unless the load asks for `validation: strict`, a null sent for a NOT
 NULL column that is not part of the key is stored as the type's default, not refused — what an insert through `/rows` would refuse.
 A key is never coerced, and a column the table does not have is refused at either level. See
-[A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
+[A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
 
 The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatch.Validate()` are described on the
-[.NET Client page](../clients/dotnet.md#6-building-column-batches-lead-s13-next-train). A multi-table load
+[.NET Client page](../clients/dotnet.md#6-building-column-batches-lead-s13-060). A multi-table load
 (`BulkLoadMultiTableAsync`) takes batches that carry a `_table` string column.
 
 - **How batches map to `:append` bodies.** A body holds up to `AppendBatchSize` rows (capped by the server's `maxRowsPerAppend`)
@@ -456,7 +456,7 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
   `autoIncrement` cell is generated (BL-1104, as for any `:append`). An insert (`InsertAsync(ColumnBatch)`) does apply defaults.
 - **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129: the
   column used to be dropped, the key stored as `0`). A null in another NOT NULL column is stored as the type's default unless the
-  load asks for `Validation = BulkLoadValidation.Strict`; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train).
+  load asks for `Validation = BulkLoadValidation.Strict`; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
 - **The arrays are not copied.** A batch's arrays are read while its rows are written, which happens before the SDK asks your
   source for the next batch; reuse them from then on.
 
@@ -483,7 +483,7 @@ const handle = await client.bulkLoad('trades', batchesOf(source), {
 });
 ```
 
-The factories and `validate()` are on the [TypeScript Client page](../clients/typescript.md#column-batches-lead-s14-next-train).
+The factories and `validate()` are on the [TypeScript Client page](../clients/typescript.md#column-batches-lead-s14-060).
 What it shares with C#, and what changed for it in the same session:
 
 - **A transport policy never re-sends an `:append`** (until Lead S14 a `retryPolicy` re-sent it — a duplicate-rows hazard). Since
@@ -525,7 +525,7 @@ for await (const handle of client.bulkLoadJobs('trades', days)) console.log(hand
   ahead of it. An update, delete or other write to the table waits for every load that was in flight when it arrived — loading or
   committing — and not for loads that start after it.
 - (**Lead S21b, 0.6.0**) **A job's last body commits it.** The C# SDK puts the commit in the end frame of a job's last
-  column-batch body ([HTTP API](../reference/http-api.md#a-body-that-commits-its-job-lead-s21b-next-train)), so a job needs no
+  column-batch body ([HTTP API](../reference/http-api.md#a-body-that-commits-its-job-lead-s21b-060)), so a job needs no
   `:commit` round trip, and it begins job N+1 as soon as job N's last body is written: N's rows end on the server the moment the
   body is read, its segments are finalized and synced while N+1's rows arrive, and only N's commit point waits for the jobs before
   it. `@aouda/client` does the same (**Lead S22, 0.6.0**) where its `fetch` streams a request body (Node's); with one that
@@ -919,12 +919,12 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables. |
 | `BulkLoadOptions.MaxRowsPerSegment` | int? | `TargetRowsPerPage * 16` | positive int | Engine/API/client | Segment sizing knob. |
 | `BulkLoadOptions.ConflictPolicy` | enum | `Block` | `Block`, `FailFast` | Engine/API/client | Controls behavior for concurrent regular writes. |
-| `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, 0.6.0**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-next-train). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |
+| `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, 0.6.0**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |
 | `BulkLoadOptions.PrincipalId` | `Guid` | `Guid.Empty` | valid guid | Engine/API | Stamped into bulk-load WAL frames. |
 | `BulkLoadOptions.LockAcquisitionTimeout` | `TimeSpan` | `30s` | positive duration | Engine/API | Lock wait bound. |
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |
 | `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
-| `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, 0.6.0**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-next-train). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
+| `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, 0.6.0**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-060). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
 | `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and the whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
 | `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, 0.1.40**). |
@@ -947,7 +947,7 @@ cut body, so first send `:begin` with the job's idempotency key (it stops that r
 body again, or its frames from `nextSequence` on. The C# SDK does exactly that, a bounded number of times, and so does
 `@aouda/client` (**Lead S22, 0.6.0**: 4 attempts; until then it left a failed `:append` to the caller). Neither SDK's retry
 policy re-sends an `:append` on its own. Before Lead S21a the server applied every frame it was sent, and a replayed
-`:append` duplicated every row the first attempt landed — silently (see the [HTTP reference](../reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-next-train)).
+`:append` duplicated every row the first attempt landed — silently (see the [HTTP reference](../reference/http-api.md#a-jobs-frames-are-numbered-lead-s21a-060)).
 
 Precedence notes:
 - Begin-time options (`BulkLoadOptionsDto`) set per-job ingest and replication behavior.

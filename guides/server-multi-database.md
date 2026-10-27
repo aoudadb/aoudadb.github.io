@@ -118,7 +118,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | Tracing | `false` | OpenTelemetry disabled until opt-in |
 | Structured (JSON) logging | `false` | Simple console formatter; enable via `Logging:Console:FormatterName: json` |
 | Health startup delay | `10 s` | `/ready` suppresses failures during startup window |
-| Database durability | `strict` per-db (**Lead S26, 0.6.0**) | WAL written through to disk before a write is visible; `os`, `unlogged` and `memory` are opt-in ([levels](write-durability.md#durability-levels-lead-s26-next-train)) |
+| Database durability | `strict` per-db (**Lead S26, 0.6.0**) | WAL written through to disk before a write is visible; `os`, `unlogged` and `memory` are opt-in ([levels](write-durability.md#durability-levels-lead-s26-060)) |
 | Replication mode | `Replicate` per-db | Tables replicated to secondaries by default |
 | Write concern | `One` per-db | Acknowledged by primary WAL only |
 | Write concern timeout | `5 000 ms` | Applies when `majority` or `all` is requested |
@@ -544,7 +544,7 @@ These can be declared in config to provision databases at startup or to set defa
 
 | Setting | Type | Default | Notes |
 |---|---|---|---|
-| `Aouda:Databases:<name>:Durability` | `string` | `strict` | (**Lead S26, 0.6.0**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-next-train)). It replaces `EnableWal` and `DataDurability`: either key here fails startup validation, naming `Durability`. |
+| `Aouda:Databases:<name>:Durability` | `string` | `strict` | (**Lead S26, 0.6.0**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-060)). It replaces `EnableWal` and `DataDurability`: either key here fails startup validation, naming `Durability`. |
 | `Aouda:Databases:<name>:ReplicationMode` | `string` | `Replicate` | `Replicate` or `DoNotReplicate` |
 | `Aouda:Databases:<name>:MaxMemoryShareBytes` | `long?` | `null` | Optional cap on this database's share of the server budget |
 | `Aouda:Databases:<name>:DefaultTemperature` | `string` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` |

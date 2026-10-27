@@ -219,7 +219,7 @@ When a token or lag budget is in play, the read may wait up to `waitMs` (default
 
 ### A token from an accepted bulk load (**Lead S30, 0.6.0**)
 
-A bulk load answered `accepted` ([Bulk Load](bulk-load.md#answered-before-the-commit-accepted-lead-s30-next-train)) hands out a token
+A bulk load answered `accepted` ([Bulk Load](bulk-load.md#answered-before-the-commit-accepted-lead-s30-060)) hands out a token
 before its rows are visible. A read presenting it — or any later write's token — waits until the job is visible: the primary, every
 materialized query over the loading tables and every replica hold their covered position below the job until then. That wait is head
 of line behind the load's commit; a read without a token is not held. If the job is then lost, its token reads as covered once the

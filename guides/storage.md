@@ -127,7 +127,7 @@ If you run server defaults and do not set per-database overrides:
 
 - Data path is `./data`.
 - Server uses `Databases/{db}` database roots and `tables/{tableName}` table roots.
-- New databases are at durability `strict` by default — WAL written through before a write is visible (**Lead S26, 0.6.0**; see [durability levels](write-durability.md#durability-levels-lead-s26-next-train)).
+- New databases are at durability `strict` by default — WAL written through before a write is visible (**Lead S26, 0.6.0**; see [durability levels](write-durability.md#durability-levels-lead-s26-060)).
 - Database replication mode defaults to `Replicate`.
 - Database default table temperature is `Auto`.
 - Write concern defaults to `One` with timeout `5000 ms`.
@@ -193,7 +193,7 @@ If you run server defaults and do not set per-database overrides:
 
 - Some persistence-policy ADR concepts (`DiskOnly`, full policy matrix) are not exposed as explicit end-user policy enums in current HTTP/TS surfaces.
 
-> **Note (P30):** the memory-only mode is fully enforced end-to-end (P30 S2): such tables write nothing to disk — no `.hot`, `.col`, `.hra`, or WAL records. This is no longer a "reserved" surface. (**Lead S26, 0.6.0**) It is now the `memory` durability level (was `MemoryOnly`); see [durability levels](write-durability.md#durability-levels-lead-s26-next-train) and `guides/hot-cold.md §2.4`.
+> **Note (P30):** the memory-only mode is fully enforced end-to-end (P30 S2): such tables write nothing to disk — no `.hot`, `.col`, `.hra`, or WAL records. This is no longer a "reserved" surface. (**Lead S26, 0.6.0**) It is now the `memory` durability level (was `MemoryOnly`); see [durability levels](write-durability.md#durability-levels-lead-s26-060) and `guides/hot-cold.md §2.4`.
 
 ## 2.5 Phase coverage matrix
 

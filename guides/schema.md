@@ -44,7 +44,7 @@ Schema lifecycle is where reliability breaks first in fast teams:
 
 Aouda's schema lifecycle combines both worlds:
 
-- Start fast with `InferenceMode: On`.
+- Start fast with HTTP DDL, the C# client's `AutoCreateSchema`, or `InferenceMode: Extend` (an insert creates a missing table).
 - Move to declarative desired-state with schema diff/apply workflows.
 - Keep runtime truth in the server catalog.
 - Apply destructive changes only by explicit opt-in.
@@ -112,8 +112,11 @@ Aouda's schema lifecycle combines both worlds:
 
 If you do not configure schema management explicitly:
 
-- Server schema inference defaults to `InferenceMode = On`.
-- Inserts to missing tables can create schema (inference path) unless disabled.
+- Server `InferenceMode` defaults to `On`, which answers `404` to an insert into a missing table. Only `Extend` creates a table on
+  insert.
+- A table that schema apply created refuses HTTP DDL in every mode (**BL-1177, next train**). See the table below.
+- The C# client reconciles a typed model on its first write by default and **drops the columns the model omits**. See the
+  warning below.
 - Runtime schema truth is always the server catalog, not a file.
 - Declarative safety still defaults to non-destructive:
   - API apply defaults to `allowDestructive = false`.
@@ -121,12 +124,51 @@ If you do not configure schema management explicitly:
 
 | Setting / behavior | Default | Allowed values | Practical impact |
 |---|---|---|---|
-| `Aouda:Schema:InferenceMode` | `On` | `Off`, `On`, `Extend` (planned — not yet wired) | Backward-compatible schema-on-write behavior enabled |
+| `Aouda:Schema:InferenceMode` | `On` | `Off`, `On`, `Extend` | What an insert into a missing table does: `Off` and `On` answer `404`, `Extend` creates the table. It does not decide the declarative DDL lock |
 | `AOUDA_SCHEMA_INFERENCE_MODE` | unset | `Off`, `On`, `Extend`; or unset (no override) | No override unless explicitly set |
 | Apply option `allowDestructive` | `false` | `true`, `false` | Drop operations are skipped unless explicitly allowed |
 | Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested |
 | CLI `schema history` pagination | `limit=50`, `offset=0` | Any non-negative integer for `limit` and `offset` | Newest-first history default view |
 | CLI output mode | human-readable | `human-readable` (default), `json` (via `--json` flag) | Use `--json` when machine parsing is needed |
+| C# `AutoReconcileSchema` / `ReconcilePolicy` | `true` / `Unsafe` | `true`, `false` / `Safe`, `Unsafe` | The first typed write adds missing columns **and drops the columns the model omits**. Set `false` for declarative tables |
+
+### What `InferenceMode` decides, and what it does not
+
+| Mode | Insert into a missing table | HTTP DDL on a table schema apply created | HTTP DDL on any other table |
+|---|---|---|---|
+| `Off` | `404`; the message names `InferenceMode is Off` | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` (**BL-1177, next train**) | allowed |
+| `On` (default) | `404` | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` (**BL-1177, next train**) | allowed |
+| `Extend` | the table is inferred from the rows and created | refused, `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | allowed |
+
+- **`InferenceMode` decides only what an insert into a missing table does.** `On` does not create a missing table; only `Extend`
+  does. `Off` and `On` differ only in the `404`'s message.
+- **The declarative lock belongs to the table, not the mode.** A table that schema apply *created* refuses HTTP DDL in every mode:
+  drop or rename the table, its options, add, alter, reorder or drop a column, and a policy change to `storageTemperature` or
+  `retention`. Change these through `schema apply`. The residency knobs (`memoryRowCap`, `targetMemoryBytes`, `memoryFilter`,
+  `hotOnlyBackstop`) have no place in the file, so `PUT …/policy` that restates the current temperature and changes only them is
+  still served. (**BL-1177, next train**: before this, only `Extend` refused. In `On` and `Off`, HTTP DDL stayed open on a table the
+  file had just applied, including `DELETE` of a column.) `Off` stops inference. It was never the lock.
+- A table that HTTP DDL created stays open to HTTP DDL in every mode, even after an apply later extends it. Only a table the apply
+  created is locked.
+- The lock is logged with the table's create, so a replica, the primary it is promoted to, and a point-in-time restore hold it too
+  (**BL-1177, next train**; before, all three held the table open, even in `Extend`).
+
+> **⚠️ The C# client's default reconcile drops every column your model does not declare.**
+>
+> `Aouda.Client` defaults to `AutoReconcileSchema = true` with `ReconcilePolicy = Unsafe`. Before the first typed write to a table, the
+> client compares the table with the model. It adds the columns the model has and the table lacks, and it **drops every column the
+> table has and the model does not declare**. That includes a derived column (`SearchText`), a server-stamped column, and any column
+> you left off the row type on purpose.
+>
+> **Set `AutoReconcileSchema = false` on every client that writes to tables from `aouda.schema.json`.** From the next train
+> (**BL-1177**), the server refuses that drop on a schema-applied table, so a default client fails its first typed write with
+> `AoudaSchemaException` and the column survives. On 0.7.0 and earlier, in `On` or `Off`, the drop succeeded and the write reported
+> success. That is how a green apply lost its derived columns at the first service start.
+>
+> **Bulk load does not reconcile.** The two write paths therefore disagree. On a table HTTP DDL created, where the drop is still
+> allowed, a bulk-loaded table keeps a column that a typed insert of the same model removes. `ReconcilePolicy = Safe` only adds
+> columns and never drops one. It is still no fix for a declarative table: an add is refused there too, so a class with a property
+> the table lacks still makes the first write throw. Turn reconcile off.
 
 ---
 
@@ -148,12 +190,13 @@ If you do not configure schema management explicitly:
   - query-time defaults for missing historical values,
   - cold-page aligned backfill support for new columns.
 - Branch lifecycle with schema diff/merge and copy-on-write segment sharing (server-side branch endpoints and engine support).
+- `InferenceMode: Extend`: an insert into a missing table infers and creates it (BL-022).
+- The declarative DDL lock: a table schema apply created refuses HTTP DDL in every `InferenceMode` (**BL-1177, next train**; before, only in `Extend`).
 - **`autoIncrement` toggle on existing columns** — the `UpdateColumnAutoIncrement` change type enables toggling `autoIncrement` on or off for any existing integer-type column via the declarative schema apply path or the Studio "Toggle AutoId" action. The counter recovers from the column's MAX existing value on first insert after enabling. Available via `POST /schema/apply`, Studio UI, and (Studio-internal) schema export→patch→apply pattern. Tracked in BL-126.
 - **Identity-insert (request-scoped / job-scoped)** — supply explicit IDs on an `autoIncrement` column **without** flipping the schema flag. Ordinary insert: `identityInsert: true` on `POST …/rows` (BL-130). Large ingest: `options.identityInsert: true` on bulk-load `:begin` (BL-131). Complementary to BL-126 (toggle = permanent Auto↔Manual; identity-insert = one request/job). See [Getting Started](../getting-started/index.md), [HTTP API](../reference/http-api.md), [Bulk Load](../guides/bulk-load.md).
 
 ### Planned / proposed
 
-- `InferenceMode: Extend` hybrid mode remains planned (tracked backlog item).
 - Richer CI/CD experience around schema governance is documented, but not all convenience surfaces are first-class SDK calls.
 - Broader branch ergonomics in client libraries are still expected evolution.
 
@@ -180,7 +223,8 @@ If you do not configure schema management explicitly:
 
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
-| Inference-first schema lifecycle (`On`/`Off`) | Yes | No | No | `SchemaOptions.cs`, `TablesController.cs` | Default is `On`; `Off` blocks auto-create |
+| Insert-time table creation (`Extend`) | Yes | No | No | `SchemaOptions.cs`, `TablesController.cs` | Default is `On`, which, like `Off`, answers `404` to an insert into a missing table |
+| Declarative DDL lock | Yes | No | No | `TablesController.RejectIfDeclarativeSchemaDdlForbidden` | Every mode (**BL-1177, next train**); only tables apply created |
 | Imperative table and column lifecycle APIs | Yes | No | No | `TablesController.cs`, P4 report | Mature and well-tested |
 | Declarative schema diff/apply/export/history APIs | Yes | No | No | `SchemaController.cs`, P8 C.4 report | Includes markdown diff format |
 | Destructive-change safety gates | Yes | No | No | `SchemaApplyEngine.cs`, `SchemaCommandHandler.cs` | Explicit opt-in required |
@@ -201,7 +245,6 @@ If you do not configure schema management explicitly:
 | .NET CLI seed command | No | Yes | No | `Program.cs` + `RunSeedStub` | Stubbed, intentionally not wired |
 | Branch create/list/get/delete/diff/merge APIs | Yes | No | No | `BranchController.cs`, F.2/F.3 reports | Includes conflict handling |
 | Copy-on-write branch data sharing | Yes | No | No | F.4 report, branch tests | Branch writes isolated from parent |
-| `InferenceMode: Extend` | No | No | Yes | `SchemaOptionsValidator.cs`, P8 tasks | Explicitly deferred |
 | `partitionKey` / `clusterColumns` / `partitionFunction` evolution | No | No | Yes | P36 overview §12 → BACKLOG | Cross-partition / full re-sort — post-P36 |
 
 ---
@@ -324,7 +367,7 @@ Key anchors:
 
 | Surface | Key | Default | Effect |
 |---|---|---|---|
-| startup config | `Aouda:Schema:InferenceMode` | `On` | Controls inference-only behavior (`Off` or `On`) |
+| startup config | `Aouda:Schema:InferenceMode` | `On` | What an insert into a missing table does (`Off`, `On`, `Extend`). The declarative DDL lock does not depend on it (**BL-1177, next train**) |
 | Env var | `AOUDA_SCHEMA_INFERENCE_MODE` | unset | Overrides server inference mode |
 
 ### B) CLI context resolution
@@ -695,7 +738,6 @@ dotnet aouda schema apply --server http://localhost:5433 --database commerce --f
 | C# SDK branch wrapper | Missing on `ISchemaOperations` | call branch HTTP endpoints directly |
 | HTTP validate endpoint | Missing | CLI `schema validate` performs diff and exits by drift |
 | .NET CLI `schema seed` | Stubbed | use seed endpoint via HTTP until CLI command is wired |
-| `InferenceMode: Extend` | Deferred | use explicit transition `On` -> export -> `Off` |
 | PATCH fields for default/description/PK | Not on AlterColumnRequest | Declarative apply or Studio metadata/PK dialogs |
 
 ### C) Aouda.Schema.Contract NuGet facade
@@ -833,7 +875,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 |---|---|
 | `ApiApply` | Schema apply via REST API (`POST /schema/apply`). Primary source under the current model. |
 | `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
-| `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = On`). |
+| `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = Extend`). |
 | `BranchMerge` | Change applied by merging a branch into the parent catalog. |
 
 ### E) Schema JSON field reference (complete)
@@ -1029,7 +1071,7 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database is at `strict`; a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-next-train). The retired `walEnabled` is a validation error naming `durability.level`. |
+| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database is at `strict`; a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-060). The retired `walEnabled` is a validation error naming `durability.level`. |
 | `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). Allowed values: non-negative integer, or `null` (inherit database default). |
 
 #### SchemaSettings (value of `settings`)
@@ -1054,12 +1096,13 @@ Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, 
 
 ### Scenario 1: Inference-first prototype -> declarative baseline
 
-1. Keep server `InferenceMode=On`.
+1. Use server `InferenceMode=Extend` in development (or HTTP DDL, or the C# client's `AutoCreateSchema`).
 2. Build and iterate with inferred table creation.
 3. Export schema:
    - `dotnet aouda schema export --server http://localhost:5433 --database myapp --output aouda.schema.json`
 4. Commit exported schema to git.
-5. Switch production/shared environments to `InferenceMode=Off`.
+5. Switch production/shared environments to `InferenceMode=Off` (or `On`), apply the file there, and set
+   `AutoReconcileSchema = false` on C# service clients (see [what `InferenceMode` decides](#what-inferencemode-decides-and-what-it-does-not)).
 
 Expected result:
 - Teams keep prototyping speed early.
@@ -1201,6 +1244,9 @@ Expected result:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Insert fails with "table does not exist... InferenceMode is Off" | Inference disabled on server | Create via schema apply or direct DDL endpoint |
+| `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table or column call | Schema apply created the table, and HTTP DDL is refused there in every mode (**BL-1177, next train**) | Change the schema file and re-apply |
+| `AoudaSchemaException: … under declarative schema management. Automatic reconciliation cannot drop column …` on the first typed write | The C# client's default reconcile tried to drop a column the model does not declare, such as a derived or server-stamped column | Set `AutoReconcileSchema = false` on that client |
+| A derived or server-stamped column vanished after the first typed insert (0.7.0 and earlier) | Default reconcile (`Unsafe`) dropped it, and `On` / `Off` did not lock the table | Re-apply the schema, and set `AutoReconcileSchema = false` |
 | `schema apply` reports skipped operations | Destructive changes present without opt-in | Re-run only after approval with `--allow-destructive` |
 | `schema validate` returns drift | Desired file and runtime catalog differ | Run `schema diff`, then apply or reconcile |
 | CLI says no schema file found | discovery path mismatch | run from repo root or pass `--file` |
@@ -1249,7 +1295,8 @@ Expected result:
 
 ## 2.18 Known gaps and undone work
 
-- `InferenceMode: Extend` is still deferred.
+- The declarative DDL lock covers only tables that schema apply created. A table HTTP DDL created and an apply later extended stays
+  open to HTTP DDL.
 - No HTTP `/schema/validate` endpoint (validate is currently a CLI composition over diff).
 - .NET CLI `schema seed` remains stubbed while server `schema/seed` endpoint exists.
 - C# high-level schema interface does not yet include seed and branch convenience wrappers.

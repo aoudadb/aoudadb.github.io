@@ -399,7 +399,7 @@ var recent = await db.Engine.Table("sensors")
 | Option | Type | Default | Allowed values | Description |
 |--------|------|---------|----------------|-------------|
 | `DataPath` | `string?` | `null` | `null` (ephemeral); any valid filesystem path | Directory for data files. `null` = ephemeral (temp dir, auto-deleted). |
-| `Durability` | `string` | `"strict"` | `"strict"`, `"os"`, `"unlogged"`, `"memory"` | (**Lead S26, 0.6.0**) The database's durability level: `strict` writes the WAL through to disk before a write is visible (survives a power loss), `os` writes it to the operating system (survives a process crash), `unlogged` has no WAL (kept whole by a clean close; after any other stop it keeps its flushed rows, or is emptied if it was being changed — (**Lead S26c, 0.6.0**)), `memory` has no WAL and no data files. Also set by config `Aouda:Durability`. It replaces `EnableWal`: setting `EnableWal` (in code or as `Aouda:EnableWal`) makes the open throw, naming `Durability`. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-next-train). |
+| `Durability` | `string` | `"strict"` | `"strict"`, `"os"`, `"unlogged"`, `"memory"` | (**Lead S26, 0.6.0**) The database's durability level: `strict` writes the WAL through to disk before a write is visible (survives a power loss), `os` writes it to the operating system (survives a process crash), `unlogged` has no WAL (kept whole by a clean close; after any other stop it keeps its flushed rows, or is emptied if it was being changed — (**Lead S26c, 0.6.0**)), `memory` has no WAL and no data files. Also set by config `Aouda:Durability`. It replaces `EnableWal`: setting `EnableWal` (in code or as `Aouda:EnableWal`) makes the open throw, naming `Durability`. See [Write Path Durability](../guides/write-durability.md#durability-levels-lead-s26-060). |
 | `MemoryBudget` | `long?` | `null` | `null` (no limit); any non-negative `long` (bytes) | Maximum memory in bytes. `null` = no limit. |
 | `TreatMissingAsEmpty` | `bool` | `true` | `true`, `false` | When `true`, querying a non-existent table returns empty results instead of an error. Useful for cache-style usage. |
 
@@ -1097,6 +1097,30 @@ Anything else throws `NotSupportedException` at inference time, naming the type.
 >
 > The same trap applies to any property whose C# type you have not checked against the schema
 > file. `bool IsPublic` is `Bool`, not `String`; `DateOnly` is `Date`, not `Timestamp`.
+
+> **⚠️ By default, the first typed insert drops every column your class does not declare.**
+>
+> `AutoReconcileSchema` defaults to `true`, and its `ReconcilePolicy` defaults to `Unsafe`. Before the first typed write to a
+> table, the client adds the columns the class has and the table lacks, and it **drops the columns the table has and the class
+> does not declare**. A derived column such as `SearchText`, a server-stamped column, or a column you left off the row type on
+> purpose is in that set.
+>
+> If the table comes from `aouda.schema.json`, turn reconcile off:
+>
+> ```csharp
+> var client = new AoudaClient(new AoudaClientOptions
+> {
+>     ServerUrl = "http://localhost:5433",
+>     DatabaseName = "myapp",
+>     AutoReconcileSchema = false, // the schema file owns these tables
+> });
+> ```
+>
+> From the next train (**BL-1177**), the server refuses HTTP DDL on a table that schema apply created, in every `InferenceMode`.
+> A default client then fails that first write with `AoudaSchemaException` and the column survives. On 0.7.0 and earlier, in
+> `On` (the default) or `Off`, the drop succeeded and the insert reported success. `ReconcilePolicy = Safe` only adds columns, but
+> it is no fix for a declarative table: when the class has a property the table lacks, the add is refused too, and the write throws.
+> Bulk load never reconciles, so it does not drop a column that a typed insert of the same class would remove.
 
 
 ### Seeding explicit IDs (identity-insert)
