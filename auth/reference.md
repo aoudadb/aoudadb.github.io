@@ -575,7 +575,7 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | JWT has no `tenant_id` claim for a `jwt-claim` PLS table | Ensure JWT includes the `tenant_id` claim |
+| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | JWT has no `tenant_id` claim (or the table's bound claim), or it is empty or white space, for a `jwt-claim` PLS table | Ensure JWT includes the `tenant_id` claim |
 | `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | Explicit partition filter does not match the JWT `tenant_id` | Match the filter to the user's `tenant_id` claim |
 | `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Write targets a partition outside the caller's `tenant_id` | Write to the caller's own partition only |
 | `AUTH_PLS_GRANT_NOT_FOUND` | 403 | Partition not in the user's grant set (`auth-db-pls`) | Create a partition grant for the user via admin API |

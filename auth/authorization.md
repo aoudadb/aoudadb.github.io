@@ -156,7 +156,7 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 | Credential | PLS Behavior |
 |------------|-------------|
 | User JWT with `tenant_id: "acme"` | Scoped to `acme` partition |
-| User JWT without `tenant_id` | 403 — no partition access |
+| User JWT without `tenant_id`, or with an empty or white-space one | 403 `AUTH_PLS_TENANT_CLAIM_MISSING` — no partition access |
 | `mk_anon_` API key | `anonymous` role — no data access by default |
 | `mk_svc_` service key (no X-User-Token) | PLS **bypassed** — sees all partitions |
 | `mk_svc_` + X-User-Token | PLS enforced using user JWT claims |
