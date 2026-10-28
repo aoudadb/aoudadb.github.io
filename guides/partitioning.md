@@ -419,13 +419,14 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - `Shared`: partitions hash to shared buckets.
   - `Auto`: starts shared and promotes high-volume partitions to dedicated.
 - Partition key values (**BL-1184, next train**):
-  - Every value of the key columns is a partition, including null and the empty string, and each reads back as itself. Before,
-    an empty-string key was taken for "no partition" (a `Dedicated` table keyed `""` became unreadable after its first cold merge),
-    the string `"_null_"` shared null's partition, and a `|` inside a value of a composite key moved the split.
+  - Every value of the key columns is a partition, including null (of any type) and the empty string, and each reads back as
+    itself. Before, an empty-string key was taken for "no partition" (a `Dedicated` table keyed `""` became unreadable after its
+    first cold merge), the string `"_null_"` shared null's partition, a null of a number key shared the partition of 0, and a `|`
+    inside a value of a composite key moved the split.
   - Under `partitions/`, a partition's directory is its key, one level per key column. A null is `_null_`, the empty string
     `_empty_`, and `%`, `|`, `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, control characters, a leading `_` and a trailing dot or space are
     written as `%XX` (UTF-8). Ordinary values (tickers, numbers, the time functions' dates) are written as they are.
-  - This is catalog / data-directory format 14. A data directory written by 0.7.x (format 13) is refused at open with both
+  - This is catalog / data-directory format 14. A data directory written by 0.6.0 or 0.7.x (format 13) is refused at open with both
     versions named; there is no migration (export with the build that wrote it, load into a fresh directory).
 - Query safety boundary:
   - Partitioned-table queries usually must include full partition-key equality filters unless explicit cross-partition access is requested.
