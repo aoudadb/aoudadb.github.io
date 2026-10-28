@@ -311,6 +311,11 @@ or `in` (including a constrained prefix of a composite partition key):
 - **A promoted key's earlier rows stay in its shared bucket** (**ColumnarRead, 0.3.0**). Promotion
   no longer migrates a key's historical rows into its dedicated directory; only rows written after the
   promotion land there. The bucket's rows are still read, so a query on that key returns both.
+- **Every key type prunes** (**BL-1194, next train**). An `eq` or `in` on a `Guid`, `UInt16`, `UInt32`,
+  `UInt64` or `Float32` partition key used to read every partition (the rows were right, the read was
+  not narrowed); it now reads only the partitions its values name, like a string or integer key. One
+  exception, on purpose: a floating-point key's `-0.0` and `0.0` are two partitions that compare equal,
+  so an equality on a zero reads every partition rather than guess which one holds its rows.
 - This is a distinct mechanism from cluster-column pruning (physical column statistics on non-partition
   columns) — the two operate on different inputs and are reported separately (see `2.13`).
 
