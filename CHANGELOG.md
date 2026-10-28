@@ -13,6 +13,19 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
+  statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
+  value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,
+  and a segment or hot file written by an earlier build is refused by name: a read of it fails with `SegmentFormatUnsupportedException`
+  ("… its footer '…' is version 4, and this build reads v5 only"). There is no migration: export the data with the build that wrote it and reload it into the new one. The order fix
+  itself means a cold merge of a `Guid`-keyed shared bucket, or of a table clustered on a `Guid`, keeps its per-key runs and its
+  sort key. No query result was wrong before it.
+- **A hot merge no longer reads a partitioned table's rows back with the wrong key (BL-710, next train).** Background hot
+  coalescing merged small hot segments across partitions and dropped a virtual partition key. Every row of the merged segment then
+  read the key column's default, and a query filtered on the key (`Where Ticker = 'NVDA'`) returned the whole merged segment with
+  that key stamped on every row. A demotion made the loss permanent. A hot merge now stays inside one partition, keeps the key, and
+  is written under the partition's directory. Data already merged by 0.7.1 or earlier is not repaired; the format change above
+  means it is reloaded anyway.
 - **A partition key reads back as itself, and the data-directory format is 14 (BL-1184).** An empty-string value of a partition
   key column is a partition like any other: a `Dedicated` table keyed `""` became unreadable after its first cold merge (and at
   once after a bulk load), and with a virtual key its rows read back as null. The string `"_null_"` no longer shares null's
