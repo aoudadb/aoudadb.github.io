@@ -426,12 +426,16 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - Under `partitions/`, a partition's directory is its key, one level per key column. A null is `_null_`, the empty string
     `_empty_`, and `%`, `|`, `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, control characters, a leading `_` and a trailing dot or space are
     written as `%XX` (UTF-8). Ordinary values (tickers, numbers, the time functions' dates) are written as they are.
-  - (**BL-1189, next train**) A key is the value the column stores, however a write gives it. A bulk load keyed a `Timestamp` or
-    `Date` key column without a time function by the value as sent, so a `DateTime` landed in a partition named by its text
+  - (**BL-1189, next train**) A key is the value the column stores, however a write gives it. A bulk load keyed a key column by
+    the value as sent, so a `DateTime` for a `Timestamp` or `Date` key landed in a partition named by its text
     (`01/02/2026 03:04:05`, to the second; an ISO-8601 string by the string) rather than the one an insert of the same value uses,
-    and an equality on the key did not find those rows; it now keys them by their ticks or days. A `UInt64` key's values above the `Int64` range
-    were named by their signed bits (`18446744073709551615` as `-1`). A `Double` key's `-0.0` and `0.0` are two partitions; an
-    equality on either now reads both, as the comparison says it should, where a cold read found only one.
+    and an equality on the key did not find those rows; with a time function, a `DateTimeOffset` was truncated on its own clock
+    (`01:00+02:00` on 2 January into `2026-01-02`, where an insert of it lands in `2026-01-01`) and an ISO-8601 string was refused. It
+    now keys them by the stored value (UTC ticks, days). A `UInt64` key's values above the `Int64` range were named by their signed
+    bits (`18446744073709551615` as `-1`). A `Double` key's `-0.0` and `0.0` are two partitions; an equality on either now reads both,
+    as the comparison says it should, where a cold read found only one. The same holds for an equality whose constant is of another
+    type than the key (`Key = 1` on a `Bool` key, a `double` on a `UInt64` or `Int64` key): it reads every partition rather than the
+    one named by the constant's text, which a cold read could miss.
   - This is catalog / data-directory format 14. A data directory written by 0.6.0 or 0.7.x (format 13) is refused at open with both
     versions named; there is no migration (export with the build that wrote it, load into a fresh directory).
 - Query safety boundary:
