@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Security: a primary's replication port no longer serves files outside its data root (BL-1193, next train).** Inside a checkpoint
+  session a primary answered a bulk-segment request (checkpoint message `0x20`) with files outside its data root (a sibling
+  directory such as `<root>-x`) and with files of databases the peer was not accepted for — without any credential when no
+  `Aouda:ReplicaSet:KeyFile` is set. The message, its chunk (`0x21`) and the unused `BulkSegmentFetcher` are removed, and a checkpoint
+  session now ends on a message type it does not know. Replication is not supported yet; if you run a replica set, set a `KeyFile`
+  and keep the replication port private ([Replication](guides/replication.md#step-1-create-a-shared-keyfile), BL-1210).
 - **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,
