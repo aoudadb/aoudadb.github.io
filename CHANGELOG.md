@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A partition grant takes its key verbatim (BL-1192, next train; behaviour change).** `POST …/auth/admin/users/{id}/partition-grants`
+  stores `partitionKey` exactly as sent: `""` grants the empty-string partition, `" "` a different one, and `" a"` is not `"a"`.
+  Up to 0.8.0 a blank key was refused and every other key trimmed, so `" a"` was granted as `"a"`. Only a missing or `null` key
+  is `400 AUTH_GRANT_INVALID`. Test identities (`policy/inspect`, `--identities` files) follow the same rule, and a grant that
+  leaves `partitionKey` out is now invalid rather than `""`. A `jwt-claim` table still treats an empty tenant claim as no claim.
+  `@aouda/client`'s `createPartitionGrant` no longer refuses a blank key. [§19.8](auth/authorization.md#198-admin-api-partition-grants).
 - **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,

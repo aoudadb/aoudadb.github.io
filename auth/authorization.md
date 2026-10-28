@@ -613,7 +613,17 @@ Response (201 Created):
 }
 ```
 
-`accessLevel` must be `"read"`, `"write"`, or `"admin"`. Missing or empty `dimension` / `partitionKey` returns 400 `AUTH_GRANT_INVALID`.
+`accessLevel` must be `"read"`, `"write"`, or `"admin"`. A missing or empty `dimension`, or a missing or `null` `partitionKey`,
+returns 400 `AUTH_GRANT_INVALID`.
+
+**`partitionKey` is taken verbatim** (**BL-1192, next train**). It is the partition's value, stored, listed and compared exactly
+as sent: `""` grants the empty-string partition, `" "` a different one, and `" a"` is not `"a"` — every partition a write can create
+can be granted. Nothing is trimmed. Up to 0.8.0 the endpoint refused an empty or white-space key and trimmed the others, so
+`" a"` was stored as `"a"` and opened the `a` partition; send the key you mean.
+
+On a `jwt-claim` table the key is the caller's tenant claim, not a grant, and an empty or white-space claim is treated as **no
+claim** (`403 AUTH_PLS_TENANT_CLAIM_MISSING`): an identity provider's "unset" must not read the `""` partition. To give users the
+`""` partition, use `auth-db-pls` and grant it.
 
 **`dimension` is an opaque entitlement name, and it is case-sensitive** (**BL-1176, 0.7.0**). A grant names a dimension and a key,
 nothing else: no database, no table, no column. Every `auth-db-pls` table whose `permissionDimension` is that string honours it, in

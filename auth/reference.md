@@ -482,7 +482,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). A casing mismatch still 201s and never matches at check time (BL-430) |
+| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). A casing mismatch still 201s and never matches at check time (BL-430). `partitionKey` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, next train**) |
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 
@@ -595,7 +595,7 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 |------------|------|---------|--------|
 | `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
 | `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
-| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields | Check that `dimension`, `partitionKey`, and `accessLevel` are all present |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields | Check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`) |
 
 ### ADRA RLS Resolver Admin Errors
 
