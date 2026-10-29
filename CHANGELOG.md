@@ -13,6 +13,18 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A table subscription can filter with `in` and `nin` (BL-1226, next train).** The server turned the array in a subscription filter
+  into its JSON text, so every `in` / `nin` filter was refused `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array") before the
+  snapshot, whichever SDK sent it. The array is kept, each member is converted to the column's type as an `eq` value is, and the snapshot
+  and the live events are filtered by it. [Client pages](clients/typescript.md#websocket-subscriptions) and the
+  [HTTP API](reference/http-api.md#websocket-streaming-protocol) now say which listener takes a table subscription: only the admin one, and
+  the data-plane's refusal (`NAMED_QUERY_SUBSCRIBE_REQUIRED`) names that path.
+- **`aouda init` and `aouda databases create` say what to do (BL-1226, next train).** `aouda init` has never prompted for a password; with
+  none supplied it now names `--admin-password-file` and `--admin-password-stdin`, and shows a PowerShell form beside the bash one
+  (`printf` is not a command in PowerShell). `aouda-setup` reads its admin password from redirected input instead of failing. A
+  `databases create` that returns no keys (the auth database already holds that name's keys; keys are shown once) says so on stderr and
+  names the two ways to get a service key afterwards: a named service key, or `regenerate-keys`.
+
 - **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,

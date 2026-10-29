@@ -666,7 +666,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
 | `NAMED_QUERY_TOO_MANY_JOINS` | 400 (schema apply) | Join count exceeds cap (default 3) |
 | `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
-| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"` |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"`. By design: the data-plane cannot compose a query (ADR 0040 C-2). Subscribe by name, or, for a trusted backend, send the table subscription (`target` + `filter`) to the **admin** listener with a service key |
 | `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-name also sent a client `filter` |
 | `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
 | `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
@@ -872,7 +872,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 
 (**Lead S26, 0.6.0**) `enableWal` and `dataDurability` are gone, with no alias: a body carrying either is **400** `INVALID_REQUEST` naming `durability` (`enableWal: false` is `"unlogged"`, `dataDurability: "MemoryOnly"` is `"memory"`).
 
-**Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them.
+**Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them. A create that finds the keys already issued returns none: an auth database that already holds the system keys for that application-database name (it was linked before) generates nothing, and the server keeps only a hash. `auth` is then `{ "enabled": true, "database": … }` with no `keys`, which is not a failure. To get a service key afterwards, mint a named one (`POST /api/databases/{db}/service-keys`, with a server key) or issue a new set (`POST /api/databases/{db}/auth/admin/regenerate-keys`); both are described under *Named service keys* above. The CLI says all of this on stderr (**BL-1226, next train**).
 
 ```json
 {
@@ -4226,7 +4226,7 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `name` is set. |
 | `name` | string? | Conditional | Named-query unique name. **Required on the data-plane listener.** |
 | `args` | object? | No | Bind arguments for `name` subscribe. Same shape as HTTP execute `args`. |
-| `filter` | object? | No | Ad-hoc `WhereClause`. **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
+| `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. Every query operator is allowed, `in` / `nin` with an array (**BL-1226, next train**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
 | `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. |
 | `at_least` | string? | No | Consistency-token pin: snapshot at at least this token. Optional `wait_ms` / `on_exceeded` (same values as HTTP). Omitted `at_least` leaves `resume_from` byte-for-byte today's path. |
 | `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |

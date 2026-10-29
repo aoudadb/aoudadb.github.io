@@ -46,6 +46,21 @@ printf '%s' "ChangeMeNow!" | aouda init \
   --json
 ```
 
+On Windows, `printf` is not a command in PowerShell or `cmd`. Pipe the password from an environment variable instead:
+
+```powershell
+$env:ADMIN_PASSWORD | aouda init `
+  --admin-email admin@derive.local `
+  --admin-password-stdin `
+  --server http://localhost:5433 `
+  --json
+```
+
+`aouda init` never prompts for a password, on any platform: a prompt that reads the terminal is what stalls a script or an agent. Without
+`--admin-password-file` or `--admin-password-stdin` it stops with `ADMIN_CREDENTIALS_REQUIRED` and names both (**BL-1226, next train**;
+before, the message named neither). Windows PowerShell 5.1 encodes what it pipes to a program as ASCII by default, so a password with
+non-ASCII characters belongs in `--admin-password-file` (or in PowerShell 7).
+
 `aouda init` does **not** start Aouda. Run `aouda start`, Docker, Windows Service, `systemd`, or another host first, then point `aouda init` at that running server.
 
 Required and optional arguments:
@@ -64,6 +79,18 @@ aouda databases create --name user --auth-enabled --auth-database auth --server 
 aouda databases create --name analytics --server http://localhost:5433 --token <admin-token>
 aouda databases create --name cache --server http://localhost:5433 --token <admin-token>
 ```
+
+**Keys are shown once.** `aouda databases create` for a database linked to an auth database (`--kind auth`, or `--auth-enabled`) prints
+that database's three system keys (`mk_anon_`, `mk_svc_`, `mk_pub_`) in `auth.keys` of the response, and only when that create
+generated them. The server keeps a hash, so it cannot show a key again, and a create that finds the keys already issued (the auth
+database already holds that name's system keys) returns none. The CLI says which happened on stderr (**BL-1226, next train**). To
+get a service key afterwards:
+
+- **A named service key** (recommended for a backend): `POST /api/databases/{db}/service-keys` with a server key (`mk_srv_`) returns a
+  new `mk_svc_` once; `POST /api/databases/{db}/service-keys/{name}/rotate` replaces it with an overlap. See
+  [Named service keys and overlapping rotation](../reference/http-api.md) (authentication section).
+- **A new set of system keys:** `POST /api/databases/{db}/auth/admin/regenerate-keys` (an admin of that database) issues new
+  `mk_anon_` / `mk_svc_` / `mk_pub_` and revokes the old ones at once, or after `overlapSeconds`.
 
 This explicit server-then-database flow is intentional: it maps cleanly to production behavior and avoids hidden provisioning during startup.
 
