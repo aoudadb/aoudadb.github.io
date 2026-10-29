@@ -21,8 +21,11 @@ Public, user-facing release notes. Engine phase status lives in the server
   rewritten:** a `Date` stored from a `Local` or offset input on a server east of UTC is a day early, and a `Timestamp` stored from offset-less text or an
   `Unspecified` `DateTime` on a non-UTC server is shifted by that server's offset. A re-upsert of the same logical value after the upgrade therefore lands on a
   different key and **creates a new row**; repair the table with an `UPDATE` that shifts the affected values (a day; the server's offset), or re-load it. A server in
-  UTC is unaffected. Also: a partition key cut from a `Timestamp` is its UTC instant; a `DateOnly` is a valid `Date` and `Timestamp` value in the embedded engine;
-  and text that is a time of day alone (`10:30`) is now refused on a `Timestamp` and a `Date` column (it was stamped with today's date). See [Timestamp — time zones](./reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train).
+  UTC is unaffected. Also: a partition key cut from a `Timestamp` is its UTC instant, so a bulk load of `Local` or offset values no longer puts a row in the neighbouring day's
+  partition (**rows already written there are not moved**, and a partition-pruned query keeps missing them until they are re-written); a `DateOnly` is a valid
+  `Date` and `Timestamp` value in the embedded engine; text that is a time of day alone (`10:30`) is now refused on a `Timestamp` and a `Date` column (it was
+  stamped with today's date); and a dot-separated date (`01.03.2026`) is read by the table's culture, as a slash date is, or refused when the table has none
+  (the invariant culture read it month-first, so `01.03.2026` on a `nb-NO` table was stored as 3 January). See [Timestamp — time zones](./reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train).
 - **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,

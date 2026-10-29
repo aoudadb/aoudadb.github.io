@@ -93,7 +93,11 @@ as the day before.
   table with an `UPDATE` that shifts the affected values (a day for the `Date` rows; the server's offset for the `Timestamp` rows, over the range written before
   the upgrade), or re-load it. A server in UTC is unaffected.
 - **Partitioning.** A table partitioned by a time function on a `Timestamp` column cuts by the UTC instant, whatever kind or offset the value carries; on a
-  `Date` column by the day on the value.
+  `Date` column by the day on the value. Rows a bulk load already wrote into the neighbouring day's partition from a `Local` or offset value are not moved, and a
+  partition-pruned query keeps missing them until they are re-written.
+- **Dates written with dots.** A `Date` column reads `01.03.2026` with the table's `culture` (`nb-NO`, `de-DE`: 1 March), as it reads a slash date. A table with no
+  `culture` refuses a slash or a dotted date (use ISO `2026-03-01`); a `Timestamp` has no table culture, so it refuses a day-first dotted date always. Year-first
+  `2026.03.01` is not ambiguous and is accepted. Before this change the invariant culture read `01.03.2026` as 3 January.
 
 ---
 
