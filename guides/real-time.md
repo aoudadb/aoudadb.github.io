@@ -383,6 +383,16 @@ returns until it subscribes again. There is no compatibility shim: upgrade the c
 **`TRUNCATE` sends no notice** — and no row events — today. A client holding a truncated table's rows keeps them until it subscribes
 again.
 
+### Array columns in a subscription (**BL-035, next train**)
+
+(**BL-035, next train**) A table or named-query subscription delivers an [array column](array-columns.md) as a JSON array (MessagePack
+and long-poll alike) and **tells the client which columns are arrays**: every `snapshot` and `change` message that holds an array
+column carries `column_types`, a map from the column's name to its type (`{"Rates":"Double[]"}`). **A column named there holds an
+array of that type; a column not named holds a scalar.** A message without an array column has no `column_types`, so a table
+without arrays is unchanged. A subscription `filter` or a `conflate.key` on an array column is refused with an `error` message,
+code `ARRAY_COLUMN_UNSUPPORTED`. The SDKs read `column_types` and give typed arrays (`Float64Array`, `double[]`, …). Details:
+[Array columns — reading](array-columns.md#subscriptions-long-poll-and-materialized-queries).
+
 ## 2.8 How Aouda implements it
 
 High-level runtime flow:

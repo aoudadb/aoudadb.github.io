@@ -118,6 +118,17 @@ Per-record detail page with:
 - Related records listed by foreign key
 - Delete with confirmation
 
+### Array columns (**BL-035, next train**)
+
+(**BL-035, next train**) Studio shows an [array column](array-columns.md) in the grid, the query worksheet, the query centre, the named-artifact
+test panel and the record view as **the first five elements and the count** (`[0.5, 0.52, 0.53, 0.55, 0.56, …] · 400 values`);
+a null stays `NULL` and an empty array is `[]`. An **expand** opens a dialog that lists every element (paged, with the index) and
+copies the whole value as JSON. Copy, CSV and JSON export write the wire's JSON form (`-0` kept, a `Byte[]` as base64, `Int64`
+digits). An array column is **read-only** in Studio: no edit, no field in the add-row form (a row added from Studio holds null
+there), and it cannot be a filter, sort, group-by, aggregate, join key or the target of a bulk SET. The schema editor offers the
+six types when you create a table or add a column, and the alter-column dialog does not change an array column's type. Studio needs
+a server and an `@aouda/client` of the same train.
+
 ---
 
 ## 4) Query Worksheet

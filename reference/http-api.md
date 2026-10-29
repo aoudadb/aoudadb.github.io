@@ -483,6 +483,8 @@ retrying is refused the same way — read it with a filtered `POST …/tables/{r
 (**BL-944, 0.4.0**) The same holds when the refusal or the ceiling arrives wrapped in another error: it is a `503` with
 `Retry-After` (or `400 RESULT_TOO_LARGE`), where up to 0.3.x it answered `400 INVALID_REQUEST`.
 
+(**BL-035, next train**) A result that carries an [array column](../guides/array-columns.md) adds **`columnTypes`** to the body, a map from each array column's name to its type (`{"Tenors":"Int32[]","Rates":"Double[]"}`); it is absent when the result has none. A client treats a column that is not named there as a scalar.
+
 Query parameter **wins** over the header when both are sent:
 
 ```http
@@ -523,6 +525,7 @@ All errors return a JSON body with this structure:
 | `INVALID_VALUE` | 400 | Invalid value type or format |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) A column-batch body of a version this server no longer reads: an `ACB1` frame, or the retired media type `application/vnd.aouda.column-batch`. The message names the version found and the one expected (`ACB2`, `application/vnd.aouda.column-batch-v2`). Upgrade the client; nothing of the request was applied |
 | `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, 0.5.0**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
+| `ARRAY_COLUMN_UNSUPPORTED` | 400 | (**BL-035, next train**) An [array column](../guides/array-columns.md) is used where it cannot be: in a primary key, `unique`, `references`, partition or cluster column, `default`, `derived`, a check, a transform predicate, the permission column or a `memoryFilter`; in a query's `where` (a null test included), `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, join key or `perKey` key; in a `setExpr`, a named mutation's `orderBy` or a `min` / `max` / `maxLength` / `enum` constraint on a parameter it is written from; in an RLS rule; in a subscription `filter` or `conflate.key` (an `error` message with this code); or in a bulk-load route or tee that copies it into a column of another type. The `error` names the column, its type and the clause: `ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).` In a named query or materialized definition applied with `schema apply`, the entry is `Failed` and its reason starts with the code, instead of a `400`. A bad **value** (a non-finite or null element, an over-limit array) is not this code: it is the surface's own invalid-value code, `NAMED_QUERY_BIND_FAILED`, `NAMED_MUTATION_BIND_FAILED` or `INVALID_REQUEST` |
 
 #### Resource Errors (4xx)
 
@@ -1217,6 +1220,27 @@ accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 `columns` names the result's columns, `types` their types, and `data` holds **one array per column**, in the order of
 `columns`, all `rowCount` long: row *i* is index *i* of every array.
 
+(**BL-035, next train**) **An [array column](../guides/array-columns.md)** is named in `types` by its array type (`"Double[]"`), and
+its cell in `data` is a JSON array, `null` for a null cell and `[]` for an empty one (a `Byte[]` cell is a base64 string, `""` when
+empty). Numbers are written in the shortest form that reads back to the same value; `-0` is written `-0`; an `Int64[]` element is a
+JSON integer (above 2^53 a plain `JSON.parse` loses digits, as it does for a scalar `Int64`); a **`Float32[]` element is written as
+the shortest text of the value widened to `double`** (`0.1f` is `0.10000000149011612`), which a JavaScript reader turns back into
+the same float:
+
+```json
+{
+  "columns": ["CurveId", "Tenors", "Rates", "Residuals"],
+  "types": ["Int32", "Int32[]", "Double[]", "Float32[]"],
+  "data": [
+    [1, 2],
+    [[90, 180, 365, 730], []],
+    [[0.0412, 0.0398, 0.0377, 0.0361], [-0, 5E-324, 1.7976931348623157E+308, 0.1]],
+    [[0.10000000149011612, -0.25, 0, 0.5], null]
+  ],
+  "rowCount": 2
+}
+```
+
 (**Lead S12, 0.6.0; breaking**) **This is the only JSON shape.** The row-object response (`format=rows`, `{"rows": [{…}]}`)
 is gone, and with it the `format` parameter: a request that still sends `format=` — any value, `columnar` included — is refused
 `400 INVALID_FORMAT`, so an old client is told instead of being handed a body it would misread. To get row objects, zip the
@@ -1246,7 +1270,7 @@ ask for it by default. Send `Accept: application/vnd.aouda.column-batch-v2, appl
 response's `Content-Type`**. A result the frame cannot carry answers JSON as before, and so does a request whose `Accept` names
 only the retired `application/vnd.aouda.column-batch` (`ACB1`). A frame cannot carry a non-null vector cell, a computed or joined
 column whose values are not its declared type, more than 4,096 columns, a column name it cannot hold (empty, or over 1,024 UTF-8
-bytes), a single row that would decode past half the reader's 256 MB frame budget, or a string value over 16 MB of UTF-8. Errors
+bytes), a single row that would decode past half the reader's 256 MB frame budget, or a string value over 16 MB of UTF-8. (**BL-035, next train**) An array column **is** carried, as kind 9; before, a result with one answered JSON. A stored non-finite array element (reachable only through a defect) answers `500` before the first byte, or an error end frame on a streamed export. Errors
 before the response starts are JSON `ProtocolError`s with their status. **An error after the response has started is the body's
 end frame** (**Lead S09, 0.6.0**): `status: "error"` with the code, the message and the status the JSON error would have had,
 after the frames already sent — which are not a result. Both SDKs drop those frames and raise the same typed error the JSON error
@@ -1311,6 +1335,7 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 | `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
 | `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
 | `Decimal` (`Decimal(p,s)`) | `ScaledDecimal` (8) | The unscaled value at the column's declared scale `s` |
+| `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (**BL-035, next train**) | `Array` (9) | The array, with the column's own element kind; **elements are not widened** |
 | A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
 
 (**LoadSpeed S13, 0.4.0**) A decimal column always goes out as `ScaledDecimal` at its declared scale; the 128-bit
@@ -1318,7 +1343,7 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 scale; one whose values no 64-bit integer holds at one scale goes as JSON.) Up to 0.3.x a decimal column's kind was chosen from the values it held, and
 an empty or all-null `Decimal(p,s)` column, or an undeclared `Decimal`, could come as kind 6.
 
-`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`.
+`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`. (**BL-035, next train**) It names an array column by its array type (`["Int64","Double[]","String[]"]`).
 `GET /admin/capabilities` lists `queryColumnBatch: true`.
 
 ---
@@ -1501,6 +1526,16 @@ succeeds at all. See [Named mutations § choosing
 | `"Qty": { "value": 10 }` | A **constant**, spelled explicitly. The wrapped value may be a scalar, `null`, or an array — but not an object. |
 
 The object shape is reserved for those two one-key forms, because `{ "param": … }` already claims it: a bare object constant would be indistinguishable from a mistyped hole. Any other object node — an unknown key (`{ "valu": 0 }`), both keys at once, an empty object, or an object nested under `value` — fails **schema apply** with `NAMED_MUTATION_VALUE_NODE_INVALID`, naming the field (`values` / `set`), the column, and the keys it actually found. A definition stored before that check existed still loads, and its `execute` fails with `NAMED_MUTATION_BIND_FAILED` naming the column (BL-479 — previously such a node was carried into the row and surfaced as an untyped `INVALID_REQUEST` from deep in column conversion).
+
+(**BL-035, next train**) **A parameter or a literal bound to an [array column](../guides/array-columns.md)** takes the column's JSON
+form: an array (`"Rates": { "param": "rates" }` with `"rates": [0.0412, 0.0398]`, or the literal `"Tenors": [30, 90, 180]`), a base64
+string for a `Byte[]`, `null` for a null cell. A bad value is refused `400 NAMED_QUERY_BIND_FAILED` for a parameter and
+`NAMED_MUTATION_BIND_FAILED` for a literal, naming the parameter, the column and the element (*"Parameter 'd' (Double[] column 'D'):
+Element 0 of the Double[] value is NaN; array elements must be finite numbers (NaN and ±Infinity are refused)."*). `upsert` and
+`update … set` write the whole array. Refused when the definition is applied (that entry is `Failed`, reason starting
+`ARRAY_COLUMN_UNSUPPORTED:`): a `setExpr` that targets or reads an array column, an `orderBy` on one, and a `min` / `max` /
+`maxLength` / `enum` constraint on a parameter written to one. A `batchParam` row's array is one JSON array in the parameter's slot
+of the column arrays.
 
 To store a JSON document in a `String` column, send it as a JSON **string** (`"Meta": "{\"a\":1}"`), not as a bare object.
 
@@ -2184,9 +2219,10 @@ Get all tables and relationships for ERD visualization.
 | `source` | string | `"declared"` or `"inferred"` |
 | `cardinality` | string | `"many-to-one"`, `"one-to-one"`, or `"one-to-many"` |
 
-#### `GET /api/schema/typescript`
+#### `GET /api/databases/{db}/schema/typescript`
 
-Generate TypeScript interfaces for all tables.
+Generate TypeScript interfaces for all tables. (**BL-035, next train**: the route was written here as `GET /api/schema/typescript`,
+which the server never served — it answers `401` without a database in the path.)
 
 **Query Parameters:**
 
@@ -2196,7 +2232,10 @@ Generate TypeScript interfaces for all tables.
 | `schema` | `true` | Include Schema interface and TableName type |
 | `namespace` | - | Optional namespace wrapper for generated types |
 
-**Response:** `text/plain` with TypeScript code
+**Response:** `text/plain` with TypeScript code. (**BL-035, next train**) An [array column](../guides/array-columns.md) is typed
+`Float64Array` (`Double[]`), `Float32Array`, `Int32Array`, `BigInt64Array` (`Int64[]`), `Uint8Array` (`Byte[]`) or `string[]` in a table
+interface and a named query's row, and a named mutation's argument takes `Float64Array | number[]`, `Float32Array | number[]`,
+`Int32Array | number[]`, `BigInt64Array | bigint[] | number[]`, `Uint8Array` or `string[]`.
 
 ```typescript
 /**
@@ -2468,6 +2507,27 @@ there is stored as null (an absent `autoIncrement` cell is still generated), for
 array or an object (a vector, a nested value) is converted the way the column's type takes it. A value is judged exactly as the same
 cell sent in a [column-batch frame](#the-column-batch-frame-acb2) — the same conversions, the same errors.
 
+(**BL-035, next train**) **An [array column](../guides/array-columns.md)'s slot holds one JSON array per row** (the data is nested
+twice), `null` for a null cell, `[]` for an empty one, and a `Byte[]` cell is a base64 string. Numbers are read from their text
+(`-0` is kept; a `Float32` is rounded to a float once); an `Int32[]` / `Int64[]` element is an integral number in any notation
+(`2.0`, `1e3`), never a fraction or a string; NaN, ±Infinity and the strings `"NaN"` / `"Infinity"` are refused, and so are a null
+element, a nested array and a number out of the type's range. At most 65,536 elements and 1,048,576 bytes of elements a value. A
+bad value is `400 INVALID_REQUEST` naming the column (`Column 'D': Element 0 of the Double[] value is NaN; …`), or on a named
+mutation `NAMED_QUERY_BIND_FAILED` naming the parameter:
+
+```json
+{
+  "database": "acdocs",
+  "columns": ["Id", "D", "B", "S"],
+  "data": [
+    [100, 101],
+    [[1.5, 2.5], null],
+    ["AQID", ""],
+    [["x", "y"], []]
+  ]
+}
+```
+
 **Refused (`400`, nothing written):** `columns` and `data` that do not match (a different number of arrays, arrays of different
 lengths, a name given twice), an `absent` that names a column `columns` does not, a row past the body, a row twice, or a cell whose
 `data` slot is not `null`. The message names the column and the row. **A body that still carries `rows`** — row objects, the shape
@@ -2576,6 +2636,10 @@ scale: `3` sent beside `2.50` is stored as `3.00`. A client
 that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
 cannot say which text it had.
 
+- (**BL-035, next train**) **An array column's frame column (kind 9) must carry the column's own element kind**: nothing is widened
+  (an `Int32` run for a `Double[]` column, or an array column sent to a scalar column, is `400 INVALID_REQUEST` naming the column —
+  *"Column 'D' is Double[]; the frame sends Int32 elements (an array column's frame carries its own element kind, Double; nothing is
+  widened)."*). The JSON body is more forgiving: an integral number is accepted in a `Double[]` column.
 - A frame has no envelope: the **database and table are the URL's**, and `identityInsert` / `writeConcern` are query
   parameters — `POST /api/databases/mydb/tables/orders/rows?identityInsert=true&writeConcern=majority`. (On a JSON body
   those query parameters are ignored; the body's own fields apply.)
@@ -4118,6 +4182,20 @@ Get cluster topology.
 | `Timestamp` | UTC instant (see note below) |
 | `Date` | Date only |
 | `Guid` | UUID/GUID |
+| `Double[]` (**BL-035, next train**) | An [array column](../guides/array-columns.md): one whole array of finite 64-bit floats per row. JSON: an array of numbers; C# `double[]`, TypeScript `Float64Array` |
+| `Float32[]` (**BL-035, next train**) | One array of finite 32-bit floats per row. JSON: an array of numbers (written as the value widened to `double`); `float[]`, `Float32Array` |
+| `Int32[]` (**BL-035, next train**) | One array of 32-bit integers per row. JSON: an array of integers; `int[]`, `Int32Array` |
+| `Int64[]` (**BL-035, next train**) | One array of 64-bit integers per row. JSON: an array of integers; `long[]`, `BigInt64Array` |
+| `Byte[]` (**BL-035, next train**) | One byte string per row. JSON: **one base64 string**, not an array of numbers; `byte[]`, `Uint8Array` |
+| `String[]` (**BL-035, next train**) | One array of strings per row (an element is never null, and must be valid Unicode). JSON: an array of strings; `string[]`, `string[]` |
+
+(**BL-035, next train**) The six array names are matched exactly (`"double[]"`, `"Double []"`, `"Double[][]"`, `"DoubleArray"` and the
+type's number are refused). An array value holds at most **65,536 elements** and **1,048,576 bytes of elements** (so a `Byte[]` is at
+most 64 KiB, `Float32[]` / `Int32[]` 256 KiB, `Double[]` / `Int64[]` 512 KiB), a nullable column keeps `null` and `[]` apart, and an
+element is never null, NaN or infinite. An array column can only be selected: see `ARRAY_COLUMN_UNSUPPORTED`. A non-nullable array
+column is allowed at create; one added with `POST …/columns` is always added nullable. A type change into or out of an array type
+is refused (`400 INVALID_REQUEST`, *"Changing a column to or from an array type is not supported; add a new column and copy the
+values."*). Details: [Array columns](../guides/array-columns.md).
 
 ### Timestamp semantics
 
@@ -4240,6 +4318,8 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `key` | string[]? | Conditional | Columns that form the conflation key. Default: table primary key. Required when the table has no PK. |
 | `interval_ms` | number | Yes | Flush interval in milliseconds. Valid range 1…60_000. |
 | `collapse_inserts` | bool | No | When true, matching in-scope inserts are held latest-wins per key. Default `false` (omitted on the wire). Delivered `op` stays `"insert"`. |
+
+(**BL-035, next train**) A `filter` or a `conflate.key` that names an [array column](../guides/array-columns.md) is refused with an `error` message, code `ARRAY_COLUMN_UNSUPPORTED` (*"… an array column cannot be used in a subscription filter …"*, *"… cannot be a conflation key (conflate.key) …"*); the subscription is not created. Selecting one is fine.
 
 Default `conflate` holds only **value `update` events** where the row was visible both before and after. `insert`, `delete`, enter-scope, and leave-scope **flush** any pending update for that key and are delivered immediately. Therefore on an **insert-only** (append-only) stream default `conflate` reduces the event rate by zero and `values_skipped` never appears. That subscribe still registers; `snapshot_complete` includes a `CONFLATE_NOOP` warning when the conflate key is not the table PK. Set `collapse_inserts: true` to collapse matching inserts. A `latestPerKey` MQ result table (PK = group key) conflates via `prev` on `update` without the flag. Conflated `change` messages set `values_skipped` (count of dropped intermediate value events, including collapsed inserts). That marker is **intentional loss** and is not a `gap`. See [browser-tier read limits](../guides/browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
@@ -4538,6 +4618,7 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
+| `column_types` | object? | (**BL-035, next train**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) the page holds. **Omitted when the page has none.** A column named here holds an array of that type; a column that is not named holds a scalar. |
 
 **Example:**
 ```json
@@ -4627,6 +4708,7 @@ Incremental row change on an active subscription. Sent whenever a row matching t
 | `version` | number | Per-database sequence version of this change. Do not infer gaps from holes. |
 | `values_skipped` | number? | Present on conflated value updates: count of intermediate updates dropped. **Not** a `gap`. |
 | `token` | string? | C-1 token of **this event's** WAL position. Hand to HTTP `?at_least=` to be sure the read sees this change. |
+| `column_types` | object? | (**BL-035, next train**) As on `snapshot`: the array columns `row` / `prev` carry, name to type name; omitted when there is none. |
 
 **Example — insert:**
 ```json
@@ -4872,7 +4954,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
-| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — (**BL-035, next train**) **but an [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included** — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
 | `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
@@ -5080,12 +5162,45 @@ kind 1  := end    body := length:u32 payload:utf8-json[length]   (at most 1 MiB)
 column  := nameLen:u16 name:utf8 kind:u8 flags:u8 [nulls:bitmap] [absent:bitmap] values
 flags   := bit 0: a null bitmap follows · bit 1: an absent bitmap follows
 bitmap  := ceil(rowCount / 8) bytes, bit i = row i (least significant bit first)
-kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 8 ScaledDecimal   (6: retired, refused)
+kind    := 0 Null (no values) · 1 Int64 · 2 Double · 3 Bool · 4 String · 5 Timestamp · 8 ScaledDecimal · 9 Array   (6: retired, refused)
 values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1970-01-01T00:00:00Z)
          | Double          : rowCount × f64
          | Bool            : bitmap
          | ScaledDecimal   : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
+         | Array           : elementKind:u8  offsets:(rowCount + 1) × u32  elements        (BL-035, next train)
+```
+
+(**BL-035, next train**) **Kind 9, `Array`**, carries an [array column](../guides/array-columns.md): one whole array per row.
+
+```
+Array   := elementKind:u8  offsets:(rowCount + 1) × u32  elements
+elementKind := 1 Int32 · 2 Int64 · 3 Float32 · 4 Double · 5 Byte · 6 String            (0 and anything above 6: refused by name)
+offsets     := offsets[0] = 0, never decreasing; row i holds offsets[i+1] − offsets[i] elements
+elements    := Int32: total × i32 | Int64: total × i64 | Float32: total × f32 | Double: total × f64 | Byte: total × u8
+             | String: byteOffsets:(total + 1) × u32  utf8[byteOffsets[total]]            (total = offsets[rowCount])
+```
+
+- **Little-endian, not widened, no padding.** `Float32` elements are 4 bytes each and `Int32` elements 4 (they are not widened to 8
+  as the scalar kinds are); `elements` follows `offsets` with no padding. A `String` element `j` is the UTF-8 in
+  `byteOffsets[j]` … `byteOffsets[j+1]`.
+- **Null, absent and empty.** A null or absent row has count 0 (the bitmaps tell it apart from an empty array, as for every kind); a
+  reader refuses a null row whose count is not 0.
+- **The reader is strict.** It refuses an element kind of 0 or above 6, offsets that do not start at 0 or that decrease, a `String` element that is not valid UTF-8, a value over 65,536 elements or 1,048,576 bytes of elements, and a `Double` or
+  `Float32` element that is NaN or ±Infinity.
+- **On insert the element kind must be the column's own** (see `POST …/rows`); a query response carries the element kind of the
+  column's type.
+- **A reader that does not know kind 9** fails with *"Column '…': unknown kind 9."*.
+- The decoded size of a column is charged to the reader's 256 MB budget before its elements are read.
+
+A `Double[]` column of two rows `[1.5, 2.5]` and `null`, and a `String[]` column `["x","y"]` and `[]`, as one data frame (an
+excerpt of a real response, kind 9 columns only; the first row's `D` has two elements, the null bitmap `02` marks row 1):
+
+```
+D:  09 01 02   04   00000000 02000000 02000000   000000000000f83f 0000000000000440
+    kind flags nulls elementKind offsets (0, 2, 2)   1.5   2.5
+S:  09 00      06   00000000 02000000 02000000   00000000 01000000 02000000   78 79
+    kind flags elementKind offsets (0, 2, 2)     byteOffsets (0, 1, 2)       "x" "y"
 ```
 
 - **The sequence and the end frame** (**Lead S09, 0.6.0**). Every frame carries `seq`, its number in the body: 0, 1, 2, …
@@ -5392,3 +5507,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.12 | 0.5.0 (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
 | 2.13 | 0.6.0 (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |
 | 2.14 | 0.6.0 (Lead) | **Lead S12 (breaking on the wire): the REST API as column arrays.** Every JSON write body sends its rows as [column arrays](#column-arrays-the-write-body) — `columns`, `data` (one array per column), optional `absent` (per column, the rows whose cell is not given, which is not null) — on `POST …/tables/{name}/rows`, a branch insert, WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed / `aouda.seed.json`; a body with `rows` (row objects) is refused `400 ROW_OBJECTS_UNSUPPORTED` (new code). Bulk-load `:append` takes frames or one JSON column-array body; NDJSON is refused `415 ROW_OBJECTS_UNSUPPORTED`, `:begin`'s `acceptedAppendFormats` is `["column-batch-v2", "column-arrays"]`, and an unroutable multi-table row is named "Row {n} of this :append" with `details: row={n}`. Reads: the `format` query parameter is removed from `/query` and the named-query execute and batch routes (any `format=` is `400 INVALID_FORMAT`; results are always `{columns, types, data, rowCount, …}`); the materialized-query `POST …/{name}/query` answers `{columns, data, rowCount, stats, token}`; `generatedValues` is `{columns, data}` with one cell per request row; a WebSocket `snapshot` page is `{type, id, columns, data, version, token?}` (`snapshot_complete` and `change` unchanged); vector `:nearest` answers `{rowKeys, distances, executionMs, token}` and graph `:khop` `{nodeIds, hops, executionMs}`; the policy inspector's table and materialized-query `sample` is `{columns, data}`. **Pass-10 (documentation only):** the [graph and vector endpoints](#graph-and-vector-endpoints) are documented. |
+| 2.15 | next train (ArrayColumns, BL-035) | **ArrayColumns (BL-035, next train; additive on the wire):** six [array column](../guides/array-columns.md) types in schema and on every surface — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (JSON: an array, a base64 string for `Byte[]`; `types` and `X-Aouda-Column-Types` name them); one new error code, `ARRAY_COLUMN_UNSUPPORTED` (400), for an array column used where it cannot be; a new frame column kind, **9 `Array`** (an older client reading it fails with its *"unknown kind 9"* error; a query response with an array column is a frame when the client accepts frames, where before it fell back to JSON); `column_types` on subscription `snapshot` and `change` messages and `columnTypes` on the materialized query endpoint's body; the generator route is `GET /api/databases/{db}/schema/typescript`. A server binary from before this train that opens a data directory holding an array column refuses it by the type's number (*"has type 514, which this build does not define"*). `X-Aouda-Protocol-Version` stays `2`. |

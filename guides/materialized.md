@@ -1871,6 +1871,59 @@ Expected checks:
 - No need for separate MQ-specific subscription protocol.
 - If MQ/result table is missing, subscriber gets normal table-not-found behavior.
 
+## 2.12a Array columns in a materialized result (**BL-035, next train**) {#array-columns-in-a-materialized-result}
+
+(**BL-035, next train**) A `latestPerKey` result carries [array columns](array-columns.md) as
+**payload**: the newest row's curve, with the rate array whole. A `topNPerGroup` and a `filter` result carry them the same way. This
+is the shape of "the latest curve per curve id":
+
+```json
+{
+  "tables": {
+    "RateCurves": {
+      "columns": {
+        "CurveId": { "type": "Int32", "primaryKey": 1 },
+        "AsOf": { "type": "Timestamp", "primaryKey": 2 },
+        "Tenors": { "type": "Int32[]", "nullable": true },
+        "Rates": { "type": "Double[]", "nullable": true }
+      },
+      "clusterColumns": ["AsOf"]
+    }
+  },
+  "materializedQueries": {
+    "LatestCurve": { "type": "latestPerKey", "sourceTable": "RateCurves", "groupBy": ["CurveId"], "orderBy": "AsOf" }
+  }
+}
+```
+
+- **An array column is never a key.** A `groupBy` / key, an `orderBy`, or an aggregate input on an array column is refused when
+  the query is declared: at `schema apply` that entry is `Failed` with `ARRAY_COLUMN_UNSUPPORTED: column 'T.V' is Double[]; an
+  array column cannot be a materialized query's group key …`, and `POST …/materialized-queries` answers `400`.
+- **A `filter` result over a table without a primary key cannot carry an array column**, because such a result identifies its
+  rows by every column. Give the table a key, or leave the array out of `select`.
+- **The values survive** the build, incremental maintenance, a rebuild and a restart, bit for bit.
+- **Reading it.** `POST …/materialized-queries/{name}/query` answers the result with a **`columnTypes`** object naming the array
+  columns (`{"Tenors":"Int32[]","Rates":"Double[]"}`; absent when the result has none). A subscription to the result is an
+  ordinary table subscription: its `snapshot` and `change` messages carry `column_types`, and a client treats a column not named
+  there as a scalar. See [Array columns](array-columns.md#subscriptions-long-poll-and-materialized-queries).
+- **Latency of "the curve changed" to "the subscriber has it"** — *measured on `d03-aouda-kb`, 2026-10-29, by `Ar2CurveLatencyTests`:
+  six curves, one row per curve per second (100 measured ticks each), each row 6.9 KB of arrays, written by a named mutation and
+  delivered to a C# SDK subscription on a `latestPerKey` result over WebSocket JSON; loopback, the server pinned to four cores,
+  shipped defaults*: from sending the insert to the push, **p50 21.4 ms, p99 29.6 ms, maximum 51.5 ms** (the insert's own
+  acknowledgement took a p50 of 9.1 ms of that). The first calls after a server start take up to about 0.45 s while connections
+  and the JIT warm up.
+- **A table with retention cannot feed a `latestPerKey`.** A `latestPerKey` (or `firstPerKey`, or `filter`) over a table that
+  declares retention is refused when the query is created (BL-1060, a limit that is not specific to arrays):
+
+  ```text
+  Materialized query 'Latest' reads 'Tick', which declares retention (keep 30d) on 'Time': a query over it keeps its history
+  below the source's horizon, rebuilds included, which needs its groups split by that time … (ADR 0063 D-10).
+  ```
+
+  So "keep 30 days of curves **and** a latest-curve view over the same table" cannot be declared today. Choose one: the view over
+  a table without retention, or retention on the table and no view. Retention on its own works for a table with array columns,
+  and drops whole segments as for any table.
+
 ## 2.13 Operations and observability
 
 Monitor first:

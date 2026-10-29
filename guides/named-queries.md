@@ -257,6 +257,16 @@ There is **no** `POST /named-queries/register`. Inventory is `GET …/schema/exp
 
 ---
 
+## Array columns (**BL-035, next train**)
+
+(**BL-035, next train**) A named query may **select** an [array column](array-columns.md) (`"select": ["CurveId", "Rates"]`); the
+result gives the array whole, in `types` as `"Double[]"`. It may not use one in `where`, `orderBy`, a group,
+an aggregate (`count(col)` included), `distinct`, a join key or a `perKey` key: that definition is **refused at `schema apply`** —
+its entry is `Failed` with a reason starting `ARRAY_COLUMN_UNSUPPORTED:` — and the other definitions in the document still apply.
+A named mutation may write an array column from a parameter or a literal (`upsert` and `update … set` replace the whole array), but
+may not use one in a `setExpr`, an `orderBy`, or give its parameter a `min` / `max` / `maxLength` / `enum`. See
+[Array columns — what is refused](array-columns.md#what-is-refused-and-where).
+
 ## Paging, distinct, and count
 
 These fields exist on the definition. They were missing from this page.
