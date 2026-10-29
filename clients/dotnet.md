@@ -39,6 +39,7 @@ For the same API in-process, without a server, use `Aouda.Embedded` (see
 | Insert data I already hold as columns | §5 Inserts, §6 Building column batches |
 | Load millions of rows | §7 Bulk load |
 | Know what is retried after a failure | §8 What the SDK re-sends |
+| Subscribe to a table or a named query, and know which listener takes which | §8a Subscriptions |
 | Handle errors | §9 Errors |
 | Authenticate | [Getting Started: SDK usage with server auth](../getting-started/index.md#sdk-usage-with-server-auth) |
 | See the wire format | [HTTP API reference](../reference/http-api.md) |
@@ -520,6 +521,25 @@ server already applied would apply it twice:
 - `:begin` carries the idempotency key, so a repeat of it finds the same job.
 
 A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was lost surfaces as an error, never silently.
+
+---
+
+## 8a) Subscriptions: which listener takes which
+
+`client.GetTable(name).SubscribeAsync()` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
+`In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, next train**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
+a query, and the **data-plane listener** (the one browsers and `mk_pub_*` reach) refuses that by design: its callers send a named-query
+name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
+
+| You are | Subscribe with | Listener |
+|---|---|---|
+| A trusted backend with a service key (`mk_svc_`) | `client.GetTable(t).Where(...).SubscribeAsync()`, or a named query | **Admin**, or either with a named query |
+| An application end user (user JWT or `mk_pub_*`) | `client.NamedQueries.SubscribeAsync(name, args)` | **Data-plane** |
+
+A table subscription sent to the data-plane listener fails with `NAMED_QUERY_SUBSCRIBE_REQUIRED`
+(`AoudaRequestException.ErrorCode`). The fix is not a different filter: subscribe **by name** (see
+[Named queries](../guides/named-queries.md#subscribe-by-name)), or point a trusted backend at the admin listener with its service key.
+The wire contract is in the [HTTP API reference](../reference/http-api.md#websocket-streaming-protocol).
 
 ---
 

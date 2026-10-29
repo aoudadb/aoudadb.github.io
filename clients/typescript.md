@@ -1046,6 +1046,17 @@ const sub = client.table('events')
   });
 ```
 
+A filter may use any operator the query builder has, `in` and `notIn` (the wire's `nin`) included
+(`.where('severity', 'in', ['error', 'fatal'])`). (**BL-1226, next train**) A server up to 0.8.0 refuses a subscription whose filter
+uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct.
+
+**Which listener takes this.** `client.table(t).subscribe(...)` is a **table subscription** (a table and a filter). It works on the
+**admin** listener, with a service key or an operator token. The **data-plane** listener, the one browsers and `mk_pub_*` reach, refuses
+it with `NAMED_QUERY_SUBSCRIBE_REQUIRED`: its callers cannot compose a query, so they subscribe **by name**
+(`client.namedQueries.subscribe(name, args)`, see [Named queries](../guides/named-queries.md#subscribe-by-name)). A trusted backend that
+wants a filtered table subscription connects to the admin listener with its service key. Do not work around the error by moving the
+filter into a different request: there is none, by design ([Direct client access](../guides/direct-client-access.md)).
+
 #### Horizons and range deletes (**Horizon, 0.5.0**)
 
 A windowed materialized query's result and a table with [retention](../guides/retention.md) drop old rows without a row event per

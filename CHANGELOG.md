@@ -13,6 +13,31 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A table subscription can filter with `in` and `nin` (BL-1226, next train).** The server turned the array in a subscription filter
+  into its JSON text, so every `in` / `nin` filter was refused `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array") before the
+  snapshot, whichever SDK sent it. The array is kept, each member is converted to the column's type as an `eq` value is, and the snapshot
+  and the live events are filtered by it. The two now select the same rows on a nullable column too (a live event with a null matched
+  `ne`, `nin`, `lt` and `lte` while the snapshot never did), and a `Bool` column's `eq`, `ne`, `in` and `nin` match live events (they never did). [Client pages](clients/typescript.md#websocket-subscriptions) and the
+  [HTTP API](reference/http-api.md#websocket-streaming-protocol) now say which listener takes a table subscription: only the admin one, and
+  the data-plane's refusal (`NAMED_QUERY_SUBSCRIBE_REQUIRED`) names that path.
+- **A subscription filter's `or` list is bounded where a null is concerned (BL-1226, next train).** A null never matches `ne`, `nin`, `lt`
+  or `lte`, in a subscription's snapshot or its live events. The server states that for live events by adding `IS NOT NULL` beside each
+  such condition, and an `or` list needs a copy of itself per alternative. So one `or` list may hold at most 6 conditions with `ne`, `nin`,
+  `lt` or `lte`; one filter may add at most 256 groups and 2048 conditions in all; and groups may not nest past the limit of 5 once the
+  copies are added. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot, and the message says what to do:
+  fold several `ne` on one column that mean "none of these" into one `nin`, or split the subscription. On a partitioned table with
+  partition-level security, an `or` list with `ne` is refused for a user with several grants exactly as an `or` list of `eq` is.
+- **A named query's literal conditions match live events as they match the snapshot (BL-1226, next train).** A named query whose
+  definition holds a literal `gt 5` on an `Int32` column compared the literal as text for live events, so a live insert of 10 was never
+  delivered although the snapshot held it; a literal `Timestamp` or `Decimal` had the same shape of defect, a literal `in` list matched no
+  live event (`nin` every one), and a literal `like` matched none. Literals are now bound to the column's stored form, and a list
+  member beyond `Int64` or with more than 15 digits keeps every digit. A bound parameter was never affected.
+- **`aouda init` and `aouda databases create` say what to do (BL-1226, next train).** `aouda init` has never prompted for a password; with
+  none supplied it now names `--admin-password-file` and `--admin-password-stdin`, and shows a PowerShell form beside the bash one
+  (`printf` is not a command in PowerShell). `aouda-setup` reads its admin password from redirected input instead of failing. A
+  `databases create` that returns no keys (the auth database already holds that name's keys; keys are shown once) says so on stderr and
+  names the two ways to get a service key afterwards: a named service key, or `regenerate-keys`.
+
 - **A `Timestamp` or a `Date` no longer depends on the time zone of a machine (BL-1225, next train; Derive's BL-723).** `DateTime.Today` written to a
   `Date` column on a +01:00 machine was stored as the day before, because the server applied the offset and took the UTC day; a `Date` is now the day on the
   value, whatever its offset or kind. A `Timestamp` written as text with no offset (`"2026-03-01"`, `"2026-03-01T00:00:00"`), or as a `DateTime` of kind
