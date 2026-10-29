@@ -355,6 +355,11 @@ The middleware:
 - If `X-User-Token` is present but invalid (expired, revoked), the request returns 401 with a clear error about the user token.
 - If `X-User-Token` is absent, an app service key (`mk_svc_`) grants full access with PLS / RLS bypassed. A server API key
   (`mk_srv_`) gets its role's grants with PLS / RLS enforced (**0.4.0**; up to 0.3.x it bypassed them too).
+- `X-User-Token` applies to **HTTP requests only**. A WebSocket or long-poll session is authenticated by its `auth` message
+  alone, and `Aouda.Client` / `@aouda/client` do not forward the user token there. A realtime session opened with a service key
+  therefore sees every partition its filter or named query names, with PLS / RLS bypassed — in its snapshot and in its change
+  events (**BL-1219, next train**). To scope a backend's
+  subscription to one user, open it with that user's token, or filter it to that user's partition values yourself.
 
 ### Example: Backend Querying on Behalf of a User
 

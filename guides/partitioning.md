@@ -189,7 +189,9 @@ Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Er
 
 **The rule above applies to subscriptions exactly as it does to reads.** A `subscribe` runs a snapshot query first, and that snapshot goes through the same enforcement as `POST /named-queries/{name}/query` — the same code, the same guard. A named query that cannot execute cannot be subscribed to either.
 
-This catches people out because the failure is **late**. The schema applies. The named query deploys. A catalog export lists it. Nothing complains until the first browser subscribes, and then every subscribe fails with `PARTITION_FILTER_REQUIRED` while a service key — which bypasses the guard entirely — works perfectly. It reads like a transport bug. It is not one.
+This catches people out because the failure is **late**. The schema applies. The named query deploys. A catalog export lists it. Nothing complains until the first browser subscribes, and then every subscribe fails with `PARTITION_FILTER_REQUIRED`. It reads like a transport bug. It is not one.
+
+**A service key is held to the same rule.** It bypasses partition-level security, not the partition filter: on a table that requires a partition filter (`PartitionOptions.RequirePartitionFilter`, `true` by default), a service key's `subscribe` needs an `eq` / `in` on every partition-key column in its filter, or a named query that binds them, exactly as a browser's does. It then receives every change event that filter admits, in every partition (**BL-1219, next train** — before it, a service key's filtered or named-query subscription on a PLS table received the snapshot and no change events).
 
 #### The per-user feed
 
@@ -277,7 +279,7 @@ Without one of these three, the definition can never execute for a user-token ca
 | A small membership / roster / inbox table, whatever the auth model | **Option C** — no partition key, `auth-db-rls`; the guard never applies |
 | Each user sees only their own rows, on a table partitioned for volume | **Option A** — PLS injects the value; the client cannot override it. **Option C also works here** and prunes identically — see below |
 | A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values — or Option C with a `PartitionGrant` rule |
-| A trusted backend reads across all partitions | A service key, which bypasses the guard |
+| A trusted backend reads across all partitions | A service key: an ad-hoc query with `crossPartitionAccess`, or a subscription with a filter on every partition key (or a named query binding them) — a service key bypasses PLS, not the partition filter |
 | A browser reads across all partitions | Not available — see [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule) |
 
 **Option C is not the "small table" option.** It is listed first for small tables because there the
