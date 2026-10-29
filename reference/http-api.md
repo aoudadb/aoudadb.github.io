@@ -58,7 +58,7 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
 | `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default is **role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. An explicit value is never rewritten. |
 | `Authorization` | **Required when the target database has auth enabled, except public app-auth POSTs** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). `POST /api/databases/{db}/auth/{signup\|signin\|refresh\|request-password-reset\|reset-password}` are keyless (a present bearer is ignored). |
-| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. |
+| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. The realtime transports take the same token as `user_token` on the WebSocket `auth` / `re_auth` message and `userToken` on the long-poll connect, with the same rules (**BL-1223, next train**). |
 
 ## Standard Response Headers
 
@@ -197,8 +197,9 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
    mk_*     → Resolve as custom app key → check permissions
    eyJ*     → Validate JWT signature and claims → extract roles
 
-4. Check X-User-Token header (optional)
+4. Check X-User-Token header (optional; realtime: auth/re_auth user_token, long-poll userToken — BL-1223, next train)
    Present + credential is mk_svc_ or mk_srv_ → Apply user context (PLS/RBAC)
+     Invalid, expired or revoked → 401 AUTH_TOKEN_INVALID (realtime: auth_error, socket closed)
    Present + credential is mk_anon_ or user JWT → Ignored
    Absent → Use credential's own identity
 
@@ -228,6 +229,11 @@ The `X-User-Token` header enables backends to act on behalf of a specific user w
 **When it is ignored:**
 - When `Authorization` is an `mk_anon_` key (anon keys already enforce PLS from the JWT)
 - When `Authorization` is a direct user JWT (the user is already identified)
+
+**Realtime** (**BL-1223, next train**): the same user token, with the same rules, is `user_token` on the WebSocket
+`auth` and `re_auth` messages and `userToken` on the long-poll connect body. The session is then the
+user's for its whole life — snapshot, change events, write streams, grant changes — and it ends when the user token expires or is
+revoked. Before BL-1223 a realtime session ignored the user token and kept the service key's visibility.
 
 **Example:**
 
@@ -4196,6 +4202,7 @@ Authenticate the connection and optionally negotiate wire mode.
 | `token` | string? | No | Bearer token. Required when server auth is enabled. |
 | `database` | string | Yes | Database name this connection is scoped to. |
 | `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
+| `user_token` | string? | No | A user JWT to act as, beside a service-level key (`mk_svc_`, `mk_srv_`) in `token` — the realtime `X-User-Token` (**BL-1223, next train**). The session is then that user's: PLS, RLS, roles, grant changes, expiry and revocation. Ignored beside any other credential. Invalid, expired or revoked → `auth_error` `AUTH_TOKEN_INVALID`. |
 
 **Example:**
 ```json
@@ -4207,7 +4214,12 @@ Authenticate the connection and optionally negotiate wire mode.
 }
 ```
 
-**Server responds with:** `auth_ok` or `auth_error`.
+**A backend acting as a user** (**BL-1223, next train**):
+```json
+{ "type": "auth", "token": "mk_svc_xyz789...", "user_token": "eyJhbGciOiJSUzI1NiIs...", "database": "my_db" }
+```
+
+**Server responds with:** `auth_ok` or `auth_error`. With a `user_token`, `auth_ok.user_id` and `auth_ok.expires_at` are the user's.
 
 ---
 
@@ -4308,6 +4320,7 @@ Re-authenticate an existing WebSocket session with a refreshed JWT (or API key) 
 |---|---|---|---|
 | `type` | string | Yes | Always `"re_auth"` |
 | `token` | string | Yes | Refreshed bearer JWT or API key |
+| `user_token` | string? | No | The user token, as on `auth` (**BL-1223, next train**). A session opened with one must send one for the same user; a session opened without one cannot add one. Either is `AUTH_TOKEN_INVALID`. |
 
 A **failed** `re_auth` still closes the session (fail-closed). A successful refresh does **not** re-snapshot. Without `re_auth`, JWT expiry closes the socket (`AUTH_TOKEN_EXPIRED`) and every browser re-snapshots.
 
@@ -4462,7 +4475,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, next train**). (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**

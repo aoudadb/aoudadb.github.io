@@ -760,6 +760,9 @@ Content-Type: application/json
 {"token":"<jwt-or-api-key>","wireMode":"json"}
 ```
 
+A backend acting as a user adds `"userToken":"<user-jwt>"` beside a service-level key — the long-poll form of `X-User-Token`
+(**BL-1223, next train**).
+
 Expected result: `auth_ok` is returned for valid auth, then `snapshot`/`change` messages flow over the chosen transport.
 
 Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports JSON mode only.

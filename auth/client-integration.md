@@ -73,6 +73,7 @@ var client = new AoudaClient(new AoudaClientOptions
 
 // Queries are PLS-scoped to the user identified by the JWT
 var userOrders = await client.GetTable("orders").Limit(10).ToListAsync();
+// So are subscriptions (BL-1223, next train): the socket carries the user token too
 ```
 
 ### Frontend: URL + database + Sign-In
@@ -345,8 +346,8 @@ X-User-Token: eyJhbGciOiJSUzI1NiIs...     ← User JWT (for PLS enforcement)
 The middleware:
 1. Validates the service key (Layer 1 — connection authorized).
 2. Validates the user JWT from `X-User-Token`.
-3. Applies PLS using the user JWT's claims (tenant_id, user_id).
-4. RBAC still uses the service key's roles (full access).
+3. Replaces the request's identity with the user's: PLS, RLS and RBAC all use the user — the user's partition grants, claims
+   (tenant_id, user_id) and roles. The service key's own roles and its PLS / RLS bypass do not apply to the request.
 
 ### Rules
 
@@ -355,11 +356,18 @@ The middleware:
 - If `X-User-Token` is present but invalid (expired, revoked), the request returns 401 with a clear error about the user token.
 - If `X-User-Token` is absent, an app service key (`mk_svc_`) grants full access with PLS / RLS bypassed. A server API key
   (`mk_srv_`) gets its role's grants with PLS / RLS enforced (**0.4.0**; up to 0.3.x it bypassed them too).
-- `X-User-Token` applies to **HTTP requests only**. A WebSocket or long-poll session is authenticated by its `auth` message
-  alone, and `Aouda.Client` / `@aouda/client` do not forward the user token there. A realtime session opened with a service key
-  therefore sees every partition its filter or named query names, with PLS / RLS bypassed — in its snapshot and in its change
-  events (**BL-1219, next train**). To scope a backend's
-  subscription to one user, open it with that user's token, or filter it to that user's partition values yourself.
+- The user token applies to **every transport** (**BL-1223, next train**): `X-User-Token` on HTTP, `user_token` on the WebSocket
+  `auth` and `re_auth` messages, `userToken` on the long-poll connect. The rules are the same on each: honoured only beside a
+  service-level key, ignored beside any other credential, and an invalid, expired or revoked one fails with `AUTH_TOKEN_INVALID`
+  (on a socket, `auth_error` and the socket closes). A realtime session opened with a service key and a user token **is** that
+  user's session: its snapshot, its change events and its write streams see what the user may see, and it follows the user's
+  grant changes while it is open. `Aouda.Client` (`UserToken`) and `@aouda/client` (`userToken`) send it wherever they send the
+  header; an older client, or an older server, leaves a realtime session with the service key's visibility.
+- A realtime session with a user token **ends when the user token expires** (`AUTH_TOKEN_EXPIRED`) or is revoked
+  (`AUTH_TOKEN_REVOKED`), as a user's own session does. Reconnect with a fresh user token, or send `re_auth` with the service key
+  and the fresh user token. A session cannot add, drop or switch its user token on `re_auth` (`AUTH_TOKEN_INVALID`).
+- A realtime session opened with a service key and **no** user token sees every partition its filter or named query names, with
+  PLS / RLS bypassed — in its snapshot and in its change events (**BL-1219, next train**).
 
 ### Example: Backend Querying on Behalf of a User
 
