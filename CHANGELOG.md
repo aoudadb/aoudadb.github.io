@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A `Timestamp` or a `Date` no longer depends on the time zone of a machine (BL-1225, next train; Derive's BL-723).** `DateTime.Today` written to a
+  `Date` column on a +01:00 machine was stored as the day before, because the server applied the offset and took the UTC day; a `Date` is now the day on the
+  value, whatever its offset or kind. A `Timestamp` written as text with no offset (`"2026-03-01"`, `"2026-03-01T00:00:00"`), or as a `DateTime` of kind
+  `Unspecified`, was read in the **server's** local zone, so the same insert stored different instants on two servers; it is now UTC. Send an offset (or a
+  `Local` / `Utc` `DateTime`) to mean another zone. `Aouda.Client` reads a time given as text in the invariant culture, as UTC. Values stored before this
+  change are not rewritten. See [Timestamp — time zones](./reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train).
 - **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,

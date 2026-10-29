@@ -1054,6 +1054,10 @@ against the model), so a mismatch here is what a reconcile failure is reporting.
 
 Anything else throws `NotSupportedException` at inference time, naming the type.
 
+A `DateTime` of kind `Local` or `Utc` is written with its offset, and a `DateTime` of kind `Unspecified` (`new DateTime(2026, 3, 1)`) is
+read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on the value, on every machine. See
+[Timestamp — time zones](../reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train) (**BL-1225, next train**).
+
 > **⚠️ An enum is `Int32` unless you say otherwise.**
 >
 > A C# enum declared the ordinary way —
