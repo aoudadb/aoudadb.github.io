@@ -232,8 +232,9 @@ The `X-User-Token` header enables backends to act on behalf of a specific user w
 
 **Realtime** (**BL-1223, next train**): the same user token, with the same rules, is `user_token` on the WebSocket
 `auth` and `re_auth` messages and `userToken` on the long-poll connect body. The session is then the
-user's for its whole life — snapshot, change events, write streams, grant changes — and it ends when the user token expires or is
-revoked. Before BL-1223 a realtime session ignored the user token and kept the service key's visibility.
+user's for partition- and row-level security for its whole life — snapshot, change events, write streams, grant changes — and it
+ends when the user token expires or is revoked. **Realtime does not check roles yet** (HTTP does: `403` for a user with no role).
+Before BL-1223 a realtime session ignored the user token and kept the service key's visibility.
 
 **Example:**
 
@@ -4475,7 +4476,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, next train**). (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, next train**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, next train**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**
