@@ -388,6 +388,64 @@ gives each number the kind its JSON text would have, a `DateTime` that is not UT
 instead (**BatchFirst S03, 0.1.40**). A load that mixes the two formats mid-stream is still one load,
 with one resume cursor.
 
+### Array columns (**BL-035, next train**) {#array-columns}
+
+(**BL-035, next train**) A table's [array columns](array-columns.md) load like any other column, on every path a load takes: whole
+batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered tables, and a load that spills.
+
+- **A JSON column-array body** carries an array column as one JSON array per row (a `Byte[]` as one base64 string, a null row as
+  `null`, an empty array as `[]`); **a frame** carries it as [kind 9](../reference/http-api.md#the-column-batch-frame-acb2) with the
+  column's own element kind (nothing is widened: an `Int32` run for a `Double[]` column is refused). The limits are the value's:
+  65,536 elements and 1 MiB of elements.
+- **An invalid array value is refused at `:append`**, `400 INVALID_REQUEST`, naming the table, column, frame and row. None of that
+  frame's rows is applied, the frames before it stay, and the job stays open. (Under `applyTransforms` the values are checked at
+  `:commit`, where the transforms run: the refusal names the table, column and row, and nothing of the job is committed.)
+
+  ```text
+  400 INVALID_REQUEST
+  Column 'xs' of table 'Bulk', row 1 of frame 1: Element 0 of the Double[] value is NaN; array elements must be finite numbers
+  (NaN and ±Infinity are refused). None of the frame's rows was applied.
+  ```
+- **A NOT NULL array column refuses a null or missing cell at every `validation` level, `coerce` included.** `coerce` stores the
+  type's default for a missing scalar, and an array type has no default:
+
+  ```text
+  400 INVALID_REQUEST
+  Column 'xs' of table 'Bulk' is not nullable, and row 1 of frame 1 has no value for it (an array column takes no default at any validation level). None of the frame's rows was applied.
+  ```
+
+  A nullable array column stores a missing cell as null.
+- **Transforms leave arrays alone.** An array column passes through `applyTransforms` untouched. Under `applyTransforms`, a `route` or `tee` [transform](insert-transforms.md)
+  that would copy an array column into a same-named column of another type, or a scalar into an array column, is refused at `:begin` with `ARRAY_COLUMN_UNSUPPORTED` (an
+  insert with such a transform is refused before anything lands).
+- **An array's payload counts against the job's ingest buffer** (its raw bytes plus 32 a value, so a load of wide curves fills the buffer
+  in fewer rows) and spills like any column.
+- **A bulk load into an edge table that has an array column is refused at `:begin`** (`ARRAY_COLUMN_UNSUPPORTED`). Do not
+  declare an array column on an edge table at all: it is accepted today but not stored correctly (BL-1259).
+
+**The SDK factories.** C#: `ColumnBatchColumn.FromDoubleArrays`, `FromFloat32Arrays`, `FromInt32Arrays`, `FromInt64Arrays`,
+`FromByteArrays` and `FromStringArrays`, each `(string name, T[]?[] values, byte[]? absentBits = null)` — a `null` row is a null cell, and the rows are **copied**
+into the column. TypeScript: `column.doubleArray`, `float32Array`, `int32Array`, `int64Array`, `byteArray` and `stringArray(name,
+rows)` — a typed array per row is kept as it is, a plain array is converted once, `float32Array` rounds a `number` to the nearest
+float at construction, and `int32Array`, `int64Array` and `byteArray` refuse an out-of-range element with a `RangeError`. Both
+SDKs check the limits and finiteness before they send (`ColumnBatch.Validate()` / `validate()`, called for you on every send), and send the batch as frames
+when the server advertises them and as JSON column arrays otherwise. POCO bulk load with an array property is refused.
+
+```csharp
+var batch = ColumnBatch.Of(
+    ColumnBatchColumn.FromInt64s("Id", new[] { 301L, 302L }),
+    ColumnBatchColumn.FromDoubleArrays("D", new double[]?[] { new[] { 1.0, 2.0 }, null }),
+    ColumnBatchColumn.FromStringArrays("S", new string[]?[] { new string[0], new[] { "x" } }));
+```
+
+```typescript
+const batch = ColumnBatch.of(
+  column.int64('Id', new BigInt64Array([602n, 603n])),
+  column.doubleArray('D', [new Float64Array([1, -0]), null]),   // a typed array keeps -0
+  column.stringArray('S', [[], ['x']]),
+).validate();
+```
+
 ### Column batches (C#) (**Lead S13, 0.6.0**)
 
 When the data is already columnar (Parquet or Arrow row groups, a data frame, another database's export), `Aouda.Client` loads
@@ -415,7 +473,7 @@ var handle = await client.BulkLoadAsync("trades", batches,          // IAsyncEnu
 
 **A load coerces by default** (**Lead S27a, 0.6.0**). Unless the load asks for `validation: strict`, a null sent for a NOT
 NULL column that is not part of the key is stored as the type's default, not refused — what an insert through `/rows` would refuse.
-A key is never coerced, and a column the table does not have is refused at either level. See
+A key is never coerced, nor an [array column](#array-columns) (**BL-035, next train**), and a column the table does not have is refused at either level. See
 [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
 
 The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatch.Validate()` are described on the
@@ -660,7 +718,7 @@ A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../re
 
 | Level | A null or absent cell in a NOT NULL column | A primary key the job holds twice, or the table already holds |
 |---|---|---|
-| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column** | Loaded as a second row (not checked) |
+| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, next train**) | Loaded as a second row (not checked) |
 | `strict` | Refused | The job fails at its commit, nothing committed |
 
 Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value

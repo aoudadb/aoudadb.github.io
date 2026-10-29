@@ -183,6 +183,7 @@ This section tracks the per-domain documents and maturity level.
 | Time-series and clustering | `docs/dev/Functionality-TimeSeries-And-Clustering.md` | Approved baseline |
 | Materialized queries | `docs/dev/Functionality-Materialized-Queries.md` | Approved baseline — updated P16 (client API, Studio browser) |
 | **Table retention and deleting before a time** | `guides/retention.md` | **New** — Horizon (0.5.0): `policy.retention`, the horizon, `expiredRows`, the delete before a time, subscriber notices, deletion hygiene |
+| **Array columns** | `guides/array-columns.md` | **New** — (**BL-035, next train**): six array types (`Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`), the JSON and frame forms, limits (65,536 elements, 1 MiB), what is refused and where (`ARRAY_COLUMN_UNSUPPORTED`), subscriptions' `column_types`, sizing |
 | Replication and cluster behavior | `docs/dev/Functionality-Replication-And-Clustering.md` | Approved baseline — updated P16 (cluster lifecycle APIs, witness role) |
 | Backup and restore | `docs/dev/Functionality-Backup-And-Restore.md` | Approved baseline — updated P16 (backup REST APIs, scheduling, Studio UI) |
 | AI-native usage model | `docs/dev/Functionality-AI-Native-Usage.md` | Approved baseline — updated P14 (Extend mode, WhereClause groups), P16 (MCP cluster tools) |

@@ -94,9 +94,9 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
 
-`orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Bool`, `Guid`, and `Float32` are valid column types and are **not** sortable.
+`orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Bool`, `Guid`, and `Float32` are valid column types and are **not** sortable. (**BL-035, next train**) So are the six [array types](array-columns.md), which are valid column types that cannot be sorted on at all.
 
-Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. HTTP execute of the same name still works.
+Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. (**BL-035, next train**) A subscription whose `conflate.key` names an [array column](array-columns.md) is refused with `ARRAY_COLUMN_UNSUPPORTED` (a named query that filters on one is already refused at `schema apply`). HTTP execute of the same name still works.
 
 `POST /api/databases/{db}/query` and `POST /api/databases/{db}/query/count` are **not** on the allowlist. On the data-plane they are **404**.
 

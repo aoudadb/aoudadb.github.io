@@ -209,6 +209,11 @@ See [Materialized queries — windows](materialized.md#windows) and [Retention](
 
 ---
 
+## Array limits (**BL-035, next train**)
+
+[Array columns](array-columns.md) have two limits, on every surface, with **no configuration key**: **65,536 elements** and
+**1,048,576 bytes (1 MiB) of elements** a value. See [the table of what that means per type](array-columns.md#limits).
+
 ## Partitioning
 
 | Setting | Default | Config key | Notes |
