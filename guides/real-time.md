@@ -385,8 +385,8 @@ again.
 
 ### Array columns in a subscription (**BL-035, next train**)
 
-(**BL-035, next train**) A table or named-query subscription delivers an [array column](array-columns.md) as a JSON array (MessagePack
-and long-poll alike) and **tells the client which columns are arrays**: every `snapshot` and `change` message that holds an array
+(**BL-035, next train**) A table or named-query subscription delivers an [array column](array-columns.md) as an array, a `Byte[]` as base64
+text (MessagePack and long-poll alike) and **tells the client which columns are arrays**: every `snapshot` and `change` message that holds an array
 column carries `column_types`, a map from the column's name to its type (`{"Rates":"Double[]"}`). **A column named there holds an
 array of that type; a column not named holds a scalar.** A message without an array column has no `column_types`, so a table
 without arrays is unchanged. A subscription `filter` or a `conflate.key` on an array column is refused with an `error` message,

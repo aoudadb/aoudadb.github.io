@@ -330,7 +330,7 @@ once.
 ### Array columns (**BL-035, next train**) {#array-columns}
 
 (**BL-035, next train**) The six [array column types](../guides/array-columns.md) read and write as CLR arrays, on every read surface (frames and
-JSON, queries, named queries, subscriptions, typed and untyped) and both wires:
+JSON, queries, named queries, subscriptions, typed and untyped) and both WebSocket wires (JSON and MessagePack):
 
 | Server type | CLR type |
 |---|---|
@@ -342,7 +342,8 @@ JSON, queries, named queries, subscriptions, typed and untyped) and both wires:
 | `String[]` (**BL-035, next train**) | `string[]` |
 
 A null cell is `null` and an empty array is empty. The `byte[]` of a `Byte[]` column is told from a scalar `Byte` by the column's
-type, never by the value's shape: sent to a scalar `Byte` column the server refuses it.
+type, never by the value's shape: sent to a scalar `Byte` column it travels as base64 text and is refused as not a number —
+except a base64 text made only of digits, which is read as that number (BL-1265). Do not send a `byte[]` to a `Byte` column.
 
 ```csharp
 var samples = client.GetTable("Samples");
@@ -369,9 +370,11 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
 - **A value the SDK cannot read as its column's type throws** (`InvalidDataException`); nothing maps to a default. Mapping to an
   object is **exact**: `ToObjects<T>` assigns a property whose type is assignable from the CLR type above (`double[]`,
   `IReadOnlyList<double>`, `object`) and throws `InvalidCastException` otherwise — a `double[]` property for a `Float32[]` column
-  throws, no element is converted. Typed subscriptions keep System.Text.Json's mapping, exact for the property types above.
+  throws, no element is converted. Typed subscriptions are **not** exact: they go through System.Text.Json, so an `int[]` column fills a `double[]` property and a
+  `float[]` property is filled from the widened text, an `object` property gets a `JsonElement`, and a failure arrives as an
+  `InvalidOperationException` (BL-1245). Give a typed subscription the exact CLR type above.
   `ToDataTable` columns have the array type.
-- **Writes** take the same arrays: dictionary rows (as JSON, never a frame), `UpdateAsync`, named-mutation arguments and
+- **Writes** take the same arrays: dictionary rows (as JSON; a row whose only array values are `byte[]` may go in a frame, as base64 text, with the same result), `UpdateAsync`, named-mutation arguments and
   `batchParam` rows. A NaN or infinity element is refused by the server (`AoudaRequestException`, status 400), and locally
   (`ArgumentException`, before sending) in a `batchParam` row and on the write stream:
 
@@ -382,8 +385,10 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
 
   The client does not check the limits itself; the server's refusal comes back as the typed exception.
 - **A column batch** takes the factories `ColumnBatchColumn.FromDoubleArrays`, `FromFloat32Arrays`, `FromInt32Arrays`,
-  `FromInt64Arrays`, `FromByteArrays` and `FromStringArrays(name, T[]?[] rows, absentBits)`: a `null` row is a null cell, and the
-  rows are **copied** into the column (unlike the scalar factories). `Validate()` checks the limits before a send.
+  `FromInt64Arrays`, `FromByteArrays` and `FromStringArrays`, each `(string name, T[]?[] values, byte[]? absentBits = null)`: a
+  `null` row is a null cell, and the rows are **copied** into the column (as the nullable scalar factories copy; the non-nullable
+  ones keep your array). `Validate()` checks the limits and finiteness, and every send calls it, so a bad batch throws
+  `ArgumentException` before anything is sent.
 
   ```csharp
   var batch = ColumnBatch.Of(
@@ -393,11 +398,12 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
   await samples.InsertAsync(batch);   // 301: D=[1,2] S=[]   302: D=null S=[x]
   ```
 - **POCO schema inference and POCO writes with an array property are refused** (`NotSupportedException`) until Embedded maps CLR
-  array properties (BL-1213). Reading into a POCO with an array property works.
+  array properties (BL-1213). Reading into a POCO with an array property works with `ToObjects<T>()`, `ToListAsync<T>()` or
+  `GetTable<T>(tableName)`; `GetTable<T>()` without a name infers the type's schema and throws `NotSupportedException`.
 - **The write stream** (`stream_rows`) holds at most `Aouda:WebSocket:StreamingWrites:MaxBatchBytes` (1 MiB by default) of JSON a
   message, so one large array row is refused there (`INVALID_STREAM_ROWS`); use an insert or a named mutation.
 - **The C# named-client generator** (`aouda generate csharp`, [Build apps](../guides/build-apps.md)) writes `double[]`, `float[]`, `int[]`, `long[]`, `byte[]` and `string[]` for
-  array columns and parameters (a required parameter defaults to `System.Array.Empty<T>()`).
+  array columns and parameters (a non-optional property defaults to `System.Array.Empty<T>()`).
 
 ## 7) Bulk load
 

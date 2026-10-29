@@ -929,8 +929,8 @@ This section documents every field available in `aouda.schema.json` by type. All
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
 
 (**BL-035, next train**) And the six [array types](array-columns.md), spelled exactly: `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`.
-An array column cannot be a key, an index or a rule, a non-nullable one is allowed at create, and one added to an existing table must be
-nullable (the rows that were there read null): see [Array columns](array-columns.md#declaring-an-array-column).
+An array column cannot be a key, an index or a rule, a non-nullable one is allowed at create, and one added to an existing table is
+nullable (the rows that were there read null; `schema apply` refuses a non-nullable one, `POST …/columns` adds it nullable): see [Array columns](array-columns.md#declaring-an-array-column).
 
 #### `Decimal(p,s)`: a decimal stored as a scaled integer (**ColumnarCore S13, 0.2.0**)
 

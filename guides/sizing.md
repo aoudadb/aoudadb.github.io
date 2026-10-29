@@ -266,15 +266,15 @@ little from one row to the next: the same curve a second later, a grid or an id 
 to a few decimals, small integers and bytes.
 
 Measured on the reference workload — *measured on `d03-aouda-kb`, 2026-10-29, on the seeded reference generator
-(`ReferenceCurveGenerator`, seed 2026: 6 curves, one row per curve per second for 600 s = 3,600 rows of 15 columns, 6,925 bytes
-of arrays a row), stored cold and merged* — the table takes **3,171 bytes a row, 0.458 × the raw little-endian arrays**, and
+(`ReferenceCurveGenerator`, seed 2026: 6 curves, one row per curve per second for 600 s = 3,600 rows of 15 columns, 6,925 raw bytes
+a row: 6,900 of array elements, 25 of scalars), stored cold and merged* — the table takes **3,171 bytes a row, 0.458 × the raw row**, and
 **0.453 × the same rows stored as base64 `String` columns** (7,003 bytes a row), the way a table without array columns would
 hold them:
 
 | Column (kind) | Bytes a row on disk | The same as base64 `String` |
 |---|---|---|
 | `Fwd3m`, 200 `Double`, a smooth forward curve (**BL-035, next train**) | 989.9 | 2,140.3 |
-| `Basis36`, 200 `Double` (**BL-035, next train**) | 925.1 | 1,604.3 |
+| `Basis36`, 150 `Double` (**BL-035, next train**) | 925.1 | 1,604.3 |
 | `FitModel`, 100 `Double` (**BL-035, next train**) | 498.8 | 1,072.3 |
 | `FitMarket`, 100 `Double` rounded to 1e-6 (**BL-035, next train**) | 121.7 | 1,072.3 |
 | `StubDf`, 50 `Double` (**BL-035, next train**) | 219.0 | 540.3 |
@@ -286,7 +286,7 @@ size by more than the repetition they hold.
 
 **A cold page is cut by bytes as well as rows.** A table with an array column ends a page before the row that would take any array
 column past 1 MiB of array payload (a constant, not a setting), otherwise at 8,192 rows, and every column of the table is cut at
-the same rows. A column of 400-element `Double[]` values (3.2 KB each) gets pages of about 300 rows, one of 1 MiB values holds one value a page, and a table whose arrays are small keeps the 8,192-row pages. Wide array rows make short pages for every column of the table.
+the same rows. A column of 400-element `Double[]` values (3.2 KB each) gets pages of about 300 rows; a numeric value is at most 512 KiB, so the largest fit two a page, and a `String[]` of about 1 MiB holds one value a page; and a table whose arrays are small keeps the 8,192-row pages. Wide array rows make short pages for every column of the table.
 
 **Retention and merges** treat an array table like any other: retention drops whole segments, and a compaction or merge carries
 the values bit for bit.

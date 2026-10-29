@@ -92,7 +92,9 @@ give a `Float64Array` in TypeScript for a `Double[]` column.
 
 **A `Byte[]` column is not a column of `Byte`.** A scalar `Byte` column holds one byte per row; a `Byte[]` column holds a whole
 byte string per row, and travels as base64 in JSON. In C# the `byte[]` you pass is a `Byte[]` value only when the **column** is
-`Byte[]`; sent to a scalar `Byte` column the server refuses it.
+`Byte[]`. It travels as its base64 text, so sent to a scalar `Byte` column it is refused as not a number, with one
+exception: a base64 text made only of digits (the three bytes `D3 4D 76` are `"0012"`) is read as that number (BL-1265).
+Do not send a `byte[]` to a `Byte` column.
 
 ---
 
@@ -188,9 +190,11 @@ Parameter 's' (String[] column 'S'): An array value holds at most 1,048,576 byte
 
 - a JSON request body is limited to 30,000,000 bytes (a body over it answers `413`); a `Double[]` of 65,536 numbers written in
   full precision is about 1.2 MB of JSON, so a batch of about 25 such rows reaches it;
-- a frame carries at most 1,000,000 rows and 4,096 columns, a string up to 16 MiB, and decodes to no more than 256 MB;
-- one transaction's rows must fit one WAL segment (64 MiB): an insert of 140 rows of 512 KiB each is refused before anything is
-  written, and the table is untouched. Split it.
+- a frame carries at most 1,000,000 rows and 4,096 columns, a string up to 16 MiB, and decodes to no more than 256 MiB;
+- one transaction's rows must fit one WAL segment. The segment size follows the disk's free space when the database opens:
+  64 MiB with about 10 GiB free or more, as little as 16 MiB on a small disk. A transaction over it is refused before anything
+  is written, and the table is untouched, but over HTTP the refusal is a `500 INTERNAL_ERROR` (BL-1264). An HTTP insert usually
+  meets the request-body limit first; on a small disk it can meet this one. Split it.
 - a WebSocket `stream_rows` message holds at most `Aouda:WebSocket:StreamingWrites:MaxBatchBytes` (1 MiB by default) of JSON, so
   one large array row can be refused there (`INVALID_STREAM_ROWS`); write it with an insert or a named mutation instead.
 
@@ -320,7 +324,7 @@ POST /api/databases/acdocs/named-queries/curveHistory/query   Accept: applicatio
 
 ### Frames
 
-A query response with an array column is a frame when the client accepts frames (before, it answered JSON). `X-Aouda-Column-Types`
+A query response with an array column is a frame when the client accepts frames. `X-Aouda-Column-Types`
 names the array types: `["Int64","Double[]","Float32[]","Int32[]","Int64[]","Byte[]","String[]"]`. The grammar is in the
 [HTTP API reference](../reference/http-api.md#the-column-batch-frame-acb2).
 
@@ -357,17 +361,22 @@ ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot
 
 | Where the array column is used | When it is refused | How it shows |
 |---|---|---|
-| primary key, `unique`, cluster column, `default`, `derived`, partition key, `references`, checks, transform predicates, the permission column, `memoryFilter` (**BL-035, next train**) | the **schema document** is refused whole | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing applied |
-| the same, in `POST …/tables`, `PATCH`, `PUT …/policy`, `POST …/materialized-queries` (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| a named query's `where`, `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, join key, per-key key (**BL-035, next train**) | `schema apply` | that entry is `Failed`, its reason starts `ARRAY_COLUMN_UNSUPPORTED:`; the rest of the document applies |
-| a materialized query's group, order or aggregate on an array column (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
-| a named mutation's `setExpr` that targets or reads one, its `orderBy`, a `min` / `max` / `maxLength` / `enum` on a parameter bound to one (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
+| primary key, `unique`, cluster column, `autoIncrement`, `default`, `derived`, partition key, `references` (either side), checks, transform predicates, the permission column (**BL-035, next train**) | the **schema document** is refused whole | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing applied |
+| the same, in `POST …/tables`; `autoIncrement` or `references` in `PATCH …/columns/{name}` (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a table policy's `memoryFilter`, in `POST …/tables` or `PUT …/tables/{name}/policy` (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a named query's `where`, `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, `selectExpr` input, join key, per-key key or order (**BL-035, next train**) | `schema apply` | that entry is `Failed`, its reason starts `ARRAY_COLUMN_UNSUPPORTED:`; the rest of the document applies |
+| a materialized query's filter, group, order or aggregate on an array column (**BL-035, next train**) | `schema apply`, or `POST …/materialized-queries` | that entry is `Failed`; the endpoint answers `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a named mutation's `where`, a `setExpr` that targets or reads one, its `orderBy`, a `min` / `max` / `maxLength` / `enum` on a parameter bound to one (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
 | `/query` and `/query/count`: `where` (**`IS NULL` included**), `orderBy`, `groupBy`, an aggregate, `distinct`, a join key, a `perKey` key (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
 | an ad-hoc `PATCH …/rows` with a `setExpr` on one (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
 | a subscription `filter`, or a `conflate.key` (**BL-035, next train**) | `subscribe` | an `error` message with code `ARRAY_COLUMN_UNSUPPORTED` |
-| an RLS rule on an array column (**BL-035, next train**) | the query | `400`; on the materialized endpoint and on subscriptions the rule denies |
-| a route or tee that copies an array column into a column of another type (**BL-035, next train**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| an RLS rule on an array column (**BL-035, next train**) | the read: a query, a named query, the materialized query endpoint, a subscribe | `400 ARRAY_COLUMN_UNSUPPORTED` (an `error` message at subscribe); a change event checked against such a rule is not delivered |
+| a route or tee under `applyTransforms` that copies an array column into a column of another type, or a scalar into an array column (**BL-035, next train**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a bulk load into an edge table that has an array column (BL-1259) (**BL-035, next train**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
 | a `filter` materialized query over a table **without a primary key**, selecting an array column (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
+
+A `default` given as text is refused with `ARRAY_COLUMN_UNSUPPORTED`; one given as a JSON array (`"default": [1.0]`) is not a valid
+`default` at all and is refused as an invalid schema (`400 INVALID_REQUEST`).
 
 `count(*)` is fine: it counts rows. Selecting an array column is fine everywhere.
 
@@ -384,8 +393,9 @@ column drops whole segments of an array table as it does any other; `latestPerKe
 refused (see [Materialized queries](materialized.md#array-columns-in-a-materialized-result)).
 
 What it costs, in memory and on disk, is on the [sizing page](sizing.md#array-columns-what-a-value-costs). In short: size memory
-for the raw bytes of the arrays; on disk the cold tier stores arrays that repeat or move little from one row to the next in
-less than half their raw size.
+for the raw bytes of the arrays plus 32 bytes a value. On disk it depends on the data: in the measured reference table a smooth
+curve took 0.55–0.62 × its raw size, a column that repeats from row to row almost nothing, a column of full-precision differences its
+full size; the whole table took 0.46 ×.
 
 ---
 
@@ -412,7 +422,8 @@ less than half their raw size.
 | `Invalid column type 'double[]'` | the type name is exact: `Double[]` |
 | A `Float32[]` reads `0.10000000149011612` in JavaScript | that is the float's exact value; `Math.fround(0.1)` prints the same. The text is chosen so a `Float32Array` reads it back exactly |
 | `-0` came back as `0` (TypeScript) | a plain `number[]` is written by `JSON.stringify`, which writes `-0` as `0`. Write a `Float64Array` / `Float32Array` to keep it |
-| `Column '…': unknown kind 9.` | an older SDK reading a frame with an array column; upgrade the SDK |
+| `Column '…': unknown kind 9.` (C#) or `Malformed column-batch frame: column '…' has unknown kind 9.` (TypeScript) | an older SDK reading a frame with an array column; upgrade the SDK |
+| An older TypeScript SDK returns a `Double[]` as a plain `number[]`, a `Byte[]` as a base64 string, or rounds an `Int64[]` | it reads JSON results (subscriptions, materialized queries, `returning`) without knowing the array types, and does not fail; upgrade the SDK |
 | `…has type 514, which this build does not define.` | an older server binary meeting an array column's type number; arrays need this train's server |
 | `Element 0 … is NaN; array elements must be finite numbers` | NaN, ±Infinity and their string forms are refused |
 | `… is not an integer (1.5)` / `… is a string; a Double[] element is a JSON number` | an `Int32[]` / `Int64[]` element must be an integer; no element is a string except in a `String[]` |

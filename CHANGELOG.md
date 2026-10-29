@@ -23,12 +23,13 @@ Public, user-facing release notes. Engine phase status lives in the server
   [HTTP API](reference/http-api.md#data-types), the frame's kind 9 in [the frame grammar](reference/http-api.md#the-column-batch-frame-acb2),
   the cost in [Sizing](guides/sizing.md#array-columns-what-a-value-costs) (a value is its raw bytes plus 32 in memory; the reference
   curve table stores cold at 0.46 × the raw arrays). Two things a client author must know: a client from before this train fails on a
-  query response with an array column (*"unknown kind 9"*; such a response is a frame when frames are accepted, where it used to be
-  JSON), and a subscription's `column_types` says which columns are arrays — a column it does not name is a scalar. A TypeScript
+  framed query response with an array column (*"unknown kind 9"*), and an older TypeScript client reads arrays from the JSON
+  surfaces as plain values without failing; and a subscription's `column_types` says which columns are arrays — a column it does not name is a scalar. A TypeScript
   `number[]` written in a row object loses `-0` (JSON's rule): write a `Float64Array` to keep it.
 - **A `"NaN"` or `"Infinity"` string, or a number past the type's range, is no longer stored in a scalar `Double` / `Float32` column
   (BL-035, next train; fixed).** Every JSON write path (named mutation parameters, `/rows` and the other JSON write bodies) stored
-  such a value as NaN or ±Infinity; they now answer `400` (`NAMED_QUERY_BIND_FAILED` / `INVALID_REQUEST`) and store nothing.
+  such a value as NaN or ±Infinity; they now answer `400` (`NAMED_QUERY_BIND_FAILED` for a parameter, `NAMED_MUTATION_BIND_FAILED` for a literal,
+  `INVALID_REQUEST` for a write body) and store nothing.
 - **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,

@@ -638,13 +638,15 @@ every surface**: query results (frames or JSON), named queries, materialized que
 | `Float32[]` (**BL-035, next train**) | `Float32Array` | `Float32Array` or `number[]` |
 | `Int32[]` (**BL-035, next train**) | `Int32Array` | `Int32Array` or `number[]` |
 | `Int64[]` (**BL-035, next train**) | `BigInt64Array` (exact past 2^53, from JSON too) | `BigInt64Array`, `bigint[]` or `number[]` |
-| `Byte[]` (**BL-035, next train**) | `Uint8Array` | `Uint8Array` |
+| `Byte[]` (**BL-035, next train**) | `Uint8Array` | `Uint8Array` (in a `ColumnBatch`, also a `number[]` of 0–255) |
 | `String[]` (**BL-035, next train**) | `string[]` | `string[]` |
 
 A null cell is `null`; an empty array is an empty typed array. `AoudaArrayValue` is the union of the six read types and
-`AOUDA_DATA_TYPES` lists the six names. A row object with arrays is inserted as JSON; a `ColumnBatch` goes as frames
+`AOUDA_DATA_TYPES` lists every column type, the six array names included. A row object with arrays is inserted as JSON; a
+`ColumnBatch` goes as frames when the server advertises them, else as JSON column arrays
 ([the factories](#column-batches-lead-s14-060) gain `doubleArray`, `float32Array`, `int32Array`, `int64Array`, `byteArray` and
-`stringArray`, taking one array per row: a typed array is kept, a plain array is converted once, and `null` is a null row).
+`stringArray`, taking one array per row: a typed array is kept, a plain numeric array is converted once, a `string[]` is kept as it is (do not
+change it before the send), and `null` is a null row).
 
 ```typescript
 await client.table('Samples').insert({
@@ -676,8 +678,9 @@ const batch = ColumnBatch.of(
 await client.table('Samples').insert(batch);
 ```
 
-**The client does not repeat the server's limits for a row object**, but it does refuse NaN and the infinities (a `RangeError`)
-and checks a `ColumnBatch` before sending (`validate()`): at most 65,536 elements and 1 MiB a value, finite floats, no lone
+**The client does not repeat the server's limits for a row object**, but it refuses NaN and the infinities in a
+`Float64Array` / `Float32Array` (a `RangeError`; in a plain `number[]`, `JSON.stringify` writes them as `null` and the server
+refuses the null element), and checks a `ColumnBatch` before sending (`validate()`): at most 65,536 elements and 1 MiB a value, finite floats, no lone
 surrogate. A `float32Array` factory rounds a plain `number` to the nearest float once, at construction; `int32Array`, `int64Array`
 and `byteArray` refuse an out-of-range element with a `RangeError`. A frame column's rows are fresh typed arrays you may keep and change.
 
@@ -687,10 +690,13 @@ AoudaApiError (ARRAY_COLUMN_UNSUPPORTED)  … an array column cannot be used in 
 ```
 
 An array column cannot be filtered, ordered, grouped, aggregated or joined on, in the builder or in a named query. The
-generator (`aouda generate typescript`, `npx @aouda/client generate` ([Type Generation CLI](#type-generation-cli)), or `GET /api/databases/{db}/schema/typescript`) writes the read types above for rows and tables,
-and for a named mutation's arguments a union that also takes a plain array (`Float64Array | number[]`).
+generator (`npx @aouda/client generate` ([Type Generation CLI](#type-generation-cli)) or `GET /api/databases/{db}/schema/typescript`) writes the read types above for rows and tables,
+and for a named mutation's arguments a union that also takes a plain array (`Float64Array | number[]`); `aouda generate typescript`,
+which works offline from a schema file, writes the named queries' and mutations' types the same way, and no table types.
 
-A client older than this train fails on a response with an array column: *"Column '…': unknown kind 9."*
+A client older than this train fails on a framed response with an array column (*"Malformed column-batch frame: column '…' has
+unknown kind 9."*), and on the JSON surfaces (subscriptions, materialized queries, `returning`) it does not fail: it gives plain
+arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use this train's client for array columns.
 
 ### Bulk load: a body sent again, resume, and a committed job (**Lead S14, S22, 0.6.0**)
 
