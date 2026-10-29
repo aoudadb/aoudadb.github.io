@@ -245,7 +245,7 @@ If you do not configure schema management explicitly:
 | .NET CLI seed command | No | Yes | No | `Program.cs` + `RunSeedStub` | Stubbed, intentionally not wired |
 | Branch create/list/get/delete/diff/merge APIs | Yes | No | No | `BranchController.cs`, F.2/F.3 reports | Includes conflict handling |
 | Copy-on-write branch data sharing | Yes | No | No | F.4 report, branch tests | Branch writes isolated from parent |
-| `partitionKey` / `clusterColumns` / `partitionFunction` evolution | No | No | Yes | P36 overview §12 → BACKLOG | Cross-partition / full re-sort — post-P36 |
+| `partitionKey` / `clusterColumns` / `partitionFunction` evolution | No | No | Yes | P36 overview §12 → BACKLOG | Cross-partition / full re-sort — post-P36. (**BL-1199, next train**) A table's partition key is fixed when it is created: schema apply refuses a document that changes it, and no API drops, renames or adds a key column |
 
 ---
 
@@ -825,14 +825,27 @@ Operations that still produce warnings (not changes) in v1:
 
 | Changed property | Warning message pattern | Action required |
 |---|---|---|
-| Table `partitionKey` | `"Partition key change on table '...' is not supported."` | Drop table, re-create (or wait for post-P36 migration). |
+| Table `partitionKey` | `"Partition key change on table '...' is not supported: a table's partition key is fixed when the table is created. Drop and re-create the table to change it."` | Drop table, re-create. (**BL-1199, next train**) **Apply refuses the whole document** — see below. |
+| Column `partitionFunction` (a column outside the key; a key column's function is part of `partitionKey`) | `"Partition function change on '...' from '...' to '...' is not supported: …"` | As above: the apply is refused (**BL-1199, next train**). |
 | Table `clusterColumns` | `"Cluster columns change on table '...' is not supported."` | Drop table, re-create. |
 | Column type involving Vector / MdVector | Tier 3 blocked | Not supported in v1. |
 | Type change on a partition-key column | Tier 3 blocked | Would reroute rows across partitions. |
 
 > **Note (P36):** Column `type`, `nullable`, `primaryKey`, `references`, rename, default, and description are first-class applyable changes. Imperative parity: `PATCH /api/databases/{db}/tables/{t}/columns/{c}` (type/nullable/autoIncrement/references/rename), `PUT …/columns:order`, and declarative apply for default/description/PK/culture. Non-integer `autoIncrement: true` still warns.
 
-Always inspect `SchemaDiffResult.Warnings` after a diff, especially before significant schema migrations. Warnings indicate intent/reality gaps that the apply pass will silently skip.
+Always inspect `SchemaDiffResult.Warnings` after a diff, especially before significant schema migrations. Warnings indicate intent/reality gaps that the apply pass will not carry out.
+
+(**BL-1199, next train**) **A partition-key warning refuses the apply.** A table's partition key is fixed when the table is
+created, so a document whose diff carries a `partitionKey` or `partitionFunction` warning — or that drops, renames or adds a
+partition-key column — is refused whole: `POST …/schema/apply` answers `400 PARTITION_KEY_FIXED` naming every reason, and **nothing in
+the document is applied** (its other changes neither), with no history entry. A dry run (`dryRun: true`) answers the same `400`, and a
+branch merge whose plan changes a key is refused the same way. Until this release the apply ran the column changes the document
+implied — the key column was dropped, renamed or added — and returned the warning beside an applied result. To change a key, drop and
+re-create the table. Other warnings are still notes: the apply goes on without them.
+
+A key's function may be spelled on its `partitionKey` entry, on its column (`partitionFunction`), or both, and `"None"` is the same as
+no function: the diff compares the function the table actually routes by, so re-applying an unchanged document has no partition-key
+warning (**BL-1199, next train**; before, a document spelling it in only one place read as a key change on every apply).
 
 ```csharp
 var diff = await client.Schema.DiffAsync(schema);
@@ -842,7 +855,8 @@ if (diff.Warnings is { Count: > 0 })
     foreach (var w in diff.Warnings)
         Console.WriteLine($"WARNING {w.TableName}.{w.ColumnName ?? "(table)"} [{w.Property}]: {w.Message}");
 
-    // Decide: abort, or proceed with apply (warnings are not applied — only changes are)
+    // Decide: abort, or proceed with apply (warnings are not applied — only changes are).
+    // A partitionKey / partitionFunction warning means the apply will be refused (400 PARTITION_KEY_FIXED).
 }
 
 Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChanges} safe, {diff.Summary.DestructiveChanges} destructive)");
@@ -1009,7 +1023,7 @@ type](../getting-started/index.md#how-a-c-property-becomes-a-column-type).
 
 | Field | JSON key | Type | Required | Notes |
 |---|---|---|---|---|
-| `column` | `column` | `string` | Yes | Name of the partition key column. Must match a column in `columns`. |
+| `column` | `column` | `string` | Yes | Name of the partition key column. Must match a column in `columns`: (**BL-1199, next train**) a document whose entry names no column is refused `400 INVALID_REQUEST` ("Partition key column '…' in table '…' is not a column of the table."). Before, the entry was ignored, and a create made the table unpartitioned. |
 | `function` | `function` | `string` | No | Partition function to apply to the column value. See valid values below. |
 
 Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`. Omit the `function` field (or use `"None"`) to use the column value as-is for routing.
