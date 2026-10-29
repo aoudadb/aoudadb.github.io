@@ -16,7 +16,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 - **A table subscription can filter with `in` and `nin` (BL-1226, next train).** The server turned the array in a subscription filter
   into its JSON text, so every `in` / `nin` filter was refused `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array") before the
   snapshot, whichever SDK sent it. The array is kept, each member is converted to the column's type as an `eq` value is, and the snapshot
-  and the live events are filtered by it. [Client pages](clients/typescript.md#websocket-subscriptions) and the
+  and the live events are filtered by it. The two now select the same rows on a nullable column too (a live event with a null matched
+  `ne`, `nin`, `lt` and `lte` while the snapshot never did), and a `Bool` column's `eq`, `ne`, `in` and `nin` match live events (they never did). [Client pages](clients/typescript.md#websocket-subscriptions) and the
   [HTTP API](reference/http-api.md#websocket-streaming-protocol) now say which listener takes a table subscription: only the admin one, and
   the data-plane's refusal (`NAMED_QUERY_SUBSCRIBE_REQUIRED`) names that path.
 - **`aouda init` and `aouda databases create` say what to do (BL-1226, next train).** `aouda init` has never prompted for a password; with

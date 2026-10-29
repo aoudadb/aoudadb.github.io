@@ -83,7 +83,7 @@ aouda databases create --name cache --server http://localhost:5433 --token <admi
 **Keys are shown once.** `aouda databases create` for a database linked to an auth database (`--kind auth`, or `--auth-enabled`) prints
 that database's three system keys (`mk_anon_`, `mk_svc_`, `mk_pub_`) in `auth.keys` of the response, and only when that create
 generated them. The server keeps a hash, so it cannot show a key again, and a create that finds the keys already issued (the auth
-database already holds that name's system keys) returns none. The CLI says which happened on stderr (**BL-1226, next train**). To
+database already holds that name's system keys) returns none. The CLI says which happened on stderr, also under `--json`, so stdout stays one JSON document: do not merge `2>&1` into a JSON parser (**BL-1226, next train**). To
 get a service key afterwards:
 
 - **A named service key** (recommended for a backend): `POST /api/databases/{db}/service-keys` with a server key (`mk_srv_`) returns a
