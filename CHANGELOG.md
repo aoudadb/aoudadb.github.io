@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Security: a primary's replication port no longer serves files outside its data root (BL-1193, next train).** Inside a checkpoint
+  session a primary answered a bulk-segment request (checkpoint message `0x20`) with files outside its data root (a sibling
+  directory such as `<root>-x`) and with files of databases the peer was not accepted for — without any credential when no
+  `Aouda:ReplicaSet:KeyFile` is set. The message, its chunk (`0x21`) and the unused `BulkSegmentFetcher` are removed, and a checkpoint
+  session now ends on a message type it does not know. Replication is not supported yet; if you run a replica set, set a `KeyFile`
+  and keep the replication port private ([Replication](guides/replication.md#step-1-create-a-shared-keyfile), BL-1210).
 - **A table subscription can filter with `in` and `nin` (BL-1226, next train).** The server turned the array in a subscription filter
   into its JSON text, so every `in` / `nin` filter was refused `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array") before the
   snapshot, whichever SDK sent it. The array is kept, each member is converted to the column's type as an `eq` value is, and the snapshot
