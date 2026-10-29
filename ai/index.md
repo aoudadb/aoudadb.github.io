@@ -430,7 +430,7 @@ Common mistake: calling app auth endpoints with JWT bearer only and no API key a
 | Start local server | `aouda start` CLI | `aouda start` CLI | local HTTP service | Implemented | Auth via POST /api/databases |
 | Create DB with auth and generated keys | HTTP call from .NET/transport | HTTP call from TS/transport | `POST /api/databases` with `auth.enabled` | Implemented | Returns keys only at creation/link time |
 | App auth sign-up/sign-in/refresh/me/password | `.NET` auth client | `client.auth.*` | `/api/databases/{db}/auth/*` | Implemented | Two-layer flow |
-| Service key user-context forwarding | `UserToken` option | `userToken` option | `X-User-Token` header | Implemented | Effective only for service-level API keys |
+| Service key user-context forwarding | `UserToken` option; `UpdateUserTokenAsync` | `userToken` option; `updateUserToken` | `X-User-Token` header; `user_token` on WebSocket `auth` / `re_auth`, `userToken` on long-poll connect (**BL-1223, next train**) | Implemented | Effective only for service-level API keys; a realtime session gets the user's PLS / RLS (no role check on realtime yet) and ends with the user token |
 | ADRA table mode metadata | Table request DTOs | `CreateTableRequest` fields in TS types | table create/update payloads | Implemented | `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` |
 | ADRA admin partition grant wrappers | No first-class helper | `create/list/deletePartitionGrant` | app admin endpoints | Partial | .NET uses raw HTTP path today |
 | ADRA admin resolver wrappers | No first-class helper | `create/list/get/update/deleteRlsResolver` | app admin endpoints | Partial | TS wrapper parity is stronger |

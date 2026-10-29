@@ -159,7 +159,7 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 | User JWT without `tenant_id` | 403 — no partition access |
 | `mk_anon_` API key | `anonymous` role — no data access by default |
 | `mk_svc_` service key (no X-User-Token) | PLS **bypassed** — sees all partitions |
-| `mk_svc_` + X-User-Token | PLS enforced using user JWT claims |
+| `mk_svc_` + X-User-Token | PLS enforced using user JWT claims — on HTTP, and on WebSocket / long-poll as `user_token` / `userToken` (**BL-1223, next train**) |
 | `mk_srv_` server key | PLS **enforced** (**0.4.0**; [what changed](#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)): `403` without the claim; a `db_admin` key may read with `crossPartitionAccess` (audited). Up to 0.3.x: not enforced |
 | `db_admin` user JWT | Can use cross-partition access |
 
