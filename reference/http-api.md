@@ -58,7 +58,7 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
 | `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default is **role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. An explicit value is never rewritten. |
 | `Authorization` | **Required when the target database has auth enabled, except public app-auth POSTs** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). `POST /api/databases/{db}/auth/{signup\|signin\|refresh\|request-password-reset\|reset-password}` are keyless (a present bearer is ignored). |
-| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. |
+| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. The realtime transports take the same token as `user_token` on the WebSocket `auth` / `re_auth` message and `userToken` on the long-poll connect, with the same rules (**BL-1223, next train**). |
 
 ## Standard Response Headers
 
@@ -197,8 +197,9 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
    mk_*     → Resolve as custom app key → check permissions
    eyJ*     → Validate JWT signature and claims → extract roles
 
-4. Check X-User-Token header (optional)
+4. Check X-User-Token header (optional; realtime: auth/re_auth user_token, long-poll userToken — BL-1223, next train)
    Present + credential is mk_svc_ or mk_srv_ → Apply user context (PLS/RBAC)
+     Invalid, expired or revoked → 401 AUTH_TOKEN_INVALID (realtime: auth_error, socket closed)
    Present + credential is mk_anon_ or user JWT → Ignored
    Absent → Use credential's own identity
 
@@ -228,6 +229,12 @@ The `X-User-Token` header enables backends to act on behalf of a specific user w
 **When it is ignored:**
 - When `Authorization` is an `mk_anon_` key (anon keys already enforce PLS from the JWT)
 - When `Authorization` is a direct user JWT (the user is already identified)
+
+**Realtime** (**BL-1223, next train**): the same user token, with the same rules, is `user_token` on the WebSocket
+`auth` and `re_auth` messages and `userToken` on the long-poll connect body. The session is then the
+user's for partition- and row-level security for its whole life — snapshot, change events, write streams, grant changes — and it
+ends when the user token expires or is revoked. **Realtime does not check roles yet**, on subscriptions or writes (HTTP does: `403` for a user with no role); until realtime role checks land, do not rely on roles there.
+Before BL-1223 a realtime session ignored the user token and kept the service key's visibility.
 
 **Example:**
 
@@ -4115,13 +4122,13 @@ Get cluster topology.
 | `Decimal` with `precision` / `scale` | `Decimal(p,s)`, 1 ≤ p ≤ 18, 0 ≤ s ≤ p: a 64-bit integer scaled by 10^s (**ColumnarCore S13, 0.2.0**). Declared with `"precision"` and `"scale"` beside `"type": "Decimal"` in create-table / add-column bodies and schema documents; reported with the same two fields in column details. Where a type is a name alone (a computed output's `type`, `cast`'s target) it is spelled `"Decimal(18,6)"`. Values are written and read as decimal numbers with exactly `s` places; more places or more than `p − s` integer digits is a `400`; `sum` is an exact `Decimal(18,s)`; `avg` returns a `Double`. See the [schema guide](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020) |
 | ~~`Decimal`~~ (undeclared) | (**LoadSpeed S13, 0.4.0; breaking**) Retired: the 128-bit `System.Decimal` of any scale. `"type": "Decimal"` without `precision` and `scale` is refused `400`, plain `"Decimal"` as a type name is refused, and a data directory holding a column of it (type 13) is refused at open, naming the column — export it with the build that wrote it |
 | `String` | UTF-8 string |
-| `Timestamp` | UTC instant (see note below) |
-| `Date` | Date only |
+| `Timestamp` | UTC instant; text with no offset is UTC (see note below) |
+| `Date` | A calendar day (days since the Unix epoch). The day written is the day stored: an offset or a `Z` on the text is not applied (**BL-1225, next train**) |
 | `Guid` | UUID/GUID |
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, next train)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
@@ -4196,6 +4203,7 @@ Authenticate the connection and optionally negotiate wire mode.
 | `token` | string? | No | Bearer token. Required when server auth is enabled. |
 | `database` | string | Yes | Database name this connection is scoped to. |
 | `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
+| `user_token` | string? | No | A user JWT to act as, beside a service-level key (`mk_svc_`, `mk_srv_`) in `token` — the realtime `X-User-Token` (**BL-1223, next train**). The session is then that user's: PLS, RLS, grant changes, expiry and revocation, and the user's subscription cap. Ignored beside any other credential. Invalid, expired or revoked → `auth_error` `AUTH_TOKEN_INVALID`. |
 
 **Example:**
 ```json
@@ -4207,7 +4215,12 @@ Authenticate the connection and optionally negotiate wire mode.
 }
 ```
 
-**Server responds with:** `auth_ok` or `auth_error`.
+**A backend acting as a user** (**BL-1223, next train**):
+```json
+{ "type": "auth", "token": "mk_svc_xyz789...", "user_token": "eyJhbGciOiJSUzI1NiIs...", "database": "my_db" }
+```
+
+**Server responds with:** `auth_ok` or `auth_error`. With a `user_token`, `auth_ok.user_id` and `auth_ok.expires_at` are the user's.
 
 ---
 
@@ -4308,6 +4321,7 @@ Re-authenticate an existing WebSocket session with a refreshed JWT (or API key) 
 |---|---|---|---|
 | `type` | string | Yes | Always `"re_auth"` |
 | `token` | string | Yes | Refreshed bearer JWT or API key |
+| `user_token` | string? | No | The user token, as on `auth` (**BL-1223, next train**). A session opened with one must send one for the same user; a session opened without one cannot add one. Either is `AUTH_TOKEN_INVALID`. |
 
 A **failed** `re_auth` still closes the session (fail-closed). A successful refresh does **not** re-snapshot. Without `re_auth`, JWT expiry closes the socket (`AUTH_TOKEN_EXPIRED`) and every browser re-snapshots.
 
@@ -4462,7 +4476,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, next train**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, next train**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**
