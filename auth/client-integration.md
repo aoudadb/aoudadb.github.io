@@ -363,9 +363,11 @@ The middleware:
   (on a socket, `auth_error` and the socket closes). A realtime session opened with a service key and a user token **is** that
   user's session for partition- and row-level security: its snapshot, its change events and its write streams see the user's
   partitions and rows, and it follows the user's grant changes while it is open.
-  **Roles are not checked on realtime yet**: a subscription is not refused for a user who has no role on the database (over HTTP
-  the same request is `403`). Until that changes, do not rely on roles to keep a user's realtime reads out. `Aouda.Client` (`UserToken`) and `@aouda/client` (`userToken`) send it wherever they send the
-  header; an older client, or an older server, leaves a realtime session with the service key's visibility.
+  **Roles are not checked on realtime yet**: a subscription or a write stream is not refused for a user who has no role on the
+  database (over HTTP the same request is `403`). Until realtime role checks land, do not rely on roles to keep a user's
+  realtime reads or writes out.
+  `Aouda.Client` (`UserToken`) and `@aouda/client` (`userToken`) send the user token wherever they send the header; an older
+  client, or an older server, leaves a realtime session with the service key's visibility.
 - A realtime session with a user token **ends when the user token expires** (`AUTH_TOKEN_EXPIRED`) or is revoked
   (`AUTH_TOKEN_REVOKED`), as a user's own session does. A long-lived backend refreshes it before then with
   `UpdateUserTokenAsync(token)` (`Aouda.Client`) or `updateUserToken(token)` (`@aouda/client`), passing a fresh token of the

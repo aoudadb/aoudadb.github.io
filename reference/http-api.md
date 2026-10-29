@@ -233,7 +233,7 @@ The `X-User-Token` header enables backends to act on behalf of a specific user w
 **Realtime** (**BL-1223, next train**): the same user token, with the same rules, is `user_token` on the WebSocket
 `auth` and `re_auth` messages and `userToken` on the long-poll connect body. The session is then the
 user's for partition- and row-level security for its whole life — snapshot, change events, write streams, grant changes — and it
-ends when the user token expires or is revoked. **Realtime does not check roles yet** (HTTP does: `403` for a user with no role).
+ends when the user token expires or is revoked. **Realtime does not check roles yet**, on subscriptions or writes (HTTP does: `403` for a user with no role); until realtime role checks land, do not rely on roles there.
 Before BL-1223 a realtime session ignored the user token and kept the service key's visibility.
 
 **Example:**
