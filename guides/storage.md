@@ -126,7 +126,7 @@ Aouda is in-memory-first at execution time, but production use requires durable 
 If you run server defaults and do not set per-database overrides:
 
 - Data path is `./data`.
-- Server uses `Databases/{db}` database roots and `tables/{tableName}` table roots.
+- Server uses `Databases/{db}` database roots and `tables/t{id}` table roots (the table's catalog id, not its name).
 - New databases are at durability `strict` by default — WAL written through before a write is visible (**Lead S26, 0.6.0**; see [durability levels](write-durability.md#durability-levels-lead-s26-060)).
 - Database replication mode defaults to `Replicate`.
 - Database default table temperature is `Auto`.
@@ -154,7 +154,7 @@ If you run server defaults and do not set per-database overrides:
 - Durable directory model:
   - Server root: `Server/` metadata + `Databases/` directories.
   - Per-database layout: `catalog/`, `wal/`, `tables/`, `materialized/`.
-  - Table directories are table-name based (`tables/{tableName}/...`).
+  - Table directories are named by table id (`tables/t{id}/...`, e.g. `t0005`), not by table name.
 - Catalog durability:
   - `CatalogStore` JSON snapshot persistence (`catalog/catalog.json`) with atomic temp-write + move.
   - Additional catalog WAL/checkpoint classes (`FileCatalog`, `CatalogWal`, `CatalogCheckpoint`) are implemented in catalog layer.
@@ -253,7 +253,12 @@ If you run server defaults and do not set per-database overrides:
     sort-key value of each 8,192-row group, each series' row range, and the primary-key range. CRC-checked; a footer
     written by an earlier build is refused.
 - **Table segment layout**
-  - Table path is name-based.
+  - A table's directory is `tables/t{id}`: its catalog id, zero-padded to four digits (`t0005`), set at create and never
+    changed; a rename does not move it.
+  - A dropped table's directory is deleted with the drop. If that delete fails (a file held open, a permission) or the
+    process stops between the drop and the delete, the next open removes it: a `t{id}` directory that no table holds,
+    whose id is below the catalog's table-id allocator. The open leaves it while the database has a branch, a restore
+    stopped part-way, or a point-in-time restore is pending (**BL-1255, next train**).
   - Default non-partitioned path uses `data/seg_*`.
   - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, 0.3.0**).
   - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the
@@ -586,7 +591,7 @@ await engine.CreateTableAsync(
     new[] { ("id", DataType.Int64, EncoderPreference.Auto, false) });
 ```
 
-Expected result: engine opens persistent layout with a WAL written through, and table is created under table-name-based storage paths.
+Expected result: engine opens persistent layout with a WAL written through, and table is created under a table-id-based storage path (`tables/t{id}`).
 
 Common mistake: assuming `AoudaEngine` backup/restore APIs are automatically exposed as server HTTP admin endpoints.
 

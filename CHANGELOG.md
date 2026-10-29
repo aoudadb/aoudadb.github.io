@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A dropped table's leftover directory is removed at the next open (BL-1255, next train).** A drop deletes the table's
+  directory after the catalog has dropped it; if that delete failed (a file held open, a permission) or the process stopped
+  in between, the directory stayed on disk for good, and nothing reported it. The next open now removes a `tables/t{id}`
+  directory that no table holds and whose id is below the table-id allocator, except while the database has a branch, a
+  restore stopped part-way, or a point-in-time restore is pending. The storage guide also no longer says table
+  directories are named after the table: they are `t{id}` ([Storage](guides/storage.md)).
 - **A partition grant takes its key verbatim (BL-1192, next train; behaviour change).** `POST …/auth/admin/users/{id}/partition-grants`
   stores `partitionKey` exactly as sent: `""` grants the empty-string partition, `" "` a different one, and `" a"` is not `"a"`.
   Up to 0.8.0 a blank key was refused and every other key trimmed, so `" a"` was granted as `"a"`. Only a missing or `null` key
