@@ -70,21 +70,30 @@ as the day before.
 | C# `DateTime` of kind `Local` (`DateTime.Now`, `DateTime.Today`) | the instant it names (the client writes the machine's offset) | **its date**: `DateTime.Today` is today |
 | C# `DateTime` of kind `Unspecified` (`new DateTime(2026, 3, 1)`, `default`) | **UTC** | its date |
 | C# `DateTimeOffset` | its instant | the date on its own clock |
-| C# `DateOnly` | (a `Date` column) | `2026-03-01` |
+| C# `DateOnly` | midnight UTC of the day | `2026-03-01` |
+| `"10:30"` (a time of day, no date) | refused | refused |
 
 - **An instant needs an offset to mean anything beyond UTC.** Text with no offset is UTC, not "local to whoever sent it". Aouda
   does not refuse it, because `"2026-03-01"` is the commonest value a person writes and every `Unspecified` `DateTime` would be refused
   with it, but a client in another zone that means *its* midnight must send the offset, or a `DateTime` that carries one (kind `Local` or `Utc`).
 - **A `Date` is a calendar day.** It has no instant, so no offset or kind is applied: the day on the value is the day stored. Send a
-  `DateOnly` or `"yyyy-MM-dd"` when you can. A TypeScript `Date` is an instant, so `new Date(2026, 2, 1)` — local midnight — is
-  written as the previous day's `…23:00:00.000Z`, and a `Date` column will store the day *in that text*: send the string `"2026-03-01"`
-  for a `Date` column from TypeScript.
+  `DateOnly` or `"yyyy-MM-dd"` when you can. A TypeScript `Date` is an instant, so what a `Date` column stores is the **UTC date of the
+  instant**: `new Date(2026, 2, 1)` — local midnight — east of UTC is the previous day's `…23:00:00.000Z` and is stored as the previous day. Send the
+  string `"2026-03-01"` for a `Date` column from TypeScript.
 - **Reading back.** A `Timestamp` is returned as UTC (`DateTimeKind.Utc`). To show it in the client's zone call `.ToLocalTime()`; printing
   `.Date` of the UTC value shows the previous day for a local midnight east of UTC. A `Date` is returned as midnight UTC of its day,
   and its `.Date` is the day.
 - **A column-type change from `Timestamp` to `Date`** stores the **UTC** day of each instant: an instant has no day without a zone, and
   UTC is the stored one.
-- Values a server in a non-UTC zone stored from text with no offset before this change are not rewritten.
+- **A time of day alone is refused** (`"10:30"`, `"10:30:15 PM"`, `"10:30+01:00"`): a parser stamps it with today's date, so what was stored depended on
+  the day it was written. Send a date with it.
+- **Data stored before this change is not rewritten, and a key built from it does not match the new reading.** A `Date` stored from a `Local` or offset input
+  on a server east of UTC is a day early, and a `Timestamp` stored from offset-less text or an `Unspecified` `DateTime` on a non-UTC server is shifted by that
+  server's offset. A re-upsert of the same logical value after the upgrade lands on a different key and **creates a new row** beside the old one. Repair the
+  table with an `UPDATE` that shifts the affected values (a day for the `Date` rows; the server's offset for the `Timestamp` rows, over the range written before
+  the upgrade), or re-load it. A server in UTC is unaffected.
+- **Partitioning.** A table partitioned by a time function on a `Timestamp` column cuts by the UTC instant, whatever kind or offset the value carries; on a
+  `Date` column by the day on the value.
 
 ---
 
