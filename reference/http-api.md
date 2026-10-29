@@ -4122,13 +4122,13 @@ Get cluster topology.
 | `Decimal` with `precision` / `scale` | `Decimal(p,s)`, 1 ≤ p ≤ 18, 0 ≤ s ≤ p: a 64-bit integer scaled by 10^s (**ColumnarCore S13, 0.2.0**). Declared with `"precision"` and `"scale"` beside `"type": "Decimal"` in create-table / add-column bodies and schema documents; reported with the same two fields in column details. Where a type is a name alone (a computed output's `type`, `cast`'s target) it is spelled `"Decimal(18,6)"`. Values are written and read as decimal numbers with exactly `s` places; more places or more than `p − s` integer digits is a `400`; `sum` is an exact `Decimal(18,s)`; `avg` returns a `Double`. See the [schema guide](../guides/schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020) |
 | ~~`Decimal`~~ (undeclared) | (**LoadSpeed S13, 0.4.0; breaking**) Retired: the 128-bit `System.Decimal` of any scale. `"type": "Decimal"` without `precision` and `scale` is refused `400`, plain `"Decimal"` as a type name is refused, and a data directory holding a column of it (type 13) is refused at open, naming the column — export it with the build that wrote it |
 | `String` | UTF-8 string |
-| `Timestamp` | UTC instant (see note below) |
-| `Date` | Date only |
+| `Timestamp` | UTC instant; text with no offset is UTC (see note below) |
+| `Date` | A calendar day (days since the Unix epoch). The day written is the day stored: an offset or a `Z` on the text is not applied (**BL-1225, next train**) |
 | `Guid` | UUID/GUID |
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, next train)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
