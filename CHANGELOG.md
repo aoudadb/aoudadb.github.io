@@ -19,6 +19,50 @@ Public, user-facing release notes. Engine phase status lives in the server
   is `400 AUTH_GRANT_INVALID`. Test identities (`policy/inspect`, `--identities` files) follow the same rule; a grant that leaves
   `partitionKey` out is still invalid. A `jwt-claim` table still treats an empty tenant claim as no claim.
   `@aouda/client`'s `createPartitionGrant` no longer refuses a blank key. [§19.8](auth/authorization.md#198-admin-api-partition-grants).
+- **Security: a primary's replication port no longer serves files outside its data root (BL-1193, next train).** Inside a checkpoint
+  session a primary answered a bulk-segment request (checkpoint message `0x20`) with files outside its data root (a sibling
+  directory such as `<root>-x`) and with files of databases the peer was not accepted for — without any credential when no
+  `Aouda:ReplicaSet:KeyFile` is set. The message, its chunk (`0x21`) and the unused `BulkSegmentFetcher` are removed, and a checkpoint
+  session now ends on a message type it does not know. Replication is not supported yet; if you run a replica set, set a `KeyFile`
+  and keep the replication port private ([Replication](guides/replication.md#step-1-create-a-shared-keyfile), BL-1210).
+- **A table subscription can filter with `in` and `nin` (BL-1226, next train).** The server turned the array in a subscription filter
+  into its JSON text, so every `in` / `nin` filter was refused `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array") before the
+  snapshot, whichever SDK sent it. The array is kept, each member is converted to the column's type as an `eq` value is, and the snapshot
+  and the live events are filtered by it. The two now select the same rows on a nullable column too (a live event with a null matched
+  `ne`, `nin`, `lt` and `lte` while the snapshot never did), and a `Bool` column's `eq`, `ne`, `in` and `nin` match live events (they never did). [Client pages](clients/typescript.md#websocket-subscriptions) and the
+  [HTTP API](reference/http-api.md#websocket-streaming-protocol) now say which listener takes a table subscription: only the admin one, and
+  the data-plane's refusal (`NAMED_QUERY_SUBSCRIBE_REQUIRED`) names that path.
+- **A subscription filter's `or` list is bounded where a null is concerned (BL-1226, next train).** A null never matches `ne`, `nin`, `lt`
+  or `lte`, in a subscription's snapshot or its live events. The server states that for live events by adding `IS NOT NULL` beside each
+  such condition, and an `or` list needs a copy of itself per alternative. So one `or` list may hold at most 6 conditions with `ne`, `nin`,
+  `lt` or `lte`; one filter may add at most 256 groups and 2048 conditions in all; and groups may not nest past the limit of 5 once the
+  copies are added. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot, and the message says what to do:
+  fold several `ne` on one column that mean "none of these" into one `nin`, or split the subscription. On a partitioned table with
+  partition-level security, an `or` list with `ne` is refused for a user with several grants exactly as an `or` list of `eq` is.
+- **A named query's literal conditions match live events as they match the snapshot (BL-1226, next train).** A named query whose
+  definition holds a literal `gt 5` on an `Int32` column compared the literal as text for live events, so a live insert of 10 was never
+  delivered although the snapshot held it; a literal `Timestamp` or `Decimal` had the same shape of defect, a literal `in` list matched no
+  live event (`nin` every one), and a literal `like` matched none. Literals are now bound to the column's stored form, and a list
+  member beyond `Int64` or with more than 15 digits keeps every digit. A bound parameter was never affected.
+- **`aouda init` and `aouda databases create` say what to do (BL-1226, next train).** `aouda init` has never prompted for a password; with
+  none supplied it now names `--admin-password-file` and `--admin-password-stdin`, and shows a PowerShell form beside the bash one
+  (`printf` is not a command in PowerShell). `aouda-setup` reads its admin password from redirected input instead of failing. A
+  `databases create` that returns no keys (the auth database already holds that name's keys; keys are shown once) says so on stderr and
+  names the two ways to get a service key afterwards: a named service key, or `regenerate-keys`.
+
+- **A `Timestamp` or a `Date` no longer depends on the time zone of a machine (BL-1225, next train; Derive's BL-723).** `DateTime.Today` written to a
+  `Date` column on a +01:00 machine was stored as the day before, because the server applied the offset and took the UTC day; a `Date` is now the day on the
+  value, whatever its offset or kind. A `Timestamp` written as text with no offset (`"2026-03-01"`, `"2026-03-01T00:00:00"`), or as a `DateTime` of kind
+  `Unspecified`, was read in the **server's** local zone, so the same insert stored different instants on two servers; it is now UTC. Send an offset (or a
+  `Local` / `Utc` `DateTime`) to mean another zone. `Aouda.Client` reads a time given as text in the invariant culture, as UTC. **Data already stored is not
+  rewritten:** a `Date` stored from a `Local` or offset input on a server east of UTC is a day early, and a `Timestamp` stored from offset-less text or an
+  `Unspecified` `DateTime` on a non-UTC server is shifted by that server's offset. A re-upsert of the same logical value after the upgrade therefore lands on a
+  different key and **creates a new row**; repair the table with an `UPDATE` that shifts the affected values (a day; the server's offset), or re-load it. A server in
+  UTC is unaffected. Also: a partition key cut from a `Timestamp` is its UTC instant, so a bulk load of `Local` or offset values no longer puts a row in the neighbouring day's
+  partition (**rows already written there are not moved**, and a partition-pruned query keeps missing them until they are re-written); a `DateOnly` is a valid
+  `Date` and `Timestamp` value in the embedded engine; text that is a time of day alone (`10:30`) is now refused on a `Timestamp` and a `Date` column (it was
+  stamped with today's date); and a dot-separated date (`01.03.2026`) is read by the table's culture, as a slash date is, or refused when the table has none
+  (the invariant culture read it month-first, so `01.03.2026` on a `nb-NO` table was stored as 3 January). See [Timestamp — time zones](./reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train).
 - **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,

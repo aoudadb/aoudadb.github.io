@@ -73,6 +73,7 @@ var client = new AoudaClient(new AoudaClientOptions
 
 // Queries are PLS-scoped to the user identified by the JWT
 var userOrders = await client.GetTable("orders").Limit(10).ToListAsync();
+// So are subscriptions (BL-1223, next train): the socket carries the user token too
 ```
 
 ### Frontend: URL + database + Sign-In
@@ -345,8 +346,9 @@ X-User-Token: eyJhbGciOiJSUzI1NiIs...     ← User JWT (for PLS enforcement)
 The middleware:
 1. Validates the service key (Layer 1 — connection authorized).
 2. Validates the user JWT from `X-User-Token`.
-3. Applies PLS using the user JWT's claims (tenant_id, user_id).
-4. RBAC still uses the service key's roles (full access).
+3. Replaces the request's identity with the user's: on HTTP, PLS, RLS and RBAC all use the user — the user's partition grants,
+   claims (tenant_id, user_id) and roles. The service key's own roles and its PLS / RLS bypass do not apply to the request.
+   A realtime session with a user token applies the user's PLS and RLS, but **does not check roles yet** (below).
 
 ### Rules
 
@@ -355,6 +357,37 @@ The middleware:
 - If `X-User-Token` is present but invalid (expired, revoked), the request returns 401 with a clear error about the user token.
 - If `X-User-Token` is absent, an app service key (`mk_svc_`) grants full access with PLS / RLS bypassed. A server API key
   (`mk_srv_`) gets its role's grants with PLS / RLS enforced (**0.4.0**; up to 0.3.x it bypassed them too).
+- The user token applies to **every transport** (**BL-1223, next train**): `X-User-Token` on HTTP, `user_token` on the WebSocket
+  `auth` and `re_auth` messages, `userToken` on the long-poll connect. The rules are the same on each: honoured only beside a
+  service-level key, ignored beside any other credential, and an invalid, expired or revoked one fails with `AUTH_TOKEN_INVALID`
+  (on a socket, `auth_error` and the socket closes). A realtime session opened with a service key and a user token **is** that
+  user's session for partition- and row-level security: its snapshot, its change events and its write streams see the user's
+  partitions and rows, and it follows the user's grant changes while it is open.
+  **Roles are not checked on realtime yet**: a subscription or a write stream is not refused for a user who has no role on the
+  database (over HTTP the same request is `403`). Until realtime role checks land, do not rely on roles to keep a user's
+  realtime reads or writes out.
+  `Aouda.Client` (`UserToken`) and `@aouda/client` (`userToken`) send the user token wherever they send the header; an older
+  client, or an older server, leaves a realtime session with the service key's visibility.
+- A realtime session with a user token **ends when the user token expires** (`AUTH_TOKEN_EXPIRED`) or is revoked
+  (`AUTH_TOKEN_REVOKED`), as a user's own session does. A long-lived backend refreshes it before then with
+  `UpdateUserTokenAsync(token)` (`Aouda.Client`) or `updateUserToken(token)` (`@aouda/client`), passing a fresh token of the
+  **same user**. That sets the token for the next HTTP request and the next realtime auth; on an open WebSocket it sends `re_auth`
+  with the service key and the new user token and waits for the answer, so the subscriptions continue with no new snapshot. A
+  long-poll session picks the new token up on its next connect, and with no open socket (not connected yet, reconnecting, or
+  given up) the token is simply stored for the next connect. **Another user's token is refused by the SDK** — it compares the new
+  token's `sub` with the current user token's, whatever the connection's state — and the client keeps the previous user token;
+  to act as another user, create another client. A `re_auth` with no answer in time closes its socket, and the reconnect uses the
+  new token. On the wire: `re_auth` with the service key and the fresh `user_token`; the server refuses a session that adds,
+  drops or switches its user token on `re_auth` (`AUTH_TOKEN_INVALID`).
+- If the user token has already expired or been revoked, the SDKs stop reconnecting — over WebSocket and over the long-poll
+  fallback: the server refuses every attempt with `AUTH_TOKEN_INVALID`, so each subscription fails with that error
+  (`AoudaAuthenticationException` in `Aouda.Client`, the subscription's error in `@aouda/client`) instead of retrying forever.
+  Call `UpdateUserTokenAsync` / `updateUserToken` with a fresh token and subscribe again: the next subscribe opens a new
+  connection with it. `AUTH_DB_UNAVAILABLE` is not a refusal of the token: the SDKs keep retrying it.
+- A realtime session with a user token counts against **that user's** subscription cap (`MaxSubscriptionsPerIdentity`, default
+  128), shared with the user's own sessions — not against the service key.
+- A realtime session opened with a service key and **no** user token sees every partition its filter or named query names, with
+  PLS / RLS bypassed — in its snapshot and in its change events (**BL-1219, next train**).
 
 ### Example: Backend Querying on Behalf of a User
 
