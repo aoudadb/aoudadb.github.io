@@ -591,7 +591,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Email is already registered in this auth database |
 | `AUTH_PASSWORD_TOO_WEAK` | 400 | Password does not meet the minimum password policy |
 | `AUTH_INVALID_EMAIL` | 400 | Email is blank or not a valid email format |
-| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | PLS: required tenant claim missing from the JWT for this table |
+| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | PLS: required tenant claim missing from the JWT for this table, or empty / white space |
 | `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | PLS: explicit partition filter does not match the token's tenant claim |
 | `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | PLS: write request targets a partition outside the tenant scope |
 | `AUTH_PLS_GRANT_NOT_FOUND` | 403 | PLS (auth-db-pls): requested partition is not in the user's grant set |

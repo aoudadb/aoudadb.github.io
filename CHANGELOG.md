@@ -13,6 +13,12 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A partition grant takes its key verbatim (BL-1192, next train; behaviour change).** `POST …/auth/admin/users/{id}/partition-grants`
+  stores `partitionKey` exactly as sent: `""` grants the empty-string partition, `" "` a different one, and `" a"` is not `"a"`.
+  Up to 0.8.0 a blank key was refused and every other key trimmed, so `" a"` was granted as `"a"`. Only a missing or `null` key
+  is `400 AUTH_GRANT_INVALID`. Test identities (`policy/inspect`, `--identities` files) follow the same rule; a grant that leaves
+  `partitionKey` out is still invalid. A `jwt-claim` table still treats an empty tenant claim as no claim.
+  `@aouda/client`'s `createPartitionGrant` no longer refuses a blank key. [§19.8](auth/authorization.md#198-admin-api-partition-grants).
 - **Security: a primary's replication port no longer serves files outside its data root (BL-1193, next train).** Inside a checkpoint
   session a primary answered a bulk-segment request (checkpoint message `0x20`) with files outside its data root (a sibling
   directory such as `<root>-x`) and with files of databases the peer was not accepted for — without any credential when no

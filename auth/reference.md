@@ -482,7 +482,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). A casing mismatch still 201s and never matches at check time (BL-430) |
+| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). A casing mismatch still 201s and never matches at check time (BL-430). `partitionKey` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, next train**) |
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 
@@ -575,7 +575,7 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | JWT has no `tenant_id` claim for a `jwt-claim` PLS table | Ensure JWT includes the `tenant_id` claim |
+| `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | JWT has no `tenant_id` claim (or the table's bound claim), or it is empty or white space, for a `jwt-claim` PLS table | Ensure JWT includes the `tenant_id` claim |
 | `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | Explicit partition filter does not match the JWT `tenant_id` | Match the filter to the user's `tenant_id` claim |
 | `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Write targets a partition outside the caller's `tenant_id` | Write to the caller's own partition only |
 | `AUTH_PLS_GRANT_NOT_FOUND` | 403 | Partition not in the user's grant set (`auth-db-pls`) | Create a partition grant for the user via admin API |
@@ -595,7 +595,7 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 |------------|------|---------|--------|
 | `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
 | `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
-| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields | Check that `dimension`, `partitionKey`, and `accessLevel` are all present |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields | Check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`) |
 
 ### ADRA RLS Resolver Admin Errors
 
