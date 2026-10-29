@@ -364,8 +364,19 @@ The middleware:
   grant changes while it is open. `Aouda.Client` (`UserToken`) and `@aouda/client` (`userToken`) send it wherever they send the
   header; an older client, or an older server, leaves a realtime session with the service key's visibility.
 - A realtime session with a user token **ends when the user token expires** (`AUTH_TOKEN_EXPIRED`) or is revoked
-  (`AUTH_TOKEN_REVOKED`), as a user's own session does. Reconnect with a fresh user token, or send `re_auth` with the service key
-  and the fresh user token. A session cannot add, drop or switch its user token on `re_auth` (`AUTH_TOKEN_INVALID`).
+  (`AUTH_TOKEN_REVOKED`), as a user's own session does. A long-lived backend refreshes it before then with
+  `UpdateUserTokenAsync(token)` (`Aouda.Client`) or `updateUserToken(token)` (`@aouda/client`), passing a fresh token of the
+  **same user**. That sets the token for the next HTTP request and the next realtime auth; on an open WebSocket it sends `re_auth`
+  with the service key and the new user token and waits for the answer, so the subscriptions continue with no new snapshot. A
+  long-poll session picks the new token up on its next connect. Another user's token is refused (`AUTH_TOKEN_INVALID`): the call
+  fails, the client keeps the previous user token, and the socket the server closed is re-opened with it. To act as another
+  user, create another client. On the wire: `re_auth` with the service key and the fresh `user_token`; a session cannot add,
+  drop or switch its user token on `re_auth` (`AUTH_TOKEN_INVALID`).
+- If the user token has already expired or been revoked, the SDKs stop reconnecting: the server refuses every attempt with
+  `AUTH_TOKEN_INVALID`, so each subscription fails with that error (`AoudaAuthenticationException` in `Aouda.Client`, the
+  subscription's error in `@aouda/client`) instead of retrying forever. Create the subscription again once you have a fresh token.
+- A realtime session with a user token counts against **that user's** subscription cap (`MaxSubscriptionsPerIdentity`, default
+  128), shared with the user's own sessions — not against the service key.
 - A realtime session opened with a service key and **no** user token sees every partition its filter or named query names, with
   PLS / RLS bypassed — in its snapshot and in its change events (**BL-1219, next train**).
 

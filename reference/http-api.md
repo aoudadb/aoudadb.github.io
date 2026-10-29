@@ -4202,7 +4202,7 @@ Authenticate the connection and optionally negotiate wire mode.
 | `token` | string? | No | Bearer token. Required when server auth is enabled. |
 | `database` | string | Yes | Database name this connection is scoped to. |
 | `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
-| `user_token` | string? | No | A user JWT to act as, beside a service-level key (`mk_svc_`, `mk_srv_`) in `token` — the realtime `X-User-Token` (**BL-1223, next train**). The session is then that user's: PLS, RLS, roles, grant changes, expiry and revocation. Ignored beside any other credential. Invalid, expired or revoked → `auth_error` `AUTH_TOKEN_INVALID`. |
+| `user_token` | string? | No | A user JWT to act as, beside a service-level key (`mk_svc_`, `mk_srv_`) in `token` — the realtime `X-User-Token` (**BL-1223, next train**). The session is then that user's: PLS, RLS, grant changes, expiry and revocation, and the user's subscription cap. Ignored beside any other credential. Invalid, expired or revoked → `auth_error` `AUTH_TOKEN_INVALID`. |
 
 **Example:**
 ```json
