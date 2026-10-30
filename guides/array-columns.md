@@ -368,11 +368,11 @@ ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot
 | a materialized query's filter, group, order or aggregate on an array column (**BL-035, next train**) | `schema apply`, or `POST …/materialized-queries` | that entry is `Failed`; the endpoint answers `400 ARRAY_COLUMN_UNSUPPORTED` |
 | a named mutation's `where`, a `setExpr` that targets or reads one, its `orderBy`, a `min` / `max` / `maxLength` / `enum` on a parameter bound to one (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
 | `/query` and `/query/count`: `where` (**`IS NULL` included**), `orderBy`, `groupBy`, an aggregate, `distinct`, a join key, a `perKey` key (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| an ad-hoc `PATCH …/rows` with a `setExpr` on one (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| an ad-hoc `PATCH …/rows` with a `setExpr` on one; a `DELETE …/rows` or a `POST …/rows/batch` delete with an `orderBy` on one (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing deleted |
 | a subscription `filter`, or a `conflate.key` (**BL-035, next train**) | `subscribe` | an `error` message with code `ARRAY_COLUMN_UNSUPPORTED` |
-| an RLS rule on an array column (**BL-035, next train**) | the read: a query, a named query, the materialized query endpoint, a subscribe | `400 ARRAY_COLUMN_UNSUPPORTED` (an `error` message at subscribe); a change event checked against such a rule is not delivered |
+| an RLS rule on an array column (**BL-035, next train**) | a read (a query, a join side, a named query, the materialized query endpoint, a subscribe), an update or a delete (`PATCH` / `DELETE …/rows`, `POST …/rows/batch`, a named mutation's `update` or `delete`) | `400 ARRAY_COLUMN_UNSUPPORTED` (an `error` message at subscribe), nothing changed; an **insert** checked against such a rule is denied (`403`), and a change event checked against it is not delivered |
 | a route or tee under `applyTransforms` that copies an array column into a column of another type, or a scalar into an array column (**BL-035, next train**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| a bulk load into an edge table that has an array column (BL-1259) (**BL-035, next train**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a column of an **edge table** (an edge table stores only its source, destination and label) (**BL-035, next train**) | `POST …/tables/{name}/columns` on an edge table (and the engine's `CreateEdgeTableAsync`) | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing added |
 | a `filter` materialized query over a table **without a primary key**, selecting an array column (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
 
 A `default` given as text is refused with `ARRAY_COLUMN_UNSUPPORTED`; one given as a JSON array (`"default": [1.0]`) is not a valid
@@ -405,7 +405,8 @@ full size; the whole table took 0.46 ×.
 
 - **Element selection and element predicates.** No `Rates[10]`, no `any element > x`, no `array_length`. The array is a value.
 - **Sorting, grouping, aggregating, joining or keying on an array column.** See the table above.
-- **An array column on an edge table.** Do not declare one; it is not stored correctly yet (BL-1259).
+- **An array column on an edge table.** Refused (see the table above): an edge table stores only its source, destination and
+  label.
 - **Embedded and POCO mapping.** `Aouda.Embedded` refuses the six names (BL-1213), and the C# client refuses POCO schema
   inference and POCO writes (`InsertAsync(entity)`) with an array property (`NotSupportedException`). Reading into a POCO with an
   array property works. Write dictionaries or column batches.
