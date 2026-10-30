@@ -420,8 +420,8 @@ batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered ta
   insert with such a transform is refused before anything lands).
 - **An array's payload counts against the job's ingest buffer** (its raw bytes plus 32 a value, so a load of wide curves fills the buffer
   in fewer rows) and spills like any column.
-- **A bulk load into an edge table that has an array column is refused at `:begin`** (`ARRAY_COLUMN_UNSUPPORTED`). Do not
-  declare an array column on an edge table at all: it is accepted today but not stored correctly (BL-1259).
+- **An edge table cannot have an array column** (refused when the column is added, with `ARRAY_COLUMN_UNSUPPORTED`), so a bulk
+  load never meets one.
 
 **The SDK factories.** C#: `ColumnBatchColumn.FromDoubleArrays`, `FromFloat32Arrays`, `FromInt32Arrays`, `FromInt64Arrays`,
 `FromByteArrays` and `FromStringArrays`, each `(string name, T[]?[] values, byte[]? absentBits = null)` — a `null` row is a null cell, and the rows are **copied**
