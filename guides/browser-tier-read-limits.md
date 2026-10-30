@@ -23,7 +23,7 @@ Enumerable tables below are generated from the validators that enforce them. If 
 |---|---|
 | See the allowed operators / routes / subscribe refusals | [Generated tables](#generated-from-the-validators) |
 | Know why my watchlist `in` filter is legal | [Partition-filter rule](#partition-filter-rule) |
-| Know why `crossPartitionAccess` is not on a named query | [No cross-partition on the data plane](#no-crosspartitionaccess-on-a-named-query) |
+| Know why `crossPartitionAccess` does nothing in the browser tier | [`crossPartitionAccess` on the data-plane listener](#crosspartitionaccess-on-the-data-plane-listener) |
 | Page a list with "1–25 of 412" | [What you can do](#what-you-can-do) (`count` / `totalMatches`) |
 | Sort by a computed value | [Stored `derived` columns or computed MQ outputs](#no-expression-orderby) |
 | Last-price at ~10 Hz | [Conflation](#conflate-is-a-no-op-on-insert-only-streams) |
@@ -120,13 +120,13 @@ Pinned by `PartitionFilterRuleTests` (engine, per operator, including the watchl
 
 ---
 
-## No `crossPartitionAccess` on a named query
+### `crossPartitionAccess` on the data-plane listener
 
-**Rule.** `crossPartitionAccess` is not a named-query field. The binder never sets it. Browser-tier credentials cannot reach the flag: data-plane `/query` and `/query/count` are 404; `mk_pub_*` on the admin listener is 401; ad-hoc WS `target` subscribe is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
+**Rule.** `crossPartitionAccess` is a per-call field on the **admin** listener: a named-query execute or batch item takes it, and so does a subscribe message. The **data-plane listener (the browser tier) ignores it**, so the partition-filter guard decides, and the `PARTITION_FILTER_REQUIRED` message says so. A named-query *definition* cannot set it. The browser-tier credentials could not use it anyway: data-plane `/query` and `/query/count` are 404; `mk_pub_*` on the admin listener is 401; ad-hoc WS `target` subscribe is `NAMED_QUERY_SUBSCRIBE_REQUIRED`. (**BL-1227, next train**)
 
-**Why.** A definition that granted an unbounded scan would not be reviewable at persist time (`D-20`). On PLS tables the flag is `db_admin` only. On non-PLS partitioned tables it is a **cost guard on the admin tier**, not a confidentiality boundary — and it is unreachable from the browser.
+**Why.** A definition that granted an unbounded scan would not be reviewable at persist time (`D-20`). The flag is a **cost guard**, not a confidentiality boundary: it waives the partition-filter guard and nothing else, so it never changes which rows a credential sees. It is unreachable from the browser by design.
 
-**Instead:** auth-db-pls fan-out (the server injects the caller's grants); an aggregate / latest-per-key MQ over the universe with `dataPlaneAccess: true`; or `in` covering every partition key.
+**Instead:** bind the partition key in the named query's `where` clause, or configure PLS on the table so the caller's partition is injected (auth-db-pls fan-out: the server injects the caller's grants); an aggregate / latest-per-key MQ over the universe with `dataPlaneAccess: true`; or `in` covering every partition key.
 
 Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess: true` on the **admin** listener. That is not a browser-tier recipe.
 

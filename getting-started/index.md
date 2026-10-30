@@ -1739,9 +1739,9 @@ If a database has Application Auth enabled (see [Getting-Started-Auth.md](auth.m
 | **Stored in** | `_serverauth` | `_auth` (app auth database) |
 | **Scope** | One or more databases (each role's `scope`) | One specific database |
 | **Use case** | Backend services, CI/CD, cross-database access | Frontend clients, per-database backend access |
-| **PLS / RLS** | Enforced from 0.4.0 (**0.4.0**); up to 0.3.x never enforced | `mk_anon_`: enforced, `mk_svc_`: bypassed |
+| **PLS / RLS** | Enforced from 0.4.0 (**0.4.0**); up to 0.3.x never enforced. Holds no grant that lifts them (**BL-1227, next train**) | `mk_anon_`: enforced, holds no grant; `mk_svc_`: holds `all-partitions` and `all-rows` on its database |
 
-For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use scoped server API keys (`mk_…`, from `/api/auth/admin/api-keys`). From 0.4.0 a server API key no longer bypasses partition- or row-level security: on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)).
+For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use scoped server API keys (`mk_…`, from `/api/auth/admin/api-keys`). A server API key holds no grant that lifts partition- or row-level security (**BL-1227, next train**): on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)).
 
 ### Common Auth Error Codes
 

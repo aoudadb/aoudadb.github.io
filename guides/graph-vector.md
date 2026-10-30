@@ -307,7 +307,8 @@ Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissi
 - `ResolveEdgeAccess` calls `AdraEdgeAccessFilter` to resolve the set of allowed partition keys.
 - `ResolveVectorAccess` calls `AdraVectorAccessFilter` similarly.
 - An empty allowed-partition set returns an empty result immediately (deny-by-default).
-- `null` permissions bypasses auth (embedded mode or service-key context).
+- `null` permissions means embedded mode, with no auth context: unrestricted on a table no auth database governs, and **empty** on an
+  `auth-db` PLS table or a table with an RLS resolver (BL-950). A service key's context is not `null`: it holds the grants. PLS is lifted by the `all-partitions` grant and RLS by `all-rows`, independently, so a credential holding one is still restricted by the other. On a `jwt-claim` PLS table, graph and vector reads return nothing to a credential without `all-partitions` (BL-1279). Graph and vector reads are not audited yet (BL-1289), so they write no `access_grant_used` row. (**BL-1227, next train**)
 
 **Key invariant:** Filtered ANN layer 1 (partition pruning) and ADRA PLS partition grants are the same mechanism — ADRA grants narrow which partitions the ANN scan considers, at no extra cost.
 
@@ -461,7 +462,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `partitionKey` | `string?` | `null` | Filtered ANN layer 1: restricts scan to one partition. Pass `null` to scan all partitions. Any other value, the empty string included, names one partition (**BL-1184, next train**). |
-| `permissions` | `IQueryPermissionContext?` | `null` | ADRA authorization (ADR 0032). `null` = no auth restriction (embedded / service-key). |
+| `permissions` | `IQueryPermissionContext?` | `null` | ADRA authorization (ADR 0032). `null` = embedded mode with no auth context: unrestricted on a table no auth database governs, empty on an auth-db PLS table or one with an RLS resolver (BL-950); a service key's context holds the grants. (**BL-1227, next train**) |
 | `k` | `int` | — (required) | Maximum results to return; engine returns ≤ k results ordered by ascending distance |
 
 ### Stage-4 manifest reservation fields (ADR 0031 Decision-6)
@@ -825,7 +826,7 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | `ShortestPathAsync` is slow or returns a long path | `StoreCsc: false`; using unidirectional BFS | Re-create the edge table with `StoreCsc: true` for bidirectional BFS (requires data reload) |
 | ANN recall is low | Too few IVF cells probed relative to corpus distribution | Increase `IvfCells` (requires recreating column config); or verify `partitionKey` is not too restrictive |
 | Edge traversal returns unexpected nodes | Cross-partition traversal not supported in Stage 1; edges from other partitions not reachable from a cross-partition query | Ensure the start node's partition is accessible and edges are routed to the same partition as their source |
-| `ADRA deny: empty partition grants` | `permissions` non-null with no grants for this table | Verify ADRA PLS grants are configured for the calling user; or pass `permissions = null` for service-key context |
+| Traversal or `:nearest` returns nothing | `permissions` non-null with no partition grants for this table, a `jwt-claim` PLS table read without `all-partitions` (BL-1279), or `permissions = null` on an auth-db-governed table | Verify ADRA PLS grants are configured for the calling user; or give the caller the `all-partitions` grant (a service key and a `db_admin` user hold it); `permissions = null` is embedded mode only (**BL-1227, next train**) |
 
 ---
 

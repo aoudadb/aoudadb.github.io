@@ -175,7 +175,7 @@ string oidcAuthority = aouda.OidcAuthority("myapp");
 
 ### Using the Service-Role Client
 
-The service-role client has full access to the database and bypasses Partition-Level Security — use it for admin operations and test setup:
+The service-role client has full access to the database and holds both `all-partitions` and `all-rows` on it, so partition- and row-level security do not restrict it (**BL-1227, next train**; [how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)) — use it for admin operations and test setup:
 
 ```csharp
 var adminClient = aouda.CreateClient("myapp"); // service_role key
