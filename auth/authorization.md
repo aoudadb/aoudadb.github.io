@@ -46,48 +46,125 @@ Both `auth-db-pls` and `auth-db-rls` use a **session cache** as the hot path: re
 from the caller's resolved permissions, and a request that has none is denied, never let through: an anonymous caller, a
 database with **no linked auth database**, and a permission lookup that failed all read no row of such a table and may
 write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table answers an empty result and refuses writes).
-That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a service key bypasses it. So link
-the auth database before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable, not open.
+That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a credential that holds the grant that
+lifts the restriction is let through ([below](#visibility-is-granted-all-partitions-and-all-rows)). So link the auth database
+before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable to everyone but a holder of the grants, not open.
+On a `jwt-claim` table with PLS on, a graph or vector read returns nothing to a credential without `all-partitions` — a tenant's
+user included — until BL-1279 gives those reads the tenant claim.
 
-### What changed in 0.4.0: only a service key bypasses PLS and RLS (**0.4.0**)
+### Visibility is granted: `all-partitions` and `all-rows` (**BL-1227, next train**)
 
-Up to 0.3.x a **server API key** (`mk_srv_…`) was treated as a service key: on every database it could reach, it read and
-wrote past partition-level security (`jwt-claim` and `auth-db-pls`) and row-level security (`auth-db-rls`). From 0.4.0
-**only an app's service key (`mk_svc_…`, kind `service_role`) bypasses them**, over HTTP, WebSocket and long-poll alike.
+Whether a credential is held to a table's partition-level security (PLS) and row-level security (RLS) is decided by the **grants it
+holds**, not by its key prefix, a role's name or a request flag. There are two grants, and each lifts one half:
 
-**Which keys lost the bypass.** Server API keys (`mk_srv_…`, kind `server_admin`). The same rule now covers every other
-credential without a user — `custom` keys not linked to a user, `anon` and `public` keys: those already got no bypass from the
-keys the server issues, and the rule is now one rule rather than a list of exceptions.
+| Grant | What it lifts | What it leaves alone |
+|---|---|---|
+| `all-partitions` | PLS. The holder gets no partition predicate and no fan-out rewrite: it reads every partition of the table, including partitions created later, and (at `write`) writes into any partition. | RLS: a row-level resolver still filters the holder's rows. |
+| `all-rows` | RLS. The holder gets no resolver predicate and no write check from the resolver. | PLS: the holder is still routed to its own partitions. |
 
-**What such a request gets now.** Its role's grants (RBAC is unchanged: a server key's `db_admin` still lets it create tables,
-apply schema and manage the database), and on a protected table only what a request with **no user** may see:
+A grant has a **scope** and a **level**:
 
-| Table | A key without a user (not a service key) |
+- **Scope** is one table or a whole database. A database-scope grant covers every table of the database, including tables created
+  after the grant, and (for `all-partitions`) every partition dimension.
+- **Level** is `read`, `write` or `admin`. `read` lifts reads only. `write` and `admin` also lift the write side: the PLS partition
+  check on an insert, update or delete, and the RLS write check. For data, `admin` is `write`. A `read` holder's UPDATE or DELETE is
+  still scoped to the rows the resolver shows it ([§19.5.3](#1953-admin-pass-through)).
+
+**Who holds them without being told.** The credentials below hold both grants at `admin` on the database of the request, by
+implication; nothing is stored. Every other credential holds only what a role gives it.
+
+| Credential | Holds | Why |
+|---|---|---|
+| App service key (`mk_svc_…`, kind `service_role`), no user token | both, on its database | Trusted server-side code that must see the whole database. |
+| A user with the `db_admin` role on the database | both, on that database | Read from the user's **role assignment** (its scope is that database, `*`, or none). A token that merely *claims* `db_admin` in `db_roles` holds nothing, and removing the assignment ends the grants on the next request. |
+| Any key + `X-User-Token` | what the **user** holds | The request runs as the user: a service key presenting a plain user's token gets that user's partition grants, not its own implied ones ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)). |
+| Custom key linked to a user | what that user holds | The key acts as its user. |
+| Server API key (`mk_srv_…`, kind `server_admin`) | nothing | It administers the server (databases, backups, `/api/auth/admin/*`); it is not a data credential. Use a service key, or send the user's token. It works on a linked application database's WebSocket and long-poll connect as it does over HTTP, and still holds no grant there. |
+| Auth-admin key (`mk_adm_…`) | nothing | It manages users and roles of one auth database. It may *read* a user's effective grants ([below](#see-what-a-user-holds)). |
+| Custom key, not linked to a user | nothing | Even if it carries the `db_admin` role: a role on a key lets it create tables and manage the database, it does not widen what rows it reads. |
+| `mk_anon_…`, `mk_pub_…`, no credential | nothing | |
+
+**Give the grants to anyone else with a role.** A grant is a role permission with `resourceType` `all-partitions` or `all-rows`; the
+holder is any user the role is assigned to (the assignment's `scope` limits the database). Roles are the only carrier: there is no
+per-user grant, and a key without a linked user holds only the implied ones. The full request shapes are in
+[§19.8a](#198a-admin-api-access-grants-on-roles) and [Auth reference](reference.md#application-auth-admin-endpoints).
+
+```bash
+# A role that lets its holders read every row of "sales" (RLS lifted for reads), but stays inside their partitions
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/roles \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "sales_auditor",
+    "description": "Reads every sales row",
+    "permissions": [
+      { "resourceType": "table", "resourceName": "sales", "actions": "read" },
+      { "resourceType": "all-rows", "resourceName": "sales", "actions": "read" }
+    ]
+  }'
+```
+
+**See what a user holds.** `GET /api/databases/{db}/auth/admin/users/{userId}/access-grants` lists the grants the user holds on a
+database, each with its `source` (`implied:db_admin` or `role:<name>`) — [§19.8a](#198a-admin-api-access-grants-on-roles).
+
+**The flag.** `crossPartitionAccess` is not a grant. It waives one thing: the `PARTITION_FILTER_REQUIRED` guard that stops an
+unfiltered scan of a partitioned table. It does so for every credential on every surface (HTTP queries, named queries, WebSocket and
+long-poll subscribe, both SDKs) and never widens what the credential sees: a user with partition grants and the flag reads exactly its
+grants, and a credential without `all-partitions` on a PLS table is still refused. It is ignored on the data-plane listener. See
+[§19.7](#197-cross-partition-fan-out-queries) and [Partitioning](../guides/partitioning.md#partition-filter-rule-p40).
+
+**Every use of a grant is audited.** A request, bulk-load job, subscription or write stream whose outcome a grant decided writes one
+`access_grant_used` row to the auth database's audit log, never one per live event. See [Auth reference — Audit
+logging](reference.md#audit-logging).
+
+**What changed.**
+
+- *0.4.0:* only an app's service key was exempt from PLS and RLS; server API keys (`mk_srv_…`) lost the exemption they had up to 0.3.x.
+- *Next train* (**BL-1227**): the service-key exemption and the `db_admin` cross-partition read are replaced by the two grants above.
+  An app service key behaves as before. **A user with the `db_admin` role now holds both grants on its database: it sees every RLS
+  row and every partition, where it saw only its own grants or what a resolver showed it.** A **key** whose role is `db_admin`
+  (`mk_srv_…`, a custom key) can no longer read a PLS table across partitions by sending `"crossPartitionAccess": true` — the flag
+  waives a cost guard and nothing else. The audit kinds `service_key_pls_bypass` and `query_cross_partition` are replaced by
+  `access_grant_used`, and the `Aouda:PlsCrossPartitionRateLimit` options and the 429 they produced are gone. The roles API now
+  refuses a `resourceType` other than `table`, `all-partitions` or `all-rows`; up to 0.8.0 it stored any string.
+
+**What a credential without these grants gets on a protected table.** Its role's grants (RBAC is unchanged: a server key's `db_admin`
+still lets it create tables, apply schema and manage the database), and then only what a request with **no user** may see:
+
+| Table | A credential holding neither grant, with no user |
 |---|---|
 | `auth-db-rls` | Only rows the table's RLS rule shows to a request with no user — with `UserId` or `PartitionGrant` rules, **none**. Writes are refused. |
-| `auth-db-pls` | `403 AUTH_PLS_GRANT_NOT_FOUND`. A key whose role is `db_admin` on the database may still **read** across partitions by asking for it (`"crossPartitionAccess": true`), which is audited. |
-| `jwt-claim` | `403` — the key carries no partition claim. The same `db_admin` + `crossPartitionAccess` read applies. |
+| `auth-db-pls` | `403 AUTH_PLS_GRANT_NOT_FOUND`, with or without `crossPartitionAccess`. |
+| `jwt-claim` | `403` — the credential carries no partition claim, with or without `crossPartitionAccess`. |
 | No auth mode | Unchanged: its role's grants. |
 
 The server-admin endpoints (`/api/auth/admin/*`, database management, backups) are unchanged: they answer from the key's role.
 
-**What to use instead.**
+**What to use instead of a key that no longer reads a PLS table.**
 
-- **Server-side code that must see a whole database:** that database's service key (`mk_svc_…`, returned once when the
-  database is created with auth enabled). Keep it on the server.
+- **Server-side code that must see a whole database:** that database's service key (`mk_svc_…`, returned once when the database is
+  created with auth enabled). Keep it on the server.
 - **Access on behalf of one user:** the user's own JWT (sign them in), or a service key **or server API key** with
   `X-User-Token: <the user's JWT>` — the request then gets that user's grants ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)).
 - **A service limited to some partitions:** a `custom` key linked to a user ([§19.4.5](#1945-durable-credentials-for-non-interactive-services)).
-- **An operator's cross-partition read:** a `db_admin` key or JWT with `"crossPartitionAccess": true` (`auth-db-pls`, `jwt-claim`).
+- **An operator who must see a whole database:** a user with the `db_admin` role on it, or a role that carries `all-partitions` /
+  `all-rows`.
 
-### Bulk load is not a per-user write (**BL-1031, 0.5.0**)
+### Bulk load is not a per-user write (**BL-1031, 0.5.0**; **BL-1227, next train**)
 
-`POST …/bulk-load:begin` on a table with PLS or RLS returns `403` `AUTHORIZATION_DENIED` unless the caller is that
-database's `service_role` key (`mk_svc_`). A `db_admin` user, a server key (`mk_srv_`), and a `custom` key are refused,
-including a caller whose partition grant would allow an ordinary insert of the same rows, and a user JWT that carries
-`api_key_kind=service_role`. That name is not a custom claim: storing it is `AUTH_CLAIM_INVALID`. Bulk load does not filter
-rows down to the caller's scope: it is a migration, and the session is not started. A table with no PLS and no RLS
-policy is unchanged. See [Bulk load](../guides/bulk-load.md).
+`POST …/bulk-load:begin` on a table with PLS or RLS returns `403` `AUTHORIZATION_DENIED` unless the caller holds, **at `write`**,
+the grant that lifts **each restriction the table has**: `all-partitions` where it has PLS, `all-rows` where it has RLS, for every table
+the job locks. A service key and a `db_admin` user hold both on their database; any other user holds them only through a role
+([§19.8a](#198a-admin-api-access-grants-on-roles)). A table with only RLS can be loaded by a holder of `all-rows` alone, and the
+reverse for PLS. Still refused: a server key (`mk_srv_`), a custom key, a plain user, a caller whose partition grants would allow an
+ordinary insert of the same rows, a token that merely claims `db_admin`, a service key presenting a plain user's `X-User-Token`, and a
+user JWT that carries `api_key_kind=service_role`. That name is not a custom claim: storing it is `AUTH_CLAIM_INVALID`. The
+check is asked again at every `:append`, of the credential making the call, so a caller cannot append to another caller's job and a grant
+revoked mid-job refuses the next `:append`. The `403` names each refused table and the grant it lacks. Bulk load does not filter rows
+down to the caller's scope: it is a migration, and the session is not started. A table with no PLS and no RLS policy is unchanged. A
+job over a protected table writes its `access_grant_used` rows at `:begin`. Supplying identity-derived columns is a separate rule and
+still belongs to service-level keys (`mk_svc_`, `mk_srv_`): an admin user's rows are stamped with its own id. Up to 0.8.0 only an app's
+service key could bulk load such a table. See [Bulk load](../guides/bulk-load.md).
 
 ---
 
@@ -158,10 +235,10 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 | User JWT with `tenant_id: "acme"` | Scoped to `acme` partition |
 | User JWT without `tenant_id`, or with an empty or white-space one | 403 `AUTH_PLS_TENANT_CLAIM_MISSING` — no partition access |
 | `mk_anon_` API key | `anonymous` role — no data access by default |
-| `mk_svc_` service key (no X-User-Token) | PLS **bypassed** — sees all partitions |
+| `mk_svc_` service key (no X-User-Token) | Holds `all-partitions` — no partition predicate, sees all partitions (**BL-1227, next train**) |
 | `mk_svc_` + X-User-Token | PLS enforced using user JWT claims — on HTTP, and on WebSocket / long-poll as `user_token` / `userToken` (**BL-1223, next train**) |
-| `mk_srv_` server key | PLS **enforced** (**0.4.0**; [what changed](#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)): `403` without the claim; a `db_admin` key may read with `crossPartitionAccess` (audited). Up to 0.3.x: not enforced |
-| `db_admin` user JWT | Can use cross-partition access |
+| `mk_srv_` server key | Holds no grant: `403` without the claim, with or without `crossPartitionAccess` (**0.4.0**; **BL-1227, next train**: a `db_admin` key can no longer read across partitions with the flag). Up to 0.3.x: not enforced |
+| User JWT whose user has the `db_admin` role on the database | Holds `all-partitions` — sees all partitions; the flag only waives the cost guard (**BL-1227, next train**) |
 
 **When to use:** Simple SaaS where each user belongs to exactly one organization and should only see that organization's data.
 
@@ -367,7 +444,7 @@ curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
 # → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
 ```
 
-**Do not** reach for `mk_svc_` for this instead. It is a full, audited bypass of PLS and RLS on every table of its database (see the credential table in [§19.3](#193-mode-1-jwt-claim-default)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to the `oslo_bors` grant in `quote_source`.
+**Do not** reach for `mk_svc_` for this instead. It holds `all-partitions` and `all-rows` on every table of its database, and every use is audited (**BL-1227, next train**; see [Visibility is granted](#visibility-is-granted-all-partitions-and-all-rows)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to the `oslo_bors` grant in `quote_source`.
 
 `userId` is only accepted on `kind: "custom"` keys — `anon`, `service_role`, `public`, and `server_admin` stay singleton, system-managed credentials and reject it with `400 INVALID_REQUEST`. Revoke the key (`DELETE .../admin/api-keys/{id}`) to cut the service off immediately, or delete the specific partition grant to narrow its access without rotating the credential.
 
@@ -490,6 +567,8 @@ curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers
 
 When a `company_admin` user queries `sales`, the resolver sees the matching pass-through rule first and returns `null` — no predicate is injected, and the user sees all rows in the partition. Non-admin users hit the compound predicate path.
 
+**The pass-through and the `all-rows` grant combine** (**BL-1227, next train**). The `all-rows` grant is checked **before** any resolver: a holder gets no predicate whether or not the resolver names it, even for a table whose resolver is missing from the holder's resolved set. The pass-through stays for users who hold only a role-based rule. The level matters on writes. A `read` holder's reads are unrestricted, but its UPDATE and DELETE are still scoped to the rows the resolver shows it, exactly as for anyone else, and its inserted and updated rows are write-checked; a holder at `write` or `admin` skips the write check too. A resolver on a `jwt-claim` table is ignored by every path — HTTP, subscriptions, writes, bulk load, materialized queries, graph and vector — so RLS does not apply there to anyone; give the table `auth-db-rls` or `auth-db-pls`.
+
 ### 19.5.4 Write-Path Validation
 
 For writes to `auth-db-rls` tables, Aouda evaluates a **write-check** predicate against the new or updated row. If the row would not be visible under that predicate, the write is rejected.
@@ -504,7 +583,7 @@ The [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/
 | INSERT | No | 403 |
 | UPDATE → visible row | Yes | Allowed |
 | UPDATE → invisible row | No | 403 |
-| Admin (null predicate) | N/A | Always allowed |
+| Admin (null predicate), or a holder of `all-rows` at `write`/`admin` (**BL-1227, next train**) | N/A | Always allowed |
 
 ---
 
@@ -542,13 +621,12 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
 
 PLS and RLS are **conjunctive** (AND). There is no cross-layer OR.
 
-**Joins onto a restricted table are refused** (**architecture review, 0.3.0**). PLS and RLS are applied as predicates
-on the queried (base) table, and a join reads its targets unfiltered — so a query or named query that joins a table the
-caller's PLS or RLS would filter (or that the caller may read nothing of) is refused with `403 AUTHORIZATION_DENIED`,
-naming the table. A join is allowed only onto tables the caller may read without restriction (an RLS rule that adds no
-predicate for this caller, such as an admin pass-through, counts as unrestricted), and every joined table needs the same
-grant as the base table. Query the restricted table directly instead. Before, a join read such a table whole. **BL-818**
-tracks carrying the restriction onto the join side. See [HTTP API — joins and authorization](../reference/http-api.md#post-apidatabasesdbquery).
+**A join is scoped on its joined side** (**BL-818, 0.3.0**). The caller's PLS and RLS for every joined table are applied on that
+join's side, exactly as on a direct read of the table, for a query and a named query alike: an inner join onto a table the caller
+may read only part of is answered with that part, and a table the caller may read none of joins against no rows. A holder of
+`all-partitions` or `all-rows` is lifted on the joined side as on a direct read (**BL-1227, next train**); `crossPartitionAccess` is
+not carried to a joined table. Still refused with `403 AUTHORIZATION_DENIED`, naming the table: a joined table whose partition-level
+security refuses the caller (no grant), and a joined materialized-query result whose source security cannot be applied. See [HTTP API — joins and authorization](../reference/http-api.md#post-apidatabasesdbquery).
 
 ---
 
@@ -577,13 +655,25 @@ This eliminates application-layer aggregation code. The query looks like a norma
 - Financial: "Latest quotes for instrument AAPL across all my authorized sources"
 - CRM: "All open deals I'm responsible for across all company partitions I manage"
 
+**A holder of `all-partitions` is not fanned out** (**BL-1227, next train**). It gets no rewrite and no partition predicate: the query
+reads every partition of the table, including partitions created after it subscribed or connected. A user who holds partition grants
+*and* `all-partitions` at `read` reads everything and, with a partition grant at `write` on `k`, writes `k` only; the grants combine.
+In `jwt-claim` mode the caller's own tenant claim counts as its partition grant for writes.
+
+**The flag is separate** (**BL-1227, next train**). A query on a partitioned table that names no value for its partition key is
+refused with `PARTITION_FILTER_REQUIRED` unless it sets `crossPartitionAccess` — a cost guard against an accidental full scan,
+independent of who asks. The flag lifts that guard and nothing else: on an `auth-db-pls` table a user with partition grants and the
+flag reads exactly its granted partitions, and a credential holding no grant is still refused `AUTH_PLS_GRANT_NOT_FOUND`. A service key
+or an admin user (a holder of `all-partitions`) still needs the flag to scan a partitioned table without a filter on its key. The flag is
+accepted on every surface and by both SDKs; see [Partitioning](../guides/partitioning.md#partition-filter-rule-p40).
+
 ---
 
 ## 19.8 Admin API: Partition Grants
 
 Manage which partition keys a user is allowed to access in each dimension.
 
-All endpoints are under `/api/databases/{db}/auth/admin/users/{userId}/partition-grants` and require a `service_role` key, `db_admin` user JWT, or server admin token. `{userId}` is the user's id and `{grantId}` the grant's, both GUIDs — the `id` their create call returned; anything else in their place is a `404`. `grantedBy`, when given, is a user id too.
+All endpoints are under `/api/databases/{db}/auth/admin/users/{userId}/partition-grants` and require a `service_role` key, `db_admin` user JWT, or server admin token. (These endpoints manage *partition* grants, which scope a user to some partitions. A grant that lifts PLS or RLS altogether is an [access grant on a role](#198a-admin-api-access-grants-on-roles).) `{userId}` is the user's id and `{grantId}` the grant's, both GUIDs — the `id` their create call returned; anything else in their place is a `404`. `grantedBy`, when given, is a user id too.
 
 ### Create a Partition Grant
 
@@ -657,6 +747,124 @@ curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/users/550e84
 # 204 No Content on success
 # 404 AUTH_GRANT_NOT_FOUND if grant does not exist
 ```
+
+---
+
+## 19.8a Admin API: Access Grants on Roles (**BL-1227, next train**)
+
+An **access grant** lifts PLS (`all-partitions`) or RLS (`all-rows`) for everyone a role is assigned to. It is stored as a permission of the
+role, beside the ordinary table permissions, and is managed with the roles endpoints under
+`/api/databases/{db}/auth/admin/roles` (a `db_admin` user, a `service_role` key or a server admin token; an auth-admin key cannot
+define roles). What a grant means — scope, level, who holds one without a role — is in
+[Visibility is granted](#visibility-is-granted-all-partitions-and-all-rows).
+
+### A role permission
+
+Each item of a role's `permissions` is `{ "resourceType", "resourceName", "actions" }`.
+
+| `resourceType` | `resourceName` | `actions` |
+|---|---|---|
+| `table` (default) | A table name, or `*` (default) | A comma-separated string of RBAC actions, for example `"read,write"` |
+| `all-partitions` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
+| `all-rows` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
+
+For `all-partitions` and `all-rows`, all three fields are required: there is no default name and no default level. A grant is a
+*second* permission, not a replacement: a role that should read `sales` and see every row of it carries both a `table` permission
+(RBAC: may the caller read `sales` at all) and the `all-rows` grant (RLS: which rows). Grants are given to a user by assigning the
+role, and the assignment's `scope` limits the database they are effective on.
+
+### Create a role that carries a grant
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/roles \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "sales_auditor",
+    "description": "Reads every sales row",
+    "permissions": [
+      { "resourceType": "table", "resourceName": "sales", "actions": "read" },
+      { "resourceType": "all-rows", "resourceName": "sales", "actions": "read" }
+    ]
+  }'
+```
+
+Response (201 Created):
+
+```json
+{
+  "id": "29582581-99ba-46ce-b83a-d5be3f151105",
+  "name": "sales_auditor",
+  "description": "Reads every sales row",
+  "isSystem": false,
+  "createdAt": "2026-10-30T19:51:09.823578Z",
+  "permissions": [
+    { "resourceType": "table", "resourceName": "sales", "actions": "read" },
+    { "resourceType": "all-rows", "resourceName": "sales", "actions": "read" }
+  ]
+}
+```
+
+`PATCH …/roles/{id}` replaces the role's `permissions` with the same shapes. The whole request is validated before anything is written: a
+refused request changes nothing. Role create does not change what live sessions see; a patch (name or permissions), a role deletion, a
+role assignment and a user deletion do, on the next request — a live subscription is re-keyed, and narrowing is immediate.
+
+### What is refused
+
+Each refusal is `400`. The body is `{ "error", "message", "suggestion", "detail", "requestId" }`; the messages below are the ones
+the server returned.
+
+| `error` | When | `message` (for the request shown) |
+|---|---|---|
+| `AUTH_GRANT_TABLE_NOT_FOUND` | A table-scope grant names a table the database does not have (names are case-sensitive) | `Table 'nope' for the 'all-rows' grant was not found in database(s) 'myapp'. Table names are case-sensitive.` |
+| `AUTH_GRANT_NOT_APPLICABLE` | The grant would lift nothing: `all-partitions` on a table with no PLS, or `all-rows` on a table with no RLS resolver | `Table 'notes' has no row-level security (an RLS resolver, auth-db mode), so the 'all-rows' grant would lift nothing on it.` |
+| `AUTH_GRANT_INVALID` | An unknown `resourceType` (up to 0.8.0 it was stored silently), a missing or multiple level, a missing `resourceName`, a `null` entry, or a grant on a system role | `Unknown resourceType 'all-tenants'. A role permission is 'table', 'all-partitions' or 'all-rows' (exactly).` · `An 'all-rows' grant needs exactly one level in actions: 'read', 'write' or 'admin' (got 'read,write').` |
+
+On an auth database's own route a table-scope grant is checked against **every** database that auth database governs; on an
+application database's route, against that database. A grant whose table is later dropped stays stored and lifts nothing until a table
+of that name exists again: a table-scope grant names a table by name, so a re-created table, or a same-named table in another database
+the assignment's scope covers, is lifted by it. Use `*` when you mean "every table".
+
+⚠️ **The self-signup role is assigned to every self-registered user.** A role that carries `all-partitions` or `all-rows` — now or after
+a later edit — and is set as `selfSignupRole` hands the grant to anyone who can sign up. (BL-1282 tracks a guard for it.)
+
+### See what a user holds
+
+```bash
+curl http://localhost:5433/api/databases/myapp/auth/admin/users/6fc78b31-5fe9-4453-9307-bd4233b0330e/access-grants \
+  -H "Authorization: Bearer <admin-token>"
+```
+
+```json
+{
+  "userId": "6fc78b31-5fe9-4453-9307-bd4233b0330e",
+  "database": "myapp",
+  "grants": [
+    { "grant": "all-rows", "scope": "table", "table": "sales", "level": "read", "source": "role:sales_auditor" }
+  ]
+}
+```
+
+`grants` lists the all-* grants the user holds **on that database**, and nothing else: partition grants are listed by
+[`…/partition-grants`](#198-admin-api-partition-grants). `scope` is `database` or `table` (`table` then names it, and is `null` for a
+database-scope grant), `level` is `read`, `write` or `admin`, and `source` is `role:<name>` for a role-carried grant or `implied:db_admin`
+for the grants an admin user holds by implication (a user with the `db_admin` role gets both, `scope` `database`, `level` `admin`).
+The list is sorted by `grant`, `scope`, `table`, `level` and `source`, and computed afresh on each call. `?database=<name>` picks the
+database; it defaults to the route's application database and is **required** on an auth database's route. The same route exists on
+the server auth database, `GET /api/auth/admin/users/{id}/access-grants?database=<name>`, for databases no auth database governs. An
+auth-admin key (`mk_adm_…`) may call it on its own auth database's route, as it may list a user's roles. A user that does not exist is `404`.
+
+### Use it, and what the audit says
+
+The holder queries as before; no request field changes. For the `sales_auditor` role above, assigned to a user with
+`PUT …/users/{id}/roles` (`{ "roles": [{ "roleName": "sales_auditor", "scope": "myapp" }] }`), a read of `sales` returns every owner's
+rows, where a user without the grant sees only its own. The use is audited as an `access_grant_used` row:
+
+```json
+{ "grant": "all-rows", "scope": "table", "level": "read", "source": "role:sales_auditor", "surface": "http", "operation": "query", "table": "sales" }
+```
+
+See [Auth reference — Audit logging](reference.md#audit-logging) for the fields and when a row is written.
 
 ---
 
