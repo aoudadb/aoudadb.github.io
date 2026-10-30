@@ -926,7 +926,9 @@ Expected result checks:
 - Route/body database mismatch requests are rejected.
 - Database list endpoint reports both as active.
 
-### Scenario 3: A trusted backend reads every partition on purpose (**BL-1227, next train**)
+### Scenario 3: A trusted backend reads every partition on purpose
+
+(**BL-1227, next train**)
 
 When to use:
 - a backend job (analytics, export) legitimately reads across many partitions of a table with partition-level security.

@@ -150,9 +150,9 @@ The server-admin endpoints (`/api/auth/admin/*`, database management, backups) a
 - **An operator who must see a whole database:** a user with the `db_admin` role on it, or a role that carries `all-partitions` /
   `all-rows`.
 
-### Bulk load is not a per-user write (**BL-1031, 0.5.0**; **BL-1227, next train**)
+### Bulk load is not a per-user write (**BL-1031, 0.5.0**)
 
-`POST …/bulk-load:begin` on a table with PLS or RLS returns `403` `AUTHORIZATION_DENIED` unless the caller holds, **at `write`**,
+(**BL-1227, next train**) `POST …/bulk-load:begin` on a table with PLS or RLS returns `403` `AUTHORIZATION_DENIED` unless the caller holds, **at `write`**,
 the grant that lifts **each restriction the table has**: `all-partitions` where it has PLS, `all-rows` where it has RLS, for every table
 the job locks. A service key and a `db_admin` user hold both on their database; any other user holds them only through a role
 ([§19.8a](#198a-admin-api-access-grants-on-roles)). A table with only RLS can be loaded by a holder of `all-rows` alone, and the

@@ -309,6 +309,16 @@ results are keyed by identity rather than time, and are not clustered.
 aggregate's window bucket even when another bucket comes first, a `topNPerGroup`'s window column — and its segments are cut by
 time slice ([2.11e](#window-expiry)).
 
+### 2.3.2 Who may read a result: the source's security
+
+(**BL-1227, next train**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
+lifted past each half by its own grant **on the source table**: `all-partitions` lifts the source's PLS and `all-rows` its RLS, each
+alone. A grant that names the result table lifts nothing. A holder of one grant is still restricted by the other half — for
+example `all-partitions` alone reads every partition of a result over an `auth-db-pls` source with an RLS resolver, but only the rows
+the resolver allows — and a result over a `jwt-claim` source is read whole by a holder of `all-partitions`. Each use of a grant on a
+result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
+See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+
 ## 2.4 Availability status (implementation honesty)
 
 ### Available now
