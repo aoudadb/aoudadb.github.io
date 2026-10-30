@@ -417,7 +417,7 @@ Key implementation anchors:
 | `...Subscriptions[*].Tables.Mode` | enum | `All` | `All`, `Include`, `Exclude` | appsettings/env | Include/Exclude require names |
 | `...Subscriptions[*].Tables.TableNames` | string[] | `[]` | non-empty for Include/Exclude | appsettings/env | Resolved to `TableId` at connect |
 | `Aouda:ReplicaSet:ThisNode:Archive:*` | object | n/a | see archive fields | appsettings/env | Effective archive config on a backup node; starts `WalArchiveWorker` when enabled + destinationed |
-| `Aouda:ReplicaSet:KeyFile` | string? | `null` | file path | appsettings/env | HMAC keyfile auth when set |
+| `Aouda:ReplicaSet:KeyFile` | string? | `null` | file path | appsettings/env | HMAC keyfile auth when set. ⚠️ Without it nothing on the replication port is authenticated — see the warning in §2.10.1 |
 | `Aouda:ReplicaSet:HeartbeatIntervalMs` | int | `2000` | positive | appsettings/env | Heartbeat period |
 | `Aouda:ReplicaSet:ElectionTimeoutMs` | int | `10000` | positive | appsettings/env | Failure/election threshold |
 | `Aouda:ReplicaSet:ReplicationPort` | int | `5433` | `1..65535` | appsettings/env | WAL stream port; election uses `+1` |
@@ -462,6 +462,14 @@ This is a concrete 3-node local setup to get replication communication working.
 #### Step 1: create a shared keyfile
 
 Use the same keyfile on all nodes.
+
+{: .warning }
+**Always set `KeyFile`.** It is optional and has no default, and without it the replication port authenticates nothing. The port
+listens on every interface, so any host that can reach it can subscribe to every replicated database and receive its WAL stream, and
+can make the primary build and send a full checkpoint image of those databases; a replica also accepts whatever a host posing as its
+primary sends. The server only logs a warning at startup. A keyfile signs the handshake, the checkpoint request and manifest, heartbeats and votes,
+but the link is not encrypted (no TLS): keep the replication port (and the election port, `ReplicationPort + 1`) on a private network
+or behind a firewall either way. Failing closed without a key is open work (**BL-1210**).
 
 ```powershell
 # Windows PowerShell

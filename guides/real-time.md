@@ -770,6 +770,11 @@ Content-Type: application/json
 {"token":"<jwt-or-api-key>","wireMode":"json"}
 ```
 
+A backend acting as a user adds `"userToken":"<user-jwt>"` beside a service-level key — the long-poll form of `X-User-Token`
+(**BL-1223, next train**). A refused credential answers `401` with `{ "code", "message" }` (`AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`,
+`AUTH_TOKEN_REVOKED`, `AUTH_API_KEY_INVALID`); `500` with `AUTH_DB_UNAVAILABLE` means the auth database could not be read or the
+session's permissions could not be resolved — no session is created, and it is **retryable** (**BL-1223, next train**).
+
 Expected result: `auth_ok` is returned for valid auth, then `snapshot`/`change` messages flow over the chosen transport.
 
 Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports JSON mode only.

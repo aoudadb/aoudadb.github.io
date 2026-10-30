@@ -242,7 +242,7 @@ An `Aouda.Server` process is a thin ASP.NET Core host. Its role is to:
         wal_000000001.log   ← segmented write-ahead log (not insert.wal)
         CHECKPOINT          ← crash redo horizon
       tables/
-        {tableName}/          ← column files, segment manifests
+        t{id}/                ← one per table, named by table id (t0005); column files, segment manifests
       materialized/           ← materialized query definitions + data
 ```
 

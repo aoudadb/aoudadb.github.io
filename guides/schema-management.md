@@ -116,7 +116,14 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 **Column evolution (P36):** changing a column's `type`, `nullable`, `primaryKey`, `references`, `default`, `description`, rename, or reorder is now an applyable **change** (not a warning). Safe type widening (e.g. `Int32` → `Int64`) is an instant metadata flip with read-time coercion; lossy conversions validate all values first, then flip and rewrite column files in the background (`GET …/jobs`).
 
-**Still warnings only:** changing table `partitionKey` or `clusterColumns` (and Vector/MdVector type changes). Those require dropping and re-creating the table (or a future migration phase).
+**Still warnings only:** changing table `clusterColumns` (and Vector/MdVector type changes). Those require dropping and re-creating the table (or a future migration phase).
+
+**Refused, not warned past** (**BL-1199, next train**): a table's partition key is fixed when the table is created. A document that
+changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a partition-key column, is refused
+whole — `schema apply` (and `--dry-run`) fails with `400 PARTITION_KEY_FIXED` naming every reason, and nothing in the document is
+applied. `schema diff` still shows the change as a `partitionKey` / `partitionFunction` warning. Until this release the apply ran the
+column changes such a document implied (the key column was dropped, renamed or added) and printed the warning beside the result. To
+change a key, drop and re-create the table.
 
 Always inspect warnings before applying — a warning means the diff cannot close that gap automatically:
 

@@ -130,7 +130,6 @@ Scope boundaries:
 - Storage coordinator and lock manager: `BulkLoadCoordinator`, `TableLoadLockManager`, `BulkLoadCommitMarker`.
 - WAL contract implemented with tags `60/61/62`: `BulkSegmentCommitted`, `BulkLoadCommitted`, `BulkLoadAborted`.
 - Replica-side bulk-load state machine in replay path: `BulkLoadReplicaCoordinator` + `FrameApplier` handlers.
-- Checkpoint protocol support for bulk segment fetch message types `0x20`/`0x21`.
 - HTTP endpoints shipped:
   - `POST /api/databases/{db}/bulk-load:begin`
   - `POST /api/databases/{db}/bulk-load/{jobId}:append`
@@ -304,7 +303,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
 | P20 (`3.3`, `5`) | `docs/tasks/P20-COMPLETION.md` | Core bulk-load primitive, WAL frame model, HTTP `begin/append/commit/abort/status`, .NET client + CLI surface | Multi-node durability polish, restart reconstruction maturity | `BL-066`, `BL-067`, `BL-069` |
-| BL Post20-S1 | `docs/tasks/BL-COMPLETION.md` Post20-S1 | Replication completion: replay coordinator, checkpoint segment fetch protocol, force-log-ship cluster setting, watchdog lifecycle integration | Further replication scalability behaviors | `BL-066` |
+| BL Post20-S1 | `docs/tasks/BL-COMPLETION.md` Post20-S1 | Replication completion: replay coordinator, checkpoint segment fetch protocol (removed, **BL-1193, next train**: nothing used it), force-log-ship cluster setting, watchdog lifecycle integration | Further replication scalability behaviors | `BL-066` |
 | BL Post20-S3 | `docs/tasks/BL-COMPLETION.md` Post20-S3 | Admin list/force-abort routes and Studio-facing server support | Studio UX evolution sits outside this repo | (tracked in Studio/task stream) |
 | P31 (S1+S2) | `docs/tasks/P31/` | Materialized Query auto-refresh after bulk-load: `PostLoadMqBehavior`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, `RefreshMaterializedQueryAsync`, replica scheduler, HTTP refresh endpoint, C# + TS clients, CLI | Cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
 | P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` loads accumulate affected MQs during the load's own pass (all four types); scan-fed path retained for `:refresh`, fallback, restore (**WorkloadCore S10, 0.3.0**: replaced by the table's pass) | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
@@ -324,7 +323,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 | Durable cursor contract (`rowsDurablyCommitted`) | Yes | Yes | No | Protocol DTOs + controller/client code | Server session cursor is updated at commit; append-time cursor granularity is incomplete in Stage 1. |
 | Resume watchdog lifecycle | Yes | No | No | `BulkLoadResumeWatchdog`, lifecycle tests | Default resume window 5 minutes. |
 | Replica apply state machine | Yes | No | No | `BulkLoadReplicaCoordinator`, `FrameApplier` handlers | Includes acquired/fetching/staged/committed/aborted. |
-| Segment fetch protocol (`0x20`/`0x21`) | Yes | No | No | `CheckpointProtocol`, `CheckpointTransferServer`, `BulkSegmentFetcher` | File-level chunk transfer plus hash verification. |
+| Replica segment fetch | No | No | Yes | — | (**BL-1193, next train**) The checkpoint protocol's unused `0x20`/`0x21` messages and `BulkSegmentFetcher` were removed; a replica's fetch of a load's segments is **BL-1116**. |
 | Cluster policy `ForceLogShipBulkLoad` | Yes | No | No | `BulkLoadClusterSettings`, coordinator/controller checks, tests | Rejects skip/snapshot modes when enabled. |
 | HTTP admin list + force-abort | Yes | No | No | `BulkLoadController` routes + list-route tests | Powering Studio admin workflow. |
 | .NET client API (`BulkLoadAsync`, `BulkLoadMultiTableAsync`) | Yes | No | No | `AoudaClient.cs`, `BulkLoadCoordinator.cs` | Includes progress + deferred work behavior. |
@@ -917,7 +916,7 @@ High-level architecture path:
 2. **Storage coordinator** (`BulkLoadCoordinator`) acquires table locks, writes bulk segments (each with its manifest), emits WAL frames. (**BL-980, 0.4.0**) The pre-P41 `.bulkload.commit` marker is no longer written or read: recovery discards a partial bulk write that has no manifest, whatever lies beside it.
 3. **HTTP session registry** (`BulkLoadSessionRegistry`) manages in-memory job state for begin/append/commit/status/list.
 4. **Replay path** (`FrameApplier` + `BulkLoadReplicaCoordinator`) decodes tag 60/61/62 frames and drives segment fetch/apply state machine.
-5. **Checkpoint transfer path** (`CheckpointProtocol` + `CheckpointTransferServer` + `BulkSegmentFetcher`) moves bulk segment file bytes over message types `0x20`/`0x21`.
+5. **Segment fetch to a replica:** none yet (**BL-1116**). (**BL-1193, next train**) The checkpoint protocol's `0x20`/`0x21` messages and `BulkSegmentFetcher`, which no server used, were removed; a primary's checkpoint session now ends on a message type it does not know.
 6. **Client coordinator** (`Aouda.Client.Internal.BulkLoadCoordinator`) orchestrates begin/append/commit and maps failures to typed exceptions.
 
 ### 2.8.1 Critical path walk-throughs
@@ -941,7 +940,7 @@ Tests: `BulkLoadControllerBeginTests`, `BulkLoadControllerAppendTests`, `BulkLoa
 4. On closing frame tag 61, coordinator transitions to staged/committed depending on fetched set completeness. (**Lead S18a, 0.6.0**) The replica's tokens stop below that frame until it is committed there (ADR 0065 `D-5`); later frames still apply. ⚠️ No server constructs the coordinator or the fetcher yet (**BL-1116**): the steps above run in tests only.
 5. Tag 62 marks job aborted and replica state transitions accordingly.
 
-Tests: `BulkLoadReplicaCoordinatorTests`, `BulkSegmentFetchTests`, `BulkLoadCompactionWatermarkTests`.
+Tests: `BulkLoadReplicaCoordinatorTests`, `BulkLoadCompactionWatermarkTests`.
 
 #### Path C: Watchdog timeout / force-abort
 
@@ -1403,7 +1402,6 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 - `src/Aouda.Engine.Replication/Replay/BulkLoadReplicaCoordinator.cs`
 - `src/Aouda.Engine.Replication/Checkpoint/CheckpointProtocol.cs`
 - `src/Aouda.Engine.Replication/Checkpoint/CheckpointTransferServer.cs`
-- `src/Aouda.Engine.Replication/Checkpoint/BulkSegmentFetcher.cs`
 - `src/Aouda.Server/Controllers/BulkLoadController.cs`
 - `src/Aouda.Server/Services/BulkLoadSessionRegistry.cs`
 - `src/Aouda.Server/Services/BulkLoadSessionSweeper.cs`

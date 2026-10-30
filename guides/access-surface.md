@@ -82,7 +82,7 @@ Sibling of `aouda.schema.json` (or `--identities`). Schema `https://aouda.io/ide
 | `kind` | **Required.** `user` or `service_key`. |
 | `userId` | Optional UUID. Omitted → deterministic: SHA-256 of `"aouda.identity:" + name`, first 16 bytes as a GUID. A non-UUID value is `AUTH_IDENTITY_INVALID`. |
 | `claims` | String values only. |
-| `grants` | Each grant needs **all three** of `dimension`, `partitionKey`, `accessLevel` (`read` \| `write` \| `admin`). |
+| `grants` | Each grant needs **all three** of `dimension`, `partitionKey`, `accessLevel` (`read` \| `write` \| `admin`). `partitionKey` is taken verbatim: `""` and keys with outer white space are partitions like any other (**BL-1192, next train**); leaving it out is invalid. |
 
 Cap: 32 identities (`ACCESS_SURFACE_TOO_MANY_IDENTITIES`). Invalid document → `AUTH_IDENTITY_INVALID`. Missing file is a **warning**, not a hard error: public-only (`mk_pub_*`) still runs.
 
