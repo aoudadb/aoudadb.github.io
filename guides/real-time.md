@@ -174,7 +174,7 @@ If you do nothing:
 - Subscription behavior:
   - Snapshot + incremental delivery.
   - User filter evaluation.
-  - ADRA-aware event filtering (PLS/RLS) and permission refresh on resume paths.
+  - ADRA-aware event filtering (PLS/RLS) by the credential's grants, and a permission re-read on every subscribe and resume (**BL-1227, next train**: see [Who may subscribe, and what a subscription sees](#who-may-subscribe-and-what-a-subscription-sees)).
   - Resume semantics with `resume_from` and change-buffer replay/fallback.
 - Write-stream behavior:
   - `stream_open`, `stream_rows`, `stream_ack`, `stream_close`.
@@ -274,6 +274,38 @@ Invariants:
 - Sequence/version continuity is monotonic and is the basis for resume and dedup.
 - Authorization filtering is enforced in subscription delivery and write validation paths.
 - Long-poll transport negotiates JSON wire mode only.
+
+### Who may subscribe, and what a subscription sees
+
+A subscription is a read, and it is held to the rules of the HTTP read it mirrors (**BL-1227, next train**):
+
+- **The same role check.** `subscribe` is authorized as `POST /query` is: the credential needs `read` on the table, and for a
+  named-query subscription on **every table the named query touches**. A refusal is the code HTTP answers
+  (`INSUFFICIENT_PERMISSIONS`, `AUTHORIZATION_DENIED`, `AUTH_TOKEN_MISSING`), sent as an `error` frame for that subscription.
+  A write stream (`stream_open`) needs `write` on the table. Up to 0.8.0 a subscribe and a `stream_open` asked no role check, so a
+  credential HTTP refused (the anonymous key, a user with no role) could read, and write, a table that has no partition or row
+  security over the socket.
+- **The same rows.** A subscription's snapshot returns what an HTTP query by the same credential returns, and its change events
+  follow the same grants: a credential that holds `all-partitions` receives the events of partitions created after it subscribed,
+  and one that does not receives only its own partitions'. Granting a role is described in
+  [Authorization](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+- **Permissions are re-read on every `subscribe`**, a first subscribe included. A subscribe whose permissions cannot be read is
+  **refused** — `PERMISSION_REVOKED`, or the retryable refusal code when the auth database was unavailable — never admitted on
+  a stale answer.
+- **A grant change reaches an open subscription on the next event.** After a role change, the first event on the table re-keys
+  each open subscription of the affected session: a narrowed one stops receiving what it may no longer see, and one that no longer
+  passes the role check ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
+  **not re-snapshotted**: rows that became visible are not pushed, only events from the re-key on. Resubscribe to read the rows
+  that were already there.
+- **Audit.** When an `all-partitions` or `all-rows` grant decides what a subscription or a write stream sees, one
+  `access_grant_used` row is written: once per subscription (operation `subscribe`), once per write stream (operation `insert`,
+  on the first batch the grant decides), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
+  event**. The `cross_partition_access` flag alone
+  writes nothing. See [Authorization](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+
+A subscription on a partitioned table needs the same partition filter as a read, or the `cross_partition_access` flag on the
+`subscribe` message (see the HTTP/protocol examples below, and
+[a subscription that spans partitions](partitioning.md#a-subscription-that-spans-partitions)).
 
 ### Horizons and range deletes
 
@@ -660,6 +692,15 @@ Sec-WebSocket-Key: <key>
 
 Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `wire_mode` (the negotiated wire mode).
 
+**Which credentials the socket accepts** (**BL-1227, next train**). The handshake asks the same stores, in the same order, as an HTTP
+request to that database: the database's own auth database first, then the server auth database. So a **server API key**
+(`mk_srv_`) or a server user's token that works over HTTP on a linked application database also opens its WebSocket and its
+long-poll connect (up to 0.8.0 both were refused with `AUTH_API_KEY_INVALID` / `AUTH_TOKEN_INVALID`). The socket keeps the store
+that accepted the credential, so `re_auth`, sign-out and revocation reach it. A session the server auth database accepted is
+authorized as HTTP authorizes a data call on the database — a database-level `read` by its grants — and is refused with HTTP's
+code (`auth_error` on the socket, `403 AUTHORIZATION_DENIED` on long-poll connect). A server key opens the socket; it holds
+neither `all-partitions` nor `all-rows`, so on a table with partition or row security it is held to the same rules as over HTTP.
+
 **Step 1 response — `auth_error` (server → client on failure):**
 
 ```json
@@ -673,6 +714,25 @@ Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `
 ```
 
 `resume_from` is optional. Omit it on a fresh subscription; include the last seen version on reconnect.
+
+**`cross_partition_access`** (optional boolean, sent only when `true`) (**BL-1227, next train**) waives the partition-filter guard
+for a subscription that names no partition: a table `subscribe`, or a named-query `subscribe` (`name`, `args`) whose query binds no
+partition key, on a partitioned table that requires a partition filter. Without it that subscribe is refused
+`PARTITION_FILTER_REQUIRED`. It is a **cost waiver, not a grant**: the snapshot and every later event are still what the
+credential's grants allow, so a credential without `all-partitions` on a table with partition-level security is refused as before.
+The data-plane listener (the browser tier) ignores the flag, so a browser still binds the partition key in a named query. An
+older server ignores the field and answers `PARTITION_FILTER_REQUIRED`.
+
+```json
+{"type":"subscribe","id":"sub-orders","target":"orders","cross_partition_access":true}
+```
+
+**A subscription that spans partitions.** A subscription with no partition filter would read every partition of the table, so a
+partitioned table's guard refuses it unless the flag is set; a service key, a `db_admin` user or any credential holding
+`all-partitions` then receives the events of **every** partition, including partitions created after it subscribed, while a
+credential with partition grants receives only its own. The rule, and the choice between a per-partition filter, a named query
+and the flag, are in
+[A subscription that spans partitions](partitioning.md#a-subscription-that-spans-partitions).
 
 **Step 2 response — `snapshot` then `change` (server → client):**
 
@@ -776,6 +836,7 @@ Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports J
 | Subscribe to table changes | `ITableOperations.SubscribeAsync()` | `TableQuery.subscribe()` | `subscribe` message over WS/long-poll | Implemented | Snapshot then incremental |
 | Typed subscriptions | `ITableOperations<T>.SubscribeAsync()` | Generic `TableQuery<T>.subscribe()` typing | Same protocol payload, typed client mapping only | Implemented | Type mapping is client-side |
 | Resume from version | Automatic in subscription implementation | Automatic re-subscribe with `resume_from` | `resume_from` field in subscribe message | Implemented | At-least-once replay semantics |
+| Subscribe across partitions (waive `PARTITION_FILTER_REQUIRED`) | `WithCrossPartitionAccess()` or `SubscribeOptions.CrossPartitionAccess` | `withCrossPartitionAccess()` or `SubscribeOptions.crossPartitionAccess`; named queries: `NamedQuerySubscribeOptions.crossPartitionAccess` | `cross_partition_access` field in subscribe message | Implemented (**BL-1227, next train**) | A cost waiver, not a grant; ignored on the data-plane listener |
 | Open write stream | `OpenWriteStreamAsync(mode)` | `openWriteStream({ mode })` | `stream_open`, `stream_rows`, `stream_ack`, `stream_close` | Implemented | Insert/upsert supported |
 | MessagePack wire mode | `.NET WireMode.MessagePack` | `streaming.wireMode = "msgpack"` | auth `wire_mode` negotiation | Implemented | Long-poll is JSON-only |
 | Long-poll fallback | `.NET EnableLongPollFallback` | `streaming.enableLongPollFallback` | `/stream/longpoll/connect|send|poll|{id}` | Implemented | Fallback used when WS connect fails |

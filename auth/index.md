@@ -259,9 +259,10 @@ If you enable auth and keep defaults:
 - API key kinds:
   - `anon`, `service_role`, `public`, custom, and `server_admin` (server keys).
   - system-managed keys reserve key kinds for default app connection models.
-  - **only `service_role` bypasses PLS / RLS** (**0.4.0**): every other key without a user — custom, `server_admin`,
-    `anon`, `public` — gets its role's grants and, on a protected table, what a request with no user may see. Up to 0.3.x a
-    `server_admin` key bypassed them too. [What changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+  - **a `service_role` key holds `all-partitions` and `all-rows` on its database** (**BL-1227, next train**); every other key
+    without a user — custom, `server_admin`, `auth_admin`, `anon`, `public` — holds none, gets its role's grants and, on a
+    protected table, what a request with no user may see. Up to 0.3.x a `server_admin` key saw past PLS / RLS too.
+    [How visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 - RBAC:
   - role memberships + permission rows define baseline operation rights.
 - PLS:
@@ -278,8 +279,9 @@ Invariants:
 - App auth endpoints require API key when app auth database is linked.
 - `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`.
 - Service-key + `X-User-Token` impersonation flow must still validate/revocation-check user token.
-- Only a `service_role` key bypasses PLS / RLS; a principal without a user id gets the deny-by-default context (no partition
-  grants, a missing RLS key denies) on HTTP, WebSocket and long-poll alike (0.4.0).
+- Only a credential that holds `all-partitions` / `all-rows` is lifted past PLS / RLS (**BL-1227, next train**); a principal
+  without a user id and without those grants gets the deny-by-default context (no partition grants, a missing RLS key
+  denies) on HTTP, WebSocket and long-poll alike (0.4.0).
 - Empty or unsupported complex resolver shapes fail closed instead of broadening access.
 
 ## 2.8 How Aouda implements it
@@ -642,7 +644,7 @@ Last verification date (UTC): `2026-03-31`.
 | App auth API key gate enforcement and scope detection | `tests/Aouda.Server.Tests/AuthenticationMiddlewareTests.cs` | Pass (historically in phase reports) | Strong | Includes app auth protected-path classification updates |
 | Middleware integration incl. `X-User-Token` and revoked token behavior | `tests/Aouda.Server.Tests/AuthenticationMiddlewareIntegrationTests.cs` | Pass (historically in phase reports) | Strong | Includes revoked `X-User-Token` regression test |
 | Auth endpoint contract behavior with/without linked auth DB | `tests/Aouda.Server.Tests/AuthEndpointContractIntegrationTests.cs` | Pass (historically in phase reports) | Medium/Strong | Clarifies pass-through behavior when auth DB not linked |
-| PLS enforcement and service-key bypass auditing | `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs` | Pass (historically in phase reports) | Strong | Includes cross-partition requirement nuance |
+| PLS enforcement and the audit of a held grant's use | `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs` | Pass (historically in phase reports) | Strong | Includes cross-partition requirement nuance |
 | Permission version increment/read semantics | `tests/Aouda.Engine.Auth.Tests/PermissionVersionServiceTests.cs` | Pass | Medium/Strong | Validates `_permission_version` contract |
 | RLS resolver composition and edge-shape handling | `tests/Aouda.Engine.Auth.Tests/RlsResolverEvaluatorTests.cs` | Pass | Strong | Includes regression paths from P14 S5 review fixes |
 | RLS write-path enforcement semantics | `tests/Aouda.Engine.Auth.Tests/RlsWriteValidatorTests.cs` | Pass | Strong | Covers write-authorization checks |
@@ -663,7 +665,7 @@ _Updated 2026-04-08 after P14/P16 completion._
 
 ### Resolved gaps
 
-- ~~Service key PLS bypass audit logging for DML~~ — ✅ **Resolved (P14, BL-041)**: `TablesController` emits service-key PLS bypass audit entries for insert/update/delete.
+- ~~Service key PLS bypass audit logging for DML~~ — ✅ **Resolved (P14, BL-041)**: `TablesController` emits service-key PLS bypass audit entries for insert/update/delete. (**BL-1227, next train**) Those `service_key_pls_bypass` rows are replaced by one `access_grant_used` row whenever an `all-partitions` / `all-rows` grant decides a read or write.
 - ~~WebSocket CORS enforcement~~ — ✅ **Resolved (P14, BL-050)**: WebSocket `Origin` validated against CORS policy.
 - ~~No server admin key management API~~ — ✅ **Resolved (P16, SA3b)**: `ServerAdminKeysController` at `/api/auth/admin/keys` — create (`mk_srv_` prefix), list, revoke. Unified auth middleware covers all `/admin/*`, `/api/admin/*`, `/api/server/*` paths.
 - ~~Hub authentication~~ — ✅ **Resolved (P16 Epic B)**: Aouda Hub provides user accounts (email/password, JWT), organizations with role-based access (owner/admin/member/viewer), and credential vault for server API keys. Studio Hub integration supports two-backend auth flow. See `docs/dev/Functionality-Cloud-And-Hub.md` §6.

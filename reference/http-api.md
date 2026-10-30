@@ -58,7 +58,7 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
 | `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default is **role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. An explicit value is never rewritten. |
 | `Authorization` | **Required when the target database has auth enabled, except public app-auth POSTs** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). `POST /api/databases/{db}/auth/{signup\|signin\|refresh\|request-password-reset\|reset-password}` are keyless (a present bearer is ignored). |
-| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context. Ignored for `anon` keys and direct user JWT requests. The realtime transports take the same token as `user_token` on the WebSocket `auth` / `re_auth` message and `userToken` on the long-poll connect, with the same rules (**BL-1223, next train**). |
+| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context: the request runs as the **user**, with the user's access grants and not the key's, so a service key that presents a user's token no longer holds `all-partitions` / `all-rows` (**BL-1227, next train**). Ignored for `anon` keys and direct user JWT requests. The realtime transports take the same token as `user_token` on the WebSocket `auth` / `re_auth` message and `userToken` on the long-poll connect, with the same rules (**BL-1223, next train**). |
 
 ## Standard Response Headers
 
@@ -85,11 +85,13 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 |--------|------|--------|-------------|
 | `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
-| `mk_svc_` | App service key | Application Auth | Backend key for one database. PLS/RLS **audited bypass**, full access — the only credential with that bypass. Ad-hoc query is allowed on the **admin** listener. Does **not** list or create databases (`GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH`); use `GET /api/databases/{name}` to check existence. |
-| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): no user's grants, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. |
+| `mk_svc_` | App service key | Application Auth | Backend key for one database. It holds both access grants, `all-partitions` and `all-rows`, at `admin` on its database, so partition- and row-level security do not restrict it; each use is audited as `access_grant_used` ([Audit](#audit-access_grant_used)) (**BL-1227, next train**). Ad-hoc query is allowed on the **admin** listener. Does **not** list or create databases (`GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH`); use `GET /api/databases/{name}` to check existence. |
+| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): it holds no access grant, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. It never holds `all-partitions` or `all-rows` by itself (**BL-1227, next train**). |
 | `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, 0.5.0**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. |
-| `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants. A custom `mk_` minted on server auth is a scoped server key (BL-1017). PLS / RLS enforced. |
+| `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants, access grants included. A custom `mk_` minted on server auth is a scoped server key (BL-1017). PLS / RLS enforced, even for a custom key that holds `db_admin`: only a user holds the implied `db_admin` grants (**BL-1227, next train**). |
 | `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. Application end-user JWTs on the data-plane listener are browser-tier (named artifacts only). Operator JWTs via Studio use the admin listener (ad-hoc allowed). |
+
+**Access grants (**BL-1227, next train**).** What a credential sees on a table with partition-level security (PLS) or row-level security (RLS) is decided by the **access grants** it holds, never by its key prefix or role name. `all-partitions` lifts PLS and `all-rows` lifts RLS; each is independent of the other. A grant has a scope (one table, or the whole database, which also covers tables created later) and a level (`read`, `write`, `admin`). An application service key (`mk_svc_`) and a user assigned `db_admin` on a database hold both grants at `admin` on that database; nobody else holds one by default. Any other holder gets one from a role: a role permission with `resourceType` `all-partitions` or `all-rows`, assigned to a user. See [Visibility is granted: all-partitions and all-rows](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows), [Role permissions and grants](#role-permissions-and-access-grants) and [Audit](#audit-access_grant_used).
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
 
@@ -139,8 +141,8 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 |---|---|---|---|---|---|
 | `mk_pub_*` | Data plane only | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
 | User JWT (application end user) | Data plane | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
-| User JWT (Studio operator) | Admin | ✅ | ✅ | ✅ enforced | ✅ per RBAC |
-| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Audited bypass | Per RBAC on admin for that database's routes. **Not** `GET`/`POST /api/databases` (server-auth catalog — **403** `AUTH_KEY_ROUTE_MISMATCH`) |
+| User JWT (Studio operator) | Admin | ✅ | ✅ | ✅ enforced; a user assigned `db_admin` on the database holds `all-partitions` and `all-rows` there (**BL-1227, next train**) | ✅ per RBAC |
+| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Holds `all-partitions` and `all-rows` (audited) (**BL-1227, next train**) | Per RBAC on admin for that database's routes. **Not** `GET`/`POST /api/databases` (server-auth catalog — **403** `AUTH_KEY_ROUTE_MISMATCH`) |
 | `mk_anon_*` | Data plane (auth endpoints) | ❌ | ❌ | n/a | ❌ — auth endpoints only |
 
 **Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
@@ -191,14 +193,17 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
 3. Identify credential type by prefix
    mk_anon_ → Resolve as app anon key → anonymous role; **auth endpoints only**
    mk_pub_  → Resolve as browser-tier public key → data-plane listener only; named artifacts
-   mk_svc_  → Resolve as app service key → full access, PLS bypassed (audited)
+   mk_svc_  → Resolve as app service key → holds all-partitions + all-rows at admin on its
+              database (each use audited as access_grant_used) — BL-1227, next train
    mk_srv_  → Resolve as server API key → check db_roles claim for this database;
-              PLS/RLS enforced, no bypass (0.4.0)
-   mk_*     → Resolve as custom app key → check permissions
+              PLS/RLS enforced, holds no access grant (0.4.0; BL-1227, next train)
+   mk_*     → Resolve as custom app key → check permissions; PLS/RLS enforced, holds the
+              access grants of its linked user, if any (BL-1227, next train)
    eyJ*     → Validate JWT signature and claims → extract roles
 
 4. Check X-User-Token header (optional; realtime: auth/re_auth user_token, long-poll userToken — BL-1223, next train)
-   Present + credential is mk_svc_ or mk_srv_ → Apply user context (PLS/RBAC)
+   Present + credential is mk_svc_ or mk_srv_ → Apply user context (PLS/RBAC); the user's
+                                                 access grants, not the key's (BL-1227, next train)
      Invalid, expired or revoked → 401 AUTH_TOKEN_INVALID (realtime: auth_error, socket closed)
    Present + credential is mk_anon_ or user JWT → Ignored
    Absent → Use credential's own identity
@@ -223,7 +228,7 @@ The `X-User-Token` header enables backends to act on behalf of a specific user w
 
 **What it does:**
 - The request authenticates as the service key (Layer 1 — connection identity)
-- But data access uses the **user's** identity (Layer 2 — PLS partition scoping, RBAC role)
+- But data access uses the **user's** identity (Layer 2 — PLS partition scoping, RBAC role) and the **user's** access grants: a service key that presents a user's token does not hold `all-partitions` / `all-rows` for that request, and a user with `db_admin` does (**BL-1227, next train**)
 - This is how backends enforce per-user data isolation without exposing the service key to the frontend
 
 **When it is ignored:**
@@ -233,8 +238,16 @@ The `X-User-Token` header enables backends to act on behalf of a specific user w
 **Realtime** (**BL-1223, next train**): the same user token, with the same rules, is `user_token` on the WebSocket
 `auth` and `re_auth` messages and `userToken` on the long-poll connect body. The session is then the
 user's for partition- and row-level security for its whole life — snapshot, change events, write streams, grant changes — and it
-ends when the user token expires or is revoked. **Realtime does not check roles yet**, on subscriptions or writes (HTTP does: `403` for a user with no role); until realtime role checks land, do not rely on roles there.
+ends when the user token expires or is revoked.
 Before BL-1223 a realtime session ignored the user token and kept the service key's visibility.
+
+**Realtime authorization** (**BL-1227, next train**). A realtime session is authorized by the same role rule as HTTP; up to 0.8.0 realtime checked no roles on subscriptions or writes.
+
+- **Handshake.** The WebSocket `auth` message and the long-poll connect authenticate against the database's own auth database first, then against the server auth database, as an HTTP request does. A session that the server auth database accepted (a `mk_srv_` key or a server JWT on a database that has no linked auth database) is checked for a database-level `read`, and refused with HTTP's code: `auth_error` and a closed socket on the WebSocket, `403` on the long-poll connect. A session the database's own auth database accepted is checked per subscribe and per write stream, below.
+- **Subscribe.** A `subscribe` needs the role permission the HTTP read it mirrors needs: `read` on the table, and for a named-query subscribe `read` on every table the named query touches. A refusal is an `error` message with HTTP's code: `INSUFFICIENT_PERMISSIONS` (a role without the permission), `AUTHORIZATION_DENIED` (no role on this database) or `AUTH_TOKEN_MISSING` (no credential, where HTTP answers `401`).
+- **`stream_open`** needs `write` on the table, refused with the same codes.
+- **Revoked rights.** When a role change means the session no longer holds the `read` a live subscription needs, the server ends that subscription with `PERMISSION_REVOKED`, before the next change is delivered.
+- **Access grants.** What a subscription sees on a PLS or RLS table is the credential's access grants, as for the HTTP read it mirrors: the snapshot equals an HTTP query by the same credential, and every live event follows the same rule. A holder of `all-partitions` also receives events of partitions created later. A change to a user's role assignments or role permissions re-keys the live session at once, narrowing it immediately; a **widening is not re-snapshotted**: rows the credential could not see before are not pushed, events from the re-key on are, so resubscribe to get the rows. A fresh `subscribe` reads the permissions again. The `crossPartitionAccess` flag is `cross_partition_access` on the `subscribe` message ([`subscribe`](#subscribe)).
 
 **Example:**
 
@@ -272,9 +285,11 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/admin/users/{id}` | GET/PATCH/DELETE | Bearer JWT (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
 | `/api/auth/admin/users/{id}/disable` | POST | Bearer JWT (`db_admin`) | Disable user |
 | `/api/auth/admin/users/{id}/enable` | POST | Bearer JWT (`db_admin`) | Enable user |
-| `/api/auth/admin/roles` | GET/POST | Bearer JWT (`db_admin`) | List/create roles |
-| `/api/auth/admin/roles/{id}` | PATCH/DELETE | Bearer JWT (`db_admin`) | Update/delete role |
-| `/api/auth/admin/users/{id}/roles` | GET/PUT | Bearer JWT (`db_admin`) | View/assign user roles |
+| `/api/auth/admin/roles` | GET/POST | Bearer JWT (`db_admin`) | List every role with its permissions / create a role. A permission is `{ "resourceType", "resourceName", "actions" }` ([Role permissions and access grants](#role-permissions-and-access-grants), **BL-1227, next train**) |
+| `/api/auth/admin/roles/{id}` | PATCH/DELETE | Bearer JWT (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET /api/auth/admin/roles` lists every role with its permissions |
+| `/api/auth/admin/users/{id}/roles` | GET/PUT | Bearer JWT (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }` |
+| `/api/auth/admin/users/{id}/access-grants?database=` | GET | Bearer JWT (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database`, with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, next train**) |
+| `/api/auth/admin/audit-log` | GET | Bearer JWT (`db_admin`) | The server auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
 | `/api/auth/admin/api-keys` | GET/POST | Bearer JWT (`db_admin`) | List/create server API keys |
 | `/api/auth/admin/api-keys/{id}` | DELETE | Bearer JWT (`db_admin`) | Revoke server API key |
 
@@ -344,6 +359,11 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/factors` | GET | API key (`db_admin`) | List that user's MFA factors (active, pending, and any other stored status). Same body as the user list: `{ "factors": [ { "id", "type", "maskedPhone", "status", "createdAt" } ] }`. Phone is masked (`+***-***-` + last 4). Empty list is 200 `factors: []`. Unknown user is 404. |
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/factors/{factorId}` | DELETE | API key (`db_admin`) | Delete that user's factor and its challenges. 200 `{ "ok": true }`. 404 if the factor is missing or belongs to someone else. |
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user. 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor is already active or pending; existing factor id in `detail`. Does not overwrite the number — `DELETE …/admin/users/{id}/mfa/factors/{factorId}` first, then enroll again |
+| `/api/databases/{db}/auth/admin/roles` | GET/POST | API key (`db_admin`) | List every role with its permissions / create a role. A permission is `{ "resourceType", "resourceName", "actions" }` ([Role permissions and access grants](#role-permissions-and-access-grants), **BL-1227, next train**) |
+| `/api/databases/{db}/auth/admin/roles/{id}` | PATCH/DELETE | API key (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET …/auth/admin/roles` lists every role with its permissions |
+| `/api/databases/{db}/auth/admin/users/{id}/roles` | GET/PUT | API key (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }` |
+| `/api/databases/{db}/auth/admin/users/{id}/access-grants[?database=]` | GET | API key (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database` (default `{db}`), with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, next train**) |
+| `/api/databases/{db}/auth/admin/audit-log` | GET | API key (`db_admin`) | The auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
 | `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys; POST accepts an optional `userId` to link the key to a user's `auth-db-pls` grants — see [Auth Reference](../auth/reference.md) |
 | `/api/databases/{db}/auth/admin/api-keys/{id}` | DELETE | API key (`db_admin`) | Revoke custom API key |
 | `/api/databases/{db}/auth/admin/signup-settings` | GET/PUT | API key (`db_admin`) | Read/write `allowSelfSignup` and `selfSignupRole` (null → `db_writer`) |
@@ -385,6 +405,67 @@ Content-Type: application/json
 | `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_reader"] }`. Values are always arrays. Scope key for unscoped roles is the auth DB name (e.g. `"_auth"`). |
 | `permissions` | Fine-grained table permissions (if custom role) |
 | `iat`, `exp` | Issued-at and expiry timestamps |
+
+#### Role permissions and access grants
+
+**Role permission shape (**BL-1227, next train**).** `POST …/roles` takes `{ "name", "description"?, "permissions": [ … ] }` and `PATCH …/roles/{id}` takes any of `name`, `description` and `permissions`. A permission is `{ "resourceType", "resourceName", "actions" }`, and the role comes back with the same `permissions` array. A `PATCH` that carries `permissions` replaces the role's whole list; one that omits it leaves the list alone.
+
+| `resourceType` | `resourceName` | `actions` |
+|---|---|---|
+| `table` (also when blank) | A table name or `*` (blank means `*`). Not checked: a permission may name a table that does not exist yet. | Role-based access control (RBAC) actions; blank means `read`. |
+| `all-partitions` | `*` for the whole database, or the name of a table (case-sensitive). Required: there is no default. | Exactly one level: `read`, `write` or `admin`. Required. |
+| `all-rows` | As for `all-partitions`. | As for `all-partitions`. |
+
+A `read` grant lifts reads only; `write` and `admin` also lift the write side of PLS and of RLS (`admin` is `write` for data). A grant of one kind never lifts the other kind. Any other `resourceType` is refused. The full rules, with the roles and scopes that decide who holds a grant, are in the [Auth Reference](../auth/reference.md) and [Visibility is granted: all-partitions and all-rows](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+
+Every permission in the request is validated before anything is written, so a refused request leaves the role as it was. The refusals are all `400` ([error codes](#error-codes)): `AUTH_GRANT_INVALID` (unknown `resourceType`; an `all-partitions` / `all-rows` entry without exactly one level or without `resourceName`; a null entry; a grant on a system role), `AUTH_GRANT_TABLE_NOT_FOUND` (a table-scope grant names a table that exists in no database the role can apply to) and `AUTH_GRANT_NOT_APPLICABLE` (the table has no PLS for `all-partitions`, or no RLS resolver for `all-rows`, so the grant would lift nothing).
+
+**Assigning a role.** `PUT …/users/{id}/roles` takes `{ "roles": [ { "roleName", "scope" } ] }` and replaces the user's assignments with it; `[]` clears them, and a missing `roles` is `400 INVALID_REQUEST`. A `scope` that is blank or omitted applies to every database; otherwise it names one database (or `*`). A `roleName` that names no role is `400 INVALID_REQUEST` (`Role '<name>' not found.`); an item with a blank or omitted `roleName` is skipped, but the user's old assignments are still replaced. A user holds an access grant when a role carrying it is assigned with a scope that covers the database. A change to a role's permissions, an assignment or a role's deletion takes effect on the **next request**, and re-keys a live subscription (**BL-1227, next train**).
+
+**`GET …/users/{id}/access-grants`** answers which `all-partitions` / `all-rows` grants a user holds on one database, computed as a request would be, with no cache (**BL-1227, next train**). The database is `?database=`; the application route defaults it to `{db}` when that is an application database. It must be a database this auth database governs, else `400 INVALID_REQUEST`; a missing database is `400 INVALID_REQUEST` too, and an unknown user is `404`. The response:
+
+```json
+{
+  "userId": "7b0c6f0e-0f3d-4a5e-9c55-6a2f6d1c8a11",
+  "database": "myapp",
+  "grants": [
+    { "grant": "all-rows", "scope": "table", "table": "orders", "level": "read", "source": "role:support_reader" },
+    { "grant": "all-partitions", "scope": "database", "table": null, "level": "admin", "source": "implied:db_admin" }
+  ]
+}
+```
+
+`grant` is `all-partitions` or `all-rows`; `scope` is `database` or `table` (then `table` names it, otherwise it is `null`); `level` is `read`, `write` or `admin`; `source` is `implied:db_admin` or `role:<role name>`. The list is ordered by `grant`, `scope`, `table`, `level` and `source`. An application service key is not a user and has no entry: it holds both grants at `admin` on its database by implication.
+
+#### Audit: `access_grant_used`
+
+**Every use of an access grant is recorded** (**BL-1227, next train**), so an operator can tell when a service key or an admin user read or wrote past partition- or row-level security. One `access_grant_used` row goes to the auth database's `_audit_log` for each grant used, and only when **the grant decided the outcome**: the table has the restriction the grant lifts. A read of a table with no PLS or RLS by a service key writes nothing, and neither does sending `crossPartitionAccess` on its own.
+
+| Column | Value |
+|---|---|
+| `action` | `access_grant_used` |
+| `resource` | `{database}/{table}` |
+| `user_id` | The user, or for a key without a user the key's id |
+| `detail` | A JSON object, below |
+
+`detail` keys:
+
+| Key | Value |
+|---|---|
+| `grant` | `all-partitions` or `all-rows` |
+| `scope` | `database` or `table` |
+| `level` | `read`, `write` or `admin` |
+| `source` | `implied:service_key`, `implied:db_admin` or `role:<role name>` |
+| `surface` | `http`, `ws`, `long-poll` or `bulk-load` |
+| `operation` | `query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `subscribe` or `rekey` |
+| `table` | The table the grant lifted a restriction of |
+| `subscriptionId`, `jobId`, `streamId` | When the use belongs to a subscription, a bulk-load job or a write stream; otherwise absent |
+
+**How often.** One row per HTTP request, per table, grant and operation (a named-query batch of many elements on one table writes one row per grant, and a join's joined table counts as a table of the request); one per bulk-load job and credential at `:begin` (a second credential that appends to the job writes its own at its first `:append`; none per later `:append` and none at `:commit`); one per write stream with the first batch the grant decides; one per `subscribe`; and one per live re-key that newly uses a grant. **Never one per live event.** The write is best-effort: a failure is logged and never fails the request.
+
+**Where it goes.** To the auth database that governs the data's database, else to the auth database that authenticated the credential. Read it with `GET …/auth/admin/audit-log?action=access_grant_used` (`GET /api/databases/{db}/auth/admin/audit-log` on an application auth database, `GET /api/auth/admin/audit-log` on the server auth database), which also takes `userId`, `from`, `to`, `limit` (default 20, max 100) and `offset`; the `action` filter is a case-insensitive substring match. The response is `{ "entries": [ { "id", "userId", "userEmail", "action", "resource", "detail", "ipAddress", "timestamp" } ], "total" }`, with `detail` as the JSON string above.
+
+Graph traversal and vector search read past security by the same grants but are not audited yet. `service_key_pls_bypass` and `query_cross_partition`, the audit kinds of the earlier bypass, are no longer written, and there is no `429` from the query endpoint for cross-partition traffic: the rate limiter and its `Aouda:PlsCrossPartitionRateLimit` options are gone, and a leftover key is ignored.
 
 #### Auth Error Responses
 
@@ -546,7 +627,7 @@ All errors return a JSON body with this structure:
 | `BRANCH_EXISTS` | 409 | A branch with the specified name already exists |
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
-| `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter |
+| `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter. `crossPartitionAccess` waives it and nothing else; on the data-plane listener it is not accepted and the guard decides (**BL-1227, next train**) |
 | `NAMED_QUERY_NOT_FOUND` | 404 | Named-query name is unknown. On the **data-plane listener**, unsigned or unentitled execute / batch / subscribe of a listed named query also uses this code (same `ProtocolError` envelope as unknown). Admin listener keeps 401/403 for those callers. |
 | `NAMED_QUERY_BIND_FAILED` | 400 | Argument bind failed (type, constraint, or missing required param) |
 | `NAMED_QUERY_PARAM_REQUIRED` | 400 | A required named-query parameter was omitted |
@@ -600,6 +681,9 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | PLS: `Where.Or` predicate shape is incompatible with safe auth-db-pls partition enforcement |
 | `AUTH_KEY_LISTENER_MISMATCH` | 401 | `mk_pub_*` presented on the admin listener (or a key used on a listener that does not accept it) |
 | `IDENTITY_QUOTA_EXCEEDED` | 429 | Data-plane per-identity request quota exceeded. `Retry-After` is set. |
+| `AUTH_GRANT_INVALID` | 400 | A grant in the request is invalid: a partition grant with missing or invalid fields, or a role permission with an unknown `resourceType`, an `all-partitions` / `all-rows` entry without exactly one level (`read`, `write` or `admin`) or without `resourceName`, a null entry, or one on a system role (**BL-1227, next train**) |
+| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission names a table that exists in no database the role can apply to. Table names are case-sensitive (**BL-1227, next train**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS resolver (**BL-1227, next train**) |
 | `AUTH_GRANT_DIMENSION_CAP` | 400 | Creating a partition grant would exceed 1 000 grants on one dimension |
 | `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Creating a partition grant would exceed 5 000 grants for the principal |
 | `AUTH_RESOLVER_INVALID` | 400 | RLS resolver cannot be persisted (e.g. zero rules — fail-closed) |
@@ -990,7 +1074,7 @@ Execute a query against a table.
 | `orderBy` | object[] | No | Sort columns (see below) |
 | `offset` | number | No | Rows to skip (default: 0) |
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
-| `crossPartitionAccess` | boolean | No | When `true`, queries on partitioned tables do not require a partition-key filter. Without this, queries on partitioned tables without a partition filter return `PARTITION_FILTER_REQUIRED`. Default: `false`. |
+| `crossPartitionAccess` | boolean | No | When `true`, a query on a partitioned table does not need a partition-key filter. Without it, a query on a partitioned table with no partition filter returns `PARTITION_FILTER_REQUIRED`. Default: `false`. It is a **cost waiver and nothing else**: it waives that scan guard for every credential, and it never widens what the credential sees. A credential with partition grants and the flag sees exactly its grants; one that does not hold `all-partitions` on a table with partition-level security is still refused. There is no read of every partition by `db_admin` plus the flag any more: that read is the `all-partitions` grant ([Access grants](#authentication-and-authorization), [partition-filter rule](../guides/partitioning.md#partition-filter-rule-p40)). The same flag is accepted on `…/query/count`, on a named-query call and each batch item (`crossPartitionAccess`), and on a WebSocket or long-poll `subscribe` as `cross_partition_access`; the data-plane listener does not accept it (**BL-1227, next train**). |
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
 | `aggregates` | object[] | No | (**ColumnarRead S16, 0.3.0**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
 | `groupBy` | object[] | No | (**ColumnarRead S16, 0.3.0**) GROUP BY keys; requires `aggregates`. |
@@ -1118,7 +1202,7 @@ columns.
 **Row- and partition-level security on a joined table (BL-818, 0.3.0).** The caller's RLS and PLS for every joined
 table are applied on that join's side, exactly as on a direct read of the table: a join onto a table the caller may read only
 part of answers with that part. (From the 2026-10 architecture review until this change such a join was refused with `403`
-`AUTHORIZATION_DENIED`.) An RLS rule that denies the caller the whole table joins against no rows of it. Still `403`: a
+`AUTHORIZATION_DENIED`.) An RLS rule that denies the caller the whole table joins against no rows of it. A caller that holds `all-partitions` or `all-rows` is lifted on the joined side as on a direct read of that table (**BL-1227, next train**); `crossPartitionAccess` is not carried to a joined table. Still `403`: a
 joined table the caller has no read grant on, a joined table whose partition-level security refuses the caller (no grant),
 and a joined materialized-query result whose source security cannot be applied to it. The same holds for a named query that joins, single and batch,
 and for `…/query/count`.
@@ -1376,6 +1460,12 @@ Execute one named query by unique name.
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
+**`crossPartitionAccess`** (boolean, optional, camelCase, omit when `false`; **BL-1227, next train**). A named query whose definition binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` (the message ends `Named query '<name>' binds no partition key: pass crossPartitionAccess with the call, or bind the partition key in the definition's where clause. The flag waives this guard only — the rows are still the credential's grants.`). Send `"crossPartitionAccess": true` in the body of the call to waive that guard. It is per call: a definition cannot set it. It waives the guard only, so the rows are still the credential's access grants. It is honoured on the **admin listener only**; the data-plane listener (`mk_pub_*` and application end users) ignores it and the guard decides ([the browser tier's rule](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
+
+```json
+{ "args": { "ticker": "AAPL" }, "crossPartitionAccess": true }
+```
+
 **Query parameters:** `readPreference` as on ad-hoc query. (**Lead S12, 0.6.0**) There is no `format` parameter any more: any `format=` is refused `400 INVALID_FORMAT`, and the result is always column arrays. Freshness: `at_least`, `waitMs`, `onExceeded`, `maxLagBytes`, `maxLagSeconds`, `maxStalenessMs`, `readYourWrites`. The named query’s declared `freshness` is keyed by `{name}`. A name with no `freshness` block is fail-safe: primary-only + `readYourWrites`. Loosening (call site weaker than the declared budget, or non-`Primary` on fail-safe) is 400 `FRESHNESS_LOOSENED`.
 
 **Success (200):** same column-array shape as `POST …/query` (`columns`, `types`, `data`, `rowCount`, `stats`, **`token`**). When the definition declared `count: true`, `totalMatches` is present (total matching rows, ignoring limit/offset — counted by the same read as the page, over the same snapshot (**ColumnarRead, 0.3.0**)). When the name is deprecated, `warnings` is present:
@@ -1403,8 +1493,10 @@ Execute one named query by unique name.
 | 429 | `IDENTITY_QUOTA_EXCEEDED` | Data-plane quota |
 
 Invoker ADRA always applies (PLS + RLS of the caller). There is no definer / `runAs` field. A definition that joins a
-table the caller's PLS or RLS restricts is refused with `403 AUTHORIZATION_DENIED` naming the table, because a join
-cannot carry that restriction ([joins and authorization](#post-apidatabasesdbquery); **architecture review, 0.3.0**).
+table the caller's PLS or RLS restricts is answered with that security applied on the joined side, exactly as a direct read of
+that table would be, and a holder of `all-partitions` / `all-rows` is lifted there as on a direct read. Still refused `403
+AUTHORIZATION_DENIED` naming the table: a joined materialized-query result whose source security cannot be applied to it, and a
+joined table whose partition-level security refuses the caller ([joins and authorization](#post-apidatabasesdbquery); **BL-818, 0.3.0**).
 
 #### `POST /api/databases/{db}/named-queries/batch`
 
@@ -1419,6 +1511,12 @@ Read-only batch envelope. Every element is evaluated against **one read snapshot
     { "name": "equity.stockOverview", "args": { "accountId": 42 } }
   ]
 }
+```
+
+Each element may also carry **`crossPartitionAccess`** (boolean, camelCase, omit when `false`; **BL-1227, next train**), with the same meaning as on a single call: it waives `PARTITION_FILTER_REQUIRED` for that element only, never widens what the credential sees, is honoured on the admin listener only, and is ignored on the data-plane listener. There is no flag on the envelope: set it on each element that needs it.
+
+```json
+{ "queries": [ { "name": "equity.allQuotes", "args": {}, "crossPartitionAccess": true } ] }
 ```
 
 **Cap:** 32 (`MaxNamedQueryBatchSize`). Named-mutation names are illegal in this envelope.
@@ -1601,6 +1699,24 @@ Posting identities requires **Admin**. `?access=true` without identities is **Re
 
 Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` attaches `accessSurface`. Studio always sends `includeAccess: true`.
 
+#### `POST /api/databases/{db}/policy/inspect`
+
+"What would this identity see?" For a named test identity (see [Access-surface diff](../guides/access-surface.md#policy-inspect)), the verdict per table, and optionally a sample of the rows it would read. Needs **Admin** on the database; the caller's own privilege is not the subject's.
+
+**Request body:** `identity` (one identity), or `document` (an identities document) with `identityName`; optional `tables` (names), `includeSample` (boolean), `sampleLimit` (default 20, max 100), `vectorProbe` (`table`, `column`, `embedding`) and `traverseStart` (`table`, `startNodeId`, `hops`).
+
+**An identity** is `{ "kind", "userId"?, "email"?, "roles"?, "claims"?, "grants"?, "accessGrants"? }` (**BL-1227, next train**: `accessGrants`). `kind` is `user` or `service_key`. `accessGrants` lists the access grants a user identity holds, as a role would carry them, so inspection can answer "what would a holder of `all-rows` on `orders` see?" before the role exists:
+
+```json
+{ "kind": "user", "userId": "u1", "accessGrants": [ { "grant": "all-rows", "table": "orders", "level": "read" } ] }
+```
+
+`grant` is `all-partitions` or `all-rows`; `table` names a table (case-sensitive), and is left out for database scope (`"*"` and an empty string are refused); `level` is `read`, `write` or `admin` and has no default. A `service_key` identity holds both grants on the database by implication and **refuses** `accessGrants` (`400 AUTH_IDENTITY_INVALID`); the kind of an identity, never its claims, decides which grants it holds by implication. The identities document stays `v1`.
+
+**Response:** `{ "identityName"?, "tables": [ { "table", "visibility", "pls"?, "rls"?, "effective"?, "effectiveHash"?, "message"?, "sample"?, "sampleReason"? } ] }`. `visibility` is `full`, `filtered` or `none`. Each of the two halves is decided on its own, as a read is: `all-partitions` lifts the partition half (`pls`), `all-rows` lifts the row half (`rls`); a holder of both is `full`, and a holder of one is decided by the other half alone (**BL-1227, next train**). A half a grant lifts needs no linked auth database to evaluate; a half it does not lift, on a table whose policy reads the auth database, is `none` with a message when the database has none linked.
+
+**`sample`** is real rows, read with the subject's context, and is shown only to a caller that could read them unrestricted itself: the caller must hold `all-partitions` where the table has PLS and `all-rows` where it has RLS. Otherwise the verdict is still answered, `sample` is omitted and `sampleReason` is `caller_not_granted` (**BL-1227, next train**). The other `sampleReason` values are `probe_required` and `sample_failed`.
+
 #### `POST /api/databases/{db}/branches/{name}/insert`
 
 Insert rows into a table on a branch; they are written to the branch's own segments only. The body is the table and the rows as
@@ -1628,6 +1744,8 @@ Base path: `/api/databases/{db}/materialized-queries`
 | POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). |
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
+
+**Security on `POST /{name}/query` (**BL-1227, next train**).** The rows are filtered by the caller's security on the query's source tables, as a direct read would be: `all-partitions` lifts the partition-level half and `all-rows` the row-level half, independently. A use of a grant here is audited as `access_grant_used` with `operation` `materialized-query`, and the row names the source table.
 
 > **BL-419 (0.1.22).** Before this fix, `:refresh` sat under the server's global 30s
 > `Aouda:RequestTimeoutMs` default like every other endpoint, and that ambient deadline started
@@ -3072,7 +3190,7 @@ Computed column types are inferred where the expression permits (`"Unknown"` oth
 vector columns are created, written and queried over REST under `/api/databases/{db}`. All bodies and answers are JSON. They are
 admin-listener routes: on the data-plane listener they are `404`. Writes need write permission on the database; the four reads need
 read permission and honour the [freshness parameters](#consistency-tokens-and-freshness) (`at_least`, `waitMs`, `onExceeded`, the
-lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)).
+lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)). A caller that holds `all-partitions` is lifted from the PLS half and one that holds `all-rows` from the RLS half, independently (**BL-1227, next train**). On a `jwt-claim` table with PLS on, a read by a credential without `all-partitions` returns nothing, because these reads have no tenant claim to compare with (BL-1279). They are not audited as `access_grant_used` yet.
 Neither SDK wraps them yet.
 
 | Method | Path | Body | Answer |
@@ -4253,6 +4371,7 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |
 | `on_exceeded` | string? | No | `wait` \| `fetchPrimary` \| `fail`. |
 | `conflate` | object? | No | Opt-in keyed conflation. Omitted = every visible event. See below. |
+| `cross_partition_access` | boolean? | No | Waives the `PARTITION_FILTER_REQUIRED` guard for the snapshot of a subscription with no partition filter on a partitioned table (and a named query's count); a named-query subscribe whose definition binds no partition key needs it too. Omitted when `false`. It waives that guard only: the snapshot and every live event are what the credential's access grants allow, no more. Not accepted on the data-plane listener, where the guard decides. The long-poll transport takes it on the same `subscribe` message sent to `…/stream/longpoll/{sessionId}/send` (**BL-1227, next train**). |
 
 **`conflate`:**
 
@@ -4379,6 +4498,8 @@ Open a write stream to a table for continuous high-throughput inserts without pe
 ```
 
 **Server responds with:** `stream_ready`.
+
+**Authorization** (**BL-1227, next train**). `stream_open` needs the `write` role permission on the table, as `POST …/tables/{name}/rows` does; the check runs before the table is looked up, so a credential without it learns nothing about which tables exist. A refusal is an `error` message for the stream `id` with HTTP's code (`INSUFFICIENT_PERMISSIONS`, `AUTHORIZATION_DENIED` or `AUTH_TOKEN_MISSING`). Up to 0.8.0 a write stream checked no role. On a table with PLS or RLS the rows are then written under the same write rules as HTTP, with the access grants of the credential (a grant at `write` or `admin` lifts the write side); a grant that decides a stream is audited once per stream, with the first batch of rows it decides, and again only after a `re_auth` changed the grants ([Audit](#audit-access_grant_used)).
 
 ---
 
@@ -4981,9 +5102,20 @@ Content-Type: application/json
 
 **Authorization (**BL-1031, 0.5.0**).** `:begin` returns `403` `AUTHORIZATION_DENIED` when any table the load will
 write — the tables in the request, plus transform targets when `applyTransforms` is set — has partition-level or
-row-level security, unless the caller is an app `service_role` key (`mk_svc_`). A user JWT, a server API key (`mk_srv_`),
-and a `custom` key are refused, including one whose grants would allow an ordinary insert of the same rows. A table with
-no PLS and no RLS policy is not affected. The refusal happens before a session exists; `:append` does not filter rows.
+row-level security, unless the caller holds, **at `write`**, the access grant for each restriction the table has:
+`all-partitions` where the table has PLS and `all-rows` where it has RLS (**BL-1227, next train**; up to 0.8.0 only an app
+`service_role` key, `mk_svc_`, was admitted). An app service key and a user assigned `db_admin` on the database hold both
+grants; a user can also hold them through a role. A server API key (`mk_srv_`), a custom key (even one that holds `db_admin`),
+a plain user, a holder of partition grants only, a user whose token only claims `db_admin`, and a service key that presents
+a plain user's `X-User-Token` are refused, including one whose rights would allow an ordinary insert of the same rows. A table
+with neither PLS nor RLS is not affected. The refusal happens before a session exists, and it is asked again at every
+`:append` (a job's id is visible to any holder of the `bulkload` permission). The message names each refused table and what it
+needs: `Bulk load is refused for 't' (needs all-partitions and all-rows at write): the table has partition or row security, and
+bulk load is not a per-user write. It needs the grant that lifts each restriction, at write — held by a service key or an admin
+user of the database, or through a role — or load a table with no PLS or RLS policy.` A table that is gone is `404`
+`TABLE_NOT_FOUND`. Identity-stamped columns are unchanged: `IDENTITY_STAMP_REQUIRED` is still decided by a service key
+(`mk_svc_`) or a server key (`mk_srv_`). Each grant that lets a job through is audited once per credential
+([Audit](#audit-access_grant_used)).
 
 ---
 
@@ -5202,6 +5334,7 @@ Content-Type: application/json
 | Code | Status | When |
 |---|---|---|
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
+| `AUTHORIZATION_DENIED` | 403 | (**BL-1227, next train**) The appending credential does not hold, at `write`, the access grant for each restriction (PLS, RLS) of a table the job locks; asked at every `:append`, not only at `:begin` ([authorization](#post-begin)). |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, 0.3.0**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, 0.6.0**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
@@ -5414,3 +5547,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.12 | 0.5.0 (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
 | 2.13 | 0.6.0 (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |
 | 2.14 | 0.6.0 (Lead) | **Lead S12 (breaking on the wire): the REST API as column arrays.** Every JSON write body sends its rows as [column arrays](#column-arrays-the-write-body) — `columns`, `data` (one array per column), optional `absent` (per column, the rows whose cell is not given, which is not null) — on `POST …/tables/{name}/rows`, a branch insert, WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed / `aouda.seed.json`; a body with `rows` (row objects) is refused `400 ROW_OBJECTS_UNSUPPORTED` (new code). Bulk-load `:append` takes frames or one JSON column-array body; NDJSON is refused `415 ROW_OBJECTS_UNSUPPORTED`, `:begin`'s `acceptedAppendFormats` is `["column-batch-v2", "column-arrays"]`, and an unroutable multi-table row is named "Row {n} of this :append" with `details: row={n}`. Reads: the `format` query parameter is removed from `/query` and the named-query execute and batch routes (any `format=` is `400 INVALID_FORMAT`; results are always `{columns, types, data, rowCount, …}`); the materialized-query `POST …/{name}/query` answers `{columns, data, rowCount, stats, token}`; `generatedValues` is `{columns, data}` with one cell per request row; a WebSocket `snapshot` page is `{type, id, columns, data, version, token?}` (`snapshot_complete` and `change` unchanged); vector `:nearest` answers `{rowKeys, distances, executionMs, token}` and graph `:khop` `{nodeIds, hops, executionMs}`; the policy inspector's table and materialized-query `sample` is `{columns, data}`. **Pass-10 (documentation only):** the [graph and vector endpoints](#graph-and-vector-endpoints) are documented. |
+| 2.15 | next train (Grants) | **BL-1227 (breaking on the wire):** what a credential sees on a table with partition- or row-level security is decided by access grants, `all-partitions` and `all-rows` (scope: a table or the database; level `read`, `write`, `admin`), not by key kind. An app service key and a user assigned `db_admin` hold both by implication; nobody else does. Role permissions take `resourceType` `all-partitions` / `all-rows` (`resourceName` `*` or a table, `actions` one level); new `400` codes `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`, and `AUTH_GRANT_INVALID` widened. New `GET …/auth/admin/users/{id}/access-grants`. `crossPartitionAccess` is a cost waiver only (it waives `PARTITION_FILTER_REQUIRED` and never widens what a credential sees), per call on named-query execute and each batch item, and `cross_partition_access` on a WebSocket / long-poll `subscribe`; the data-plane listener ignores it. The `db_admin`-plus-flag read of every partition is gone, and so are the cross-partition rate limiter, its `429` and the `query_cross_partition` audit row. Every use of a grant is audited as `access_grant_used` (replaces `service_key_pls_bypass`). Bulk load admits a caller that holds, at `write`, the grant for each restriction of a table it locks, at `:begin` and every `:append`. Realtime checks roles as HTTP does (subscribe `read`, `stream_open` `write`, `PERMISSION_REVOKED` on a role change); a server-auth session is checked at the handshake; a join side is scoped as a direct read. Policy inspect identities take `accessGrants`; a sample needs the grants (`sampleReason` `caller_not_granted`). |

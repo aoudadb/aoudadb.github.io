@@ -838,7 +838,11 @@ This is the recommended path for a bounded, continuous-trickle insert feed (e.g.
 
 Every named-query execute, batch element, mutation, and subscribe applies **the caller's** PLS and RLS. A bug in a named query cannot leak across a tenant boundary **if ADRA is intact** — which is why fail-closed resolvers and the [access-surface diff](access-surface.md) exist.
 
-Service keys (`mk_svc_*`) keep the audited bypass. They are for backends, not browsers.
+Visibility is **granted**, never implied by the kind of key. A service key (`mk_svc_*`) holds `all-partitions` and `all-rows` on its database, and a user with `db_admin` holds the same, so a named query run by either sees what a direct read would see. Any other credential needs the grant. Service keys are for backends, not browsers. A call that a grant decided is audited like any read: one `access_grant_used` row per request, and a batch whose slots read one table writes one row per grant, not one per slot. See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). (**BL-1227, next train**)
+
+### `crossPartitionAccess` per call
+
+A named-query call on the **admin** listener can send `crossPartitionAccess: true` (an execute body, or one item of a batch; `cross_partition_access` on a [subscribe](#subscribe-by-name)). It waives the partition-filter guard when the query's `where` binds no partition key, and nothing else: the rows stay the caller's grants, so a credential without `all-partitions` on a PLS table is still refused. A definition cannot set it, and the data-plane listener ignores it. A browser binds the key in the definition instead; see [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener). (**BL-1227, next train**)
 
 There is no catalog field, header, or option that runs a named query as someone else.
 

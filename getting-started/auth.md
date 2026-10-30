@@ -150,15 +150,15 @@ Case A: Server credential (from _serverauth)
   → JWT or mk_srv_ API key from the _serverauth database
   → db_roles checked for "myapp"
   → Access at the granted role level
-  → PLS / RLS enforced (0.4.0): no user's grants, so protected
-    tables show it nothing unless it sends X-User-Token (a db_admin key may
-    read a PLS table with crossPartitionAccess, audited). Up to 0.3.x an
-    mk_srv_ key saw all data.
+  → PLS / RLS enforced (0.4.0): an mk_srv_ key holds no all-partitions
+    or all-rows grant and has no user's grants, so protected tables show it
+    nothing unless it sends X-User-Token (BL-1227, next train). Up to 0.3.x
+    an mk_srv_ key saw all data.
   → Used by: DBAs, CI/CD, cross-database backend services
 
 Case B: App API key (from _auth, auto-generated)
   → mk_anon_... → maps to anonymous role, PLS enforced
-  → mk_svc_... → maps to db_admin role, PLS bypassed
+  → mk_svc_... → maps to db_admin role, holds all-partitions and all-rows on its database (BL-1227, next train)
   → Used by: Frontend clients, per-database backend services
 
 Case C: App user JWT (from _auth, obtained via signin)
@@ -362,22 +362,23 @@ await client.auth.signIn(email, password);
 
 When you create a database with auth enabled, Aouda still auto-generates keys. They are not the browser login credential:
 
-| Key | Prefix | Role | PLS | Use Case | Safety |
+| Key | Prefix | Role | PLS / RLS grants held (**BL-1227, next train**) | Use Case | Safety |
 |-----|--------|------|-----|----------|--------|
-| **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | Enforced | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
-| **`public`** | `mk_pub_` | `public` | Enforced | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
-| **`service_role`** | `mk_svc_` | `db_admin` (full access) | **Bypassed** | Backend servers, admin tools | **Must keep secret** |
-| **`auth_admin`** | `mk_adm_` | user and grant admin on that auth database | Enforced | A user-management service (**BL-1032, 0.5.0**) | **Must keep secret** |
+| **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | None | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
+| **`public`** | `mk_pub_` | `public` | None | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
+| **`service_role`** | `mk_svc_` | `db_admin` (full access) | Both (`all-partitions` and `all-rows`) on its database | Backend servers, admin tools | **Must keep secret** |
+| **`auth_admin`** | `mk_adm_` | user and grant admin on that auth database | None | A user-management service (**BL-1032, 0.5.0**) | **Must keep secret** |
 
 **Named keys (**BL-1032, 0.5.0**).** The bootstrap `mk_svc_` is still shown once, at database creation. A server key mints more, one name per service (`POST /api/databases/{db}/service-keys`), lists them by prefix, and revokes one name without touching the others. `POST …/{name}/rotate` with `overlapSeconds` leaves the old secret valid until `validUntil`; omit it, or send `0`, to revoke at once. Put `mk_adm_` in `AuthAdmin` / `authAdmin`, not in the service-key setting. The C# client and `@aouda/client` refuse a prefix that belongs to a different setting, so an `mk_srv_` cannot sit in `ServiceKey`.
 
-**What changed in 0.4.0** (**0.4.0**): the `service_role` key is the **only** credential that bypasses partition- and
-row-level security. A server API key (`mk_srv_`) bypassed them too up to 0.3.x; it now gets its role's grants and, on a
-protected table, what a request with no user may see (with the usual RLS rules, no row; a PLS table answers `403`). Use the
-database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with either key for one user's data —
-[what changed](../auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
-Bulk load of a protected table is the same credential, and stricter: `:begin` is `403` for every caller except `mk_svc_`,
-even one whose grant would allow an insert (**BL-1031, 0.5.0**). [Bulk load](../guides/bulk-load.md).
+**Which keys see past PLS and RLS** (**BL-1227, next train**): a credential sees a protected table whole only through a grant it
+holds, never because of its key prefix. A service key (`mk_svc_`) holds `all-partitions` and `all-rows` on its database; a user
+with `db_admin` on it does too; a server API key (`mk_srv_`), an auth-admin key (`mk_adm_`), a custom key, `anon` and `public`
+hold none, and get their role's grants and, on a protected table, what a request with no user may see (with the usual RLS rules,
+no row; a PLS table answers `403`). Use the database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with
+either key for one user's data — [how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+Bulk load of a protected table asks the same grants, at `write`, for each restriction the table has: `:begin` is `403` for a
+caller without them, such as `mk_srv_` or a custom key. [Bulk load](../guides/bulk-load.md).
 
 ```bash
 # Enable self-service signup (app-admin) — default is off
@@ -413,7 +414,7 @@ After a user signs in, they receive a JWT that contains their identity, roles, a
                       PLS/RLS evaluate JWT claims (tenant_id, user_id, roles)
 
 4. Backend access:    Authorization: Bearer mk_svc_...
-                      → Service key audited-bypasses PLS, grants full access
+                      → Service key holds all-partitions and all-rows (audited when used), grants full access
 ```
 
 ### How the Middleware Distinguishes Keys from JWTs
