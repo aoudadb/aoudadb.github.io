@@ -819,6 +819,7 @@ Before reporting the work complete:
 | Ingest throughput fell after adding transforms | Write amplification on small batches | Batch size is the tuning parameter; avoid stacking tees on a hot path |
 | `MEMORY_BUDGET_EXCEEDED` / 503 with `Retry-After` | The RSS ceiling is doing its job | [Sizing memory and WAL](sizing.md); raise the budget deliberately or demote a table. If the message says **refused by the server-level budget** (**BL-737, 0.2.0**), the database's own budget had room — raising it will not help; the message lists what holds the server's budget by category. Honour `Retry-After` either way |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | An imperative DDL call against an apply-managed table, refused in every `InferenceMode` (**BL-1177, 0.7.1**). Often the C# client's default reconcile trying to drop a column the model omits | Change the schema file and re-apply. Set `AutoReconcileSchema = false` on C# clients that write to these tables |
+| `PARTITION_KEY_FIXED` (**BL-1199, next train**) | A drop or rename of a partition-key column, or a schema document that changes a table's `partitionKey` / `partitionFunction` — the key is fixed when the table is created. Nothing was applied. On a C# client, often the default reconcile dropping a key column its model omits | Keep the key column in the model and the document. To change a key, drop and re-create the table |
 
 ---
 

@@ -540,6 +540,7 @@ All errors return a JSON body with this structure:
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
 | `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
+| `PARTITION_KEY_FIXED` | 400 | (**BL-1199, next train**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
 | `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
 | `BRANCH_EXISTS` | 409 | A branch with the specified name already exists |
@@ -2416,6 +2417,10 @@ Alter a column: `type`, `nullable`, `autoIncrement`, `references`, and/or `newNa
 `encoder` field is gone (**BL-768, 0.3.0**): it changed nothing since columns choose an encoding per vector, and a
 request carrying only `encoder` is now refused as having nothing to alter. The example renames a column.
 
+(**BL-1199, next train**) A partition-key column is not renamed: `newName` on one is refused `400 PARTITION_KEY_FIXED`, before
+any other field of the request is applied (it was renamed; on a composite key a rename to or from `tenant_id` changed which column,
+and which JWT claim, partition-level security filters on).
+
 **Request:**
 
 ```json
@@ -2432,6 +2437,9 @@ request carrying only `encoder` is now refused as having nothing to alter. The e
 Drop a column. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created, in every `InferenceMode`
 (**BL-1177, 0.7.1**). This is the call the C# client's default reconcile (`AutoReconcileSchema`, `Unsafe`) makes for each column
 its model does not declare.
+
+(**BL-1199, next train**) A partition-key column is not dropped: refused `400 PARTITION_KEY_FIXED` (it was dropped, leaving the
+table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key.
 
 **Response:** `204 No Content`
 
