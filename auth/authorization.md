@@ -52,9 +52,9 @@ before you give a table an `auth-db-*` mode: unlinking one makes its tables unre
 On a `jwt-claim` table with PLS on, a graph or vector read returns nothing to a credential without `all-partitions` — a tenant's
 user included — until BL-1279 gives those reads the tenant claim.
 
-### Visibility is granted: `all-partitions` and `all-rows` (**BL-1227, next train**)
+### Visibility is granted: `all-partitions` and `all-rows`
 
-Whether a credential is held to a table's partition-level security (PLS) and row-level security (RLS) is decided by the **grants it
+(**BL-1227, next train**) Whether a credential is held to a table's partition-level security (PLS) and row-level security (RLS) is decided by the **grants it
 holds**, not by its key prefix, a role's name or a request flag. There are two grants, and each lifts one half:
 
 | Grant | What it lifts | What it leaves alone |
@@ -750,9 +750,9 @@ curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/users/550e84
 
 ---
 
-## 19.8a Admin API: Access Grants on Roles (**BL-1227, next train**)
+## 19.8a Admin API: Access Grants on Roles
 
-An **access grant** lifts PLS (`all-partitions`) or RLS (`all-rows`) for everyone a role is assigned to. It is stored as a permission of the
+(**BL-1227, next train**) An **access grant** lifts PLS (`all-partitions`) or RLS (`all-rows`) for everyone a role is assigned to. It is stored as a permission of the
 role, beside the ordinary table permissions, and is managed with the roles endpoints under
 `/api/databases/{db}/auth/admin/roles` (a `db_admin` user, a `service_role` key or a server admin token; an auth-admin key cannot
 define roles). What a grant means — scope, level, who holds one without a role — is in
