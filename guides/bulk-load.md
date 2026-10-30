@@ -58,7 +58,7 @@ Operationally, this gives Aouda one ingest primitive that can be used by:
 
 Scope boundaries:
 - Bulk load optimizes the ingest path; it is not a replacement for normal row-level write APIs.
-- A table with partition or row security is not a per-user bulk-load target. For each such table the load locks, the caller must hold, at `write`, the grant that lifts each restriction the table has: `all-partitions` where it has PLS, `all-rows` where it has RLS. `:begin` and every `:append` refuse otherwise (`403 AUTHORIZATION_DENIED`). An app `service_role` key (`mk_svc_`) and a `db_admin` user hold both on their database; a role can grant them to others, and a holder of `all-rows` alone can load a table that has RLS only. A grant that would allow an ordinary insert does not. A table with no PLS and no RLS policy is unchanged. (**BL-1031, 0.5.0; BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+- A table with partition or row security is not a per-user bulk-load target. For each such table the load locks, the caller must hold, at `write`, the grant that lifts each restriction the table has: `all-partitions` where it has PLS, `all-rows` where it has RLS. `:begin` and every `:append` refuse otherwise (`403 AUTHORIZATION_DENIED`). An app `service_role` key (`mk_svc_`) and a `db_admin` user hold both on their database (a custom key linked to a user holds that user's); a role assigned to a user can grant them to others, and a holder of `all-rows` alone can load a table that has RLS only. A grant that would allow an ordinary insert does not. A table with no PLS and no RLS policy is unchanged. Every bulk-load route also needs the `bulkload` permission on the database first (`db_admin` has it; `db_writer` does not). (**BL-1031, 0.5.0; BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 - It guarantees atomic commit at the job boundary (`BulkLoadCommitted`), not partial "progressively visible" reads.
 - It currently does not provide persistent server session reconstruction across restarts (see `2.18`, `BL-067`).
 
@@ -375,10 +375,11 @@ difference is *when* the work is paid — per load, or once for many — not how
    key, bulk loading it again and crashing before the next checkpoint removed the loaded row.
 8. A load into a table with PLS or RLS is refused at `:begin`, and at every `:append`, unless the caller holds at `write` the
    grant for each restriction the table has: `all-partitions` for PLS, `all-rows` for RLS. An app `service_role` key
-   (`mk_svc_`) and a `db_admin` user hold both on their database. A server key (`mk_srv_`), a `custom` key, and a plain user
-   are refused, including a caller who holds a partition write grant, and a `db_admin` that is only in the token's claims. The
+   (`mk_svc_`) and a `db_admin` user hold both on their database. A server key (`mk_srv_`), a `custom` key not linked to a holder, and a plain
+   user are refused, including a caller who holds a partition write grant, and a `db_admin` that is only in the token's claims. The
    refusal names each refused table and the grant it lacks, and starts no session. A job over such a table writes its
-   `access_grant_used` audit rows once, at `:begin` (with the `jobId`), not per `:append`. (**BL-1031, 0.5.0; BL-1227, next train**)
+   `access_grant_used` audit rows once per credential: at `:begin` (with the `jobId`), and at the first `:append` of another
+   credential that appends to the job; never per `:append` after that. (**BL-1031, 0.5.0; BL-1227, next train**)
 
 ### What a frame carries is what JSON carries
 

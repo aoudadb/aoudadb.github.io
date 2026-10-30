@@ -154,6 +154,10 @@ Case A: Server credential (from _serverauth)
     or all-rows grant and has no user's grants, so protected tables show it
     nothing unless it sends X-User-Token (BL-1227, next train). Up to 0.3.x
     an mk_srv_ key saw all data.
+  → A server user's JWT holds what its role assignments give: a server user
+    with db_admin on myapp, or with no scope (the bootstrapped server admin),
+    holds all-partitions and all-rows and sees every partition and every
+    row (BL-1227, next train).
   → Used by: DBAs, CI/CD, cross-database backend services
 
 Case B: App API key (from _auth, auto-generated)
@@ -164,7 +168,9 @@ Case B: App API key (from _auth, auto-generated)
 Case C: App user JWT (from _auth, obtained via signin)
   → JWT validated against the linked _auth database
   → db_roles checked for "myapp"
-  → PLS enforced based on JWT claims (tenant_id, user_id)
+  → PLS enforced based on JWT claims (tenant_id, user_id); a user with a
+    db_admin role assignment on myapp holds both grants and sees every
+    partition and row (BL-1227, next train)
   → Used by: End users of your application
 ```
 
@@ -367,18 +373,18 @@ When you create a database with auth enabled, Aouda still auto-generates keys. T
 | **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | None | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
 | **`public`** | `mk_pub_` | `public` | None | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
 | **`service_role`** | `mk_svc_` | `db_admin` (full access) | Both (`all-partitions` and `all-rows`) on its database | Backend servers, admin tools | **Must keep secret** |
-| **`auth_admin`** | `mk_adm_` | user and grant admin on that auth database | None | A user-management service (**BL-1032, 0.5.0**) | **Must keep secret** |
+| **`auth_admin`** | `mk_adm_` | user and grant admin on that auth database | None itself; it can assign `db_admin` (or a grant-carrying role) to a user, who then holds both | A user-management service (**BL-1032, 0.5.0**) | **Must keep secret** — it can hand out full visibility |
 
 **Named keys (**BL-1032, 0.5.0**).** The bootstrap `mk_svc_` is still shown once, at database creation. A server key mints more, one name per service (`POST /api/databases/{db}/service-keys`), lists them by prefix, and revokes one name without touching the others. `POST …/{name}/rotate` with `overlapSeconds` leaves the old secret valid until `validUntil`; omit it, or send `0`, to revoke at once. Put `mk_adm_` in `AuthAdmin` / `authAdmin`, not in the service-key setting. The C# client and `@aouda/client` refuse a prefix that belongs to a different setting, so an `mk_srv_` cannot sit in `ServiceKey`.
 
 **Which keys see past PLS and RLS** (**BL-1227, next train**): a credential sees a protected table whole only through a grant it
 holds, never because of its key prefix. A service key (`mk_svc_`) holds `all-partitions` and `all-rows` on its database; a user
-with `db_admin` on it does too; a server API key (`mk_srv_`), an auth-admin key (`mk_adm_`), a custom key, `anon` and `public`
-hold none, and get their role's grants and, on a protected table, what a request with no user may see (with the usual RLS rules,
+with `db_admin` on it does too; a server API key (`mk_srv_`), an auth-admin key (`mk_adm_`), a custom key not linked to a user,
+`anon` and `public` hold none (a custom key linked to a user holds what that user holds), and get their role's grants and, on a protected table, what a request with no user may see (with the usual RLS rules,
 no row; a PLS table answers `403`). Use the database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with
 either key for one user's data — [how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 Bulk load of a protected table asks the same grants, at `write`, for each restriction the table has: `:begin` is `403` for a
-caller without them, such as `mk_srv_` or a custom key. [Bulk load](../guides/bulk-load.md).
+caller without them, such as `mk_srv_` or a custom key not linked to a holder. [Bulk load](../guides/bulk-load.md).
 
 ```bash
 # Enable self-service signup (app-admin) — default is off

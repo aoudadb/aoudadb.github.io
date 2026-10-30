@@ -569,7 +569,7 @@ await foreach (var evt in client.GetTable("orders")
 // Or in the options
 var options = new SubscribeOptions { CrossPartitionAccess = true };
 await foreach (var evt in client.GetTable("orders")
-    .Where("status", "=", "open")
+    .Where("status", "eq", "open")
     .SubscribeAsync(options, ct))
 {
     Console.WriteLine(evt.Type);

@@ -17,16 +17,18 @@ Public, user-facing release notes. Engine phase status lives in the server
   behaviour change).** Whether a credential is held to a table's partition-level security (PLS) and row-level security (RLS) is now
   decided by two **grants** it holds, never by its key prefix, a role's name or a request flag: `all-partitions` lifts PLS and
   `all-rows` lifts RLS, each on one table or the whole database, at a level (`read` lifts reads; `write` and `admin` also lift the
-  write side). An app's service key (`mk_svc_…`) and a user with the `db_admin` role on the database hold both by implication; nobody
-  else does, a custom key that holds `db_admin` and a server key (`mk_srv_…`) included. Anyone else gets them through a **role**: a
-  role permission with `resourceType` `all-partitions` or `all-rows` (`resourceName` a table or `*`, `actions` exactly one level),
+  write side). An app's service key (`mk_svc_…`) and a user with the `db_admin` role on the database hold both by implication; no other
+  credential does, a key whose own role is `db_admin` and a server key (`mk_srv_…`) included (a key linked to a user, or sent with a
+  user's `X-User-Token`, holds what that user holds). Any other user gets them through a **role** assigned to it (a role on an API key
+  never carries one): a role permission with `resourceType` `all-partitions` or `all-rows` (`resourceName` a table or `*`, `actions` exactly one level),
   and `GET …/auth/admin/users/{id}/access-grants` lists what a user holds and why. Every use of a grant is audited as one
-  `access_grant_used` row, on every surface. [Visibility is granted](auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows),
+  `access_grant_used` row, on every surface except graph and vector reads (BL-1289). [Visibility is granted](auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows),
   [§19.8a](auth/authorization.md#198a-admin-api-access-grants-on-roles), [Audit logging](auth/reference.md#audit-logging).
   **What an upgrade changes:**
   - **A `db_admin` user now sees every row and every partition of its database's PLS and RLS tables** — it saw only its own
     partition grants, or what an RLS resolver showed it. An app service key behaves as before. A self-signup role that is set to
-    `db_admin` (or that carries a grant) therefore hands the grants to every self-registered user.
+    `db_admin` (or that carries a grant) therefore hands the grants to every self-registered user, and an auth-admin key
+    (`mk_adm_…`), which may assign any role, can make a user who sees everything.
   - **A key whose role is `db_admin` (a custom key, a server key) can no longer read a PLS table across partitions with
     `"crossPartitionAccess": true`.** That read was the grant `all-partitions`; the flag is now a pure cost waiver. Give the reader a
     `db_admin` user, a service key, or a role that carries `all-partitions`.
@@ -58,7 +60,8 @@ Public, user-facing release notes. Engine phase status lives in the server
   should not have seen, or let it write where HTTP refuses; each is fixed, with no setting to restore the old behaviour:
   - A WebSocket or long-poll subscribe applied none of HTTP's role checks: the anonymous key, a user with no role, or a role holder on a table
     its role does not name could subscribe to a table with no partition or row security (and a materialized result or named query) and
-    read it, and `stream_open` accepted writes HTTP refuses (BL-1280). Both now ask HTTP's rule.
+    read it, and `stream_open` accepted writes HTTP refuses (BL-1280) — a server key whose role on the database only reads
+    included. Both now ask HTTP's rule.
   - A socket on an **auth database** served its users and keys (password hashes included) to a session that needed no credential or
     to any self-registered user; a server key scoped to one database could open a socket on another; a **public** key could use long-poll
     on the admin listener. Each is now refused as HTTP refuses it.

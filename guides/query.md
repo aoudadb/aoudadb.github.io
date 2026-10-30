@@ -332,7 +332,7 @@ Precedence/override notes:
 - Response format: the JSON answer is always column arrays; `Accept` chooses JSON or column-batch frames (**Lead S12, 0.6.0**: the `format` parameter is gone).
 - Read preference: query parameter overrides header when both are present.
 - Limit handling: request value is normalized by translator (`0` special-case, negative->default, positive->cap).
-- Cross-partition behavior: the flag is a cost waiver for the partition-filter guard, not a visibility grant. A credential with partition grants plus the flag sees exactly its grants; a credential without `all-partitions` on a PLS table is still refused. There is no rate limit on it, and no `Aouda:PlsCrossPartitionRateLimit:*` setting (a leftover key is ignored). (**BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+- Cross-partition behavior: the flag is a cost waiver for the partition-filter guard, not a visibility grant. A credential with partition grants plus the flag sees exactly its grants (a `jwt-claim` user, its tenant); a credential that holds no grant at all on a PLS table is still refused. There is no rate limit on it, and no `Aouda:PlsCrossPartitionRateLimit:*` setting (a leftover key is ignored). (**BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
 ### Operator and query-option glossary
 

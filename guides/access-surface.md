@@ -86,7 +86,6 @@ Sibling of `aouda.schema.json` (or `--identities`). Schema `https://aouda.io/ide
 | `userId` | Optional UUID. Omitted → deterministic: SHA-256 of `"aouda.identity:" + name`, first 16 bytes as a GUID. A non-UUID value is `AUTH_IDENTITY_INVALID`. |
 | `claims` | String values only. |
 | `grants` | Each grant needs **all three** of `dimension`, `partitionKey`, `accessLevel` (`read` \| `write` \| `admin`). `partitionKey` is taken verbatim: `""` and keys with outer white space are partitions like any other (**BL-1192, next train**); leaving it out is invalid. |
-
 | `accessGrants` | Optional, `user` identities only. Each entry is `{ "grant", "table"?, "level" }`: `grant` is `all-partitions` or `all-rows`, `level` is `read` \| `write` \| `admin` and is required, and `table` names one table (leave it out for the whole database). It answers "what would a holder of this grant see?" before the role exists. A `service_key` identity refuses the field (`AUTH_IDENTITY_INVALID`): it already holds both grants by implication. A `user` identity whose `roles` include `db_admin` holds both grants on the database, as an admin user does. The `kind` decides what a fixture holds, never its claims. (**BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). |
 
 Cap: 32 identities (`ACCESS_SURFACE_TOO_MANY_IDENTITIES`). Invalid document → `AUTH_IDENTITY_INVALID`. Missing file is a **warning**, not a hard error: public-only (`mk_pub_*`) still runs.
@@ -135,7 +134,7 @@ Per table, the response reports:
 
 Errors: `AUTH_IDENTITY_NOT_FOUND`, `AUTH_IDENTITY_INVALID`.
 
-**Credential and listener:** admin listener, with a **service key or an admin JWT**. A `db_reader` JWT gets 403, and the route is 404 on the data-plane — this is an operator and CI tool, not something an application calls. The route is open to other admin credentials too (a server key, a custom key holding `db_admin`), but they hold no grants, so they get the verdict without the `sample` (`sampleReason: "caller_not_granted"`). (**BL-1227, next train**)
+**Credential and listener:** admin listener, with a **service key or an admin JWT**. A `db_reader` JWT gets 403, and the route is 404 on the data-plane — this is an operator and CI tool, not something an application calls. The route is open to other admin credentials too (a server key, a custom key holding `db_admin` and not linked to a user), but they hold no grants, so on a table with partition or row security they get the verdict without the `sample` (`sampleReason: "caller_not_granted"`). (**BL-1227, next train**)
 
 Run it for one identity per authorization class before you opt a table into the data-plane, and put the output in the migration record.
 

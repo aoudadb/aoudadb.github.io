@@ -271,7 +271,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key, a nested name, or a reserved name (`sub`, `email`, `iss`, `aud`, `iat`, `exp`, `nbf`, `aal`, `db_roles`, and the authenticator names `auth_type`, `api_key_kind`, `api_key_id`, `api_key_prefix`, `api_key_name`, `aouda_auth_db` — **BL-1031, 0.5.0**) |
 | `.../admin/roles` | GET | List roles |
 | `.../admin/roles` | POST | Create custom role. A permission may be an access grant (`all-partitions` / `all-rows`, **BL-1227, next train**) |
-| `.../admin/roles/{id}` | PATCH | Update role (its `permissions` are replaced) |
+| `.../admin/roles/{id}` | PATCH | Update role (a `permissions` array, when sent, replaces the role's permissions) |
 | `.../admin/roles/{id}` | DELETE | Delete custom role |
 | `.../admin/api-keys` | GET | List API keys |
 | `.../admin/api-keys` | POST | Create custom API key |
@@ -598,7 +598,9 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 |------------|------|---------|--------|
 | `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
 | `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
-| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields | Check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`) |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant | For a partition grant, check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, next train**) |
+| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission names a table no governed database has (case-sensitive) | Fix the table name, or use `*` (**BL-1227, next train**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | The named table lacks the security the grant lifts (no PLS for `all-partitions`, no RLS for `all-rows`) | Drop the grant; it would lift nothing (**BL-1227, next train**) |
 
 ### ADRA RLS Resolver Admin Errors
 
@@ -709,11 +711,13 @@ stream whose outcome an `all-partitions` or `all-rows` grant decided, by any cre
 | `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
 
 - A row is written only when a grant **decided** the outcome: the table has the restriction the grant lifts (PLS for `all-partitions`, an RLS
-  resolver for `all-rows`) and the request was not denied by either half. A caller without a grant writes nothing, and so does a table with
-  no PLS or RLS. The row records the authorization decision, not the read's success: a read that the partition-filter cost guard then
-  refuses still names the grant.
+  resolver for `all-rows`). For a read, the row is written only when neither half denied it; a write is recorded when its gate is
+  asked, so a write that the other half then refuses still names the grant. A caller without a grant writes nothing, and so does a
+  table with no PLS or RLS. The row records the authorization decision, not the request's success: a read that the partition-filter
+  cost guard then refuses still names the grant.
 - A row is written **once** per request (per table, grant and operation; a named-query batch writes one per grant), per bulk-load job and credential
-  at `:begin`, per subscribe, per re-key that newly uses a grant, and per write stream. **Never one per live event.** An upsert is an `insert`.
+  (at `:begin`, or at the first `:append` of another credential), per subscribe, per re-key that newly uses a grant, and per write
+  stream (again when the grants that decide it change). **Never one per live event.** An upsert is an `insert`.
 - It goes to the auth database that governs the data, else to the one that authenticated the credential. The write is best-effort: a failure is
   logged and never fails the request.
 - `crossPartitionAccess` on its own writes nothing: it is a cost waiver, not a grant. Graph and vector reads are not audited yet (BL-1289).

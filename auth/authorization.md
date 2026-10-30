@@ -76,11 +76,11 @@ implication; nothing is stored. Every other credential holds only what a role gi
 | Credential | Holds | Why |
 |---|---|---|
 | App service key (`mk_svc_…`, kind `service_role`), no user token | both, on its database | Trusted server-side code that must see the whole database. |
-| A user with the `db_admin` role on the database | both, on that database | Read from the user's **role assignment** (its scope is that database, `*`, or none). A token that merely *claims* `db_admin` in `db_roles` holds nothing, and removing the assignment ends the grants on the next request. |
+| A user with the `db_admin` role on the database | both, on that database | Read from the user's **role assignment** (its scope is that database, `*`, or none). A token that merely *claims* `db_admin` in `db_roles` holds nothing, and removing the assignment ends the grants on the next request. This includes a **server** user: the bootstrapped server admin user holds `db_admin` with no scope, so its token holds both grants on **every** database (what Studio, signed in as that user, sees). |
 | Any key + `X-User-Token` | what the **user** holds | The request runs as the user: a service key presenting a plain user's token gets that user's partition grants, not its own implied ones ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)). |
 | Custom key linked to a user | what that user holds | The key acts as its user. |
 | Server API key (`mk_srv_…`, kind `server_admin`) | nothing | It administers the server (databases, backups, `/api/auth/admin/*`); it is not a data credential. Use a service key, or send the user's token. It works on a linked application database's WebSocket and long-poll connect as it does over HTTP, and still holds no grant there. |
-| Auth-admin key (`mk_adm_…`) | nothing | It manages users and roles of one auth database. It may *read* a user's effective grants ([below](#see-what-a-user-holds)). |
+| Auth-admin key (`mk_adm_…`) | nothing | It manages users and roles of one auth database. It may *read* a user's effective grants ([below](#see-what-a-user-holds)). ⚠️ It may also **assign** any existing role to a user, `db_admin` and a role carrying a grant included, and such a user holds the grants: treat the key as able to hand out full visibility. |
 | Custom key, not linked to a user | nothing | Even if it carries the `db_admin` role: a role on a key lets it create tables and manage the database, it does not widen what rows it reads. |
 | `mk_anon_…`, `mk_pub_…`, no credential | nothing | |
 
@@ -110,7 +110,8 @@ database, each with its `source` (`implied:db_admin` or `role:<name>`) — [§19
 **The flag.** `crossPartitionAccess` is not a grant. It waives one thing: the `PARTITION_FILTER_REQUIRED` guard that stops an
 unfiltered scan of a partitioned table. It does so for every credential on every surface (HTTP queries, named queries, WebSocket and
 long-poll subscribe, both SDKs) and never widens what the credential sees: a user with partition grants and the flag reads exactly its
-grants, and a credential without `all-partitions` on a PLS table is still refused. It is ignored on the data-plane listener. See
+grants, a `jwt-claim` user reads its own tenant, and a credential that holds no grant at all on a PLS table (no `all-partitions`, no
+partition grant, no tenant claim) is still refused. It is ignored on the data-plane listener. See
 [§19.7](#197-cross-partition-fan-out-queries) and [Partitioning](../guides/partitioning.md#partition-filter-rule-p40).
 
 **Every use of a grant is audited.** A request, bulk-load job, subscription or write stream whose outcome a grant decided writes one

@@ -185,13 +185,16 @@ On the data-plane listener (the browser tier) the guard always decides: the list
 ### The `crossPartitionAccess` flag: a cost waiver, never a grant
 
 (**BL-1227, next train**) The guard above exists to stop an accidental scan of every partition. `crossPartitionAccess` is how a caller says the scan is intended. It
-does one thing, for every credential, on every surface: it waives `PARTITION_FILTER_REQUIRED`. It **never widens what the credential
+does one thing, for every credential, on every admin-listener surface: it waives `PARTITION_FILTER_REQUIRED`. It **never widens what the credential
 sees**:
 
 - A user with partition grants who sets the flag reads exactly the partitions it is granted, and a `jwt-claim` user reads only its own
-  tenant. Where PLS injects the caller's partition, the guard is already satisfied and the flag changes nothing.
-- A credential without `all-partitions` on a PLS table is refused as before, with or without the flag. Up to 0.8.0 a key whose role was
-  `db_admin` could read every partition of a PLS table by sending the flag, as an audited exception; that read is gone.
+  tenant. Where PLS injects the caller's partition on the table's partition-key column, the guard is already satisfied and the flag
+  changes nothing.
+- A credential that holds no grant at all on a PLS table (an `mk_srv_` key, a custom key not linked to a user, a token that only
+  claims `db_admin`) is refused as before, with or without the flag: `403 AUTH_PLS_GRANT_NOT_FOUND` on `auth-db-pls`,
+  `403 AUTH_PLS_TENANT_CLAIM_MISSING` on `jwt-claim`. Up to 0.8.0 any credential with `db_admin` in its `db_roles` could read every
+  partition of a PLS table by sending the flag, as an audited exception; that read is gone.
   The read of every partition is now the [`all-partitions` grant](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)
   — held by an app service key and by a `db_admin` user, or given to a role.
 - A holder of `all-partitions` still needs the flag to scan a partitioned table without a filter on its key: the grant lifts PLS, the flag
@@ -342,7 +345,7 @@ what the subscription sees is decided by the credential's grants:
 | App service key, or a `db_admin` user (holds `all-partitions`) | Every partition of the table. Events of partitions **created after** the subscription started are delivered too |
 | A user with `auth-db-pls` grants | Exactly its granted partitions; an event in another partition is not delivered |
 | A `jwt-claim` user | Its own tenant's partition only |
-| A key with no grant (`mk_srv_`, a custom key, `mk_anon_`) | Refused or empty, as for the same query; the flag does not change that |
+| A key with no grant (`mk_srv_`, a custom key not linked to a user, `mk_anon_`) | Refused or empty, as for the same query; the flag does not change that |
 | A browser (`mk_pub_`, the data-plane listener) | The flag is ignored: the guard decides |
 
 A subscription's snapshot is what an HTTP query by the same credential returns, and every live event follows the same rule. If a
@@ -465,7 +468,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 | jwt-claim PLS enforcement | Yes | No | No | P12 G2 report + `PartitionSecurityEnforcer.cs` | Injects/validates partition scope from claim |
 | `all-partitions` grant (replaces the admin cross-partition read; **BL-1227, next train**) | Yes | No | No | Grants phase, `docs/tasks/Grants/` + `PartitionSecurityEnforcer.cs` | Held by a service key and a `db_admin` user by implication, or through a role; every use writes `access_grant_used` |
 | auth-db-pls enforcement path | Yes | No | No | P14 S4 task + `PartitionSecurityEnforcer.cs` | PermissionContext-driven grant routing |
-| `access_grant_used` audit (replaces the service-key bypass audit; **BL-1227, next train**) | Yes | No | No | `AccessGrantAudit.cs` + the controllers | One row per request, job, stream, subscribe and re-key that a grant decided; never per event |
+| `access_grant_used` audit (replaces the service-key bypass audit; **BL-1227, next train**) | Yes | No | No | `AccessGrantAudit.cs` + the controllers | One row per table and grant, per request, job, stream, subscribe and re-key that a grant decided; never per event |
 | PLS helper support for `WhereClause.Groups` | No | Yes | No | `Messages.cs` + `PartitionSecurityEnforcer.cs` + BL-044 | Server has groups in protocol; helper logic not fully groups-aware |
 | Partition-key and hash-bucket segment pruning | Yes | No | No | P45 overview + S02 report | Exact for `eq`/`in`/constrained composite prefix; never prunes a bucket on a range predicate |
 | Background cold-segment coalescing | Yes | No | No | P45 overview + S05 report | Steady-state, not a one-off repair; keeps streaming-write segment shape from decaying indefinitely |
@@ -996,9 +999,9 @@ Suggested tuning sequence:
 |---|---|---|
 | `400` saying body database must match path database | Route/body mismatch | Ensure request body `database` equals `/api/databases/{db}` segment |
 | Query on partitioned table fails with partition filter required | Missing `eq`/`in` on every partition-key column (ranges and prefixes do not count) and the flag is not set | Add `eq`/`in` on the missing keys (named in the error), or set `crossPartitionAccess` (the data-plane listener ignores it, so the browser tier cannot). See [partition-filter rule](#partition-filter-rule-p40) |
-| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key's own call sets `cross_partition_access` (or filters on the key), which waives the guard, so it hides the gap; the browser tier cannot send the flag | First ask whether the table clears [the partitioning rule](#should-this-table-have-a-partition-key-p45) — on a membership or roster table it usually does not, and dropping `partitionKey` for `auth-db-rls` removes the guard outright. Otherwise set `authMode: "auth-db-pls"` + `permissionDimension` so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
+| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key's own call sets `cross_partition_access`, which waives the guard, so it hides the gap; the browser tier cannot send the flag | First ask whether the table clears [the partitioning rule](#should-this-table-have-a-partition-key-p45) — on a membership or roster table it usually does not, and dropping `partitionKey` for `auth-db-rls` removes the guard outright. Otherwise set `authMode: "auth-db-pls"` + `permissionDimension` + `permissionColumn` (the partition-key column) so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
 | A named artifact returns `404 NOT_FOUND` to a user token, but exists in the catalog export | On the data-plane listener a permission denial is deliberately masked as "not found", so callers cannot enumerate artifacts | Read the **server** log: it records the real denial reason, code and subject for every masked 404. Grant the caller access — re-deploying the artifact will not change it |
-| A grant's use is not in the audit log | The grant did not decide the outcome (the table has no PLS / RLS for it, or the request was refused first), or the audit write failed (best-effort; check the server log) | Read `GET …/auth/admin/audit-log?action=access_grant_used`; a caller without a grant, or a table with no PLS, writes none **(BL-1227, next train)** |
+| A grant's use is not in the audit log | The grant did not decide the outcome (the table has no PLS / RLS for it, or the request was refused first), or the audit write failed (best-effort; check the server log) | Read `GET …/auth/admin/audit-log?action=access_grant_used`; a caller without a grant, or a table with neither PLS nor RLS, writes none **(BL-1227, next train)** |
 | PLS behavior seems odd with nested/grouped filter shapes | `WhereClause.Groups` helper adoption gap | Keep partition conditions in top-level `and`/`or` until BL-044 work lands |
 
 ## 2.15 Verification ledger

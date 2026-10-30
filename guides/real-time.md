@@ -290,16 +290,17 @@ A subscription is a read, and it is held to the rules of the HTTP read it mirror
   and one that does not receives only its own partitions'. Granting a role is described in
   [Authorization](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 - **Permissions are re-read on every `subscribe`**, a first subscribe included. A subscribe whose permissions cannot be read is
-  **refused** — `PERMISSION_REVOKED`, or the retryable refusal code when the auth database was unavailable — never admitted on
-  a stale answer.
-- **A grant change reaches an open subscription on the next event.** After a role change, the first event on the table re-keys
-  each open subscription of the affected session: a narrowed one stops receiving what it may no longer see, and one that no longer
-  passes the role check ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
+  **refused** (`PERMISSION_REVOKED`), or refused with a retryable capacity code (`SERVICE_UNAVAILABLE`, `MEMORY_BUDGET_EXCEEDED`, …)
+  when the read is refused for capacity — never admitted on a stale answer.
+- **A grant change reaches an open subscription on the next event.** After a role or grant change, the next event on any table the
+  session subscribes to (or its next `subscribe` or `re_auth`) re-keys all of that session's subscriptions before the event is
+  delivered: a narrowed one stops receiving what it may no longer see, and one narrowed to nothing, or that no longer passes the
+  role check, ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
   **not re-snapshotted**: rows that became visible are not pushed, only events from the re-key on. Resubscribe to read the rows
   that were already there.
 - **Audit.** When an `all-partitions` or `all-rows` grant decides what a subscription or a write stream sees, one
-  `access_grant_used` row is written: once per subscription (operation `subscribe`), once per write stream (operation `insert`,
-  on the first batch the grant decides), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
+  `access_grant_used` row per grant is written: once per subscribe or resume (operation `subscribe`), once per write stream
+  (operation `insert`, on the first batch the grant decides, and again if the deciding grants change), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
   event**. The `cross_partition_access` flag alone
   writes nothing. See [Authorization](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
@@ -698,7 +699,7 @@ request to that database: the database's own auth database first, then the serve
 long-poll connect (up to 0.8.0 both were refused with `AUTH_API_KEY_INVALID` / `AUTH_TOKEN_INVALID`). The socket keeps the store
 that accepted the credential, so `re_auth`, sign-out and revocation reach it. A session the server auth database accepted is
 authorized as HTTP authorizes a data call on the database — a database-level `read` by its grants — and is refused with HTTP's
-code (`auth_error` on the socket, `403 AUTHORIZATION_DENIED` on long-poll connect). A server key opens the socket; it holds
+code (`auth_error` on the socket, `403` with HTTP's code on long-poll connect). A server key opens the socket; it holds
 neither `all-partitions` nor `all-rows`, so on a table with partition or row security it is held to the same rules as over HTTP.
 
 **Step 1 response — `auth_error` (server → client on failure):**
@@ -719,7 +720,8 @@ neither `all-partitions` nor `all-rows`, so on a table with partition or row sec
 for a subscription that names no partition: a table `subscribe`, or a named-query `subscribe` (`name`, `args`) whose query binds no
 partition key, on a partitioned table that requires a partition filter. Without it that subscribe is refused
 `PARTITION_FILTER_REQUIRED`. It is a **cost waiver, not a grant**: the snapshot and every later event are still what the
-credential's grants allow, so a credential without `all-partitions` on a table with partition-level security is refused as before.
+credential's grants allow: a credential without `all-partitions` receives only the partitions it is granted (a `jwt-claim` user, its
+own tenant), and one with no grant at all on a table with partition-level security is refused as before.
 The data-plane listener (the browser tier) ignores the flag, so a browser still binds the partition key in a named query. An
 older server ignores the field and answers `PARTITION_FILTER_REQUIRED`.
 

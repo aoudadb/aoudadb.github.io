@@ -253,7 +253,7 @@ const open = await client.table('orders')
 
 **The flag is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: what the query returns is what
 the credential's grants allow, with the flag or without it. A user with partition grants sees only those partitions, and a
-credential that holds no `all-partitions` grant on a table with partition-level security is still refused there. Which
+credential that holds no grant at all on a table with partition-level security is still refused there. Which
 credentials hold the grant: [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 The **data-plane** listener (the browser tier) ignores the flag. For subscriptions and named queries see
 [A subscription that spans partitions](#a-subscription-that-spans-partitions) and
