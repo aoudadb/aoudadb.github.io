@@ -807,7 +807,7 @@ Response (201 Created):
 
 `PATCH …/roles/{id}` replaces the role's `permissions` with the same shapes. The whole request is validated before anything is written: a
 refused request changes nothing. Role create does not change what live sessions see; a patch (name or permissions), a role deletion, a
-role assignment and a user deletion do, on the next request — a live subscription is re-keyed, and narrowing is immediate.
+role assignment and a user deletion do, on the next request — a live subscription is re-keyed on the first event after the change.
 
 ### What is refused
 

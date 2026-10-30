@@ -49,8 +49,8 @@ Public, user-facing release notes. Engine phase status lives in the server
     subscribe is authorized by the same role check as the HTTP read it mirrors** (`PERMISSION_REVOKED` ends a subscription whose
     role no longer allows it; `stream_open` needs `write`). [Real-time](guides/real-time.md).
   - **A subscription follows the grants:** its snapshot is what an HTTP query by the same credential returns, a holder of
-    `all-partitions` receives events of partitions created later, and a grant change re-keys the live session — a narrowing at
-    once, a widening only from the next event (rows that became visible are not re-sent; resubscribe).
+    `all-partitions` receives events of partitions created later, and a grant change re-keys the live session on the first event after it — a widening
+    only from then on (rows that became visible are not re-sent; resubscribe).
   - Policy inspect and `aouda.identities.json` identities take `accessGrants`; a `service_key` identity holds the implied pair and refuses
     them; a policy-inspect `sample` is shown only to a caller that holds the grants for it (`sampleReason: "caller_not_granted"`).
     The materialized-query endpoint, graph traversal and vector search lift each half by its own grant.

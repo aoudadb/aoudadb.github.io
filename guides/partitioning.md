@@ -346,7 +346,7 @@ what the subscription sees is decided by the credential's grants:
 | A browser (`mk_pub_`, the data-plane listener) | The flag is ignored: the guard decides |
 
 A subscription's snapshot is what an HTTP query by the same credential returns, and every live event follows the same rule. If a
-credential's grants change while it is subscribed, the session is re-keyed: a narrowing takes effect on the next event; a **widening is
+credential's grants change while it is subscribed, the session is re-keyed on the first event after the change; a **widening is
 not re-snapshotted** — rows that became visible are not pushed, events from the re-key on are — so resubscribe to read them. See
 [Real-time](real-time.md) and [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
