@@ -13,6 +13,23 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Array columns: one whole array per row (BL-035, next train).** A column can be `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`,
+  `Byte[]` or `String[]` — a curve's 400 points, a fit's residuals — written whole and read whole on every surface: schema,
+  named queries and mutations, `/query`, `/rows`, bulk load, subscriptions, `latestPerKey` results, column-batch frames, both SDKs
+  (`double[]` … in C#, `Float64Array` … in TypeScript) and Studio. A value holds at most 65,536 elements and 1 MiB of elements, only
+  finite numbers, never a null element; `-0` and subnormals survive bit for bit, and null is not empty. An array column can only be
+  selected: a `where`, `orderBy`, `groupBy`, aggregate, join key, key, default or subscription filter on one is refused with the new
+  `ARRAY_COLUMN_UNSUPPORTED`. New guide [Array columns](guides/array-columns.md); the types are in the
+  [HTTP API](reference/http-api.md#data-types), the frame's kind 9 in [the frame grammar](reference/http-api.md#the-column-batch-frame-acb2),
+  the cost in [Sizing](guides/sizing.md#array-columns-what-a-value-costs) (a value is its raw bytes plus 32 in memory; the reference
+  curve table stores cold at 0.46 × the raw arrays). Two things a client author must know: a client from before this train fails on a
+  framed query response with an array column (*"unknown kind 9"*), and an older TypeScript client reads arrays from the JSON
+  surfaces as plain values without failing; and a subscription's `column_types` says which columns are arrays — a column it does not name is a scalar. A TypeScript
+  `number[]` written in a row object loses `-0` (JSON's rule): write a `Float64Array` to keep it.
+- **A `"NaN"` or `"Infinity"` string, or a number past the type's range, is no longer stored in a scalar `Double` / `Float32` column
+  (BL-035, next train; fixed).** Every JSON write path (named mutation parameters, `/rows` and the other JSON write bodies) stored
+  such a value as NaN or ±Infinity; they now answer `400` (`NAMED_QUERY_BIND_FAILED` for a parameter, `NAMED_MUTATION_BIND_FAILED` for a literal,
+  `INVALID_REQUEST` for a write body) and store nothing.
 - **A dropped table's leftover directory is removed at the next open (BL-1255, next train).** A drop deletes the table's
   directory after the catalog has dropped it; if that delete failed (a file held open, a permission) or the process stopped
   in between, the directory stayed on disk for good, and nothing reported it. The next open now removes a `tables/t{id}`

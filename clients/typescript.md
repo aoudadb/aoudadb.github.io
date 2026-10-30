@@ -627,6 +627,77 @@ batches.
 On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.32 s and 0.57 CPU-s as batches**, 5.7 s and
 7.4 CPU-s as row objects — the same 42 MB of frames either way.
 
+### Array columns (**BL-035, next train**) {#array-columns}
+
+(**BL-035, next train**) The six [array column types](../guides/array-columns.md) read and write as typed arrays, **the same type on
+every surface**: query results (frames or JSON), named queries, materialized queries, WebSocket and long-poll subscriptions.
+
+| Server type | Read as | Write with |
+|---|---|---|
+| `Double[]` (**BL-035, next train**) | `Float64Array` | `Float64Array` or `number[]` |
+| `Float32[]` (**BL-035, next train**) | `Float32Array` | `Float32Array` or `number[]` |
+| `Int32[]` (**BL-035, next train**) | `Int32Array` | `Int32Array` or `number[]` |
+| `Int64[]` (**BL-035, next train**) | `BigInt64Array` (exact past 2^53, from JSON too) | `BigInt64Array`, `bigint[]` or `number[]` |
+| `Byte[]` (**BL-035, next train**) | `Uint8Array` | `Uint8Array` (in a `ColumnBatch`, also a `number[]` of 0–255) |
+| `String[]` (**BL-035, next train**) | `string[]` | `string[]` |
+
+A null cell is `null`; an empty array is an empty typed array. `AoudaArrayValue` is the union of the six read types and
+`AOUDA_DATA_TYPES` lists every column type, the six array names included. A row object with arrays is inserted as JSON; a
+`ColumnBatch` goes as frames when the server advertises them, else as JSON column arrays
+([the factories](#column-batches-lead-s14-060) gain `doubleArray`, `float32Array`, `int32Array`, `int64Array`, `byteArray` and
+`stringArray`, taking one array per row: a typed array is kept, a plain numeric array is converted once, a `string[]` is kept as it is (do not
+change it before the send), and `null` is a null row).
+
+```typescript
+await client.table('Samples').insert({
+  Id: 600,
+  D: new Float64Array([1.5, -0, 5e-324]),
+  F: new Float32Array([0.1]),
+  I: new Int32Array([1, 2, 3]),
+  L: new BigInt64Array([9007199254740993n]),
+  B: new Uint8Array([1, 2, 3]),
+  S: ['a', '日本語'],
+});
+
+const { rows } = await client.table('Samples').where('Id', '=', 600).execute();
+rows[0].D;   // Float64Array [1.5, -0, 5e-324]  (the bits of -0 are kept: 8000000000000000)
+rows[0].L;   // BigInt64Array [9007199254740993n]
+```
+
+**`-0` and plain arrays.** A typed float array keeps `-0` exactly. **A plain `number[]` written in a row object loses it**: it
+goes through `JSON.stringify`, which writes `-0` as `0`. To keep `-0`, write a `Float64Array` / `Float32Array`. (The same plain
+`[1.5, -0]` read back as `3ff8000000000000, 0000000000000000` in the run this page was checked with; the typed array read back
+`3ff8000000000000, 8000000000000000`.)
+
+```typescript
+const batch = ColumnBatch.of(
+  column.int64('Id', new BigInt64Array([602n, 603n])),
+  column.doubleArray('D', [new Float64Array([1, -0]), null]),   // row 603 is a null cell
+  column.stringArray('S', [[], ['x']]),                          // row 602 is an empty array
+).validate();
+await client.table('Samples').insert(batch);
+```
+
+**The client does not repeat the server's limits for a row object**, but it refuses NaN and the infinities in a
+`Float64Array` / `Float32Array` (a `RangeError`; in a plain `number[]`, `JSON.stringify` writes them as `null` and the server
+refuses the null element), and checks a `ColumnBatch` before sending (`validate()`): at most 65,536 elements and 1 MiB a value, finite floats, no lone
+surrogate. A `float32Array` factory rounds a plain `number` to the nearest float once, at construction; `int32Array`, `int64Array`
+and `byteArray` refuse an out-of-range element with a `RangeError`. A frame column's rows are fresh typed arrays you may keep and change.
+
+```text
+RangeError  Value '0': element 0 is NaN; array elements must be finite numbers (NaN and ±Infinity are refused).
+AoudaApiError (ARRAY_COLUMN_UNSUPPORTED)  … an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).
+```
+
+An array column cannot be filtered, ordered, grouped, aggregated or joined on, in the builder or in a named query. The
+generator (`npx @aouda/client generate` ([Type Generation CLI](#type-generation-cli)) or `GET /api/databases/{db}/schema/typescript`) writes the read types above for rows and tables,
+and for a named mutation's arguments a union that also takes a plain array (`Float64Array | number[]`); `aouda generate typescript`,
+which works offline from a schema file, writes the named queries' and mutations' types the same way, and no table types.
+
+A client older than this train fails on a framed response with an array column (*"Malformed column-batch frame: column '…' has
+unknown kind 9."*), and on the JSON surfaces (subscriptions, materialized queries, `returning`) it does not fail: it gives plain
+arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded. Use this train's client for array columns.
+
 ### Bulk load: a body sent again, resume, and a committed job (**Lead S14, S22, 0.6.0**)
 
 - **The job's last body commits it** (**Lead S22, 0.6.0**). A load's frame bodies are numbered across the job, and the last
