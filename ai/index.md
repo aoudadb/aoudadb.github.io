@@ -474,10 +474,10 @@ Steps:
 1. Connect backend with `service_role` key.
 2. Attach user JWT as `X-User-Token`.
 3. Execute data query/write on PLS/RLS-enabled tables.
-4. Verify results are scoped to user policy, not unrestricted service key access.
+4. Verify results are scoped to user policy, not the service key's unrestricted view.
 
 Expected checks:
-- service key alone can bypass PLS where allowed;
+- service key alone sees past PLS and RLS, because it holds `all-partitions` and `all-rows` on its database (**BL-1227, next train**; [how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows));
 - service key + valid `X-User-Token` applies user-context enforcement;
 - invalid/revoked `X-User-Token` yields 401 with explicit guidance.
 
@@ -539,7 +539,7 @@ Recommended tuning sequence:
 | Service key request fails with `X-User-Token` error | User token expired/revoked/invalid | Refresh/reissue user token, retry |
 | Fan-out query returns too few rows | Missing partition grants for dimension | Add grants for missing partition keys |
 | Write denied on granted partition | Grant is `read` level only | Promote to `write`/`admin` access level |
-| RLS seems not applied | Table mode/resolver binding mismatch | Verify `authMode` and `rlsResolverName` on table |
+| RLS seems not applied | Table mode/resolver binding mismatch; or a resolver on a `jwt-claim` table, which is ignored; or the caller holds `all-rows` (a service key, a `db_admin` user, or a role grant) (**BL-1227, next train**) | Verify `authMode` and `rlsResolverName` on table; use the resolver on an `auth-db-rls` table; check what the caller holds with `GET …/auth/admin/users/{id}/access-grants` |
 | No full keys in create-database response | Keys already existed and are one-time display | Use `POST .../auth/admin/regenerate-keys` |
 
 ## 2.15 Verification ledger

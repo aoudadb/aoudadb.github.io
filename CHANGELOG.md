@@ -13,6 +13,75 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Visibility is granted: `all-partitions` and `all-rows` replace the service-key and `db_admin` bypasses (BL-1227, next train;
+  behaviour change).** Whether a credential is held to a table's partition-level security (PLS) and row-level security (RLS) is now
+  decided by two **grants** it holds, never by its key prefix, a role's name or a request flag: `all-partitions` lifts PLS and
+  `all-rows` lifts RLS, each on one table or the whole database, at a level (`read` lifts reads; `write` and `admin` also lift the
+  write side). An app's service key (`mk_svc_…`) and a user with the `db_admin` role on the database hold both by implication; no other
+  credential does, a key whose own role is `db_admin` and a server key (`mk_srv_…`) included (a key linked to a user, or sent with a
+  user's `X-User-Token`, holds what that user holds). Any other user gets them through a **role** assigned to it (a role on an API key
+  never carries one): a role permission with `resourceType` `all-partitions` or `all-rows` (`resourceName` a table or `*`, `actions` exactly one level),
+  and `GET …/auth/admin/users/{id}/access-grants` lists what a user holds and why. Every use of a grant is audited as one
+  `access_grant_used` row, on every surface except graph and vector reads (BL-1289). [Visibility is granted](auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows),
+  [§19.8a](auth/authorization.md#198a-admin-api-access-grants-on-roles), [Audit logging](auth/reference.md#audit-logging).
+  **What an upgrade changes:**
+  - **A `db_admin` user now sees every row and every partition of its database's PLS and RLS tables** — it saw only its own
+    partition grants, or what an RLS resolver showed it. An app service key behaves as before. A self-signup role that is set to
+    `db_admin` (or that carries a grant) therefore hands the grants to every self-registered user, and an auth-admin key
+    (`mk_adm_…`), which may assign any role, can make a user who sees everything.
+  - **A key whose role is `db_admin` (a custom key, a server key) can no longer read a PLS table across partitions with
+    `"crossPartitionAccess": true`.** That read was the grant `all-partitions`; the flag is now a pure cost waiver. Give the reader a
+    `db_admin` user, a service key, or a role that carries `all-partitions`.
+  - **`crossPartitionAccess` waives `PARTITION_FILTER_REQUIRED` and nothing else**, for every credential. It is now accepted on a table
+    `subscribe` (`cross_partition_access`, WebSocket and long-poll), a named-query subscribe, a named-query execute and each batch
+    item (`crossPartitionAccess`, per call) and by both SDKs (`WithCrossPartitionAccess()` reaches `SubscribeAsync`;
+    `withCrossPartitionAccess()` reaches `subscribe()`; `SubscribeOptions.CrossPartitionAccess` / `crossPartitionAccess`; named-query
+    options). A named-query definition still cannot set it, and the data-plane listener ignores it. A server that predates this release
+    ignores the field and answers `PARTITION_FILTER_REQUIRED`. [Partitioning](guides/partitioning.md#the-crosspartitionaccess-flag-a-cost-waiver-never-a-grant).
+  - **The audit kinds `service_key_pls_bypass` and `query_cross_partition` are gone**, replaced by `access_grant_used` (no alias).
+    **`Aouda:PlsCrossPartitionRateLimit` and the `429` it produced are gone**; a leftover key in a config file is ignored.
+  - **The roles API refuses an unknown `resourceType`** (`400 AUTH_GRANT_INVALID`); up to 0.8.0 it stored any string, which granted
+    nothing. A grant on a table the database lacks is `400 AUTH_GRANT_TABLE_NOT_FOUND`, one that would lift nothing (no PLS, no RLS
+    resolver) `400 AUTH_GRANT_NOT_APPLICABLE`.
+  - **Bulk load asks for the grants.** A table with PLS or RLS is loaded by a caller that holds, at `write`, the grant for each
+    restriction the table has — a service key or a `db_admin` user, or a role that carries them — at `:begin` and at every `:append`;
+    up to 0.8.0 only an app's service key could.
+  - **A resolver on a `jwt-claim` table is ignored on every surface**, subscriptions included.
+  - **`mk_srv_` keys open a linked application database's socket** as they work over HTTP (and hold no grant there), and **a realtime
+    subscribe is authorized by the same role check as the HTTP read it mirrors** (`PERMISSION_REVOKED` ends a subscription whose
+    role no longer allows it; `stream_open` needs `write`). [Real-time](guides/real-time.md).
+  - **A subscription follows the grants:** its snapshot is what an HTTP query by the same credential returns, a holder of
+    `all-partitions` receives events of partitions created later, and a grant change re-keys the live session on the first event after it — a widening
+    only from then on (rows that became visible are not re-sent; resubscribe).
+  - Policy inspect and `aouda.identities.json` identities take `accessGrants`; a `service_key` identity holds the implied pair and refuses
+    them; a policy-inspect `sample` is shown only to a caller that holds the grants for it (`sampleReason: "caller_not_granted"`).
+    The materialized-query endpoint, graph traversal and vector search lift each half by its own grant.
+- **Security: leaks in released servers closed by the grants work (BL-1227, next train).** Each of these showed one credential data it
+  should not have seen, or let it write where HTTP refuses; each is fixed, with no setting to restore the old behaviour:
+  - A WebSocket or long-poll subscribe applied none of HTTP's role checks: the anonymous key, a user with no role, or a role holder on a table
+    its role does not name could subscribe to a table with no partition or row security (and a materialized result or named query) and
+    read it, and `stream_open` accepted writes HTTP refuses (BL-1280) — a server key whose role on the database only reads
+    included. Both now ask HTTP's rule.
+  - A socket on an **auth database** served its users and keys (password hashes included) to a session that needed no credential or
+    to any self-registered user; a server key scoped to one database could open a socket on another; a **public** key could use long-poll
+    on the admin listener. Each is now refused as HTTP refuses it.
+  - Graph traversal and nearest-neighbour search on a `jwt-claim` PLS table applied no partition security, so one tenant's user could
+    read another tenant's edges and vectors. They now return nothing to a credential without `all-partitions` (a tenant's user
+    included, until BL-1279 routes the tenant claim there).
+  - A fresh subscribe after a partition grant was revoked still snapshotted the revoked partition; removing, renaming or editing a
+    role, or removing a user's role, took effect only when some other permission change happened. They now take effect on the next request.
+  - A caller refused a protected table by bulk load could still `:append` to another caller's job on it; `:append` now asks the check of
+    the credential appending.
+  - Policy inspect's `includeSample` returned a secured table's rows to a custom key holding `db_admin` or a server key.
+  - Truncate and schema seed on a PLS or RLS table asked only the role check: a custom role carrying `truncate` emptied every
+    tenant's partition, and a seed wrote rows no partition or row check saw. Both now need the grants bulk load needs, or answer
+    `403 AUTHORIZATION_DENIED` and write nothing ([Authorization](auth/authorization.md#bulk-load-is-not-a-per-user-write-bl-1031-050)).
+  - An update whose `set` named the partition column moved a row into a partition its writer may not write, and an upsert replaced
+    another partition's or another owner's row by key. Both are now held to the write rule of the partition or row they reach
+    ([§19.4.4](auth/authorization.md#1944-write-path-access-level-enforcement)).
+  - The materialized-query endpoint, for a query over another query's result, returned every row: it took the policy of the result
+    it read from, which has none. It now filters by the base table's, as `/query` on the result does. A named-query subscribe whose
+    `target` spelled the query's table in another case took its security from the other-cased table; it now reads the query's own.
 - **Array columns: one whole array per row (BL-035, next train).** A column can be `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`,
   `Byte[]` or `String[]` — a curve's 400 points, a fit's residuals — written whole and read whole on every surface: schema,
   named queries and mutations, `/query`, `/rows`, bulk load, subscriptions, `latestPerKey` results, column-batch frames, both SDKs
@@ -527,7 +596,7 @@ Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's sec
   role's grants and, on a protected table, what a request with no user may see: with the usual RLS rules no row (writes
   refused), on a PLS table `403` unless its role is `db_admin` and the read asks for `crossPartitionAccess` (audited). Use the
   database's `mk_svc_` key for whole-database backend access, or `X-User-Token` with a service or server key for one user's
-  data. [What changed](auth/authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+  data. [What changed](auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 - **Sizing: a known gap in the memory ceiling is documented (BL-983).** [Sizing](guides/sizing.md) now says that the process can
   sit 2–5 % above `MaxTotalRamBytes` under load — the memory outside the .NET heap is larger than the server sets aside for it — and
   what to do until it is fixed: a container limit about 10 % above the setting, and `MALLOC_ARENA_MAX=2` on Linux.

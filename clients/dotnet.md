@@ -619,6 +619,83 @@ A table subscription sent to the data-plane listener fails with `NAMED_QUERY_SUB
 [Named queries](../guides/named-queries.md#subscribe-by-name)), or point a trusted backend at the admin listener with its service key.
 The wire contract is in the [HTTP API reference](../reference/http-api.md#websocket-streaming-protocol).
 
+**What a subscription sees** (**BL-1227, next train**). A subscription's snapshot and events follow the same grants as an HTTP query by
+the same credential; `SubscribeAsync` is authorized by the same role check (`read` on the table, and for a named query every table it
+touches), and the server re-reads the credential's permissions on every subscribe. A server API key (`mk_srv_`) that works over HTTP
+on a linked application database opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
+
+### Subscribing across partitions
+
+On a partitioned table that requires a partition filter, a subscription that names no partition is refused with
+`PARTITION_FILTER_REQUIRED`. `RemoteTableQuery.WithCrossPartitionAccess()` reaches
+`SubscribeAsync` as well as the query methods (**BL-1227, next train**; until this train a subscription had no way to send it), and
+`SubscribeOptions.CrossPartitionAccess` asks for the same. Either asks; **neither cancels the other**. The client sends
+`cross_partition_access: true` on the `subscribe` message only when asked, and sends it again on every resubscribe after a reconnect.
+
+```csharp
+using Aouda.Abstractions.Streaming;
+using Aouda.Client;
+
+// On the query builder
+await foreach (var evt in client.GetTable("orders")
+    .WithCrossPartitionAccess()
+    .SubscribeAsync(ct))
+{
+    Console.WriteLine($"{evt.Type} v{evt.Version}");
+}
+
+// Or in the options
+var options = new SubscribeOptions { CrossPartitionAccess = true };
+await foreach (var evt in client.GetTable("orders")
+    .Where("status", "eq", "open")
+    .SubscribeAsync(options, ct))
+{
+    Console.WriteLine(evt.Type);
+}
+```
+
+**It is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: the snapshot and every event are what the
+credential's grants allow (a service key, or a user with the `all-partitions` grant, receives every partition, those created later
+too; a user with partition grants receives only its own). The data-plane listener ignores it. An older server ignores the field and
+answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The flag itself writes nothing to the audit log; a grant that
+decides what a subscription sees is audited once per subscription
+([Authorization](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)).
+
+### Named queries and the flag
+
+A named query that binds no partition key on a partitioned table is refused the same way, and takes the flag **per call**
+(**BL-1227, next train**): `NamedQueriesApi.ExecuteAsync(…, crossPartitionAccess: true)`,
+`new NamedQueryBatchInput(…, crossPartitionAccess: true)` for one batch item, and `SubscribeOptions.CrossPartitionAccess` on
+`NamedQueriesApi.SubscribeAsync`. A definition cannot set it, and a batch has no batch-wide switch.
+
+```csharp
+var args = new Dictionary<string, object?> { ["status"] = "open" };
+
+// ExecuteAsync(name, args, ct, orderByIndex, atLeast, crossPartitionAccess)
+var open = await client.NamedQueries.ExecuteAsync(
+    "orders_by_status", args, ct, crossPartitionAccess: true);
+
+// BatchAsync: the flag is on the item
+var slots = await client.NamedQueries.BatchAsync(
+    new[]
+    {
+        new NamedQueryBatchInput("orders_by_status", args, crossPartitionAccess: true),
+        new NamedQueryBatchInput("customer_card", new Dictionary<string, object?> { ["id"] = 7 }),
+    },
+    ct);
+
+// SubscribeAsync: the flag is in the options
+await foreach (var evt in client.NamedQueries.SubscribeAsync(
+    "orders_by_status", args, new SubscribeOptions { CrossPartitionAccess = true }, ct))
+{
+    Console.WriteLine(evt.Type);
+}
+```
+
+The rows are the credential's grants, flag or not. The alternative is to bind the partition key in the definition's `where` clause: it
+needs no flag and works on the data-plane listener, where the flag is ignored
+([`crossPartitionAccess` on the data-plane listener](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
+
 ---
 
 ## 9) Errors

@@ -70,6 +70,8 @@ The profile is tagged on the **Kestrel connection**. There is no request header 
 
 Allowed: `/health` `/ready` `/startup`, app-auth except `/auth/admin/*`, OIDC/JWKS, named-query execute + batch, named-mutation execute, `/api/databases/{db}/ws`.
 
+The data-plane listener **ignores `crossPartitionAccess`** (**BL-1227, next train**): the partition-filter guard decides, and the error says the flag is not accepted there. The flag only waives that guard on the admin listener and never widens what a credential sees — [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener).
+
 Listed named-artifact routes still **do not enumerate names**. On the data-plane, unsigned, `mk_anon_*`, and other unentitled callers get **404** `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — not 401 vs 404. Unlisted paths stay empty 404 (D-11). The admin listener keeps 401/403 so operators can tell missing token from denied. Invalid credentials stay 401 on both listeners.
 
 ---

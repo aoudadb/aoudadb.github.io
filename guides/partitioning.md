@@ -98,8 +98,8 @@ Partitioning and multitenancy exist to make a single Aouda deployment practical 
   - `docs/tasks/P7/P7-Task8-MultiDatabaseScenarios-Report.md`
   - `docs/tasks/P12/P12-TaskG1-PLSFlagAndConfiguration-Report.md`
   - `docs/tasks/P12/P12-TaskG2-PlsEnforcement-TokenClaimToPartitionRouting-Report.md`
-  - `docs/tasks/P12/P12-TaskG3-PlsCrossPartitionAccessControl-Report.md`
-  - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md`
+  - `docs/tasks/P12/P12-TaskG3-PlsCrossPartitionAccessControl-Report.md` (history: the admin cross-partition read it describes is replaced by the `all-partitions` grant, **BL-1227, next train**)
+  - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md` (history: the limiter it describes is gone, **BL-1227, next train**)
   - `docs/tasks/P14/P14-TaskS4-EnhancedPLS.md`
   - `docs/tasks/P14/P14-ADRA-Tasks.md`
 - Design references:
@@ -144,7 +144,7 @@ If you create a table/database without tuning partition or multidb options:
   - If partitioned, `PartitionOptions` defaults are active (`StorageMode = Auto`, `RequirePartitionFilter = true`, promotion thresholds enabled). Out-of-order (late) rows need no setting: they are flushed like any other row and visible at once.
 - Query safety:
   - Partition-filter enforcement is on by default for partitioned tables unless explicitly disabled.
-  - Cross-partition reads require explicit opt-in (`crossPartitionAccess` / `.WithCrossPartitionAccess()` in supported clients). That flag is **admin-tier**. It is not a named-query field and is unreachable from `mk_pub_*` on the data-plane. Browser-tier rule: [partition-filter rule](#partition-filter-rule-p40).
+  - Reading a partitioned table without a filter on its partition key requires an explicit opt-in: `crossPartitionAccess` (`.WithCrossPartitionAccess()` / `withCrossPartitionAccess()` in both SDKs; per call on a named query; `cross_partition_access` on a subscribe). The flag is a **cost waiver** for the scan guard, never a grant (**BL-1227, next train**): it is not a named-query *definition* field, and it is ignored on the data-plane listener, so `mk_pub_*` cannot use it. See [the flag](#the-crosspartitionaccess-flag-a-cost-waiver-never-a-grant) and the browser-tier rule [partition-filter rule](#partition-filter-rule-p40).
 - Multitenancy:
   - Database-scoped HTTP routes are the default API shape.
   - Database creation defaults to durability `strict` (WAL written through; **Lead S26, 0.6.0**), replication mode `Replicate`, default temperature `Auto`.
@@ -164,9 +164,6 @@ If you create a table/database without tuning partition or multidb options:
 | `DatabaseOptions.Durability` | `strict` | `strict`, `os`, `unlogged`, `memory` | (**Lead S26, 0.6.0**; replaces `EnableWal`) DB writes its WAL through before a write is visible unless set otherwise; see [durability levels](write-durability.md#durability-levels-lead-s26-060) |
 | `DatabaseOptions.ReplicationMode` | `Replicate` | `Replicate`, `DoNotReplicate` | DB participates in replication by default |
 | `DatabaseOptions.MaxMemoryShareBytes` | `null` | `null` (no cap); or any non-negative `long` (bytes) | No explicit per-database cap unless set |
-| `PlsCrossPartitionRateLimitOptions.Enabled` | `false` | `true`, `false` | Cross-partition bypass rate limiting is opt-in |
-| `PlsCrossPartitionRateLimitOptions.PermitLimit` | `60` | Positive integer | Effective only when limiter is enabled |
-| `PlsCrossPartitionRateLimitOptions.WindowSeconds` | `60` | Positive integer (seconds) | Effective only when limiter is enabled |
 
 ### Partition-filter rule (P40)
 
@@ -183,7 +180,51 @@ On a partitioned table the guard defaults **on**. A query must include `eq` or `
 
 Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Error `PARTITION_FILTER_REQUIRED` names the **missing** columns and the satisfying operators.
 
-`crossPartitionAccess` is not a named-query field. Browser-tier alternatives: the watchlist `in` shape, auth-db-pls fan-out, or an MQ over the universe. Full page: [What a browser-tier read cannot do](browser-tier-read-limits.md#partition-filter-rule).
+On the data-plane listener (the browser tier) the guard always decides: the listener ignores `crossPartitionAccess`. Browser-tier alternatives: the watchlist `in` shape, auth-db-pls fan-out, or an MQ over the universe. Full page: [What a browser-tier read cannot do](browser-tier-read-limits.md#partition-filter-rule).
+
+### The `crossPartitionAccess` flag: a cost waiver, never a grant
+
+(**BL-1227, next train**) The guard above exists to stop an accidental scan of every partition. `crossPartitionAccess` is how a caller says the scan is intended. It
+does one thing, for every credential, on every admin-listener surface: it waives `PARTITION_FILTER_REQUIRED`. It **never widens what the credential
+sees**:
+
+- A user with partition grants who sets the flag reads exactly the partitions it is granted, and a `jwt-claim` user reads only its own
+  tenant. Where PLS injects the caller's partition on the table's partition-key column, the guard is already satisfied and the flag
+  changes nothing.
+- A credential that holds no grant at all on a PLS table (an `mk_srv_` key, a custom key not linked to a user, a token that only
+  claims `db_admin`) is refused as before, with or without the flag: `403 AUTH_PLS_GRANT_NOT_FOUND` on `auth-db-pls`,
+  `403 AUTH_PLS_TENANT_CLAIM_MISSING` on `jwt-claim`. Up to 0.8.0 any credential with `db_admin` in its `db_roles` could read every
+  partition of a PLS table by sending the flag, as an audited exception; that read is gone.
+  The read of every partition is now the [`all-partitions` grant](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)
+  — held by an app service key and by a `db_admin` user, or given to a role.
+- A holder of `all-partitions` still needs the flag to scan a partitioned table without a filter on its key: the grant lifts PLS, the flag
+  lifts the cost guard. A service key's unfiltered read is `crossPartitionAccess` **plus** the grant.
+- It writes no audit row of its own. What is audited is a grant's use (`access_grant_used`, below).
+
+Where it is accepted:
+
+| Surface | How | Notes |
+|---|---|---|
+| HTTP query and count | `"crossPartitionAccess": true` on the body | |
+| Named query: execute and each batch item | `"crossPartitionAccess": true`, **per call** | A named-query *definition* cannot set it. In a batch each item asks for itself; there is no batch-wide flag |
+| WebSocket and long-poll subscribe, table or named query | `"cross_partition_access": true` on the `subscribe` message | Waives the guard for the snapshot |
+| .NET client | `.WithCrossPartitionAccess()` on a table query (it reaches `SubscribeAsync` too), `SubscribeOptions.CrossPartitionAccess`, `NamedQueriesApi.ExecuteAsync(…, crossPartitionAccess)`, `NamedQueryBatchInput(…, crossPartitionAccess)` | The builder or the options ask; neither cancels the other |
+| TypeScript client | `withCrossPartitionAccess()` on a table query (it reaches `subscribe()` too), `SubscribeOptions.crossPartitionAccess`, `NamedQueryExecuteOptions`, `NamedQuerySubscribeOptions`, `NamedQueryBatchItem.crossPartitionAccess` | Sent only when `true` |
+| Data-plane listener (`mk_pub_*`, the browser tier) | **Ignored** | The guard decides; the error says so |
+
+A server that predates this release ignores the field on a subscribe or a named-query call and answers `PARTITION_FILTER_REQUIRED`.
+
+**What the error tells you, per surface** (the engine's message, then the surface's own remedy):
+
+- *Table subscribe, admin listener:* "…On a subscription, set cross_partition_access on the subscribe message (the SDKs'
+  WithCrossPartitionAccess() / SubscribeOptions.CrossPartitionAccess send it); it waives this guard only — the rows are still the
+  credential's grants."
+- *Named-query call or subscribe, admin listener:* "Named query '<name>' binds no partition key: pass crossPartitionAccess with the call
+  (cross_partition_access on the subscribe message), or bind the partition key in the definition's where clause. The flag waives this
+  guard only — the rows are still the credential's grants."
+- *Data-plane listener:* "crossPartitionAccess is not accepted on the data-plane listener (the browser tier, ADR 0009)." followed by the
+  remedy that works there: bind the partition key in the named query's own where clause, or configure partition-level security on the
+  table so the caller's partition is injected.
 
 ### Live subscriptions on a partitioned table
 
@@ -191,7 +232,7 @@ Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Er
 
 This catches people out because the failure is **late**. The schema applies. The named query deploys. A catalog export lists it. Nothing complains until the first browser subscribes, and then every subscribe fails with `PARTITION_FILTER_REQUIRED`. It reads like a transport bug. It is not one.
 
-**A service key is held to the same rule.** It bypasses partition-level security, not the partition filter: on a table that requires a partition filter (`PartitionOptions.RequirePartitionFilter`, `true` by default), a service key's `subscribe` needs an `eq` / `in` on every partition-key column in its filter, or a named query that binds them, exactly as a browser's does. It then receives every change event that filter admits, in every partition (**BL-1219, next train** — before it, a service key's filtered or named-query subscription on a PLS table received the snapshot and no change events).
+**A service key is held to the same rule** (**BL-1227, next train**). It holds `all-partitions`, so PLS does not restrict it, but the partition filter is a cost guard and not part of PLS: on a table that requires a partition filter (`PartitionOptions.RequirePartitionFilter`, `true` by default), a service key's `subscribe` needs an `eq` / `in` on every partition-key column in its filter, or a named query that binds them, exactly as a browser's does — or the `cross_partition_access` flag, which waives the guard (a browser's cannot: the data-plane listener ignores it). It then receives every change event that filter admits, in every partition (**BL-1219, next train** — before it, a service key's filtered or named-query subscription on a PLS table received the snapshot and no change events).
 
 #### The per-user feed
 
@@ -270,7 +311,7 @@ same on an unpartitioned table. A grant's `partitionKey` field is a key *within 
 not a claim about the table's physical layout. That is what lets a "user belongs to many rooms" app keep
 grant-based authorization while dropping partitioning it does not have the volume to justify.
 
-Without one of these three, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess()` — a query-builder method. **There is no such toggle on a named query or a subscription**, and a browser-tier caller could not use it if there were.
+Without one of these three, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess()` — a query-builder method. On the admin listener a named query takes the flag **per call** (`crossPartitionAccess` on the call or batch item, `cross_partition_access` on its subscribe) and a table subscribe takes `cross_partition_access`, and the error names whichever applies (**BL-1227, next train**; see [the flag](#the-crosspartitionaccess-flag-a-cost-waiver-never-a-grant)). A browser-tier caller cannot use it: the data-plane listener ignores it, so those three options are the only ways to a runnable definition there.
 
 #### Which one you want
 
@@ -279,7 +320,7 @@ Without one of these three, the definition can never execute for a user-token ca
 | A small membership / roster / inbox table, whatever the auth model | **Option C** — no partition key, `auth-db-rls`; the guard never applies |
 | Each user sees only their own rows, on a table partitioned for volume | **Option A** — PLS injects the value; the client cannot override it. **Option C also works here** and prunes identically — see below |
 | A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values — or Option C with a `PartitionGrant` rule |
-| A trusted backend reads across all partitions | A service key: an ad-hoc query with `crossPartitionAccess`, or a subscription with a filter on every partition key (or a named query binding them) — a service key bypasses PLS, not the partition filter |
+| A trusted backend reads across all partitions | A service key (it holds `all-partitions`) with `crossPartitionAccess`: an ad-hoc query, a named-query call or a `subscribe` with the flag set — or a filter on every partition key (or a named query binding them). The grant lifts PLS, the flag lifts the partition filter (**BL-1227, next train**) |
 | A browser reads across all partitions | Not available — see [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule) |
 
 **Option C is not the "small table" option.** It is listed first for small tables because there the
@@ -290,6 +331,27 @@ either way. Choose the layout on volume and the authorization mode on policy —
 [Layout and authorization mode are independent choices](../auth/authorization.md#layout-and-authorization-mode-are-independent-choices).
 
 See [Access control](../auth/authorization.md) for identity sources and how the injected predicate is resolved.
+
+### A subscription that spans partitions
+
+(**BL-1227, next train**) A `subscribe` on a partitioned table with no filter on its partition key is refused with `PARTITION_FILTER_REQUIRED`, as a query is. To
+subscribe across partitions on purpose, set **`cross_partition_access: true`** on the `subscribe` message (`.WithCrossPartitionAccess()`
+or `SubscribeOptions.CrossPartitionAccess` in the .NET client, `withCrossPartitionAccess()` or `SubscribeOptions.crossPartitionAccess` in
+the TypeScript client; a named-query subscribe takes it the same way). The flag waives the guard for the snapshot and nothing else, so
+what the subscription sees is decided by the credential's grants:
+
+| Credential | Snapshot and events with the flag |
+|---|---|
+| App service key, or a `db_admin` user (holds `all-partitions`) | Every partition of the table. Events of partitions **created after** the subscription started are delivered too |
+| A user with `auth-db-pls` grants | Exactly its granted partitions; an event in another partition is not delivered |
+| A `jwt-claim` user | Its own tenant's partition only |
+| A key with no grant (`mk_srv_`, a custom key not linked to a user, `mk_anon_`) | Refused or empty, as for the same query; the flag does not change that |
+| A browser (`mk_pub_`, the data-plane listener) | The flag is ignored: the guard decides |
+
+A subscription's snapshot is what an HTTP query by the same credential returns, and every live event follows the same rule. If a
+credential's grants change while it is subscribed, the session is re-keyed on the first event after the change; a **widening is
+not re-snapshotted** — rows that became visible are not pushed, events from the re-key on are — so resubscribe to read them. See
+[Real-time](real-time.md) and [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
 ### Partition and bucket pruning (P45)
 
@@ -345,7 +407,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - Auto-promotion pipeline with queue/in-progress tracking and WAL hooks.
 - Partition query enforcement:
   - Partition-filter required by default for partitioned tables.
-  - Explicit cross-partition bypass flag in protocol and .NET fluent APIs.
+  - Explicit cross-partition flag (a cost waiver, **BL-1227, next train**) in the protocol and both SDKs' fluent APIs, on queries, named queries and subscriptions.
 - Multi-database architecture:
   - `DatabaseRegistry` persisted metadata under server scope.
   - `DatabaseManager` runtime engine-per-database orchestration.
@@ -357,9 +419,8 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - Per-db monitoring/health surfaces from P6.
 - PLS interaction:
   - `partitionLevelSecurity` table option and validation.
-  - `jwt-claim` mode enforcement and controlled bypasses.
-  - Cross-partition bypass rate limiter (configurable).
-  - Query-level audit logging for cross-partition and service-key bypass events.
+  - `jwt-claim` mode enforcement; the `all-partitions` grant lifts it for the credentials that hold one (**BL-1227, next train**).
+  - Audit logging of every use of a grant (`access_grant_used`); the cross-partition rate limiter and the `query_cross_partition` / `service_key_pls_bypass` rows are gone (**BL-1227, next train**).
 - ADRA bridge behavior:
   - Unified enforcer dispatches by `AuthorizationMode`.
   - `auth-db-pls` query/write enforcement paths are implemented for permission-context-driven partition grants.
@@ -372,9 +433,8 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 
 ### Reserved / not yet wired
 
-- TypeScript fluent query builder currently has no first-class cross-partition toggle method; it cannot set `crossPartitionAccess` directly even though protocol and server support it.
 - PLS helper awareness for `WhereClause.Groups` is still backlog-tracked (`BL-044`), not complete.
-- Service-key PLS bypass audit logging for DML (insert/update/delete) is implemented in `TablesController` (BL-041, 2026-04-04).
+- A grant's use on a DML request (insert/update/delete, bulk load, truncate, schema seed) is audited as `access_grant_used` (**BL-1227, next train**; it replaced the `service_key_pls_bypass` rows BL-041 added).
 
 ## 2.5 Phase coverage matrix
 
@@ -383,7 +443,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 | P4 | Epic F Task1/2/3 reports, Epic G BL005 report | Partition metadata model, storage router, query enforcement, auto-promotion, retrospective partitioning baseline | Advanced retrospective migration strategy wiring (phase-2 strategy intents) | `docs/BACKLOG.md` (retrospective follow-up context + BL-044 related helper scope) |
 | P6 | Epic A/B/C/F reports | Multi-database registry/manager/routes, database field in protocol, client multidb wiring, per-db config/memory/metrics | Further API ergonomics and parity surfaces continue in follow-up work | `docs/BACKLOG.md` |
 | P7 | `P7-Task8-MultiDatabaseScenarios-Report.md` | Scenario validation of multi-db lifecycle, isolation, WAL recovery, memory budget, route behavior | Some scenario breadth noted as partial in report (table durability override limitations) | `docs/BACKLOG.md` |
-| P12 | Task G1/G2/G3/G4 reports | PLS flag + jwt-claim enforcement, admin cross-partition bypass, bypass rate limiting and query audit path | DML service-key bypass audit delivered in P14 BL-041 | `docs/tasks/P14/BL-041-ServiceKeyPlsBypassAudit-DML.md` |
+| P12 | Task G1/G2/G3/G4 reports | PLS flag + jwt-claim enforcement; history: an admin cross-partition read and a rate limiter, both replaced by the `all-partitions` grant and a cost-waiver flag (**BL-1227, next train**) | The grants phase (BL-1227) replaced the service-key bypass audit of P14 BL-041 with `access_grant_used` | `docs/tasks/Grants/Grants-Overview.md` |
 | P14 | `P14-ADRA-Tasks.md`, `P14-TaskS4-EnhancedPLS.md` | Unified enforcer dispatch and auth-db-pls permission-context path, safer OR/fan-out handling model | Ongoing ADRA hardening and full ecosystem parity | `docs/BACKLOG.md` BL-044 (+ future ADRA tasks) |
 | P45 | `docs/tasks/P45/P45-PruningAndShape-Overview.md` (sessions S01–S08) | Exact partition-key and hash-bucket segment pruning; cached segment discovery; background cold-segment coalescing so streaming-write segment shape stops decaying; declarable `initialBucketCount`/promotion thresholds/`pkUniqueness` with a cardinality-derived default; byte-sized page splitting for cheaper materialization | Bucket-count rebalancing of an existing table; partial-bucket accrual across a bulk-load `:commit` boundary | `docs/BACKLOG.md` BL-300 (manual migration route), BL-381 (deferred) |
 
@@ -396,7 +456,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 | Shared-bucket routing + nested dedicated paths | Yes | No | No | `PartitionRouter.cs` + P4 F1 report | Dedicated path supports multi-level directories |
 | Auto-promotion shared -> dedicated | Yes | No | No | P4 F3 report + `PartitionVolumeTracker.cs` + `PartitionPromoter.cs` | Queue/in-progress/wal-callback flow implemented |
 | Partition-filter-required query guard | Yes | No | No | P4 F2 report + `PartitionEnforcer.cs` + `TableQuery.cs` | Default safety on partitioned tables |
-| Explicit cross-partition query opt-in | Yes | No | No | `QueryMessage.CrossPartitionAccess`, `.WithCrossPartitionAccess()` in engine/.NET client | TypeScript fluent surface gap remains |
+| Explicit cross-partition query opt-in (a cost waiver, **BL-1227, next train**) | Yes | No | No | `QueryMessage.CrossPartitionAccess`, `.WithCrossPartitionAccess()` in the engine and both SDKs; per call on named queries; `cross_partition_access` on `subscribe` | Never widens what a credential sees |
 | Retrospective partitioning baseline | Yes | Yes | No | P4 BL005 report + policy model | Strategy surface exists; some strategy fields remain phase-2 intent |
 | Multi-database registry and lifecycle state machine | Yes | No | No | P6 A2 report + `DatabaseRegistry.cs` | Persistent registry with create/drop transitions |
 | Multi-engine routing per database | Yes | No | No | P6 A3 report + `DatabaseManager.cs` | One active engine per active database |
@@ -406,12 +466,10 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 | Per-db memory budget coordination | Yes | No | No | P6 F1 report + server memory manager wiring | Works with server-wide cap model |
 | Partition-level security (`partitionLevelSecurity`) | Yes | No | No | P12 G1 report + schema/model fields | Valid only for partitioned tables |
 | jwt-claim PLS enforcement | Yes | No | No | P12 G2 report + `PartitionSecurityEnforcer.cs` | Injects/validates partition scope from claim |
-| Admin cross-partition bypass + query audit | Yes | No | No | P12 G3 report + `QueryController.cs` | Includes query-level audit action |
-| Cross-partition bypass rate limiting | Yes | No | No | P12 G4 report + limiter classes | Per identity + database sliding-window limiter |
+| `all-partitions` grant (replaces the admin cross-partition read; **BL-1227, next train**) | Yes | No | No | Grants phase, `docs/tasks/Grants/` + `PartitionSecurityEnforcer.cs` | Held by a service key and a `db_admin` user by implication, or through a role; every use writes `access_grant_used` |
 | auth-db-pls enforcement path | Yes | No | No | P14 S4 task + `PartitionSecurityEnforcer.cs` | PermissionContext-driven grant routing |
-| DML service-key bypass audit logging | Yes | No | No | `PartitionSecurityEnforcer.cs` + `QueryController.cs` + `TablesController.cs` + BL-041 task | Query and DML paths emit `service_key_pls_bypass` when applicable |
+| `access_grant_used` audit (replaces the service-key bypass audit; **BL-1227, next train**) | Yes | No | No | `AccessGrantAudit.cs` + the controllers | One row per table and grant, per request, job, stream, subscribe and re-key that a grant decided; never per event |
 | PLS helper support for `WhereClause.Groups` | No | Yes | No | `Messages.cs` + `PartitionSecurityEnforcer.cs` + BL-044 | Server has groups in protocol; helper logic not fully groups-aware |
-| TypeScript fluent cross-partition toggle | No | No | Yes | `../aouda-client-ts/src/query-builder.ts` | No `withCrossPartitionAccess()` in current TS query builder |
 | Partition-key and hash-bucket segment pruning | Yes | No | No | P45 overview + S02 report | Exact for `eq`/`in`/constrained composite prefix; never prunes a bucket on a range predicate |
 | Background cold-segment coalescing | Yes | No | No | P45 overview + S05 report | Steady-state, not a one-off repair; keeps streaming-write segment shape from decaying indefinitely |
 
@@ -453,7 +511,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 - Runtime invariants:
   - Route database must match body database for scoped request DTOs.
   - Partition enforcement decisions occur before table query execution.
-  - Cross-partition bypasses are explicit and observable (audit/rate-limiter paths).
+  - Reads that a grant lifts are explicit and observable (`access_grant_used`, **BL-1227, next train**); the cross-partition flag is a cost waiver and changes no one's visibility.
 
 ### Should this table have a partition key? (P45)
 
@@ -650,9 +708,9 @@ Core modules:
 4. Security scope:
    - `PartitionSecurityEnforcer.EnforceQueryScope(...)` applies jwt-claim or auth-db-pls mode.
    - `RlsPredicateInjector` can add row-level predicates for auth-db-rls mode tables.
-5. Cross-partition bypass path:
-   - if bypass used, optional rate limiter is applied,
-   - audit record is written for cross-partition query or service-key bypass.
+5. Cross-partition and grant path:
+   - a holder of `all-partitions` gets no partition predicate, and the use is recorded as `access_grant_used` once per request (**BL-1227, next train**),
+   - `crossPartitionAccess` waives the partition-filter guard only: there is no limiter and no audit row for the flag itself.
 6. Query translation and execution proceeds through `TableQuery`.
 7. Test anchors: `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`, `tests/Aouda.Engine.Auth.Tests/PLS/PartitionSecurityEnforcerTests.cs`.
 
@@ -673,7 +731,7 @@ Core modules:
 
 | Capability question | Typical systems | Aouda approach | User impact |
 |---|---|---|---|
-| Is partition safety "best effort" or enforced by default? | Often advisory patterns or optional optimizer hints | Default partition-filter enforcement (`RequirePartitionFilter = true`) with explicit bypass | Fewer accidental full-partition scans; safer multi-tenant access patterns |
+| Is partition safety "best effort" or enforced by default? | Often advisory patterns or optional optimizer hints | Default partition-filter enforcement (`RequirePartitionFilter = true`) with an explicit cost waiver (`crossPartitionAccess`) | Fewer accidental full-partition scans; safer multi-tenant access patterns |
 | Can one server host many isolated DBs without hidden global coupling? | Varies; some systems are single-db engines with external orchestration | First-class `DatabaseRegistry` + `DatabaseManager` with per-db engines and routes | Cleaner tenant/workload isolation inside one Aouda server |
 | How explicit is database routing in API contracts? | Some APIs infer db from connection/session context | Database-scoped routes plus required body `database` fields | Lower risk of wrong-db writes/queries |
 | How does partition storage adapt to skew? | Static partition strategy is common | `Auto` mode with tracked volume thresholds and promotion to dedicated storage | Better balance for mixed-size tenant populations |
@@ -710,23 +768,20 @@ Core modules:
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | create-db API | DB create-time operational setting |
 | `CreateDatabaseRequest.maxMemoryShareBytes` | long? | `null` | null or non-negative | create-db API | DB create-time cap on its share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`) |
 | `CreateDatabaseRequest.defaultTemperature` | string? | `null` (`Auto` in options) | `Auto`, `HotOnly`, `ColdPreferred` | create-db API | DB create-time default table temp |
-| `Aouda:PlsCrossPartitionRateLimit:Enabled` | bool | `false` | `true/false` | server config | Enables limiter for bypassed cross-partition queries |
-| `Aouda:PlsCrossPartitionRateLimit:PermitLimit` | int | `60` | positive | server config | Max requests/window per (identity, db) |
-| `Aouda:PlsCrossPartitionRateLimit:WindowSeconds` | int | `60` | positive | server config | Limiter window size |
 
 Precedence and operational notes:
 
 - Precedence:
   - Route `{db}` plus required body `database` define request scope at runtime.
   - Table-level partition settings override database defaults for table behavior.
-  - Request-level `crossPartitionAccess` can only bypass query partition-filter requirement; it does not bypass authorization unless allowed by auth mode/rules.
+  - Request-level `crossPartitionAccess` waives the partition-filter requirement and nothing else: it never widens what the credential is authorized to see (**BL-1227, next train**).
 - Dynamic vs restart-required:
-  - `Aouda:Databases` and limiter config are startup-loaded server configuration (treat as restart-required).
+  - `Aouda:Databases` is startup-loaded server configuration (treat as restart-required). The `Aouda:PlsCrossPartitionRateLimit` keys no longer exist (**BL-1227, next train**); a leftover key in a config file is ignored.
   - Table partition options and table auth mode updates are runtime API operations.
 - Safety-gated settings:
   - Database name validation rejects invalid/reserved names.
   - Route/body database mismatch is rejected.
-  - Partitioned query without required filter is rejected unless explicit bypass.
+  - Partitioned query without required filter is rejected unless `crossPartitionAccess` waives the guard.
 - Deprecated/reserved:
   - `PartitionOptions.Migration` and its phase-2 fields were removed (**WorkloadCore S17, 0.3.0**).
 
@@ -750,7 +805,7 @@ var rows = await client
 
 Expected result: query can run on a partitioned table without explicit partition key filter because cross-partition access is explicitly requested.
 
-Common mistake: using cross-partition access for all app traffic; this should stay an admin/analytics exception path.
+Common mistake: using cross-partition access for all app traffic; this should stay an admin/analytics exception path. The flag only waives the scan guard: a caller still sees only what its grants allow (**BL-1227, next train**).
 
 ### TypeScript example (multidb + partitioned query)
 
@@ -771,7 +826,17 @@ const orders = await client
 
 Expected result: request is sent to `/api/databases/appdb/query` with explicit `database` in body and partition-safe filter.
 
-Common mistake: expecting a TS fluent `withCrossPartitionAccess()` helper; current TS query builder does not expose this toggle.
+To read across partitions deliberately, add the flag (**BL-1227, next train** for its subscribe and named-query halves; the query builder method is older):
+
+```typescript
+const all = await client
+  .table("orders")
+  .withCrossPartitionAccess()
+  .where("status", "=", "open")
+  .execute();
+```
+
+The flag waives the partition-filter guard and nothing else: with a user's token it returns the user's own partitions, and only a credential that holds `all-partitions` (an app service key, a `db_admin` user) reads every partition.
 
 ### HTTP/protocol examples
 
@@ -818,18 +883,16 @@ Common mistake: omitting `database` in request body or mismatching route/body da
 |---|---|---|---|---|---|
 | Create partitioned table (partition key + storage mode) | Table create DTOs / schema APIs | `tables.createTable(...)` with partition fields | `POST /api/databases/{db}/tables` | Implemented | End-to-end available |
 | Query partitioned table with required filters | Fluent query APIs | `table(...).where(...).execute()` | `POST /api/databases/{db}/query` | Implemented | Guarded by server/engine partition enforcement |
-| Explicit cross-partition query opt-in | `.WithCrossPartitionAccess()` (`RemoteTableQuery`, `TableQuery`) | No dedicated fluent method | `QueryMessage.crossPartitionAccess = true` | Partial | TS surface gap |
+| Explicit cross-partition opt-in (a cost waiver; **BL-1227, next train**) | `.WithCrossPartitionAccess()` (`RemoteTableQuery`, `TableQuery`; it reaches `SubscribeAsync`), `SubscribeOptions.CrossPartitionAccess`, named-query execute / batch input | `withCrossPartitionAccess()`, `SubscribeOptions.crossPartitionAccess`, `NamedQueryExecuteOptions` / `NamedQuerySubscribeOptions` / per-item `crossPartitionAccess` | `crossPartitionAccess = true` (query, named-query call and batch item); `cross_partition_access` on `subscribe` | Implemented | Ignored on the data-plane listener |
 | Database CRUD | `.Databases` client surface (P6 C2) | `client.databases.list/create/get/drop` | `/api/databases` endpoints | Implemented | Database-scoped operations shipped |
 | Database-scoped data/schema routes | .NET client routes with `DatabaseName` | Client paths built from configured `database` | `/api/databases/{db}/...` | Implemented | Flat route era replaced |
 | PLS table configuration | table options DTOs | table create/update payload fields supported | table create/update options endpoints | Implemented | Includes `partitionLevelSecurity`, `authMode`, etc. |
 | auth-db-pls runtime enforcement | server/engine internal | server/engine internal | query path enforcement in controller/enforcer | Implemented | Requires PermissionContext path |
-| Cross-partition bypass rate limiting | server internal | server internal | 429 from query endpoint when limited | Implemented | Config gated (`Enabled=false` by default) |
 
 ### B) Missing API matrix
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| TypeScript fluent cross-partition toggle | `table(...).withCrossPartitionAccess()` equivalent | Use partition filters; no direct TS fluent bypass support today | Future TS SDK parity work | High |
 | Full PLS helper support for `WhereClause.Groups` | Enforcer helper extraction methods ignore groups | Keep top-level `and`/`or` for partition conditions | `docs/BACKLOG.md` BL-044 | Medium |
 | Full retrospective migration strategy parity | `Eager`/`Blocking` strategy intent fields not fully wired as shipped behavior | Use `None`/`Background` baseline behavior | P4 BL005 phase-2 follow-up work | Medium |
 
@@ -866,20 +929,22 @@ Expected result checks:
 - Route/body database mismatch requests are rejected.
 - Database list endpoint reports both as active.
 
-### Scenario 3: Controlled cross-partition admin query with limiter
+### Scenario 3: A trusted backend reads every partition on purpose
+
+(**BL-1227, next train**)
 
 When to use:
-- admin analytics requires temporary fan-out reads across many partitions.
+- a backend job (analytics, export) legitimately reads across many partitions of a table with partition-level security.
 
 Steps:
-1. Enable `Aouda:PlsCrossPartitionRateLimit` in config (`Enabled=true`).
-2. Send query with `crossPartitionAccess=true` as authorized admin.
-3. Repeat rapidly above permit threshold.
+1. Use the database's service key (`mk_svc_…`), or a user with the `db_admin` role. Both hold `all-partitions`, which lifts PLS.
+2. Send the query with `"crossPartitionAccess": true`. The grant decides whose rows the caller may see; the flag lifts the partition-filter guard.
+3. Read the audit log: `GET /api/databases/{db}/auth/admin/audit-log?action=access_grant_used`.
 
 Expected result checks:
-- Initial requests succeed.
-- Excess requests return 429 with retry-after semantics.
-- Audit entries are written for cross-partition bypass actions.
+- Every partition's rows come back. Without the flag the same query is `PARTITION_FILTER_REQUIRED`; with the flag but without `all-partitions` (a custom key holding `db_admin`, a server key) it is `403`.
+- One `access_grant_used` row per request, naming the grant (`all-partitions`), its `source` (`implied:service_key` or `implied:db_admin`), the table and the `operation`.
+- There is no rate limit: a cost limiter for waived fan-out reads is not part of this release.
 
 ## 2.13 Operations and observability
 
@@ -899,12 +964,11 @@ Monitor first:
   - **(P45)** segment-discovery cache hit/miss counts — repeated queries against an unchanged table stop
     paying the filesystem-walk cost after the first one; a concurrent flush, commit, or promotion is
     visible to the very next query regardless of the cache.
-- Query enforcement and bypass:
+- Query enforcement and grants:
   - partition-filter-required rejections
-  - cross-partition bypass counts
-  - 429 rate-limiter events for bypass traffic
+  - cross-partition counts (`Perf.CrossPartitionQueries`)
 - Security-audit signals:
-  - `query_cross_partition` and `service_key_pls_bypass` actions in auth audit table (query and DML `TablesController` paths)
+  - `access_grant_used` actions in the auth audit table (HTTP reads and writes, named queries, bulk load, subscriptions and write streams; **BL-1227, next train**); read them per database and table to see who used `all-partitions`
 - Per-database resource signals:
   - server memory endpoint per-db snapshots
   - per-db metrics/health endpoints from P6 monitoring work
@@ -921,26 +985,24 @@ Suggested tuning sequence:
 2. Start with partition filter requirement enabled and explicit tenant filters in app queries.
 3. Choose `Auto` partition storage first unless workload shape is clearly known.
 4. Add per-db memory caps when multiple high-volume databases share one server.
-5. Enable cross-partition limiter before granting broad admin bypass usage.
+5. Review who holds `all-partitions` (`GET …/users/{id}/access-grants`) before granting broad admin access.
 
 | Question | Practical answer |
 |---|---|
 | How do I quickly confirm DB isolation? | Create same table name in two DBs and verify query results differ per route |
 | How do I confirm partition query safety is active? | Run an unfiltered query on a partitioned table and verify it is rejected |
-| What should I monitor before enabling cross-partition admin analytics? | Bypass audit volume and limiter hit rate per identity/database |
+| What should I monitor before enabling cross-partition admin analytics? | `access_grant_used` volume per identity, database and table |
 
 ## 2.14 Troubleshooting by symptom
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `400` saying body database must match path database | Route/body mismatch | Ensure request body `database` equals `/api/databases/{db}` segment |
-| Query on partitioned table fails with partition filter required | Missing `eq`/`in` on every partition-key column (ranges and prefixes do not count) and no admin bypass | Add `eq`/`in` on the missing keys (named in the error); browser-tier cannot set `crossPartitionAccess`. See [partition-filter rule](#partition-filter-rule-p40) |
-| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key bypasses the guard, so it hides the gap | First ask whether the table clears [the partitioning rule](#should-this-table-have-a-partition-key-p45) — on a membership or roster table it usually does not, and dropping `partitionKey` for `auth-db-rls` removes the guard outright. Otherwise set `authMode: "auth-db-pls"` + `permissionDimension` so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
+| Query on partitioned table fails with partition filter required | Missing `eq`/`in` on every partition-key column (ranges and prefixes do not count) and the flag is not set | Add `eq`/`in` on the missing keys (named in the error), or set `crossPartitionAccess` (the data-plane listener ignores it, so the browser tier cannot). See [partition-filter rule](#partition-filter-rule-p40) |
+| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key's own call sets `cross_partition_access`, which waives the guard, so it hides the gap; the browser tier cannot send the flag | First ask whether the table clears [the partitioning rule](#should-this-table-have-a-partition-key-p45) — on a membership or roster table it usually does not, and dropping `partitionKey` for `auth-db-rls` removes the guard outright. Otherwise set `authMode: "auth-db-pls"` + `permissionDimension` + `permissionColumn` (the partition-key column) so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
 | A named artifact returns `404 NOT_FOUND` to a user token, but exists in the catalog export | On the data-plane listener a permission denial is deliberately masked as "not found", so callers cannot enumerate artifacts | Read the **server** log: it records the real denial reason, code and subject for every masked 404. Grant the caller access — re-deploying the artifact will not change it |
-| Cross-partition admin queries suddenly return 429 | Rate limiter enabled and threshold exceeded | Reduce request rate, widen window/permit settings, or retry after suggested delay |
-| Service key writes bypass PLS but no corresponding audit entries | Should not occur after BL-041 | Confirm `_audit_log` contains `service_key_pls_bypass` for the database/table; see integration tests in `PartitionLevelSecurityEnforcementIntegrationTests` |
+| A grant's use is not in the audit log | The grant did not decide the outcome (the table has no PLS / RLS for it, or the request was refused first), or the audit write failed (best-effort; check the server log) | Read `GET …/auth/admin/audit-log?action=access_grant_used`; a caller without a grant, or a table with neither PLS nor RLS, writes none **(BL-1227, next train)** |
 | PLS behavior seems odd with nested/grouped filter shapes | `WhereClause.Groups` helper adoption gap | Keep partition conditions in top-level `and`/`or` until BL-044 work lands |
-| TypeScript app cannot request explicit cross-partition query | TS fluent SDK missing toggle | Use partition filters; track SDK parity enhancement |
 
 ## 2.15 Verification ledger
 
@@ -950,16 +1012,16 @@ Last verification date (UTC): `2026-09-10`.
 |---|---|---|---|---|
 | Documentation/code alignment audit for partition + multidb + PLS sources | N/A (source and report audit pass) | Pass | 2026-03-31 | Validated defaults, route shapes, protocol fields, and enforcer paths against current code |
 | Partition query enforcement behavior | N/A (test evidence referenced) | Not run in this doc pass | 2026-03-31 | Covered by `TableQueryPartitionTests` and `PartitionEnforcementIntegrationTests` |
-| PLS bypass/rate-limit/audit behavior | N/A (test evidence referenced) | Not run in this doc pass | 2026-03-31 | Covered by P12 reports and enforcement tests listed in section 2.16 |
+| PLS grant and audit behavior | N/A (test evidence referenced) | Not run in this doc pass | 2026-03-31 | Covered by P12 reports and enforcement tests listed in section 2.16 |
 | Multi-database lifecycle/isolation scenarios | N/A (test evidence referenced) | Not run in this doc pass | 2026-03-31 | Covered by P7 scenario report and multi-db testing suites |
 
 ## 2.16 Test coverage matrix
 
 | Capability | Test files / suites | Current status | Coverage strength | Notes |
 |---|---|---|---|---|
-| Partition key filter enforcement and bypass | `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs` | Pass (historical/phase evidence) | Strong | Covers required-filter and cross-partition execution paths |
+| Partition key filter enforcement and the cross-partition flag | `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs` | Pass (historical/phase evidence) | Strong | Covers required-filter and cross-partition execution paths |
 | Partition storage path behavior (including nested paths) | `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs` | Pass (historical/phase evidence) | Medium/Strong | Validates nested partition routing semantics |
-| PLS query and bypass enforcement | `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`, `tests/Aouda.Engine.Auth.Tests/PLS/PartitionSecurityEnforcerTests.cs` | Pass (historical/phase evidence) | Strong | Includes jwt-claim and auth-db-pls logic branches |
+| PLS query and grant enforcement | `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`, `tests/Aouda.Engine.Auth.Tests/PLS/PartitionSecurityEnforcerTests.cs` | Pass (historical/phase evidence) | Strong | Includes jwt-claim and auth-db-pls logic branches |
 | Multi-database lifecycle and isolation scenarios | `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs` + P7 scenario report | Pass (historical/phase evidence) | Medium/Strong | Covers create/list/drop/isolation/recovery classes of behavior |
 | Protocol serialization for database-scoped messages | `tests/Aouda.Protocol.Tests/SerializationTests.cs` | Pass (historical/phase evidence) | Medium | Verifies DTO field serialization contracts |
 
@@ -967,7 +1029,6 @@ Last verification date (UTC): `2026-09-10`.
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| No explicit TS client test for cross-partition flag because fluent API is missing | SDK parity and documentation correctness risk | Add TS API once implemented, then contract test for emitted `crossPartitionAccess` | High |
 | Limited explicit tests for `WhereClause.Groups` with PLS helper extraction | Complex query-shape correctness risk | Add group-aware PLS helper tests as part of BL-044 | Medium |
 | Retrospective migration phase-2 strategy behavior not covered end-to-end | Operators may assume Eager/Blocking are fully active | Add strategy-specific integration tests once those paths are fully wired | Medium |
 
@@ -976,9 +1037,6 @@ Last verification date (UTC): `2026-09-10`.
 - BL-044 (open):
   - `WhereClause.Groups` adoption is incomplete across clients and PLS helper extraction logic.
   - User impact: complex grouped predicates can hit unsupported/less ergonomic partition-security behavior.
-- TypeScript fluent parity gap:
-  - TS query builder currently lacks explicit cross-partition toggle method.
-  - User impact: TS consumers must stay with partition filters and cannot explicitly request cross-partition query bypass in fluent API.
 - Retrospective partitioning phase-2 strategy gap:
   - `Eager`/`Blocking` strategy fields are defined but not documented as fully shipped behavior.
   - User impact: treat these as reserved/planned rather than production-ready guarantees.
@@ -1033,12 +1091,12 @@ Last verification date (UTC): `2026-09-10`.
   - `docs/tasks/P12/P12-TaskG1-PLSFlagAndConfiguration-Report.md`
   - `docs/tasks/P12/P12-TaskG2-PlsEnforcement-TokenClaimToPartitionRouting-Report.md`
   - `docs/tasks/P12/P12-TaskG3-PlsCrossPartitionAccessControl-Report.md`
-  - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md`
+  - `docs/tasks/P12/P12-TaskG4-PlsCrossPartitionRateLimiting-Report.md` (history: the limiter is gone, **BL-1227, next train**)
   - `docs/tasks/P14/P14-ADRA-Tasks.md`
   - `docs/tasks/P14/P14-TaskS4-EnhancedPLS.md`
 - Backlog:
   - `docs/BACKLOG.md` (`BL-044`)
-  - `docs/tasks/P14/BL-041-ServiceKeyPlsBypassAudit-DML.md`
+  - `docs/tasks/P14/BL-041-ServiceKeyPlsBypassAudit-DML.md` (history: superseded by `access_grant_used`, **BL-1227, next train**)
 - Code:
   - `src/Aouda.Engine.Catalog/Policies.cs`
   - `src/Aouda.Engine.Catalog/CatalogModels.cs`
@@ -1058,8 +1116,6 @@ Last verification date (UTC): `2026-09-10`.
   - `src/Aouda.Protocol/Schema/TableMessages.cs`
   - `src/Aouda.Server/Configuration/AoudaServerOptions.cs`
   - `src/Aouda.Server/Configuration/DatabaseConfigSection.cs`
-  - `src/Aouda.Server/Configuration/PlsCrossPartitionRateLimitOptions.cs`
-  - `src/Aouda.Server/Auth/PlsCrossPartitionRateLimiter.cs`
   - `src/Aouda.Client/RemoteTableQuery.cs`
   - `../aouda-client-ts/src/client.ts`
   - `../aouda-client-ts/src/query-builder.ts`
@@ -1078,5 +1134,4 @@ Last verification date (UTC): `2026-09-10`.
 
 - This document is capability-complete at feature level, but it does not enumerate every DTO property for every server/client method.
 - Verification ledger is evidence-referenced rather than fresh command execution in this doc-writing pass.
-- If TypeScript adds explicit cross-partition query support, section `2.11` and the missing API matrix must be updated immediately.
 - If BL-044 is completed, sections `2.4`, `2.17`, and `2.18` should be updated in the same PR as the code changes. (BL-041 updates landed 2026-04-04.)

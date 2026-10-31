@@ -189,7 +189,7 @@ Notes:
 - `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](access-surface.md).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top.
 - `dataPlaneAccess: true` is required for browser-tier callers on **every table the definition touches**, including join tables **and** a materialized-query result table. On an MQ, set it on the `materializedQueries` entry (default `false`) — do not PATCH table-options. Independent of ADRA: RLS/PLS still filter rows of the base table.
-- **A join target must be readable without restriction** (**architecture review, 0.3.0**). RLS and PLS filter the base table only — a join cannot carry them onto the joined table — so an execute whose definition joins a table the caller's RLS or PLS would filter is refused with `403 AUTHORIZATION_DENIED`, naming the table; every joined table also needs the caller's grant. Before, the joined table was read unfiltered. **BL-818** tracks filtering the join side instead. Query a restricted table on its own, or through a materialized query keyed for it.
+- **A joined table is scoped as a direct read of it would be** (**BL-818, 0.3.0**; **BL-1227, next train**). The caller's RLS and PLS for every joined table are applied on that join's side, so an execute whose definition joins a table the caller may read only part of is answered with that part, and every joined table also needs the caller's grant. A holder of `all-partitions` or `all-rows` is lifted on the joined side as on a direct read; `crossPartitionAccess` is not carried to a joined table. Still `403 AUTHORIZATION_DENIED`, naming the table: a joined table whose partition-level security refuses the caller, and a joined materialized-query result whose source security cannot be applied.
 
 ### Legal `where` operators
 
@@ -848,7 +848,11 @@ This is the recommended path for a bounded, continuous-trickle insert feed (e.g.
 
 Every named-query execute, batch element, mutation, and subscribe applies **the caller's** PLS and RLS. A bug in a named query cannot leak across a tenant boundary **if ADRA is intact** — which is why fail-closed resolvers and the [access-surface diff](access-surface.md) exist.
 
-Service keys (`mk_svc_*`) keep the audited bypass. They are for backends, not browsers.
+Visibility is **granted**, never implied by the kind of key. A service key (`mk_svc_*`) holds `all-partitions` and `all-rows` on its database, and a user with a `db_admin` role assignment on the database holds the same (a token that only *claims* `db_admin` holds nothing), so a named query run by either sees what a direct read would see. Any other credential sees its partition grants or tenant, or holds the grant through a role. Service keys are for backends, not browsers. A call that a grant decided is audited like any read: one `access_grant_used` row per table and grant per request, and a batch whose slots read one table writes one row per grant, not one per slot. See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). (**BL-1227, next train**)
+
+### `crossPartitionAccess` per call
+
+A named-query call on the **admin** listener can send `crossPartitionAccess: true` (an execute body, or one item of a batch; `cross_partition_access` on a [subscribe](#subscribe-by-name)). It waives the partition-filter guard when the query's `where` binds no partition key, and nothing else: the rows stay the caller's grants: a credential without `all-partitions` reads only its partition grants (or its tenant), and one with no grant at all on a PLS table is still refused. A definition cannot set it, and the data-plane listener ignores it. A browser binds the key in the definition instead; see [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener). (**BL-1227, next train**)
 
 There is no catalog field, header, or option that runs a named query as someone else.
 

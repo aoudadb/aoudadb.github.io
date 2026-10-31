@@ -265,12 +265,13 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/sessions/{id}` | DELETE | End one session: its refresh family is revoked and every access token it issued is revoked (**NativeClients, 0.4.0** — it deleted the row only, and the session kept refreshing). The user's other sessions are untouched |
 | `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
-| `.../admin/users/{id}/roles` | PUT | Replace user's role assignments |
+| `.../admin/users/{id}/roles` | PUT | Replace user's role assignments: `{ "roles": [{ "roleName", "scope" }] }`; an item that names no role is skipped, and the old assignments are still replaced |
+| `.../admin/users/{id}/access-grants` | GET | The `all-partitions` / `all-rows` grants the user holds on a database, with their source: `?database=` (required on an auth database's route). An auth-admin key (`mk_adm_`) may call it (**BL-1227, next train**) |
 | `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
 | `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key, a nested name, or a reserved name (`sub`, `email`, `iss`, `aud`, `iat`, `exp`, `nbf`, `aal`, `db_roles`, and the authenticator names `auth_type`, `api_key_kind`, `api_key_id`, `api_key_prefix`, `api_key_name`, `aouda_auth_db` — **BL-1031, 0.5.0**) |
 | `.../admin/roles` | GET | List roles |
-| `.../admin/roles` | POST | Create custom role |
-| `.../admin/roles/{id}` | PATCH | Update role |
+| `.../admin/roles` | POST | Create custom role. A permission may be an access grant (`all-partitions` / `all-rows`, **BL-1227, next train**) |
+| `.../admin/roles/{id}` | PATCH | Update role (a `permissions` array, when sent, replaces the role's permissions) |
 | `.../admin/roles/{id}` | DELETE | Delete custom role |
 | `.../admin/api-keys` | GET | List API keys |
 | `.../admin/api-keys` | POST | Create custom API key |
@@ -410,7 +411,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 |-------|------|----------|-------|
 | `name` | string | **Yes** | Unique role name. |
 | `description` | string | No | |
-| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (default `"table"`), `resourceName` (default `"*"`), `actions` (**string**, e.g. `"read"` or `"read,write"`). |
+| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (`"table"` by default; `"all-partitions"` or `"all-rows"` for an access grant — anything else is `400 AUTH_GRANT_INVALID`, where up to 0.8.0 any string was stored), `resourceName` (default `"*"` for a `table` permission), `actions` (**string**, e.g. `"read"` or `"read,write"`). For an access grant `resourceName` and `actions` are **required** — `*` or a table name, and exactly one of `read`, `write`, `admin` — and a system role cannot carry one (**BL-1227, next train**). |
 
 ```json
 {
@@ -425,6 +426,8 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 **400 `INVALID_REQUEST`:** missing `name`, duplicate name, or malformed JSON. Body is `{ "error", "message", "suggestion", "requestId" }` — log it. `permissions` is not required.
 
+**400 `AUTH_GRANT_INVALID`, `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`** (**BL-1227, next train**): a refused access grant — an unknown `resourceType`, a missing or multiple level, a missing `resourceName`, a `null` entry or a system role; a table the database does not have; a table with no PLS (`all-partitions`) or no RLS resolver (`all-rows`). Nothing is written. The request shapes, messages and worked example are in [§19.8a of Data Authorization](authorization.md#198a-admin-api-access-grants-on-roles).
+
 **`POST .../admin/api-keys`** — Create a `custom` API key. Returns `201 Created`. The raw key is returned **only in this response** — it is stored hashed, and cannot be recovered later.
 
 | Field | Type | Required | Notes |
@@ -433,7 +436,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 | `roles` | array | No | RBAC roles for this key: `[{ "role": "db_writer", "scope": null }]`. `scope` is a database name or `null` for all databases — same shape as user role assignments. |
 | `expiresAt` | string? | No | ISO-8601 timestamp. Omit for a non-expiring key. |
 | `kind` | string | No | Defaults to `"custom"`. `"anon"`, `"service_role"`, `"public"`, and `"server_admin"` are reserved — they are singleton, system-managed keys and this endpoint rejects creating them (`400 INVALID_REQUEST`). |
-| `userId` | string? (GUID) | No | Links this key to an existing user (its `id`). The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — no key but the `service_role` key bypasses them ([0.4.0](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040)) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
+| `userId` | string? (GUID) | No | Links this key to an existing user (its `id`). The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — a key holds no access grant unless it is linked to a user who does ([Visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows); **BL-1227, next train**) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
 
 ```json
 {
@@ -595,7 +598,9 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 |------------|------|---------|--------|
 | `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
 | `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
-| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields | Check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`) |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant | For a partition grant, check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, next train**) |
+| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission names a table no governed database has (case-sensitive) | Fix the table name, or use `*` (**BL-1227, next train**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | The named table lacks the security the grant lifts (no PLS for `all-partitions`, no RLS for `all-rows`) | Drop the grant; it would lift nothing (**BL-1227, next train**) |
 
 ### ADRA RLS Resolver Admin Errors
 
@@ -644,13 +649,14 @@ try {
 ### API Key Security
 
 - **`anon` keys** (`mk_anon_`) are safe to embed in frontend code — they grant limited access only.
-- **`service_role` keys** (`mk_svc_`) must be kept secret — they grant full database access.
+- **`service_role` keys** (`mk_svc_`) must be kept secret — they hold `all-partitions` and `all-rows` on their database, so they read and write every row of every table (**BL-1227, next train**).
 - **Server keys** (`mk_srv_`) must be kept secret and stored in environment variables.
-- **What each key may read (0.4.0, **0.4.0**):** only the `service_role` key (`mk_svc_`) bypasses partition- and
-  row-level security. Every other key without a user — `custom` (not linked to a user), `server_admin` (`mk_srv_`), `anon`,
-  `public` — gets its role's grants, and on a PLS / RLS table only what a request with no user may see (with the usual
-  rules, no row; a PLS table answers `403`). Up to 0.3.x a server key bypassed them too. Use `X-User-Token` with a service or
-  server key for one user's data — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+- **What each key may read (**0.4.0**; **BL-1227, next train**):** a key sees past partition- and row-level security only
+  through the access grants it holds. The `service_role` key (`mk_svc_`) holds both on its database, by implication. Every other key
+  without a user — `custom` (not linked to a user), `server_admin` (`mk_srv_`), `anon`, `public` — gets its role's grants, and on a PLS / RLS
+  table only what a request with no user may see (with the usual rules, no row; a PLS table answers `403`), with or without
+  `crossPartitionAccess`, which waives a cost guard and nothing else. Up to 0.3.x a server key was exempt too. Use `X-User-Token` with a
+  service or server key for one user's data — [Visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 - Auto-generated keys are shown only once at creation time. Store them securely.
 - Rotate keys periodically via the regeneration endpoint.
 
@@ -692,6 +698,31 @@ Signup, refresh, password-reset, and MFA verification are not covered. Sign-in i
 ### Audit Logging
 
 All auth events are logged to the `_audit_log` table: sign-up, sign-in, sign-out, failed attempts, password changes, role changes, admin actions, and `signin_ceiling_tripped` when the optional failed-signin ceiling first fires.
+
+**`access_grant_used`** (**BL-1227, next train**) records every use of an access grant: a request, bulk-load job, subscription or write
+stream whose outcome an `all-partitions` or `all-rows` grant decided, by any credential. Up to 0.8.0 the service key's PLS bypass wrote
+`service_key_pls_bypass` and a `db_admin` cross-partition read wrote `query_cross_partition`; both kinds are gone, with no alias.
+
+| Column | Value |
+|---|---|
+| `action` | `access_grant_used` |
+| `resource` | `{database}/{table}` |
+| `user_id` | The user, or for a key without a user the key's own id |
+| `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
+
+- A row is written only when a grant **decided** the outcome: the table has the restriction the grant lifts (PLS for `all-partitions`, an RLS
+  resolver for `all-rows`). For a read, the row is written only when neither half denied it; a write is recorded when its gate is
+  asked, so a write that the other half then refuses still names the grant. A caller without a grant writes nothing, and so does a
+  table with no PLS or RLS. The row records the authorization decision, not the request's success: a read that the partition-filter
+  cost guard then refuses still names the grant.
+- A row is written **once** per request (per table, grant and operation; a named-query batch writes one per grant), per bulk-load job, credential
+  and table (at `:begin`, or at the first `:append` of another credential), per truncate and per seed (each table and grant, before the
+  first row is written; a refused one writes none), per subscribe, per re-key that newly uses a grant, and per write
+  stream (again when the grants that decide it change). **Never one per live event.** An upsert is an `insert`.
+- It goes to the auth database that governs the data, else to the one that authenticated the credential. The write is best-effort: a failure is
+  logged and never fails the request.
+- `crossPartitionAccess` on its own writes nothing: it is a cost waiver, not a grant. Graph and vector reads are not audited yet (BL-1289).
+- Read them with `GET …/auth/admin/audit-log?action=access_grant_used` (`from`, `to`, `userId`, `limit`, `offset` also filter).
 
 ---
 
@@ -1097,7 +1128,7 @@ In Aouda, the traditional tradeoff between JWT-embedded claims (fast, stale) and
 | Policy location | In the database as SQL objects | In auth DB (`_rls_resolvers` table) |
 | Manage policies | SQL migrations or Supabase dashboard | Admin API (`PATCH /rls-resolvers/{id}`) |
 | Test policies | Run SQL queries with `set local role` | Unit test resolver evaluation against mock auth DB |
-| Admin bypass | `set local role service_role` | `PartitionGrant` with `{"role":"…","effect":"allow-all"}` |
+| Admin pass-through | `set local role service_role` | `PartitionGrant` with `{"role":"…","effect":"allow-all"}`, or an `all-rows` grant (**BL-1227, next train**) |
 | Compound predicates | Full SQL `OR`/`AND` | Composite resolver with `combinator: OR/AND` |
 
 ---
