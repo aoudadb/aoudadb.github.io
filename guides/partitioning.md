@@ -434,7 +434,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 ### Reserved / not yet wired
 
 - PLS helper awareness for `WhereClause.Groups` is still backlog-tracked (`BL-044`), not complete.
-- A grant's use on a DML request (insert/update/delete, bulk load) is audited as `access_grant_used` (**BL-1227, next train**; it replaced the `service_key_pls_bypass` rows BL-041 added).
+- A grant's use on a DML request (insert/update/delete, bulk load, truncate, schema seed) is audited as `access_grant_used` (**BL-1227, next train**; it replaced the `service_key_pls_bypass` rows BL-041 added).
 
 ## 2.5 Phase coverage matrix
 

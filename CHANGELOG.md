@@ -73,6 +73,15 @@ Public, user-facing release notes. Engine phase status lives in the server
   - A caller refused a protected table by bulk load could still `:append` to another caller's job on it; `:append` now asks the check of
     the credential appending.
   - Policy inspect's `includeSample` returned a secured table's rows to a custom key holding `db_admin` or a server key.
+  - Truncate and schema seed on a PLS or RLS table asked only the role check: a custom role carrying `truncate` emptied every
+    tenant's partition, and a seed wrote rows no partition or row check saw. Both now need the grants bulk load needs, or answer
+    `403 AUTHORIZATION_DENIED` and write nothing ([Authorization](auth/authorization.md#bulk-load-is-not-a-per-user-write-bl-1031-050)).
+  - An update whose `set` named the partition column moved a row into a partition its writer may not write, and an upsert replaced
+    another partition's or another owner's row by key. Both are now held to the write rule of the partition or row they reach
+    ([§19.4.4](auth/authorization.md#1944-write-path-access-level-enforcement)).
+  - The materialized-query endpoint, for a query over another query's result, returned every row: it took the policy of the result
+    it read from, which has none. It now filters by the base table's, as `/query` on the result does. A named-query subscribe whose
+    `target` spelled the query's table in another case took its security from the other-cased table; it now reads the query's own.
 
 - **A dropped table's leftover directory is removed at the next open (BL-1255, next train).** A drop deletes the table's
   directory after the catalog has dropped it; if that delete failed (a file held open, a permission) or the process stopped
