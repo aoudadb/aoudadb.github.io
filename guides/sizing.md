@@ -238,6 +238,59 @@ decimal column now costs 8 bytes a value in memory. A decimal also travels as 8 
 loads without a per-value allocation: a bulk load's decimal column takes as much of the ingest buffer as an `Int64`
 column.
 
+### Array columns: what a value costs (**BL-035, next train**) {#array-columns-what-a-value-costs}
+
+(**BL-035, next train**) An [array column](array-columns.md) stores each value's elements as they are, in the tiers that hold
+rows, and compresses them only on disk.
+
+**In memory** (the write buffer, the hot tier, a materialized result that carries the column, the WAL's buffer) a value costs
+its **raw payload plus 32 bytes**, and a null costs 8:
+
+| Cell | Bytes charged to the memory budget |
+|---|---|
+| a null (**BL-035, next train**) | 8 |
+| `Double[]`, `Int64[]` of *n* elements (**BL-035, next train**) | 8 + 24 + 8*n* |
+| `Float32[]`, `Int32[]` of *n* (**BL-035, next train**) | 8 + 24 + 4*n* |
+| `Byte[]` of *n* (**BL-035, next train**) | 8 + 24 + *n* |
+| `String[]` of *n* elements, *u* bytes of UTF-8 in all (**BL-035, next train**) | 8 + 24 + 4 + 4*n* + *u* |
+
+There is no validity bitmap and no compression in these tiers: **size memory for the raw bytes.** A row of ten array cells costs
+their raw bytes plus 320. A curve table whose rows hold about 6.9 KB of arrays (the reference workload below) charges about
+7.2 KB a row, so 100,000 such rows resident are about 720 MB of the hot budget. A read's memory budget counts the payload bytes
+too, so a query that selects a wide array column from many rows asks for as much as the rows weigh.
+
+**On disk** (cold segments) the elements are encoded per page, and the engine chooses the encoding; nothing is configurable
+(an array column takes `Auto`). The ceiling is the raw bytes plus a few bytes per 2,048 elements for data that does not
+compress (random full-precision `Float32` values store at 1.00 × their bytes). What compresses is data that repeats or moves
+little from one row to the next: the same curve a second later, a grid or an id list that is constant per series, values rounded
+to a few decimals, small integers and bytes.
+
+Measured on the reference workload — *measured on `d03-aouda-kb`, 2026-10-29, on the seeded reference generator
+(`ReferenceCurveGenerator`, seed 2026: 6 curves, one row per curve per second for 600 s = 3,600 rows of 15 columns, 6,925 raw bytes
+a row: 6,900 of array elements, 25 of scalars), stored cold and merged* — the table takes **3,171 bytes a row, 0.458 × the raw row**, and
+**0.453 × the same rows stored as base64 `String` columns** (7,003 bytes a row), the way a table without array columns would
+hold them:
+
+| Column (kind) | Bytes a row on disk | The same as base64 `String` |
+|---|---|---|
+| `Fwd3m`, 200 `Double`, a smooth forward curve (**BL-035, next train**) | 989.9 | 2,140.3 |
+| `Basis36`, 150 `Double` (**BL-035, next train**) | 925.1 | 1,604.3 |
+| `FitModel`, 100 `Double` (**BL-035, next train**) | 498.8 | 1,072.3 |
+| `FitMarket`, 100 `Double` rounded to 1e-6 (**BL-035, next train**) | 121.7 | 1,072.3 |
+| `StubDf`, 50 `Double` (**BL-035, next train**) | 219.0 | 540.3 |
+| `FitDistanceBp`, 100 `Float32` (**BL-035, next train**) | 400.3 | 540.3 |
+| `NodeDays`, `FitIds` (`Int32[]`), `FitBandBp` (`Float32[]`), `FitGrade` (`Byte[]`), constant or tiny (**BL-035, next train**) | 5.0 · 3.1 · 1.9 · 1.0 | 11.4 · 6.1 · 6.1 · 1.4 |
+
+These are the numbers of one generator's data. Your arrays compress as well as they resemble it, and not better than their raw
+size by more than the repetition they hold.
+
+**A cold page is cut by bytes as well as rows.** A table with an array column ends a page before the row that would take any array
+column past 1 MiB of array payload (a constant, not a setting), otherwise at 8,192 rows, and every column of the table is cut at
+the same rows. A column of 400-element `Double[]` values (3.2 KB each) gets pages of about 300 rows; a numeric value is at most 512 KiB, so the largest fit two a page, and a `String[]` of about 1 MiB holds one value a page; and a table whose arrays are small keeps the 8,192-row pages. Wide array rows make short pages for every column of the table.
+
+**Retention and merges** treat an array table like any other: retention drops whole segments, and a compaction or merge carries
+the values bit for bit.
+
 ## The buffering thresholds are one formula in every deployment (**WorkloadCore S17, 0.3.0**)
 
 A server's buffering is sized by the same formulas on every host:

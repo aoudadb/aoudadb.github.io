@@ -829,6 +829,7 @@ Operations that still produce warnings (not changes) in v1:
 | Column `partitionFunction` (a column outside the key; a key column's function is part of `partitionKey`) | `"Partition function change on '...' from '...' to '...' is not supported: …"` | As above: the apply is refused (**BL-1199, next train**). |
 | Table `clusterColumns` | `"Cluster columns change on table '...' is not supported."` | Drop table, re-create. |
 | Column type involving Vector / MdVector | Tier 3 blocked | Not supported in v1. |
+| Column type change into or out of an array type (**BL-035, next train**) | Tier 3 blocked: `"Changing a column to or from an array type is not supported; add a new column and copy the values."` The column keeps its type. | Add a new column and copy the values. |
 | Type change on a partition-key column | Tier 3 blocked | Would reroute rows across partitions. |
 
 > **Note (P36):** Column `type`, `nullable`, `primaryKey`, `references`, rename, default, and description are first-class applyable changes. Imperative parity: `PATCH /api/databases/{db}/tables/{t}/columns/{c}` (type/nullable/autoIncrement/references/rename), `PUT …/columns:order`, and declarative apply for default/description/PK/culture. Non-integer `autoIncrement: true` still warns.
@@ -927,7 +928,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `type` | `type` | `string` | **Required** | Column data type. See valid values below. May be changed in place (P36): Tier 1 widens instantly; Tier 2 validates then rewrites. |
+| `type` | `type` | `string` | **Required** | Column data type. See valid values below, including the six [array types](array-columns.md) (**BL-035, next train**), which never change type. May be changed in place (P36): Tier 1 widens instantly; Tier 2 validates then rewrites. |
 | `primaryKey` | `primaryKey` | `int` | None | Ordinal position in composite primary key (1-based). Omit if not a PK column. Membership is changeable via apply. |
 | `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer columns. Allowed values: `true`, `false`. On ordinary insert, `0` or an absent cell (the column left out of the row) auto-generates (**Lead S12, 0.6.0**; it was `400 Missing required column`, BL-429); a named-mutation `values` template may leave it out too, but a bound parameter left out of a call is not a request — see [Named queries](named-queries.md#batch-insert-batchparam) and [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows). |
 | `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. Allowed values: `true`, `false`. |
@@ -940,6 +941,10 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
+
+(**BL-035, next train**) And the six [array types](array-columns.md), spelled exactly: `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`.
+An array column cannot be a key, an index or a rule, a non-nullable one is allowed at create, and one added to an existing table is
+nullable (the rows that were there read null; `schema apply` refuses a non-nullable one, `POST …/columns` adds it nullable): see [Array columns](array-columns.md#declaring-an-array-column).
 
 #### `Decimal(p,s)`: a decimal stored as a scaled integer (**ColumnarCore S13, 0.2.0**)
 

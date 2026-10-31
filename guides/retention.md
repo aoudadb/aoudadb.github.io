@@ -110,6 +110,7 @@ Each refusal is a `400` that names its reason.
 | A **window** on a materialized query whose source has retention (directly, or as the first non-windowed table up a cascade) | A windowed result computes its part below the window from its source; once the source has dropped a range, that answer would change. Use an unwindowed query over the table with retention — it keeps its history. |
 | Retention on a table that a window completes from | The same rule, seen from the table. |
 | A query over a table with retention that does not split its groups by the retention column, and retention on a table such a query reads | See [What may read a table with retention](#what-may-read-a-table-with-retention). |
+| An **array column** (**BL-035, next train**) | Not refused. An [array column](array-columns.md) is an ordinary column to retention: whole segments of an array table are dropped as for any table. It is not on this list. |
 | Retention on an **edge table**, or on a table with a **vector column** | Traversals and nearest-neighbour reads apply no horizon, and vector segments carry no time to drop by; retention is for tabular tables. |
 | **Dropping, retyping or un-clustering the retention column** (a `clusterOrder` change that moves retention to another column) while retention is declared | Every read hides the rows below the horizon by that column; without it they would be readable again. |
 

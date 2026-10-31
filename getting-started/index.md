@@ -1234,6 +1234,9 @@ await client.Schema.CreateTableAsync(new CreateTableRequest
 });
 ```
 
+(**BL-035, next train**) A column can also hold a whole array per row — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` or
+`String[]` — see [Array columns](../guides/array-columns.md). The embedded engine does not take them yet.
+
 ### Schema Operations via TypeScript Client
 
 ```typescript
