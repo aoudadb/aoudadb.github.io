@@ -457,11 +457,11 @@ Every permission in the request is validated before anything is written, so a re
 | `level` | `read`, `write` or `admin` |
 | `source` | `implied:service_key`, `implied:db_admin` or `role:<role name>` |
 | `surface` | `http`, `ws`, `long-poll` or `bulk-load` |
-| `operation` | `query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `subscribe` or `rekey` |
+| `operation` | `query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe` or `rekey` |
 | `table` | The table the grant lifted a restriction of |
 | `subscriptionId`, `jobId`, `streamId` | When the use belongs to a subscription, a bulk-load job or a write stream; otherwise absent |
 
-**How often.** One row per HTTP request, per table, grant and operation (a named-query batch of many elements on one table writes one row per grant, and a join's joined table counts as a table of the request); one per bulk-load job and credential at `:begin` (a second credential that appends to the job writes its own at its first `:append`; none per later `:append` and none at `:commit`); one per write stream with the first batch the grant decides; one per `subscribe`; and one per live re-key that newly uses a grant. **Never one per live event.** The write is best-effort: a failure is logged and never fails the request.
+**How often.** One row per HTTP request, per table, grant and operation (a named-query batch of many elements on one table writes one row per grant, and a join's joined table counts as a table of the request); one per bulk-load job, credential and table at `:begin` (a second credential that appends to the job writes its own at its first `:append`; none per later `:append` and none at `:commit`); one per truncate, and one per table a seed names, before the first row is written (a refused truncate or seed writes none); one per write stream with the first batch the grant decides; one per `subscribe`; and one per live re-key that newly uses a grant. **Never one per live event.** The write is best-effort: a failure is logged and never fails the request.
 
 **Where it goes.** To the auth database that governs the data's database, else to the auth database that authenticated the credential. Read it with `GET …/auth/admin/audit-log?action=access_grant_used` (`GET /api/databases/{db}/auth/admin/audit-log` on an application auth database, `GET /api/auth/admin/audit-log` on the server auth database), which also takes `userId`, `from`, `to`, `limit` (default 20, max 100) and `offset`; the `action` filter is a case-insensitive substring match. The response is `{ "entries": [ { "id", "userId", "userEmail", "action", "resource", "detail", "ipAddress", "timestamp" } ], "total" }`, with `detail` as the JSON string above.
 
@@ -1597,6 +1597,11 @@ does not choose — a presence heartbeat or typing indicator keyed by
 succeeds at all. See [Named mutations § choosing
 `op`](../guides/named-queries.md#choosing-op).
 
+(**BL-1227, next train**) On a table with PLS or RLS, an upsert that finds a row under the key replaces it only if the caller may
+write **that** row — on PLS its partition, on RLS the update scope and the write check — else `403 AUTHORIZATION_DENIED` and no row of
+the call is written. The message names the key, not the stored row's partition. A holder of the lifting grant(s) at `write` is not
+checked. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement).
+
 
 **What a `values` / `set` entry may be.** Exactly three forms:
 
@@ -2047,6 +2052,13 @@ Apply idempotent seed data. Tables must already exist.
 A table may carry `absent` as any write body does; a cell left absent is not part of that row's seed.
 
 **Response:** `200 OK` — `SeedApplyResult` with per-table `insertedCount` and `skippedCount` (existing primary keys skipped).
+
+**Authorization.** Database-level `write`. (**BL-1227, next train**) A seed is not a per-user write — its rows pass no PLS or RLS
+check — so every table the document names that has partition- or row-level security needs, at `write`, the grant lifting each
+restriction it has (`all-partitions` for PLS, `all-rows` for RLS), held by a service key, a `db_admin` user or a role. Otherwise the
+answer is `403 AUTHORIZATION_DENIED` naming every refused table and the grant it lacks, and nothing from the document is written. A
+table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A holder's seed writes one `access_grant_used` row per
+table and grant (operation `seed`) before the first row.
 
 ---
 
@@ -2808,6 +2820,7 @@ Update rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
+| `AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | (**BL-1227, next train**) On a PLS table, `set` names the partition column (any case) with a partition the caller may not write — held to the insert's rule; or a `setExpr` of that column without `all-partitions` at `write`. Nothing is changed. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement) |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
@@ -2988,6 +3001,12 @@ The following optional fields extend the standard delete request:
 Truncate (clear) all rows from a table. Schema is preserved. Requires the `Truncate`
 authorization scope — `db_writer` alone is insufficient.
 
+(**BL-1227, next train**) On a table with partition- or row-level security a truncate also needs, at `write`, `all-partitions`
+where the table has PLS and `all-rows` where it has RLS. A service key and a `db_admin` user hold both on their database; anyone
+else holds them only through a role. Without them the answer is `403 AUTHORIZATION_DENIED` naming the table and the grant it lacks,
+and nothing is truncated; delete the rows you may write with a `WHERE` instead. A holder's truncate writes one `access_grant_used`
+row per grant (operation `truncate`) before the table is emptied. See [Authorization](../auth/authorization.md#bulk-load-is-not-a-per-user-write-bl-1031-050).
+
 **Request Body:**
 
 ```json
@@ -3019,7 +3038,7 @@ is freed at once; it is still one log record and atomic for readers. Subscribers
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `AUTHORIZATION_DENIED` | 403 | Caller lacks the `Truncate` authorization scope |
+| `AUTHORIZATION_DENIED` | 403 | Caller lacks the `Truncate` authorization scope; or (**BL-1227, next train**) the table has PLS or RLS and the caller lacks the grant lifting it at `write` |
 
 ---
 
@@ -4927,6 +4946,10 @@ Acknowledges durable receipt of rows through the given sequence number. May incl
   ]
 }
 ```
+
+`FORBIDDEN_WRITE` at an index is a row PLS or RLS refused; the frame's other rows are written. (**BL-1227, next train**) With
+`mode: "upsert"` that includes a row whose key names a stored row the caller may not write (another partition, another RLS
+owner): an upsert may replace only a row the caller may write.
 
 ---
 

@@ -708,15 +708,16 @@ stream whose outcome an `all-partitions` or `all-rows` grant decided, by any cre
 | `action` | `access_grant_used` |
 | `resource` | `{database}/{table}` |
 | `user_id` | The user, or for a key without a user the key's own id |
-| `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
+| `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
 
 - A row is written only when a grant **decided** the outcome: the table has the restriction the grant lifts (PLS for `all-partitions`, an RLS
   resolver for `all-rows`). For a read, the row is written only when neither half denied it; a write is recorded when its gate is
   asked, so a write that the other half then refuses still names the grant. A caller without a grant writes nothing, and so does a
   table with no PLS or RLS. The row records the authorization decision, not the request's success: a read that the partition-filter
   cost guard then refuses still names the grant.
-- A row is written **once** per request (per table, grant and operation; a named-query batch writes one per grant), per bulk-load job and credential
-  (at `:begin`, or at the first `:append` of another credential), per subscribe, per re-key that newly uses a grant, and per write
+- A row is written **once** per request (per table, grant and operation; a named-query batch writes one per grant), per bulk-load job, credential
+  and table (at `:begin`, or at the first `:append` of another credential), per truncate and per seed (each table and grant, before the
+  first row is written; a refused one writes none), per subscribe, per re-key that newly uses a grant, and per write
   stream (again when the grants that decide it change). **Never one per live event.** An upsert is an `insert`.
 - It goes to the auth database that governs the data, else to the one that authenticated the credential. The write is best-effort: a failure is
   logged and never fails the request.

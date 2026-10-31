@@ -115,7 +115,8 @@ partition grant, no tenant claim) is still refused. It is ignored on the data-pl
 [§19.7](#197-cross-partition-fan-out-queries) and [Partitioning](../guides/partitioning.md#partition-filter-rule-p40).
 
 **Every use of a grant is audited.** A request, bulk-load job, subscription or write stream whose outcome a grant decided writes one
-`access_grant_used` row to the auth database's audit log, never one per live event. See [Auth reference — Audit
+`access_grant_used` row to the auth database's audit log, never one per live event. Graph traversal and vector search are the
+exception: they read by the same grants but are not audited yet (BL-1289). See [Auth reference — Audit
 logging](reference.md#audit-logging).
 
 **What changed.**
@@ -157,7 +158,7 @@ The server-admin endpoints (`/api/auth/admin/*`, database management, backups) a
 the grant that lifts **each restriction the table has**: `all-partitions` where it has PLS, `all-rows` where it has RLS, for every table
 the job locks. A service key and a `db_admin` user hold both on their database; any other user holds them only through a role
 ([§19.8a](#198a-admin-api-access-grants-on-roles)). A table with only RLS can be loaded by a holder of `all-rows` alone, and the
-reverse for PLS. Still refused: a server key (`mk_srv_`), a custom key, a plain user, a caller whose partition grants would allow an
+reverse for PLS. Still refused: a server key (`mk_srv_`), a custom key not linked to a user who holds the grants, a plain user, a caller whose partition grants would allow an
 ordinary insert of the same rows, a token that merely claims `db_admin`, a service key presenting a plain user's `X-User-Token`, and a
 user JWT that carries `api_key_kind=service_role`. That name is not a custom claim: storing it is `AUTH_CLAIM_INVALID`. The
 check is asked again at every `:append`, of the credential making the call, so a caller cannot append to another caller's job and a grant
@@ -166,6 +167,14 @@ down to the caller's scope: it is a migration, and the session is not started. A
 job over a protected table writes its `access_grant_used` rows at `:begin`. Supplying identity-derived columns is a separate rule and
 still belongs to service-level keys (`mk_svc_`, `mk_srv_`): an admin user's rows are stamped with its own id. Up to 0.8.0 only an app's
 service key could bulk load such a table. See [Bulk load](../guides/bulk-load.md).
+
+**Truncate and schema seed follow the same rule** (**BL-1227, next train**). Neither is a per-user write either: a truncate empties
+every partition and every row, and a seed's rows pass no PLS or RLS check. On a table with PLS or RLS, `POST …/tables/{name}/truncate`
+and `POST …/schema/seed` need, at `write`, the grant lifting each restriction the table has, as bulk load does; RBAC's `truncate` /
+database `write` alone no longer empties or seeds a protected table. Otherwise the answer is `403 AUTHORIZATION_DENIED` naming each
+refused table and the grant it lacks, and nothing is written — a seed is refused whole if any table it names is refused. A holder's
+truncate or seed writes `access_grant_used` rows (operation `truncate` / `seed`) before the first row is touched. Up to 0.8.0 a
+custom role carrying `truncate` emptied every tenant's partition. A table with no PLS and no RLS policy is unchanged.
 
 ---
 
@@ -394,6 +403,22 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400
     "accessLevel": "read"
   }'
 ```
+
+**An update may not move a row out of the caller's write scope** (**BL-1227, next train**). On a PLS table, an UPDATE whose `set`
+names the partition column (matched without case — every key that names it) is held to the insert's rule for the partition it
+names: a partition grant at `write` on `auth-db-pls`, the tenant claim on `jwt-claim`; `all-partitions` at `write` lifts it. An
+expression `setExpr` of that column is refused unless lifted (`AUTH_PLS_WRITE_SCOPE_VIOLATION`). Over `PATCH …/rows` and
+`…/rows/batch` the refusal is `403` with the PLS code (`AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` for a grant
+held at `read`, or `AUTH_PLS_WRITE_SCOPE_VIOLATION` on `jwt-claim`); a named mutation's is `403 AUTHORIZATION_DENIED`. On an RLS table the write
+check already reads the row as the update leaves it. Up to 0.8.0 a writer of partition `a` could move its rows into any partition.
+
+**An upsert may not take over a row the caller may not write** (**BL-1227, next train**). When an upsert (`"op": "upsert"` on a
+named mutation, `mode: "upsert"` on a write stream) finds a row under the key, it may replace it only if the caller may write that
+row: on PLS, the stored row's partition must be one the caller writes; on RLS, the stored row must be one the caller's update would
+reach and that passes the write check. Otherwise the named mutation answers `403 AUTHORIZATION_DENIED` and writes nothing, and the
+write stream rejects that row with `FORBIDDEN_WRITE` at its index (the frame's other rows are written). The refusal names the key,
+not the other tenant's partition. A holder of the lifting grant(s) at `write` is not checked. Up to 0.8.0 the insert check saw only
+the new row, so an upsert replaced another tenant's or another owner's row by key.
 
 **Thin JWT benefit:** A user belonging to 500 chat rooms would add ~10 KB to a JWT if room memberships were embedded as claims. With `auth-db-pls`, the JWT carries only the user's identity; grants live in the auth DB and are resolved from the session cache at query time.
 
