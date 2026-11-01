@@ -247,7 +247,7 @@ Signin response for a user with `forcePasswordChange` set:
 
 ### Application Auth Admin Endpoints
 
-All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
+All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `service_role` key, a `db_admin` user, or a server key (`mk_srv_`) — may call every one. A restricted admin may call the ones that do not raise its reach (**BL-1240, next train**): the seeded system role `db_operator` (it administers without the implied all-partitions / all-rows grants), a custom role with `admin`, and an `mk_adm_` key on the user-management routes. Assigning `db_admin` or an all-* grant, changing a role that carries one, renaming a role to or from `db_admin`, writing an RLS resolver, regenerating keys, minting a privileged key, and writing a user who already holds those grants on any database its auth database governs are `403 AUTHORIZATION_DENIED` and need `db_admin`. The other seeded system roles are `db_admin`, `db_writer`, `db_reader`, `anonymous` and `public`.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -491,7 +491,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 ### ADRA Admin Endpoints
 
-All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
+All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `service_role` key, a `db_admin` user, or a server key (`mk_srv_`) — may call every one. A restricted admin may call the ones that do not raise its reach (**BL-1240, next train**): the seeded system role `db_operator` (it administers without the implied all-partitions / all-rows grants), a custom role with `admin`, and an `mk_adm_` key on the user-management routes. Assigning `db_admin` or an all-* grant, changing a role that carries one, renaming a role to or from `db_admin`, writing an RLS resolver, regenerating keys, minting a privileged key, and writing a user who already holds those grants on any database its auth database governs are `403 AUTHORIZATION_DENIED` and need `db_admin`. The other seeded system roles are `db_admin`, `db_writer`, `db_reader`, `anonymous` and `public`.
 
 **Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-partition-grants)):
 
