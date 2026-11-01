@@ -159,7 +159,7 @@ If you do nothing beyond default server config:
   - Hot->cold demotion pipeline with catalog durability updates and diagnostics.
   - Cold->hot promotion pipeline: **two intents** (P30):
     - `PromoteForQueryAsync` — cold → immutable columnar hot (query path)
-    - `PromoteForUpdateAsync` — cold → mutable keyed tier (update/cache path), with two-phase dissolution for crash safety
+    - `PromoteForUpdateAsync` — cold → mutable keyed tier (update/cache path), with two-phase dissolution for crash safety. Phase 2 retires the cold segment only after a flush has written the rows that promotion loaded. A promotion that lands after the flush has frozen waits for a later flush. The cold segment remains the crash copy until then. A clean shutdown lists the segment as dissolving only when the snapshot contains those rows (**BL-1198, next train**).
 - **Hot-first flush** (P30): Flush produces only an immutable hot segment (`.hot` file). Cold segments come exclusively from the demotion path. Prior to P30 this invariant was violated.
 - **Mutable keyed tier** (P30): `MutableKeyedStore` provides in-place upsert by PK. Dead-row reclamation via lazy tombstone compaction. Bounded memory at keyspace size. Serves `LatestPerKey` and cache/UPSERT workloads.
 - **Representation selector** (P30): `RepresentationSelector` routes incoming write streams by: intent hint (`Mutable` policy) → mutation rate (rolling writes/s) → segment size (below seal floor) → defaults to immutable hot.
@@ -233,7 +233,7 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 | Segment temperature persistence (`Hot`/`Cold`) | Yes | No | No | P3 Task reports, `Policies.cs`, `HotColdMetadataTests` | Preserved through restart semantics |
 | Hot->cold demotion | Yes | No | No | P3 Task 4 report, `SegmentDemoter`, demotion tests | Includes policy-driven demotion and diagnostics |
 | Cold->hot promotion (for query) | Yes | No | No | P3 Task 5 / P30 S6, `SegmentPromoter.PromoteForQueryAsync` | Promotes cold → immutable columnar hot |
-| Cold->mutable tier promotion (for update) | Yes | No | No | P30 S6/S7, `SegmentPromoter.PromoteForUpdateAsync` | Promotes cold → mutable keyed tier; two-phase dissolution for crash safety |
+| Cold->mutable tier promotion (for update) | Yes | No | No | P30 S6/S7, `SegmentPromoter.PromoteForUpdateAsync` | Promotes cold → mutable keyed tier; two-phase dissolution for crash safety. Phase 2 retires the cold segment only after a flush has written the rows that promotion loaded. A promotion that lands after the flush has frozen waits for a later flush. The cold segment remains the crash copy until then. A clean shutdown lists the segment as dissolving only when the snapshot contains those rows (**BL-1198, next train**). |
 | Two-phase dissolution (Gap B crash safety) | Yes | No | No | P30 S7/S11, catalog + durable tombstone | Phase 1: dissolving; Phase 2: fsync + retire; tombstone prevents orphan resurrection |
 | Maintenance worker policy automation | Yes | No | No | `HotColdMaintenanceWorker.cs`, P3 reports/tests | Auto/HotOnly/ColdPreferred/Mutable handled |
 | Hot/cold management inspection surface | No | No | Yes | P3 Task 8 report | `HotColdInspector` removed (**ColumnarRead, 0.3.0**); it had no caller in the server or either SDK |
@@ -269,7 +269,7 @@ From ADR intent and follow-up planning, not shipped as end-to-end behavior:
 **Demotion vs Promotion:**
 - Demotion: hot (immutable) → cold; catalog updated; hot handles unregistered.
 - `PromoteForQueryAsync`: cold → immutable columnar hot (read acceleration).
-- `PromoteForUpdateAsync`: cold → mutable keyed tier (write acceleration); uses two-phase dissolution to prevent double-counting on crash (Gap B).
+- `PromoteForUpdateAsync`: cold → mutable keyed tier (write acceleration); uses two-phase dissolution to prevent double-counting on crash (Gap B). Phase 2 retires the cold segment only after a flush has written the rows that promotion loaded. A promotion that lands after the flush has frozen waits for a later flush. The cold segment remains the crash copy until then. A clean shutdown lists the segment as dissolving only when the snapshot contains those rows (**BL-1198, next train**).
 
 **Memory governance layers:**
 - Per-engine `MemoryBudgetManager` + server-level `ServerMemoryBudgetManager`.
