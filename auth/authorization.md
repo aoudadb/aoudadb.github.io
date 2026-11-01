@@ -1309,6 +1309,8 @@ curl -X POST http://localhost:5433/api/databases/crm/tables/sales/rows \
 # → 403 AUTH_RLS_INSERT_VIOLATION (row would not be visible to the inserter)
 ```
 
+A null does not satisfy `ne`, `lt`, or `lte`, so the insert and the update are refused with the same codes a non-matching value already gets, and a query of the same rule does not return the row (**BL-1251, next train**).
+
 ---
 
 ### Use Case 3 — Financial Platform (`auth-db-pls`, billions of rows on disk)
