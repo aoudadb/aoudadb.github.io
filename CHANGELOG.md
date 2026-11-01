@@ -60,7 +60,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   seconds, up to 31 days — and everyone it is assigned to, `db_admin` users included, then sees a row of that table only once its row
   time (the first cluster column, a `Timestamp` or a `Date`) is at least that old by the server's clock: queries, counts, aggregates,
   joins and named queries all apply the cutoff, and a live subscription releases each change when it comes of age. It narrows and lifts
-  nothing, so no grant removes it; an app service key and a server key are never embargoed. Writes to the table, materialized queries,
+  nothing, so no grant removes it; an app service key and a server key are never embargoed. Writes to the table — a bulk load's `:begin` and every `:append` included — materialized queries,
   graph traversal, vector search and branch queries over it are refused the holder with the new `403 AUTH_EMBARGO_UNSUPPORTED`; an
   embargoed subscription that holds back more than `Aouda:Streaming:EmbargoHoldMaxEvents` changes (default 100 000), or whose embargo
   changes, ends with the new `SUBSCRIPTION_EMBARGO_RESET`, which `@aouda/client` answers by subscribing again. `GET …/access-grants`

@@ -936,7 +936,7 @@ table is computed from the visible rows only.
 
 | Surface | When |
 |---|---|
-| Every write to the embargoed table — insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, a bulk load (`:begin`), a write stream (each `stream_rows` batch; the stream is closed) | Always: a delayed tier is a read tier |
+| Every write to the embargoed table — insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, a bulk load (`:begin` and every `:append`), a write stream (each `stream_rows` batch; the stream is closed) | Always: a delayed tier is a read tier |
 | A write that names no table (a schema seed, a branch insert) | When the caller holds any embargo |
 | A materialized query over the table — its query endpoint, a `/query` or named query that reads it by name, and a subscription to it | Its result is computed once for every reader |
 | Graph traversal over an embargoed edge table, and vector `:nearest` on an embargoed table | These read no row time |
