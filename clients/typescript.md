@@ -1262,6 +1262,30 @@ no horizon (BL-1068), so a callback-only client drops those rows at the next `ho
 A client older than this ignores both messages, so its rows include ones the server no longer returns until it subscribes again. A
 `TRUNCATE` sends no notice. The wire contract: [Real-time Streaming — Horizons and range deletes](../guides/real-time.md#horizons-and-range-deletes).
 
+#### Embargoed tables (**BL-418, next train**)
+
+A credential whose role carries an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train)
+on a table reads it on a delay: queries return only rows at least N seconds old, and a subscription's changes arrive as they come of
+age. Nothing changes in the calls you make. Two error codes are exported for it:
+
+- `AUTH_EMBARGO_UNSUPPORTED` — thrown as an `AoudaApiError` (`403`) by a write, a materialized query, graph traversal, vector search
+  or a branch query on the embargoed table. Retrying with the same credential gets the same answer.
+- `SUBSCRIPTION_EMBARGO_RESET` — the server ended the subscription: it held back more changes than its limit, or the credential's
+  embargo changed. The `Subscription` **resubscribes fresh by itself** (a new snapshot, no `resume_from`) and your `onSnapshot`
+  receives it. A second reset before that snapshot arrives goes to `onError`, as any other subscription error does.
+
+```typescript
+import { AoudaApiError, AUTH_EMBARGO_UNSUPPORTED } from '@aouda/client';
+
+try {
+  await client.table('quotes').insert({ symbol: 'AAPL', price: 191.2 });
+} catch (err) {
+  if (err instanceof AoudaApiError && err.code === AUTH_EMBARGO_UNSUPPORTED) {
+    // This credential reads `quotes` on a delay and cannot write it.
+  }
+}
+```
+
 #### One connection, many subscriptions
 
 Every subscription and write stream on a client shares **one** WebSocket per

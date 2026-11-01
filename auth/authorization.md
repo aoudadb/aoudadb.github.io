@@ -89,7 +89,7 @@ implication; nothing is stored. Every other credential holds only what a role gi
 | Custom key, not linked to a user | nothing | Even if it carries the `db_admin` role: a role on a key lets it create tables and manage the database, it does not widen what rows it reads. |
 | `mk_anon_…`, `mk_pub_…`, no credential | nothing | |
 
-**Restricted admin (**BL-1240, next train**).** A full admin of a database is a caller whose grants there include `implied:db_admin` or `implied:service_key`, or a server key (`mk_srv_`). Everyone else who can already call the admin routes is a restricted admin: `db_operator`, a custom role whose `*` row includes `admin`, a custom key holding `db_admin`, and an `mk_adm_` key. A restricted admin is refused `403 AUTHORIZATION_DENIED` — the message names the operation and says it needs `db_admin` — when it would assign `db_admin` or an all-* grant, change or delete a role that carries one, rename a role to or from `db_admin`, write an RLS resolver, regenerate keys, mint a key that holds `db_admin`, `db_operator` or an all-* grant or that is linked to a user who holds them, or change such a user (including its own roles, claims and partition grants). A user holds them when it does on any database its auth database governs, not only the one in the route. A description-only change of a grant-carrying role is allowed. Signup still cannot be set to `db_admin` or a grant-carrying role (`400`), including by a full admin. An embargo row is not part of this train.
+**Restricted admin (**BL-1240, next train**).** A full admin of a database is a caller whose grants there include `implied:db_admin` or `implied:service_key`, or a server key (`mk_srv_`). Everyone else who can already call the admin routes is a restricted admin: `db_operator`, a custom role whose `*` row includes `admin`, a custom key holding `db_admin`, and an `mk_adm_` key. A restricted admin is refused `403 AUTHORIZATION_DENIED` — the message names the operation and says it needs `db_admin` — when it would assign `db_admin` or an all-* grant, change or delete a role that carries one, rename a role to or from `db_admin`, write an RLS resolver, regenerate keys, mint a key that holds `db_admin`, `db_operator` or an all-* grant or that is linked to a user who holds them, or change such a user (including its own roles, claims and partition grants). A user holds them when it does on any database its auth database governs, not only the one in the route. A description-only change of a grant-carrying role is allowed. Signup still cannot be set to `db_admin` or a grant-carrying role (`400`), including by a full admin. An [embargo row](#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) is privileged the same way (**BL-418, next train**): only a full admin may store, change or remove one, or rename a role that carries one.
 
 **Give the grants to anyone else with a role.** A grant is a role permission with `resourceType` `all-partitions` or `all-rows`; the
 holder is any user the role is assigned to (the assignment's `scope` limits the database). Roles are the only carrier: there is no
@@ -801,6 +801,7 @@ Each item of a role's `permissions` is `{ "resourceType", "resourceName", "actio
 | `table` (default) | A table name, or `*` (default) | A comma-separated string of RBAC actions, for example `"read,write"` |
 | `all-partitions` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
 | `all-rows` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
+| `embargo` (**BL-418, next train**) | One table's name (case-sensitive); `*` is refused | Whole seconds, `1` to `2678400` (31 days), digits only — see [Embargo](#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) |
 
 For `all-partitions` and `all-rows`, all three fields are required: there is no default name and no default level. A grant is a
 *second* permission, not a replacement: a role that should read `sales` and see every row of it carries both a `table` permission
@@ -851,8 +852,8 @@ the server returned.
 | `error` | When | `message` (for the request shown) |
 |---|---|---|
 | `AUTH_GRANT_TABLE_NOT_FOUND` | A table-scope grant names a table the database does not have (names are case-sensitive) | `Table 'nope' for the 'all-rows' grant was not found in database(s) 'myapp'. Table names are case-sensitive.` |
-| `AUTH_GRANT_NOT_APPLICABLE` | The grant would lift nothing: `all-partitions` on a table with no PLS, or `all-rows` on a table with no RLS resolver | `Table 'notes' has no row-level security (an RLS resolver, auth-db mode), so the 'all-rows' grant would lift nothing on it.` |
-| `AUTH_GRANT_INVALID` | An unknown `resourceType` (up to 0.8.0 it was stored silently), a missing or multiple level, a missing `resourceName`, a `null` entry, or a grant on a system role | `Unknown resourceType 'all-tenants'. A role permission is 'table', 'all-partitions' or 'all-rows' (exactly).` · `An 'all-rows' grant needs exactly one level in actions: 'read', 'write' or 'admin' (got 'read,write').` |
+| `AUTH_GRANT_NOT_APPLICABLE` | The grant would lift nothing: `all-partitions` on a table with no PLS, or `all-rows` on a table with no RLS resolver. An `embargo` on a table with no row time (**BL-418, next train**) | `Table 'notes' has no row-level security (an RLS resolver, auth-db mode), so the 'all-rows' grant would lift nothing on it.` · `Table 'notes' has no row time (its first cluster column is not a Timestamp or a Date), so an 'embargo' has nothing to delay by.` |
+| `AUTH_GRANT_INVALID` | An unknown `resourceType` (up to 0.8.0 it was stored silently), a missing or multiple level, a missing `resourceName`, a `null` entry, or a grant on a system role. For an `embargo` (**BL-418, next train**): a blank or `*` table, a delay that is not whole seconds from 1 to 2678400, or an embargo on a system role | `Unknown resourceType 'all-tenants'. A role permission is 'table', 'all-partitions', 'all-rows' or 'embargo' (exactly).` · `An 'all-rows' grant needs exactly one level in actions: 'read', 'write' or 'admin' (got 'read,write').` · `An 'embargo' needs whole seconds in actions, from 1 to 2678400 (31 days), as digits only (got '15m').` |
 
 On an auth database's own route a table-scope grant is checked against **every** database that auth database governs; on an
 application database's route, against that database. A grant whose table is later dropped stays stored and lifts nothing until a table
@@ -898,6 +899,77 @@ rows, where a user without the grant sees only its own. The use is audited as an
 ```
 
 See [Auth reference — Audit logging](reference.md#audit-logging) for the fields and when a row is written.
+
+## 19.8b Embargo: a delayed view of a table (**BL-418, next train**)
+
+An **embargo** makes a table show its holder only the rows that are at least N seconds old — the delayed tier of a market-data
+feed, for example, where one set of users sees quotes in real time and another fifteen minutes late. It is a role permission, like
+an access grant, but it narrows rather than lifts:
+
+```json
+{ "resourceType": "embargo", "resourceName": "quotes", "actions": "900" }
+```
+
+- **One table per row.** `resourceName` names a table (case-sensitive); `*` is refused. `actions` is the delay, whole seconds as
+  digits, from `1` to `2678400` (31 days); the role stores it normalized (`" 0900 "` is stored as `900`). The table must exist where
+  the role can apply and must have a **row time**: its first cluster column, a `Timestamp` or a `Date`. A system role cannot carry
+  one. The refusals are the `400`s in [What is refused](#what-is-refused).
+- **Only a full admin may store one** — create, change or delete a role that carries an embargo row, or rename such a role
+  (a restricted admin is `403 AUTHORIZATION_DENIED`), as for an all-* grant.
+- **Who it applies to.** Every user a role carrying it is assigned to, with the assignment's database scope — **`db_admin` users
+  included**: a full admin who holds an embargo role is delayed too — and a custom key that holds the role. An application service
+  key (`mk_svc_`) and a server key (`mk_srv_`) hold no stored role and are never embargoed.
+- **Several rows on one table**: the largest N applies. A stored row that does not parse (edited outside the API) withholds every
+  row of its table, and of every table when its table name is blank or `*` — the embargo fails closed.
+- **It is independent of every grant.** `all-partitions`, `all-rows`, PLS and RLS decide *which* rows; the embargo decides *how
+  old* they must be. No grant lifts it, and it lifts nothing. A holder of `all-rows` with a 900-second embargo sees every row that
+  is at least fifteen minutes old.
+- **No audit row.** An embargo narrows what a caller sees; it is not recorded as `access_grant_used`.
+
+**What a read returns.** The cutoff is the server's UTC clock when the read binds, minus N: a row is visible when its row time is at
+or before the cutoff. A `Date` row time is compared by UTC day (a row dated `D` is visible once the cutoff falls on or after `D`).
+A row whose row time is null is never visible to a holder. Every read the scan answers applies it — `POST …/query`, `…/query/count`,
+aggregates and `groupBy`, the joined side of a join, named queries and batches — so a count, a sum or a `max` over an embargoed
+table is computed from the visible rows only.
+
+**What is refused.** Surfaces that cannot apply a cutoff refuse the holder `403 AUTH_EMBARGO_UNSUPPORTED`, naming the table:
+
+| Surface | When |
+|---|---|
+| Every write to the embargoed table — insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, a bulk load (`:begin`), a write stream (each `stream_rows` batch; the stream is closed) | Always: a delayed tier is a read tier |
+| A write that names no table (a schema seed, a branch insert) | When the caller holds any embargo |
+| A materialized query over the table — its query endpoint, a `/query` or named query that reads it by name, and a subscription to it | Its result is computed once for every reader |
+| Graph traversal over an embargoed edge table, and vector `:nearest` on an embargoed table | These read no row time |
+| `POST …/branches/{name}/query` on the table | A branch read applies no row security |
+
+```json
+{ "error": "AUTH_EMBARGO_UNSUPPORTED", "message": "This credential holds an embargo on table 'quotes', and a write cannot honour it. Read the table through the query or subscription API." }
+```
+
+**Live subscriptions.** A table subscription by a holder is served on a delay as well. The snapshot is the rows visible at the
+cutoff; the rows past it are held on the server and each change is released when its row time reaches the cutoff, in order (a
+later change to the same key replaces the held one). A change that reaches the holder therefore arrives about N seconds after its
+row time, and a row inserted and deleted inside the embargo is never seen. At most `Aouda:Streaming:EmbargoHoldMaxEvents` changes
+(default 100 000) are held per subscription; past that, and when the caller's embargo on the table changes (a role edit, an
+assignment, a deletion), the subscription ends with the WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. Subscribe again — fresh, not
+resuming — to get a new snapshot at the current cutoff; `@aouda/client` does this itself. A holder's `resume_from` is answered with a
+fresh snapshot, since the held changes are not in the replay.
+
+**See what a user holds.** [`…/users/{id}/access-grants`](#see-what-a-user-holds) lists the embargoes beside the grants:
+
+```json
+{
+  "userId": "6fc78b31-5fe9-4453-9307-bd4233b0330e",
+  "database": "myapp",
+  "grants": [],
+  "embargoes": [
+    { "table": "quotes", "seconds": 900, "source": "role:delayed_quotes" }
+  ]
+}
+```
+
+`table` and `seconds` are `null` for a stored row that did not parse (it withholds every row — of every table, when `table` is
+`null`). The list is sorted by `table`, `seconds` and `source`.
 
 ---
 
