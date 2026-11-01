@@ -309,6 +309,9 @@ Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissi
 - An empty allowed-partition set returns an empty result immediately (deny-by-default).
 - `null` permissions means embedded mode, with no auth context: unrestricted on a table no auth database governs, and **empty** on an
   `auth-db` PLS table or a table with an RLS resolver (BL-950). A service key's context is not `null`: it holds the grants. PLS is lifted by the `all-partitions` grant and RLS by `all-rows`, independently, so a credential holding one is still restricted by the other. On a `jwt-claim` PLS table, graph and vector reads return nothing to a credential without `all-partitions` (BL-1279). Graph and vector reads are not audited yet (BL-1289), so they write no `access_grant_used` row. (**BL-1227, next train**)
+- A credential that holds an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) on the
+  table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
+  and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, next train**)
 
 **Key invariant:** Filtered ANN layer 1 (partition pruning) and ADRA PLS partition grants are the same mechanism — ADRA grants narrow which partitions the ANN scan considers, at no extra cost.
 

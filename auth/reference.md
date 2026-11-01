@@ -266,11 +266,11 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `se
 | `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
 | `.../admin/users/{id}/roles` | PUT | Replace user's role assignments: `{ "roles": [{ "roleName", "scope" }] }`; an item that names no role is skipped, and the old assignments are still replaced |
-| `.../admin/users/{id}/access-grants` | GET | The `all-partitions` / `all-rows` grants the user holds on a database, with their source: `?database=` (required on an auth database's route). An auth-admin key (`mk_adm_`) may call it (**BL-1227, next train**) |
+| `.../admin/users/{id}/access-grants` | GET | The `all-partitions` / `all-rows` grants the user holds on a database, with their source: `?database=` (required on an auth database's route). An auth-admin key (`mk_adm_`) may call it (**BL-1227, next train**). Also lists the user's `embargoes` there (**BL-418, next train**) |
 | `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
 | `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key, a nested name, or a reserved name (`sub`, `email`, `iss`, `aud`, `iat`, `exp`, `nbf`, `aal`, `db_roles`, and the authenticator names `auth_type`, `api_key_kind`, `api_key_id`, `api_key_prefix`, `api_key_name`, `aouda_auth_db` — **BL-1031, 0.5.0**) |
 | `.../admin/roles` | GET | List roles |
-| `.../admin/roles` | POST | Create custom role. A permission may be an access grant (`all-partitions` / `all-rows`, **BL-1227, next train**) |
+| `.../admin/roles` | POST | Create custom role. A permission may be an access grant (`all-partitions` / `all-rows`, **BL-1227, next train**) or an `embargo` (**BL-418, next train**) |
 | `.../admin/roles/{id}` | PATCH | Update role (a `permissions` array, when sent, replaces the role's permissions) |
 | `.../admin/roles/{id}` | DELETE | Delete custom role |
 | `.../admin/api-keys` | GET | List API keys |
@@ -423,7 +423,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 |-------|------|----------|-------|
 | `name` | string | **Yes** | Unique role name. |
 | `description` | string | No | |
-| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (`"table"` by default; `"all-partitions"` or `"all-rows"` for an access grant — anything else is `400 AUTH_GRANT_INVALID`, where up to 0.8.0 any string was stored), `resourceName` (default `"*"` for a `table` permission), `actions` (**string**, e.g. `"read"` or `"read,write"`). For an access grant `resourceName` and `actions` are **required** — `*` or a table name, and exactly one of `read`, `write`, `admin` — and a system role cannot carry one (**BL-1227, next train**). |
+| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (`"table"` by default; `"all-partitions"` or `"all-rows"` for an access grant — anything else is `400 AUTH_GRANT_INVALID`, where up to 0.8.0 any string was stored), `resourceName` (default `"*"` for a `table` permission), `actions` (**string**, e.g. `"read"` or `"read,write"`). For an access grant `resourceName` and `actions` are **required** — `*` or a table name, and exactly one of `read`, `write`, `admin` — and a system role cannot carry one (**BL-1227, next train**). `"embargo"` delays one table for the role's holders: `resourceName` a table with a row time (not `*`), `actions` whole seconds from `1` to `2678400` ([§19.8b](authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train); **BL-418, next train**). |
 
 ```json
 {
@@ -438,7 +438,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 **400 `INVALID_REQUEST`:** missing `name`, duplicate name, or malformed JSON. Body is `{ "error", "message", "suggestion", "requestId" }` — log it. `permissions` is not required.
 
-**400 `AUTH_GRANT_INVALID`, `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`** (**BL-1227, next train**): a refused access grant — an unknown `resourceType`, a missing or multiple level, a missing `resourceName`, a `null` entry or a system role; a table the database does not have; a table with no PLS (`all-partitions`) or no RLS resolver (`all-rows`). Nothing is written. The request shapes, messages and worked example are in [§19.8a of Data Authorization](authorization.md#198a-admin-api-access-grants-on-roles).
+**400 `AUTH_GRANT_INVALID`, `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`** (**BL-1227, next train**): a refused access grant — an unknown `resourceType`, a missing or multiple level, a missing `resourceName`, a `null` entry or a system role; a table the database does not have; a table with no PLS (`all-partitions`) or no RLS resolver (`all-rows`). For an `embargo` (**BL-418, next train**): a blank or `*` table, a delay outside 1–2678400 whole seconds, a system role, a table the database does not have, or a table with no row time. Nothing is written. The request shapes, messages and worked example are in [§19.8a of Data Authorization](authorization.md#198a-admin-api-access-grants-on-roles).
 
 **`POST .../admin/api-keys`** — Create a `custom` API key. Returns `201 Created`. The raw key is returned **only in this response** — it is stored hashed, and cannot be recovered later.
 
@@ -604,15 +604,22 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 | `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate | Insert a row whose fields fall within the user's RLS scope |
 | `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope | Update only fields that keep the row visible to the user |
 
+### Embargo Errors (**BL-418, next train**)
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_EMBARGO_UNSUPPORTED` | 403 | The caller holds an [embargo](authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) on the table and the surface cannot apply its cutoff: a write, a materialized query, graph traversal, vector search or a branch query (a write that names no table is refused for any embargo holder) | Read the table through the query or subscription API; write with a credential that holds no embargo |
+| `SUBSCRIPTION_EMBARGO_RESET` | WS error | An embargoed subscription ended: its hold reached `Aouda:Streaming:EmbargoHoldMaxEvents`, or the caller's embargo on the table changed | Subscribe again, fresh (no `resume_from`); `@aouda/client` does this itself |
+
 ### ADRA Partition Grant Admin Errors
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
 | `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
-| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant | For a partition grant, check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, next train**) |
-| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission names a table no governed database has (case-sensitive) | Fix the table name, or use `*` (**BL-1227, next train**) |
-| `AUTH_GRANT_NOT_APPLICABLE` | 400 | The named table lacks the security the grant lifts (no PLS for `all-partitions`, no RLS for `all-rows`) | Drop the grant; it would lift nothing (**BL-1227, next train**) |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant or embargo | For a partition grant, check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, next train**); for an `embargo`, one table and whole seconds 1–2678400 (**BL-418, next train**) |
+| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table no governed database has (case-sensitive) | Fix the table name, or use `*` for a grant (**BL-1227, next train**; embargo **BL-418, next train**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | The named table lacks the security the grant lifts (no PLS for `all-partitions`, no RLS for `all-rows`), or has no row time for an `embargo` | Drop the grant; it would lift nothing (**BL-1227, next train**). An embargo needs a first cluster column of type `Timestamp` or `Date` (**BL-418, next train**) |
 
 ### ADRA RLS Resolver Admin Errors
 

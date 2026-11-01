@@ -310,6 +310,7 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 | Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
 | The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
+| Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, next train**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
 
 Both limits are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
 quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch

@@ -319,6 +319,14 @@ the resolver allows — and a result over a `jwt-claim` source is read whole by 
 result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
 See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
+(**BL-418, next train**) **An embargo holder cannot read a result over the embargoed table.** A result is computed once for every
+reader, so it cannot be cut by one caller's delay: its query endpoint, a `/query` or named query that names it, and a subscription to
+it answer `403 AUTH_EMBARGO_UNSUPPORTED` to a credential holding an
+[embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) on the source (or on the result table).
+The holder's reads of the source table itself work, with the cutoff applied as any read's security is — a read the server routes
+to a result carries that cutoff as part of its question, and is answered from the result only where the routing rules below prove
+the answer equal.
+
 ## 2.4 Availability status (implementation honesty)
 
 ### Available now
