@@ -2143,8 +2143,9 @@ security needs, at `write`, the grant lifting each restriction it has (`all-part
 service key, a `db_admin` user or a role. Otherwise the answer is `403 AUTHORIZATION_DENIED` naming every refused table and the grant
 it lacks, and nothing from the document is written. A table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A
 holder's seed writes one `access_grant_used` row per table and grant (operation `seed`) before the first row. (**BL-1304, next train**)
-A transform that lands on any other table is the caller's per-row insert check, on the target row after derived columns and the
-identity stamp — the same `403` and code as `POST …/tables/{target}/rows` of that row — and that landing is not written when it is refused.
+A transform that lands on any other table is the caller's per-row insert check, on the target row after derived columns. Seed does
+not stamp identity, so a stamp column is not filled before that check. A refusal is the same `403` and code as
+`POST …/tables/{target}/rows` of that row, and that landing is not written when it is refused.
 
 ---
 
