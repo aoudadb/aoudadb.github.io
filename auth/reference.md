@@ -631,8 +631,8 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate | Insert a row whose fields fall within the user's RLS scope |
-| `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope | Update only fields that keep the row visible to the user |
+| `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate. A null cell does not satisfy the predicate when the operator is `ne`, `lt`, or `lte` (**BL-1251, next train**) | Insert a row whose fields fall within the user's RLS scope |
+| `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope. A null cell does not satisfy the predicate when the operator is `ne`, `lt`, or `lte` (**BL-1251, next train**) | Update only fields that keep the row visible to the user |
 
 ### Embargo Errors (**BL-418, next train**)
 
