@@ -402,7 +402,8 @@ batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered ta
   65,536 elements and 1 MiB of elements.
 - **An invalid array value is refused at `:append`**, `400 INVALID_REQUEST`, naming the table, column, frame and row. None of that
   frame's rows is applied, the frames before it stay, and the job stays open. (Under `applyTransforms` the values are checked at
-  `:commit`, where the transforms run: the refusal names the table, column and row, and nothing of the job is committed.)
+  `:commit`, where the transforms run: the refusal names the table, column and row, and nothing of the job is committed.
+  (**BL-1277, next train**) That refusal is `400` with the transform's own code, not `500`.)
 
   ```text
   400 INVALID_REQUEST
