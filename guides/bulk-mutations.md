@@ -1014,7 +1014,7 @@ await client.branches.delete(`backup-${Date.now()}`);
 | RETURNING returns unexpected columns | `["*"]` was used and the schema has more columns than expected | Enumerate explicit column names instead of `"*"` |
 | Computed column value is `null` | Division by zero in the expression for that row | Guard with `$ifNull` or check denominator values before querying; this is intentional behavior |
 | Expression SELECT result type shows `"Unknown"` | Expression is uninferable (mixed coalesce, unbound param, missing col) | Expected for that expression; inferable expressions report a concrete type (P40 S08) |
-| Batch operation fails partway through | One operation in the batch returned an error | A batch is not one transaction: the operations before the failing one were applied and stay applied, and the later ones did not run. Do not re-send the whole batch unless its operations are idempotent; see [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch) for what each answer means (`503 BATCH_PARTIALLY_APPLIED` names how many were applied) |
+| Batch operation fails partway through | One operation in the batch returned an error | A batch is not one transaction: the operations before the failing one were applied and stay applied, and the later ones did not run. Do not re-send the whole batch unless its operations are idempotent; see [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch) for what each answer means (`503 BATCH_PARTIALLY_APPLIED` names how many were applied, and `403 BATCH_RLS_PREFIX_APPLIED` does the same when a later operation's RLS write check refuses — do not re-send that batch as-is) (**BL-1303, next train**) |
 
 ---
 
