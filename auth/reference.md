@@ -496,7 +496,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 **`GET .../admin/api-keys`** — Lists keys (wrapped: `{ "apiKeys": [...] }`). Never returns the raw `key`, only `keyPrefix`. Each item includes `userId` (`null` for an unlinked key) so an operator can see which user's grants a given key inherits without cross-referencing the grants table separately.
 
-**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name. Filter matching is **case-sensitive** (same as grant create / PLS check): `?dimension=source` will not list a grant stored as `"Source"`. See [Data Authorization §19.8](authorization.md#198-admin-api-partition-grants).
+**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name. The filter is exact (**BL-430, next train**): `?dimension=source` lists the grants stored as `source`, and a capitalised name lists none of those. A name an older build stored with a capital is listed only by that spelling. See [Data Authorization §19.8](authorization.md#198-admin-api-partition-grants).
 
 ```json
 {
@@ -526,7 +526,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `se
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). A casing mismatch still 201s and never matches at check time (BL-430). `partitionKey` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, next train**) |
+| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` is lower case and must match the table's `permissionDimension` byte-for-byte; the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). An upper-case letter is `400 AUTH_GRANT_INVALID` and the message gives the lower-case spelling (**BL-430, next train**). `partitionKey` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, next train**) |
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 

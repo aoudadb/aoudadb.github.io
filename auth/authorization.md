@@ -272,13 +272,13 @@ Use `auth-db-pls` when a user needs access to **multiple partitions simultaneous
 
 - **`permissionDimension`** is the grant namespace. A partition grant in the auth database is only *(user, dimension, key,
   access level)*: it names no database, table or column, because the auth database is a standalone identity provider and Aouda
-  is one of its consumers. The dimension is an opaque entitlement name such as `fx_source`. It is matched against the grant
-  byte-for-byte, and it selects no column.
+  is one of its consumers. The dimension is a lower-case opaque entitlement name such as `fx_source` (**BL-430, next train**). It is matched against the grant
+  byte-for-byte, and it selects no column. A name with an upper-case letter is `400 INVALID_REQUEST`.
 - **`permissionColumn`** is the column the grant keys are compared with, declared beside the dimension. It must name a column of
   the table (exact name).
 
 Both are **required** for `auth-db-pls` on a table, and the table is refused when either is missing or the column names no column.
-A dimension spelled like a column (`permissionDimension: "Source"`) does **not** select that column, and partition-key order does not
+A lower-case dimension spelled like a column (`permissionDimension: "source"` beside a column `Source`) does **not** select that column, and partition-key order does not
 select one either. Up to 0.6.0 the engine inferred the column: a column named like the dimension (ignoring case), else a `tenant_id`
 partition column, else the first partition-key column. A table persisted that way now **denies** every per-user read and write
 until it declares `permissionColumn` — re-apply its schema or set it through the table's options.
@@ -449,7 +449,7 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
 # → { "id": "550e8400-e29b-41d4-a716-446655440002", ... }
 
 # 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user).
-#    `dimension` is the table's permissionDimension (`quote_source`), byte-for-byte (case-sensitive). The grant names no
+#    `dimension` is the table's permissionDimension (`quote_source`), lower case and byte-for-byte. The grant names no
 #    column: the table's permissionColumn (`Source`) is what the key is compared with.
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440002/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
@@ -755,17 +755,16 @@ On a `jwt-claim` table the key is the caller's tenant claim, not a grant, and an
 claim** (`403 AUTH_PLS_TENANT_CLAIM_MISSING`): an identity provider's "unset" must not read the `""` partition. To give users the
 `""` partition, use `auth-db-pls` and grant it.
 
-**`dimension` is an opaque entitlement name, and it is case-sensitive** (**BL-1176, 0.7.0**). A grant names a dimension and a key,
+**`dimension` is a lower-case opaque entitlement name** (**BL-1176, 0.7.0**; **BL-430, next train**). A grant names a dimension and a key,
 nothing else: no database, no table, no column. Every `auth-db-pls` table whose `permissionDimension` is that string honours it, in
 every database linked to this auth database, and compares the key with the column that table declares as `permissionColumn`. The
 dimension does not have to look like a column name, and spelling it like one selects nothing: `fx_source` for the fx tables and
 `rates_source` for the rates tables keeps one `MORN` grant from reaching both, though both compare it with a column named `Source`.
 
-The match is **byte-for-byte** (`StringComparison.Ordinal` — `"fx_source"` ≠ `"FX_Source"`). Creation does **not** validate or
-normalize against any table: a grant with the wrong casing returns `201` and looks fine on read-back, then every insert/query against
-the table fails `403` (`Partition '…' is not in the user's grant set for dimension 'fx_source'`). Copy the `permissionDimension`
-string from the schema; do not lowercase it. Partition **keys** are also compared ordinal-case-sensitive (they are data). Engine work
-to case-fold or reject a casing mismatch at grant-create time is BL-430.
+The name is lower case. An upper-case letter or outer white space is `400 AUTH_GRANT_INVALID`, and the message gives the lower-case
+spelling (`"Source"` → use `source`). Matching stays exact (`StringComparison.Ordinal`). Nothing stored is converted: a grant an older
+build wrote as `"Source"` keeps that spelling and matches only a table whose `permissionDimension` is `"Source"`, and that table's next
+options change must send the lower-case name. Partition **keys** stay verbatim (**BL-1192, next train**).
 
 ### List Partition Grants
 
@@ -1017,7 +1016,7 @@ table's `rlsResolverName`) and its `name` is unique in the auth database (**BL-1
 |---|---|---|
 | `UserId` | `"{}"` (ignored) | Authenticated user's id |
 | `Literal` | the comparison **string** (not an object) | Static value. Bool columns do not match `"true"` — use String |
-| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm. The dimension must be named: a bare `"team"`, `"{}"` or an object without `dimension` is refused at create and PATCH (`AUTH_RESOLVER_INVALID`) and a stored one denies (**BL-1176, 0.7.0**; up to 0.6.0 a bare string was read as the dimension) |
+| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm. The dimension must be named: a bare `"team"`, `"{}"` or an object without `dimension` is refused at create and PATCH (`AUTH_RESOLVER_INVALID`) and a stored one denies (**BL-1176, 0.7.0**; up to 0.6.0 a bare string was read as the dimension). A dimension with an upper-case letter or outer white space is the same `400 AUTH_RESOLVER_INVALID`, and the message gives the lower-case spelling (**BL-430, next train**) |
 | `PartitionGrant` (pass-through) | `{"role":"<name>","effect":"allow-all"}` | If the user has the role, resolver returns null (full access) |
 | `Claim` | any | Deny sentinel (not implemented — BL-315). Do not use |
 

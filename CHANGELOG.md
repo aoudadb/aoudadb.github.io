@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A partition-grant dimension name is lower case, everywhere it is written (BL-430, next train).** A partition grant's `dimension`, a table's `permissionDimension` (create, `PUT …/options`, schema apply, edge and vector tables, embedded) and a `PartitionGrant` resolver rule's `{"dimension": …}` are refused `400` when they contain an upper-case letter or outer white space (`AUTH_GRANT_INVALID`, `INVALID_REQUEST`, `AUTH_RESOLVER_INVALID`; schema apply reports the change `Failed`), and the message gives the lower-case spelling. A grant created as `source` used to return `201` and never match a table whose dimension is `Source`; with one spelling per name that cannot happen. Matching stays exact. Nothing stored is converted: a table or grant written with capitals by an older build keeps its spelling and matches only that spelling, and that table's next options change must send the lower-case name.
+
 - **Visibility is granted: `all-partitions` and `all-rows` replace the service-key and `db_admin` bypasses (BL-1227, next train;
   behaviour change).** Whether a credential is held to a table's partition-level security (PLS) and row-level security (RLS) is now
   decided by two **grants** it holds, never by its key prefix, a role's name or a request flag: `all-partitions` lifts PLS and
