@@ -935,7 +935,8 @@ an access grant, but it narrows rather than lifts:
 **What a read returns.** The cutoff is the server's UTC clock when the read binds, minus N: a row is visible when its row time is at
 or before the cutoff. A `Date` row time is compared by UTC day (a row dated `D` is visible once the cutoff falls on or after `D`).
 A row whose row time is null is never visible to a holder. Every read the scan answers applies it — `POST …/query`, `…/query/count`,
-aggregates and `groupBy`, the joined side of a join, named queries and batches — so a count, a sum or a `max` over an embargoed
+aggregates and `groupBy`, the joined side of a join, named queries and batches, and a branch query of a base table
+(**BL-1161, BL-1298, next train**) — so a count, a sum or a `max` over an embargoed
 table is computed from the visible rows only.
 
 **What is refused.** Surfaces that cannot apply a cutoff refuse the holder `403 AUTH_EMBARGO_UNSUPPORTED`, naming the table:
@@ -944,9 +945,8 @@ table is computed from the visible rows only.
 |---|---|
 | Every write to the embargoed table — insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, a bulk load (`:begin` and every `:append`), a write stream (each `stream_rows` batch; the stream is closed) | Always: a delayed tier is a read tier |
 | A write that names no table (a schema seed, a branch insert) | When the caller holds any embargo |
-| A materialized query over the table — its query endpoint, a `/query` or named query that reads it by name, and a subscription to it | Its result is computed once for every reader |
+| A materialized query over the table — its query endpoint, a `/query` or named query that reads it by name, a subscription to it, and a branch query of the result | Its result is computed once for every reader, so a cutoff cannot be applied (**BL-1161, BL-1298, next train**) |
 | Graph traversal over an embargoed edge table, and vector `:nearest` on an embargoed table | These read no row time |
-| `POST …/branches/{name}/query` on the table | A branch read applies no row security |
 
 ```json
 { "error": "AUTH_EMBARGO_UNSUPPORTED", "message": "This credential holds an embargo on table 'quotes', and a write cannot honour it. Read the table through the query or subscription API." }
