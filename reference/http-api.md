@@ -3384,6 +3384,8 @@ Insert edges: `srcs[i]` → `dsts[i]`. The two arrays must be non-empty and the 
 { "edgesInserted": 3, "token": "…" }
 ```
 
+On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, next train**). `all-partitions` at `write` allows the write, including an edge table whose source is not a partition key. One ungranted key writes none of the batch.
+
 #### `POST /api/databases/{db}/tables/{name}/edges:traverse`
 
 Breadth-first traversal: every node reachable from `startNodeId` within `hops` hops (default `1`), each once, the start node not
@@ -3446,7 +3448,7 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 
 Insert vectors for row keys. `vectorData` is **row-major**: the vectors one after another, `rowKeys.length × dimensions` numbers.
 `embeddingModelVersion` records which model made them; `partitionKey` places them in a partition of a PLS table (the default
-partition when omitted or null; an empty string names a partition of its own, **BL-1184, next train**). Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
+partition when omitted or null; an empty string names a partition of its own, **BL-1184, next train**). On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, next train**). `all-partitions` at `write` allows the write, including an omitted `partitionKey`. `partitionKey: ""` is the empty partition, not "omitted". Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
 
 ```json
 { "rowKeys": [1, 2], "vectorData": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], "embeddingModelVersion": "v1" }

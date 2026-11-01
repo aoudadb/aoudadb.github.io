@@ -458,7 +458,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
-| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, next train**; it was "no partition" in one place and a partition in another) |
+| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, next train**; it was "no partition" in one place and a partition in another). `null` on an `auth-db-pls` table is `403 AUTH_PLS_GRANT_NOT_FOUND` unless the caller holds `all-partitions` at `write` (**BL-1204, next train**) |
 
 ### NearestNeighborsAsync query parameters
 
