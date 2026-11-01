@@ -2524,11 +2524,13 @@ not a duration, an edge table, a table with a vector column — is `400` naming 
 
 **Authorization fields** (top-level, beside `columns`): `partitionLevelSecurity`, `authMode` (`jwt-claim`, `auth-db-pls`,
 `auth-db-rls`), `permissionDimension`, `permissionColumn`, `rlsResolverName`, `plsClaimBinding`. (**BL-1176, 0.7.0; breaking**)
-`authMode: "auth-db-pls"` requires both `permissionDimension` — the grant namespace, an opaque name matched byte-for-byte against a
+`authMode: "auth-db-pls"` requires both `permissionDimension` — the grant namespace, a lower-case opaque name matched byte-for-byte against a
 partition grant's `dimension` — and `permissionColumn`, the column the grant keys are compared with, which must name one of the
 table's columns exactly. Neither is inferred: a dimension spelled like a column does not select it, and the partition key is not a
 fallback. Missing or unmatched, the create is `400 INVALID_REQUEST` naming the field; `permissionColumn` with another `authMode` is
-`400` too. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
+`400` too. (**BL-430, next train**) An upper-case letter in `permissionDimension` is the same `400 INVALID_REQUEST`, and the message
+gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. `PUT …/options` refuses it the same way
+and leaves the stored name unchanged. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
 table stays `auth-db-pls` and dropped when the request moves it to another mode. (**BL-1296, next train**) On a table that already
 has PLS or RLS, a request that changes that security is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
 `all-partitions` where PLS applies and `all-rows` where RLS applies. RBAC `alter` is still required and is not enough. A table with
@@ -3375,7 +3377,7 @@ Create an edge table: two `Int64` columns, the source and the destination node i
 | `edgeLabel` | string? | No | A label for the table's edges. |
 | `storeCsc` | bool | No | Also keep the reverse (destination → source) index, which lets a shortest path search from both ends. Default `false`. |
 | `authMode` | string? | No | `jwt-claim` (default), `auth-db-pls` or `auth-db-rls`. |
-| `permissionDimension` | string? | With `auth-db-pls` | The grant dimension the caller's grants are matched on. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
+| `permissionDimension` | string? | With `auth-db-pls` | The grant dimension the caller's grants are matched on. Lower case (**BL-430, next train**): an upper-case letter is `400 INVALID_REQUEST` (not `500`), and the message gives the lower-case spelling. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
 | `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. |
 | `rlsColumn` | string? | No | Adds a `String` column for grant-sourced RLS (for example `org`). |
