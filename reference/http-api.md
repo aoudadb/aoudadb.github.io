@@ -683,6 +683,7 @@ All errors return a JSON body with this structure:
 | `BULK_LOAD_TRANSFORM_INTENT_REQUIRED` | 400 | Bulk load into a table with derived columns, checks, or transforms without `applyTransforms` or `preTransformed` |
 | `BULK_LOAD_TRANSFORM_INTENT_CONFLICT` | 400 | Both transform-intent flags set |
 | `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` | 400 | `preTransformed` load into a table with a server-time column; use `applyTransforms` (**NativeClients, 0.4.0**) |
+| `BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS` | 400 | `preTransformed` load into a table with an identity column; use `applyTransforms` (**BL-1278, BL-1170, next train**) |
 
 #### Authentication Errors (4xx)
 
@@ -1819,7 +1820,7 @@ The caller is authorized for `read` on that table, then the rows are filtered as
 
 Insert rows into a table on a branch; they are written to the branch's own segments only. The body is the table and the rows as
 [column arrays](#column-arrays-the-write-body) (**Lead S12, 0.6.0; breaking**: it was `{"table", "rows": [{…}]}`, now refused
-`400 ROW_OBJECTS_UNSUPPORTED`). The rows are inserted as `POST …/tables/{name}/rows` inserts them.
+`400 ROW_OBJECTS_UNSUPPORTED`). The rows are inserted as `POST …/tables/{name}/rows` inserts them, including partition security, row security and the identity stamp, and a refusal uses that route's status and code (**BL-1278, BL-1170, next train**).
 
 ```json
 { "table": "orders", "columns": ["id", "status"], "data": [[1, 2], ["pending", "shipped"]] }
@@ -5184,8 +5185,9 @@ All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append`
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (column-batch frames, or JSON column arrays). |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:commit` | Commit the session. |
 | `GET` | `/api/databases/{db}/bulk-load/{jobId}` | Get session status and progress. (Listed as `{jobId}:status` until **WorkloadCore, 0.3.0**; the route has always been `{jobId}`.) |
-| `GET` | `/api/databases/{db}/bulk-load:list` | List all sessions for this database. |
-| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. (Listed under `{jobId}` until **WorkloadCore, 0.3.0**; the route has always been this.) |
+| `POST` | `/api/databases/{db}/bulk-load/{jobId}:abort` | Abort the session. The beginning credential only (**BL-1278, BL-1170, next train**). |
+| `GET` | `/api/databases/{db}/bulk-load:list` | List the sessions this credential began (**BL-1278, BL-1170, next train**). |
+| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. The beginning credential, or a database admin who also holds `bulkload` (**BL-1278, BL-1170, next train**). (Listed under `{jobId}` until **WorkloadCore, 0.3.0**; the route has always been this.) |
 
 ---
 
@@ -5200,7 +5202,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `database` | string | Yes | Database name (must match `{db}` in path). |
 | `tables` | string[] | Yes | Tables this load writes to. Index 0 is the primary table. Single-element array for single-table loads. When more than one table is listed, each row in `:append` calls must carry a `"_table"` discriminator field naming its destination. Empty array is rejected (400). |
 | `options` | object? | No | Load options (see below). |
-| `idempotencyKey` | string? | No | Client-supplied key. If the same key is received within the server's idempotency window (default 10 min) while the prior job is still in-flight, the same `jobId` is returned without re-acquiring the lock. |
+| `idempotencyKey` | string? | No | Client-supplied key. If the same key is received within the server's idempotency window (default 10 min) while the prior job is still in-flight, the same `jobId` is returned without re-acquiring the lock. The key returns that `jobId` only for the credential that began the job; another credential is `403 AUTHORIZATION_DENIED` and the job is unchanged (**BL-1278, BL-1170, next train**). |
 
 **Load options:**
 
@@ -5217,7 +5219,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` (`"deferred"` until 0.3.x; refused `400` from the 0.4.0 — use `"auto"`) | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it runs the table's pass that was starting anyway or, once that has run, re-scans the whole source table. (**WorkloadCore S10, 0.3.0**) `"auto"` records a pending job, as `"deferred"` did, and starts the table's **deferred pass** for each table it wrote right after the commit (multi-table and transform loads included): a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the other queries on the table are not held behind one long rebuild), and the queries built on them caught up. The load does no materialized-query work while its rows stream and is not paced to a drain. Until the pass ends its queries read as behind (`isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false`). Before S10, how `"auto"` did it depended on the table: a table of only `aggregate` and `latestPerKey`/`firstPerKey` queries was folded as the load wrote its segments and written by the table's pass after the commit; on any other table the queries accumulated during the load's own pass and published by shadow-swap after the commit (the ingest-fed path). (**WorkloadCore S09, 0.3.0**) Every `"auto"` load's maintenance runs after the commit point, in the background, and `:commit` waits for it only as long as `mqWaitMs` allows (below): on a table of only aggregates and latest / first per key the load used to write its queries before `:commit` returned, with `mqRebuildStatus: "completed"` (**ColumnarCore S12, 0.2.0**). `"skip"`: no pending job, no pass and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. (**LoadSpeed K31, 0.4.0**) `"deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message saying to use `"auto"`: it was folded into `"auto"`, which since M.3 leaves a loading table's pass to the quiet period as `"deferred"` did, and which with `mqWaitMs` 0 (the default) does not wait at `:commit`. Until then: `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`; **WorkloadCore S10, 0.3.0**: owed the pass, not marked stale as `"skip"` leaves them), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. It was for very large or many back-to-back loads: many loads, one pass (a server before 0.1.40 refused it `400` too). See [Deferred loads](../guides/materialized.md#deferred-loads). |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
-| `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. |
+| `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. An identity column is refused `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`, the same as a server-time column: use `applyTransforms` (**BL-1278, BL-1170, next train**). |
 | `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, 0.6.0**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), `"strict"` in a database at `os` (its WAL is not written through), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database is refused. See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
 
 **Transform intent is mandatory for a table with write-time compute.**
@@ -5314,7 +5316,7 @@ user of the database, or through a role — or load a table with no PLS or RLS p
 
 ### `POST {jobId}:append`
 
-Append frames of rows to an in-flight session.
+Append frames of rows to an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is appended (**BL-1278, BL-1170, next train**).
 
 **Each frame is checked against its table before any of it is applied** (**Lead S27a, 0.6.0**). A frame is refused
 `400 INVALID_REQUEST` — none of its rows applied, the frames before it credited (`nextSequence` unchanged past them), the job still
@@ -5579,7 +5581,7 @@ Content-Type: application/json
 
 ### `POST {jobId}:commit`
 
-Commit the session. All sealed segments become queryable. (**Lead S21b, 0.6.0**) A job whose last body is column-batch frames
+Commit the session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is committed (**BL-1278, BL-1170, next train**). All sealed segments become queryable. (**Lead S21b, 0.6.0**) A job whose last body is column-batch frames
 can [commit in that body's end frame](#a-body-that-commits-its-job-lead-s21b-060) instead, with the same options and the same
 answer; `:commit` is for a job whose last rows went as JSON, a resumed job whose bodies the server already holds, or an empty job.
 A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED`, if the job it follows did not commit.
@@ -5684,7 +5686,7 @@ load again: its rows are in the table, and a second load would add them twice.
 
 _The route is `GET /api/databases/{db}/bulk-load/{jobId}` (no `:status` suffix)._
 
-Get current session state and progress.
+Get current session state and progress. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the body has no `token`, including a committed job whose session is gone (**BL-1278, BL-1170, next train**).
 
 (**Lead S30, 0.6.0**) **Query parameter `waitMs`** (`0`–`60000`, default `0`; outside that `400 BULK_LOAD_INVALID_OPTIONS`):
 for a job whose commit is running — `committing`, or `accepted` — the answer waits up to that long for the job to settle (committed,
@@ -5716,7 +5718,7 @@ failed, lost or aborted), then answers as it stands. This is how a client learns
 
 ### `GET :list`
 
-List all sessions for this database.
+List the sessions this credential began. Another credential's job is omitted, not a 403 for the list (**BL-1278, BL-1170, next train**).
 
 **Response body:**
 
@@ -5728,9 +5730,13 @@ List all sessions for this database.
 
 ---
 
+### `POST {jobId}:abort`
+
+Abort an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**). A missing job is `404 BULK_LOAD_JOB_NOT_FOUND`.
+
 ### `POST {jobId}:force-abort`
 
-Operator abort of an in-flight session. Releases table locks and records the abort reason in the WAL.
+Operator abort of an in-flight session. The beginning credential, or a database admin who also holds `bulkload`. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**). Releases table locks and records the abort reason in the WAL.
 
 **Request body:**
 
