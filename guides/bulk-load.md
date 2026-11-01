@@ -623,13 +623,15 @@ job's rows have ended and it holds its place in its tables' commit order, and th
 
 ```csharp
 var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { CommitWait = BulkLoadCommitWait.Accepted });
-// handle.State == BulkLoadCommitState.Accepted: not durable yet
-var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost
+// handle.State == BulkLoadCommitState.Accepted: not durable yet.
+// The outcome request started when this answer arrived (**BL-1140, next train**).
+var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost; a 404 after an hour throws
 ```
 
 ```typescript
 const handle = await client.table('trades').bulkLoad(batches, { commitWait: 'accepted' });
-const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
+// The outcome request started when this answer arrived (**BL-1140, next train**).
+const outcome = await handle.outcome;   // { state: 'committed' | 'lost' }; a 404 after an hour throws BulkLoadOutcomeUnknownError
 ```
 
 - ⚠️ **An accepted job is not durable and may be lost.** If the server stops before the job's commit point, or its commit fails,
@@ -639,12 +641,14 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
 - **A read with the handle's token waits until the job is visible** — on the primary, for the materialized queries over the loading
   tables, and on a replica — so reading your own load with the token never shows it half there. Do not read the outcome off the
   token: a lost job's token reads as covered once the log moves past it.
-- **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. After a
-  restart that cut the job off, the server answers it `lost`; once its log has moved past the job, `404` — the same answer for an
-  accepted job: load it again. ⚠️ Read the outcome promptly: a committed job's record is kept for at least an hour after its commit
-  (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer), and a `404` asked after that cannot tell a lost job from a committed one
-  the server has forgotten. A job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is
-  committed and its rows become visible at the next restart (note 6 below; **Lead group 7 review, 0.6.0**).
+- **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. They ask as
+  soon as the accepted answer arrives (**BL-1140, next train**). After a restart that cut the job off, the server answers `200`
+  `state: "lost"` with `BULK_LOAD_LOST`: load it again. Once its log has moved past the job, `404 BULK_LOAD_JOB_NOT_FOUND`. A `404`
+  within an hour of the accepted answer is still lost (nothing durable; load it again). A `404` after that hour cannot tell a lost job
+  from a committed one the server has forgotten, and the SDKs reject it as unknown rather than lost (**BL-1140, next train**). A
+  committed job's record is kept for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A
+  job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is committed and its rows become
+  visible at the next restart (note 6 below; **Lead group 7 review, 0.6.0**).
 - **A `validation: "strict"` job's key check runs at its commit point, after the accepted answer**, so a key it holds twice or one the
   table already holds is its outcome: `GET {jobId}` answers `state: "failed"`, `errorCode: "BULK_LOAD_DUPLICATE_PK"`, and the SDKs
   raise what they raise for the same load without the accepted wait (`BulkLoadDuplicatePkException`; an `AoudaApiError` coded
