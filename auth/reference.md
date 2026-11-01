@@ -631,8 +631,9 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate | Insert a row whose fields fall within the user's RLS scope |
-| `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope | Update only fields that keep the row visible to the user |
+| `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate. A null cell does not satisfy the predicate when the operator is `ne`, `lt`, or `lte` (**BL-1251, next train**) | Insert a row whose fields fall within the user's RLS scope |
+| `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope. A null cell does not satisfy the predicate when the operator is `ne`, `lt`, or `lte` (**BL-1251, next train**) | Update only fields that keep the row visible to the user |
+| `BATCH_RLS_PREFIX_APPLIED` | 403 | A `rows/batch` update's RLS write check refused operation `k` ≥ 1. Operations `0` to `k − 1` were applied; the refused row was not written. No `Retry-After`. Do not re-send the batch as-is. A refusal of the first operation is `AUTH_RLS_UPDATE_SET_VIOLATION` and applies nothing (**BL-1303, next train**) | Read what was stored and send a new batch for what is still legal. Do not re-send this batch |
 
 ### Embargo Errors (**BL-418, next train**)
 

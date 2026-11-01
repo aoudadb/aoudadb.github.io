@@ -421,8 +421,9 @@ names the partition column (matched without case — every key that names it) is
 names: a partition grant at `write` on `auth-db-pls`, the tenant claim on `jwt-claim`; `all-partitions` at `write` lifts it. An
 expression `setExpr` of that column is refused unless lifted (`AUTH_PLS_WRITE_SCOPE_VIOLATION`). Over `PATCH …/rows` and
 `…/rows/batch` the refusal is `403` with the PLS code (`AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` for a grant
-held at `read`, or `AUTH_PLS_WRITE_SCOPE_VIOLATION` on `jwt-claim`); a named mutation's is `403 AUTHORIZATION_DENIED`. On an RLS table the write
-check already reads the row as the update leaves it. Up to 0.8.0 a writer of partition `a` could move its rows into any partition.
+held at `read`, or `AUTH_PLS_WRITE_SCOPE_VIOLATION` on `jwt-claim`); a named mutation's is `403 AUTHORIZATION_DENIED`. On an RLS table a single
+update's write check reads the row as that update leaves it, and a `rows/batch` update reads the row as the earlier operations of that
+batch leave it (**BL-1303, next train**). Up to 0.8.0 a writer of partition `a` could move its rows into any partition.
 
 **An upsert may not take over a row the caller may not write** (**BL-1227, next train**). When an upsert (`"op": "upsert"` on a
 named mutation, `mode: "upsert"` on a write stream) finds a row under the key, it may replace it only if the caller may write that
@@ -1307,6 +1308,8 @@ curl -X POST http://localhost:5433/api/databases/crm/tables/sales/rows \
   -d '{ "database": "crm", "columns": ["company_id", "owner_id", "amount"], "data": [["acme"], ["550e8400-e29b-41d4-a716-446655440004"], [5000]] }'
 # → 403 AUTH_RLS_INSERT_VIOLATION (row would not be visible to the inserter)
 ```
+
+A null does not satisfy `ne`, `lt`, or `lte`, so the insert and the update are refused with the same codes a non-matching value already gets, and a query of the same rule does not return the row (**BL-1251, next train**).
 
 ---
 
