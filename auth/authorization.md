@@ -303,7 +303,7 @@ A grant whose dimension no table declares is simply not read by Aouda; it is sti
 the auth database.
 
 Edge tables and vector search keep scoping by the grant set — an edge traversal or a nearest-neighbour search needs at least one grant
-in the dimension and declares no column (an edge table refuses one). A vector-column table is an ordinary table for its reads, so
+in the dimension and declares no column (an edge table refuses one). Those inserts are held to that set at `write` (**BL-1204, next train**). A vector-column table is an ordinary table for its reads, so
 `POST …:create-vector-column` with `auth-db-pls` takes a `permissionColumn` too, and refuses one without `auth-db-pls`.
 
 ### 19.4.1 Setup
