@@ -5602,15 +5602,15 @@ the server stops before the job's commit point, or its commit fails, nothing of 
 - **The outcome comes from [`GET {jobId}`](#get-jobid)**: `state` is `"accepted"` while the commit runs, then `"completed"` (with the
   job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`) — or, for a `validation: "strict"` job whose commit
   found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, 0.6.0**: it read `"lost"`). Ask with
-  `waitMs` to be answered when it settles. After a
-  restart that cut the job off, `GET {jobId}` answers `"lost"`; once the server's log has moved past the job (a checkpoint), it answers
-  `404 BULK_LOAD_JOB_NOT_FOUND`, which for an accepted job means the same thing: nothing of it is durable, load it again. ⚠️ That
-  holds only while the job is recent: the server keeps a committed job's record for at least an hour after its commit (or
-  `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer), and may forget it after that, so a `404` asked later cannot tell a lost job
-  from a committed one. Ask for the outcome as soon as you have the accepted answer; both SDKs ask when you first read it, so read
-  it promptly. A job that passed its commit point is never answered `"lost"`, even when work after it failed (**Lead group 7
-  review, 0.6.0**). Don't infer the outcome from the token: a lost job's token reads as covered once the log moves past it, and
-  its rows are not there.
+  `waitMs` to be answered when it settles. Both SDKs ask as soon as the accepted answer arrives (**BL-1140, next train**). After a
+  restart that cut the job off, `GET {jobId}` answers `"lost"` (`200`, `errorCode` `BULK_LOAD_LOST`): load it again. Once the server's
+  log has moved past the job (a checkpoint), it answers `404 BULK_LOAD_JOB_NOT_FOUND`. A `404` within an hour of the accepted answer is
+  still lost: nothing of it is durable, load it again. A `404` after that hour cannot tell a lost job from a committed one the server
+  has forgotten, and the SDKs reject it as unknown rather than lost (**BL-1140, next train**). The server keeps a committed job's
+  record for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A `200` `state: "lost"` with
+  `BULK_LOAD_LOST` is unchanged: load it again. A job that passed its commit point is never answered `"lost"`, even when work after it
+  failed (**Lead group 7 review, 0.6.0**). Don't infer the outcome from the token: a lost job's token reads as covered once the log
+  moves past it, and its rows are not there.
 - **"Accepted" frees the loader, not the table.** A write into a table the job loads still waits for the job, as it does for any load.
 - A job the server cannot accept — one that writes no closing log frame, or a database without a WAL — is answered when committed,
   `state: "committed"`: a stronger answer than asked for, never a weaker one.
