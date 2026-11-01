@@ -1129,12 +1129,15 @@ read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on th
 > The same trap applies to any property whose C# type you have not checked against the schema
 > file. `bool IsPublic` is `Bool`, not `String`; `DateOnly` is `Date`, not `Timestamp`.
 
-> **⚠️ By default, the first typed insert drops every column your class does not declare.**
+> **⚠️ A typed update writes values. It does not change the table's columns.** (**BL-1178, next train**)
 >
-> `AutoReconcileSchema` defaults to `true`, and its `ReconcilePolicy` defaults to `Unsafe`. Before the first typed write to a
-> table, the client adds the columns the class has and the table lacks, and it **drops the columns the table has and the class
-> does not declare**. A derived column such as `SearchText`, a server-stamped column, or a column you left off the row type on
-> purpose is in that set.
+> `UpdateAsync(new { name = "b" })` sets `name` and leaves every other column in place. It does not reconcile, whatever
+> `ReconcilePolicy` is.
+>
+> `AutoReconcileSchema` still defaults to `true`. `ReconcilePolicy` defaults to `Safe`: before the first typed insert, the client
+> adds the columns the class has and the table lacks, and it does not drop a column the class omits. (**BL-1178, next train**)
+> `Unsafe` is opt-in. It drops non-key columns the class does not declare — a derived column such as `SearchText`, a
+> server-stamped column, or a column left off the row type on purpose — and it never drops a primary-key column.
 >
 > If the table comes from `aouda.schema.json`, turn reconcile off:
 >
@@ -1148,10 +1151,11 @@ read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on th
 > ```
 >
 > From the next train (**BL-1177**), the server refuses HTTP DDL on a table that schema apply created, in every `InferenceMode`.
-> A default client then fails that first write with `AoudaSchemaException` and the column survives. On 0.7.0 and earlier, in
-> `On` (the default) or `Off`, the drop succeeded and the insert reported success. `ReconcilePolicy = Safe` only adds columns, but
-> it is no fix for a declarative table: when the class has a property the table lacks, the add is refused too, and the write throws.
-> Bulk load never reconciles, so it does not drop a column that a typed insert of the same class would remove.
+> A default client is `Safe`, so that insert no longer tries to drop a column the class omits: the write succeeds and the column
+> stays. (**BL-1178, next train**) An explicit `Unsafe` client still fails that drop with `AoudaSchemaException`, and the column
+> survives. On 0.7.0 and earlier the default was `Unsafe`: in `On` (the default) or `Off`, the drop succeeded and the insert
+> reported success. `Safe` is no fix for a class that has a property the table lacks: the add is refused too, and the write throws.
+> Bulk load never reconciles.
 
 
 ### Seeding explicit IDs (identity-insert)

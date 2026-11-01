@@ -115,8 +115,8 @@ If you do not configure schema management explicitly:
 - Server `InferenceMode` defaults to `On`, which answers `404` to an insert into a missing table. Only `Extend` creates a table on
   insert.
 - A table that schema apply created refuses HTTP DDL in every mode (**BL-1177, 0.7.1**). See the table below.
-- The C# client reconciles a typed model on its first write by default and **drops the columns the model omits**. See the
-  warning below.
+- The C# client reconciles a typed insert by default and does not drop columns the model omits (`ReconcilePolicy` defaults to
+  `Safe`). A typed update does not reconcile. (**BL-1178, next train**) See the warning below.
 - Runtime schema truth is always the server catalog, not a file.
 - Declarative safety still defaults to non-destructive:
   - API apply defaults to `allowDestructive = false`.
@@ -130,7 +130,7 @@ If you do not configure schema management explicitly:
 | Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested |
 | CLI `schema history` pagination | `limit=50`, `offset=0` | Any non-negative integer for `limit` and `offset` | Newest-first history default view |
 | CLI output mode | human-readable | `human-readable` (default), `json` (via `--json` flag) | Use `--json` when machine parsing is needed |
-| C# `AutoReconcileSchema` / `ReconcilePolicy` | `true` / `Unsafe` | `true`, `false` / `Safe`, `Unsafe` | The first typed write adds missing columns **and drops the columns the model omits**. Set `false` for declarative tables |
+| C# `AutoReconcileSchema` / `ReconcilePolicy` | `true` / `Safe` | `true`, `false` / `Safe`, `Unsafe` | The first typed insert adds missing columns and drops none. `Unsafe` is opt-in and drops non-key columns the model omits. A typed update does not reconcile. (**BL-1178, next train**) Set `false` for declarative tables |
 
 ### What `InferenceMode` decides, and what it does not
 
@@ -153,22 +153,22 @@ If you do not configure schema management explicitly:
 - The lock is logged with the table's create, so a replica, the primary it is promoted to, and a point-in-time restore hold it too
   (**BL-1177, 0.7.1**; before, all three held the table open, even in `Extend`).
 
-> **⚠️ The C# client's default reconcile drops every column your model does not declare.**
+> **⚠️ `Unsafe` drops non-key columns your model does not declare. The default is `Safe`.** (**BL-1178, next train**)
 >
-> `Aouda.Client` defaults to `AutoReconcileSchema = true` with `ReconcilePolicy = Unsafe`. Before the first typed write to a table, the
-> client compares the table with the model. It adds the columns the model has and the table lacks, and it **drops every column the
-> table has and the model does not declare**. That includes a derived column (`SearchText`), a server-stamped column, and any column
-> you left off the row type on purpose.
+> `Aouda.Client` defaults to `AutoReconcileSchema = true` with `ReconcilePolicy = Safe`. Before the first typed insert, the client
+> adds the columns the model has and the table lacks, and it does not drop a column the model omits. A typed update does not
+> reconcile. `Unsafe` is opt-in: it drops non-key columns the model does not declare, including a derived column (`SearchText`), a
+> server-stamped column, and any column you left off the row type on purpose. It never drops a primary-key column.
 >
 > **Set `AutoReconcileSchema = false` on every client that writes to tables from `aouda.schema.json`.** From the next train
-> (**BL-1177**), the server refuses that drop on a schema-applied table, so a default client fails its first typed write with
-> `AoudaSchemaException` and the column survives. On 0.7.0 and earlier, in `On` or `Off`, the drop succeeded and the write reported
-> success. That is how a green apply lost its derived columns at the first service start.
+> (**BL-1177**), the server refuses HTTP DDL on a schema-applied table. A default (`Safe`) client no longer tries to drop a column
+> the model omits, so that insert succeeds and the column stays. An explicit `Unsafe` client fails that drop with
+> `AoudaSchemaException` and the column survives. On 0.7.0 and earlier the default was `Unsafe`: in `On` or `Off`, the drop
+> succeeded and the write reported success. That is how a green apply lost its derived columns at the first service start.
 >
-> **Bulk load does not reconcile.** The two write paths therefore disagree. On a table HTTP DDL created, where the drop is still
-> allowed, a bulk-loaded table keeps a column that a typed insert of the same model removes. `ReconcilePolicy = Safe` only adds
-> columns and never drops one. It is still no fix for a declarative table: an add is refused there too, so a class with a property
-> the table lacks still makes the first write throw. Turn reconcile off.
+> **Bulk load does not reconcile.** On a table HTTP DDL created, an explicit `Unsafe` insert can still drop a non-key column that a
+> bulk load of the same model keeps. `Safe` is no fix for a class that has a property the table lacks: the add is refused on a
+> declarative table too, and the first write throws. Turn reconcile off.
 
 ---
 
@@ -1264,8 +1264,8 @@ Expected result:
 |---|---|---|
 | Insert fails with "table does not exist... InferenceMode is Off" | Inference disabled on server | Create via schema apply or direct DDL endpoint |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table or column call | Schema apply created the table, and HTTP DDL is refused there in every mode (**BL-1177, 0.7.1**) | Change the schema file and re-apply |
-| `AoudaSchemaException: … under declarative schema management. Automatic reconciliation cannot drop column …` on the first typed write | The C# client's default reconcile tried to drop a column the model does not declare, such as a derived or server-stamped column | Set `AutoReconcileSchema = false` on that client |
-| A derived or server-stamped column vanished after the first typed insert (0.7.0 and earlier) | Default reconcile (`Unsafe`) dropped it, and `On` / `Off` did not lock the table | Re-apply the schema, and set `AutoReconcileSchema = false` |
+| `AoudaSchemaException: … under declarative schema management. Automatic reconciliation cannot drop column …` on a typed insert | An explicit `Unsafe` reconcile tried to drop a column the model does not declare, such as a derived or server-stamped column. The default is `Safe` and does not try. (**BL-1178, next train**) | Leave `ReconcilePolicy` at `Safe`, or set `AutoReconcileSchema = false` |
+| A derived or server-stamped column vanished after the first typed insert (0.7.0 and earlier) | The default then was `Unsafe`, and it dropped the column; `On` / `Off` did not lock the table | Re-apply the schema. From this train the default is `Safe` (**BL-1178, next train**) |
 | `schema apply` reports skipped operations | Destructive changes present without opt-in | Re-run only after approval with `--allow-destructive` |
 | `schema validate` returns drift | Desired file and runtime catalog differ | Run `schema diff`, then apply or reconcile |
 | CLI says no schema file found | discovery path mismatch | run from repo root or pass `--file` |
