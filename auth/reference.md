@@ -121,10 +121,10 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | Endpoint | Method | Auth Required | Description |
 |----------|--------|---------------|-------------|
 | `.../auth/signup` | POST | None (public POST; 403 `AUTH_SIGNUP_DISABLED` unless `allowSelfSignup`) | Register a new user |
-| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens. Optional `deviceInfo`: your description of the device, at most 512 UTF-8 bytes, shown in the session list (**NativeClients, 0.4.0**) |
-| `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token |
+| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens. Optional `deviceInfo`: your description of the device, at most 512 UTF-8 bytes, shown in the session list (**NativeClients, 0.4.0**). Optional `databases`: the databases the token may open — see [The token allowance](#the-token-allowance) (**BL-1018, next train**) |
+| `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token. The new token keeps the session's allowance; a refresh at a database outside it is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` and does not spend the refresh token (**BL-1018, next train**) |
 | `.../auth/signout` | POST | User JWT | End **this** session (**NativeClients, 0.4.0**) — it ended every session of the user. Optional body `{ "scope": "local" \| "others" \| "global" }`: `others` ends every other session and keeps this one, `global` ends all. See [Sessions are devices](#sessions-are-devices) |
-| `.../auth/authorize` | POST | User JWT | Native sign-in, step 1 (**NativeClients, 0.4.0**): issue a single-use code for a registered native client. Body `{ clientId, redirectUri, codeChallenge, codeChallengeMethod: "S256", state? }` → `{ code, state, redirectTo, expiresIn: 60, aal }`. See [Native sign-in](#native-sign-in-through-the-browser) |
+| `.../auth/authorize` | POST | User JWT | Native sign-in, step 1 (**NativeClients, 0.4.0**): issue a single-use code for a registered native client. Body `{ clientId, redirectUri, codeChallenge, codeChallengeMethod: "S256", state?, databases? }` → `{ code, state, redirectTo, expiresIn: 60, aal }`. `databases` (**BL-1018, next train**) narrows the code's allowance to part of the caller's; omitted, the code carries the caller's whole allowance. See [Native sign-in](#native-sign-in-through-the-browser) |
 | `.../auth/token` | POST | None (public) | Native sign-in, step 2 (**NativeClients, 0.4.0**): redeem the code. Body `{ grantType: "authorization_code", code, codeVerifier, clientId, redirectUri, deviceInfo? }` → the sign-in response, a **new session** at the code's `aal` |
 | `.../auth/sessions` | GET | User JWT | The caller's sessions, one per device (**NativeClients, 0.4.0**): `{ "sessions": [{ id, deviceInfo, userAgent, ipAddress, createdAt, lastSeenAt, aal, current }] }`, most recently used first |
 | `.../auth/sessions/{id}` | DELETE | User JWT | End one of the caller's sessions — sign another device out (204) (**NativeClients, 0.4.0**). Another user's session, or an unknown id: `404 AUTH_SESSION_NOT_FOUND` |
@@ -132,10 +132,10 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/me` | PATCH | User JWT | Update user metadata |
 | `.../auth/password` | PUT | User JWT | Change password |
 | `.../auth/request-password-reset` | POST | API key (anon or higher) | Request a 6-digit OTP emailed to the user; always returns 200 |
-| `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success |
+| `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success. Optional `databases`, as on sign-in; a `databases` the allowance rule refuses is `400` and leaves the OTP usable (**BL-1018, next train**) |
 | `.../auth/mfa/enroll` | POST | User JWT | Enrol a TOTP or phone MFA factor. Phone enrol is idempotent per-user: a second call returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists (same or different number). To replace a number: `DELETE .../auth/mfa/factors/{id}` then enrol again |
 | `.../auth/mfa/challenge` | POST | User JWT | Create a challenge for an enrolled factor; sends SMS for phone factors |
-| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success. The `aal2` session **replaces** the one verified from (**NativeClients, 0.4.0**): the same device, its `deviceInfo` kept unless the request gives `deviceInfo` |
+| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success. The `aal2` session **replaces** the one verified from (**NativeClients, 0.4.0**): the same device, its `deviceInfo` kept unless the request gives `deviceInfo`, and its allowance kept — never widened (**BL-1018, next train**) |
 | `.../auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
 | `.../auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
 
@@ -161,9 +161,38 @@ This applies to connections opened with a user's token; one opened with an API k
 > **Signing out is per device now.** A client that called `signout` to sign the user out *everywhere* must send
 > `{ "scope": "global" }`.
 
-⚠️ **A session is not bound to the database it was opened at** (**BL-1018**, open). Its refresh token refreshes at any database
-linked to the same auth database, and at the auth database's own path, for a session there. Databases that share an auth database
-are one trust domain: see [who should share one](use-cases.md#one-auth-database-is-one-trust-domain).
+#### The token allowance
+
+(**BL-1018, next train**) Every application token, its refresh-token family and every native sign-in code carry an **allowance**: the
+set of databases they may open, at most 64. The access token's `iss` is the **auth database's** URL
+(`{base_url}/api/databases/{authDb}`), whichever database's path minted or refreshed it, and its `aud` is the allowance, always a JSON
+array. A token is accepted at a database when that database's auth database issued it and the database is the auth database itself or
+is in the allowance. Anywhere else it is refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` — on HTTP, on the WebSocket handshake and
+`re_auth`, on a long-poll connect, and as an `X-User-Token` beside a service key.
+
+- **Sign-in and password reset** give the databases of this auth database (it and every database linked to it) on which the user holds
+  a role — an assignment scoped to that database, or one with no scope (every database). A user who holds a role on none of them is
+  refused `403 AUTHORIZATION_DENIED`: an allowance is never empty, and there is no fallback to every linked database. This holds at
+  the auth database's own path too. An administrator who creates a user must assign a role before that user can sign in.
+- **`databases`** in the request narrows that set; it never widens it. A name the user holds no role on, a database not linked to this
+  auth database, an unknown name, a blank name, an empty array or more than 64 names is `400 INVALID_REQUEST` — nothing is dropped
+  silently, and nothing is minted. The check runs after the password is verified, so it reveals nothing about an account. A user with
+  roles on more than 64 databases must name the ones it needs.
+- **Signup** gives the database signed up on (the self-signup role is scoped to it); a `databases` field is ignored.
+- **Refresh** keeps the family's allowance. A refresh at a database outside it (other than the auth database) is
+  `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` before the refresh token is spent, so the same token still refreshes where it belongs.
+- **MFA verify and step-up** keep the session's allowance; they never widen it.
+- **Native sign-in.** `authorize` stores the caller's allowance on the code, or the part of it `databases` names (a name outside it,
+  or an empty array, is `400`). A code redeemed at a database outside its allowance is refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`
+  and is spent — start again.
+- **Unlinking** a database from the auth database takes it out of every allowance at once: a token or family that names it no longer
+  opens it. Stored allowances are not rewritten; naming an unlinked database opens nothing. A database linked later is not in any
+  existing allowance — the user signs in again to reach it.
+
+Server-auth tokens (`/api/auth/signin`, setup) are unchanged: they carry no allowance and keep their issuer and audience.
+
+One sign-in covering several applications is the allowance doing its job: either accept the role-derived default, or name the
+databases with `databases`. See [one auth database is one trust domain](use-cases.md#one-auth-database-is-one-trust-domain).
 
 #### Native sign-in through the browser
 
@@ -198,9 +227,9 @@ was ended). A failed redemption spends the code — start again. At `authorize`:
 `AUTH_REDIRECT_URI_NOT_REGISTERED`, `AUTH_PKCE_METHOD_UNSUPPORTED` (`S256` only), `AUTH_PKCE_CHALLENGE_INVALID`. Both endpoints share
 sign-in's rate limit.
 
-⚠️ **A code is not bound to the database it was created at** (**BL-1018**, open): a code from `authorize` at one database can be
-redeemed at `token` on any database linked to the same auth database, or at the auth database's own path. See
-[one auth database is one trust domain](use-cases.md#one-auth-database-is-one-trust-domain).
+A code carries an allowance (**BL-1018, next train**): the web session's, or the part of it `authorize`'s `databases` names. Redeemed
+at a database outside it, the code is refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` and spent. See
+[the token allowance](#the-token-allowance).
 
 > **MFA endpoints require a user JWT** — the access token returned from sign-in. Send `Authorization: Bearer <accessToken>` directly; no API key is required or expected. If you are building a BFF that proxies MFA requests, forward the user JWT unchanged in `Authorization` — do not replace it with your service key. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints).
 
@@ -522,6 +551,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `se
 | `AUTH_TOKEN_MISSING` | 401 | No `Authorization` header on a protected endpoint | Add `Authorization: Bearer <token>` header |
 | `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature — or (**BL-980, 0.4.0**) an application database's token whose `iss` is not the database's URL issuer (the `"aouda"` issuer is no longer accepted beside it) | Discard token; force re-sign-in |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
+| `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, next train**) The token is valid, but its allowance (`aud`) does not include this database — on HTTP, the realtime handshake and `re_auth`, `X-User-Token`, a refresh, or a native code's redemption (which spends the code). A refused refresh does not spend its refresh token | Do not retry. Sign in again — naming this database in `databases` if the default does not include it — or use the token at a database it was issued for. If the user holds no role on this database, an administrator must assign one |
 | `AUTH_TOKEN_REVOKED` | 401 | Token was revoked — the session signed out or was ended by an administrator, the account was disabled, or the password changed. Also sent on an open WebSocket as `auth_error` (**NativeClients, 0.4.0**) | Redirect to sign-in |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
 | `AUTH_API_KEY_INVALID` | 401 | API key is not recognized, revoked, or expired | Regenerate via the admin regenerate-keys endpoint. A live `mk_svc_` / `mk_scp_` / `mk_adm_` on `GET`/`POST /api/databases` is **403** `AUTH_KEY_ROUTE_MISMATCH`, not this code (**BL-1128**; `mk_scp_` is **BL-1239, next train**). |
@@ -763,9 +793,9 @@ Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any
 | OIDC Discovery | `GET /api/databases/{db}/auth/.well-known/openid-configuration` |
 | JWKS (public keys) | `GET /api/databases/{db}/auth/.well-known/jwks.json` |
 
-Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database.
+Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database. (**BL-1018, next train**) The issuer is the **auth database's** URL: the document at a database linked to a separate auth database names that auth database, the same issuer every database linked to it advertises.
 
-> **Only that issuer is accepted** (**BL-980, 0.4.0**). A request on a database path validates a JWT against the database's URL issuer (and, for a database linked to a separate auth database, that auth database's URL issuer) — nothing else. Builds up to 0.3.x also accepted the default issuer `"aouda"` beside it; a token carrying it on a database path is now `401 AUTH_TOKEN_INVALID`, so a client holding one signs in again. `"aouda"` remains the issuer of the **server** auth database's tokens (`/api/auth/signin`, setup).
+> **Only that issuer is accepted** (**BL-980, 0.4.0**). A request on a database path validates a JWT against its auth database's URL issuer — nothing else (**BL-1018, next train**: the database's own URL is no longer a second accepted issuer for a linked database; a token from before the train signs in again). Builds up to 0.3.x also accepted the default issuer `"aouda"` beside it; a token carrying it on a database path is now `401 AUTH_TOKEN_INVALID`, so a client holding one signs in again. `"aouda"` remains the issuer of the **server** auth database's tokens (`/api/auth/signin`, setup).
 
 > **Non-standard discovery path — read before using `AddJwtBearer`.**
 > The OIDC discovery document is served at `…/auth/.well-known/openid-configuration`, which is one path segment deeper than the OIDC convention of `{issuer}/.well-known/openid-configuration`. Because the `issuer` is `{base_url}/api/databases/{db}`, any library that auto-constructs the metadata URL from `Authority` alone will try the wrong path and get a 404, causing JWT validation to fail on every request.
@@ -776,8 +806,8 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 
 | Claim | Value |
 |-------|-------|
-| `iss` | `{base_url}/api/databases/{db}` |
-| `aud` | auth database name |
+| `iss` | `{base_url}/api/databases/{authDb}` — the auth database's URL (**BL-1018, next train**; it was the path database's) |
+| `aud` | The token's allowance: a JSON array of the database names it may open (**BL-1018, next train**; it was the auth database's name). See [the token allowance](#the-token-allowance) |
 | `sub` | user ID (UUID) |
 | `email` | user email |
 | `iat` | issued-at timestamp |
@@ -918,21 +948,27 @@ if (map.TryGetValue("derive", out var scopedRoles) && scopedRoles.Contains("app_
 
 Use `AddJwtBearer` with the OIDC `Authority` and `MetadataAddress`. The middleware fetches the JWKS and validates signatures, issuer, and expiry.
 
+> **Issuer and audience** (**BL-1018, next train**). The issuer is the **auth database's** URL, for every database linked to it, and
+> `aud` is the token's allowance — an array of database names. A service that serves database `mydb` validates the auth database's
+> issuer and `mydb` as the audience: a token whose allowance does not name `mydb` is then refused by the service as it is by Aouda.
+> Until this train the issuer was the database's own URL and `aud` was the auth database's name.
+
 > **`MetadataAddress` is required.** Aouda's discovery document is at `{authority}/auth/.well-known/openid-configuration`, not the conventional `{authority}/.well-known/openid-configuration`. If you set only `Authority`, ASP.NET Core constructs the wrong URL, the JWKS fetch fails silently at startup, and every request returns 401. Always provide `MetadataAddress` explicitly.
 
 ```csharp
 builder.Services.AddAuthentication().AddJwtBearer(options =>
 {
     var aoudaBase = "https://your-aouda-server.com";
-    var db        = "mydb";  // the application database name
-    var issuer    = $"{aoudaBase}/api/databases/{db}";
+    var db        = "mydb";       // the application database this service serves
+    var authDb    = "mydb_auth";  // the auth database mydb is linked to (mydb itself if it is its own)
+    var issuer    = $"{aoudaBase}/api/databases/{authDb}";
 
     // Required: discovery path has an extra /auth/ segment — auto-derivation from Authority is wrong.
     options.MetadataAddress = $"{issuer}/auth/.well-known/openid-configuration";
 
     // Authority is still used for issuer validation in incoming tokens.
     options.Authority = issuer;
-    options.Audience  = "mydb_auth";  // the auth database name
+    options.Audience  = db;  // the token's allowance must name this database
 
     // If your Aouda server uses HTTP (local dev only):
     // options.RequireHttpsMetadata = false;
@@ -960,8 +996,8 @@ const JWKS = createRemoteJWKSet(
 
 async function verifyAoudaToken(token) {
     const { payload } = await jwtVerify(token, JWKS, {
-        issuer:   'https://your-aouda-server.com/api/databases/mydb',
-        audience: 'mydb_auth',
+        issuer:   'https://your-aouda-server.com/api/databases/mydb_auth', // the auth database
+        audience: 'mydb',                                               // the database this service serves
     });
     // payload.db_roles is a native object: { "_auth": ["db_admin"], "derive": ["app_derive_connect"] }
     return payload;
@@ -979,10 +1015,12 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://your-aouda-server.com/api/databases/mydb
+          issuer-uri: https://your-aouda-server.com/api/databases/mydb_auth
+          audiences: mydb
 ```
 
-Spring Security auto-discovers the JWKS from the OIDC discovery endpoint.
+Spring Security auto-discovers the JWKS from the OIDC discovery endpoint. The issuer is the auth database; the audience is the
+database the service serves.
 
 ---
 
@@ -1001,8 +1039,8 @@ func verifyToken(tokenStr string) (jwt.Token, error) {
     keySet, _ := cache.Get(ctx, "https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json")
     return jwt.Parse([]byte(tokenStr), jwt.WithKeySet(keySet),
         jwt.WithValidate(true),
-        jwt.WithIssuer("https://your-aouda-server.com/api/databases/mydb"),
-        jwt.WithAudience("mydb_auth"))
+        jwt.WithIssuer("https://your-aouda-server.com/api/databases/mydb_auth"), // the auth database
+        jwt.WithAudience("mydb"))                                                // the database this service serves
 }
 ```
 
@@ -1016,8 +1054,8 @@ import jwt
 from jwt import PyJWKClient
 
 JWKS_URL = "https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json"
-ISSUER   = "https://your-aouda-server.com/api/databases/mydb"
-AUDIENCE = "mydb_auth"
+ISSUER   = "https://your-aouda-server.com/api/databases/mydb_auth"  # the auth database
+AUDIENCE = "mydb"                                                   # the database this service serves
 
 jwks_client = PyJWKClient(JWKS_URL)
 
@@ -1292,8 +1330,8 @@ Your application reads Aouda Auth configuration from `appsettings.json` / `appse
 // appsettings.Development.json  ← git-ignored, each developer maintains their own
 {
   "AoudaAuth": {
-    "Authority":    "http://localhost:5433/api/databases/derive",
-    "Audience":     "_auth",
+    "Authority":    "http://localhost:5433/api/databases/_auth",
+    "Audience":     "derive",
     "ServerUrl":    "http://localhost:5433",
     "DatabaseName": "derive",
     "AnonKey":      "mk_anon_a1b2c3d4e5f6...",
@@ -1304,8 +1342,8 @@ Your application reads Aouda Auth configuration from `appsettings.json` / `appse
 
 | Key | Purpose | Where It Comes From |
 |-----|---------|---------------------|
-| `Authority` | Base URL for OIDC Discovery — used by `options.Authority` in `AddJwtBearer` | Constructed from server URL + database name |
-| `Audience` | JWT `aud` claim — always the auth database name | Always `_auth` (unless you named it differently) |
+| `Authority` | Base URL for OIDC Discovery and the expected `iss` — used by `options.Authority` in `AddJwtBearer` | Server URL + the **auth database** name (**BL-1018, next train**; it was the application database) |
+| `Audience` | A name the JWT `aud` claim must contain — the token's allowance is an array of database names | The application database this service serves, e.g. `derive` (**BL-1018, next train**; it was the auth database name) |
 | `ServerUrl` | Aouda server base URL — used to construct the `AoudaClient` | Your server address |
 | `DatabaseName` | Which database the `AoudaClient` connects to | The `name` from `POST /api/databases` (e.g. `derive`) |
 | `AnonKey` | `mk_anon_...` — public auth endpoints (signup, signin, password reset) | From create-database or regenerate-keys response |
@@ -1324,7 +1362,7 @@ builder.Services.AddAuthentication()
         // Required — do NOT rely only on Authority; the discovery URL won't be derived correctly.
         options.MetadataAddress      = $"{authority}/auth/.well-known/openid-configuration";
         options.Authority            = authority;
-        options.Audience             = builder.Configuration["AoudaAuth:Audience"] ?? "_auth";
+        options.Audience             = builder.Configuration["AoudaAuth:Audience"]!;
         options.RequireHttpsMetadata = false; // dev only — remove for production
     });
 
@@ -1353,8 +1391,8 @@ appsettings.Development.template.json   ← checked in, shows structure with pla
 ```json
 {
   "AoudaAuth": {
-    "Authority":    "http://localhost:5433/api/databases/derive",
-    "Audience":     "_auth",
+    "Authority":    "http://localhost:5433/api/databases/_auth",
+    "Audience":     "derive",
     "ServerUrl":    "http://localhost:5433",
     "DatabaseName": "derive",
     "AnonKey":      "REPLACE_WITH_MK_ANON_KEY",

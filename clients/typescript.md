@@ -185,6 +185,13 @@ React Native, `react-native-get-random-values`; see [React Native](#react-native
 `app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
 session's `aal`. Recipes: [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
 
+**Which databases a sign-in opens** (**BL-1018, next train**): a token opens only its allowance — the databases of the auth database
+on which the user holds a role. `client.auth.signIn(email, password, { databases: ['orders', 'reports'] })` narrows it (never wider;
+anything but a non-empty subset is `400 INVALID_REQUEST`), and so does `createAuthorizationCode({ …, databases })` for native sign-in.
+A token used elsewhere is `401` with the exported code `AUTH_DATABASE_NOT_IN_ALLOWANCE`. A refresh refused with it ends the session
+like `AUTH_REFRESH_TOKEN_INVALID` — the client clears its tokens, reports `"signedOut"` and does not retry, and the realtime transports
+stop reconnecting. See [the token allowance](../auth/reference.md#the-token-allowance).
+
 **Auth option rules:**
 - `appAuth` and `serverAuth` are mutually exclusive. Omitting both still exposes `client.auth` for keyless browser login.
 - Within each, `apiKey` and `token` are mutually exclusive.

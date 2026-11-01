@@ -344,18 +344,18 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/api/databases/{db}/auth/signup` | POST | API key (Layer 1) | Register new user |
-| `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token |
-| `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT |
+| `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token. Optional `databases` narrows the token's allowance (**BL-1018, next train**) — see [the token allowance](#the-token-allowance) |
+| `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT with the same allowance. Outside the allowance: `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`, refresh token not spent (**BL-1018, next train**) |
 | `/api/databases/{db}/auth/signout` | POST | API key + user JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, 0.4.0**) |
-| `/api/databases/{db}/auth/authorize` | POST | user JWT | Native sign-in: issue a single-use PKCE code for a registered native client (**NativeClients, 0.4.0**) |
-| `/api/databases/{db}/auth/token` | POST | none | Native sign-in: redeem the code (`grantType: "authorization_code"`) for a new session (**NativeClients, 0.4.0**) |
+| `/api/databases/{db}/auth/authorize` | POST | user JWT | Native sign-in: issue a single-use PKCE code for a registered native client (**NativeClients, 0.4.0**). The code carries the caller's allowance, or the part of it an optional `databases` names (**BL-1018, next train**) |
+| `/api/databases/{db}/auth/token` | POST | none | Native sign-in: redeem the code (`grantType: "authorization_code"`) for a new session (**NativeClients, 0.4.0**). At a database outside the code's allowance: `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`, and the code is spent (**BL-1018, next train**) |
 | `/api/databases/{db}/auth/sessions` | GET | user JWT | The caller's sessions, one per device (**NativeClients, 0.4.0**) |
 | `/api/databases/{db}/auth/sessions/{id}` | DELETE | user JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, 0.4.0**) |
 | `/api/databases/{db}/auth/me` | GET | API key + user JWT | Current user profile |
 | `/api/databases/{db}/auth/me` | PATCH | API key + user JWT | Update profile metadata |
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
 | `/api/databases/{db}/auth/request-password-reset` | POST | API key (Layer 1) | Request 6-digit OTP emailed to user; always 200 (anti-enumeration) |
-| `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set |
+| `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set. Optional `databases`, as on sign-in (**BL-1018, next train**) |
 | `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor. Phone: 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; delete existing factor then re-enroll to replace number. Needs an `aal2` token, else 403 `AUTH_MFA_STEP_UP_REQUIRED` (**BL-795, 0.3.0**) |
 | `/api/databases/{db}/auth/mfa/challenge` | POST | User JWT | Create MFA challenge; sends SMS OTP for phone factors |
 | `/api/databases/{db}/auth/mfa/verify` | POST | User JWT | Submit OTP/TOTP/backup code; returns `aal2` token pair on success |
@@ -387,9 +387,12 @@ Content-Type: application/json
 
 {
   "email": "user@example.com",
-  "password": "..."
+  "password": "...",
+  "databases": ["myapp"]
 }
 ```
+
+`databases` is optional (**BL-1018, next train**).
 
 **App auth signin response:**
 
@@ -408,13 +411,32 @@ Content-Type: application/json
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `{base_url}/api/databases/{db}` (`Aouda:BaseUrl`, else the request's scheme and host). (**BL-980, 0.4.0**) The only issuer accepted for this database's tokens (with, for a linked auth database, that database's URL issuer); up to 0.3.x `"aouda"` was accepted beside it, and a token carrying it is now `401` |
-| `aud` | Auth database name (e.g. `"_auth"`) |
+| `iss` | `{base_url}/api/databases/{authDb}` — the **auth database's** URL, whichever linked database minted or refreshed the token (`Aouda:BaseUrl`, else the request's scheme and host). (**BL-1018, next train**; it was the path database's URL.) The only issuer accepted on the paths of that auth database and the databases linked to it; up to 0.3.x `"aouda"` was accepted beside it, and a token carrying it is `401` (**BL-980, 0.4.0**) |
+| `aud` | The token's **allowance**: a JSON array of the databases it may open, e.g. `["myapp", "reports"]` (**BL-1018, next train**; it was the auth database's name) |
 | `aal` | Authentication assurance level: `"aal1"` (password signin by a user who has an active MFA factor, not yet verified) or `"aal2"` (MFA verified, **or a password signin by a user with no active factor** — **BL-795, 0.3.0**) |
 | `tenant_id` | Tenant ID for PLS partition scoping |
 | `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_reader"] }`. Values are always arrays. Scope key for unscoped roles is the auth DB name (e.g. `"_auth"`). |
 | `permissions` | Fine-grained table permissions (if custom role) |
 | `iat`, `exp` | Issued-at and expiry timestamps |
+
+#### The token allowance
+
+(**BL-1018, next train**) An application token is accepted at a database when its auth database issued it and the database is that
+auth database or is named in `aud`. Anywhere else — HTTP, the WebSocket handshake and `re_auth`, a long-poll connect, `X-User-Token`
+— it is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`. The refresh-token family and a native sign-in code carry the same allowance, at most 64
+names.
+
+- **Sign-in, password reset:** the databases of this auth database (it and every database linked to it) on which the user holds a
+  role — scoped to that database, or unscoped. None: `403 AUTHORIZATION_DENIED`; there is no fallback to every linked database.
+- **`databases`** in the request narrows that set and never widens it. A name the user holds no role on, a database not linked to this
+  auth database, an unknown or blank name, an empty array, or more than 64 names: `400 INVALID_REQUEST`, nothing minted. More than 64
+  role-derived databases with `databases` omitted is also `400`.
+- **Signup:** the database signed up on (`databases` is ignored). **MFA verify:** the session's allowance, never wider.
+- **Refresh:** the family's allowance; outside it, `401` before the refresh token is spent. **Native code:** outside its allowance,
+  `401` and the code is spent.
+- **Unlink** takes a database out of every allowance at once; a database linked later is in none until the user signs in again.
+
+Server-auth tokens are unchanged: no allowance, `iss` `"aouda"`, `aud` the server auth database's name.
 
 #### Role permissions and access grants
 
@@ -671,6 +693,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_MISSING` | 401 | Missing or empty `Authorization: Bearer` header. Exception: data-plane listed named-artifact execute / batch is 404 `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` instead (admin listener still 401). |
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
+| `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, next train**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
 | `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
@@ -4740,7 +4763,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, next train**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, next train**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, next train**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, next train**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, next train**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**
@@ -5725,3 +5748,4 @@ Operator abort of an in-flight session. Releases table locks and records the abo
 | 2.15 | next train (ArrayColumns, BL-035) | **ArrayColumns (BL-035, next train; additive on the wire):** six [array column](../guides/array-columns.md) types in schema and on every surface — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (JSON: an array, a base64 string for `Byte[]`; `types` and `X-Aouda-Column-Types` name them); one new error code, `ARRAY_COLUMN_UNSUPPORTED` (400), for an array column used where it cannot be; a new frame column kind, **9 `Array`** (an older client reading it fails with its *"unknown kind 9"* error; a query response with an array column is a frame when the client accepts frames; an older TypeScript client reading arrays from JSON — subscriptions, the materialized query endpoint, `returning` — does not fail, and gives plain arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded); `column_types` on subscription `snapshot` and `change` messages and `columnTypes` on the materialized query endpoint's body; the generator route is `GET /api/databases/{db}/schema/typescript`. A server binary from before this train that opens a data directory holding an array column refuses it by the type's number (*"has type 514, which this build does not define"*). `X-Aouda-Protocol-Version` stays `2`. |
 | 2.16 | next train (Grants) | **BL-1227 (breaking on the wire):** what a credential sees on a table with partition- or row-level security is decided by access grants, `all-partitions` and `all-rows` (scope: a table or the database; level `read`, `write`, `admin`), not by key kind. An app service key and a user assigned `db_admin` hold both by implication (a key linked to such a user, or presenting its token, acts as the user); no other credential does. Role permissions take `resourceType` `all-partitions` / `all-rows` (`resourceName` `*` or a table, `actions` one level); new `400` codes `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`, and `AUTH_GRANT_INVALID` widened. New `GET …/auth/admin/users/{id}/access-grants`. `crossPartitionAccess` is a cost waiver only (it waives `PARTITION_FILTER_REQUIRED` and never widens what a credential sees), per call on named-query execute and each batch item, and `cross_partition_access` on a WebSocket / long-poll `subscribe`; the data-plane listener ignores it. The `db_admin`-plus-flag read of every partition is gone, and so are the cross-partition rate limiter, its `429` and the `query_cross_partition` audit row. Every use of a grant is audited as `access_grant_used` (replaces `service_key_pls_bypass`). Bulk load admits a caller that holds, at `write`, the grant for each restriction of a table it locks, at `:begin` and every `:append`. Realtime checks roles as HTTP does (subscribe `read`, `stream_open` `write`, `PERMISSION_REVOKED` on a role change); a server-auth session is checked at the handshake; a join side is scoped as a direct read. Policy inspect identities take `accessGrants`; a sample needs the grants (`sampleReason` `caller_not_granted`). |
 | 2.17 | next train (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal, vector search and branch queries on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/access-grants` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
+| 2.18 | next train (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |
