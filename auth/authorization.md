@@ -49,8 +49,10 @@ write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table ans
 That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a credential that holds the grant that
 lifts the restriction is let through ([below](#visibility-is-granted-all-partitions-and-all-rows)). So link the auth database
 before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable to everyone but a holder of the grants, not open.
-On a `jwt-claim` table with PLS on, a graph or vector read returns nothing to a credential without `all-partitions` — a tenant's
-user included — until BL-1279 gives those reads the tenant claim.
+On a `jwt-claim` table with PLS on, graph traversal, k-hop, shortest path, and nearest-neighbour search scope a tenant's user to
+the bound claim and return no other partition, including rows stored with no partition key. A missing, empty, or white-space
+claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. A request with no permission
+context does not. (**BL-1279, next train**)
 
 ### Visibility is granted: `all-partitions` and `all-rows`
 
@@ -239,7 +241,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
   }'
 ```
 
-When a signed-in user queries `orders`, the middleware reads the **bound claim** from the JWT and routes all queries to that single partition. One user, one partition.
+When a signed-in user queries `orders`, the middleware reads the **bound claim** from the JWT and routes all queries to that single partition — `POST …/query`, and `edges:traverse`, `edges:khop`, `edges:shortest-path`, and `vectors/{column}:nearest`. One user, one partition. A missing, empty, or white-space claim on those four reads is `403 AUTH_PLS_TENANT_CLAIM_MISSING`, the same code as a query. (**BL-1279, next train**)
 
 The default binding is `claim:tenant_id` (omit `plsClaimBinding` — same as today). Aouda's own sign-in JWT does **not** mint `tenant_id` unless an admin set it. Two ways to make `jwt-claim` work with built-in auth:
 

@@ -3332,7 +3332,7 @@ Computed column types are inferred where the expression permits (`"Unknown"` oth
 vector columns are created, written and queried over REST under `/api/databases/{db}`. All bodies and answers are JSON. They are
 admin-listener routes: on the data-plane listener they are `404`. Writes need write permission on the database; the four reads need
 read permission and honour the [freshness parameters](#consistency-tokens-and-freshness) (`at_least`, `waitMs`, `onExceeded`, the
-lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)). A caller that holds `all-partitions` is lifted from the PLS half and one that holds `all-rows` from the RLS half, independently (**BL-1227, next train**). On a `jwt-claim` table with PLS on, a read by a credential without `all-partitions` returns nothing, because these reads have no tenant claim to compare with (BL-1279). They are not audited as `access_grant_used` yet.
+lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)). A caller that holds `all-partitions` is lifted from the PLS half and one that holds `all-rows` from the RLS half, independently (**BL-1227, next train**). On a `jwt-claim` table with PLS on, `edges:traverse`, `edges:khop`, `edges:shortest-path`, and `vectors/{column}:nearest` scope the caller to the bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, next train**) They are not audited as `access_grant_used` yet.
 Neither SDK wraps them yet.
 
 | Method | Path | Body | Answer |
@@ -3384,7 +3384,9 @@ Insert edges: `srcs[i]` → `dsts[i]`. The two arrays must be non-empty and the 
 #### `POST /api/databases/{db}/tables/{name}/edges:traverse`
 
 Breadth-first traversal: every node reachable from `startNodeId` within `hops` hops (default `1`), each once, the start node not
-included.
+included. On a `jwt-claim` table with partition-level security, the caller sees only the bound claim's partition. A missing,
+empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition.
+(**BL-1279, next train**)
 
 ```json
 { "startNodeId": 1, "hops": 2 }
@@ -3398,7 +3400,9 @@ included.
 
 The k-hop neighbourhood: every node reachable from `startNodeId` within `k` hops (`k` > 0), with its smallest hop distance
 (from 1; the start node not included), ordered by distance and then node id. The answer is column arrays: `nodeIds[i]` is at
-`hops[i]` hops (**Lead S12, 0.6.0; breaking**: it was `"nodes": [{"nodeId", "hops"}]`, one object per node).
+`hops[i]` hops (**Lead S12, 0.6.0; breaking**: it was `"nodes": [{"nodeId", "hops"}]`, one object per node). On a `jwt-claim`
+table with partition-level security, the caller sees only the bound claim's partition. A missing, empty, or white-space claim
+is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, next train**)
 
 ```json
 { "startNodeId": 1, "k": 2 }
@@ -3411,7 +3415,9 @@ The k-hop neighbourhood: every node reachable from `startNodeId` within `k` hops
 #### `POST /api/databases/{db}/tables/{name}/edges:shortest-path`
 
 The shortest path from node `a` to node `b`: the node ids along it, both ends included, or `[]` when there is none. A table
-created with `storeCsc: true` is searched from both ends.
+created with `storeCsc: true` is searched from both ends. On a `jwt-claim` table with partition-level security, the caller sees
+only the bound claim's partition. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`.
+`all-partitions` at `read` sees every partition. (**BL-1279, next train**)
 
 ```json
 { "a": 1, "b": 4 }
@@ -3457,7 +3463,10 @@ partition when omitted or null; an empty string names a partition of its own, **
 
 Approximate nearest neighbours of `queryEmbedding` (its length is the column's `dimensions`): up to `k` (> 0) hits, nearest first.
 The answer is column arrays: `rowKeys[i]` is at `distances[i]` (**Lead S12, 0.6.0; breaking**: it was
-`"results": [{"rowKey", "distance"}]`, one object per hit). `token` is the cut the search read.
+`"results": [{"rowKey", "distance"}]`, one object per hit). `token` is the cut the search read. On a `jwt-claim` table with
+partition-level security, the caller sees only the bound claim's partition, not another tenant's and not vectors stored with no
+partition key. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees
+every partition, including unpartitioned vectors. (**BL-1279, next train**)
 
 ```json
 { "queryEmbedding": [0.1, 0.2, 0.3], "k": 2 }
