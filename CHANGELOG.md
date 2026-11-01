@@ -56,6 +56,16 @@ Public, user-facing release notes. Engine phase status lives in the server
   - Policy inspect and `aouda.identities.json` identities take `accessGrants`; a `service_key` identity holds the implied pair and refuses
     them; a policy-inspect `sample` is shown only to a caller that holds the grants for it (`sampleReason: "caller_not_granted"`).
     The materialized-query endpoint, graph traversal and vector search lift each half by its own grant.
+- **A token opens only the databases it was issued for (BL-1018, next train; behaviour change).** Databases that share an auth
+  database no longer share every sign-in. An application token, its refresh tokens and a native sign-in code carry an **allowance** —
+  the databases of the auth database on which the user holds a role — and are refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code)
+  anywhere else, on HTTP, realtime and `X-User-Token`. Sign-in, password reset and native `authorize` take an optional `databases`
+  that narrows it, never widens it (`400` for anything but a non-empty subset). The access token's `iss` is now the auth database's
+  URL on every linked database and its `aud` is the allowance, an array — a service that validates tokens itself checks that issuer
+  and that `aud` names its database. **What an upgrade changes:** a user with no role on any database of the auth database can no
+  longer sign in (`403`), so assign a role to users an administrator creates; a data directory written before the train is refused at
+  startup (catalog format 15, no migration); both SDKs end the session on a refresh refused with the new code. Server-auth tokens are unchanged.
+  [The token allowance](auth/reference.md#the-token-allowance), [one auth database is one trust domain](auth/use-cases.md#one-auth-database-is-one-trust-domain).
 - **Embargo: a table seen on a delay (BL-418, next train).** A role can carry an `embargo` row — one table and a delay in whole
   seconds, up to 31 days — and everyone it is assigned to, `db_admin` users included, then sees a row of that table only once its row
   time (the first cluster column, a `Timestamp` or a `Date`) is at least that old by the server's clock: queries, counts, aggregates,

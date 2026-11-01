@@ -477,7 +477,7 @@ The auth database can be used directly as the `{db}` segment in all auth endpoin
 }
 ```
 
-JWT claims issued for standalone auth: `iss = http://localhost:5433/api/databases/auth`, `aud = auth`.
+JWT claims issued for standalone auth: `iss = http://localhost:5433/api/databases/auth`, `aud = ["auth"]` — the databases the token may open (**BL-1018, next train**; it was the string `"auth"`).
 
 See **[Architecture Patterns & Deployment — Pattern E](../auth/architecture.md)** for the full deployment diagram and multi-service gateway example.
 
