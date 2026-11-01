@@ -67,8 +67,11 @@ A grant has a **scope** and a **level**:
 - **Scope** is one table or a whole database. A database-scope grant covers every table of the database, including tables created
   after the grant, and (for `all-partitions`) every partition dimension.
 - **Level** is `read`, `write` or `admin`. `read` lifts reads only. `write` and `admin` also lift the write side: the PLS partition
-  check on an insert, update or delete, and the RLS write check. For data, `admin` is `write`. A `read` holder's UPDATE or DELETE is
-  still scoped to the rows the resolver shows it ([§19.5.3](#1953-admin-pass-through)).
+  check on an insert, update or delete, and the RLS write check. For data, `admin` is `write`: a data operation asks `write`, and an
+  `admin` grant covers it. (**BL-1296, next train**) DDL that changes or drops PLS or RLS on a table that already has either
+  restriction asks `admin` — `all-partitions` where PLS applies and `all-rows` where RLS applies — which a `write` grant does not
+  cover. RBAC `alter`, `drop`, or `admin` alone is refused `403 AUTHORIZATION_DENIED`. A table with neither restriction is unchanged.
+  A `read` holder's UPDATE or DELETE is still scoped to the rows the resolver shows it ([§19.5.3](#1953-admin-pass-through)).
 
 **Who holds them without being told.** The credentials below hold both grants at `admin` on the database of the request, by
 implication; nothing is stored. Every other credential holds only what a role gives it.
