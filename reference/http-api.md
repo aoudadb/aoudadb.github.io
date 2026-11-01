@@ -1764,6 +1764,10 @@ An empty diff, a diff that only creates a protected table, and a diff that only 
 Dropping the `permissionColumn`, when allowed, turns PLS off (`auth-db-rls` if a resolver remains, otherwise `jwt-claim` with
 partition-level security off).
 
+(**BL-1178, next train**) A document that would leave a table with no columns is `400 INVALID_REQUEST`. The message says nothing
+was applied and names the table. That includes `dryRun: true`. Nothing in the document is applied. Dropping the table is not this
+refusal. Dropping every old column and adding one new column is allowed when `allowDestructive` is true.
+
 #### `POST /api/databases/{db}/schema/diff?access=true`
 
 Without `?access=true` the body stays a raw `SchemaDocument` and `accessSurface` is omitted (byte-compatible with earlier clients).
@@ -2675,8 +2679,13 @@ and which JWT claim, partition-level security filters on).
 #### `DELETE /api/databases/{db}/tables/{name}/columns/{columnName}`
 
 Drop a column. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created, in every `InferenceMode`
-(**BL-1177, 0.7.1**). This is the call the C# client's default reconcile (`AutoReconcileSchema`, `Unsafe`) makes for each column
-its model does not declare.
+(**BL-1177, 0.7.1**). An explicit `Unsafe` insert reconcile (`AutoReconcileSchema` + `ReconcilePolicy = Unsafe`) issues this
+DELETE for each non-key column its row type omits. A typed update does not reconcile, so it does not issue this DELETE.
+(**BL-1178, next train**)
+
+(**BL-1178, next train**) Dropping the last column is `400 INVALID_REQUEST`. The message names the table and the column
+(`Dropping column 'n' would leave table 't' with no columns.`), and the column stays. A primary key is dropped when another
+column remains (`204`). A partition-key column stays `400 PARTITION_KEY_FIXED`, including when it is the only column.
 
 (**BL-1199, next train**) A partition-key column is not dropped: refused `400 PARTITION_KEY_FIXED` (it was dropped, leaving the
 table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key. (**BL-1296, next train**)
