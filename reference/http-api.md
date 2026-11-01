@@ -724,7 +724,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `IDENTITY_QUOTA_EXCEEDED` | 429 | Data-plane per-identity request quota exceeded. `Retry-After` is set. |
 | `AUTH_GRANT_INVALID` | 400 | A grant in the request is invalid: a partition grant with missing or invalid fields, or a role permission with an unknown `resourceType`, an `all-partitions` / `all-rows` entry without exactly one level (`read`, `write` or `admin`) or without `resourceName`, a null entry, or one on a system role (**BL-1227, next train**). An `embargo` with a blank or `*` table or a delay that is not whole seconds from 1 to 2678400 (**BL-418, next train**) |
 | `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table that exists in no database the role can apply to. Table names are case-sensitive (**BL-1227, next train**; embargo **BL-418, next train**) |
-| `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS (no resolver, or a `jwt-claim` table, where a resolver is ignored) (**BL-1227, next train**). An `embargo` on a table with no row time (**BL-418, next train**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS (no resolver, or a `jwt-claim` table) (**BL-1227, next train**). `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records the change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, next train**). An `embargo` on a table with no row time (**BL-418, next train**) |
 | `AUTH_EMBARGO_UNSUPPORTED` | 403 / WS error | The caller holds an embargo on the table and the surface cannot apply its cutoff: a write (insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, bulk-load `:begin` and every `:append`, a write stream's `stream_rows`), a materialized query (its query endpoint, a `/query` or named query that reads it, a subscription to it), graph traversal, or vector `:nearest`. A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused (**BL-1161, BL-1298, next train**). A write that names no table (a schema seed, a branch insert) is refused for any embargo holder. Not retryable with the same credential (**BL-418, next train**) |
 | `AUTH_GRANT_DIMENSION_CAP` | 400 | Creating a partition grant would exceed 1 000 grants on one dimension |
 | `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Creating a partition grant would exceed 5 000 grants for the principal |
@@ -1768,6 +1768,9 @@ partition-level security off).
 was applied and names the table. That includes `dryRun: true`. Nothing in the document is applied. Dropping the table is not this
 refusal. Dropping every old column and adding one new column is allowed when `allowDestructive` is true.
 
+(**BL-1281, next train**) A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, stays HTTP `200`: that change is `Failed`, `reason` names `auth-db-rls` and `auth-db-pls`, and the table is not written. A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
+
+
 #### `POST /api/databases/{db}/schema/diff?access=true`
 
 Without `?access=true` the body stays a raw `SchemaDocument` and `accessSurface` is omitted (byte-compatible with earlier clients).
@@ -2536,8 +2539,8 @@ partition grant's `dimension` — and `permissionColumn`, the column the grant k
 table's columns exactly. Neither is inferred: a dimension spelled like a column does not select it, and the partition key is not a
 fallback. Missing or unmatched, the create is `400 INVALID_REQUEST` naming the field; `permissionColumn` with another `authMode` is
 `400` too. (**BL-430, next train**) An upper-case letter in `permissionDimension` is the same `400 INVALID_REQUEST`, and the message
-gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. `PUT …/options` refuses it the same way
-and leaves the stored name unchanged. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
+gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. (**BL-1281, next train**) `rlsResolverName` on `jwt-claim`, including when `authMode` is omitted, is `400 INVALID_REQUEST`. The message names `auth-db-rls` and `auth-db-pls`. A whitespace-only name is no resolver. `PUT …/options` that omits `rlsResolverName` keeps the stored name, so with `authMode: jwt-claim` that is the same `400` and the table is unchanged; an empty `rlsResolverName` clears it and `jwt-claim` is then allowed. A resolver on `auth-db-rls` or `auth-db-pls` is unchanged. `PUT …/options` refuses an upper-case `permissionDimension` with that same `400 INVALID_REQUEST`
+and leaves the stored dimension unchanged. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
 table stays `auth-db-pls` and dropped when the request moves it to another mode. (**BL-1296, next train**) On a table that already
 has PLS or RLS, a request that changes that security is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
 `all-partitions` where PLS applies and `all-rows` where RLS applies. RBAC `alter` is still required and is not enough. A table with
@@ -3391,7 +3394,7 @@ Create an edge table: two `Int64` columns, the source and the destination node i
 | `authMode` | string? | No | `jwt-claim` (default), `auth-db-pls` or `auth-db-rls`. |
 | `permissionDimension` | string? | With `auth-db-pls` | The grant dimension the caller's grants are matched on. Lower case (**BL-430, next train**): an upper-case letter is `400 INVALID_REQUEST` (not `500`), and the message gives the lower-case spelling. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
-| `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. |
+| `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. On `jwt-claim`, including when `authMode` is omitted, it is `400 INVALID_REQUEST` and the table is not created — not dropped (**BL-1281, next train**). A resolver applies on `auth-db-rls` and `auth-db-pls`. |
 | `rlsColumn` | string? | No | Adds a `String` column for grant-sourced RLS (for example `org`). |
 
 `400 INVALID_REQUEST` for a missing field or an unknown `authMode`; `409 TABLE_EXISTS` when the name is taken.
@@ -3477,7 +3480,7 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `permissionColumn` | string? | With `auth-db-pls` | (**BL-1176, 0.7.0**) The column the grant keys are compared with — in practice the `rlsColumn`. The vector table is an ordinary table for its reads, so it declares the column like any `auth-db-pls` table. Sent with no `authMode` or with `jwt-claim` it is `400`, not ignored. |
 
 `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance`, `quantization` or `authMode`;
-`409 TABLE_EXISTS` when the table exists.
+`409 TABLE_EXISTS` when the table exists. (**BL-1281, next train**) `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is `400 INVALID_REQUEST` and the table is not created, not dropped. `permissionColumn` with `jwt-claim` stays `400` for that field.
 
 #### `POST /api/databases/{db}/tables/{name}/vectors/{column}`
 
