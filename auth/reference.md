@@ -297,7 +297,7 @@ These routes take a **server key** (`mk_srv_`), not `mk_svc_` and not a `db_admi
 
 #### Scoped service keys (**BL-1239, next train**)
 
-Same caller as the table above: a server key (`mk_srv_`). `{db}` is a linked application database. The body is `{ name, roles, expiresAt? }`. `roles` is one or more role names in that database's auth database; each is stored with scope `{db}`. `db_admin`, `db_operator`, `anonymous` and `public` are `400`, and so is an unknown role. The key (`mk_scp_`) holds those roles' access grants on `{db}` and no implied pair. Rotate keeps the roles.
+Same caller as the table above: a server key (`mk_srv_`). `{db}` is a linked application database. The body is `{ name, roles, expiresAt? }`. `roles` is one or more role names in that database's auth database; each is stored with scope `{db}`. `db_admin`, `db_operator`, `anonymous` and `public` are `400`, and so is an unknown role. The key (`mk_scp_`) holds those roles' access grants on `{db}` and no implied pair. It never administers `{db}`: every `…/auth/admin/…` route is `403 INSUFFICIENT_PERMISSIONS`, even when one of its roles carries `admin`. Rotate keeps the roles.
 
 | Method | Path | What |
 |--------|------|------|
