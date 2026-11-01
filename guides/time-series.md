@@ -147,7 +147,7 @@ If you create a partitioned time-series table and do not set advanced controls:
 | `ColumnEntry.PartitionFunction` | `null` / `None` | Partition routing uses raw key values |
 | `TableOptions.SortOnSeal` | `true` | Clustered writes are sorted on seal by default |
 | `PartitionOptions.StorageMode` | `Auto` | Shared buckets first, with possible dedicated promotion |
-| `PartitionOptions.RequirePartitionFilter` | `true` | Partitioned queries require key filters unless bypassed |
+| `PartitionOptions.RequirePartitionFilter` | `true` | Partitioned queries require key filters unless the cost guard is waived (`crossPartitionAccess`) |
 | `TablePolicy.MetadataCaching` | `Auto` | No effect: the summary caches it governed are deleted (**ColumnarRead, 0.3.0**) |
 
 ## 2.4 Availability status (implementation honesty)

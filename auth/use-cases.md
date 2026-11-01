@@ -204,9 +204,10 @@ app.get("/api/admin/tasks", async (req, res) => {
 });
 ```
 
-**Only the service key sees everything** (**0.4.0**). Up to 0.3.x a server API key (`mk_srv_`) did too; from 0.4.0
-it gets its role's grants and, on a PLS / RLS table, what a request with no user may see (with the usual rules, no row). An
-admin view like the one above needs this database's `mk_svc_` key — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+**The service key sees everything because it holds both grants** (**BL-1227, next train**). Up to 0.3.x a server API key
+(`mk_srv_`) saw it all too; it holds no grant, so it gets its role's grants and, on a PLS / RLS table, what a request with no
+user may see (with the usual rules, no row). An admin view like the one above needs this database's `mk_svc_` key, or a user
+with `db_admin` on it — [how visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
 ---
 

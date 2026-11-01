@@ -237,6 +237,28 @@ const count = await client.table('users')
 
 `count()` posts to `/query/count`: the server counts and returns only the number (**architecture review, 0.3.0**).
 
+### Reading across partitions — `withCrossPartitionAccess()`
+
+A table with a partition key refuses a read that names no partition (`PARTITION_FILTER_REQUIRED`), because it would scan every
+partition. `withCrossPartitionAccess()` asks the server to skip that guard for the query, and it works on `execute()`, on `count()`
+and on `subscribe()` (**BL-1227, next train**; until this train it reached `execute()` and `count()` only, and `subscribe()` had no way to send it).
+
+```typescript
+// A trusted backend reads open orders across every partition
+const open = await client.table('orders')
+  .where('status', '=', 'open')
+  .withCrossPartitionAccess()
+  .execute();
+```
+
+**The flag is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: what the query returns is what
+the credential's grants allow, with the flag or without it. A user with partition grants sees only those partitions, and a
+credential that holds no grant at all on a table with partition-level security is still refused there. Which
+credentials hold the grant: [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+The **data-plane** listener (the browser tier) ignores the flag. For subscriptions and named queries see
+[A subscription that spans partitions](#a-subscription-that-spans-partitions) and
+[Named queries and the flag](#named-queries-and-the-flag).
+
 ### All Filter Operators
 
 `where(column, operator, value)` adds an AND predicate. All operators:
@@ -1127,6 +1149,80 @@ it with `NAMED_QUERY_SUBSCRIBE_REQUIRED`: its callers cannot compose a query, so
 (`client.namedQueries.subscribe(name, args)`, see [Named queries](../guides/named-queries.md#subscribe-by-name)). A trusted backend that
 wants a filtered table subscription connects to the admin listener with its service key. Do not work around the error by moving the
 filter into a different request: there is none, by design ([Direct client access](../guides/direct-client-access.md)).
+
+**What a subscription sees** (**BL-1227, next train**). A subscription's snapshot and its change events follow the same grants as an
+HTTP query by the same credential, `subscribe` is authorized by the same role check (`read` on the table), and the server re-reads the
+credential's permissions on every `subscribe`. The server API keys (`mk_srv_`) that work over HTTP on a linked application database
+open its socket too. How it works: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
+
+#### A subscription that spans partitions
+
+On a partitioned table that requires a partition filter, a subscription that names no partition is refused with
+`PARTITION_FILTER_REQUIRED`, as the read would be. A trusted backend that really wants every partition's events asks for the waiver,
+either on the builder or in the options; if both ask, the subscription asks once, and neither cancels the other (**BL-1227, next train**).
+
+```typescript
+// On the query builder
+const sub = client.table('orders')
+  .withCrossPartitionAccess()
+  .subscribe({
+    onSnapshot: (rows, version) => console.log('Initial rows:', rows.length, version),
+    onChange: (event) => console.log(event.op, event.row ?? event.key),
+  });
+
+// Or in the subscribe options (SubscribeOptions.crossPartitionAccess)
+const sub2 = client.table('orders')
+  .where('status', '=', 'open')
+  .subscribe({
+    crossPartitionAccess: true,
+    onChange: (event) => console.log(event.op, event.row),
+  });
+```
+
+The SDK sends `cross_partition_access: true` on the `subscribe` message, only when you ask, and sends it again on every resubscribe after
+a reconnect. **It is a cost waiver, not a grant**: it waives `PARTITION_FILTER_REQUIRED` and nothing else, so the snapshot and the events
+are what the credential's grants allow (a service key, or a user with the `all-partitions` grant, sees every partition, those created
+later too; a user with partition grants sees only its own). The data-plane listener ignores it. An older server ignores the field and
+answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The wire rule:
+[A subscription that spans partitions](../guides/partitioning.md#a-subscription-that-spans-partitions).
+
+#### Named queries and the flag
+
+A named query that binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` too, on `execute()`,
+`batch()` and `subscribe()`. Each takes the flag **per call**, as a sibling of the arguments (**BL-1227, next train**). A definition
+cannot set it, and there is no batch-wide switch: each batch item carries its own.
+
+```typescript
+import type {
+  NamedQueryBatchItem,
+  NamedQueryBatchOptions,
+  NamedQueryExecuteOptions,
+  NamedQuerySubscribeOptions,
+} from '@aouda/client';
+
+// execute(name, args, NamedQueryExecuteOptions)
+const execOptions: NamedQueryExecuteOptions = { crossPartitionAccess: true };
+const open = await client.namedQueries.execute('orders_by_status', { status: 'open' }, execOptions);
+
+// batch(items, NamedQueryBatchOptions): the flag is on the item; the options hold { signal?, atLeast? }
+const items: NamedQueryBatchItem[] = [
+  { name: 'orders_by_status', args: { status: 'open' }, crossPartitionAccess: true },
+  { name: 'customer_card', args: { id: 7 } },
+];
+const batchOptions: NamedQueryBatchOptions = { signal: AbortSignal.timeout(10_000) };
+const slots = await client.namedQueries.batch(items, batchOptions);
+
+// subscribe(name, args, NamedQuerySubscribeOptions)
+const subOptions: NamedQuerySubscribeOptions = {
+  crossPartitionAccess: true,
+  onChange: (event) => console.log(event.op, event.row),
+};
+const live = client.namedQueries.subscribe('orders_by_status', { status: 'open' }, subOptions);
+```
+
+The flag is sent only when it is `true`. It waives the guard and widens nothing: the rows are the credential's grants. Alternatively bind
+the partition key in the definition's `where` clause, which needs no flag and works on the data-plane listener, where the flag is
+ignored ([`crossPartitionAccess` on the data-plane listener](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
 
 #### Horizons and range deletes (**Horizon, 0.5.0**)
 

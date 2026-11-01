@@ -309,10 +309,11 @@ Aouda supports many different deployment configurations. This section maps each 
 | **Production — full stack** | Yes | Yes | `mk_srv_`, `mk_anon_`, `mk_svc_` | Bootstrap admin, create DB with `auth.enabled` |
 | **AI agent development** | Optional | Optional | From create-database response | `aouda start` + create auth-enabled DB via API |
 
-**Which key sees past PLS / RLS** (**0.4.0**): only an app's `mk_svc_` key. A server API key (`mk_srv_`) runs the
-server — databases, schema, backups, keys — but on a table with a PLS or RLS mode it now gets only what a request with no user
-may see (up to 0.3.x it bypassed them). A backend that reads protected tables uses the database's `mk_svc_` key, or sends the
-user's JWT as `X-User-Token` — [what changed](authorization.md#what-changed-in-040-only-a-service-key-bypasses-pls-and-rls-040).
+**Which key sees past PLS / RLS** (**BL-1227, next train**): the one that holds the grants — an app's `mk_svc_` key holds
+`all-partitions` and `all-rows` on its database. A server API key (`mk_srv_`) runs the server — databases, schema, backups,
+keys — but holds neither grant, so on a table with a PLS or RLS mode it gets only what a request with no user may see (up to
+0.3.x it saw past them). A backend that reads protected tables uses the database's `mk_svc_` key, or sends the user's JWT as
+`X-User-Token` — [how visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
 ### Scenario 1: Embedded Mode (Zero Auth)
 

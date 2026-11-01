@@ -623,7 +623,7 @@ The path above is the one that removes the most work. It is not the only support
 | Edge / serverless functions | Treat them as trusted services with `mk_svc_*`; mind connection lifetime and that subscriptions want a long-lived socket | Streaming from a short-lived function | [Direct client access](direct-client-access.md) |
 | Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and run the access gate | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
 | Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
-| A browser needs cross-partition analytics | **Refused by design.** Use `auth-db-pls` fan-out, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [No crossPartitionAccess on a named query](browser-tier-read-limits.md#no-crosspartitionaccess-on-a-named-query) |
+| A browser needs cross-partition analytics | **Refused by design.** Use `auth-db-pls` fan-out, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener) |
 | You already have an application | Start from the existing-app branch below | Nothing — it is the same destination | [Adoption](adoption.md) |
 
 ---

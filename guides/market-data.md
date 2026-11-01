@@ -37,7 +37,7 @@ You cannot (data-plane restrictions):
 
 - Call `POST .../query` ad-hoc — 404 on the data-plane.
 - Create tables, MQs, or named queries via HTTP.
-- Use `crossPartitionAccess` — that flag is not a named-query field.
+- Use `crossPartitionAccess` — the data-plane listener ignores it, and a named-query definition cannot set it. A named-query call accepts it only on the admin listener. (**BL-1227, next train**)
 - Select internal MQ accumulator columns (`_max_bid`, `_first_open_val`, …) — `outputName` aliases are the public surface.
 
 **Admin / operator** paths (ingest servers, Studio, workflow services) are covered in the [Admin appendix](#admin-appendix) at the end of this guide.
@@ -617,7 +617,7 @@ See [Auth — auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhan
 | Schema file includes MQs | `materializedQueries` section in `aouda.schema.json` |
 | `dataPlaneAccess: true` on every MQ the browser reads | Set in the schema file, not patched via table-options HTTP |
 | Named queries select `outputName` columns | `open`, `high`, `low`, `close` — not `_max_bid` / `_first_open_val` |
-| No `crossPartitionAccess` in NQ params | Not a named-query field |
+| No `crossPartitionAccess` in NQ params | A definition cannot set it, and the data-plane listener ignores it; bind the partition keys in the where clause (**BL-1227, next train**) |
 | Watchlist: both partition keys required | `ticker in $tickers` + `source eq $source` (not just ticker) |
 | Last-price: use `latestPerKey` MQ or `collapse_inserts` | Default `conflate` is a no-op on insert-only streams |
 | Screener: `whenParamPresent` on optional facets | Unmarked optional omit throws `NAMED_QUERY_PARAM_REQUIRED` |
@@ -683,7 +683,7 @@ await client.table("quotes")
   .execute();
 ```
 
-`.Aggregate(...)` and `.withCrossPartitionAccess()` are admin-listener APIs — not `QueryMessage` fields and not available on the data-plane.
+`.Aggregate(...)` is an admin-listener API, and `crossPartitionAccess` is honoured on the admin listener only: the data-plane listener ignores it. The flag waives the partition-filter guard (a scan cost guard) and nothing else. It never widens what the credential sees, so the credential still needs its partition grants. A named query accepts it per call on the admin listener (`crossPartitionAccess` in the execute body or a batch item); a definition cannot set it. (**BL-1227, next train**)
 
 ### Ad-hoc query on a candle table (admin HTTP)
 
