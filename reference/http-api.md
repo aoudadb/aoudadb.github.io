@@ -2137,12 +2137,14 @@ A table may carry `absent` as any write body does; a cell left absent is not par
 
 **Response:** `200 OK` — `SeedApplyResult` with per-table `insertedCount` and `skippedCount` (existing primary keys skipped).
 
-**Authorization.** Database-level `write`. (**BL-1227, next train**) A seed is not a per-user write — its rows pass no PLS or RLS
-check — so every table the document names that has partition- or row-level security needs, at `write`, the grant lifting each
-restriction it has (`all-partitions` for PLS, `all-rows` for RLS), held by a service key, a `db_admin` user or a role. Otherwise the
-answer is `403 AUTHORIZATION_DENIED` naming every refused table and the grant it lacks, and nothing from the document is written. A
-table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A holder's seed writes one `access_grant_used` row per
-table and grant (operation `seed`) before the first row.
+**Authorization.** Database-level `write`. (**BL-1227, next train**) Tables the document names stay on the whole-table grant: a seed of
+those tables is not a per-user write — their rows pass no PLS or RLS check — so every named table that has partition- or row-level
+security needs, at `write`, the grant lifting each restriction it has (`all-partitions` for PLS, `all-rows` for RLS), held by a
+service key, a `db_admin` user or a role. Otherwise the answer is `403 AUTHORIZATION_DENIED` naming every refused table and the grant
+it lacks, and nothing from the document is written. A table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A
+holder's seed writes one `access_grant_used` row per table and grant (operation `seed`) before the first row. (**BL-1304, next train**)
+A transform that lands on any other table is the caller's per-row insert check, on the target row after derived columns and the
+identity stamp — the same `403` and code as `POST …/tables/{target}/rows` of that row — and that landing is not written when it is refused.
 
 ---
 

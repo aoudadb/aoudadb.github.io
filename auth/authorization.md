@@ -400,6 +400,8 @@ curl -X POST http://localhost:5433/api/databases/myapp/query \
 | `write` | ✅ | ✅ | ✅ |
 | `admin` | ✅ | ✅ | ✅ |
 
+A `route` or `tee` into the table is that same write check, by the caller, on the landed row (**BL-1304, next train**).
+
 ```bash
 # Grant Bob (user id 550e8400-…-446655440001) read-only access to room 42 (he can view but not post)
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440001/partition-grants \
@@ -610,6 +612,8 @@ For writes to `auth-db-rls` tables, Aouda evaluates a **write-check** predicate 
 **Write-check replaces the read predicate** when `writeCheckRules` is present on the resolver. Absent `writeCheckRules` ⇒ write-check = the read rules (today's behavior). To require both membership and identity, put both rules in `writeCheckRules` — do not assume they are ANDed automatically.
 
 The [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a SenderId-only write-check so a user can insert a stamped message into a private room they cannot **read**.
+
+A `route` or `tee` into the table is that same write check, by the caller, on the landed row (**BL-1304, next train**).
 
 | Write Operation | Write-check matches row? | Result |
 |---|:---:|:---:|
