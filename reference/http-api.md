@@ -495,7 +495,7 @@ Every permission in the request is validated before anything is written, so a re
 | `level` | `read`, `write` or `admin` |
 | `source` | `implied:service_key`, `implied:db_admin` or `role:<role name>` |
 | `surface` | `http`, `ws`, `long-poll` or `bulk-load` |
-| `operation` | `query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe` or `rekey` |
+| `operation` | `query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe` or `rekey` |
 | `table` | The table the grant lifted a restriction of |
 | `subscriptionId`, `jobId`, `streamId` | When the use belongs to a subscription, a bulk-load job or a write stream; otherwise absent |
 
@@ -503,7 +503,7 @@ Every permission in the request is validated before anything is written, so a re
 
 **Where it goes.** To the auth database that governs the data's database, else to the auth database that authenticated the credential. Read it with `GET …/auth/admin/audit-log?action=access_grant_used` (`GET /api/databases/{db}/auth/admin/audit-log` on an application auth database, `GET /api/auth/admin/audit-log` on the server auth database), which also takes `userId`, `from`, `to`, `limit` (default 20, max 100) and `offset`; the `action` filter is a case-insensitive substring match. The response is `{ "entries": [ { "id", "userId", "userEmail", "action", "resource", "detail", "ipAddress", "timestamp" } ], "total" }`, with `detail` as the JSON string above.
 
-Graph traversal and vector search read past security by the same grants but are not audited yet. `service_key_pls_bypass` and `query_cross_partition`, the audit kinds of the earlier bypass, are no longer written, and there is no `429` from the query endpoint for cross-partition traffic: the rate limiter and its `Aouda:PlsCrossPartitionRateLimit` options are gone, and a leftover key is ignored.
+A graph traversal, k-hop, shortest path, or nearest-neighbour search writes one `access_grant_used` row per grant that widened the read (`operation` `graph` or `vector`, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, next train**) `service_key_pls_bypass` and `query_cross_partition`, the audit kinds of the earlier bypass, are no longer written, and there is no `429` from the query endpoint for cross-partition traffic: the rate limiter and its `Aouda:PlsCrossPartitionRateLimit` options are gone, and a leftover key is ignored.
 
 #### Auth Error Responses
 
@@ -3355,7 +3355,7 @@ Computed column types are inferred where the expression permits (`"Unknown"` oth
 vector columns are created, written and queried over REST under `/api/databases/{db}`. All bodies and answers are JSON. They are
 admin-listener routes: on the data-plane listener they are `404`. Writes need write permission on the database; the four reads need
 read permission and honour the [freshness parameters](#consistency-tokens-and-freshness) (`at_least`, `waitMs`, `onExceeded`, the
-lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)). A caller that holds `all-partitions` is lifted from the PLS half and one that holds `all-rows` from the RLS half, independently (**BL-1227, next train**). On a `jwt-claim` table with PLS on, `edges:traverse`, `edges:khop`, `edges:shortest-path`, and `vectors/{column}:nearest` scope the caller to the bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, next train**) They are not audited as `access_grant_used` yet.
+lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)). A caller that holds `all-partitions` is lifted from the PLS half and one that holds `all-rows` from the RLS half, independently (**BL-1227, next train**). On a `jwt-claim` table with PLS on, `edges:traverse`, `edges:khop`, `edges:shortest-path`, and `vectors/{column}:nearest` scope the caller to the bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, next train**) A grant that widened the read writes one `access_grant_used` row per grant (`operation` `graph` for traverse, k-hop and shortest path, `vector` for nearest, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, next train**)
 Neither SDK wraps them yet.
 
 | Method | Path | Body | Answer |

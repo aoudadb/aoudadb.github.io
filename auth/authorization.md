@@ -125,8 +125,10 @@ partition grant, no tenant claim) is still refused. It is ignored on the data-pl
 [§19.7](#197-cross-partition-fan-out-queries) and [Partitioning](../guides/partitioning.md#partition-filter-rule-p40).
 
 **Every use of a grant is audited.** A request, bulk-load job, subscription or write stream whose outcome a grant decided writes one
-`access_grant_used` row to the auth database's audit log, never one per live event. Graph traversal and vector search are the
-exception: they read by the same grants but are not audited yet (BL-1289). See [Auth reference — Audit
+`access_grant_used` row to the auth database's audit log, never one per live event. Graph traversal, k-hop, shortest path, and
+nearest-neighbour search write one row per grant that widened the read (`operation` `graph` or `vector`, the edge or vector table,
+once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none.
+(**BL-1289, next train**) See [Auth reference — Audit
 logging](reference.md#audit-logging).
 
 **What changed.**
