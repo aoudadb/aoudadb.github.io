@@ -295,6 +295,18 @@ These routes take a **server key** (`mk_srv_`), not `mk_svc_` and not a `db_admi
 | POST | `/api/databases/{db}/service-keys/{name}/rotate` | New secret. `{ "overlapSeconds" }` `0` revokes now; a positive value leaves the old secret valid until `validUntil` |
 | POST / GET / DELETE / POST `…/rotate` | `/api/databases/{authDb}/auth-admin-keys` | The same, for `mk_adm_` on an application auth database |
 
+#### Scoped service keys (**BL-1239, next train**)
+
+Same caller as the table above: a server key (`mk_srv_`). `{db}` is a linked application database. The body is `{ name, roles, expiresAt? }`. `roles` is one or more role names in that database's auth database; each is stored with scope `{db}`. `db_admin`, `db_operator`, `anonymous` and `public` are `400`, and so is an unknown role. The key (`mk_scp_`) holds those roles' access grants on `{db}` and no implied pair. Rotate keeps the roles.
+
+| Method | Path | What |
+|--------|------|------|
+| POST / GET | `/api/databases/{db}/scoped-service-keys` | Mint / list. The list items include `roles` |
+| DELETE | `/api/databases/{db}/scoped-service-keys/{name}` | Revoke every live row of that name |
+| POST | `/api/databases/{db}/scoped-service-keys/{name}/rotate` | New secret, same roles. `{ "overlapSeconds" }` as for service keys |
+
+`POST …/auth/admin/api-keys` with `kind: "scoped_service"` is `400`. `GET` and `POST /api/databases` with an `mk_scp_` key — live or only the prefix — are **403** `AUTH_KEY_ROUTE_MISMATCH`.
+
 `mk_adm_` is accepted on that auth database's user, grant, session, audit, and MFA admin routes. It is not `service_role` (PLS / RLS stay enforced) and it cannot mint keys, regenerate system keys, define roles, change signup settings, or edit RLS. Call those routes as `/api/databases/{authDb}/auth/admin/…`.
 
 #### Response Bodies
@@ -512,7 +524,7 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
 | `AUTH_TOKEN_REVOKED` | 401 | Token was revoked — the session signed out or was ended by an administrator, the account was disabled, or the password changed. Also sent on an open WebSocket as `auth_error` (**NativeClients, 0.4.0**) | Redirect to sign-in |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
-| `AUTH_API_KEY_INVALID` | 401 | API key is not recognized, revoked, or expired | Regenerate via the admin regenerate-keys endpoint. A live `mk_svc_` / `mk_adm_` on `GET`/`POST /api/databases` is **403** `AUTH_KEY_ROUTE_MISMATCH`, not this code (**BL-1128**). |
+| `AUTH_API_KEY_INVALID` | 401 | API key is not recognized, revoked, or expired | Regenerate via the admin regenerate-keys endpoint. A live `mk_svc_` / `mk_scp_` / `mk_adm_` on `GET`/`POST /api/databases` is **403** `AUTH_KEY_ROUTE_MISMATCH`, not this code (**BL-1128**; `mk_scp_` is **BL-1239, next train**). |
 | `AUTH_ACCOUNT_DISABLED` | 423 | (**NativeClients, 0.4.0**) A refresh for an account an administrator disabled. Nothing the account held refreshes | Sign out locally; tell the user the account is disabled |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received. A reuse ends the whole session (**NativeClients, 0.4.0**): its access tokens are refused too (`AUTH_TOKEN_REVOKED`) | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only. (**BL-980, 0.4.0**) Also a refresh token whose stored `aal` is missing or not `aal1` / `aal2` — only an older build left one; it is not read as an `aal1` session |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live. (**BL-944, 0.4.0**) Also a bearer JWT whose check was refused (it was `401 AUTH_TOKEN_INVALID`), a password reset refused at the hash and an MFA verify refused after its code was accepted: the reset OTP and the MFA challenge (and a backup code) stay usable — and a reset whose new password is too weak no longer spends its OTP. (**NativeClients, 0.4.0**) Also a native sign-in's `POST …/auth/token`: the code is put back, so the same code and verifier can be retried within its 60 s | Retry the **same** request (the same refresh token, OTP, challenge or code) after `Retry-After`. (**BL-944, 0.4.0**) A sign-up refused part-way — after its user was written, at the role grant — is rolled back, so its retry succeeds instead of finding the email taken |
@@ -650,6 +662,7 @@ try {
 
 - **`anon` keys** (`mk_anon_`) are safe to embed in frontend code — they grant limited access only.
 - **`service_role` keys** (`mk_svc_`) must be kept secret — they hold `all-partitions` and `all-rows` on their database, so they read and write every row of every table (**BL-1227, next train**).
+- **Scoped service keys** (`mk_scp_`) must be kept secret too. They hold only the roles they were minted with, on that one database, and not the implied pair (**BL-1239, next train**).
 - **Server keys** (`mk_srv_`) must be kept secret and stored in environment variables.
 - **What each key may read (**0.4.0**; **BL-1227, next train**):** a key sees past partition- and row-level security only
   through the access grants it holds. The `service_role` key (`mk_svc_`) holds both on its database, by implication. Every other key

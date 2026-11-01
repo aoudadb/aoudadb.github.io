@@ -86,6 +86,7 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 | `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
 | `mk_svc_` | App service key | Application Auth | Backend key for one database. It holds both access grants, `all-partitions` and `all-rows`, at `admin` on its database, so partition- and row-level security do not restrict it; each use is audited as `access_grant_used` ([Audit](#audit-access_grant_used)) (**BL-1227, next train**). Ad-hoc query is allowed on the **admin** listener. Does **not** list or create databases (`GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH`); use `GET /api/databases/{name}` to check existence. |
+| `mk_scp_` | Scoped service key | Application Auth | Backend key for one database. It holds only the roles it was minted with, each scoped to that database, and not the implied pair. `X-User-Token` is ignored and the data-plane opt-in applies. `GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH` (**BL-1239, next train**). |
 | `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): it holds no access grant, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. It never holds `all-partitions` or `all-rows` by itself (**BL-1227, next train**). |
 | `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, 0.5.0**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. It may assign any existing role to a user, `db_admin` included, and a `db_admin` user holds both access grants: keep it as secret as a service key (**BL-1227, next train**). |
 | `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants, access grants included. A custom `mk_` minted on server auth is a scoped server key (BL-1017). A key's own `db_admin` role grants nothing: PLS / RLS stay enforced for a key not linked to a user. A key linked to a user holds that user's grants, so a key linked to a `db_admin` user holds `all-partitions` and `all-rows` (**BL-1227, next train**). |
@@ -110,7 +111,16 @@ The same four routes under `/api/databases/{authDb}/auth-admin-keys` mint `mk_ad
 
 `POST /api/databases/{db}/auth/admin/regenerate-keys` takes `{ "overlapSeconds"? }` the same way and returns `validUntil` (`null` when the previous system keys were revoked at once). Named keys are not swept.
 
-`Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_`; `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings.
+`Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_` (and accepts `mk_scp_`); `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_scp_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings. `mk_scp_` on `serverAuth` is **BL-1239, next train**.
+
+**Scoped service keys (**BL-1239, next train**).** A server key mints them on a linked application database. `db_admin`, `db_operator`, `anonymous`, `public` and an unknown role are `400`. `POST …/auth/admin/api-keys` with `kind: "scoped_service"` is `400`.
+
+| Method | Path | Body | Result |
+|--------|------|------|--------|
+| POST | `/api/databases/{db}/scoped-service-keys` | `{ "name", "roles", "expiresAt"? }` | `201` and the secret once: `{ name, key, keyPrefix, roles, expiresAt, createdAt }` |
+| GET | `/api/databases/{db}/scoped-service-keys` | | Live keys: `{ keys: [{ name, keyPrefix, roles, expiresAt, createdAt }] }` |
+| DELETE | `/api/databases/{db}/scoped-service-keys/{name}` | | `204` |
+| POST | `/api/databases/{db}/scoped-service-keys/{name}/rotate` | `{ "overlapSeconds" }` | `201` with the new secret, the same `roles`, and `validUntil` |
 
 #### Listeners and profiles
 

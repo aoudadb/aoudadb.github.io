@@ -76,6 +76,7 @@ implication; nothing is stored. Every other credential holds only what a role gi
 | Credential | Holds | Why |
 |---|---|---|
 | App service key (`mk_svc_…`, kind `service_role`), no user token | both, on its database | Trusted server-side code that must see the whole database. |
+| Scoped service key (`mk_scp_…`, kind `scoped_service`) (**BL-1239, next train**) | only the roles it was minted with, on that database | A backend key for one database that must not see every row. It does not receive the implied pair. `X-User-Token` is ignored, and the data-plane opt-in applies. Minted with a server key; `db_admin` cannot be one of its roles. |
 | A user with the `db_admin` role on the database | both, on that database | Read from the user's **role assignment** (its scope is that database, `*`, or none). A token that merely *claims* `db_admin` in `db_roles` holds nothing, and removing the assignment ends the grants on the next request. This includes a **server** user: the bootstrapped server admin user holds `db_admin` with no scope, so its token holds both grants on **every** database (what Studio, signed in as that user, sees). |
 | Any key + `X-User-Token` | what the **user** holds | The request runs as the user: a service key presenting a plain user's token gets that user's partition grants, not its own implied ones ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)). |
 | Custom key linked to a user | what that user holds | The key acts as its user. |
@@ -86,7 +87,8 @@ implication; nothing is stored. Every other credential holds only what a role gi
 
 **Give the grants to anyone else with a role.** A grant is a role permission with `resourceType` `all-partitions` or `all-rows`; the
 holder is any user the role is assigned to (the assignment's `scope` limits the database). Roles are the only carrier: there is no
-per-user grant, and a key without a linked user holds only the implied ones. The full request shapes are in
+per-user grant. A key without a linked user holds only the implied ones, except a scoped service key (`mk_scp_…`), which holds the
+grants of the roles it was minted with, on its own database (**BL-1239, next train**). The full request shapes are in
 [§19.8a](#198a-admin-api-access-grants-on-roles) and [Auth reference](reference.md#application-auth-admin-endpoints).
 
 ```bash
