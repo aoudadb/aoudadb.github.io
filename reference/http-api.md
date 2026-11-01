@@ -1711,6 +1711,16 @@ row, so `rowsInserted + rowsUpdated + expiredRows` can exceed the rows sent.
 
 Schema branch review can report **widening** of what a principal class can read (tables, columns, named-query projections). Computation lives in the engine so CI can gate a merge without Studio. See [Access-surface diff](../guides/access-surface.md).
 
+#### `POST /api/databases/{db}/schema/apply`
+
+(**BL-1296, next train**) A document that drops a table that already has PLS or RLS, changes that table's security, or drops its
+`permissionColumn`, is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and
+`all-rows` where RLS applies — one answer naming every refused table, and nothing is applied. That includes `dryRun: true` and
+`allowDestructive: false`. RBAC database `admin` is still required and is not enough. A table with neither restriction is unchanged.
+An empty diff, a diff that only creates a protected table, and a diff that only changes unprotected tables are not this check.
+Dropping the `permissionColumn`, when allowed, turns PLS off (`auth-db-rls` if a resolver remains, otherwise `jwt-claim` with
+partition-level security off).
+
 #### `POST /api/databases/{db}/schema/diff?access=true`
 
 Without `?access=true` the body stays a raw `SchemaDocument` and `accessSurface` is omitted (byte-compatible with earlier clients).
@@ -2466,7 +2476,10 @@ partition grant's `dimension` — and `permissionColumn`, the column the grant k
 table's columns exactly. Neither is inferred: a dimension spelled like a column does not select it, and the partition key is not a
 fallback. Missing or unmatched, the create is `400 INVALID_REQUEST` naming the field; `permissionColumn` with another `authMode` is
 `400` too. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
-table stays `auth-db-pls` and dropped when the request moves it to another mode. The table detail and `…/schema` responses carry
+table stays `auth-db-pls` and dropped when the request moves it to another mode. (**BL-1296, next train**) On a table that already
+has PLS or RLS, a request that changes that security is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
+`all-partitions` where PLS applies and `all-rows` where RLS applies. RBAC `alter` is still required and is not enough. A table with
+neither restriction is unchanged, and turning protection on is not this check. The table detail and `…/schema` responses carry
 `permissionColumn`. See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls).
 
 ```json
@@ -2489,7 +2502,9 @@ table stays `auth-db-pls` and dropped when the request moves it to another mode.
 #### `DELETE /api/databases/{db}/tables/{name}`
 
 Delete a table. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
-table, remove it from the schema file and apply with `allowDestructive: true`.
+table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, next train**) A table that already has
+PLS or RLS answers `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and `all-rows`
+where RLS applies. RBAC `drop` is still required and is not enough. A table with neither restriction is unchanged.
 
 **Response:** `204 No Content`
 
@@ -2606,7 +2621,12 @@ Drop a column. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema 
 its model does not declare.
 
 (**BL-1199, next train**) A partition-key column is not dropped: refused `400 PARTITION_KEY_FIXED` (it was dropped, leaving the
-table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key.
+table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key. (**BL-1296, next train**)
+Dropping the `permissionColumn` of a table that already has PLS is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
+`all-partitions` (and `all-rows` where RLS also applies). RBAC `alter` is still required and is not enough. Any other column, and a
+table with neither restriction, is unchanged. When the drop is allowed, PLS turns off in the same write: `auth-db-rls` if a resolver
+remains, otherwise `jwt-claim` with partition-level security off. A holder who then drops a partition-key column still gets
+`400 PARTITION_KEY_FIXED`, and the table is unchanged.
 
 **Response:** `204 No Content`
 
