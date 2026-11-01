@@ -1978,7 +1978,9 @@ Monitor first:
   stored rows changed since it (a compaction, or a stored row replaced since; (**WorkloadCore S11, 0.3.0**) a flush
   alone no longer counts — the checkpoint is retaken when the result's segments move). A query over another query's result
   is rebuilt from that result whenever its upstream took writes after the checkpoint. A database without a log restores
-  results only after a clean shutdown.
+  results only after a clean shutdown. A `filter` over a table without a primary key
+  is restored from its checkpoint only when its source took no write since it; otherwise it is rebuilt (its rows have no key, so
+  they cannot be rewritten idempotently on a replica) (**ColumnarMerge S08, 0.2.0**).
 - (**WorkloadCore S11, 0.3.0**) **Opening a database never rebuilds a query.** Before, the open rebuilt every query it
   could not restore, one after another, before the database came up — so a restart took as long as scanning every
   source once per query. Now the open restores what it can and returns; the others come back **behind and `Building`**
