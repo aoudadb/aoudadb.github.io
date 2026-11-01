@@ -1785,6 +1785,8 @@ Posting identities requires **Admin**. `?access=true` without identities is **Re
 
 **400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`.
 
+(**BL-1209, next train**) A branch name is one segment of 1–64 ASCII letters, digits, or hyphens, not `main` and not a Windows device name. `/`, `\`, `..`, a drive, a rooted name, a trailing dot or space, and `_` are refused. Every branch route answers `400 INVALID_REQUEST` and writes nothing.
+
 #### `POST /api/databases/{db}/branches/{name}/diff`
 
 Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` attaches `accessSurface`. Studio always sends `includeAccess: true`.
