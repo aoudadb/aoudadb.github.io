@@ -84,7 +84,7 @@ implication; nothing is stored. Every other credential holds only what a role gi
 | Any key + `X-User-Token` | what the **user** holds | The request runs as the user: a service key presenting a plain user's token gets that user's partition grants, not its own implied ones ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)). |
 | Custom key linked to a user | what that user holds | The key acts as its user. |
 | Server API key (`mk_srv_…`, kind `server_admin`) | nothing | It administers the server (databases, backups, `/api/auth/admin/*`); it is not a data credential. Use a service key, or send the user's token. It works on a linked application database's WebSocket and long-poll connect as it does over HTTP, and still holds no grant there. |
-| Auth-admin key (`mk_adm_…`) | nothing | It manages users and roles of one auth database. It may *read* a user's effective grants ([below](#see-what-a-user-holds)). ⚠️ It may also **assign** any existing role to a user, `db_admin` and a role carrying a grant included, and such a user holds the grants: treat the key as able to hand out full visibility. |
+| Auth-admin key (`mk_adm_…`) | nothing | It manages users and roles of one auth database. It may *read* a user's effective grants ([below](#see-what-a-user-holds)). Assigning `db_admin`, or a role that carries an all-* grant, is `403 AUTHORIZATION_DENIED` and the user's assignments stay; a user JWT can still assign them. A grant added later to a role it already assigned still reaches those users (**BL-1299, next train**). |
 | Custom key, not linked to a user | nothing | Even if it carries the `db_admin` role: a role on a key lets it create tables and manage the database, it does not widen what rows it reads. |
 | `mk_anon_…`, `mk_pub_…`, no credential | nothing | |
 
@@ -856,8 +856,7 @@ application database's route, against that database. A grant whose table is late
 of that name exists again: a table-scope grant names a table by name, so a re-created table, or a same-named table in another database
 the assignment's scope covers, is lifted by it. Use `*` when you mean "every table".
 
-⚠️ **The self-signup role is assigned to every self-registered user.** A role that carries `all-partitions` or `all-rows` — now or after
-a later edit — and is set as `selfSignupRole` hands the grant to anyone who can sign up. (BL-1282 tracks a guard for it.)
+**A signup role cannot be `db_admin` and cannot carry `all-partitions` or `all-rows`.** `PUT …/signup-settings`, a `PATCH` of that role's permissions, and database create (`selfSignupRole` / `auth.selfSignupRole`) answer `400 INVALID_REQUEST` and leave the previous settings, or no database. Signup of a role stored that way before this change answers `400 AUTH_SIGNUP_FAILED` with "Account could not be created." and creates no user (**BL-1282, next train**). A role that is not a signup role may still carry a grant, and a grant added after users are assigned still reaches them.
 
 ### See what a user holds
 
