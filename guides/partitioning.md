@@ -276,8 +276,9 @@ Three things that are easy to get wrong here:
   grant keys with the declared column and needs no partition key for it; `partitionLevelSecurity: true` under `jwt-claim` still
   requires one (*"Partition-level security can only be enabled on tables with a partition key."*). Option A is about the
   partitioned layout this section starts from, so keep the key there.
-- `permissionDimension` is only read in `auth-db-pls` mode. On a `jwt-claim` table it validates and then
-  does nothing; next to `auth-db-rls` it is a hard apply error (*"authMode 'auth-db-rls' cannot be
+- `permissionDimension` is only read in `auth-db-pls` mode. On a `jwt-claim` table it is refused
+  (*"authMode 'jwt-claim' cannot be combined with permissionDimension"*; **BL-1363, next train**), as is a
+  `rlsResolverName` there; next to `auth-db-rls` it is a hard apply error (*"authMode 'auth-db-rls' cannot be
   combined with permissionDimension"*).
 
 **Option B — bind it in the definition.** Take the partition key as a parameter the caller supplies. Simpler to set up, but the value now comes from the client, so authorization has to come from somewhere else (RLS, or a grant check) — otherwise any user can pass another user's id.

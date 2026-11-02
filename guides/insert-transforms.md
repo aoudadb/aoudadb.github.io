@@ -275,6 +275,8 @@ This is the operational difference between a transform and the application code 
 
 **Transforms are evaluated for the whole batch before anything is written.** The order is derived → checks → route/tee, recursively through hops. The first row that fails any stage throws, and **nothing in the batch is stored** — not the failing row, and not the rows around it. There is no partial success and no per-row skip.
 
+**One exception, for a `tee`:** that all-or-nothing rule covers evaluating the transforms. A `tee` commits the ingress rows first and writes the copies after, so a copy the target table then refuses (its own constraints on the landing write, a missing write grant, or row security) fails the request but leaves the ingress rows stored. A `route` stores no ingress row, so it has no such window.
+
 | Error | Raised when | HTTP |
 |---|---|---|
 | `CONSTRAINT_CHECK_VIOLATION` | A check predicate is false for a row | 400 |
