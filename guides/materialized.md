@@ -311,7 +311,7 @@ time slice ([2.11e](#window-expiry)).
 
 ### 2.3.2 Who may read a result: the source's security
 
-(**BL-1227, next train**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
+(**BL-1227, 0.9.0**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
 lifted past each half by its own grant **on the source table**: `all-partitions` lifts the source's PLS and `all-rows` its RLS, each
 alone. A grant that names the result table lifts nothing. A holder of one grant is still restricted by the other half — for
 example `all-partitions` alone reads every partition of a result over an `auth-db-pls` source with an RLS resolver, but only the rows
@@ -319,7 +319,7 @@ the resolver allows — and a result over a `jwt-claim` source is read whole by 
 result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
 See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
-(**BL-418, next train**) **An embargo holder cannot read a result over the embargoed table.** A result is computed once for every
+(**BL-418, 0.9.0**) **An embargo holder cannot read a result over the embargoed table.** A result is computed once for every
 reader, so it cannot be cut by one caller's delay: its query endpoint, a `/query` or named query that names it, and a subscription to
 it answer `403 AUTH_EMBARGO_UNSUPPORTED` to a credential holding an
 [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) on the source (or on the result table).
@@ -1889,9 +1889,9 @@ Expected checks:
 - No need for separate MQ-specific subscription protocol.
 - If MQ/result table is missing, subscriber gets normal table-not-found behavior.
 
-## 2.12a Array columns in a materialized result (**BL-035, next train**) {#array-columns-in-a-materialized-result}
+## 2.12a Array columns in a materialized result (**BL-035, 0.9.0**) {#array-columns-in-a-materialized-result}
 
-(**BL-035, next train**) A `latestPerKey` result carries [array columns](array-columns.md) as
+(**BL-035, 0.9.0**) A `latestPerKey` result carries [array columns](array-columns.md) as
 **payload**: the newest row's curve, with the rate array whole. A `topNPerGroup` and a `filter` result carry them the same way. This
 is the shape of "the latest curve per curve id":
 

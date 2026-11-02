@@ -116,7 +116,7 @@ If you do not configure schema management explicitly:
   insert.
 - A table that schema apply created refuses HTTP DDL in every mode (**BL-1177, 0.7.1**). See the table below.
 - The C# client reconciles a typed insert by default and does not drop columns the model omits (`ReconcilePolicy` defaults to
-  `Safe`). A typed update does not reconcile. (**BL-1178, next train**) See the warning below.
+  `Safe`). A typed update does not reconcile. (**BL-1178, 0.9.0**) See the warning below.
 - Runtime schema truth is always the server catalog, not a file.
 - Declarative safety still defaults to non-destructive:
   - API apply defaults to `allowDestructive = false`.
@@ -130,7 +130,7 @@ If you do not configure schema management explicitly:
 | Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested |
 | CLI `schema history` pagination | `limit=50`, `offset=0` | Any non-negative integer for `limit` and `offset` | Newest-first history default view |
 | CLI output mode | human-readable | `human-readable` (default), `json` (via `--json` flag) | Use `--json` when machine parsing is needed |
-| C# `AutoReconcileSchema` / `ReconcilePolicy` | `true` / `Safe` | `true`, `false` / `Safe`, `Unsafe` | The first typed insert adds missing columns and drops none. `Unsafe` is opt-in and drops non-key columns the model omits. A typed update does not reconcile. (**BL-1178, next train**) Set `false` for declarative tables |
+| C# `AutoReconcileSchema` / `ReconcilePolicy` | `true` / `Safe` | `true`, `false` / `Safe`, `Unsafe` | The first typed insert adds missing columns and drops none. `Unsafe` is opt-in and drops non-key columns the model omits. A typed update does not reconcile. (**BL-1178, 0.9.0**) Set `false` for declarative tables |
 
 ### What `InferenceMode` decides, and what it does not
 
@@ -153,14 +153,14 @@ If you do not configure schema management explicitly:
 - The lock is logged with the table's create, so a replica, the primary it is promoted to, and a point-in-time restore hold it too
   (**BL-1177, 0.7.1**; before, all three held the table open, even in `Extend`).
 
-> **⚠️ `Unsafe` drops non-key columns your model does not declare. The default is `Safe`.** (**BL-1178, next train**)
+> **⚠️ `Unsafe` drops non-key columns your model does not declare. The default is `Safe`.** (**BL-1178, 0.9.0**)
 >
 > `Aouda.Client` defaults to `AutoReconcileSchema = true` with `ReconcilePolicy = Safe`. Before the first typed insert, the client
 > adds the columns the model has and the table lacks, and it does not drop a column the model omits. A typed update does not
 > reconcile. `Unsafe` is opt-in: it drops non-key columns the model does not declare, including a derived column (`SearchText`), a
 > server-stamped column, and any column you left off the row type on purpose. It never drops a primary-key column.
 >
-> **Set `AutoReconcileSchema = false` on every client that writes to tables from `aouda.schema.json`.** From the next train
+> **Set `AutoReconcileSchema = false` on every client that writes to tables from `aouda.schema.json`.** From the 0.9.0
 > (**BL-1177**), the server refuses HTTP DDL on a schema-applied table. A default (`Safe`) client no longer tries to drop a column
 > the model omits, so that insert succeeds and the column stays. An explicit `Unsafe` client fails that drop with
 > `AoudaSchemaException` and the column survives. On 0.7.0 and earlier the default was `Unsafe`: in `On` or `Off`, the drop
@@ -245,7 +245,7 @@ If you do not configure schema management explicitly:
 | .NET CLI seed command | No | Yes | No | `Program.cs` + `RunSeedStub` | Stubbed, intentionally not wired |
 | Branch create/list/get/delete/diff/merge APIs | Yes | No | No | `BranchController.cs`, F.2/F.3 reports | Includes conflict handling |
 | Copy-on-write branch data sharing | Yes | No | No | F.4 report, branch tests | Branch writes isolated from parent |
-| `partitionKey` / `clusterColumns` / `partitionFunction` evolution | No | No | Yes | P36 overview §12 → BACKLOG | Cross-partition / full re-sort — post-P36. (**BL-1199, next train**) A table's partition key is fixed when it is created: schema apply refuses a document that changes it, and no API drops, renames or adds a key column |
+| `partitionKey` / `clusterColumns` / `partitionFunction` evolution | No | No | Yes | P36 overview §12 → BACKLOG | Cross-partition / full re-sort — post-P36. (**BL-1199, 0.9.0**) A table's partition key is fixed when it is created: schema apply refuses a document that changes it, and no API drops, renames or adds a key column |
 
 ---
 
@@ -322,7 +322,7 @@ Key anchors:
 > applying an **older** copy of the file (a rollback, a stale artifact baked into a deploy image, a
 > second service applying its own version) is enough. The same holds for whole tables.
 > A document that would leave a table with no columns does not run that drop: it is `400 INVALID_REQUEST`
-> and applies nothing (**BL-1178, next train**).
+> and applies nothing (**BL-1178, 0.9.0**).
 >
 > This matters most in pipelines that hard-set `allowDestructive: true` for an environment. Two
 > habits make it safe:
@@ -827,18 +827,18 @@ Operations that still produce warnings (not changes) in v1:
 
 | Changed property | Warning message pattern | Action required |
 |---|---|---|
-| Table `partitionKey` | `"Partition key change on table '...' is not supported: a table's partition key is fixed when the table is created. Drop and re-create the table to change it."` | Drop table, re-create. (**BL-1199, next train**) **Apply refuses the whole document** — see below. |
-| Column `partitionFunction` (a column outside the key; a key column's function is part of `partitionKey`) | `"Partition function change on '...' from '...' to '...' is not supported: …"` | As above: the apply is refused (**BL-1199, next train**). |
+| Table `partitionKey` | `"Partition key change on table '...' is not supported: a table's partition key is fixed when the table is created. Drop and re-create the table to change it."` | Drop table, re-create. (**BL-1199, 0.9.0**) **Apply refuses the whole document** — see below. |
+| Column `partitionFunction` (a column outside the key; a key column's function is part of `partitionKey`) | `"Partition function change on '...' from '...' to '...' is not supported: …"` | As above: the apply is refused (**BL-1199, 0.9.0**). |
 | Table `clusterColumns` | `"Cluster columns change on table '...' is not supported."` | Drop table, re-create. |
 | Column type involving Vector / MdVector | Tier 3 blocked | Not supported in v1. |
-| Column type change into or out of an array type (**BL-035, next train**) | Tier 3 blocked: `"Changing a column to or from an array type is not supported; add a new column and copy the values."` The column keeps its type. | Add a new column and copy the values. |
+| Column type change into or out of an array type (**BL-035, 0.9.0**) | Tier 3 blocked: `"Changing a column to or from an array type is not supported; add a new column and copy the values."` The column keeps its type. | Add a new column and copy the values. |
 | Type change on a partition-key column | Tier 3 blocked | Would reroute rows across partitions. |
 
 > **Note (P36):** Column `type`, `nullable`, `primaryKey`, `references`, rename, default, and description are first-class applyable changes. Imperative parity: `PATCH /api/databases/{db}/tables/{t}/columns/{c}` (type/nullable/autoIncrement/references/rename), `PUT …/columns:order`, and declarative apply for default/description/PK/culture. Non-integer `autoIncrement: true` still warns.
 
 Always inspect `SchemaDiffResult.Warnings` after a diff, especially before significant schema migrations. Warnings indicate intent/reality gaps that the apply pass will not carry out.
 
-(**BL-1199, next train**) **A partition-key warning refuses the apply.** A table's partition key is fixed when the table is
+(**BL-1199, 0.9.0**) **A partition-key warning refuses the apply.** A table's partition key is fixed when the table is
 created, so a document whose diff carries a `partitionKey` or `partitionFunction` warning — or that drops, renames or adds a
 partition-key column — is refused whole: `POST …/schema/apply` answers `400 PARTITION_KEY_FIXED` naming every reason, and **nothing in
 the document is applied** (its other changes neither), with no history entry. A dry run (`dryRun: true`) answers the same `400`, and a
@@ -846,14 +846,14 @@ branch merge whose plan changes a key is refused the same way. Until this releas
 implied — the key column was dropped, renamed or added — and returned the warning beside an applied result. To change a key, drop and
 re-create the table. Other warnings are still notes: the apply goes on without them.
 
-(**BL-1178, next train**) **A document that would leave a table with no columns is refused.** `POST …/schema/apply` answers
+(**BL-1178, 0.9.0**) **A document that would leave a table with no columns is refused.** `POST …/schema/apply` answers
 `400 INVALID_REQUEST`. The message says nothing was applied and names the table, and nothing in the document is applied, a dry run
 included. Dropping the table is not this refusal. Dropping every old column and adding one new column is allowed when
 `allowDestructive` is true.
 
 A key's function may be spelled on its `partitionKey` entry, on its column (`partitionFunction`), or both, and `"None"` is the same as
 no function: the diff compares the function the table actually routes by, so re-applying an unchanged document has no partition-key
-warning (**BL-1199, next train**; before, a document spelling it in only one place read as a key change on every apply).
+warning (**BL-1199, 0.9.0**; before, a document spelling it in only one place read as a key change on every apply).
 
 ```csharp
 var diff = await client.Schema.DiffAsync(schema);
@@ -925,9 +925,9 @@ This section documents every field available in `aouda.schema.json` by type. All
 | `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, 0.6.0**) and replication settings for this table. |
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
 | `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-pls"`, `"auth-db-rls"`. `auth-db-pls` implies partition-level security even when `partitionLevelSecurity` is omitted, and requires `permissionDimension` and `permissionColumn`; it does not require a partition key (**BL-1176, 0.7.0** — up to 0.6.0 schema apply required one). |
-| `permissionDimension` | `permissionDimension` | `string` | None | The grant namespace for `"auth-db-pls"`: a lower-case opaque entitlement name in the auth database (for example `fx_source`). Partition-grant `dimension` must match this string **byte-for-byte**. It **selects no column** — `permissionColumn` does (**BL-1176, 0.7.0**). An upper-case letter is refused (**BL-430, next train**): HTTP create and `PUT …/options` answer `400 INVALID_REQUEST`, and schema apply reports that change `Failed` and does not write it. The message gives the lower-case spelling. See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) and [§19.8](../auth/authorization.md#198-admin-api-partition-grants). |
+| `permissionDimension` | `permissionDimension` | `string` | None | The grant namespace for `"auth-db-pls"`: a lower-case opaque entitlement name in the auth database (for example `fx_source`). Partition-grant `dimension` must match this string **byte-for-byte**. It **selects no column** — `permissionColumn` does (**BL-1176, 0.7.0**). An upper-case letter is refused (**BL-430, 0.9.0**): HTTP create and `PUT …/options` answer `400 INVALID_REQUEST`, and schema apply reports that change `Failed` and does not write it. The message gives the lower-case spelling. See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) and [§19.8](../auth/authorization.md#198-admin-api-partition-grants). |
 | `permissionColumn` | `permissionColumn` | `string` | None | (**BL-1176, 0.7.0**) The column the grant keys of `permissionDimension` are compared with. **Required** with `"auth-db-pls"`, and must name a column of the table exactly; refused with any other `authMode`. Never inferred: a dimension spelled like a column does not select it, and neither does partition-key order. The column cannot be dropped while it is declared; a rename carries it. |
-| `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Required with `"auth-db-rls"`, optional with `"auth-db-pls"`, refused with `"jwt-claim"` (including when `authMode` is omitted). Create and `PUT …/options` answer `400 INVALID_REQUEST`; schema apply records the change `Failed` and does not write it. The message names `auth-db-rls` and `auth-db-pls` (**BL-1281, next train**). The resolver itself is created via the admin API, not schema apply. |
+| `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Required with `"auth-db-rls"`, optional with `"auth-db-pls"`, refused with `"jwt-claim"` (including when `authMode` is omitted). Create and `PUT …/options` answer `400 INVALID_REQUEST`; schema apply records the change `Failed` and does not write it. The message names `auth-db-rls` and `auth-db-pls` (**BL-1281, 0.9.0**). The resolver itself is created via the admin API, not schema apply. |
 | `plsClaimBinding` | `plsClaimBinding` | `string` | `claim:tenant_id` | jwt-claim PLS source. `"subject"` or `"claim:<name>"`. Omit keeps `tenant_id`. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
 
@@ -935,7 +935,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `type` | `type` | `string` | **Required** | Column data type. See valid values below, including the six [array types](array-columns.md) (**BL-035, next train**), which never change type. May be changed in place (P36): Tier 1 widens instantly; Tier 2 validates then rewrites. |
+| `type` | `type` | `string` | **Required** | Column data type. See valid values below, including the six [array types](array-columns.md) (**BL-035, 0.9.0**), which never change type. May be changed in place (P36): Tier 1 widens instantly; Tier 2 validates then rewrites. |
 | `primaryKey` | `primaryKey` | `int` | None | Ordinal position in composite primary key (1-based). Omit if not a PK column. Membership is changeable via apply. |
 | `autoIncrement` | `autoIncrement` | `bool` | `false` | Auto-increment identity column. Only valid on integer columns. Allowed values: `true`, `false`. On ordinary insert, `0` or an absent cell (the column left out of the row) auto-generates (**Lead S12, 0.6.0**; it was `400 Missing required column`, BL-429); a named-mutation `values` template may leave it out too, but a bound parameter left out of a call is not a request — see [Named queries](named-queries.md#batch-insert-batchparam) and [HTTP API insert](../reference/http-api.md#post-apidatabasesdbtablesnamerows). |
 | `nullable` | `nullable` | `bool` | `false` | Whether the column accepts null values. Allowed values: `true`, `false`. |
@@ -949,7 +949,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
 
-(**BL-035, next train**) And the six [array types](array-columns.md), spelled exactly: `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`.
+(**BL-035, 0.9.0**) And the six [array types](array-columns.md), spelled exactly: `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`.
 An array column cannot be a key, an index or a rule, a non-nullable one is allowed at create, and one added to an existing table is
 nullable (the rows that were there read null; `schema apply` refuses a non-nullable one, `POST …/columns` adds it nullable): see [Array columns](array-columns.md#declaring-an-array-column).
 
@@ -1035,7 +1035,7 @@ type](../getting-started/index.md#how-a-c-property-becomes-a-column-type).
 
 | Field | JSON key | Type | Required | Notes |
 |---|---|---|---|---|
-| `column` | `column` | `string` | Yes | Name of the partition key column. Must match a column in `columns`: (**BL-1199, next train**) a document whose entry names no column is refused `400 INVALID_REQUEST` ("Partition key column '…' in table '…' is not a column of the table."). Before, the entry was ignored, and a create made the table unpartitioned. |
+| `column` | `column` | `string` | Yes | Name of the partition key column. Must match a column in `columns`: (**BL-1199, 0.9.0**) a document whose entry names no column is refused `400 INVALID_REQUEST` ("Partition key column '…' in table '…' is not a column of the table."). Before, the entry was ignored, and a create made the table unpartitioned. |
 | `function` | `function` | `string` | No | Partition function to apply to the column value. See valid values below. |
 
 Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`. Omit the `function` field (or use `"None"`) to use the column value as-is for routing.
@@ -1271,8 +1271,8 @@ Expected result:
 |---|---|---|
 | Insert fails with "table does not exist... InferenceMode is Off" | Inference disabled on server | Create via schema apply or direct DDL endpoint |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table or column call | Schema apply created the table, and HTTP DDL is refused there in every mode (**BL-1177, 0.7.1**) | Change the schema file and re-apply |
-| `AoudaSchemaException: … under declarative schema management. Automatic reconciliation cannot drop column …` on a typed insert | An explicit `Unsafe` reconcile tried to drop a column the model does not declare, such as a derived or server-stamped column. The default is `Safe` and does not try. (**BL-1178, next train**) | Leave `ReconcilePolicy` at `Safe`, or set `AutoReconcileSchema = false` |
-| A derived or server-stamped column vanished after the first typed insert (0.7.0 and earlier) | The default then was `Unsafe`, and it dropped the column; `On` / `Off` did not lock the table | Re-apply the schema. From this train the default is `Safe` (**BL-1178, next train**) |
+| `AoudaSchemaException: … under declarative schema management. Automatic reconciliation cannot drop column …` on a typed insert | An explicit `Unsafe` reconcile tried to drop a column the model does not declare, such as a derived or server-stamped column. The default is `Safe` and does not try. (**BL-1178, 0.9.0**) | Leave `ReconcilePolicy` at `Safe`, or set `AutoReconcileSchema = false` |
+| A derived or server-stamped column vanished after the first typed insert (0.7.0 and earlier) | The default then was `Unsafe`, and it dropped the column; `On` / `Off` did not lock the table | Re-apply the schema. From this train the default is `Safe` (**BL-1178, 0.9.0**) |
 | `schema apply` reports skipped operations | Destructive changes present without opt-in | Re-run only after approval with `--allow-destructive` |
 | `schema validate` returns drift | Desired file and runtime catalog differ | Run `schema diff`, then apply or reconcile |
 | CLI says no schema file found | discovery path mismatch | run from repo root or pass `--file` |

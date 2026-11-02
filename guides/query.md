@@ -99,7 +99,7 @@ If you issue a query without custom tuning, Aouda applies protocol defaults and 
 | `offset` | `0` | No row skipping unless explicitly requested. |
 | `orderBy` max columns | `8` (`ProtocolConstants.MaxOrderByColumns`) | Prevents unbounded sort-key complexity in requests. |
 | `where` omitted | No predicate filtering | Full scan path across discovered segments. |
-| `crossPartitionAccess` | `false` | The partition-filter guard stays on. The flag waives that guard only (a cost guard); it never widens what the caller may see. (**BL-1227, next train**) |
+| `crossPartitionAccess` | `false` | The partition-filter guard stays on. The flag waives that guard only (a cost guard); it never widens what the caller may see. (**BL-1227, 0.9.0**) |
 | Read preference | Default parse behavior when omitted | Server validates role/visibility compatibility before query execution. |
 
 ## 2.4 Availability status (implementation honesty)
@@ -325,14 +325,14 @@ for its history.)
 | `orderBy` | Request body field | null | up to 8 columns | `QueryMessage` | Duplicate columns rejected by validator. |
 | `offset` | Request body field | `0` | `>=0` | `QueryMessage` | Negative rejected. |
 | `limit` | Request body field | `1000` effective when omitted/negative | `0` or positive; capped at `10000` | `QueryMessage` -> `QueryTranslator` | `0` means unlimited. |
-| `crossPartitionAccess` | Request body field | `false` | bool | `QueryMessage` | Waives `PARTITION_FILTER_REQUIRED` and nothing else, for every credential. The rows stay the credential's grants. Accepted on query, count, named-query calls and subscribe messages; the data-plane listener ignores it. (**BL-1227, next train**) |
+| `crossPartitionAccess` | Request body field | `false` | bool | `QueryMessage` | Waives `PARTITION_FILTER_REQUIRED` and nothing else, for every credential. The rows stay the credential's grants. Accepted on query, count, named-query calls and subscribe messages; the data-plane listener ignores it. (**BL-1227, 0.9.0**) |
 
 Precedence/override notes:
 
 - Response format: the JSON answer is always column arrays; `Accept` chooses JSON or column-batch frames (**Lead S12, 0.6.0**: the `format` parameter is gone).
 - Read preference: query parameter overrides header when both are present.
 - Limit handling: request value is normalized by translator (`0` special-case, negative->default, positive->cap).
-- Cross-partition behavior: the flag is a cost waiver for the partition-filter guard, not a visibility grant. A credential with partition grants plus the flag sees exactly its grants (a `jwt-claim` user, its tenant); a credential that holds no grant at all on a PLS table is still refused. There is no rate limit on it, and no `Aouda:PlsCrossPartitionRateLimit:*` setting (a leftover key is ignored). (**BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+- Cross-partition behavior: the flag is a cost waiver for the partition-filter guard, not a visibility grant. A credential with partition grants plus the flag sees exactly its grants (a `jwt-claim` user, its tenant); a credential that holds no grant at all on a PLS table is still refused. There is no rate limit on it, and no `Aouda:PlsCrossPartitionRateLimit:*` setting (a leftover key is ignored). (**BL-1227, 0.9.0**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
 ### Operator and query-option glossary
 
@@ -395,7 +395,7 @@ Notes:
 | Total matches with a page | Embedded engine: `TableQuery.WithTotalMatches()` → `TotalMatches` on the result (**ColumnarRead, 0.3.0**) | — | Named queries: `count: true` → `totalMatches` | Embedded + named queries | Counted by the same read over the same snapshot as the page, ignoring `Skip` / `Limit`. |
 | Rows as views | Embedded engine: `ToListAsync()` rows read the result's columns (**ColumnarRead, 0.3.0**); remote: `ClientColumnarResult.Rows` over a frame answer's typed columns (**ColumnarRead S16, 0.3.0**) | `result.rows` are views over `result.typedColumns` when the server answered with frames (**ColumnarRead S16, 0.3.0**) | Column-batch frame response | Implemented (0.3.0) | A row is a view over the result's column arrays: the indexer boxes one cell, `Get<T>` reads a typed column without boxing, `ToDictionary()` copies. |
 | Count convenience | `.CountAsync()` → `/query/count` | `.count()` → `/query/count` (**architecture review, 0.3.0**; it downloaded every matching row through `/query`) | `POST .../query/count` | Implemented (0.3.0) | No row is transferred. The filter and joins count; `select`, `orderBy`, `limit`, `offset` and `distinct` do not. Aggregates and `groupBy` are dropped by both SDKs: the count is of matching rows, not groups (C# `CountAsync` sent them and got a 400 before). |
-| Cross-partition query flag | `.WithCrossPartitionAccess()` | `.withCrossPartitionAccess()` | `crossPartitionAccess` bool | Implemented | Waives the partition-filter guard on the admin listener; reaches subscriptions and named-query calls too. (**BL-1227, next train**) |
+| Cross-partition query flag | `.WithCrossPartitionAccess()` | `.withCrossPartitionAccess()` | `crossPartitionAccess` bool | Implemented | Waives the partition-filter guard on the admin listener; reaches subscriptions and named-query calls too. (**BL-1227, 0.9.0**) |
 || Expression SELECT (computed columns) | `.SelectExpr((alias, expr), ...)` | `.selectExpr({ alias: expr })` | `selectExpr[]` in query body | Implemented (P27 S7 / P40 S08) | Server-computed columns appended to result; type is inferred where the expression permits (`Unknown` otherwise). Always nullable. See [browser-tier read limits](browser-tier-read-limits.md#selectexpr-result-types) and [Bulk Mutations](bulk-mutations.md). |
 || Literal UPDATE | `.UpdateAsync(dict)` | `.update(values)` | `PATCH .../rows` | Implemented | Requires at least one WHERE predicate. See [Bulk Mutations guide](bulk-mutations.md). |
 || Expression SET UPDATE | `.UpdateAsync(setBuilder)` | `.update({ col: { \$inc: 1 } })` | `PATCH .../rows` (`setExpr`) | Implemented (P27 S1) | Server-side expression evaluation; WAL stores concrete resolved values. |
@@ -555,7 +555,7 @@ Quick-answer matrix:
 | `Database is required` or path/body mismatch | Missing or inconsistent `database` field | Ensure body `database` matches `/api/databases/{db}` route. |
 | `ThenBy() requires OrderBy()` exception | Secondary sort called first | Add `OrderBy()` before `ThenBy()` in query chain. |
 | Query returns fewer rows than expected | Default/capped limit applied | Set explicit `limit` (or `0` when intentionally unbounded). |
-| Cross-partition query rejected | `PARTITION_FILTER_REQUIRED` without the flag; or the credential holds no grant at all on the PLS table — no `all-partitions`, no partition grant, no tenant claim (the flag never widens visibility: a user with partition grants and the flag reads its own partitions); or the request came through the data-plane listener, which ignores the flag | Send `crossPartitionAccess` on the admin listener, or bind the partition key. For visibility, see [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). (**BL-1227, next train**) |
+| Cross-partition query rejected | `PARTITION_FILTER_REQUIRED` without the flag; or the credential holds no grant at all on the PLS table — no `all-partitions`, no partition grant, no tenant claim (the flag never widens visibility: a user with partition grants and the flag reads its own partitions); or the request came through the data-plane listener, which ignores the flag | Send `crossPartitionAccess` on the admin listener, or bind the partition key. For visibility, see [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). (**BL-1227, 0.9.0**) |
 | Nested boolean request works over HTTP but not SDK builder | SDK does not expose groups API yet | Use raw protocol payload or flatten conditions; track `BL-044`. |
 | Slow cold predicate query | Limited pruning selectivity or high decode volume | Validate predicate columns, check pruning counters, review data distribution/segment stats. |
 

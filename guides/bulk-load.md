@@ -58,7 +58,7 @@ Operationally, this gives Aouda one ingest primitive that can be used by:
 
 Scope boundaries:
 - Bulk load optimizes the ingest path; it is not a replacement for normal row-level write APIs.
-- A table with partition or row security is not a per-user bulk-load target. For each such table the load locks, the caller must hold, at `write`, the grant that lifts each restriction the table has: `all-partitions` where it has PLS, `all-rows` where it has RLS. `:begin` and every `:append` refuse otherwise (`403 AUTHORIZATION_DENIED`). An app `service_role` key (`mk_svc_`) and a `db_admin` user hold both on their database (a custom key linked to a user holds that user's); a role assigned to a user can grant them to others, and a holder of `all-rows` alone can load a table that has RLS only. A grant that would allow an ordinary insert does not. A table with no PLS and no RLS policy is unchanged. Every bulk-load route also needs the `bulkload` permission on the database first (`db_admin` has it; `db_writer` does not). (**BL-1031, 0.5.0; BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+- A table with partition or row security is not a per-user bulk-load target. For each such table the load locks, the caller must hold, at `write`, the grant that lifts each restriction the table has: `all-partitions` where it has PLS, `all-rows` where it has RLS. `:begin` and every `:append` refuse otherwise (`403 AUTHORIZATION_DENIED`). An app `service_role` key (`mk_svc_`) and a `db_admin` user hold both on their database (a custom key linked to a user holds that user's); a role assigned to a user can grant them to others, and a holder of `all-rows` alone can load a table that has RLS only. A grant that would allow an ordinary insert does not. A table with no PLS and no RLS policy is unchanged. Every bulk-load route also needs the `bulkload` permission on the database first (`db_admin` has it; `db_writer` does not). (**BL-1031, 0.5.0; BL-1227, 0.9.0**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 - It guarantees atomic commit at the job boundary (`BulkLoadCommitted`), not partial "progressively visible" reads.
 - It currently does not provide persistent server session reconstruction across restarts (see `2.18`, `BL-067`).
 
@@ -303,7 +303,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
 | P20 (`3.3`, `5`) | `docs/tasks/P20-COMPLETION.md` | Core bulk-load primitive, WAL frame model, HTTP `begin/append/commit/abort/status`, .NET client + CLI surface | Multi-node durability polish, restart reconstruction maturity | `BL-066`, `BL-067`, `BL-069` |
-| BL Post20-S1 | `docs/tasks/BL-COMPLETION.md` Post20-S1 | Replication completion: replay coordinator, checkpoint segment fetch protocol (removed, **BL-1193, next train**: nothing used it), force-log-ship cluster setting, watchdog lifecycle integration | Further replication scalability behaviors | `BL-066` |
+| BL Post20-S1 | `docs/tasks/BL-COMPLETION.md` Post20-S1 | Replication completion: replay coordinator, checkpoint segment fetch protocol (removed, **BL-1193, 0.9.0**: nothing used it), force-log-ship cluster setting, watchdog lifecycle integration | Further replication scalability behaviors | `BL-066` |
 | BL Post20-S3 | `docs/tasks/BL-COMPLETION.md` Post20-S3 | Admin list/force-abort routes and Studio-facing server support | Studio UX evolution sits outside this repo | (tracked in Studio/task stream) |
 | P31 (S1+S2) | `docs/tasks/P31/` | Materialized Query auto-refresh after bulk-load: `PostLoadMqBehavior`, `BulkLoadJobHandle.MqRebuildStatus`/`MqRebuildCompleted`, `RefreshMaterializedQueryAsync`, replica scheduler, HTTP refresh endpoint, C# + TS clients, CLI | Cross-MQ dependency ordering; WebSocket rebuild progress | ADR 0036 |
 | P46 | `docs/tasks/P46/` | Ingest-fed materialization: `Auto` loads accumulate affected MQs during the load's own pass (all four types); scan-fed path retained for `:refresh`, fallback, restore (**WorkloadCore S10, 0.3.0**: replaced by the table's pass) | Incremental maintenance from cold-segment arrival outside a bulk load; cross-MQ dependency ordering | ADR 0036 D-9…D-15 |
@@ -323,7 +323,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 | Durable cursor contract (`rowsDurablyCommitted`) | Yes | Yes | No | Protocol DTOs + controller/client code | Server session cursor is updated at commit; append-time cursor granularity is incomplete in Stage 1. |
 | Resume watchdog lifecycle | Yes | No | No | `BulkLoadResumeWatchdog`, lifecycle tests | Default resume window 5 minutes. |
 | Replica apply state machine | Yes | No | No | `BulkLoadReplicaCoordinator`, `FrameApplier` handlers | Includes acquired/fetching/staged/committed/aborted. |
-| Replica segment fetch | No | No | Yes | — | (**BL-1193, next train**) The checkpoint protocol's unused `0x20`/`0x21` messages and `BulkSegmentFetcher` were removed; a replica's fetch of a load's segments is **BL-1116**. |
+| Replica segment fetch | No | No | Yes | — | (**BL-1193, 0.9.0**) The checkpoint protocol's unused `0x20`/`0x21` messages and `BulkSegmentFetcher` were removed; a replica's fetch of a load's segments is **BL-1116**. |
 | Cluster policy `ForceLogShipBulkLoad` | Yes | No | No | `BulkLoadClusterSettings`, coordinator/controller checks, tests | Rejects skip/snapshot modes when enabled. |
 | HTTP admin list + force-abort | Yes | No | No | `BulkLoadController` routes + list-route tests | Powering Studio admin workflow. |
 | .NET client API (`BulkLoadAsync`, `BulkLoadMultiTableAsync`) | Yes | No | No | `AoudaClient.cs`, `BulkLoadCoordinator.cs` | Includes progress + deferred work behavior. |
@@ -379,7 +379,7 @@ difference is *when* the work is paid — per load, or once for many — not how
    user are refused, including a caller who holds a partition write grant, and a `db_admin` that is only in the token's claims. The
    refusal names each refused table and the grant it lacks, and starts no session. A job over such a table writes its
    `access_grant_used` audit rows once per credential: at `:begin` (with the `jobId`), and at the first `:append` of another
-   credential that appends to the job; never per `:append` after that. (**BL-1031, 0.5.0; BL-1227, next train**)
+   credential that appends to the job; never per `:append` after that. (**BL-1031, 0.5.0; BL-1227, 0.9.0**)
 
 ### What a frame carries is what JSON carries
 
@@ -391,9 +391,9 @@ gives each number the kind its JSON text would have, a `DateTime` that is not UT
 instead (**BatchFirst S03, 0.1.40**). A load that mixes the two formats mid-stream is still one load,
 with one resume cursor.
 
-### Array columns (**BL-035, next train**) {#array-columns}
+### Array columns (**BL-035, 0.9.0**) {#array-columns}
 
-(**BL-035, next train**) A table's [array columns](array-columns.md) load like any other column, on every path a load takes: whole
+(**BL-035, 0.9.0**) A table's [array columns](array-columns.md) load like any other column, on every path a load takes: whole
 batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered tables, and a load that spills.
 
 - **A JSON column-array body** carries an array column as one JSON array per row (a `Byte[]` as one base64 string, a null row as
@@ -403,7 +403,7 @@ batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered ta
 - **An invalid array value is refused at `:append`**, `400 INVALID_REQUEST`, naming the table, column, frame and row. None of that
   frame's rows is applied, the frames before it stay, and the job stays open. (Under `applyTransforms` the values are checked at
   `:commit`, where the transforms run: the refusal names the table, column and row, and nothing of the job is committed.
-  (**BL-1277, next train**) That refusal is `400` with the transform's own code, not `500`.)
+  (**BL-1277, 0.9.0**) That refusal is `400` with the transform's own code, not `500`.)
 
   ```text
   400 INVALID_REQUEST
@@ -477,7 +477,7 @@ var handle = await client.BulkLoadAsync("trades", batches,          // IAsyncEnu
 
 **A load coerces by default** (**Lead S27a, 0.6.0**). Unless the load asks for `validation: strict`, a null sent for a NOT
 NULL column that is not part of the key is stored as the type's default, not refused — what an insert through `/rows` would refuse.
-A key is never coerced, nor an [array column](#array-columns) (**BL-035, next train**), and a column the table does not have is refused at either level. See
+A key is never coerced, nor an [array column](#array-columns) (**BL-035, 0.9.0**), and a column the table does not have is refused at either level. See
 [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
 
 The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatch.Validate()` are described on the
@@ -624,13 +624,13 @@ job's rows have ended and it holds its place in its tables' commit order, and th
 ```csharp
 var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { CommitWait = BulkLoadCommitWait.Accepted });
 // handle.State == BulkLoadCommitState.Accepted: not durable yet.
-// The outcome request started when this answer arrived (**BL-1140, next train**).
+// The outcome request started when this answer arrived (**BL-1140, 0.9.0**).
 var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost; a 404 at or after an hour throws
 ```
 
 ```typescript
 const handle = await client.table('trades').bulkLoad(batches, { commitWait: 'accepted' });
-// The outcome request started when this answer arrived (**BL-1140, next train**).
+// The outcome request started when this answer arrived (**BL-1140, 0.9.0**).
 const outcome = await handle.outcome;   // { state: 'committed' | 'lost' }; a 404 at or after an hour throws BulkLoadOutcomeUnknownError
 ```
 
@@ -642,11 +642,11 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost' }; a 40
   tables, and on a replica — so reading your own load with the token never shows it half there. Do not read the outcome off the
   token: a lost job's token reads as covered once the log moves past it.
 - **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. They ask as
-  soon as the accepted answer arrives (**BL-1140, next train**). After a restart that cut the job off, the server answers `200`
+  soon as the accepted answer arrives (**BL-1140, 0.9.0**). After a restart that cut the job off, the server answers `200`
   `state: "lost"` with `BULK_LOAD_LOST`: load it again. Once its log has moved past the job, `404 BULK_LOAD_JOB_NOT_FOUND`. A `404`
   before one hour from the accepted answer is still lost (nothing durable; load it again). A `404` at or after that hour is unknown:
   it cannot tell a lost job from a committed one the server has forgotten, and that tick is the first on which a committed header may
-  be forgotten. Both SDKs reject it as unknown rather than lost (**BL-1140, next train**). A
+  be forgotten. Both SDKs reject it as unknown rather than lost (**BL-1140, 0.9.0**). A
   committed job's record is kept for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A
   job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is committed and its rows become
   visible at the next restart (note 6 below; **Lead group 7 review, 0.6.0**).
@@ -727,7 +727,7 @@ A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../re
 
 | Level | A null or absent cell in a NOT NULL column | A primary key the job holds twice, or the table already holds |
 |---|---|---|
-| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, next train**) | Loaded as a second row (not checked) |
+| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, 0.9.0**) | Loaded as a second row (not checked) |
 | `strict` | Refused | The job fails at its commit, nothing committed |
 
 Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value
@@ -926,7 +926,7 @@ High-level architecture path:
 2. **Storage coordinator** (`BulkLoadCoordinator`) acquires table locks, writes bulk segments (each with its manifest), emits WAL frames. (**BL-980, 0.4.0**) The pre-P41 `.bulkload.commit` marker is no longer written or read: recovery discards a partial bulk write that has no manifest, whatever lies beside it.
 3. **HTTP session registry** (`BulkLoadSessionRegistry`) manages in-memory job state for begin/append/commit/status/list.
 4. **Replay path** (`FrameApplier` + `BulkLoadReplicaCoordinator`) decodes tag 60/61/62 frames and drives segment fetch/apply state machine.
-5. **Segment fetch to a replica:** none yet (**BL-1116**). (**BL-1193, next train**) The checkpoint protocol's `0x20`/`0x21` messages and `BulkSegmentFetcher`, which no server used, were removed; a primary's checkpoint session now ends on a message type it does not know.
+5. **Segment fetch to a replica:** none yet (**BL-1116**). (**BL-1193, 0.9.0**) The checkpoint protocol's `0x20`/`0x21` messages and `BulkSegmentFetcher`, which no server used, were removed; a primary's checkpoint session now ends on a message type it does not know.
 6. **Client coordinator** (`Aouda.Client.Internal.BulkLoadCoordinator`) orchestrates begin/append/commit and maps failures to typed exceptions.
 
 ### 2.8.1 Critical path walk-throughs
@@ -956,7 +956,7 @@ Tests: `BulkLoadReplicaCoordinatorTests`, `BulkLoadCompactionWatermarkTests`.
 
 1. Engine registers in-flight job in `BulkLoadResumeWatchdog` when bulk load starts.
 2. If job exceeds resume window without successful close, watchdog emits `BulkLoadAborted`.
-3. The credential that began the job, or a database admin who also holds `bulkload`, can force-abort via `POST .../bulk-load:force-abort`, which also emits an abort frame. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**).
+3. The credential that began the job, or a database admin who also holds `bulkload`, can force-abort via `POST .../bulk-load:force-abort`, which also emits an abort frame. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**).
 4. Registry marks session aborted after durable WAL abort emission.
 
 Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort` cases).
@@ -993,7 +993,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |
 | `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
 | `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, 0.6.0**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-060). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
-| `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and an identity column is refused the same way (`preTransformed` → `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`) (**BL-1278, BL-1170, next train**). The whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
+| `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and an identity column is refused the same way (`preTransformed` → `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`) (**BL-1278, BL-1170, 0.9.0**). The whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
 | `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, 0.1.40**). |
 | `Aouda:BulkLoad:SessionRetentionMinutes` | int | `10` | `>=1` | Server config | Retention for terminal sessions. |
@@ -1149,7 +1149,7 @@ Expected checks:
 
 ### Scenario 3: Operator force-abort of stuck job
 
-When to use: in-flight job is blocked and client path is no longer trusted. Force-abort stays the credential that began the job, or a database admin who also holds `bulkload`. Another `bulkload` holder is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**).
+When to use: in-flight job is blocked and client path is no longer trusted. Force-abort stays the credential that began the job, or a database admin who also holds `bulkload`. Another `bulkload` holder is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**).
 
 Steps:
 1. The credential that began the job finds it on `GET .../bulk-load:list` (the list contains only jobs that credential began). A database admin who did not begin the job is omitted from that list and needs the job id from outside it.
@@ -1330,7 +1330,7 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| `403 AUTHORIZATION_DENIED` on `:begin` or `:append` (**BL-1031, 0.5.0; BL-1227, next train**) | A table in the load has PLS or RLS, and the caller lacks, at `write`, the grant for a restriction it has (the message names the table and `all-partitions` / `all-rows`) | Load with that database's `mk_svc_` key or as a `db_admin` user, or have a role grant the missing grant at `write`. Ordinary inserts remain the per-user write path. |
+| `403 AUTHORIZATION_DENIED` on `:begin` or `:append` (**BL-1031, 0.5.0; BL-1227, 0.9.0**) | A table in the load has PLS or RLS, and the caller lacks, at `write`, the grant for a restriction it has (the message names the table and `all-partitions` / `all-rows`) | Load with that database's `mk_svc_` key or as a `db_admin` user, or have a role grant the missing grant at `write`. Ordinary inserts remain the per-user write path. |
 | "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, 0.6.0**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
 | `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, 0.6.0**) | The level is not `strict` or `os` (lower case); `strict` in a database at `os`; or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into a table with vector columns or an edge or vector table, has no level it may use in an `os` database. |
 | `GET {jobId}` answers `lost` with `durability: "os"` (**Lead S26c, 0.6.0**) | The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was dropped whole | Load it again with the same idempotency key: it no longer names a commit. |

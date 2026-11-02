@@ -118,7 +118,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 **Still warnings only:** changing table `clusterColumns` (and Vector/MdVector type changes). Those require dropping and re-creating the table (or a future migration phase).
 
-**Refused, not warned past** (**BL-1199, next train**): a table's partition key is fixed when the table is created. A document that
+**Refused, not warned past** (**BL-1199, 0.9.0**): a table's partition key is fixed when the table is created. A document that
 changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a partition-key column, is refused
 whole — `schema apply` (and `--dry-run`) fails with `400 PARTITION_KEY_FIXED` naming every reason, and nothing in the document is
 applied. `schema diff` still shows the change as a `partitionKey` / `partitionFunction` warning. Until this release the apply ran the

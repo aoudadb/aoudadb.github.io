@@ -185,7 +185,7 @@ React Native, `react-native-get-random-values`; see [React Native](#react-native
 `app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
 session's `aal`. Recipes: [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
 
-**Which databases a sign-in opens** (**BL-1018, next train**): a token opens only its allowance — the databases of the auth database
+**Which databases a sign-in opens** (**BL-1018, 0.9.0**): a token opens only its allowance — the databases of the auth database
 on which the user holds a role. `client.auth.signIn(email, password, { databases: ['orders', 'reports'] })` narrows it (never wider;
 anything but a non-empty subset is `400 INVALID_REQUEST`), and so does `createAuthorizationCode({ …, databases })` for native sign-in.
 A token used elsewhere is `401` with the exported code `AUTH_DATABASE_NOT_IN_ALLOWANCE`. A refresh refused with it ends the session
@@ -248,7 +248,7 @@ const count = await client.table('users')
 
 A table with a partition key refuses a read that names no partition (`PARTITION_FILTER_REQUIRED`), because it would scan every
 partition. `withCrossPartitionAccess()` asks the server to skip that guard for the query, and it works on `execute()`, on `count()`
-and on `subscribe()` (**BL-1227, next train**; until this train it reached `execute()` and `count()` only, and `subscribe()` had no way to send it).
+and on `subscribe()` (**BL-1227, 0.9.0**; until this train it reached `execute()` and `count()` only, and `subscribe()` had no way to send it).
 
 ```typescript
 // A trusted backend reads open orders across every partition
@@ -656,19 +656,19 @@ batches.
 On kb2, 1 M rows of six columns through the SDK alone (the server stubbed): **0.32 s and 0.57 CPU-s as batches**, 5.7 s and
 7.4 CPU-s as row objects — the same 42 MB of frames either way.
 
-### Array columns (**BL-035, next train**) {#array-columns}
+### Array columns (**BL-035, 0.9.0**) {#array-columns}
 
-(**BL-035, next train**) The six [array column types](../guides/array-columns.md) read and write as typed arrays, **the same type on
+(**BL-035, 0.9.0**) The six [array column types](../guides/array-columns.md) read and write as typed arrays, **the same type on
 every surface**: query results (frames or JSON), named queries, materialized queries, WebSocket and long-poll subscriptions.
 
 | Server type | Read as | Write with |
 |---|---|---|
-| `Double[]` (**BL-035, next train**) | `Float64Array` | `Float64Array` or `number[]` |
-| `Float32[]` (**BL-035, next train**) | `Float32Array` | `Float32Array` or `number[]` |
-| `Int32[]` (**BL-035, next train**) | `Int32Array` | `Int32Array` or `number[]` |
-| `Int64[]` (**BL-035, next train**) | `BigInt64Array` (exact past 2^53, from JSON too) | `BigInt64Array`, `bigint[]` or `number[]` |
-| `Byte[]` (**BL-035, next train**) | `Uint8Array` | `Uint8Array` (in a `ColumnBatch`, also a `number[]` of 0–255) |
-| `String[]` (**BL-035, next train**) | `string[]` | `string[]` |
+| `Double[]` (**BL-035, 0.9.0**) | `Float64Array` | `Float64Array` or `number[]` |
+| `Float32[]` (**BL-035, 0.9.0**) | `Float32Array` | `Float32Array` or `number[]` |
+| `Int32[]` (**BL-035, 0.9.0**) | `Int32Array` | `Int32Array` or `number[]` |
+| `Int64[]` (**BL-035, 0.9.0**) | `BigInt64Array` (exact past 2^53, from JSON too) | `BigInt64Array`, `bigint[]` or `number[]` |
+| `Byte[]` (**BL-035, 0.9.0**) | `Uint8Array` | `Uint8Array` (in a `ColumnBatch`, also a `number[]` of 0–255) |
+| `String[]` (**BL-035, 0.9.0**) | `string[]` | `string[]` |
 
 A null cell is `null`; an empty array is an empty typed array. `AoudaArrayValue` is the union of the six read types and
 `AOUDA_DATA_TYPES` lists every column type, the six array names included. A row object with arrays is inserted as JSON; a
@@ -1147,7 +1147,7 @@ const sub = client.table('events')
 ```
 
 A filter may use any operator the query builder has, `in` and `notIn` (the wire's `nin`) included
-(`.where('severity', 'in', ['error', 'fatal'])`). (**BL-1226, next train**) A server up to 0.8.0 refuses a subscription whose filter
+(`.where('severity', 'in', ['error', 'fatal'])`). (**BL-1226, 0.9.0**) A server up to 0.8.0 refuses a subscription whose filter
 uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct.
 
 **Which listener takes this.** `client.table(t).subscribe(...)` is a **table subscription** (a table and a filter). It works on the
@@ -1157,7 +1157,7 @@ it with `NAMED_QUERY_SUBSCRIBE_REQUIRED`: its callers cannot compose a query, so
 wants a filtered table subscription connects to the admin listener with its service key. Do not work around the error by moving the
 filter into a different request: there is none, by design ([Direct client access](../guides/direct-client-access.md)).
 
-**What a subscription sees** (**BL-1227, next train**). A subscription's snapshot and its change events follow the same grants as an
+**What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and its change events follow the same grants as an
 HTTP query by the same credential, `subscribe` is authorized by the same role check (`read` on the table), and the server re-reads the
 credential's permissions on every `subscribe`. The server API keys (`mk_srv_`) that work over HTTP on a linked application database
 open its socket too. How it works: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
@@ -1166,7 +1166,7 @@ open its socket too. How it works: [Real-time Streaming](../guides/real-time.md#
 
 On a partitioned table that requires a partition filter, a subscription that names no partition is refused with
 `PARTITION_FILTER_REQUIRED`, as the read would be. A trusted backend that really wants every partition's events asks for the waiver,
-either on the builder or in the options; if both ask, the subscription asks once, and neither cancels the other (**BL-1227, next train**).
+either on the builder or in the options; if both ask, the subscription asks once, and neither cancels the other (**BL-1227, 0.9.0**).
 
 ```typescript
 // On the query builder
@@ -1196,7 +1196,7 @@ answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The wir
 #### Named queries and the flag
 
 A named query that binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` too, on `execute()`,
-`batch()` and `subscribe()`. Each takes the flag **per call**, as a sibling of the arguments (**BL-1227, next train**). A definition
+`batch()` and `subscribe()`. Each takes the flag **per call**, as a sibling of the arguments (**BL-1227, 0.9.0**). A definition
 cannot set it, and there is no batch-wide switch: each batch item carries its own.
 
 ```typescript
@@ -1269,7 +1269,7 @@ no horizon (BL-1068), so a callback-only client drops those rows at the next `ho
 A client older than this ignores both messages, so its rows include ones the server no longer returns until it subscribes again. A
 `TRUNCATE` sends no notice. The wire contract: [Real-time Streaming — Horizons and range deletes](../guides/real-time.md#horizons-and-range-deletes).
 
-#### Embargoed tables (**BL-418, next train**)
+#### Embargoed tables (**BL-418, 0.9.0**)
 
 A credential whose role carries an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train)
 on a table reads it on a delay: queries return only rows at least N seconds old, and a subscription's changes arrive as they come of

@@ -225,13 +225,13 @@ Use a single dedicated auth database to issue and validate JWTs for multiple dow
 1. Create one `auth` database with `kind: "auth"`. No other databases needed.
 2. Auth endpoints are available at `/api/databases/auth/auth/...` — the `{db}` segment equals the auth database name.
 3. After signup/signin, JWTs are issued with `iss = {server}/api/databases/auth` and `aud = ["auth"]` — the token's allowance, an
-   array of the databases it may open (**BL-1018, next train**; `aud` was the string `"auth"`). A service validates the issuer and
+   array of the databases it may open (**BL-1018, 0.9.0**; `aud` was the string `"auth"`). A service validates the issuer and
    checks that `aud` names the database it serves.
 4. Any downstream service validates the JWT against the OIDC discovery endpoint.
 
 **When to use:** Microservice architectures where auth is a separate concern; Auth0/Clerk replacement with self-hosted performance; organizations that want a single identity provider for multiple independent data services.
 
-**A token opens only its allowance** (**BL-1018, next train**): the databases linked to the auth database on which the user holds a
+**A token opens only its allowance** (**BL-1018, 0.9.0**): the databases linked to the auth database on which the user holds a
 role, or the part of them the sign-in named in `databases`. Every linked database's token carries the auth database's issuer; a
 token, refresh token or native sign-in code used at a database outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`. See
 [the token allowance](reference.md#the-token-allowance) and [use cases](use-cases.md#one-auth-database-is-one-trust-domain).
@@ -314,7 +314,7 @@ Aouda supports many different deployment configurations. This section maps each 
 | **Production — full stack** | Yes | Yes | `mk_srv_`, `mk_anon_`, `mk_svc_` | Bootstrap admin, create DB with `auth.enabled` |
 | **AI agent development** | Optional | Optional | From create-database response | `aouda start` + create auth-enabled DB via API |
 
-**Which key sees past PLS / RLS** (**BL-1227, next train**): the one that holds the grants — an app's `mk_svc_` key holds
+**Which key sees past PLS / RLS** (**BL-1227, 0.9.0**): the one that holds the grants — an app's `mk_svc_` key holds
 `all-partitions` and `all-rows` on its database. A server API key (`mk_srv_`) runs the server — databases, schema, backups,
 keys — but holds neither grant, so on a table with a PLS or RLS mode it gets only what a request with no user may see (up to
 0.3.x it saw past them). A backend that reads protected tables uses the database's `mk_svc_` key, or sends the user's JWT as

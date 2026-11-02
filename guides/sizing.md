@@ -238,9 +238,9 @@ decimal column now costs 8 bytes a value in memory. A decimal also travels as 8 
 loads without a per-value allocation: a bulk load's decimal column takes as much of the ingest buffer as an `Int64`
 column.
 
-### Array columns: what a value costs (**BL-035, next train**) {#array-columns-what-a-value-costs}
+### Array columns: what a value costs (**BL-035, 0.9.0**) {#array-columns-what-a-value-costs}
 
-(**BL-035, next train**) An [array column](array-columns.md) stores each value's elements as they are, in the tiers that hold
+(**BL-035, 0.9.0**) An [array column](array-columns.md) stores each value's elements as they are, in the tiers that hold
 rows, and compresses them only on disk.
 
 **In memory** (the write buffer, the hot tier, a materialized result that carries the column, the WAL's buffer) a value costs
@@ -248,11 +248,11 @@ its **raw payload plus 32 bytes**, and a null costs 8:
 
 | Cell | Bytes charged to the memory budget |
 |---|---|
-| a null (**BL-035, next train**) | 8 |
-| `Double[]`, `Int64[]` of *n* elements (**BL-035, next train**) | 8 + 24 + 8*n* |
-| `Float32[]`, `Int32[]` of *n* (**BL-035, next train**) | 8 + 24 + 4*n* |
-| `Byte[]` of *n* (**BL-035, next train**) | 8 + 24 + *n* |
-| `String[]` of *n* elements, *u* bytes of UTF-8 in all (**BL-035, next train**) | 8 + 24 + 4 + 4*n* + *u* |
+| a null (**BL-035, 0.9.0**) | 8 |
+| `Double[]`, `Int64[]` of *n* elements (**BL-035, 0.9.0**) | 8 + 24 + 8*n* |
+| `Float32[]`, `Int32[]` of *n* (**BL-035, 0.9.0**) | 8 + 24 + 4*n* |
+| `Byte[]` of *n* (**BL-035, 0.9.0**) | 8 + 24 + *n* |
+| `String[]` of *n* elements, *u* bytes of UTF-8 in all (**BL-035, 0.9.0**) | 8 + 24 + 4 + 4*n* + *u* |
 
 There is no validity bitmap and no compression in these tiers: **size memory for the raw bytes.** A row of ten array cells costs
 their raw bytes plus 320. A curve table whose rows hold about 6.9 KB of arrays (the reference workload below) charges about
@@ -273,13 +273,13 @@ hold them:
 
 | Column (kind) | Bytes a row on disk | The same as base64 `String` |
 |---|---|---|
-| `Fwd3m`, 200 `Double`, a smooth forward curve (**BL-035, next train**) | 989.9 | 2,140.3 |
-| `Basis36`, 150 `Double` (**BL-035, next train**) | 925.1 | 1,604.3 |
-| `FitModel`, 100 `Double` (**BL-035, next train**) | 498.8 | 1,072.3 |
-| `FitMarket`, 100 `Double` rounded to 1e-6 (**BL-035, next train**) | 121.7 | 1,072.3 |
-| `StubDf`, 50 `Double` (**BL-035, next train**) | 219.0 | 540.3 |
-| `FitDistanceBp`, 100 `Float32` (**BL-035, next train**) | 400.3 | 540.3 |
-| `NodeDays`, `FitIds` (`Int32[]`), `FitBandBp` (`Float32[]`), `FitGrade` (`Byte[]`), constant or tiny (**BL-035, next train**) | 5.0 · 3.1 · 1.9 · 1.0 | 11.4 · 6.1 · 6.1 · 1.4 |
+| `Fwd3m`, 200 `Double`, a smooth forward curve (**BL-035, 0.9.0**) | 989.9 | 2,140.3 |
+| `Basis36`, 150 `Double` (**BL-035, 0.9.0**) | 925.1 | 1,604.3 |
+| `FitModel`, 100 `Double` (**BL-035, 0.9.0**) | 498.8 | 1,072.3 |
+| `FitMarket`, 100 `Double` rounded to 1e-6 (**BL-035, 0.9.0**) | 121.7 | 1,072.3 |
+| `StubDf`, 50 `Double` (**BL-035, 0.9.0**) | 219.0 | 540.3 |
+| `FitDistanceBp`, 100 `Float32` (**BL-035, 0.9.0**) | 400.3 | 540.3 |
+| `NodeDays`, `FitIds` (`Int32[]`), `FitBandBp` (`Float32[]`), `FitGrade` (`Byte[]`), constant or tiny (**BL-035, 0.9.0**) | 5.0 · 3.1 · 1.9 · 1.0 | 11.4 · 6.1 · 6.1 · 1.4 |
 
 These are the numbers of one generator's data. Your arrays compress as well as they resemble it, and not better than their raw
 size by more than the repetition they hold.

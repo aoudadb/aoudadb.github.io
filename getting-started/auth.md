@@ -152,17 +152,17 @@ Case A: Server credential (from _serverauth)
   → Access at the granted role level
   → PLS / RLS enforced (0.4.0): an mk_srv_ key holds no all-partitions
     or all-rows grant and has no user's grants, so protected tables show it
-    nothing unless it sends X-User-Token (BL-1227, next train). Up to 0.3.x
+    nothing unless it sends X-User-Token (BL-1227, 0.9.0). Up to 0.3.x
     an mk_srv_ key saw all data.
   → A server user's JWT holds what its role assignments give: a server user
     with db_admin on myapp, or with no scope (the bootstrapped server admin),
     holds all-partitions and all-rows and sees every partition and every
-    row (BL-1227, next train).
+    row (BL-1227, 0.9.0).
   → Used by: DBAs, CI/CD, cross-database backend services
 
 Case B: App API key (from _auth, auto-generated)
   → mk_anon_... → maps to anonymous role, PLS enforced
-  → mk_svc_... → maps to db_admin role, holds all-partitions and all-rows on its database (BL-1227, next train)
+  → mk_svc_... → maps to db_admin role, holds all-partitions and all-rows on its database (BL-1227, 0.9.0)
   → Used by: Frontend clients, per-database backend services
 
 Case C: App user JWT (from _auth, obtained via signin)
@@ -170,7 +170,7 @@ Case C: App user JWT (from _auth, obtained via signin)
   → db_roles checked for "myapp"
   → PLS enforced based on JWT claims (tenant_id, user_id); a user with a
     db_admin role assignment on myapp holds both grants and sees every
-    partition and row (BL-1227, next train)
+    partition and row (BL-1227, 0.9.0)
   → Used by: End users of your application
 ```
 
@@ -359,7 +359,7 @@ await client.auth.signIn(email, password);
 
 `mk_anon_*` is **not** required for browser login. It may still be minted. It is not a secret, not app identity, and not a security control for these routes. Do not bake it into a SPA or `NEXT_PUBLIC_*`. After sign-in, the user JWT is the data credential. CORS, then JWT + RLS/grants, do the work — with these consequences you must plan for:
 
-- **Self-registration is opt-in.** Linking an auth database to `{db}` does **not** open public signup. `POST …/auth/signup` returns **403** `AUTH_SIGNUP_DISABLED` until an operator sets `allowSelfSignup: true` (create-database body, or `PUT /api/databases/{db}/auth/admin/signup-settings`). Enabled signups receive `db_writer` (`read,write,delete`) scoped to that database unless `selfSignupRole` names another existing role. That role cannot be `db_admin` or carry an `all-partitions` or `all-rows` grant; settings, a later permission patch, and database create answer `400 INVALID_REQUEST` and leave the previous settings or no database (**BL-1282, next train**).
+- **Self-registration is opt-in.** Linking an auth database to `{db}` does **not** open public signup. `POST …/auth/signup` returns **403** `AUTH_SIGNUP_DISABLED` until an operator sets `allowSelfSignup: true` (create-database body, or `PUT /api/databases/{db}/auth/admin/signup-settings`). Enabled signups receive `db_writer` (`read,write,delete`) scoped to that database unless `selfSignupRole` names another existing role. That role cannot be `db_admin` or carry an `all-partitions` or `all-rows` grant; settings, a later permission patch, and database create answer `400 INVALID_REQUEST` and leave the previous settings or no database (**BL-1282, 0.9.0**).
 - **CORS is the browser origin control, and it is only as good as its configuration.** The data-plane listener denies all origins when `Aouda:Listeners:DataPlane:CorsOrigins` is unset, but the setting accepts `*`. A `*` origin lets any website's JavaScript call your public auth POSTs (and, after login, any data-plane route the JWT can reach). Prefer an explicit origin list.
 - **Password reset triggers outbound email unauthenticated**, bounded by 20/min/IP. `request-password-reset` always returns `{ ok: true }` and does not disclose whether the account exists.
 - **Credential stuffing across accounts and IPs is invisible to per-IP limits and lockout.** The optional failed-signin ceiling (`Aouda:Auth:FailedSigninCeiling`, off by default) caps **failed** sign-ins per auth database so that attack is visible. It is per process; successful logins do not consume the budget *until the ceiling trips* — after that every sign-in on that database is 429 until the window drains (a full login outage, not degraded service). See [Auth reference — Rate Limiting](../auth/reference.md#rate-limiting).
@@ -368,16 +368,16 @@ await client.auth.signIn(email, password);
 
 When you create a database with auth enabled, Aouda still auto-generates keys. They are not the browser login credential:
 
-| Key | Prefix | Role | PLS / RLS grants held (**BL-1227, next train**) | Use Case | Safety |
+| Key | Prefix | Role | PLS / RLS grants held (**BL-1227, 0.9.0**) | Use Case | Safety |
 |-----|--------|------|-----|----------|--------|
 | **`anon`** | `mk_anon_` | `anonymous` (no data access by default) | None | Leftover; optional on public auth POSTs; **denied on data/admin** | Not a login secret — do not embed for login |
 | **`public`** | `mk_pub_` | `public` | None | Pre-auth named queries on the **data-plane** listener | Safe to embed for named artifacts only |
 | **`service_role`** | `mk_svc_` | `db_admin` (full access) | Both (`all-partitions` and `all-rows`) on its database | Backend servers, admin tools | **Must keep secret** |
-| **`auth_admin`** | `mk_adm_` | user and grant admin on that auth database | None itself. It cannot assign `db_admin` or a role that carries an all-* grant (`403 AUTHORIZATION_DENIED`); a user JWT still can. A grant added later to a role it already assigned still reaches those users (**BL-1299, next train**) | A user-management service (**BL-1032, 0.5.0**) | **Must keep secret** — a role it assigns can later gain a grant |
+| **`auth_admin`** | `mk_adm_` | user and grant admin on that auth database | None itself. It cannot assign `db_admin` or a role that carries an all-* grant (`403 AUTHORIZATION_DENIED`); a user JWT still can. A grant added later to a role it already assigned still reaches those users (**BL-1299, 0.9.0**) | A user-management service (**BL-1032, 0.5.0**) | **Must keep secret** — a role it assigns can later gain a grant |
 
 **Named keys (**BL-1032, 0.5.0**).** The bootstrap `mk_svc_` is still shown once, at database creation. A server key mints more, one name per service (`POST /api/databases/{db}/service-keys`), lists them by prefix, and revokes one name without touching the others. `POST …/{name}/rotate` with `overlapSeconds` leaves the old secret valid until `validUntil`; omit it, or send `0`, to revoke at once. Put `mk_adm_` in `AuthAdmin` / `authAdmin`, not in the service-key setting. The C# client and `@aouda/client` refuse a prefix that belongs to a different setting, so an `mk_srv_` cannot sit in `ServiceKey`.
 
-**Which keys see past PLS and RLS** (**BL-1227, next train**): a credential sees a protected table whole only through a grant it
+**Which keys see past PLS and RLS** (**BL-1227, 0.9.0**): a credential sees a protected table whole only through a grant it
 holds, never because of its key prefix. A service key (`mk_svc_`) holds `all-partitions` and `all-rows` on its database; a user
 with `db_admin` on it does too; a server API key (`mk_srv_`), an auth-admin key (`mk_adm_`), a custom key not linked to a user,
 `anon` and `public` hold none (a custom key linked to a user holds what that user holds), and get their role's grants and, on a protected table, what a request with no user may see (with the usual RLS rules,
@@ -477,7 +477,7 @@ The auth database can be used directly as the `{db}` segment in all auth endpoin
 }
 ```
 
-JWT claims issued for standalone auth: `iss = http://localhost:5433/api/databases/auth`, `aud = ["auth"]` — the databases the token may open (**BL-1018, next train**; it was the string `"auth"`).
+JWT claims issued for standalone auth: `iss = http://localhost:5433/api/databases/auth`, `aud = ["auth"]` — the databases the token may open (**BL-1018, 0.9.0**; it was the string `"auth"`).
 
 See **[Architecture Patterns & Deployment — Pattern E](../auth/architecture.md)** for the full deployment diagram and multi-service gateway example.
 

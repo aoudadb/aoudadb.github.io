@@ -13,9 +13,14 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-- **A partition-grant dimension name is lower case, everywhere it is written (BL-430, next train).** A capital letter in a partition grant's `dimension`, a table's `permissionDimension` (create, `PUT …/options`, schema apply, edge and vector tables, embedded) or a `PartitionGrant` resolver rule's `{"dimension": …}` is refused `400` (`AUTH_GRANT_INVALID`, `INVALID_REQUEST`, `AUTH_RESOLVER_INVALID`; schema apply reports the change `Failed`), and the message gives the lower-case spelling. HTTP writers trim outer white space before that check, so a grant created as `" source "` is `201` and stored as `source`. An in-process grant and a resolver JSON `dimension` do not trim: outer white space there is the same `400`. A grant created as `source` used to return `201` and never match a table whose dimension is `Source`; with one spelling per name that cannot happen. Matching stays exact. Nothing stored is converted: a table or grant written with capitals by an older build keeps its spelling and matches only that spelling, and that table's next options change must send the lower-case name.
+## 0.9.0 — 2026-11-02
 
-- **Visibility is granted: `all-partitions` and `all-rows` replace the service-key and `db_admin` bypasses (BL-1227, next train;
+Server **0.9.0** / `@aouda/client` **0.9.0** / `Aouda.Client` **0.9.0**. Studio pin follows npm.
+
+
+- **A partition-grant dimension name is lower case, everywhere it is written (BL-430, 0.9.0).** A capital letter in a partition grant's `dimension`, a table's `permissionDimension` (create, `PUT …/options`, schema apply, edge and vector tables, embedded) or a `PartitionGrant` resolver rule's `{"dimension": …}` is refused `400` (`AUTH_GRANT_INVALID`, `INVALID_REQUEST`, `AUTH_RESOLVER_INVALID`; schema apply reports the change `Failed`), and the message gives the lower-case spelling. HTTP writers trim outer white space before that check, so a grant created as `" source "` is `201` and stored as `source`. An in-process grant and a resolver JSON `dimension` do not trim: outer white space there is the same `400`. A grant created as `source` used to return `201` and never match a table whose dimension is `Source`; with one spelling per name that cannot happen. Matching stays exact. Nothing stored is converted: a table or grant written with capitals by an older build keeps its spelling and matches only that spelling, and that table's next options change must send the lower-case name.
+
+- **Visibility is granted: `all-partitions` and `all-rows` replace the service-key and `db_admin` bypasses (BL-1227, 0.9.0;
   behaviour change).** Whether a credential is held to a table's partition-level security (PLS) and row-level security (RLS) is now
   decided by two **grants** it holds, never by its key prefix, a role's name or a request flag: `all-partitions` lifts PLS and
   `all-rows` lifts RLS, each on one table or the whole database, at a level (`read` lifts reads; `write` and `admin` also lift the
@@ -58,7 +63,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   - Policy inspect and `aouda.identities.json` identities take `accessGrants`; a `service_key` identity holds the implied pair and refuses
     them; a policy-inspect `sample` is shown only to a caller that holds the grants for it (`sampleReason: "caller_not_granted"`).
     The materialized-query endpoint, graph traversal and vector search lift each half by its own grant.
-- **A token opens only the databases it was issued for (BL-1018, next train; behaviour change).** Databases that share an auth
+- **A token opens only the databases it was issued for (BL-1018, 0.9.0; behaviour change).** Databases that share an auth
   database no longer share every sign-in. An application token, its refresh tokens and a native sign-in code carry an **allowance** —
   the databases of the auth database on which the user holds a role — and are refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code)
   anywhere else, on HTTP, realtime and `X-User-Token`. Sign-in, password reset and native `authorize` take an optional `databases`
@@ -68,7 +73,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   longer sign in (`403`), so assign a role to users an administrator creates; a data directory written before the train is refused at
   startup (this build reads catalog format 16 and names the version it found — a format-15 directory included — with no migration); both SDKs end the session on a refresh refused with the new code. Server-auth tokens are unchanged.
   [The token allowance](auth/reference.md#the-token-allowance), [one auth database is one trust domain](auth/use-cases.md#one-auth-database-is-one-trust-domain).
-- **Embargo: a table seen on a delay (BL-418, next train).** A role can carry an `embargo` row — one table and a delay in whole
+- **Embargo: a table seen on a delay (BL-418, 0.9.0).** A role can carry an `embargo` row — one table and a delay in whole
   seconds, up to 31 days — and everyone it is assigned to, `db_admin` users included, then sees a row of that table only once its row
   time (the first cluster column, a `Timestamp` or a `Date`) is at least that old by the server's clock: queries, counts, aggregates,
   joins and named queries all apply the cutoff, and a live subscription releases each change when it comes of age. It narrows and lifts
@@ -77,7 +82,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   embargoed subscription that holds back more than `Aouda:Streaming:EmbargoHoldMaxEvents` changes (default 100 000), or whose embargo
   changes, ends with the new `SUBSCRIPTION_EMBARGO_RESET`, which `@aouda/client` answers by subscribing again. `GET …/access-grants`
   lists a user's `embargoes`; only a full admin may store one. [Embargo](auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train).
-- **Security: leaks in released servers closed by the grants work (BL-1227, next train).** Each of these showed one credential data it
+- **Security: leaks in released servers closed by the grants work (BL-1227, 0.9.0).** Each of these showed one credential data it
   should not have seen, or let it write where HTTP refuses; each is fixed, with no setting to restore the old behaviour:
   - A WebSocket or long-poll subscribe applied none of HTTP's role checks: the anonymous key, a user with no role, or a role holder on a table
     its role does not name could subscribe to a table with no partition or row security (and a materialized result or named query) and
@@ -103,7 +108,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   - The materialized-query endpoint, for a query over another query's result, returned every row: it took the policy of the result
     it read from, which has none. It now filters by the base table's, as `/query` on the result does. A named-query subscribe whose
     `target` spelled the query's table in another case took its security from the other-cased table; it now reads the query's own.
-- **Array columns: one whole array per row (BL-035, next train).** A column can be `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`,
+- **Array columns: one whole array per row (BL-035, 0.9.0).** A column can be `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`,
   `Byte[]` or `String[]` — a curve's 400 points, a fit's residuals — written whole and read whole on every surface: schema,
   named queries and mutations, `/query`, `/rows`, bulk load, subscriptions, `latestPerKey` results, column-batch frames, both SDKs
   (`double[]` … in C#, `Float64Array` … in TypeScript) and Studio. A value holds at most 65,536 elements and 1 MiB of elements, only
@@ -117,53 +122,53 @@ Public, user-facing release notes. Engine phase status lives in the server
   surfaces as plain values without failing; and a subscription's `column_types` says which columns are arrays — a column it does not name is a scalar. A TypeScript
   `number[]` written in a row object loses `-0` (JSON's rule): write a `Float64Array` to keep it.
 - **A `"NaN"` or `"Infinity"` string, or a number past the type's range, is no longer stored in a scalar `Double` / `Float32` column
-  (BL-035, next train; fixed).** Every JSON write path (named mutation parameters, `/rows` and the other JSON write bodies) stored
+  (BL-035, 0.9.0; fixed).** Every JSON write path (named mutation parameters, `/rows` and the other JSON write bodies) stored
   such a value as NaN or ±Infinity; they now answer `400` (`NAMED_QUERY_BIND_FAILED` for a parameter, `NAMED_MUTATION_BIND_FAILED` for a literal,
   `INVALID_REQUEST` for a write body) and store nothing.
-- **A dropped table's leftover directory is removed at the next open (BL-1255, next train).** A drop deletes the table's
+- **A dropped table's leftover directory is removed at the next open (BL-1255, 0.9.0).** A drop deletes the table's
   directory after the catalog has dropped it; if that delete failed (a file held open, a permission) or the process stopped
   in between, the directory stayed on disk for good, and nothing reported it. The next open now removes a `tables/t{id}`
   directory that no table holds and whose id is below the table-id allocator, except while the database has a branch, a
   restore stopped part-way, or a point-in-time restore is pending. The storage guide also no longer says table
   directories are named after the table: they are `t{id}` ([Storage](guides/storage.md)).
-- **A partition grant takes its key verbatim (BL-1192, next train; behaviour change).** `POST …/auth/admin/users/{id}/partition-grants`
+- **A partition grant takes its key verbatim (BL-1192, 0.9.0; behaviour change).** `POST …/auth/admin/users/{id}/partition-grants`
   stores `partitionKey` exactly as sent: `""` grants the empty-string partition, `" "` a different one, and `" a"` is not `"a"`.
   Up to 0.8.0 a blank key was refused and every other key trimmed, so `" a"` was granted as `"a"`. Only a missing or `null` key
   is `400 AUTH_GRANT_INVALID`. Test identities (`policy/inspect`, `--identities` files) follow the same rule; a grant that leaves
   `partitionKey` out is still invalid. A `jwt-claim` table still treats an empty tenant claim as no claim.
   `@aouda/client`'s `createPartitionGrant` no longer refuses a blank key. [§19.8](auth/authorization.md#198-admin-api-partition-grants).
-- **Security: a primary's replication port no longer serves files outside its data root (BL-1193, next train).** Inside a checkpoint
+- **Security: a primary's replication port no longer serves files outside its data root (BL-1193, 0.9.0).** Inside a checkpoint
   session a primary answered a bulk-segment request (checkpoint message `0x20`) with files outside its data root (a sibling
   directory such as `<root>-x`) and with files of databases the peer was not accepted for — without any credential when no
   `Aouda:ReplicaSet:KeyFile` is set. The message, its chunk (`0x21`) and the unused `BulkSegmentFetcher` are removed, and a checkpoint
   session now ends on a message type it does not know. Replication is not supported yet; if you run a replica set, set a `KeyFile`
   and keep the replication port private ([Replication](guides/replication.md#step-1-create-a-shared-keyfile), BL-1210).
-- **A table subscription can filter with `in` and `nin` (BL-1226, next train).** The server turned the array in a subscription filter
+- **A table subscription can filter with `in` and `nin` (BL-1226, 0.9.0).** The server turned the array in a subscription filter
   into its JSON text, so every `in` / `nin` filter was refused `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array") before the
   snapshot, whichever SDK sent it. The array is kept, each member is converted to the column's type as an `eq` value is, and the snapshot
   and the live events are filtered by it. The two now select the same rows on a nullable column too (a live event with a null matched
   `ne`, `nin`, `lt` and `lte` while the snapshot never did), and a `Bool` column's `eq`, `ne`, `in` and `nin` match live events (they never did). [Client pages](clients/typescript.md#websocket-subscriptions) and the
   [HTTP API](reference/http-api.md#websocket-streaming-protocol) now say which listener takes a table subscription: only the admin one, and
   the data-plane's refusal (`NAMED_QUERY_SUBSCRIBE_REQUIRED`) names that path.
-- **A subscription filter's `or` list is bounded where a null is concerned (BL-1226, next train).** A null never matches `ne`, `nin`, `lt`
+- **A subscription filter's `or` list is bounded where a null is concerned (BL-1226, 0.9.0).** A null never matches `ne`, `nin`, `lt`
   or `lte`, in a subscription's snapshot or its live events. The server states that for live events by adding `IS NOT NULL` beside each
   such condition, and an `or` list needs a copy of itself per alternative. So one `or` list may hold at most 6 conditions with `ne`, `nin`,
   `lt` or `lte`; one filter may add at most 256 groups and 2048 conditions in all; and groups may not nest past the limit of 5 once the
   copies are added. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot, and the message says what to do:
   fold several `ne` on one column that mean "none of these" into one `nin`, or split the subscription. On a partitioned table with
   partition-level security, an `or` list with `ne` is refused for a user with several grants exactly as an `or` list of `eq` is.
-- **A named query's literal conditions match live events as they match the snapshot (BL-1226, next train).** A named query whose
+- **A named query's literal conditions match live events as they match the snapshot (BL-1226, 0.9.0).** A named query whose
   definition holds a literal `gt 5` on an `Int32` column compared the literal as text for live events, so a live insert of 10 was never
   delivered although the snapshot held it; a literal `Timestamp` or `Decimal` had the same shape of defect, a literal `in` list matched no
   live event (`nin` every one), and a literal `like` matched none. Literals are now bound to the column's stored form, and a list
   member beyond `Int64` or with more than 15 digits keeps every digit. A bound parameter was never affected.
-- **`aouda init` and `aouda databases create` say what to do (BL-1226, next train).** `aouda init` has never prompted for a password; with
+- **`aouda init` and `aouda databases create` say what to do (BL-1226, 0.9.0).** `aouda init` has never prompted for a password; with
   none supplied it now names `--admin-password-file` and `--admin-password-stdin`, and shows a PowerShell form beside the bash one
   (`printf` is not a command in PowerShell). `aouda-setup` reads its admin password from redirected input instead of failing. A
   `databases create` that returns no keys (the auth database already holds that name's keys; keys are shown once) says so on stderr and
   names the two ways to get a service key afterwards: a named service key, or `regenerate-keys`.
 
-- **A `Timestamp` or a `Date` no longer depends on the time zone of a machine (BL-1225, next train; Derive's BL-723).** `DateTime.Today` written to a
+- **A `Timestamp` or a `Date` no longer depends on the time zone of a machine (BL-1225, 0.9.0; Derive's BL-723).** `DateTime.Today` written to a
   `Date` column on a +01:00 machine was stored as the day before, because the server applied the offset and took the UTC day; a `Date` is now the day on the
   value, whatever its offset or kind. A `Timestamp` written as text with no offset (`"2026-03-01"`, `"2026-03-01T00:00:00"`), or as a `DateTime` of kind
   `Unspecified`, was read in the **server's** local zone, so the same insert stored different instants on two servers; it is now UTC. Send an offset (or a
@@ -176,14 +181,14 @@ Public, user-facing release notes. Engine phase status lives in the server
   `Date` and `Timestamp` value in the embedded engine; text that is a time of day alone (`10:30`) is now refused on a `Timestamp` and a `Date` column (it was
   stamped with today's date); and a dot-separated date (`01.03.2026`) is read by the table's culture, as a slash date is, or refused when the table has none
   (the invariant culture read it month-first, so `01.03.2026` on a `nb-NO` table was stored as 3 January). See [Timestamp — time zones](./reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train).
-- **⚠️ The next train cannot read table data written by 0.7.1 or earlier (BL-1181, next train; breaking).** A `Guid` column's
+- **⚠️ The 0.9.0 cannot read table data written by 0.7.1 or earlier (BL-1181, 0.9.0; breaking).** A `Guid` column's
   statistics are now kept in `Guid` value order, the order the flush and every merge sort by; 0.7.1 kept them in the order of the
   value's stored bytes. The bytes on disk look the same either way, so the segment footer moves to v5 and the `.hot` file to v3,
   and a segment or hot file written by an earlier build is refused by name: a read of it fails with `SegmentFormatUnsupportedException`
   ("… its footer '…' is version 4, and this build reads v5 only"). There is no migration: export the data with the build that wrote it and reload it into the new one. The order fix
   itself means a cold merge of a `Guid`-keyed shared bucket, or of a table clustered on a `Guid`, keeps its per-key runs and its
   sort key. No query result was wrong before it.
-- **A hot merge no longer reads a partitioned table's rows back with the wrong key (BL-710, next train).** Background hot
+- **A hot merge no longer reads a partitioned table's rows back with the wrong key (BL-710, 0.9.0).** Background hot
   coalescing merged small hot segments across partitions and dropped a virtual partition key. Every row of the merged segment then
   read the key column's default, and a query filtered on the key (`Where Ticker = 'NVDA'`) returned the whole merged segment with
   that key stamped on every row. A demotion made the loss permanent. A hot merge now stays inside one partition, keeps the key, and
@@ -200,7 +205,7 @@ Public, user-facing release notes. Engine phase status lives in the server
   key returns its rows once they are cold (it returned none). A data directory written before this train is refused at open, with the
   version found and format 16 named: export it with the build that wrote it and load it into a fresh directory.
 
-- **A shared partitioned table no longer has to name its key twice (BL-1180, next train).** The hot and cold merges, and a bulk load's merge of its spilled runs, now keep a shared bucket in partition-key order, then cluster order, as the flush and the bulk load write it. A key derived by a function such as `TruncateToDay` is not ordered that way: its directories are merged in cluster order, as before. So a per-key history keeps one run per key after a merge with `clusterColumns` on the time column alone. The flush also orders a non-string or multi-column key by value (an `Int64` key's `9` before `10`), and strings sort by code point everywhere, so a bucket whose string keys mix an emoji (or another character above U+FFFF) with characters from U+E000 to U+FFFF no longer loses its per-key runs at the flush. [Partitioning](guides/partitioning.md#should-this-table-have-a-partition-key-p45) and [Market data](guides/market-data.md) now say so, and keep the old layout (the key as the first `clusterColumns` entry) for 0.7.1 and earlier, where it is still needed.
+- **A shared partitioned table no longer has to name its key twice (BL-1180, 0.9.0).** The hot and cold merges, and a bulk load's merge of its spilled runs, now keep a shared bucket in partition-key order, then cluster order, as the flush and the bulk load write it. A key derived by a function such as `TruncateToDay` is not ordered that way: its directories are merged in cluster order, as before. So a per-key history keeps one run per key after a merge with `clusterColumns` on the time column alone. The flush also orders a non-string or multi-column key by value (an `Int64` key's `9` before `10`), and strings sort by code point everywhere, so a bucket whose string keys mix an emoji (or another character above U+FFFF) with characters from U+E000 to U+FFFF no longer loses its per-key runs at the flush. [Partitioning](guides/partitioning.md#should-this-table-have-a-partition-key-p45) and [Market data](guides/market-data.md) now say so, and keep the old layout (the key as the first `clusterColumns` entry) for 0.7.1 and earlier, where it is still needed.
 - **Partitioning: the decision to partition is the size of the table, and a million rows per key is the later `Dedicated` line.** [Should this table have a partition key?](guides/partitioning.md#should-this-table-have-a-partition-key-p45) opened by requiring every key to fill a segment (~1 000 000 rows), then showed a 200-million-row table with ~200 rows per key as `Auto`/`Shared`. The first test is now total rows divided by one segment — a result near one means no `partitionKey` — and rows per key chooses `Dedicated` only once that test has passed. The same correction is in [Bulk load](guides/bulk-load.md#choosing-partition-storage-mode), [Build apps](guides/build-apps.md), the chat use case in [Data Authorization](auth/authorization.md#use-case-1--chat-application-auth-db-pls-hundreds-of-rooms), and the index blurb. The read chooses the layout those row counts allow: a tick tape (tens of millions of rows per key) is `Dedicated` and clustered on time; a daily per-key history (thousands of rows per key, loaded as a day of every key) is `Auto`/`Shared` with a bucket count near the ceiling and names the key both as `partitionKey` and as the first `clusterColumns` entry, then time — the merge orders by `clusterColumns` only (**BL-1180**), so a partition key alone does not keep per-key runs; a sensor window whose old rows are irrelevant stays unpartitioned, with retention. [Market data](guides/market-data.md) is marked as the tick fixture, including its candle materialized queries, which serve a tail of a time-bucketed result and not one ticker's history across years.
 
 ## 0.7.1 — 2026-10-27

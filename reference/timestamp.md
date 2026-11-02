@@ -53,7 +53,7 @@ API and wire consumers should assume **Timestamp = UTC instant**, not a SQL Serv
 
 ---
 
-## Which instant, which day: time zones (**BL-1225, next train**)
+## Which instant, which day: time zones (**BL-1225, 0.9.0**)
 
 What the server stores for a `Timestamp` or a `Date` never depends on the time zone of the client machine, of the server, or of
 the machine a data directory is restored on. Until this change, text with no offset and a `DateTime` of kind `Unspecified` were read in the

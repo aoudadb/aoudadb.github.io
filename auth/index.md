@@ -259,7 +259,7 @@ If you enable auth and keep defaults:
 - API key kinds:
   - `anon`, `service_role`, `public`, custom, and `server_admin` (server keys).
   - system-managed keys reserve key kinds for default app connection models.
-  - **a `service_role` key holds `all-partitions` and `all-rows` on its database** (**BL-1227, next train**); every other key
+  - **a `service_role` key holds `all-partitions` and `all-rows` on its database** (**BL-1227, 0.9.0**); every other key
     without a user — custom, `server_admin`, `auth_admin`, `anon`, `public` — holds none, gets its role's grants and, on a
     protected table, what a request with no user may see. Up to 0.3.x a `server_admin` key saw past PLS / RLS too.
     [How visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows).
@@ -277,9 +277,9 @@ If you enable auth and keep defaults:
 Invariants:
 
 - App auth endpoints require API key when app auth database is linked.
-- `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`. `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused (**BL-1281, next train**): create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls`.
+- `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`. `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused (**BL-1281, 0.9.0**): create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls`.
 - Service-key + `X-User-Token` impersonation flow must still validate/revocation-check user token.
-- Only a credential that holds `all-partitions` / `all-rows` is lifted past PLS / RLS (**BL-1227, next train**); a principal
+- Only a credential that holds `all-partitions` / `all-rows` is lifted past PLS / RLS (**BL-1227, 0.9.0**); a principal
   without a user id and without those grants gets the deny-by-default context (no partition grants, a missing RLS key
   denies) on HTTP, WebSocket and long-poll alike (0.4.0).
 - Empty or unsupported complex resolver shapes fail closed instead of broadening access.
@@ -423,7 +423,7 @@ Primary evidence:
 | Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-pls`, `auth-db-rls` | table create/update payload | Authorization mode per table |
 | Table `permissionDimension` | string? | `null` | non-empty when needed | table payload | Required for `auth-db-pls`; the grant namespace, selects no column |
 | Table `permissionColumn` | string? | `null` | a column of the table (exact name) | table payload | Required for `auth-db-pls`; refused with other modes (**BL-1176, 0.7.0**) |
-| Table `rlsResolverName` | string? | `null` | existing resolver name | table payload | Required for `auth-db-rls`. Refused on `jwt-claim`, including an omitted `authMode` (**BL-1281, next train**) |
+| Table `rlsResolverName` | string? | `null` | existing resolver name | table payload | Required for `auth-db-rls`. Refused on `jwt-claim`, including an omitted `authMode` (**BL-1281, 0.9.0**) |
 
 Precedence and operational notes:
 
@@ -624,7 +624,7 @@ Recommended tuning/operation sequence:
 | Sign-in keeps failing then returns account locked | Exceeded lockout threshold | Wait lockout duration or re-enable user via admin API |
 | User has new grants but behavior still old briefly | Cached permission context not yet refreshed for session | Trigger next request and verify `_permission_version` increment happened |
 | `auth-db-pls` table rejects write unexpectedly | Grant exists but `access_level` is read-only or partition key not granted | Update partition grant to proper key and `write` access level |
-| RLS seems ignored for a table | The table is `jwt-claim`, or the resolver is not on a mode that takes one. `rlsResolverName` on `jwt-claim` (including an omitted `authMode`) is `400 INVALID_REQUEST` at create and options; schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, next train**) | Set `authMode` to `auth-db-rls` or `auth-db-pls` with `rlsResolverName`, then retest with a caller that does not hold `all-rows` |
+| RLS seems ignored for a table | The table is `jwt-claim`, or the resolver is not on a mode that takes one. `rlsResolverName` on `jwt-claim` (including an omitted `authMode`) is `400 INVALID_REQUEST` at create and options; schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, 0.9.0**) | Set `authMode` to `auth-db-rls` or `auth-db-pls` with `rlsResolverName`, then retest with a caller that does not hold `all-rows` |
 | Service key + `X-User-Token` request returns 401 | User token invalid/revoked/expired | Refresh user token and retry; ensure service key kind supports impersonation flow |
 
 ## 2.15 Verification ledger
@@ -665,7 +665,7 @@ _Updated 2026-04-08 after P14/P16 completion._
 
 ### Resolved gaps
 
-- ~~Service key PLS bypass audit logging for DML~~ — ✅ **Resolved (P14, BL-041)**: `TablesController` emits service-key PLS bypass audit entries for insert/update/delete. (**BL-1227, next train**) Those `service_key_pls_bypass` rows are replaced by one `access_grant_used` row whenever an `all-partitions` / `all-rows` grant decides a read or write.
+- ~~Service key PLS bypass audit logging for DML~~ — ✅ **Resolved (P14, BL-041)**: `TablesController` emits service-key PLS bypass audit entries for insert/update/delete. (**BL-1227, 0.9.0**) Those `service_key_pls_bypass` rows are replaced by one `access_grant_used` row whenever an `all-partitions` / `all-rows` grant decides a read or write.
 - ~~WebSocket CORS enforcement~~ — ✅ **Resolved (P14, BL-050)**: WebSocket `Origin` validated against CORS policy.
 - ~~No server admin key management API~~ — ✅ **Resolved (P16, SA3b)**: `ServerAdminKeysController` at `/api/auth/admin/keys` — create (`mk_srv_` prefix), list, revoke. Unified auth middleware covers all `/admin/*`, `/api/admin/*`, `/api/server/*` paths.
 - ~~Hub authentication~~ — ✅ **Resolved (P16 Epic B)**: Aouda Hub provides user accounts (email/password, JWT), organizations with role-based access (owner/admin/member/viewer), and credential vault for server API keys. Studio Hub integration supports two-backend auth flow. See `docs/dev/Functionality-Cloud-And-Hub.md` §6.

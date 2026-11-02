@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Array columns: one whole array per row
 
-(**BL-035, next train**) Everything on this page is new in the next server train, and nothing here exists in the current release.
+(**BL-035, 0.9.0**) Everything on this page is new in the next server train, and nothing here exists in the current release.
 
 An **array column** holds one whole array per row: a curve's 400 forward points, a fit's 100 residuals, a feature vector's
 history. You write the array whole, read it whole, and never ask the engine about a single element. There are six types, one per
@@ -40,7 +40,7 @@ search, a different thing).
 
 ## What it is, and when not to use it
 
-(**BL-035, next train**) An array column stores the same kind of value a spreadsheet cell would if it could hold a list: a
+(**BL-035, 0.9.0**) An array column stores the same kind of value a spreadsheet cell would if it could hold a list: a
 `Double[]` column holds `[0.0412, 0.0398, 0.0377, 0.0361]` in one row and `[0.0415, 0.0399]` in the next. The rows can differ in
 length. The array is the value: you replace it whole (an `upsert` or an `update … set` writes a whole new array) and the engine
 compares it as bytes.
@@ -76,16 +76,16 @@ element, with the point's index as a key column. For **similarity search** over 
 
 ## The six types
 
-(**BL-035, next train**) The names are matched **exactly**: ordinal, case-sensitive, no spaces, no alias.
+(**BL-035, 0.9.0**) The names are matched **exactly**: ordinal, case-sensitive, no spaces, no alias.
 
 | Type | Element | JSON form of a value | C# | TypeScript |
 |---|---|---|---|---|
-| `Double[]` (**BL-035, next train**) | 64-bit float | array of numbers | `double[]` | `Float64Array` |
-| `Float32[]` (**BL-035, next train**) | 32-bit float | array of numbers | `float[]` | `Float32Array` |
-| `Int32[]` (**BL-035, next train**) | 32-bit signed integer | array of integers | `int[]` | `Int32Array` |
-| `Int64[]` (**BL-035, next train**) | 64-bit signed integer | array of integers | `long[]` | `BigInt64Array` |
-| `Byte[]` (**BL-035, next train**) | unsigned byte | **one base64 string** (not an array of numbers) | `byte[]` | `Uint8Array` |
-| `String[]` (**BL-035, next train**) | text | array of strings | `string[]` | `string[]` |
+| `Double[]` (**BL-035, 0.9.0**) | 64-bit float | array of numbers | `double[]` | `Float64Array` |
+| `Float32[]` (**BL-035, 0.9.0**) | 32-bit float | array of numbers | `float[]` | `Float32Array` |
+| `Int32[]` (**BL-035, 0.9.0**) | 32-bit signed integer | array of integers | `int[]` | `Int32Array` |
+| `Int64[]` (**BL-035, 0.9.0**) | 64-bit signed integer | array of integers | `long[]` | `BigInt64Array` |
+| `Byte[]` (**BL-035, 0.9.0**) | unsigned byte | **one base64 string** (not an array of numbers) | `byte[]` | `Uint8Array` |
+| `String[]` (**BL-035, 0.9.0**) | text | array of strings | `string[]` | `string[]` |
 
 The same type comes back on every surface and in both SDKs: a query result, a frame, a subscription message and a long-poll all
 give a `Float64Array` in TypeScript for a `Double[]` column.
@@ -100,7 +100,7 @@ Do not send a `byte[]` to a `Byte` column.
 
 ## Declaring an array column
 
-(**BL-035, next train**) Use the type name wherever a column's type is named: a schema document, `POST …/tables`,
+(**BL-035, 0.9.0**) Use the type name wherever a column's type is named: a schema document, `POST …/tables`,
 `POST …/tables/{name}/columns`, a schema export, the `aouda-schema.v1.json` editor schema, and table describe.
 
 ```json
@@ -140,7 +140,7 @@ plain array (`Float64Array | number[]`, `BigInt64Array | bigint[] | number[]`); 
 
 ## Values
 
-(**BL-035, next train**)
+(**BL-035, 0.9.0**)
 
 - **Null is not empty.** The column may be null (a nullable column); `[]` is an empty array, a value. They read back as `null`
   and `[]`, on every surface. For a `Byte[]` the empty array is the empty string `""`.
@@ -162,22 +162,22 @@ The refusals are the ones in [Writing](#writing).
 
 ## Limits
 
-(**BL-035, next train**) The same limits apply on every surface and there is no setting for them.
+(**BL-035, 0.9.0**) The same limits apply on every surface and there is no setting for them.
 
 | Limit | Value |
 |---|---|
-| Elements in one value (**BL-035, next train**) | **65,536** |
-| Bytes of elements in one value (**BL-035, next train**) | **1,048,576** (1 MiB): `count × width` for the numeric types, the sum of the strings' UTF-8 lengths for `String[]` |
+| Elements in one value (**BL-035, 0.9.0**) | **65,536** |
+| Bytes of elements in one value (**BL-035, 0.9.0**) | **1,048,576** (1 MiB): `count × width` for the numeric types, the sum of the strings' UTF-8 lengths for `String[]` |
 
 A value **at** a limit is accepted; one over is refused. Because the element limit is reached first for the fixed-width types, the
 largest value of each is:
 
 | Type | Largest value |
 |---|---|
-| `Byte[]` (**BL-035, next train**) | 65,536 elements = 64 KiB |
-| `Float32[]`, `Int32[]` (**BL-035, next train**) | 65,536 elements = 256 KiB |
-| `Double[]`, `Int64[]` (**BL-035, next train**) | 65,536 elements = 512 KiB |
-| `String[]` (**BL-035, next train**) | 65,536 elements **and** 1 MiB of UTF-8, whichever is reached first |
+| `Byte[]` (**BL-035, 0.9.0**) | 65,536 elements = 64 KiB |
+| `Float32[]`, `Int32[]` (**BL-035, 0.9.0**) | 65,536 elements = 256 KiB |
+| `Double[]`, `Int64[]` (**BL-035, 0.9.0**) | 65,536 elements = 512 KiB |
+| `String[]` (**BL-035, 0.9.0**) | 65,536 elements **and** 1 MiB of UTF-8, whichever is reached first |
 
 The element count is checked before the elements are read. The refusal names the limit and what it saw:
 
@@ -202,7 +202,7 @@ Parameter 's' (String[] column 'S'): An array value holds at most 1,048,576 byte
 
 ## Writing
 
-(**BL-035, next train**) A refused value stores nothing from that request.
+(**BL-035, 0.9.0**) A refused value stores nothing from that request.
 
 ### Named mutations
 
@@ -297,7 +297,7 @@ row-object insert**, so a refusal arrives as the server's error.
 
 ## Reading
 
-(**BL-035, next train**) Every read surface gives the array whole.
+(**BL-035, 0.9.0**) Every read surface gives the array whole.
 
 ### JSON
 
@@ -352,7 +352,7 @@ unchanged.
 
 ## What is refused, and where
 
-(**BL-035, next train**) An array column can only be **selected**. It is refused, at the earliest point, with
+(**BL-035, 0.9.0**) An array column can only be **selected**. It is refused, at the earliest point, with
 `400 ARRAY_COLUMN_UNSUPPORTED` and a message that names the column, its type and the clause:
 
 ```text
@@ -361,19 +361,19 @@ ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot
 
 | Where the array column is used | When it is refused | How it shows |
 |---|---|---|
-| primary key, `unique`, cluster column, `autoIncrement`, `default`, `derived`, partition key, `references` (either side), checks, transform predicates, the permission column (**BL-035, next train**) | the **schema document** is refused whole | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing applied |
-| the same, in `POST …/tables`; `autoIncrement` or `references` in `PATCH …/columns/{name}` (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| a table policy's `memoryFilter`, in `POST …/tables` or `PUT …/tables/{name}/policy` (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| a named query's `where`, `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, `selectExpr` input, join key, per-key key or order (**BL-035, next train**) | `schema apply` | that entry is `Failed`, its reason starts `ARRAY_COLUMN_UNSUPPORTED:`; the rest of the document applies |
-| a materialized query's filter, group, order or aggregate on an array column (**BL-035, next train**) | `schema apply`, or `POST …/materialized-queries` | that entry is `Failed`; the endpoint answers `400 ARRAY_COLUMN_UNSUPPORTED` |
-| a named mutation's `where`, a `setExpr` that targets or reads one, its `orderBy`, a `min` / `max` / `maxLength` / `enum` on a parameter bound to one (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
-| `/query` and `/query/count`: `where` (**`IS NULL` included**), `orderBy`, `groupBy`, an aggregate, `distinct`, a join key, a `perKey` key (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| an ad-hoc `PATCH …/rows` with a `setExpr` on one; a `DELETE …/rows` or a `POST …/rows/batch` delete with an `orderBy` on one (**BL-035, next train**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing deleted |
-| a subscription `filter`, or a `conflate.key` (**BL-035, next train**) | `subscribe` | an `error` message with code `ARRAY_COLUMN_UNSUPPORTED` |
-| an RLS rule on an array column (**BL-035, next train**) | a read (a query, a join side, a named query, the materialized query endpoint, a subscribe), an update or a delete (`PATCH` / `DELETE …/rows`, `POST …/rows/batch`, a named mutation's `update` or `delete`) | `400 ARRAY_COLUMN_UNSUPPORTED` (an `error` message at subscribe), nothing changed; an **insert** checked against such a rule is denied (`403`), and a change event checked against it is not delivered |
-| a route or tee under `applyTransforms` that copies an array column into a column of another type, or a scalar into an array column (**BL-035, next train**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| a column of an **edge table** (an edge table stores only its source, destination and label) (**BL-035, next train**) | `POST …/tables/{name}/columns` on an edge table (and the engine's `CreateEdgeTableAsync`) | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing added |
-| a `filter` materialized query over a table **without a primary key**, selecting an array column (**BL-035, next train**) | `schema apply` | that entry is `Failed` |
+| primary key, `unique`, cluster column, `autoIncrement`, `default`, `derived`, partition key, `references` (either side), checks, transform predicates, the permission column (**BL-035, 0.9.0**) | the **schema document** is refused whole | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing applied |
+| the same, in `POST …/tables`; `autoIncrement` or `references` in `PATCH …/columns/{name}` (**BL-035, 0.9.0**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a table policy's `memoryFilter`, in `POST …/tables` or `PUT …/tables/{name}/policy` (**BL-035, 0.9.0**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a named query's `where`, `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, `selectExpr` input, join key, per-key key or order (**BL-035, 0.9.0**) | `schema apply` | that entry is `Failed`, its reason starts `ARRAY_COLUMN_UNSUPPORTED:`; the rest of the document applies |
+| a materialized query's filter, group, order or aggregate on an array column (**BL-035, 0.9.0**) | `schema apply`, or `POST …/materialized-queries` | that entry is `Failed`; the endpoint answers `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a named mutation's `where`, a `setExpr` that targets or reads one, its `orderBy`, a `min` / `max` / `maxLength` / `enum` on a parameter bound to one (**BL-035, 0.9.0**) | `schema apply` | that entry is `Failed` |
+| `/query` and `/query/count`: `where` (**`IS NULL` included**), `orderBy`, `groupBy`, an aggregate, `distinct`, a join key, a `perKey` key (**BL-035, 0.9.0**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| an ad-hoc `PATCH …/rows` with a `setExpr` on one; a `DELETE …/rows` or a `POST …/rows/batch` delete with an `orderBy` on one (**BL-035, 0.9.0**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing deleted |
+| a subscription `filter`, or a `conflate.key` (**BL-035, 0.9.0**) | `subscribe` | an `error` message with code `ARRAY_COLUMN_UNSUPPORTED` |
+| an RLS rule on an array column (**BL-035, 0.9.0**) | a read (a query, a join side, a named query, the materialized query endpoint, a subscribe), an update or a delete (`PATCH` / `DELETE …/rows`, `POST …/rows/batch`, a named mutation's `update` or `delete`) | `400 ARRAY_COLUMN_UNSUPPORTED` (an `error` message at subscribe), nothing changed; an **insert** checked against such a rule is denied (`403`), and a change event checked against it is not delivered |
+| a route or tee under `applyTransforms` that copies an array column into a column of another type, or a scalar into an array column (**BL-035, 0.9.0**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
+| a column of an **edge table** (an edge table stores only its source, destination and label) (**BL-035, 0.9.0**) | `POST …/tables/{name}/columns` on an edge table (and the engine's `CreateEdgeTableAsync`) | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing added |
+| a `filter` materialized query over a table **without a primary key**, selecting an array column (**BL-035, 0.9.0**) | `schema apply` | that entry is `Failed` |
 
 A `default` given as text is refused with `ARRAY_COLUMN_UNSUPPORTED`; one given as a JSON array (`"default": [1.0]`) is not a valid
 `default` at all and is refused as an invalid schema (`400 INVALID_REQUEST`).
@@ -387,7 +387,7 @@ invalid-value code, [above](#writing).
 
 ## Tiers, retention and cost
 
-(**BL-035, next train**) An array column follows its table's temperature like any column: it is written to the write buffer and the
+(**BL-035, 0.9.0**) An array column follows its table's temperature like any column: it is written to the write buffer and the
 WAL, flushed to hot and cold segments, merged and compacted, and read through the same scan. Retention on the table's time
 column drops whole segments of an array table as it does any other; `latestPerKey` over a table with retention is still
 refused (see [Materialized queries](materialized.md#array-columns-in-a-materialized-result)).
@@ -401,7 +401,7 @@ full size; the whole table took 0.46 ×.
 
 ## Known limitations
 
-(**BL-035, next train**) Not supported; there is no date.
+(**BL-035, 0.9.0**) Not supported; there is no date.
 
 - **Element selection and element predicates.** No `Rates[10]`, no `any element > x`, no `array_length`. The array is a value.
 - **Sorting, grouping, aggregating, joining or keying on an array column.** See the table above.

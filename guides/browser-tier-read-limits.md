@@ -94,9 +94,9 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
 
-`orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Bool`, `Guid`, and `Float32` are valid column types and are **not** sortable. (**BL-035, next train**) So are the six [array types](array-columns.md), which are valid column types that cannot be sorted on at all.
+`orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Bool`, `Guid`, and `Float32` are valid column types and are **not** sortable. (**BL-035, 0.9.0**) So are the six [array types](array-columns.md), which are valid column types that cannot be sorted on at all.
 
-Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. (**BL-035, next train**) A subscription whose `conflate.key` names an [array column](array-columns.md) is refused with `ARRAY_COLUMN_UNSUPPORTED` (a named query that filters on one is already refused at `schema apply`). HTTP execute of the same name still works.
+Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. (**BL-035, 0.9.0**) A subscription whose `conflate.key` names an [array column](array-columns.md) is refused with `ARRAY_COLUMN_UNSUPPORTED` (a named query that filters on one is already refused at `schema apply`). HTTP execute of the same name still works.
 
 `POST /api/databases/{db}/query` and `POST /api/databases/{db}/query/count` are **not** on the allowlist. On the data-plane they are **404**.
 
@@ -122,7 +122,7 @@ Pinned by `PartitionFilterRuleTests` (engine, per operator, including the watchl
 
 ### `crossPartitionAccess` on the data-plane listener
 
-**Rule.** `crossPartitionAccess` is a per-call field on the **admin** listener: a named-query execute or batch item takes it, and so does a subscribe message. The **data-plane listener (the browser tier) ignores it**, so the partition-filter guard decides, and the `PARTITION_FILTER_REQUIRED` message says so. A named-query *definition* cannot set it. The browser-tier credentials could not use it anyway: data-plane `/query` and `/query/count` are 404; `mk_pub_*` on the admin listener is 401; ad-hoc WS `target` subscribe is `NAMED_QUERY_SUBSCRIBE_REQUIRED`. (**BL-1227, next train**)
+**Rule.** `crossPartitionAccess` is a per-call field on the **admin** listener: a named-query execute or batch item takes it, and so does a subscribe message. The **data-plane listener (the browser tier) ignores it**, so the partition-filter guard decides, and the `PARTITION_FILTER_REQUIRED` message says so. A named-query *definition* cannot set it. The browser-tier credentials could not use it anyway: data-plane `/query` and `/query/count` are 404; `mk_pub_*` on the admin listener is 401; ad-hoc WS `target` subscribe is `NAMED_QUERY_SUBSCRIBE_REQUIRED`. (**BL-1227, 0.9.0**)
 
 **Why.** A definition that granted an unbounded scan would not be reviewable at persist time (`D-20`). The flag is a **cost guard**, not a confidentiality boundary: it waives the partition-filter guard and nothing else, so it never changes which rows a credential sees. It is unreachable from the browser by design.
 

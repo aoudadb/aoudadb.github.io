@@ -16,7 +16,7 @@ The review file is `_review/Flywheel-S01-docs-review.md`. `_config.yml` has no `
 
 - **S01-M1** `clients/typescript.md` marked `client.databases.create` auth options as `(**0.5.0**)`. `@aouda/client` 0.5.0 is already published. On that release, `databases.create` writes `enableWal`, `replicationMode`, `maxMemoryShareBytes`, and `defaultTemperature` only, and drops anything else. The Flywheel S01 changeset is an unreleased minor (BL-1123). A 0.5.0 marker tells a reader the installed client already sends `kind` and `auth`.
 
-  Resolution: the marker is `(**BL-1123, next train**)`.
+  Resolution: the marker is `(**BL-1123, 0.9.0**)`.
 
 ## Should Fix
 
