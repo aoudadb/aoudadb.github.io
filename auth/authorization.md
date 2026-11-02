@@ -452,7 +452,7 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
 # → { "id": "550e8400-e29b-41d4-a716-446655440002", ... }
 
 # 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user).
-#    `dimension` is the table's permissionDimension (`quote_source`), lower case and byte-for-byte. The grant names no
+#    `dimension` is the table's permissionDimension (`quote_source`), lower case (**BL-430, next train**) and byte-for-byte. The grant names no
 #    column: the table's permissionColumn (`Source`) is what the key is compared with.
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440002/partition-grants \
   -H "Authorization: Bearer <admin-token>" \
@@ -764,8 +764,9 @@ every database linked to this auth database, and compares the key with the colum
 dimension does not have to look like a column name, and spelling it like one selects nothing: `fx_source` for the fx tables and
 `rates_source` for the rates tables keeps one `MORN` grant from reaching both, though both compare it with a column named `Source`.
 
-The name is lower case. An upper-case letter or outer white space is `400 AUTH_GRANT_INVALID`, and the message gives the lower-case
-spelling (`"Source"` → use `source`). Matching stays exact (`StringComparison.Ordinal`). Nothing stored is converted: a grant an older
+The name is lower case. A capital letter is `400 AUTH_GRANT_INVALID`, and the message gives the lower-case
+spelling (`"Source"` → use `source`). HTTP trims outer white space before that check, so `" source "` is `201` and stored as `source`.
+An in-process grant and a resolver JSON `dimension` do not trim: outer white space on those is the same `400`. Matching stays exact (`StringComparison.Ordinal`). Nothing stored is converted: a grant an older
 build wrote as `"Source"` keeps that spelling and matches only a table whose `permissionDimension` is `"Source"`, and that table's next
 options change must send the lower-case name. Partition **keys** stay verbatim (**BL-1192, next train**).
 
@@ -925,7 +926,8 @@ an access grant, but it narrows rather than lifts:
 - **Only a full admin may store one** — create, change or delete a role that carries an embargo row, or rename such a role
   (a restricted admin is `403 AUTHORIZATION_DENIED`), as for an all-* grant.
 - **Who it applies to.** Every user a role carrying it is assigned to, with the assignment's database scope — **`db_admin` users
-  included**: a full admin who holds an embargo role is delayed too — and a custom key that holds the role. An application service
+  included**: a full admin who holds an embargo role is delayed too. A custom key is embargoed only through the user it is linked to,
+  when that user holds the role; the key's own role list is not an embargo assignment. An application service
   key (`mk_svc_`) and a server key (`mk_srv_`) hold no stored role and are never embargoed.
 - **Several rows on one table**: the largest N applies. A stored row that does not parse (edited outside the API) withholds every
   row of its table, and of every table when its table name is blank or `*` — the embargo fails closed.

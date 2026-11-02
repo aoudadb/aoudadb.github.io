@@ -502,8 +502,8 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
     as the comparison says it should, where a cold read found only one. The same holds for an equality whose constant is of another
     type than the key (`Key = 1` on a `Bool` key, a `double` on a `UInt64` or `Int64` key): it reads every partition rather than the
     one named by the constant's text, which a cold read could miss.
-  - This is catalog / data-directory format 14. A data directory written by 0.6.0 or 0.7.x (format 13) is refused at open with both
-    versions named; there is no migration (export with the build that wrote it, load into a fresh directory).
+  - This is catalog / data-directory format 16. A data directory of any other format is refused at open with both versions named — a
+    format-15 directory included — and there is no migration (export with the build that wrote it, load into a fresh directory).
 - Query safety boundary:
   - Partitioned-table queries usually must include full partition-key equality filters unless explicit cross-partition access is requested.
 - Security boundary:
