@@ -759,7 +759,7 @@ stream whose outcome an `all-partitions` or `all-rows` grant decided, by any cre
 | `action` | `access_grant_used` |
 | `resource` | `{database}/{table}` |
 | `user_id` | The user, or for a key without a user the key's own id |
-| `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
+| `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `drop-table`, `alter-security`, `drop-column` (**BL-1296, next train**), `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
 
 - A row is written only when a grant **decided** the outcome: the table has the restriction the grant lifts (PLS for `all-partitions`, an RLS
   resolver for `all-rows`). For a read, the row is written only when neither half denied it; a write is recorded when its gate is

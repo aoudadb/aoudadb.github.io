@@ -625,13 +625,13 @@ job's rows have ended and it holds its place in its tables' commit order, and th
 var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { CommitWait = BulkLoadCommitWait.Accepted });
 // handle.State == BulkLoadCommitState.Accepted: not durable yet.
 // The outcome request started when this answer arrived (**BL-1140, next train**).
-var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost; a 404 after an hour throws
+var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost; a 404 at or after an hour throws
 ```
 
 ```typescript
 const handle = await client.table('trades').bulkLoad(batches, { commitWait: 'accepted' });
 // The outcome request started when this answer arrived (**BL-1140, next train**).
-const outcome = await handle.outcome;   // { state: 'committed' | 'lost' }; a 404 after an hour throws BulkLoadOutcomeUnknownError
+const outcome = await handle.outcome;   // { state: 'committed' | 'lost' }; a 404 at or after an hour throws BulkLoadOutcomeUnknownError
 ```
 
 - ⚠️ **An accepted job is not durable and may be lost.** If the server stops before the job's commit point, or its commit fails,
@@ -644,8 +644,9 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost' }; a 40
 - **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. They ask as
   soon as the accepted answer arrives (**BL-1140, next train**). After a restart that cut the job off, the server answers `200`
   `state: "lost"` with `BULK_LOAD_LOST`: load it again. Once its log has moved past the job, `404 BULK_LOAD_JOB_NOT_FOUND`. A `404`
-  within an hour of the accepted answer is still lost (nothing durable; load it again). A `404` after that hour cannot tell a lost job
-  from a committed one the server has forgotten, and the SDKs reject it as unknown rather than lost (**BL-1140, next train**). A
+  before one hour from the accepted answer is still lost (nothing durable; load it again). A `404` at or after that hour is unknown:
+  it cannot tell a lost job from a committed one the server has forgotten, and that tick is the first on which a committed header may
+  be forgotten. Both SDKs reject it as unknown rather than lost (**BL-1140, next train**). A
   committed job's record is kept for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A
   job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is committed and its rows become
   visible at the next restart (note 6 below; **Lead group 7 review, 0.6.0**).
@@ -955,7 +956,7 @@ Tests: `BulkLoadReplicaCoordinatorTests`, `BulkLoadCompactionWatermarkTests`.
 
 1. Engine registers in-flight job in `BulkLoadResumeWatchdog` when bulk load starts.
 2. If job exceeds resume window without successful close, watchdog emits `BulkLoadAborted`.
-3. Operator can force abort via `POST .../bulk-load:force-abort`, which also emits abort frame.
+3. The credential that began the job, or a database admin who also holds `bulkload`, can force-abort via `POST .../bulk-load:force-abort`, which also emits an abort frame. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**).
 4. Registry marks session aborted after durable WAL abort emission.
 
 Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort` cases).
@@ -1148,12 +1149,12 @@ Expected checks:
 
 ### Scenario 3: Operator force-abort of stuck job
 
-When to use: in-flight job is blocked and client path is no longer trusted. The call is allowed for the credential that began the job, or for a database admin who also holds `bulkload`. Another `bulkload` holder is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**).
+When to use: in-flight job is blocked and client path is no longer trusted. Force-abort stays the credential that began the job, or a database admin who also holds `bulkload`. Another `bulkload` holder is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**).
 
 Steps:
-1. Call `GET .../bulk-load:list` and identify active `jobId` (the list contains only jobs this credential began).
-2. Call `POST .../bulk-load:force-abort` with `jobId` and reason.
-3. Confirm `GET .../{jobId}` returns `aborted`.
+1. The credential that began the job finds it on `GET .../bulk-load:list` (the list contains only jobs that credential began). A database admin who did not begin the job is omitted from that list and needs the job id from outside it.
+2. Call `POST .../bulk-load:force-abort` with that `jobId` and a reason. The beginning credential may call it, and so may a database admin who also holds `bulkload`.
+3. Status stays the owner's. The beginning credential confirms `GET .../{jobId}` returns `aborted`. An admin who did not begin the job gets `403` on that status.
 
 Expected checks:
 - Force-abort returns `{ jobId, aborted: true }`.

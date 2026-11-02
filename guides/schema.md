@@ -321,6 +321,8 @@ Key anchors:
 > a field from the schema file, renaming it in a way the differ does not recognise as a rename, or
 > applying an **older** copy of the file (a rollback, a stale artifact baked into a deploy image, a
 > second service applying its own version) is enough. The same holds for whole tables.
+> A document that would leave a table with no columns does not run that drop: it is `400 INVALID_REQUEST`
+> and applies nothing (**BL-1178, next train**).
 >
 > This matters most in pipelines that hard-set `allowDestructive: true` for an environment. Two
 > habits make it safe:
@@ -843,6 +845,11 @@ the document is applied** (its other changes neither), with no history entry. A 
 branch merge whose plan changes a key is refused the same way. Until this release the apply ran the column changes the document
 implied — the key column was dropped, renamed or added — and returned the warning beside an applied result. To change a key, drop and
 re-create the table. Other warnings are still notes: the apply goes on without them.
+
+(**BL-1178, next train**) **A document that would leave a table with no columns is refused.** `POST …/schema/apply` answers
+`400 INVALID_REQUEST`. The message says nothing was applied and names the table, and nothing in the document is applied, a dry run
+included. Dropping the table is not this refusal. Dropping every old column and adding one new column is allowed when
+`allowDestructive` is true.
 
 A key's function may be spelled on its `partitionKey` entry, on its column (`partitionFunction`), or both, and `"None"` is the same as
 no function: the diff compares the function the table actually routes by, so re-applying an unchanged document has no partition-key

@@ -495,7 +495,7 @@ Every permission in the request is validated before anything is written, so a re
 | `level` | `read`, `write` or `admin` |
 | `source` | `implied:service_key`, `implied:db_admin` or `role:<role name>` |
 | `surface` | `http`, `ws`, `long-poll` or `bulk-load` |
-| `operation` | `query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe` or `rekey` |
+| `operation` | `query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `drop-table`, `alter-security`, `drop-column` (**BL-1296, next train**), `subscribe` or `rekey` |
 | `table` | The table the grant lifted a restriction of |
 | `subscriptionId`, `jobId`, `streamId` | When the use belongs to a subscription, a bulk-load job or a write stream; otherwise absent |
 
@@ -5616,9 +5616,10 @@ the server stops before the job's commit point, or its commit fails, nothing of 
   found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, 0.6.0**: it read `"lost"`). Ask with
   `waitMs` to be answered when it settles. Both SDKs ask as soon as the accepted answer arrives (**BL-1140, next train**). After a
   restart that cut the job off, `GET {jobId}` answers `"lost"` (`200`, `errorCode` `BULK_LOAD_LOST`): load it again. Once the server's
-  log has moved past the job (a checkpoint), it answers `404 BULK_LOAD_JOB_NOT_FOUND`. A `404` within an hour of the accepted answer is
-  still lost: nothing of it is durable, load it again. A `404` after that hour cannot tell a lost job from a committed one the server
-  has forgotten, and the SDKs reject it as unknown rather than lost (**BL-1140, next train**). The server keeps a committed job's
+  log has moved past the job (a checkpoint), it answers `404 BULK_LOAD_JOB_NOT_FOUND`. A `404` before one hour from the accepted answer is
+  still lost: nothing of it is durable, load it again. A `404` at or after that hour is unknown: it cannot tell a lost job from a
+  committed one the server has forgotten, and that tick is the first on which a committed header may be forgotten. Both SDKs reject it
+  as unknown rather than lost (**BL-1140, next train**). The server keeps a committed job's
   record for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A `200` `state: "lost"` with
   `BULK_LOAD_LOST` is unchanged: load it again. A job that passed its commit point is never answered `"lost"`, even when work after it
   failed (**Lead group 7 review, 0.6.0**). Don't infer the outcome from the token: a lost job's token reads as covered once the log
@@ -5707,6 +5708,11 @@ Get current session state and progress. The beginning credential only: another c
 (**Lead S30, 0.6.0**) **Query parameter `waitMs`** (`0`–`60000`, default `0`; outside that `400 BULK_LOAD_INVALID_OPTIONS`):
 for a job whose commit is running — `committing`, or `accepted` — the answer waits up to that long for the job to settle (committed,
 failed, lost or aborted), then answers as it stands. This is how a client learns an accepted job's outcome without polling.
+
+A `404 BULK_LOAD_JOB_NOT_FOUND` before one hour from an accepted answer is still lost: nothing of the job is durable, so load it
+again. A `404` at or after that hour is unknown. It cannot tell a lost job from a committed one the server has forgotten, and that
+tick is the first on which a committed header may be forgotten. Both SDKs treat it as unknown rather than lost (**BL-1140, next train**).
+The server keeps a committed job's record for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer).
 
 **Response body:**
 
