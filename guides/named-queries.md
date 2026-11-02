@@ -187,7 +187,7 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
 Notes:
 
 - `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](access-surface.md).
-- Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top.
+- Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top. **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still a required param. Write `"required": false` explicitly for optional args (and always when pairing with `whenParamPresent`).
 - `dataPlaneAccess: true` is required for browser-tier callers on **every table the definition touches**, including join tables **and** a materialized-query result table. On an MQ, set it on the `materializedQueries` entry (default `false`) — do not PATCH table-options. Independent of ADRA: RLS/PLS still filter rows of the base table.
 - **A joined table is scoped as a direct read of it would be** (**BL-818, 0.3.0**; **BL-1227, 0.9.0**). The caller's RLS and PLS for every joined table are applied on that join's side, so an execute whose definition joins a table the caller may read only part of is answered with that part, and every joined table also needs the caller's grant. A holder of `all-partitions` or `all-rows` is lifted on the joined side as on a direct read; `crossPartitionAccess` is not carried to a joined table. Still `403 AUTHORIZATION_DENIED`, naming the table: a joined table whose partition-level security refuses the caller, and a joined materialized-query result whose source security cannot be applied.
 
@@ -333,7 +333,7 @@ Constraints:
 
 - Only valid on `and`-clause conditions. An `or` condition with `whenParamPresent` fails apply.
 - A marked condition **never** counts as partition-key coverage for `count: true`. The table must be unpartitioned, or all required partition predicates must be separately covered by non-marked conditions.
-- Params that control `whenParamPresent` conditions should declare `"required": false` (the engine defaults to `required: true` when the field is absent).
+- Params that control `whenParamPresent` conditions **must** declare `"required": false`. Omitting `required` defaults it to `true` (an `enum` / `min` / `max` / `maxLength` alone does not make the param optional); apply then fails with `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID`.
 
 ---
 
@@ -869,6 +869,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |
 | Schema apply `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` | Set a numeric cap (or a constrained `limitParam`) |
 | Schema apply `NAMED_QUERY_COUNT_UNBOUNDED` | `count: true` on a join, `distinct`, or uncovered partition keys | Cover every partition key with required `eq`/`in`, or drop `count` |
+| Schema apply `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID` | `whenParamPresent: true` but `params.<name>.required` is missing or `true` (omit defaults to required) | Set `"required": false` on that param |
 | Schema apply `NAMED_QUERY_COST_EXCEEDED` | Too many joins | Split the query or drop a join (cap default 8 = `1 + joins`) |
 | Batch HTTP 400 `NAMED_QUERY_BATCH_MUTATION` | Mutation name in `queries` | Mutations have their own execute route |
 | Schema apply `NAMED_MUTATION_BATCH_MAX_ITEMS_REQUIRED` | `batchParam` set without `maxItems` on that parameter | Declare `"maxItems"` on the batch parameter's `params` entry |

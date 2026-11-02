@@ -528,7 +528,7 @@ and [Sizing](sizing.md#mq-result-residency).
 }
 ```
 
-`whenParamPresent: true` means: if the caller omits this arg, skip the predicate entirely. If the arg is supplied, apply it. An **unmarked** (`whenParamPresent` absent) required omission still throws `NAMED_QUERY_PARAM_REQUIRED`. A marked condition never counts as partition-key coverage for `count: true`.
+`whenParamPresent: true` means: if the caller omits this arg, skip the predicate entirely. If the arg is supplied, apply it. Those params must declare `"required": false` — omitting `required` defaults it to `true` and apply fails with `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID`. An **unmarked** (`whenParamPresent` absent) required omission still throws `NAMED_QUERY_PARAM_REQUIRED`. A marked condition never counts as partition-key coverage for `count: true`.
 
 **Execute with no filter (all listings, page 0):**
 

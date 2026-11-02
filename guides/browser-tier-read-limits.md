@@ -156,9 +156,11 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
 
 **Rule.** A predicate marked `"whenParamPresent": true` is **skipped entirely** when the caller omits that argument. An **unmarked** optional param omission becomes `Value = null` — for `eq`/`ne` that is `IS NULL`; for range/`in` operators it **throws** `NAMED_QUERY_PARAM_REQUIRED`.
 
+**`required` must be `false`.** Omitting `params.<name>.required` does **not** mean optional — the engine defaults it to `true`. A `whenParamPresent` condition whose param is still required fails schema apply with `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID` (`whenParamPresent on '<name>' requires params.<name>.required to be false`). Set `"required": false` explicitly on every param used that way (an `enum` / `min` / `max` / `maxLength` alone is not enough).
+
 **What ships (`D-34`):** `"whenParamPresent": true` on any `and`-clause condition. Multiple conditions in the same `and` can independently carry the marker; omitting any subset is legal. `or`-clause conditions cannot carry the marker (fails apply). A marked condition never counts as partition-key coverage for `count: true` — the table must either be unpartitioned or all required partition predicates must be separately covered by non-marked conditions.
 
-**Example — four optional facets, one definition:**
+**Example — optional facets, one definition:**
 
 ```json
 "where": {
@@ -166,6 +168,10 @@ Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess:
     { "column": "currency", "op": "in",  "param": "currency", "whenParamPresent": true },
     { "column": "sector",   "op": "eq",  "param": "sector",   "whenParamPresent": true }
   ]
+},
+"params": {
+  "currency": { "required": false },
+  "sector":   { "required": false, "maxLength": 64 }
 }
 ```
 
@@ -255,7 +261,7 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 | Distinct source list | `distinct: true` over partition-key columns with one key constrained ([key-only DISTINCT](#partition-filter-rule)). Answered on the scan, which skips row groups from their statistics (**architecture review, 0.3.0**). The partition-directory answer was retired — a directory outlives rows deleted from it — so deleted partitions no longer appear and `stats.distinctServedFromPartitionMetadata` is gone |
 | Paging | `limit` (required cap) + `limitParam` / `offsetParam` (param names; still need a numeric cap). Non-zero offset **disqualifies subscribe** |
 | "1–25 of 412" | `"count": true` on the definition → `totalMatches` on HTTP (omitted when false) and `total_matches` on `snapshot_complete`. Unbounded count fails apply (`NAMED_QUERY_COUNT_UNBOUNDED`). Ad-hoc `/query/count` stays 404 on the data plane |
-| Optional facets in one definition | `"whenParamPresent": true` on `and`-clause conditions (`D-34`). Omitted arg skips the predicate; unmarked omission throws. `or` conditions cannot carry the marker. |
+| Optional facets in one definition | `"whenParamPresent": true` on `and`-clause conditions **and** `"required": false` on those params (`D-34`). Omitting `required` defaults it to `true` and apply fails (`NAMED_QUERY_OPTIONAL_PREDICATE_INVALID`). Omitted arg skips the predicate; unmarked omission throws. `or` conditions cannot carry the marker. |
 | Bounded sort choice | Declare `orderByChoices` in the definition; pass `orderByIndex` (0-based) in execute or subscribe (`D-35`). Expression `orderBy` on arbitrary columns is still not offered (BL-183). |
 | Insert-only stream conflation | `"conflate": { "collapse_inserts": true }` on the subscribe message (`D-32`). Without this flag, default conflate is a no-op on insert-only ticks. |
 | Server-side ranking | `computed` on an `aggregate` MQ — physically stored, orderable as a first-class column (`D-36`). The `derived` alternative works on base tables. |

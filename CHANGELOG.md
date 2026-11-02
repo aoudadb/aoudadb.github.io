@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Named-query `params.required` default is documented explicitly.** Omitting `required` means **required** (`true`), not optional. A `whenParamPresent` condition needs `"required": false` on that param or schema apply fails with `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID`. Spelled out in [Named queries](guides/named-queries.md#optional-predicates-whenparampresent), [browser-tier read limits](guides/browser-tier-read-limits.md#optional-predicates-whenparampresent), [market data](guides/market-data.md), and the [HTTP API](reference/http-api.md) named-query definition fields / error table.
+
 ## 0.9.0 — 2026-11-02
 
 Server **0.9.0** / `@aouda/client` **0.9.0** / `Aouda.Client` **0.9.0**. Studio pin follows npm.

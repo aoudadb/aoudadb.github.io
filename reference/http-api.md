@@ -796,6 +796,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_IDENTIFIER_PARAM` | 400 (schema apply) | A parameter occupies an identifier position (table/column/operator/sort/projection) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | 400 (schema apply) | Named query has no capped `limit` / `limitParam` |
 | `NAMED_QUERY_COUNT_UNBOUNDED` | 400 (schema apply) | `count: true` but the definition is not cost-bounded (joins, `distinct`, or uncovered partition keys) |
+| `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID` | 400 (schema apply) | `whenParamPresent` is invalid: no param, literal-only, used on `or`, or the named param is still required. **`params.<name>.required` defaults to `true` when omitted** — set `"required": false` explicitly. |
 | `NAMED_QUERY_IDENTITY_PARAM` | 400 (schema apply) | Parameter name collides with an identity-derived value |
 | `NAMED_QUERY_PROJECTION_REQUIRED` | 400 (schema apply) | Named query omitted `select` / `selectExpr` |
 | `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
@@ -1497,6 +1498,8 @@ There is **no HTTP route that registers a definition** and **no inventory list**
 | `aggregates` / `groupBy` | As on `/query`: the definition answers its keys and aggregates (no `select` then). Applied under `/query`'s rules — a shape `/query` would refuse, an unknown column, `sum` / `avg` of a non-number, a bucket of a non-`Timestamp`, or `count: true` beside them fails `schema/apply`. Until now these keys were silently dropped and the query answered plain rows (**BL-796, 0.3.0**). Subscribe refuses them. |
 | `perKey` | As on `/query` (**BL-801, 0.3.0**). Subscribe refuses it. |
 | `joins[i].where` | A filter on the joined table, with `{ "param": … }` values bound like the base `where` (**BL-818, 0.3.0**). |
+| `params` | Per-argument constraints (`required`, `min` / `max`, `enum`, `maxLength`, `maxItems`, optional `serverTime`). **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still required. Write `"required": false` for optional args. |
+| `whenParamPresent` | On a `where` (or join `where`) condition: skip the predicate when that param is absent. Requires `params.<name>.required: false`; omit or `true` fails apply with `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID`. `and`-clause only. See [Optional predicates](../guides/named-queries.md#optional-predicates-whenparampresent). |
 
 There is no `?alias=` / `X-Aouda-Named-Query-Alias` / body `alias`. Freshness is keyed by the path, batch, or subscribe **name**.
 
