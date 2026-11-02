@@ -118,9 +118,9 @@ Per-record detail page with:
 - Related records listed by foreign key
 - Delete with confirmation
 
-### Array columns (**BL-035, next train**)
+### Array columns (**BL-035, 0.9.0**)
 
-(**BL-035, next train**) Studio shows an [array column](array-columns.md) in the grid, the query worksheet, the query centre, the named-artifact
+(**BL-035, 0.9.0**) Studio shows an [array column](array-columns.md) in the grid, the query worksheet, the query centre, the named-artifact
 test panel and the record view as **its first five elements, and the count when there are more** (`[0.5, 0.52, 0.53, 0.55, 0.56, …] · 400 values`);
 a null stays `NULL` and an empty array is `[]`. An **expand** opens a dialog that lists every element (paged, with the index) and
 copies the whole value as JSON. Copy, CSV and JSON export write the wire's JSON form (`-0` kept, a `Byte[]` as base64, `Int64`

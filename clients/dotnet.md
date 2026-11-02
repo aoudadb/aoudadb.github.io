@@ -84,8 +84,8 @@ application.
 | `CircuitBreakerPolicy` | `CircuitBreakerPolicy.Default` (opens after 5 failures in 30 s) | While open, calls fail at once with `CircuitBreakerOpenException`. `CircuitBreakerPolicy.Disabled` turns it off. |
 | `ServerAuth` / `AppAuth` | none | Server auth (`ServerAuthOptions`: `ApiKey`, `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`). Mutually exclusive. See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
 | `AutoCreateSchema` | `false` | Typed inserts create a missing table from the type. |
-| `AutoReconcileSchema` | `true` | Before the first typed insert to a table, compare it with the type and change the table to match (see `ReconcilePolicy`). A typed update does not reconcile. (**BL-1178, next train**) ⚠️ Set `false` for tables from `aouda.schema.json`: since **BL-1177 (next train)** the server refuses DDL on them, and an insert that needs to add or drop a column fails with `AoudaSchemaException`. |
-| `ReconcilePolicy` | `Safe` | Default `Safe` only adds columns the row type has and the table lacks. `Unsafe` is opt-in and drops non-key columns a row type omits; a primary-key column stays. A typed update does not reconcile. (**BL-1178, next train**) Bulk load never reconciles. See [Schema § what `InferenceMode` decides](../guides/schema.md#what-inferencemode-decides-and-what-it-does-not). |
+| `AutoReconcileSchema` | `true` | Before the first typed insert to a table, compare it with the type and change the table to match (see `ReconcilePolicy`). A typed update does not reconcile. (**BL-1178, 0.9.0**) ⚠️ Set `false` for tables from `aouda.schema.json`: since **BL-1177 (0.9.0)** the server refuses DDL on them, and an insert that needs to add or drop a column fails with `AoudaSchemaException`. |
+| `ReconcilePolicy` | `Safe` | Default `Safe` only adds columns the row type has and the table lacks. `Unsafe` is opt-in and drops non-key columns a row type omits; a primary-key column stays. A typed update does not reconcile. (**BL-1178, 0.9.0**) Bulk load never reconciles. See [Schema § what `InferenceMode` decides](../guides/schema.md#what-inferencemode-decides-and-what-it-does-not). |
 | `TreatMissingAsEmpty` | `false` | A query on a missing table returns no rows instead of an error. |
 | `ConsistencyTokenStore` | in-memory, per client | Holds the read-your-writes token. Share one store between clients that must see each other's writes. See [Freshness](../guides/freshness.md). |
 
@@ -328,19 +328,19 @@ once.
 
 ---
 
-### Array columns (**BL-035, next train**) {#array-columns}
+### Array columns (**BL-035, 0.9.0**) {#array-columns}
 
-(**BL-035, next train**) The six [array column types](../guides/array-columns.md) read and write as CLR arrays, on every read surface (frames and
+(**BL-035, 0.9.0**) The six [array column types](../guides/array-columns.md) read and write as CLR arrays, on every read surface (frames and
 JSON, queries, named queries, subscriptions, typed and untyped) and both WebSocket wires (JSON and MessagePack):
 
 | Server type | CLR type |
 |---|---|
-| `Double[]` (**BL-035, next train**) | `double[]` |
-| `Float32[]` (**BL-035, next train**) | `float[]` |
-| `Int32[]` (**BL-035, next train**) | `int[]` |
-| `Int64[]` (**BL-035, next train**) | `long[]` |
-| `Byte[]` (**BL-035, next train**) | `byte[]` |
-| `String[]` (**BL-035, next train**) | `string[]` |
+| `Double[]` (**BL-035, 0.9.0**) | `double[]` |
+| `Float32[]` (**BL-035, 0.9.0**) | `float[]` |
+| `Int32[]` (**BL-035, 0.9.0**) | `int[]` |
+| `Int64[]` (**BL-035, 0.9.0**) | `long[]` |
+| `Byte[]` (**BL-035, 0.9.0**) | `byte[]` |
+| `String[]` (**BL-035, 0.9.0**) | `string[]` |
 
 A null cell is `null` and an empty array is empty. The `byte[]` of a `Byte[]` column is told from a scalar `Byte` by the column's
 type, never by the value's shape: sent to a scalar `Byte` column it travels as base64 text and is refused as not a number —
@@ -605,7 +605,7 @@ A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was 
 ## 8a) Subscriptions: which listener takes which
 
 `client.GetTable(name).SubscribeAsync()` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
-`In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, next train**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
+`In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, 0.9.0**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
 a query, and the **data-plane listener** (the one browsers and `mk_pub_*` reach) refuses that by design: its callers send a named-query
 name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
 
@@ -619,7 +619,7 @@ A table subscription sent to the data-plane listener fails with `NAMED_QUERY_SUB
 [Named queries](../guides/named-queries.md#subscribe-by-name)), or point a trusted backend at the admin listener with its service key.
 The wire contract is in the [HTTP API reference](../reference/http-api.md#websocket-streaming-protocol).
 
-**What a subscription sees** (**BL-1227, next train**). A subscription's snapshot and events follow the same grants as an HTTP query by
+**What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and events follow the same grants as an HTTP query by
 the same credential; `SubscribeAsync` is authorized by the same role check (`read` on the table, and for a named query every table it
 touches), and the server re-reads the credential's permissions on every subscribe. A server API key (`mk_srv_`) that works over HTTP
 on a linked application database opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
@@ -628,7 +628,7 @@ on a linked application database opens its socket too. Details: [Real-time Strea
 
 On a partitioned table that requires a partition filter, a subscription that names no partition is refused with
 `PARTITION_FILTER_REQUIRED`. `RemoteTableQuery.WithCrossPartitionAccess()` reaches
-`SubscribeAsync` as well as the query methods (**BL-1227, next train**; until this train a subscription had no way to send it), and
+`SubscribeAsync` as well as the query methods (**BL-1227, 0.9.0**; until this train a subscription had no way to send it), and
 `SubscribeOptions.CrossPartitionAccess` asks for the same. Either asks; **neither cancels the other**. The client sends
 `cross_partition_access: true` on the `subscribe` message only when asked, and sends it again on every resubscribe after a reconnect.
 
@@ -664,7 +664,7 @@ decides what a subscription sees is audited once per subscription
 ### Named queries and the flag
 
 A named query that binds no partition key on a partitioned table is refused the same way, and takes the flag **per call**
-(**BL-1227, next train**): `NamedQueriesApi.ExecuteAsync(…, crossPartitionAccess: true)`,
+(**BL-1227, 0.9.0**): `NamedQueriesApi.ExecuteAsync(…, crossPartitionAccess: true)`,
 `new NamedQueryBatchInput(…, crossPartitionAccess: true)` for one batch item, and `SubscribeOptions.CrossPartitionAccess` on
 `NamedQueriesApi.SubscribeAsync`. A definition cannot set it, and a batch has no batch-wide switch.
 
@@ -698,7 +698,7 @@ needs no flag and works on the data-plane listener, where the flag is ignored
 
 ---
 
-## 8b) Which databases a sign-in opens (**BL-1018, next train**)
+## 8b) Which databases a sign-in opens (**BL-1018, 0.9.0**)
 
 An application sign-in gives a token that opens only its **allowance**: the databases of the auth database on which the user holds
 a role. `SignInAsync(email, password, deviceInfo, databases)` narrows it to the databases you name — never wider; a name the user

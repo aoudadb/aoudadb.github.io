@@ -58,7 +58,7 @@ The server echoes the version it used. If the client sends an unsupported versio
 | `X-Aouda-Wait-Ms` | No | Freshness wait budget in milliseconds (query `waitMs` wins). Default 250 when a token or lag budget is in play. Cap 30 000. |
 | `X-Aouda-On-Exceeded` | No | `wait` \| `fetchPrimary` \| `fail` (query `onExceeded` wins). Default is **role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. An explicit value is never rewritten. |
 | `Authorization` | **Required when the target database has auth enabled, except public app-auth POSTs** | `Bearer <token>` — JWT access token or API key (`mk_anon_...`, `mk_pub_...`, `mk_svc_...`, `mk_srv_...`, custom `mk_...`). `POST /api/databases/{db}/auth/{signup\|signin\|refresh\|request-password-reset\|reset-password}` are keyless (a present bearer is ignored). |
-| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context: the request runs as the **user**, with the user's access grants and not the key's, so a service key that presents a user's token no longer holds `all-partitions` / `all-rows` (**BL-1227, next train**). Ignored for `anon` keys and direct user JWT requests. The realtime transports take the same token as `user_token` on the WebSocket `auth` / `re_auth` message and `userToken` on the long-poll connect, with the same rules (**BL-1223, next train**). |
+| `X-User-Token` | Conditional | Optional user JWT. Used only when `Authorization` is a service-level key (`mk_svc_...` or `mk_srv_...`) to enforce PLS/RBAC in user context: the request runs as the **user**, with the user's access grants and not the key's, so a service key that presents a user's token no longer holds `all-partitions` / `all-rows` (**BL-1227, 0.9.0**). Ignored for `anon` keys and direct user JWT requests. The realtime transports take the same token as `user_token` on the WebSocket `auth` / `re_auth` message and `userToken` on the long-poll connect, with the same rules (**BL-1223, 0.9.0**). |
 
 ## Standard Response Headers
 
@@ -85,14 +85,14 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 |--------|------|--------|-------------|
 | `mk_anon_` | App anon key | Application Auth | Leftover public key. **Not required** for signup/signin/refresh/password-reset. Denied on data and admin routes. RBAC `anonymous` role has no data permissions. |
 | `mk_pub_` | Browser-tier data key | Application Auth | Public/frontend key for the **data-plane listener**. Named query, named mutation, and subscribe only. Cannot compose an ad-hoc `QueryMessage`. Accepted **only** on the data-plane listener (`AUTH_KEY_LISTENER_MISMATCH` on admin). Role `public` has `read,write,delete` on `*`; the listener 404 and `dataPlaneAccess` are the real gates. |
-| `mk_svc_` | App service key | Application Auth | Backend key for one database. It holds both access grants, `all-partitions` and `all-rows`, at `admin` on its database, so partition- and row-level security do not restrict it; each use is audited as `access_grant_used` ([Audit](#audit-access_grant_used)) (**BL-1227, next train**). Ad-hoc query is allowed on the **admin** listener. Does **not** list or create databases (`GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH`); use `GET /api/databases/{name}` to check existence. |
-| `mk_scp_` | Scoped service key | Application Auth | Backend key for one database. It holds only the roles it was minted with, each scoped to that database, and not the implied pair. It never holds `admin`: the admin routes are **403** whatever its roles carry. `X-User-Token` is ignored and the data-plane opt-in applies. `GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH` (**BL-1239, next train**). |
-| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): it holds no access grant, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. It never holds `all-partitions` or `all-rows` by itself (**BL-1227, next train**). |
-| `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, 0.5.0**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. It may assign an ordinary role. `db_admin`, and any role that carries an `all-partitions` or `all-rows` grant, are `403 AUTHORIZATION_DENIED` and the user's assignments stay as they were; a user JWT can still assign those roles (**BL-1299, next train**). A user who already holds `db_admin` still holds both access grants (**BL-1227, next train**). A grant added later to a role the key already assigned still reaches those users, so keep the key secret. |
-| `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants, access grants included. A custom `mk_` minted on server auth is a scoped server key (BL-1017). A key's own `db_admin` role grants nothing: PLS / RLS stay enforced for a key not linked to a user. A key linked to a user holds that user's grants, so a key linked to a `db_admin` user holds `all-partitions` and `all-rows` (**BL-1227, next train**). |
+| `mk_svc_` | App service key | Application Auth | Backend key for one database. It holds both access grants, `all-partitions` and `all-rows`, at `admin` on its database, so partition- and row-level security do not restrict it; each use is audited as `access_grant_used` ([Audit](#audit-access_grant_used)) (**BL-1227, 0.9.0**). Ad-hoc query is allowed on the **admin** listener. Does **not** list or create databases (`GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH`); use `GET /api/databases/{name}` to check existence. |
+| `mk_scp_` | Scoped service key | Application Auth | Backend key for one database. It holds only the roles it was minted with, each scoped to that database, and not the implied pair. It never holds `admin`: the admin routes are **403** whatever its roles carry. `X-User-Token` is ignored and the data-plane opt-in applies. `GET`/`POST /api/databases` → **403** `AUTH_KEY_ROUTE_MISMATCH` (**BL-1239, 0.9.0**). |
+| `mk_srv_` | Server API key | Server Auth | Cross-database service key. Scoped roles per database. **PLS / RLS enforced** (**0.4.0**; up to 0.3.x bypassed): it holds no access grant, so a protected table shows it what a request with no user may see; `X-User-Token` applies a user's. It never holds `all-partitions` or `all-rows` by itself (**BL-1227, 0.9.0**). |
+| `mk_adm_` | Auth-admin key | Application Auth | User, grant, session, audit, and MFA administration on **one application auth database** (**BL-1032, 0.5.0**). Not `service_role`: PLS / RLS stay enforced, and it is not a data key. `X-User-Token` is ignored. It may assign an ordinary role. `db_admin`, and any role that carries an `all-partitions` or `all-rows` grant, are `403 AUTHORIZATION_DENIED` and the user's assignments stay as they were; a user JWT can still assign those roles (**BL-1299, 0.9.0**). A user who already holds `db_admin` still holds both access grants (**BL-1227, 0.9.0**). A grant added later to a role the key already assigned still reaches those users, so keep the key secret. |
+| `mk_` (other) | Custom key | Either | Granular custom key. On application auth, linked to a user (`userId`), it gets that user's grants, access grants included. A custom `mk_` minted on server auth is a scoped server key (BL-1017). A key's own `db_admin` role grants nothing: PLS / RLS stay enforced for a key not linked to a user. A key linked to a user holds that user's grants, so a key linked to a `db_admin` user holds `all-partitions` and `all-rows` (**BL-1227, 0.9.0**). |
 | `eyJ...` (JWT) | Access token | Either | JWT from signin. Claims determine which auth system issued it. Application end-user JWTs on the data-plane listener are browser-tier (named artifacts only). Operator JWTs via Studio use the admin listener (ad-hoc allowed). |
 
-**Access grants (**BL-1227, next train**).** What a credential sees on a table with partition-level security (PLS) or row-level security (RLS) is decided by the **access grants** it holds, never by its key prefix or role name. `all-partitions` lifts PLS and `all-rows` lifts RLS; each is independent of the other. A grant has a scope (one table, or the whole database, which also covers tables created later) and a level (`read`, `write`, `admin`). An application service key (`mk_svc_`) and a user assigned `db_admin` on a database hold both grants at `admin` on that database, and so does a key linked to such a user or presenting its `X-User-Token`; no other credential holds one by implication. Any other holder gets one from a role: a role permission with `resourceType` `all-partitions` or `all-rows`, assigned to a user. See [Visibility is granted: all-partitions and all-rows](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows), [Role permissions and grants](#role-permissions-and-access-grants) and [Audit](#audit-access_grant_used).
+**Access grants (**BL-1227, 0.9.0**).** What a credential sees on a table with partition-level security (PLS) or row-level security (RLS) is decided by the **access grants** it holds, never by its key prefix or role name. `all-partitions` lifts PLS and `all-rows` lifts RLS; each is independent of the other. A grant has a scope (one table, or the whole database, which also covers tables created later) and a level (`read`, `write`, `admin`). An application service key (`mk_svc_`) and a user assigned `db_admin` on a database hold both grants at `admin` on that database, and so does a key linked to such a user or presenting its `X-User-Token`; no other credential holds one by implication. Any other holder gets one from a role: a role permission with `resourceType` `all-partitions` or `all-rows`, assigned to a user. See [Visibility is granted: all-partitions and all-rows](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows), [Role permissions and grants](#role-permissions-and-access-grants) and [Audit](#audit-access_grant_used).
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
 
@@ -111,9 +111,9 @@ The same four routes under `/api/databases/{authDb}/auth-admin-keys` mint `mk_ad
 
 `POST /api/databases/{db}/auth/admin/regenerate-keys` takes `{ "overlapSeconds"? }` the same way and returns `validUntil` (`null` when the previous system keys were revoked at once). Named keys are not swept.
 
-`Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_` (and accepts `mk_scp_`); `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_scp_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings. `mk_scp_` on `serverAuth` is **BL-1239, next train**.
+`Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_` (and accepts `mk_scp_`); `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_scp_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings. `mk_scp_` on `serverAuth` is **BL-1239, 0.9.0**.
 
-**Scoped service keys (**BL-1239, next train**).** A server key mints them on a linked application database. `db_admin`, `db_operator`, `anonymous`, `public` and an unknown role are `400`. `POST …/auth/admin/api-keys` with `kind: "scoped_service"` is `400`.
+**Scoped service keys (**BL-1239, 0.9.0**).** A server key mints them on a linked application database. `db_admin`, `db_operator`, `anonymous`, `public` and an unknown role are `400`. `POST …/auth/admin/api-keys` with `kind: "scoped_service"` is `400`.
 
 | Method | Path | Body | Result |
 |--------|------|------|--------|
@@ -151,8 +151,8 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 |---|---|---|---|---|---|
 | `mk_pub_*` | Data plane only | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
 | User JWT (application end user) | Data plane | ❌ | ✅ only path | ✅ enforced | ❌ 404 |
-| User JWT (Studio operator) | Admin | ✅ | ✅ | ✅ enforced; a user assigned `db_admin` on the database holds `all-partitions` and `all-rows` there (**BL-1227, next train**) | ✅ per RBAC |
-| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Holds `all-partitions` and `all-rows` (audited) (**BL-1227, next train**) | Per RBAC on admin for that database's routes. **Not** `GET`/`POST /api/databases` (server-auth catalog — **403** `AUTH_KEY_ROUTE_MISMATCH`) |
+| User JWT (Studio operator) | Admin | ✅ | ✅ | ✅ enforced; a user assigned `db_admin` on the database holds `all-partitions` and `all-rows` there (**BL-1227, 0.9.0**) | ✅ per RBAC |
+| `mk_svc_*` | Either (key accepted); ad-hoc only on admin | ✅ on admin; 404 on data-plane `/query` | ✅ | Holds `all-partitions` and `all-rows` (audited) (**BL-1227, 0.9.0**) | Per RBAC on admin for that database's routes. **Not** `GET`/`POST /api/databases` (server-auth catalog — **403** `AUTH_KEY_ROUTE_MISMATCH`) |
 | `mk_anon_*` | Data plane (auth endpoints) | ❌ | ❌ | n/a | ❌ — auth endpoints only |
 
 **Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
@@ -204,16 +204,16 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
    mk_anon_ → Resolve as app anon key → anonymous role; **auth endpoints only**
    mk_pub_  → Resolve as browser-tier public key → data-plane listener only; named artifacts
    mk_svc_  → Resolve as app service key → holds all-partitions + all-rows at admin on its
-              database (each use audited as access_grant_used) — BL-1227, next train
+              database (each use audited as access_grant_used) — BL-1227, 0.9.0
    mk_srv_  → Resolve as server API key → check db_roles claim for this database;
-              PLS/RLS enforced, holds no access grant (0.4.0; BL-1227, next train)
+              PLS/RLS enforced, holds no access grant (0.4.0; BL-1227, 0.9.0)
    mk_*     → Resolve as custom app key → check permissions; PLS/RLS enforced, holds the
-              access grants of its linked user, if any (BL-1227, next train)
+              access grants of its linked user, if any (BL-1227, 0.9.0)
    eyJ*     → Validate JWT signature and claims → extract roles
 
-4. Check X-User-Token header (optional; realtime: auth/re_auth user_token, long-poll userToken — BL-1223, next train)
+4. Check X-User-Token header (optional; realtime: auth/re_auth user_token, long-poll userToken — BL-1223, 0.9.0)
    Present + credential is mk_svc_ or mk_srv_ → Apply user context (PLS/RBAC); the user's
-                                                 access grants, not the key's (BL-1227, next train)
+                                                 access grants, not the key's (BL-1227, 0.9.0)
      Invalid, expired or revoked → 401 AUTH_TOKEN_INVALID (realtime: auth_error, socket closed)
    Present + credential is mk_anon_ or user JWT → Ignored
    Absent → Use credential's own identity
@@ -238,26 +238,26 @@ The `X-User-Token` header enables backends to act on behalf of a specific user w
 
 **What it does:**
 - The request authenticates as the service key (Layer 1 — connection identity)
-- But data access uses the **user's** identity (Layer 2 — PLS partition scoping, RBAC role) and the **user's** access grants: a service key that presents a user's token does not hold `all-partitions` / `all-rows` for that request, and a user with `db_admin` does (**BL-1227, next train**)
+- But data access uses the **user's** identity (Layer 2 — PLS partition scoping, RBAC role) and the **user's** access grants: a service key that presents a user's token does not hold `all-partitions` / `all-rows` for that request, and a user with `db_admin` does (**BL-1227, 0.9.0**)
 - This is how backends enforce per-user data isolation without exposing the service key to the frontend
 
 **When it is ignored:**
 - When `Authorization` is an `mk_anon_` key (anon keys already enforce PLS from the JWT)
 - When `Authorization` is a direct user JWT (the user is already identified)
 
-**Realtime** (**BL-1223, next train**): the same user token, with the same rules, is `user_token` on the WebSocket
+**Realtime** (**BL-1223, 0.9.0**): the same user token, with the same rules, is `user_token` on the WebSocket
 `auth` and `re_auth` messages and `userToken` on the long-poll connect body. The session is then the
 user's for partition- and row-level security for its whole life — snapshot, change events, write streams, grant changes — and it
 ends when the user token expires or is revoked.
 Before BL-1223 a realtime session ignored the user token and kept the service key's visibility.
 
-**Realtime authorization** (**BL-1227, next train**). A realtime session is authorized by the same role rule as HTTP; up to 0.8.0 realtime checked no roles on subscriptions or writes.
+**Realtime authorization** (**BL-1227, 0.9.0**). A realtime session is authorized by the same role rule as HTTP; up to 0.8.0 realtime checked no roles on subscriptions or writes.
 
 - **Handshake.** The WebSocket `auth` message and the long-poll connect authenticate against the database's own auth database first, then against the server auth database, as an HTTP request does. A session that the server auth database accepted (a `mk_srv_` key or a server user's JWT, whether or not the database has a linked auth database), and any session on an auth database, is also checked for a database-level `read` at the handshake, and refused with HTTP's code: `auth_error` and a closed socket on the WebSocket, `403` on the long-poll connect. Every session is checked per subscribe and per write stream, below.
-- **Subscribe.** A `subscribe` needs the role permission the HTTP read it mirrors needs: `read` on the table, and for a named-query subscribe `read` on every table the named query touches. A refusal is an `error` message with HTTP's code: `INSUFFICIENT_PERMISSIONS` (a role without the permission), `AUTHORIZATION_DENIED` (no role on this database) or `AUTH_TOKEN_MISSING` (no credential, where HTTP answers `401`). (**BL-1286, next train**) A `jwt-claim` partition refusal on that `error` frame — WebSocket and long-poll snapshot — uses the HTTP query's code (`AUTH_PLS_TENANT_CLAIM_MISSING`, `AUTH_PLS_TENANT_CLAIM_MISMATCH`, and the other PLS codes query already returns), not `AUTHORIZATION_DENIED`. A named-query batch slot uses the same code. The call is still refused.
+- **Subscribe.** A `subscribe` needs the role permission the HTTP read it mirrors needs: `read` on the table, and for a named-query subscribe `read` on every table the named query touches. A refusal is an `error` message with HTTP's code: `INSUFFICIENT_PERMISSIONS` (a role without the permission), `AUTHORIZATION_DENIED` (no role on this database) or `AUTH_TOKEN_MISSING` (no credential, where HTTP answers `401`). (**BL-1286, 0.9.0**) A `jwt-claim` partition refusal on that `error` frame — WebSocket and long-poll snapshot — uses the HTTP query's code (`AUTH_PLS_TENANT_CLAIM_MISSING`, `AUTH_PLS_TENANT_CLAIM_MISMATCH`, and the other PLS codes query already returns), not `AUTHORIZATION_DENIED`. A named-query batch slot uses the same code. The call is still refused.
 - **`stream_open`** needs `write` on the table, refused with the same codes.
 - **Revoked rights.** When a role change means the session no longer holds the `read` a live subscription needs, the server ends that subscription with `PERMISSION_REVOKED`, before the next change is delivered.
-- **Access grants.** What a subscription sees on a PLS or RLS table is the credential's access grants, as for the HTTP read it mirrors: the snapshot equals an HTTP query by the same credential, and every live event follows the same rule. A holder of `all-partitions` also receives events of partitions created later. A change to a user's role assignments or role permissions re-keys the live session on the first event after the change (a narrowing then applies to that event). (**BL-1284, next train**) One session applies one refresh at a time. An older resolution cannot put a revoked partition back. An event which arrives while a refresh is in progress is delivered only when the winning set still allows it. A **widening is not re-snapshotted**: rows the credential could not see before are not pushed, events from the re-key on are, so resubscribe to get the rows. A fresh `subscribe` reads the permissions again. The `crossPartitionAccess` flag is `cross_partition_access` on the `subscribe` message ([`subscribe`](#subscribe)).
+- **Access grants.** What a subscription sees on a PLS or RLS table is the credential's access grants, as for the HTTP read it mirrors: the snapshot equals an HTTP query by the same credential, and every live event follows the same rule. A holder of `all-partitions` also receives events of partitions created later. A change to a user's role assignments or role permissions re-keys the live session on the first event after the change (a narrowing then applies to that event). (**BL-1284, 0.9.0**) One session applies one refresh at a time. An older resolution cannot put a revoked partition back. An event which arrives while a refresh is in progress is delivered only when the winning set still allows it. A **widening is not re-snapshotted**: rows the credential could not see before are not pushed, events from the re-key on are, so resubscribe to get the rows. A fresh `subscribe` reads the permissions again. The `crossPartitionAccess` flag is `cross_partition_access` on the `subscribe` message ([`subscribe`](#subscribe)).
 
 **Example:**
 
@@ -295,10 +295,10 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/admin/users/{id}` | GET/PATCH/DELETE | Bearer JWT (`db_admin`) | Get/update/delete user (DELETE 204; 404 if missing; cascades related rows by id) |
 | `/api/auth/admin/users/{id}/disable` | POST | Bearer JWT (`db_admin`) | Disable user |
 | `/api/auth/admin/users/{id}/enable` | POST | Bearer JWT (`db_admin`) | Enable user |
-| `/api/auth/admin/roles` | GET/POST | Bearer JWT (`db_admin`) | List every role with its permissions / create a role. A permission is `{ "resourceType", "resourceName", "actions" }` ([Role permissions and access grants](#role-permissions-and-access-grants), **BL-1227, next train**) |
+| `/api/auth/admin/roles` | GET/POST | Bearer JWT (`db_admin`) | List every role with its permissions / create a role. A permission is `{ "resourceType", "resourceName", "actions" }` ([Role permissions and access grants](#role-permissions-and-access-grants), **BL-1227, 0.9.0**) |
 | `/api/auth/admin/roles/{id}` | PATCH/DELETE | Bearer JWT (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET /api/auth/admin/roles` lists every role with its permissions |
-| `/api/auth/admin/users/{id}/roles` | GET/PUT | Bearer JWT (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. A user JWT may assign `db_admin` and a role that carries an `all-partitions` or `all-rows` grant (**BL-1299, next train**) |
-| `/api/auth/admin/users/{id}/access-grants?database=` | GET | Bearer JWT (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database`, with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, next train**) |
+| `/api/auth/admin/users/{id}/roles` | GET/PUT | Bearer JWT (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. A user JWT may assign `db_admin` and a role that carries an `all-partitions` or `all-rows` grant (**BL-1299, 0.9.0**) |
+| `/api/auth/admin/users/{id}/access-grants?database=` | GET | Bearer JWT (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database`, with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, 0.9.0**) |
 | `/api/auth/admin/audit-log` | GET | Bearer JWT (`db_admin`) | The server auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
 | `/api/auth/admin/api-keys` | GET/POST | Bearer JWT (`db_admin`) | List/create server API keys |
 | `/api/auth/admin/api-keys/{id}` | DELETE | Bearer JWT (`db_admin`) | Revoke server API key |
@@ -344,18 +344,18 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/api/databases/{db}/auth/signup` | POST | API key (Layer 1) | Register new user |
-| `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token. Optional `databases` narrows the token's allowance (**BL-1018, next train**) — see [the token allowance](#the-token-allowance) |
-| `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT with the same allowance. Outside the allowance: `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`, refresh token not spent (**BL-1018, next train**) |
+| `/api/databases/{db}/auth/signin` | POST | API key (Layer 1) | Sign in → JWT + refresh token. Optional `databases` narrows the token's allowance (**BL-1018, 0.9.0**) — see [the token allowance](#the-token-allowance) |
+| `/api/databases/{db}/auth/refresh` | POST | API key (Layer 1) | Exchange refresh token → new JWT with the same allowance. Outside the allowance: `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`, refresh token not spent (**BL-1018, 0.9.0**) |
 | `/api/databases/{db}/auth/signout` | POST | API key + user JWT | End this session; optional `{ "scope": "local" \| "others" \| "global" }` (**NativeClients, 0.4.0**) |
-| `/api/databases/{db}/auth/authorize` | POST | user JWT | Native sign-in: issue a single-use PKCE code for a registered native client (**NativeClients, 0.4.0**). The code carries the caller's allowance, or the part of it an optional `databases` names (**BL-1018, next train**) |
-| `/api/databases/{db}/auth/token` | POST | none | Native sign-in: redeem the code (`grantType: "authorization_code"`) for a new session (**NativeClients, 0.4.0**). At a database outside the code's allowance: `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`, and the code is spent (**BL-1018, next train**) |
+| `/api/databases/{db}/auth/authorize` | POST | user JWT | Native sign-in: issue a single-use PKCE code for a registered native client (**NativeClients, 0.4.0**). The code carries the caller's allowance, or the part of it an optional `databases` names (**BL-1018, 0.9.0**) |
+| `/api/databases/{db}/auth/token` | POST | none | Native sign-in: redeem the code (`grantType: "authorization_code"`) for a new session (**NativeClients, 0.4.0**). At a database outside the code's allowance: `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`, and the code is spent (**BL-1018, 0.9.0**) |
 | `/api/databases/{db}/auth/sessions` | GET | user JWT | The caller's sessions, one per device (**NativeClients, 0.4.0**) |
 | `/api/databases/{db}/auth/sessions/{id}` | DELETE | user JWT | End one of the caller's sessions; another user's: `404 AUTH_SESSION_NOT_FOUND` (**NativeClients, 0.4.0**) |
 | `/api/databases/{db}/auth/me` | GET | API key + user JWT | Current user profile |
 | `/api/databases/{db}/auth/me` | PATCH | API key + user JWT | Update profile metadata |
 | `/api/databases/{db}/auth/password` | PUT | API key + user JWT | Change own password (current password required) |
 | `/api/databases/{db}/auth/request-password-reset` | POST | API key (Layer 1) | Request 6-digit OTP emailed to user; always 200 (anti-enumeration) |
-| `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set. Optional `databases`, as on sign-in (**BL-1018, next train**) |
+| `/api/databases/{db}/auth/reset-password` | POST | API key (Layer 1) | Submit OTP + new password; returns token pair; also used for invite-pending first-time password set. Optional `databases`, as on sign-in (**BL-1018, 0.9.0**) |
 | `/api/databases/{db}/auth/mfa/enroll` | POST | User JWT | Enrol TOTP or phone MFA factor. Phone: 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists; delete existing factor then re-enroll to replace number. Needs an `aal2` token, else 403 `AUTH_MFA_STEP_UP_REQUIRED` (**BL-795, 0.3.0**) |
 | `/api/databases/{db}/auth/mfa/challenge` | POST | User JWT | Create MFA challenge; sends SMS OTP for phone factors |
 | `/api/databases/{db}/auth/mfa/verify` | POST | User JWT | Submit OTP/TOTP/backup code; returns `aal2` token pair on success |
@@ -369,14 +369,14 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/factors` | GET | API key (`db_admin`) | List that user's MFA factors (active, pending, and any other stored status). Same body as the user list: `{ "factors": [ { "id", "type", "maskedPhone", "status", "createdAt" } ] }`. Phone is masked (`+***-***-` + last 4). Empty list is 200 `factors: []`. Unknown user is 404. |
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/factors/{factorId}` | DELETE | API key (`db_admin`) | Delete that user's factor and its challenges. 200 `{ "ok": true }`. 404 if the factor is missing or belongs to someone else. |
 | `/api/databases/{db}/auth/admin/users/{id}/mfa/enroll` | POST | API key (`db_admin`) | Admin-enrol a phone MFA factor on behalf of a user. 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor is already active or pending; existing factor id in `detail`. Does not overwrite the number — `DELETE …/admin/users/{id}/mfa/factors/{factorId}` first, then enroll again |
-| `/api/databases/{db}/auth/admin/roles` | GET/POST | API key (`db_admin`) | List every role with its permissions / create a role. A permission is `{ "resourceType", "resourceName", "actions" }` ([Role permissions and access grants](#role-permissions-and-access-grants), **BL-1227, next train**) |
+| `/api/databases/{db}/auth/admin/roles` | GET/POST | API key (`db_admin`) | List every role with its permissions / create a role. A permission is `{ "resourceType", "resourceName", "actions" }` ([Role permissions and access grants](#role-permissions-and-access-grants), **BL-1227, 0.9.0**) |
 | `/api/databases/{db}/auth/admin/roles/{id}` | PATCH/DELETE | API key (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET …/auth/admin/roles` lists every role with its permissions |
-| `/api/databases/{db}/auth/admin/users/{id}/roles` | GET/PUT | API key (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. An `mk_adm_` key receives `403 AUTHORIZATION_DENIED` for `db_admin` and for a role that carries an `all-partitions` or `all-rows` grant, at any scope, and the previous assignments stay; a user JWT may assign them (**BL-1299, next train**) |
-| `/api/databases/{db}/auth/admin/users/{id}/access-grants[?database=]` | GET | API key (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database` (default `{db}`), with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, next train**) |
+| `/api/databases/{db}/auth/admin/users/{id}/roles` | GET/PUT | API key (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. An `mk_adm_` key receives `403 AUTHORIZATION_DENIED` for `db_admin` and for a role that carries an `all-partitions` or `all-rows` grant, at any scope, and the previous assignments stay; a user JWT may assign them (**BL-1299, 0.9.0**) |
+| `/api/databases/{db}/auth/admin/users/{id}/access-grants[?database=]` | GET | API key (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database` (default `{db}`), with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, 0.9.0**) |
 | `/api/databases/{db}/auth/admin/audit-log` | GET | API key (`db_admin`) | The auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
 | `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys; POST accepts an optional `userId` to link the key to a user's `auth-db-pls` grants — see [Auth Reference](../auth/reference.md) |
 | `/api/databases/{db}/auth/admin/api-keys/{id}` | DELETE | API key (`db_admin`) | Revoke custom API key |
-| `/api/databases/{db}/auth/admin/signup-settings` | GET/PUT | API key (`db_admin`) | Read/write `allowSelfSignup` and `selfSignupRole` (null → `db_writer`). The role cannot be `db_admin` or carry an `all-partitions` or `all-rows` grant: `400 INVALID_REQUEST` and the stored settings stay (**BL-1282, next train**) |
+| `/api/databases/{db}/auth/admin/signup-settings` | GET/PUT | API key (`db_admin`) | Read/write `allowSelfSignup` and `selfSignupRole` (null → `db_writer`). The role cannot be `db_admin` or carry an `all-partitions` or `all-rows` grant: `400 INVALID_REQUEST` and the stored settings stay (**BL-1282, 0.9.0**) |
 
 **App auth signin request:**
 
@@ -392,7 +392,7 @@ Content-Type: application/json
 }
 ```
 
-`databases` is optional (**BL-1018, next train**).
+`databases` is optional (**BL-1018, 0.9.0**).
 
 **App auth signin response:**
 
@@ -411,8 +411,8 @@ Content-Type: application/json
 |-------|-------------|
 | `sub` | User ID |
 | `email` | User email |
-| `iss` | `{base_url}/api/databases/{authDb}` — the **auth database's** URL, whichever linked database minted or refreshed the token (`Aouda:BaseUrl`, else the request's scheme and host). (**BL-1018, next train**; it was the path database's URL.) The only issuer accepted on the paths of that auth database and the databases linked to it; up to 0.3.x `"aouda"` was accepted beside it, and a token carrying it is `401` (**BL-980, 0.4.0**) |
-| `aud` | The token's **allowance**: a JSON array of the databases it may open, e.g. `["myapp", "reports"]` (**BL-1018, next train**; it was the auth database's name) |
+| `iss` | `{base_url}/api/databases/{authDb}` — the **auth database's** URL, whichever linked database minted or refreshed the token (`Aouda:BaseUrl`, else the request's scheme and host). (**BL-1018, 0.9.0**; it was the path database's URL.) The only issuer accepted on the paths of that auth database and the databases linked to it; up to 0.3.x `"aouda"` was accepted beside it, and a token carrying it is `401` (**BL-980, 0.4.0**) |
+| `aud` | The token's **allowance**: a JSON array of the databases it may open, e.g. `["myapp", "reports"]` (**BL-1018, 0.9.0**; it was the auth database's name) |
 | `aal` | Authentication assurance level: `"aal1"` (password signin by a user who has an active MFA factor, not yet verified) or `"aal2"` (MFA verified, **or a password signin by a user with no active factor** — **BL-795, 0.3.0**) |
 | `tenant_id` | Tenant ID for PLS partition scoping |
 | `db_roles` | Native JSON object — role map keyed by scope, e.g. `{ "myapp": ["db_reader"] }`. Values are always arrays. Scope key for unscoped roles is the auth DB name (e.g. `"_auth"`). |
@@ -421,7 +421,7 @@ Content-Type: application/json
 
 #### The token allowance
 
-(**BL-1018, next train**) An application token is accepted at a database when its auth database issued it and the database is that
+(**BL-1018, 0.9.0**) An application token is accepted at a database when its auth database issued it and the database is that
 auth database or is named in `aud`. Anywhere else — HTTP, the WebSocket handshake and `re_auth`, a long-poll connect, `X-User-Token`
 — it is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`. The refresh-token family and a native sign-in code carry the same allowance, at most 64
 names.
@@ -440,24 +440,24 @@ Server-auth tokens are unchanged: no allowance, `iss` `"aouda"`, `aud` the serve
 
 #### Role permissions and access grants
 
-**Role permission shape (**BL-1227, next train**).** `POST …/roles` takes `{ "name", "description"?, "permissions": [ … ] }` and `PATCH …/roles/{id}` takes any of `name`, `description` and `permissions`. A permission is `{ "resourceType", "resourceName", "actions" }`, and the role comes back with the same `permissions` array. A `PATCH` that carries `permissions` replaces the role's whole list; one that omits it leaves the list alone. (**BL-1283, next train**) A system role's name cannot be changed, and a custom role cannot be renamed to a system role's name (`db_admin`, `db_operator`, `db_writer`, `db_reader`, `public`, `anonymous`, any case). That request is `400 INVALID_REQUEST` and changes nothing. A description change is still allowed.
+**Role permission shape (**BL-1227, 0.9.0**).** `POST …/roles` takes `{ "name", "description"?, "permissions": [ … ] }` and `PATCH …/roles/{id}` takes any of `name`, `description` and `permissions`. A permission is `{ "resourceType", "resourceName", "actions" }`, and the role comes back with the same `permissions` array. A `PATCH` that carries `permissions` replaces the role's whole list; one that omits it leaves the list alone. (**BL-1283, 0.9.0**) A system role's name cannot be changed, and a custom role cannot be renamed to a system role's name (`db_admin`, `db_operator`, `db_writer`, `db_reader`, `public`, `anonymous`, any case). That request is `400 INVALID_REQUEST` and changes nothing. A description change is still allowed.
 
 | `resourceType` | `resourceName` | `actions` |
 |---|---|---|
 | `table` (also when blank) | A table name or `*` (blank means `*`). Not checked: a permission may name a table that does not exist yet. | Role-based access control (RBAC) actions; blank means `read`. |
 | `all-partitions` | `*` for the whole database, or the name of a table (case-sensitive). Required: there is no default. | Exactly one level: `read`, `write` or `admin`. Required. |
 | `all-rows` | As for `all-partitions`. | As for `all-partitions`. |
-| `embargo` (**BL-418, next train**) | One table's name (case-sensitive); `*` is refused. The table must have a row time (its first cluster column is a `Timestamp` or a `Date`). | Whole seconds as digits, `1` to `2678400` (31 days); stored normalized (`"0900"` → `"900"`). |
+| `embargo` (**BL-418, 0.9.0**) | One table's name (case-sensitive); `*` is refused. The table must have a row time (its first cluster column is a `Timestamp` or a `Date`). | Whole seconds as digits, `1` to `2678400` (31 days); stored normalized (`"0900"` → `"900"`). |
 
 An `embargo` row delays the table for the role's holders — they see a row only once its row time is at least that many seconds old — and refuses them the surfaces that cannot apply that cutoff (`403 AUTH_EMBARGO_UNSUPPORTED`); see [Embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train). It is independent of the grants: no grant lifts it.
 
 A `read` grant lifts reads only; `write` and `admin` also lift the write side of PLS and of RLS (`admin` is `write` for data). A grant of one kind never lifts the other kind. Any other `resourceType` is refused. The full rules, with the roles and scopes that decide who holds a grant, are in the [Auth Reference](../auth/reference.md) and [Visibility is granted: all-partitions and all-rows](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
-Every permission in the request is validated before anything is written, so a refused request leaves the role as it was. The refusals are all `400` ([error codes](#error-codes)): `AUTH_GRANT_INVALID` (unknown `resourceType`; an `all-partitions` / `all-rows` entry without exactly one level or without `resourceName`; a null entry; a grant on a system role), `AUTH_GRANT_TABLE_NOT_FOUND` (a table-scope grant names a table that exists in no database the role can apply to) and `AUTH_GRANT_NOT_APPLICABLE` (the table has no PLS for `all-partitions`, or no RLS — an RLS resolver on an `auth-db` mode table — for `all-rows`, so the grant would lift nothing). An `embargo` row is refused `AUTH_GRANT_INVALID` for a blank or `*` table, a delay that is not whole seconds from 1 to 2678400, or a system role; `AUTH_GRANT_TABLE_NOT_FOUND` for a table that exists in no database the role can apply to; and `AUTH_GRANT_NOT_APPLICABLE` for a table with no row time (**BL-418, next train**). A `PATCH` that includes `permissions` and would leave an `all-partitions` or `all-rows` row on a role that is the signup role of a database this auth database governs is `400 INVALID_REQUEST`; the permissions and the role version stay. A description-only patch of that role is still allowed (**BL-1282, next train**).
+Every permission in the request is validated before anything is written, so a refused request leaves the role as it was. The refusals are all `400` ([error codes](#error-codes)): `AUTH_GRANT_INVALID` (unknown `resourceType`; an `all-partitions` / `all-rows` entry without exactly one level or without `resourceName`; a null entry; a grant on a system role), `AUTH_GRANT_TABLE_NOT_FOUND` (a table-scope grant names a table that exists in no database the role can apply to) and `AUTH_GRANT_NOT_APPLICABLE` (the table has no PLS for `all-partitions`, or no RLS — an RLS resolver on an `auth-db` mode table — for `all-rows`, so the grant would lift nothing). An `embargo` row is refused `AUTH_GRANT_INVALID` for a blank or `*` table, a delay that is not whole seconds from 1 to 2678400, or a system role; `AUTH_GRANT_TABLE_NOT_FOUND` for a table that exists in no database the role can apply to; and `AUTH_GRANT_NOT_APPLICABLE` for a table with no row time (**BL-418, 0.9.0**). A `PATCH` that includes `permissions` and would leave an `all-partitions` or `all-rows` row on a role that is the signup role of a database this auth database governs is `400 INVALID_REQUEST`; the permissions and the role version stay. A description-only patch of that role is still allowed (**BL-1282, 0.9.0**).
 
-**Assigning a role.** `PUT …/users/{id}/roles` takes `{ "roles": [ { "roleName", "scope" } ] }` and replaces the user's assignments with it; `[]` clears them, and a missing `roles` is `400 INVALID_REQUEST`. A `scope` that is blank or omitted applies to every database; otherwise it names one database (or `*`). A `roleName` that names no role is `400 INVALID_REQUEST` (`Role '<name>' not found.`). (**BL-1293, next train**) A missing, null, empty, or whitespace-only `roleName` is `400 INVALID_REQUEST`, the message names the 0-based index, and nothing is written. `[]` still clears. A user holds an access grant when a role carrying it is assigned with a scope that covers the database. An `mk_adm_` key that names `db_admin`, or a role whose permissions include `all-partitions` or `all-rows` (any `resourceName`, including `*` and a table), receives `403 AUTHORIZATION_DENIED` naming the role; the replacement is refused whole and the previous rows stay. A user JWT may assign those roles. A grant added later to a role that is not a signup role still reaches users already assigned (**BL-1299, next train**). A change to a role's permissions, an assignment or a role's deletion takes effect on the **next request**, and re-keys a live subscription (**BL-1227, next train**).
+**Assigning a role.** `PUT …/users/{id}/roles` takes `{ "roles": [ { "roleName", "scope" } ] }` and replaces the user's assignments with it; `[]` clears them, and a missing `roles` is `400 INVALID_REQUEST`. A `scope` that is blank or omitted applies to every database; otherwise it names one database (or `*`). A `roleName` that names no role is `400 INVALID_REQUEST` (`Role '<name>' not found.`). (**BL-1293, 0.9.0**) A missing, null, empty, or whitespace-only `roleName` is `400 INVALID_REQUEST`, the message names the 0-based index, and nothing is written. `[]` still clears. A user holds an access grant when a role carrying it is assigned with a scope that covers the database. An `mk_adm_` key that names `db_admin`, or a role whose permissions include `all-partitions` or `all-rows` (any `resourceName`, including `*` and a table), receives `403 AUTHORIZATION_DENIED` naming the role; the replacement is refused whole and the previous rows stay. A user JWT may assign those roles. A grant added later to a role that is not a signup role still reaches users already assigned (**BL-1299, 0.9.0**). A change to a role's permissions, an assignment or a role's deletion takes effect on the **next request**, and re-keys a live subscription (**BL-1227, 0.9.0**).
 
-**`GET …/users/{id}/access-grants`** answers which `all-partitions` / `all-rows` grants a user holds on one database, computed as a request would be, with no cache (**BL-1227, next train**). The database is `?database=`; the application route defaults it to `{db}` when that is an application database. It must be a database this auth database governs, else `400 INVALID_REQUEST`; a missing database is `400 INVALID_REQUEST` too, and an unknown user is `404`. The response:
+**`GET …/users/{id}/access-grants`** answers which `all-partitions` / `all-rows` grants a user holds on one database, computed as a request would be, with no cache (**BL-1227, 0.9.0**). The database is `?database=`; the application route defaults it to `{db}` when that is an application database. It must be a database this auth database governs, else `400 INVALID_REQUEST`; a missing database is `400 INVALID_REQUEST` too, and an unknown user is `404`. The response:
 
 ```json
 {
@@ -473,11 +473,11 @@ Every permission in the request is validated before anything is written, so a re
 }
 ```
 
-`grant` is `all-partitions` or `all-rows`; `scope` is `database` or `table` (then `table` names it, otherwise it is `null`); `level` is `read`, `write` or `admin`; `source` is `implied:db_admin` or `role:<role name>`. The list is ordered by `grant`, `scope`, `table`, `level` and `source`. `embargoes` (**BL-418, next train**) lists the embargo rows the user holds on the database, from roles whose assignment covers it, ordered by `table`, `seconds` and `source`; `table` or `seconds` is `null` for a stored row that did not parse, which withholds every row of the table (of every table when `table` is `null`). An application service key is not a user and has no entry: it holds both grants at `admin` on its database by implication.
+`grant` is `all-partitions` or `all-rows`; `scope` is `database` or `table` (then `table` names it, otherwise it is `null`); `level` is `read`, `write` or `admin`; `source` is `implied:db_admin` or `role:<role name>`. The list is ordered by `grant`, `scope`, `table`, `level` and `source`. `embargoes` (**BL-418, 0.9.0**) lists the embargo rows the user holds on the database, from roles whose assignment covers it, ordered by `table`, `seconds` and `source`; `table` or `seconds` is `null` for a stored row that did not parse, which withholds every row of the table (of every table when `table` is `null`). An application service key is not a user and has no entry: it holds both grants at `admin` on its database by implication.
 
 #### Audit: `access_grant_used`
 
-**Every use of an access grant is recorded** (**BL-1227, next train**), so an operator can tell when a service key or an admin user read or wrote past partition- or row-level security. One `access_grant_used` row goes to the auth database's `_audit_log` for each grant used, and only when **the grant decided the outcome**: the table has the restriction the grant lifts. A read of a table with no PLS or RLS by a service key writes nothing, and neither does sending `crossPartitionAccess` on its own.
+**Every use of an access grant is recorded** (**BL-1227, 0.9.0**), so an operator can tell when a service key or an admin user read or wrote past partition- or row-level security. One `access_grant_used` row goes to the auth database's `_audit_log` for each grant used, and only when **the grant decided the outcome**: the table has the restriction the grant lifts. A read of a table with no PLS or RLS by a service key writes nothing, and neither does sending `crossPartitionAccess` on its own.
 
 | Column | Value |
 |---|---|
@@ -495,7 +495,7 @@ Every permission in the request is validated before anything is written, so a re
 | `level` | `read`, `write` or `admin` |
 | `source` | `implied:service_key`, `implied:db_admin` or `role:<role name>` |
 | `surface` | `http`, `ws`, `long-poll` or `bulk-load` |
-| `operation` | `query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `drop-table`, `alter-security`, `drop-column` (**BL-1296, next train**), `subscribe` or `rekey` |
+| `operation` | `query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `drop-table`, `alter-security`, `drop-column` (**BL-1296, 0.9.0**), `subscribe` or `rekey` |
 | `table` | The table the grant lifted a restriction of |
 | `subscriptionId`, `jobId`, `streamId` | When the use belongs to a subscription, a bulk-load job or a write stream; otherwise absent |
 
@@ -503,7 +503,7 @@ Every permission in the request is validated before anything is written, so a re
 
 **Where it goes.** To the auth database that governs the data's database, else to the auth database that authenticated the credential. Read it with `GET …/auth/admin/audit-log?action=access_grant_used` (`GET /api/databases/{db}/auth/admin/audit-log` on an application auth database, `GET /api/auth/admin/audit-log` on the server auth database), which also takes `userId`, `from`, `to`, `limit` (default 20, max 100) and `offset`; the `action` filter is a case-insensitive substring match. The response is `{ "entries": [ { "id", "userId", "userEmail", "action", "resource", "detail", "ipAddress", "timestamp" } ], "total" }`, with `detail` as the JSON string above.
 
-A graph traversal, k-hop, shortest path, or nearest-neighbour search writes one `access_grant_used` row per grant that widened the read (`operation` `graph` or `vector`, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, next train**) `service_key_pls_bypass` and `query_cross_partition`, the audit kinds of the earlier bypass, are no longer written, and there is no `429` from the query endpoint for cross-partition traffic: the rate limiter and its `Aouda:PlsCrossPartitionRateLimit` options are gone, and a leftover key is ignored.
+A graph traversal, k-hop, shortest path, or nearest-neighbour search writes one `access_grant_used` row per grant that widened the read (`operation` `graph` or `vector`, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, 0.9.0**) `service_key_pls_bypass` and `query_cross_partition`, the audit kinds of the earlier bypass, are no longer written, and there is no `429` from the query endpoint for cross-partition traffic: the rate limiter and its `Aouda:PlsCrossPartitionRateLimit` options are gone, and a leftover key is ignored.
 
 #### Auth Error Responses
 
@@ -649,7 +649,7 @@ All errors return a JSON body with this structure:
 | `INVALID_VALUE` | 400 | Invalid value type or format |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) A column-batch body of a version this server no longer reads: an `ACB1` frame, or the retired media type `application/vnd.aouda.column-batch`. The message names the version found and the one expected (`ACB2`, `application/vnd.aouda.column-batch-v2`). Upgrade the client; nothing of the request was applied |
 | `RESULT_TOO_LARGE` | 400 | (**release blockers, 0.3.0**) The query's result exceeds `Aouda:Query:MaxResultRows` (default 1 000 000): `/query`, a named query, or `POST …/materialized-queries/{name}/query`. The message names the row count, the ceiling and its key. No `Retry-After`: the same query is refused the same way. Narrow the query, page it (`limit` / `offset`), or have the operator raise the setting. It was `503 MEMORY_BUDGET_EXCEEDED` with a `Retry-After` a retry could not honour. (**LoadScan, 0.5.0**) A `/query` with no page that asks for column-batch frames is streamed, not held, and is never refused this way: ask for frames to export a whole table |
-| `ARRAY_COLUMN_UNSUPPORTED` | 400 | (**BL-035, next train**) An [array column](../guides/array-columns.md) is used where it cannot be: in a primary key, `unique`, `references`, partition or cluster column, `autoIncrement`, a `default` given as text, `derived`, a check, a transform predicate, the permission column or a `memoryFilter`; in a query's `where` (a null test included), `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, `selectExpr` input, join key or `perKey` key; in a `setExpr`, a named mutation's `where` or `orderBy`, or a `min` / `max` / `maxLength` / `enum` constraint on a parameter it is written from; in an RLS rule (on `/query` and a join side, a named query, `POST …/materialized-queries/{name}/query`, at subscribe, and on an update or delete: `PATCH` / `DELETE …/rows`, `POST …/rows/batch`, a named mutation's `update` or `delete` — an insert checked against such a rule is denied with `403`); in a `DELETE …/rows` or `rows/batch` delete's `orderBy`; in a subscription `filter` or `conflate.key` (an `error` message with this code); in a bulk-load route or tee under `applyTransforms` that copies it into a column of another type or a scalar into it; or as a column of an edge table (`POST …/tables/{name}/columns` on an edge table). The `error` names the column, its type and the clause: `ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).` In a named query or materialized definition applied with `schema apply`, the entry is `Failed` and its reason starts with the code, instead of a `400`. A bad **value** (a non-finite or null element, an over-limit array) is not this code: it is the surface's own invalid-value code, `NAMED_QUERY_BIND_FAILED`, `NAMED_MUTATION_BIND_FAILED` or `INVALID_REQUEST` |
+| `ARRAY_COLUMN_UNSUPPORTED` | 400 | (**BL-035, 0.9.0**) An [array column](../guides/array-columns.md) is used where it cannot be: in a primary key, `unique`, `references`, partition or cluster column, `autoIncrement`, a `default` given as text, `derived`, a check, a transform predicate, the permission column or a `memoryFilter`; in a query's `where` (a null test included), `orderBy`, `groupBy`, aggregate (`count(col)` included), `distinct`, `selectExpr` input, join key or `perKey` key; in a `setExpr`, a named mutation's `where` or `orderBy`, or a `min` / `max` / `maxLength` / `enum` constraint on a parameter it is written from; in an RLS rule (on `/query` and a join side, a named query, `POST …/materialized-queries/{name}/query`, at subscribe, and on an update or delete: `PATCH` / `DELETE …/rows`, `POST …/rows/batch`, a named mutation's `update` or `delete` — an insert checked against such a rule is denied with `403`); in a `DELETE …/rows` or `rows/batch` delete's `orderBy`; in a subscription `filter` or `conflate.key` (an `error` message with this code); in a bulk-load route or tee under `applyTransforms` that copies it into a column of another type or a scalar into it; or as a column of an edge table (`POST …/tables/{name}/columns` on an edge table). The `error` names the column, its type and the clause: `ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot be used in a where (an array column can only be selected — ADR 0067 D-5).` In a named query or materialized definition applied with `schema apply`, the entry is `Failed` and its reason starts with the code, instead of a `400`. A bad **value** (a non-finite or null element, an over-limit array) is not this code: it is the surface's own invalid-value code, `NAMED_QUERY_BIND_FAILED`, `NAMED_MUTATION_BIND_FAILED` or `INVALID_REQUEST` |
 
 #### Resource Errors (4xx)
 
@@ -660,13 +660,13 @@ All errors return a JSON body with this structure:
 | `TABLE_EXISTS` | 409 | A table with the specified name already exists |
 | `COLUMN_EXISTS` | 409 | A column with the specified name already exists |
 | `DECLARATIVE_SCHEMA_DDL_FORBIDDEN` | 400 | HTTP DDL rejected because schema apply created the table. Change it through `POST …/schema/apply`. Applies in every `InferenceMode` (**BL-1177, 0.7.1**). Before, it applied only in `Extend`, and `On` / `Off` accepted the call |
-| `PARTITION_KEY_FIXED` | 400 | (**BL-1199, next train**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
+| `PARTITION_KEY_FIXED` | 400 | (**BL-1199, 0.9.0**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
 | `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
 | `BRANCH_EXISTS` | 409 | A branch with the specified name already exists |
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
-| `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter. `crossPartitionAccess` waives it and nothing else; on the data-plane listener it is not accepted and the guard decides (**BL-1227, next train**) |
+| `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter. `crossPartitionAccess` waives it and nothing else; on the data-plane listener it is not accepted and the guard decides (**BL-1227, 0.9.0**) |
 | `NAMED_QUERY_NOT_FOUND` | 404 | Named-query name is unknown. On the **data-plane listener**, unsigned or unentitled execute / batch / subscribe of a listed named query also uses this code (same `ProtocolError` envelope as unknown). Admin listener keeps 401/403 for those callers. |
 | `NAMED_QUERY_BIND_FAILED` | 400 | Argument bind failed (type, constraint, or missing required param) |
 | `NAMED_QUERY_PARAM_REQUIRED` | 400 | A required named-query parameter was omitted |
@@ -683,7 +683,7 @@ All errors return a JSON body with this structure:
 | `BULK_LOAD_TRANSFORM_INTENT_REQUIRED` | 400 | Bulk load into a table with derived columns, checks, or transforms without `applyTransforms` or `preTransformed` |
 | `BULK_LOAD_TRANSFORM_INTENT_CONFLICT` | 400 | Both transform-intent flags set |
 | `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` | 400 | `preTransformed` load into a table with a server-time column; use `applyTransforms` (**NativeClients, 0.4.0**) |
-| `BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS` | 400 | `preTransformed` load into a table with an identity column; use `applyTransforms` (**BL-1278, BL-1170, next train**) |
+| `BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS` | 400 | `preTransformed` load into a table with an identity column; use `applyTransforms` (**BL-1278, BL-1170, 0.9.0**) |
 
 #### Authentication Errors (4xx)
 
@@ -694,7 +694,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_MISSING` | 401 | Missing or empty `Authorization: Bearer` header. Exception: data-plane listed named-artifact execute / batch is 404 `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` instead (admin listener still 401). |
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
-| `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, next train**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
+| `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, 0.9.0**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
 | `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
@@ -722,10 +722,10 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | PLS: `Where.Or` predicate shape is incompatible with safe auth-db-pls partition enforcement |
 | `AUTH_KEY_LISTENER_MISMATCH` | 401 | `mk_pub_*` presented on the admin listener (or a key used on a listener that does not accept it) |
 | `IDENTITY_QUOTA_EXCEEDED` | 429 | Data-plane per-identity request quota exceeded. `Retry-After` is set. |
-| `AUTH_GRANT_INVALID` | 400 | A grant in the request is invalid: a partition grant with missing or invalid fields, or a role permission with an unknown `resourceType`, an `all-partitions` / `all-rows` entry without exactly one level (`read`, `write` or `admin`) or without `resourceName`, a null entry, or one on a system role (**BL-1227, next train**). An `embargo` with a blank or `*` table or a delay that is not whole seconds from 1 to 2678400 (**BL-418, next train**) |
-| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table that exists in no database the role can apply to. Table names are case-sensitive (**BL-1227, next train**; embargo **BL-418, next train**) |
-| `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS (no resolver, or a `jwt-claim` table) (**BL-1227, next train**). `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records the change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, next train**). An `embargo` on a table with no row time (**BL-418, next train**) |
-| `AUTH_EMBARGO_UNSUPPORTED` | 403 / WS error | The caller holds an embargo on the table and the surface cannot apply its cutoff: a write (insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, bulk-load `:begin` and every `:append`, a write stream's `stream_rows`), a materialized query (its query endpoint, a `/query` or named query that reads it, a subscription to it), graph traversal, or vector `:nearest`. A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused (**BL-1161, BL-1298, next train**). A write that names no table (a schema seed, a branch insert) is refused for any embargo holder. Not retryable with the same credential (**BL-418, next train**) |
+| `AUTH_GRANT_INVALID` | 400 | A grant in the request is invalid: a partition grant with missing or invalid fields, or a role permission with an unknown `resourceType`, an `all-partitions` / `all-rows` entry without exactly one level (`read`, `write` or `admin`) or without `resourceName`, a null entry, or one on a system role (**BL-1227, 0.9.0**). An `embargo` with a blank or `*` table or a delay that is not whole seconds from 1 to 2678400 (**BL-418, 0.9.0**) |
+| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table that exists in no database the role can apply to. Table names are case-sensitive (**BL-1227, 0.9.0**; embargo **BL-418, 0.9.0**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS (no resolver, or a `jwt-claim` table) (**BL-1227, 0.9.0**). `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records the change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, 0.9.0**). An `embargo` on a table with no row time (**BL-418, 0.9.0**) |
+| `AUTH_EMBARGO_UNSUPPORTED` | 403 / WS error | The caller holds an embargo on the table and the surface cannot apply its cutoff: a write (insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, bulk-load `:begin` and every `:append`, a write stream's `stream_rows`), a materialized query (its query endpoint, a `/query` or named query that reads it, a subscription to it), graph traversal, or vector `:nearest`. A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused (**BL-1161, BL-1298, 0.9.0**). A write that names no table (a schema seed, a branch insert) is refused for any embargo holder. Not retryable with the same credential (**BL-418, 0.9.0**) |
 | `AUTH_GRANT_DIMENSION_CAP` | 400 | Creating a partition grant would exceed 1 000 grants on one dimension |
 | `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Creating a partition grant would exceed 5 000 grants for the principal |
 | `AUTH_RESOLVER_INVALID` | 400 | RLS resolver cannot be persisted (e.g. zero rules — fail-closed) |
@@ -765,7 +765,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The server could not fit the request in memory now: the memory budget's queue refused it (`Retry-After` is the queue's estimate), or the managed heap hit its hard limit while serving it (`Retry-After: 10`, one sampling tick). The request was not applied; retry after `Retry-After`. (**WorkloadCore S17, 0.3.0**) Never a constant `Retry-After: 1`: every memory refusal carries the governor's estimate for its bytes at the queue's measured service rate, or `10` (the memory broker's next look, `T6`) before any rate is measured or when it has no estimate. (**BL-956, 0.4.0**) The estimate is at most **30 s** (it was 300 s): ask again then, and the next answer carries a fresh estimate. (**WorkloadCore S07, 0.3.0**: a heap exhaustion inside any request, and a query the read path refused, answered `500 INTERNAL_ERROR` before.) A bulk load's `:commit` whose failure came **after** the load's commit point is never this code: see the bulk-load `:commit` errors. (**BL-921, 0.3.0**) **Every endpoint answers a capacity refusal this way** — this code, or `WAL_CAPACITY_EXCEEDED` for the WAL's — never as the client's mistake or a server failure: inserting edges or vectors, reordering a table's columns or seeding a schema while the WAL was full answered `400 INVALID_REQUEST`, and other endpoints' catch-alls `500`. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL is at its refusal line (`T27`): writes to source tables are refused until retention brings it back under `T26`. Nothing was applied; `Retry-After` is the server's estimate from the measured reclaim rate. Retry after it. (**BL-956, 0.4.0**) It is at most **30 s**, and `10` before any reclaim is measured (it was up to 300 s). (**BL-921, 0.3.0**) Answered as this on every endpoint, where some answered `400` or `500` before. |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) `POST …/tables/{name}/rows/batch` only: operation `k` (`k` ≥ 1) was refused for capacity. Operations `0` to `k − 1` **were applied**; operation `k` and the ones after it were not. `details` names `appliedOperations=k`, `totalOperations=n` and the refusal's own code. **No `Retry-After`**, deliberately: re-sending the whole batch would apply its first `k` operations twice. Re-send only the remaining operations (`operations[k..]`) as a new batch. A refusal of operation `0` is still the plain `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` with `Retry-After`: nothing was applied. It used to be that plain refusal whatever `k` was, which both SDKs re-send |
-| `BATCH_RLS_PREFIX_APPLIED` | 403 | (**BL-1303, next train**) `POST …/tables/{name}/rows/batch` only: the RLS write check refused operation `k` (`k` ≥ 1) after operations `0` to `k − 1` were applied. The refused row was not written; later operations did not run. `details` names `appliedOperations=k`, `totalOperations=n` and `refusalCode=AUTH_RLS_UPDATE_SET_VIOLATION`, plus the resolver, table and `operation=update`. **No `Retry-After`**. Do not re-send the batch as-is. A refusal of operation 0 is still `403 AUTH_RLS_UPDATE_SET_VIOLATION` and applies nothing. Each update is checked against the rows the earlier operations of that batch left |
+| `BATCH_RLS_PREFIX_APPLIED` | 403 | (**BL-1303, 0.9.0**) `POST …/tables/{name}/rows/batch` only: the RLS write check refused operation `k` (`k` ≥ 1) after operations `0` to `k − 1` were applied. The refused row was not written; later operations did not run. `details` names `appliedOperations=k`, `totalOperations=n` and `refusalCode=AUTH_RLS_UPDATE_SET_VIOLATION`, plus the resolver, table and `operation=update`. **No `Retry-After`**. Do not re-send the batch as-is. A refusal of operation 0 is still `403 AUTH_RLS_UPDATE_SET_VIOLATION` and applies nothing. Each update is checked against the rows the earlier operations of that batch left |
 | `TIMEOUT` | 504 | Request timed out |
 | `OVERLOADED` | 503 | Server is overloaded |
 
@@ -810,7 +810,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_SERVER_TIME_INVALID` | 400 | A `serverTime` parameter supplied in `args`, or (schema apply) declared where only a `Timestamp` comparison may use it (**NativeClients, 0.4.0**) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
-| `SUBSCRIPTION_EMBARGO_RESET` | WS error | (**BL-418, next train**) An embargoed subscription ended and was removed: more changes were held back than `Aouda:Streaming:EmbargoHoldMaxEvents` (default 100 000) — at subscribe, the rows still inside the embargo already exceed it (narrow the filter) — or the caller's embargo on the table changed. Subscribe again, fresh (no `resume_from`); `@aouda/client` does this once per snapshot it receives |
+| `SUBSCRIPTION_EMBARGO_RESET` | WS error | (**BL-418, 0.9.0**) An embargoed subscription ended and was removed: more changes were held back than `Aouda:Streaming:EmbargoHoldMaxEvents` (default 100 000) — at subscribe, the rows still inside the embargo already exceed it (narrow the filter) — or the caller's embargo on the table changed. Subscribe again, fresh (no `resume_from`); `@aouda/client` does this once per snapshot it receives |
 | `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
 | `CONFLATE_NOOP` | `snapshot_complete` warning | `conflate` is set without `collapse_inserts` and the key is not the table PK (insert-only no-op). Subscribe still registers. |
@@ -1000,15 +1000,15 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
 | `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database; both may include `auth`. `kind: "auth"` together with an `auth` object is rejected (400). |
 | `allowSelfSignup` | bool | No | When `kind` is `"auth"`, whether self-service signup is enabled on the new database. Omitted: off. |
-| `selfSignupRole` | string \| null | No | When `kind` is `"auth"`, role granted to self-service signups. Null or omitted: `db_writer`. `db_admin`, or a role that carries `all-partitions` or `all-rows`, is `400 INVALID_REQUEST` and the database is not left with that signup role (**BL-1282, next train**). |
+| `selfSignupRole` | string \| null | No | When `kind` is `"auth"`, role granted to self-service signups. Null or omitted: `db_writer`. `db_admin`, or a role that carries `all-partitions` or `all-rows`, is `400 INVALID_REQUEST` and the database is not left with that signup role (**BL-1282, 0.9.0**). |
 | `auth.enabled` | bool | No | Shorthand: link to the single existing auth database (400 if none or more than one). |
 | `auth.database` | string | No | Link to (or create) a named auth database. |
 | `auth.allowSelfSignup` | bool | No | Whether self-service signup is enabled on the linked application database. Omitted: off. |
-| `auth.selfSignupRole` | string \| null | No | Role granted to self-service signups on the linked application database. Null or omitted: `db_writer`. `db_admin`, or a role that carries `all-partitions` or `all-rows`, is `400 INVALID_REQUEST` and the database is not left with that signup role (**BL-1282, next train**). |
+| `auth.selfSignupRole` | string \| null | No | Role granted to self-service signups on the linked application database. Null or omitted: `db_writer`. `db_admin`, or a role that carries `all-partitions` or `all-rows`, is `400 INVALID_REQUEST` and the database is not left with that signup role (**BL-1282, 0.9.0**). |
 
 (**Lead S26, 0.6.0**) `enableWal` and `dataDurability` are gone, with no alias: a body carrying either is **400** `INVALID_REQUEST` naming `durability` (`enableWal: false` is `"unlogged"`, `dataDurability: "MemoryOnly"` is `"memory"`).
 
-**Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them. A create that finds the keys already issued returns none: an auth database that already holds the system keys for that application-database name (it was linked before) generates nothing, and the server keeps only a hash. `auth` is then `{ "enabled": true, "database": … }` with no `keys`, which is not a failure. To get a service key afterwards, mint a named one (`POST /api/databases/{db}/service-keys`, with a server key) or issue a new set (`POST /api/databases/{db}/auth/admin/regenerate-keys`); both are described under *Named service keys* above. The CLI says all of this on stderr (**BL-1226, next train**).
+**Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them. A create that finds the keys already issued returns none: an auth database that already holds the system keys for that application-database name (it was linked before) generates nothing, and the server keeps only a hash. `auth` is then `{ "enabled": true, "database": … }` with no `keys`, which is not a failure. To get a service key afterwards, mint a named one (`POST /api/databases/{db}/service-keys`, with a server key) or issue a new set (`POST /api/databases/{db}/auth/admin/regenerate-keys`); both are described under *Named service keys* above. The CLI says all of this on stderr (**BL-1226, 0.9.0**).
 
 ```json
 {
@@ -1118,7 +1118,7 @@ Execute a query against a table.
 | `orderBy` | object[] | No | Sort columns (see below) |
 | `offset` | number | No | Rows to skip (default: 0) |
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
-| `crossPartitionAccess` | boolean | No | When `true`, a query on a partitioned table does not need a partition-key filter. Without it, a query on a partitioned table with no partition filter returns `PARTITION_FILTER_REQUIRED`. Default: `false`. It is a **cost waiver and nothing else**: it waives that scan guard for every credential, and it never widens what the credential sees. A credential with partition grants and the flag sees exactly its grants (a `jwt-claim` user, its tenant); one that holds neither `all-partitions` nor any partition grant on a table with partition-level security is still refused. There is no read of every partition by `db_admin` plus the flag any more: that read is the `all-partitions` grant ([Access grants](#authentication-and-authorization), [partition-filter rule](../guides/partitioning.md#partition-filter-rule-p40)). The same flag is accepted on `…/query/count`, on a named-query call and each batch item (`crossPartitionAccess`), and on a WebSocket or long-poll `subscribe` as `cross_partition_access`; the data-plane listener does not accept it (**BL-1227, next train**). |
+| `crossPartitionAccess` | boolean | No | When `true`, a query on a partitioned table does not need a partition-key filter. Without it, a query on a partitioned table with no partition filter returns `PARTITION_FILTER_REQUIRED`. Default: `false`. It is a **cost waiver and nothing else**: it waives that scan guard for every credential, and it never widens what the credential sees. A credential with partition grants and the flag sees exactly its grants (a `jwt-claim` user, its tenant); one that holds neither `all-partitions` nor any partition grant on a table with partition-level security is still refused. There is no read of every partition by `db_admin` plus the flag any more: that read is the `all-partitions` grant ([Access grants](#authentication-and-authorization), [partition-filter rule](../guides/partitioning.md#partition-filter-rule-p40)). The same flag is accepted on `…/query/count`, on a named-query call and each batch item (`crossPartitionAccess`), and on a WebSocket or long-poll `subscribe` as `cross_partition_access`; the data-plane listener does not accept it (**BL-1227, 0.9.0**). |
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
 | `aggregates` | object[] | No | (**ColumnarRead S16, 0.3.0**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
 | `groupBy` | object[] | No | (**ColumnarRead S16, 0.3.0**) GROUP BY keys; requires `aggregates`. |
@@ -1246,7 +1246,7 @@ columns.
 **Row- and partition-level security on a joined table (BL-818, 0.3.0).** The caller's RLS and PLS for every joined
 table are applied on that join's side, exactly as on a direct read of the table: a join onto a table the caller may read only
 part of answers with that part. (From the 2026-10 architecture review until this change such a join was refused with `403`
-`AUTHORIZATION_DENIED`.) An RLS rule that denies the caller the whole table joins against no rows of it. A caller that holds `all-partitions` or `all-rows` is lifted on the joined side as on a direct read of that table (**BL-1227, next train**); `crossPartitionAccess` is not carried to a joined table. Still `403`: a
+`AUTHORIZATION_DENIED`.) An RLS rule that denies the caller the whole table joins against no rows of it. A caller that holds `all-partitions` or `all-rows` is lifted on the joined side as on a direct read of that table (**BL-1227, 0.9.0**); `crossPartitionAccess` is not carried to a joined table. Still `403`: a
 joined table the caller has no read grant on, a joined table whose partition-level security refuses the caller (no grant),
 and a joined materialized-query result whose source security cannot be applied to it. The same holds for a named query that joins, single and batch,
 and for `…/query/count`.
@@ -1353,7 +1353,7 @@ accepted at `schema/apply` and the fields are dropped, so it answers plain rows.
 `columns` names the result's columns, `types` their types, and `data` holds **one array per column**, in the order of
 `columns`, all `rowCount` long: row *i* is index *i* of every array.
 
-(**BL-035, next train**) **An [array column](../guides/array-columns.md)** is named in `types` by its array type (`"Double[]"`), and
+(**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md)** is named in `types` by its array type (`"Double[]"`), and
 its cell in `data` is a JSON array, `null` for a null cell and `[]` for an empty one (a `Byte[]` cell is a base64 string, `""` when
 empty). Numbers are written in the shortest form that reads back to the same value; `-0` is written `-0`; an `Int64[]` element is a
 JSON integer (above 2^53 a plain `JSON.parse` loses digits, as it does for a scalar `Int64`); a **`Float32[]` element is written as
@@ -1403,7 +1403,7 @@ ask for it by default. Send `Accept: application/vnd.aouda.column-batch-v2, appl
 response's `Content-Type`**. A result the frame cannot carry answers JSON as before, and so does a request whose `Accept` names
 only the retired `application/vnd.aouda.column-batch` (`ACB1`). A frame cannot carry a non-null vector cell, a computed or joined
 column whose values are not its declared type, more than 4,096 columns, a column name it cannot hold (empty, or over 1,024 UTF-8
-bytes), a single row that would decode past half the reader's 256 MB frame budget, or a string value over 16 MB of UTF-8. (**BL-035, next train**) An array column **is** carried, as kind 9. A stored non-finite array element (reachable only through a defect) answers `500` before the first byte, or an error end frame on a streamed export. Errors
+bytes), a single row that would decode past half the reader's 256 MB frame budget, or a string value over 16 MB of UTF-8. (**BL-035, 0.9.0**) An array column **is** carried, as kind 9. A stored non-finite array element (reachable only through a defect) answers `500` before the first byte, or an error end frame on a streamed export. Errors
 before the response starts are JSON `ProtocolError`s with their status. **An error after the response has started is the body's
 end frame** (**Lead S09, 0.6.0**): `status: "error"` with the code, the message and the status the JSON error would have had,
 after the frames already sent — which are not a result. Both SDKs drop those frames and raise the same typed error the JSON error
@@ -1468,7 +1468,7 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 | `Timestamp` | `Timestamp` (5) | 100-ns ticks since the Unix epoch, UTC. The JSON body carries .NET ticks since `0001-01-01`, which is 621,355,968,000,000,000 more |
 | `Date` | `Int64` (1) | Days since the Unix epoch, as in JSON |
 | `Decimal` (`Decimal(p,s)`) | `ScaledDecimal` (8) | The unscaled value at the column's declared scale `s` |
-| `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (**BL-035, next train**) | `Array` (9) | The array, with the column's own element kind; **elements are not widened** |
+| `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (**BL-035, 0.9.0**) | `Array` (9) | The array, with the column's own element kind; **elements are not widened** |
 | A column with no value of its own (e.g. a vector column, which a table query reads as null) | `Null` (0) | — |
 
 (**LoadSpeed S13, 0.4.0**) A decimal column always goes out as `ScaledDecimal` at its declared scale; the 128-bit
@@ -1476,7 +1476,7 @@ train**: before, a browser read `Retry-After` as `null` on every 429 / 503).
 scale; one whose values no 64-bit integer holds at one scale goes as JSON.) Up to 0.3.x a decimal column's kind was chosen from the values it held, and
 an empty or all-null `Decimal(p,s)` column, or an undeclared `Decimal`, could come as kind 6.
 
-`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`. (**BL-035, next train**) It names an array column by its array type (`["Int64","Double[]","String[]"]`).
+`X-Aouda-Column-Types` tells a reader how to narrow a cell back to its type: `Int32`, `UInt64`, `Float32`, `Date`, `Guid`. (**BL-035, 0.9.0**) It names an array column by its array type (`["Int64","Double[]","String[]"]`).
 `GET /admin/capabilities` lists `queryColumnBatch: true`.
 
 ---
@@ -1526,7 +1526,7 @@ Execute one named query by unique name.
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
-**`crossPartitionAccess`** (boolean, optional, camelCase, omit when `false`; **BL-1227, next train**). A named query whose definition binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` (the message ends `Named query '<name>' binds no partition key: pass crossPartitionAccess with the call, or bind the partition key in the definition's where clause. The flag waives this guard only — the rows are still the credential's grants.`). Send `"crossPartitionAccess": true` in the body of the call to waive that guard. It is per call: a definition cannot set it. It waives the guard only, so the rows are still the credential's access grants. It is honoured on the **admin listener only**; the data-plane listener (`mk_pub_*` and application end users) ignores it and the guard decides ([the browser tier's rule](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
+**`crossPartitionAccess`** (boolean, optional, camelCase, omit when `false`; **BL-1227, 0.9.0**). A named query whose definition binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` (the message ends `Named query '<name>' binds no partition key: pass crossPartitionAccess with the call, or bind the partition key in the definition's where clause. The flag waives this guard only — the rows are still the credential's grants.`). Send `"crossPartitionAccess": true` in the body of the call to waive that guard. It is per call: a definition cannot set it. It waives the guard only, so the rows are still the credential's access grants. It is honoured on the **admin listener only**; the data-plane listener (`mk_pub_*` and application end users) ignores it and the guard decides ([the browser tier's rule](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
 
 ```json
 { "args": { "ticker": "AAPL" }, "crossPartitionAccess": true }
@@ -1579,7 +1579,7 @@ Read-only batch envelope. Every element is evaluated against **one read snapshot
 }
 ```
 
-Each element may also carry **`crossPartitionAccess`** (boolean, camelCase, omit when `false`; **BL-1227, next train**), with the same meaning as on a single call: it waives `PARTITION_FILTER_REQUIRED` for that element only, never widens what the credential sees, is honoured on the admin listener only, and is ignored on the data-plane listener. There is no flag on the envelope: set it on each element that needs it.
+Each element may also carry **`crossPartitionAccess`** (boolean, camelCase, omit when `false`; **BL-1227, 0.9.0**), with the same meaning as on a single call: it waives `PARTITION_FILTER_REQUIRED` for that element only, never widens what the credential sees, is honoured on the admin listener only, and is ignored on the data-plane listener. There is no flag on the envelope: set it on each element that needs it.
 
 ```json
 { "queries": [ { "name": "equity.allQuotes", "args": {}, "crossPartitionAccess": true } ] }
@@ -1663,7 +1663,7 @@ does not choose — a presence heartbeat or typing indicator keyed by
 succeeds at all. See [Named mutations § choosing
 `op`](../guides/named-queries.md#choosing-op).
 
-(**BL-1227, next train**) On a table with PLS or RLS, an upsert that finds a row under the key replaces it only if the caller may
+(**BL-1227, 0.9.0**) On a table with PLS or RLS, an upsert that finds a row under the key replaces it only if the caller may
 write **that** row — on PLS its partition, on RLS the update scope and the write check — else `403 AUTHORIZATION_DENIED` and no row of
 the call is written. The message names the key, not the stored row's partition. A holder of the lifting grant(s) at `write` is not
 checked. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement).
@@ -1679,7 +1679,7 @@ checked. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-a
 
 The object shape is reserved for those two one-key forms, because `{ "param": … }` already claims it: a bare object constant would be indistinguishable from a mistyped hole. Any other object node — an unknown key (`{ "valu": 0 }`), both keys at once, an empty object, or an object nested under `value` — fails **schema apply** with `NAMED_MUTATION_VALUE_NODE_INVALID`, naming the field (`values` / `set`), the column, and the keys it actually found. A definition stored before that check existed still loads, and its `execute` fails with `NAMED_MUTATION_BIND_FAILED` naming the column (BL-479 — previously such a node was carried into the row and surfaced as an untyped `INVALID_REQUEST` from deep in column conversion).
 
-(**BL-035, next train**) **A parameter or a literal bound to an [array column](../guides/array-columns.md)** takes the column's JSON
+(**BL-035, 0.9.0**) **A parameter or a literal bound to an [array column](../guides/array-columns.md)** takes the column's JSON
 form: an array (`"Rates": { "param": "rates" }` with `"rates": [0.0412, 0.0398]`, or the literal `"Tenors": [30, 90, 180]`), a base64
 string for a `Byte[]`, `null` for a null cell. A bad value is refused `400 NAMED_QUERY_BIND_FAILED` for a parameter and
 `NAMED_MUTATION_BIND_FAILED` for a literal, naming the parameter, the column and the element (*"Parameter 'd' (Double[] column 'D'):
@@ -1756,7 +1756,7 @@ Schema branch review can report **widening** of what a principal class can read 
 
 #### `POST /api/databases/{db}/schema/apply`
 
-(**BL-1296, next train**) A document that drops a table that already has PLS or RLS, changes that table's security, or drops its
+(**BL-1296, 0.9.0**) A document that drops a table that already has PLS or RLS, changes that table's security, or drops its
 `permissionColumn`, is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and
 `all-rows` where RLS applies — one answer naming every refused table, and nothing is applied. That includes `dryRun: true` and
 `allowDestructive: false`. RBAC database `admin` is still required and is not enough. A table with neither restriction is unchanged.
@@ -1764,11 +1764,11 @@ An empty diff, a diff that only creates a protected table, and a diff that only 
 Dropping the `permissionColumn`, when allowed, turns PLS off (`auth-db-rls` if a resolver remains, otherwise `jwt-claim` with
 partition-level security off).
 
-(**BL-1178, next train**) A document that would leave a table with no columns is `400 INVALID_REQUEST`. The message says nothing
+(**BL-1178, 0.9.0**) A document that would leave a table with no columns is `400 INVALID_REQUEST`. The message says nothing
 was applied and names the table. That includes `dryRun: true`. Nothing in the document is applied. Dropping the table is not this
 refusal. Dropping every old column and adding one new column is allowed when `allowDestructive` is true.
 
-(**BL-1281, next train**) A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, stays HTTP `200`: that change is `Failed`, `reason` names `auth-db-rls` and `auth-db-pls`, and the table is not written. A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
+(**BL-1281, 0.9.0**) A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, stays HTTP `200`: that change is `Failed`, `reason` names `auth-db-rls` and `auth-db-pls`, and the table is not written. A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
 
 
 #### `POST /api/databases/{db}/schema/diff?access=true`
@@ -1793,7 +1793,7 @@ Posting identities requires **Admin**. `?access=true` without identities is **Re
 
 **400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`.
 
-(**BL-1209, next train**) A branch name is one segment of 1–64 ASCII letters, digits, or hyphens, not `main` and not a Windows device name. `/`, `\`, `..`, a drive, a rooted name, a trailing dot or space, and `_` are refused. Every branch route answers `400 INVALID_REQUEST` and writes nothing.
+(**BL-1209, 0.9.0**) A branch name is one segment of 1–64 ASCII letters, digits, or hyphens, not `main` and not a Windows device name. `/`, `\`, `..`, a drive, a rooted name, a trailing dot or space, and `_` are refused. Every branch route answers `400 INVALID_REQUEST` and writes nothing.
 
 #### `POST /api/databases/{db}/branches/{name}/diff`
 
@@ -1805,7 +1805,7 @@ Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` a
 
 **Request body:** `identity` (one identity), or `document` (an identities document) with `identityName`; optional `tables` (names), `includeSample` (boolean), `sampleLimit` (default 20, max 100), `vectorProbe` (`table`, `column`, `embedding`) and `traverseStart` (`table`, `startNodeId`, `hops`).
 
-**An identity** is `{ "kind", "userId"?, "email"?, "roles"?, "claims"?, "grants"?, "accessGrants"? }` (**BL-1227, next train**: `accessGrants`). `kind` is `user` or `service_key`. `accessGrants` lists the access grants a user identity holds, as a role would carry them, so inspection can answer "what would a holder of `all-rows` on `orders` see?" before the role exists:
+**An identity** is `{ "kind", "userId"?, "email"?, "roles"?, "claims"?, "grants"?, "accessGrants"? }` (**BL-1227, 0.9.0**: `accessGrants`). `kind` is `user` or `service_key`. `accessGrants` lists the access grants a user identity holds, as a role would carry them, so inspection can answer "what would a holder of `all-rows` on `orders` see?" before the role exists:
 
 ```json
 { "kind": "user", "userId": "6fc78b31-5fe9-4453-9307-bd4233b0330e", "accessGrants": [ { "grant": "all-rows", "table": "orders", "level": "read" } ] }
@@ -1813,13 +1813,13 @@ Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` a
 
 `grant` is `all-partitions` or `all-rows`; `table` names a table (case-sensitive), and is left out for database scope (`"*"` and an empty string are refused); `level` is `read`, `write` or `admin` and has no default. A `service_key` identity holds both grants on the database by implication and **refuses** `accessGrants` (`400 AUTH_IDENTITY_INVALID`); the kind of an identity, never its claims, decides which grants it holds by implication, and a `user` identity whose `roles` include `db_admin` holds both on the database, as an admin user does. The identities document stays `v1`.
 
-**Response:** `{ "identityName"?, "tables": [ { "table", "visibility", "pls"?, "rls"?, "effective"?, "effectiveHash"?, "message"?, "sample"?, "sampleReason"? } ] }`. `visibility` is `full`, `filtered` or `none`. Each of the two halves is decided on its own, as a read is: `all-partitions` lifts the partition half (`pls`), `all-rows` lifts the row half (`rls`); a holder of both is `full`, and a holder of one is decided by the other half alone (**BL-1227, next train**). A half a grant lifts needs no linked auth database to evaluate; a half it does not lift, on a table whose policy reads the auth database, is `none` with a message when the database has none linked.
+**Response:** `{ "identityName"?, "tables": [ { "table", "visibility", "pls"?, "rls"?, "effective"?, "effectiveHash"?, "message"?, "sample"?, "sampleReason"? } ] }`. `visibility` is `full`, `filtered` or `none`. Each of the two halves is decided on its own, as a read is: `all-partitions` lifts the partition half (`pls`), `all-rows` lifts the row half (`rls`); a holder of both is `full`, and a holder of one is decided by the other half alone (**BL-1227, 0.9.0**). A half a grant lifts needs no linked auth database to evaluate; a half it does not lift, on a table whose policy reads the auth database, is `none` with a message when the database has none linked.
 
-**`sample`** is real rows, read with the subject's context, and is shown only to a caller that could read them unrestricted itself: the caller must hold `all-partitions` where the table has PLS and `all-rows` where it has RLS. Otherwise the verdict is still answered, `sample` is omitted and `sampleReason` is `caller_not_granted` (**BL-1227, next train**). The other `sampleReason` values are `probe_required` and `sample_failed`.
+**`sample`** is real rows, read with the subject's context, and is shown only to a caller that could read them unrestricted itself: the caller must hold `all-partitions` where the table has PLS and `all-rows` where it has RLS. Otherwise the verdict is still answered, `sample` is omitted and `sampleReason` is `caller_not_granted` (**BL-1227, 0.9.0**). The other `sampleReason` values are `probe_required` and `sample_failed`.
 
 #### `POST /api/databases/{db}/branches/{name}/query`
 
-Query one table on a branch (**BL-1161, BL-1298, next train**). The body is `{ "table" }` only; any other property is ignored, and the table name is case-sensitive.
+Query one table on a branch (**BL-1161, BL-1298, 0.9.0**). The body is `{ "table" }` only; any other property is ignored, and the table name is case-sensitive.
 
 `200` is the same columnar body as [`POST …/query`](#post-apidatabasesdbquery): `columns`, `types`, `data`, `rowCount`, `stats`, `token`. The body has no `clrType`.
 
@@ -1829,7 +1829,7 @@ The caller is authorized for `read` on that table, then the rows are filtered as
 
 Insert rows into a table on a branch; they are written to the branch's own segments only. The body is the table and the rows as
 [column arrays](#column-arrays-the-write-body) (**Lead S12, 0.6.0; breaking**: it was `{"table", "rows": [{…}]}`, now refused
-`400 ROW_OBJECTS_UNSUPPORTED`). The rows are inserted as `POST …/tables/{name}/rows` inserts them, including partition security, row security and the identity stamp, and a refusal uses that route's status and code (**BL-1278, BL-1170, next train**).
+`400 ROW_OBJECTS_UNSUPPORTED`). The rows are inserted as `POST …/tables/{name}/rows` inserts them, including partition security, row security and the identity stamp, and a refusal uses that route's status and code (**BL-1278, BL-1170, 0.9.0**).
 
 ```json
 { "table": "orders", "columns": ["id", "status"], "data": [[1, 2], ["pending", "shipped"]] }
@@ -1849,11 +1849,11 @@ Base path: `/api/databases/{db}/materialized-queries`
 | GET | `/{name}` | Read | Status for one query; `404` if missing. |
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. (**BL-884, 0.3.0**) A create whose first build is refused for capacity (memory, or a full WAL) still answers `204`: the definition is durable, the query exists **behind** (`current: false`) and is built once there is room. It used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists". |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
-| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). (**BL-035, next train**) A result that carries an [array column](../guides/array-columns.md) adds **`columnTypes`** to the body, a map from each array column's name to its type (`{"Tenors":"Int32[]","Rates":"Double[]"}`); it is absent when the result has none, and the body has no `types`. A client treats a column that is not named there as a scalar. |
+| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). (**BL-035, 0.9.0**) A result that carries an [array column](../guides/array-columns.md) adds **`columnTypes`** to the body, a map from each array column's name to its type (`{"Tenors":"Int32[]","Rates":"Double[]"}`); it is absent when the result has none, and the body has no `types`. A client treats a column that is not named there as a scalar. |
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
-**Security on `POST /{name}/query` (**BL-1227, next train**).** The rows are filtered by the caller's security on the query's source tables, as a direct read would be: `all-partitions` lifts the partition-level half and `all-rows` the row-level half, independently. A use of a grant here is audited as `access_grant_used` with `operation` `materialized-query`, and the row names the source table.
+**Security on `POST /{name}/query` (**BL-1227, 0.9.0**).** The rows are filtered by the caller's security on the query's source tables, as a direct read would be: `all-partitions` lifts the partition-level half and `all-rows` the row-level half, independently. A use of a grant here is audited as `access_grant_used` with `operation` `materialized-query`, and the row names the source table.
 
 > **BL-419 (0.1.22).** Before this fix, `:refresh` sat under the server's global 30s
 > `Aouda:RequestTimeoutMs` default like every other endpoint, and that ambient deadline started
@@ -2156,12 +2156,12 @@ A table may carry `absent` as any write body does; a cell left absent is not par
 
 **Response:** `200 OK` — `SeedApplyResult` with per-table `insertedCount` and `skippedCount` (existing primary keys skipped).
 
-**Authorization.** Database-level `write`. (**BL-1227, next train**) Tables the document names stay on the whole-table grant: a seed of
+**Authorization.** Database-level `write`. (**BL-1227, 0.9.0**) Tables the document names stay on the whole-table grant: a seed of
 those tables is not a per-user write — their rows pass no PLS or RLS check — so every named table that has partition- or row-level
 security needs, at `write`, the grant lifting each restriction it has (`all-partitions` for PLS, `all-rows` for RLS), held by a
 service key, a `db_admin` user or a role. Otherwise the answer is `403 AUTHORIZATION_DENIED` naming every refused table and the grant
 it lacks, and nothing from the document is written. A table that does not exist is left to the apply's own `400 TABLE_NOT_FOUND`. A
-holder's seed writes one `access_grant_used` row per table and grant (operation `seed`) before the first row. (**BL-1304, next train**)
+holder's seed writes one `access_grant_used` row per table and grant (operation `seed`) before the first row. (**BL-1304, 0.9.0**)
 A transform that lands on any other table is the caller's per-row insert check, on the target row after derived columns. Seed does
 not stamp identity, so a stamp column is not filled before that check. A refusal is the same `403` and code as
 `POST …/tables/{target}/rows` of that row, and that landing is not written when it is refused.
@@ -2430,7 +2430,7 @@ Get all tables and relationships for ERD visualization.
 
 #### `GET /api/databases/{db}/schema/typescript`
 
-Generate TypeScript interfaces for all tables. (**BL-035, next train**: the route was written here as `GET /api/schema/typescript`,
+Generate TypeScript interfaces for all tables. (**BL-035, 0.9.0**: the route was written here as `GET /api/schema/typescript`,
 which the server never served — it answers `401` without a database in the path.)
 
 **Query Parameters:**
@@ -2441,7 +2441,7 @@ which the server never served — it answers `401` without a database in the pat
 | `schema` | `true` | Include Schema interface and TableName type |
 | `namespace` | - | Optional namespace wrapper for generated types |
 
-**Response:** `text/plain` with TypeScript code. (**BL-035, next train**) An [array column](../guides/array-columns.md) is typed
+**Response:** `text/plain` with TypeScript code. (**BL-035, 0.9.0**) An [array column](../guides/array-columns.md) is typed
 `Float64Array` (`Double[]`), `Float32Array`, `Int32Array`, `BigInt64Array` (`Int64[]`), `Uint8Array` (`Byte[]`) or `string[]` in a table
 interface and a named query's row, and a named mutation's argument takes `Float64Array | number[]`, `Float32Array | number[]`,
 `Int32Array | number[]`, `BigInt64Array | bigint[] | number[]`, `Uint8Array` or `string[]`.
@@ -2538,10 +2538,10 @@ not a duration, an edge table, a table with a vector column — is `400` naming 
 partition grant's `dimension` — and `permissionColumn`, the column the grant keys are compared with, which must name one of the
 table's columns exactly. Neither is inferred: a dimension spelled like a column does not select it, and the partition key is not a
 fallback. Missing or unmatched, the create is `400 INVALID_REQUEST` naming the field; `permissionColumn` with another `authMode` is
-`400` too. (**BL-430, next train**) An upper-case letter in `permissionDimension` is the same `400 INVALID_REQUEST`, and the message
-gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. (**BL-1281, next train**) `rlsResolverName` on `jwt-claim`, including when `authMode` is omitted, is `400 INVALID_REQUEST`. The message names `auth-db-rls` and `auth-db-pls`. A whitespace-only name is no resolver. `PUT …/options` that omits `rlsResolverName` keeps the stored name, so with `authMode: jwt-claim` that is the same `400` and the table is unchanged; an empty `rlsResolverName` clears it and `jwt-claim` is then allowed. A resolver on `auth-db-rls` or `auth-db-pls` is unchanged. `PUT …/options` refuses an upper-case `permissionDimension` with that same `400 INVALID_REQUEST`
+`400` too. (**BL-430, 0.9.0**) An upper-case letter in `permissionDimension` is the same `400 INVALID_REQUEST`, and the message
+gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. (**BL-1281, 0.9.0**) `rlsResolverName` on `jwt-claim`, including when `authMode` is omitted, is `400 INVALID_REQUEST`. The message names `auth-db-rls` and `auth-db-pls`. A whitespace-only name is no resolver. `PUT …/options` that omits `rlsResolverName` keeps the stored name, so with `authMode: jwt-claim` that is the same `400` and the table is unchanged; an empty `rlsResolverName` clears it and `jwt-claim` is then allowed. A resolver on `auth-db-rls` or `auth-db-pls` is unchanged. `PUT …/options` refuses an upper-case `permissionDimension` with that same `400 INVALID_REQUEST`
 and leaves the stored dimension unchanged. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
-table stays `auth-db-pls` and dropped when the request moves it to another mode. (**BL-1296, next train**) On a table that already
+table stays `auth-db-pls` and dropped when the request moves it to another mode. (**BL-1296, 0.9.0**) On a table that already
 has PLS or RLS, a request that changes that security is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
 `all-partitions` where PLS applies and `all-rows` where RLS applies. RBAC `alter` is still required and is not enough. A table with
 neither restriction is unchanged, and turning protection on is not this check. The table detail and `…/schema` responses carry
@@ -2567,7 +2567,7 @@ neither restriction is unchanged, and turning protection on is not this check. T
 #### `DELETE /api/databases/{db}/tables/{name}`
 
 Delete a table. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
-table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, next train**) A table that already has
+table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, 0.9.0**) A table that already has
 PLS or RLS answers `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and `all-rows`
 where RLS applies. RBAC `drop` is still required and is not enough. A table with neither restriction is unchanged.
 
@@ -2664,7 +2664,7 @@ Alter a column: `type`, `nullable`, `autoIncrement`, `references`, and/or `newNa
 `encoder` field is gone (**BL-768, 0.3.0**): it changed nothing since columns choose an encoding per vector, and a
 request carrying only `encoder` is now refused as having nothing to alter. The example renames a column.
 
-(**BL-1199, next train**) A partition-key column is not renamed: `newName` on one is refused `400 PARTITION_KEY_FIXED`, before
+(**BL-1199, 0.9.0**) A partition-key column is not renamed: `newName` on one is refused `400 PARTITION_KEY_FIXED`, before
 any other field of the request is applied (it was renamed; on a composite key a rename to or from `tenant_id` changed which column,
 and which JWT claim, partition-level security filters on).
 
@@ -2684,14 +2684,14 @@ and which JWT claim, partition-level security filters on).
 Drop a column. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created, in every `InferenceMode`
 (**BL-1177, 0.7.1**). An explicit `Unsafe` insert reconcile (`AutoReconcileSchema` + `ReconcilePolicy = Unsafe`) issues this
 DELETE for each non-key column its row type omits. A typed update does not reconcile, so it does not issue this DELETE.
-(**BL-1178, next train**)
+(**BL-1178, 0.9.0**)
 
-(**BL-1178, next train**) Dropping the last column is `400 INVALID_REQUEST`. The message names the table and the column
+(**BL-1178, 0.9.0**) Dropping the last column is `400 INVALID_REQUEST`. The message names the table and the column
 (`Dropping column 'n' would leave table 't' with no columns.`), and the column stays. A primary key is dropped when another
 column remains (`204`). A partition-key column stays `400 PARTITION_KEY_FIXED`, including when it is the only column.
 
-(**BL-1199, next train**) A partition-key column is not dropped: refused `400 PARTITION_KEY_FIXED` (it was dropped, leaving the
-table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key. (**BL-1296, next train**)
+(**BL-1199, 0.9.0**) A partition-key column is not dropped: refused `400 PARTITION_KEY_FIXED` (it was dropped, leaving the
+table's stored partitions keyed by a column it no longer had). Drop and re-create the table to change its key. (**BL-1296, 0.9.0**)
 Dropping the `permissionColumn` of a table that already has PLS is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
 `all-partitions` (and `all-rows` where RLS also applies). RBAC `alter` is still required and is not enough. Any other column, and a
 table with neither restriction, is unchanged. When the drop is allowed, PLS turns off in the same write: `auth-db-rls` if a resolver
@@ -2740,7 +2740,7 @@ there is stored as null (an absent `autoIncrement` cell is still generated), for
 array or an object (a vector, a nested value) is converted the way the column's type takes it. A value is judged exactly as the same
 cell sent in a [column-batch frame](#the-column-batch-frame-acb2) — the same conversions, the same errors.
 
-(**BL-035, next train**) **An [array column](../guides/array-columns.md)'s slot holds one JSON array per row** (the data is nested
+(**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md)'s slot holds one JSON array per row** (the data is nested
 twice), `null` for a null cell, `[]` for an empty one, and a `Byte[]` cell is a base64 string. Numbers are read from their text
 (`-0` is kept; a `Float32` is rounded to a float once); an `Int32[]` / `Int64[]` element is an integral number in any notation
 (`2.0`, `1e3`), never a fraction or a string; NaN, ±Infinity and the strings `"NaN"` / `"Infinity"` are refused, and so are a null
@@ -2869,7 +2869,7 @@ scale: `3` sent beside `2.50` is stored as `3.00`. A client
 that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
 cannot say which text it had.
 
-- (**BL-035, next train**) **An array column's frame column (kind 9) must carry the column's own element kind**: nothing is widened
+- (**BL-035, 0.9.0**) **An array column's frame column (kind 9) must carry the column's own element kind**: nothing is widened
   (an `Int32` run for a `Double[]` column, or an array column sent to a scalar column, is `400 INVALID_REQUEST` naming the column —
   *"Column 'D' is Double[]; the frame sends Int32 elements (an array column's frame carries its own element kind, Double; nothing is
   widened)."*). The JSON body is more forgiving: an integral number is accepted in a `Double[]` column.
@@ -2972,7 +2972,7 @@ Update rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
-| `AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | (**BL-1227, next train**) On a PLS table, `set` names the partition column (any case) with a partition the caller may not write — held to the insert's rule; or a `setExpr` of that column without `all-partitions` at `write`. Nothing is changed. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement) |
+| `AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | (**BL-1227, 0.9.0**) On a PLS table, `set` names the partition column (any case) with a partition the caller may not write — held to the insert's rule; or a `setExpr` of that column without `all-partitions` at `write`. Nothing is changed. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement) |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
@@ -3153,7 +3153,7 @@ The following optional fields extend the standard delete request:
 Truncate (clear) all rows from a table. Schema is preserved. Requires the `Truncate`
 authorization scope — `db_writer` alone is insufficient.
 
-(**BL-1227, next train**) On a table with partition- or row-level security a truncate also needs, at `write`, `all-partitions`
+(**BL-1227, 0.9.0**) On a table with partition- or row-level security a truncate also needs, at `write`, `all-partitions`
 where the table has PLS and `all-rows` where it has RLS. A service key and a `db_admin` user hold both on their database; anyone
 else holds them only through a role. Without them the answer is `403 AUTHORIZATION_DENIED` naming the table and the grant it lacks,
 and nothing is truncated; delete the rows you may write with a `WHERE` instead. A holder's truncate writes one `access_grant_used`
@@ -3190,7 +3190,7 @@ is freed at once; it is still one log record and atomic for readers. Subscribers
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `AUTHORIZATION_DENIED` | 403 | Caller lacks the `Truncate` authorization scope; or (**BL-1227, next train**) the table has PLS or RLS and the caller lacks the grant lifting it at `write` |
+| `AUTHORIZATION_DENIED` | 403 | Caller lacks the `Truncate` authorization scope; or (**BL-1227, 0.9.0**) the table has PLS or RLS and the caller lacks the grant lifting it at `write` |
 
 ---
 
@@ -3204,11 +3204,11 @@ retry from the failed operation. What each answer means for what was applied:
 
 - **`400 INVALID_REQUEST` for the request's shape** (see Errors below), a PLS `403`, an RLS deny-all, and an RLS write-check
   refusal of operation 0 (`403 AUTH_RLS_UPDATE_SET_VIOLATION`): nothing was applied. Those checks run before the first operation
-  commits. (**BL-1303, next train**)
+  commits. (**BL-1303, 0.9.0**)
 - **`403 BATCH_RLS_PREFIX_APPLIED`**, no `Retry-After`: the RLS write check refused operation `k` ≥ 1. Operations `0` to `k − 1`
   were applied, operation `k` and the later ones were not, and the row that check refused was not written. `details` names
   `appliedOperations` and `totalOperations` (and `refusalCode=AUTH_RLS_UPDATE_SET_VIOLATION`). **Do not re-send the batch as-is.**
-  Each update is checked against the rows the earlier operations of this batch left. (**BL-1303, next train**)
+  Each update is checked against the rows the earlier operations of this batch left. (**BL-1303, 0.9.0**)
 - **`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`**, with `Retry-After`: the **first** operation was refused for capacity
   and nothing was applied. Retry the whole batch after `Retry-After` (**0.3.0**).
 - **`503 BATCH_PARTIALLY_APPLIED`**, no `Retry-After`: operation `k` ≥ 1 was refused for capacity. Operations `0` to `k − 1` were
@@ -3275,7 +3275,7 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 | `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity; operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
-| `BATCH_RLS_PREFIX_APPLIED` | 403 | (**BL-1303, next train**) The RLS write check refused operation `k` ≥ 1. Operations `0` to `k − 1` were applied; the refused row was not written. `details` names `appliedOperations` and `totalOperations`. No `Retry-After`. Do not re-send the batch as-is. A refusal of operation 0 is `AUTH_RLS_UPDATE_SET_VIOLATION` and applies nothing. Each update is checked against the rows the earlier operations of this batch left |
+| `BATCH_RLS_PREFIX_APPLIED` | 403 | (**BL-1303, 0.9.0**) The RLS write check refused operation `k` ≥ 1. Operations `0` to `k − 1` were applied; the refused row was not written. `details` names `appliedOperations` and `totalOperations`. No `Retry-After`. Do not re-send the batch as-is. A refusal of operation 0 is `AUTH_RLS_UPDATE_SET_VIOLATION` and applies nothing. Each update is checked against the rows the earlier operations of this batch left |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) One operation's matched rows kept changing; it and the later ones were not applied, the earlier ones were |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The batch was applied; the answer failed. Do not re-send |
 
@@ -3367,7 +3367,7 @@ Computed column types are inferred where the expression permits (`"Unknown"` oth
 vector columns are created, written and queried over REST under `/api/databases/{db}`. All bodies and answers are JSON. They are
 admin-listener routes: on the data-plane listener they are `404`. Writes need write permission on the database; the four reads need
 read permission and honour the [freshness parameters](#consistency-tokens-and-freshness) (`at_least`, `waitMs`, `onExceeded`, the
-lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)). A caller that holds `all-partitions` is lifted from the PLS half and one that holds `all-rows` from the RLS half, independently (**BL-1227, next train**). On a `jwt-claim` table with PLS on, `edges:traverse`, `edges:khop`, `edges:shortest-path`, and `vectors/{column}:nearest` scope the caller to the bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, next train**) A grant that widened the read writes one `access_grant_used` row per grant (`operation` `graph` for traverse, k-hop and shortest path, `vector` for nearest, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, next train**)
+lag budgets) as `POST …/query` does. A caller's PLS / RLS applies to the reads ([graph and vector guide](../guides/graph-vector.md#276-adra-authorization-composes-with-graphvector-queries)). A caller that holds `all-partitions` is lifted from the PLS half and one that holds `all-rows` from the RLS half, independently (**BL-1227, 0.9.0**). On a `jwt-claim` table with PLS on, `edges:traverse`, `edges:khop`, `edges:shortest-path`, and `vectors/{column}:nearest` scope the caller to the bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, 0.9.0**) A grant that widened the read writes one `access_grant_used` row per grant (`operation` `graph` for traverse, k-hop and shortest path, `vector` for nearest, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, 0.9.0**)
 Neither SDK wraps them yet.
 
 | Method | Path | Body | Answer |
@@ -3392,9 +3392,9 @@ Create an edge table: two `Int64` columns, the source and the destination node i
 | `edgeLabel` | string? | No | A label for the table's edges. |
 | `storeCsc` | bool | No | Also keep the reverse (destination → source) index, which lets a shortest path search from both ends. Default `false`. |
 | `authMode` | string? | No | `jwt-claim` (default), `auth-db-pls` or `auth-db-rls`. |
-| `permissionDimension` | string? | With `auth-db-pls` | The grant dimension the caller's grants are matched on. Lower case (**BL-430, next train**): an upper-case letter is `400 INVALID_REQUEST` (not `500`), and the message gives the lower-case spelling. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
+| `permissionDimension` | string? | With `auth-db-pls` | The grant dimension the caller's grants are matched on. Lower case (**BL-430, 0.9.0**): an upper-case letter is `400 INVALID_REQUEST` (not `500`), and the message gives the lower-case spelling. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
-| `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. On `jwt-claim`, including when `authMode` is omitted, it is `400 INVALID_REQUEST` and the table is not created — not dropped (**BL-1281, next train**). A resolver applies on `auth-db-rls` and `auth-db-pls`. |
+| `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. On `jwt-claim`, including when `authMode` is omitted, it is `400 INVALID_REQUEST` and the table is not created — not dropped (**BL-1281, 0.9.0**). A resolver applies on `auth-db-rls` and `auth-db-pls`. |
 | `rlsColumn` | string? | No | Adds a `String` column for grant-sourced RLS (for example `org`). |
 
 `400 INVALID_REQUEST` for a missing field or an unknown `authMode`; `409 TABLE_EXISTS` when the name is taken.
@@ -3416,14 +3416,14 @@ Insert edges: `srcs[i]` → `dsts[i]`. The two arrays must be non-empty and the 
 { "edgesInserted": 3, "token": "…" }
 ```
 
-On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, next train**). `all-partitions` at `write` allows the write, including an edge table whose source is not a partition key. One ungranted key writes none of the batch.
+On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, 0.9.0**). `all-partitions` at `write` allows the write, including an edge table whose source is not a partition key. One ungranted key writes none of the batch.
 
 #### `POST /api/databases/{db}/tables/{name}/edges:traverse`
 
 Breadth-first traversal: every node reachable from `startNodeId` within `hops` hops (default `1`), each once, the start node not
 included. On a `jwt-claim` table with partition-level security, the caller sees only the bound claim's partition. A missing,
 empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition.
-(**BL-1279, next train**)
+(**BL-1279, 0.9.0**)
 
 ```json
 { "startNodeId": 1, "hops": 2 }
@@ -3439,7 +3439,7 @@ The k-hop neighbourhood: every node reachable from `startNodeId` within `k` hops
 (from 1; the start node not included), ordered by distance and then node id. The answer is column arrays: `nodeIds[i]` is at
 `hops[i]` hops (**Lead S12, 0.6.0; breaking**: it was `"nodes": [{"nodeId", "hops"}]`, one object per node). On a `jwt-claim`
 table with partition-level security, the caller sees only the bound claim's partition. A missing, empty, or white-space claim
-is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, next train**)
+is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition. (**BL-1279, 0.9.0**)
 
 ```json
 { "startNodeId": 1, "k": 2 }
@@ -3454,7 +3454,7 @@ is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every pa
 The shortest path from node `a` to node `b`: the node ids along it, both ends included, or `[]` when there is none. A table
 created with `storeCsc: true` is searched from both ends. On a `jwt-claim` table with partition-level security, the caller sees
 only the bound claim's partition. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`.
-`all-partitions` at `read` sees every partition. (**BL-1279, next train**)
+`all-partitions` at `read` sees every partition. (**BL-1279, 0.9.0**)
 
 ```json
 { "a": 1, "b": 4 }
@@ -3480,13 +3480,13 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `permissionColumn` | string? | With `auth-db-pls` | (**BL-1176, 0.7.0**) The column the grant keys are compared with — in practice the `rlsColumn`. The vector table is an ordinary table for its reads, so it declares the column like any `auth-db-pls` table. Sent with no `authMode` or with `jwt-claim` it is `400`, not ignored. |
 
 `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance`, `quantization` or `authMode`;
-`409 TABLE_EXISTS` when the table exists. (**BL-1281, next train**) `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is `400 INVALID_REQUEST` and the table is not created, not dropped. `permissionColumn` with `jwt-claim` stays `400` for that field.
+`409 TABLE_EXISTS` when the table exists. (**BL-1281, 0.9.0**) `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is `400 INVALID_REQUEST` and the table is not created, not dropped. `permissionColumn` with `jwt-claim` stays `400` for that field.
 
 #### `POST /api/databases/{db}/tables/{name}/vectors/{column}`
 
 Insert vectors for row keys. `vectorData` is **row-major**: the vectors one after another, `rowKeys.length × dimensions` numbers.
 `embeddingModelVersion` records which model made them; `partitionKey` places them in a partition of a PLS table (the default
-partition when omitted or null; an empty string names a partition of its own, **BL-1184, next train**). On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, next train**). `all-partitions` at `write` allows the write, including an omitted `partitionKey`. `partitionKey: ""` is the empty partition, not "omitted". Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
+partition when omitted or null; an empty string names a partition of its own, **BL-1184, 0.9.0**). On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, 0.9.0**). `all-partitions` at `write` allows the write, including an omitted `partitionKey`. `partitionKey: ""` is the empty partition, not "omitted". Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
 
 ```json
 { "rowKeys": [1, 2], "vectorData": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], "embeddingModelVersion": "v1" }
@@ -3503,7 +3503,7 @@ The answer is column arrays: `rowKeys[i]` is at `distances[i]` (**Lead S12, 0.6.
 `"results": [{"rowKey", "distance"}]`, one object per hit). `token` is the cut the search read. On a `jwt-claim` table with
 partition-level security, the caller sees only the bound claim's partition, not another tenant's and not vectors stored with no
 partition key. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees
-every partition, including unpartitioned vectors. (**BL-1279, next train**)
+every partition, including unpartitioned vectors. (**BL-1279, 0.9.0**)
 
 ```json
 { "queryEmbedding": [0.1, 0.2, 0.3], "k": 2 }
@@ -4437,16 +4437,16 @@ Get cluster topology.
 | ~~`Decimal`~~ (undeclared) | (**LoadSpeed S13, 0.4.0; breaking**) Retired: the 128-bit `System.Decimal` of any scale. `"type": "Decimal"` without `precision` and `scale` is refused `400`, plain `"Decimal"` as a type name is refused, and a data directory holding a column of it (type 13) is refused at open, naming the column — export it with the build that wrote it |
 | `String` | UTF-8 string |
 | `Timestamp` | UTC instant; text with no offset is UTC (see note below) |
-| `Date` | A calendar day (days since the Unix epoch). The day written is the day stored: an offset or a `Z` on the text is not applied (**BL-1225, next train**) |
+| `Date` | A calendar day (days since the Unix epoch). The day written is the day stored: an offset or a `Z` on the text is not applied (**BL-1225, 0.9.0**) |
 | `Guid` | UUID/GUID |
-| `Double[]` (**BL-035, next train**) | An [array column](../guides/array-columns.md): one whole array of finite 64-bit floats per row. JSON: an array of numbers; C# `double[]`, TypeScript `Float64Array` |
-| `Float32[]` (**BL-035, next train**) | One array of finite 32-bit floats per row. JSON: an array of numbers (written as the value widened to `double`); `float[]`, `Float32Array` |
-| `Int32[]` (**BL-035, next train**) | One array of 32-bit integers per row. JSON: an array of integers; `int[]`, `Int32Array` |
-| `Int64[]` (**BL-035, next train**) | One array of 64-bit integers per row. JSON: an array of integers; `long[]`, `BigInt64Array` |
-| `Byte[]` (**BL-035, next train**) | One byte string per row. JSON: **one base64 string**, not an array of numbers; `byte[]`, `Uint8Array` |
-| `String[]` (**BL-035, next train**) | One array of strings per row (an element is never null, and must be valid Unicode). JSON: an array of strings; `string[]`, `string[]` |
+| `Double[]` (**BL-035, 0.9.0**) | An [array column](../guides/array-columns.md): one whole array of finite 64-bit floats per row. JSON: an array of numbers; C# `double[]`, TypeScript `Float64Array` |
+| `Float32[]` (**BL-035, 0.9.0**) | One array of finite 32-bit floats per row. JSON: an array of numbers (written as the value widened to `double`); `float[]`, `Float32Array` |
+| `Int32[]` (**BL-035, 0.9.0**) | One array of 32-bit integers per row. JSON: an array of integers; `int[]`, `Int32Array` |
+| `Int64[]` (**BL-035, 0.9.0**) | One array of 64-bit integers per row. JSON: an array of integers; `long[]`, `BigInt64Array` |
+| `Byte[]` (**BL-035, 0.9.0**) | One byte string per row. JSON: **one base64 string**, not an array of numbers; `byte[]`, `Uint8Array` |
+| `String[]` (**BL-035, 0.9.0**) | One array of strings per row (an element is never null, and must be valid Unicode). JSON: an array of strings; `string[]`, `string[]` |
 
-(**BL-035, next train**) The six array names are matched exactly (`"double[]"`, `"Double []"`, `"Double[][]"`, `"DoubleArray"` and the
+(**BL-035, 0.9.0**) The six array names are matched exactly (`"double[]"`, `"Double []"`, `"Double[][]"`, `"DoubleArray"` and the
 type's number are refused). An array value holds at most **65,536 elements** and **1,048,576 bytes of elements** (so a `Byte[]` is at
 most 64 KiB, `Float32[]` / `Int32[]` 256 KiB, `Double[]` / `Int64[]` 512 KiB), a nullable column keeps `null` and `[]` apart, and an
 element is never null, NaN or infinite. An array column can only be selected: see `ARRAY_COLUMN_UNSUPPORTED`. A non-nullable array
@@ -4456,7 +4456,7 @@ column and copy the values."*); a `schema apply` that asks for it answers `200` 
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, next train)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, 0.9.0)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
@@ -4531,7 +4531,7 @@ Authenticate the connection and optionally negotiate wire mode.
 | `token` | string? | No | Bearer token. Required when server auth is enabled. |
 | `database` | string | Yes | Database name this connection is scoped to. |
 | `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
-| `user_token` | string? | No | A user JWT to act as, beside a service-level key (`mk_svc_`, `mk_srv_`) in `token` — the realtime `X-User-Token` (**BL-1223, next train**). The session is then that user's: PLS, RLS, grant changes, expiry and revocation, and the user's subscription cap. Ignored beside any other credential. Invalid, expired or revoked → `auth_error` `AUTH_TOKEN_INVALID`. |
+| `user_token` | string? | No | A user JWT to act as, beside a service-level key (`mk_svc_`, `mk_srv_`) in `token` — the realtime `X-User-Token` (**BL-1223, 0.9.0**). The session is then that user's: PLS, RLS, grant changes, expiry and revocation, and the user's subscription cap. Ignored beside any other credential. Invalid, expired or revoked → `auth_error` `AUTH_TOKEN_INVALID`. |
 
 **Example:**
 ```json
@@ -4543,7 +4543,7 @@ Authenticate the connection and optionally negotiate wire mode.
 }
 ```
 
-**A backend acting as a user** (**BL-1223, next train**):
+**A backend acting as a user** (**BL-1223, 0.9.0**):
 ```json
 { "type": "auth", "token": "mk_svc_xyz789...", "user_token": "eyJhbGciOiJSUzI1NiIs...", "database": "my_db" }
 ```
@@ -4567,13 +4567,13 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `name` is set. |
 | `name` | string? | Conditional | Named-query unique name. **Required on the data-plane listener.** |
 | `args` | object? | No | Bind arguments for `name` subscribe. Same shape as HTTP execute `args`. |
-| `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin` and `like`, on the column types the query path accepts them for (no ordering on `Bool` or `Guid`; `like` on `String`). `in` / `nin` take a non-empty array of non-null members of the column's type (**BL-1226, next train**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). The snapshot and the live events select the same rows, a nullable column included: a null never matches `ne`, `nin`, `lt` or `lte` (`eq null` and `ne null` test for null), as in a query. To state that for live events the server adds an `IS NOT NULL` beside each such condition, and an `or` list needs a copy of itself per alternative, so the cost is bounded (**BL-1226, next train**): one `or` list may hold at most 6 conditions with `ne`, `nin`, `lt` or `lte`, the rewrite may add at most 256 groups and 2048 conditions to one filter, and it may not nest groups past the depth limit of 5. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot. Fold several `ne` on one column that mean "none of these" into one `nin` (`ne` conditions in an `and` list cost one `IS NOT NULL` per column, which no honest filter reaches the bound with), or split the subscription. Up to 0.8.0 a live event with a null matched those four while the snapshot held none, and a `Bool` column's `eq`, `ne`, `in` and `nin` never matched a live event. The user-filter rewrite is unchanged. The same null rule now holds for an RLS predicate and for a named query's bound clause on the live path, without that rewrite (**BL-1251, next train**). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
+| `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin` and `like`, on the column types the query path accepts them for (no ordering on `Bool` or `Guid`; `like` on `String`). `in` / `nin` take a non-empty array of non-null members of the column's type (**BL-1226, 0.9.0**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). The snapshot and the live events select the same rows, a nullable column included: a null never matches `ne`, `nin`, `lt` or `lte` (`eq null` and `ne null` test for null), as in a query. To state that for live events the server adds an `IS NOT NULL` beside each such condition, and an `or` list needs a copy of itself per alternative, so the cost is bounded (**BL-1226, 0.9.0**): one `or` list may hold at most 6 conditions with `ne`, `nin`, `lt` or `lte`, the rewrite may add at most 256 groups and 2048 conditions to one filter, and it may not nest groups past the depth limit of 5. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot. Fold several `ne` on one column that mean "none of these" into one `nin` (`ne` conditions in an `and` list cost one `IS NOT NULL` per column, which no honest filter reaches the bound with), or split the subscription. Up to 0.8.0 a live event with a null matched those four while the snapshot held none, and a `Bool` column's `eq`, `ne`, `in` and `nin` never matched a live event. The user-filter rewrite is unchanged. The same null rule now holds for an RLS predicate and for a named query's bound clause on the live path, without that rewrite (**BL-1251, 0.9.0**). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
 | `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. |
 | `at_least` | string? | No | Consistency-token pin: snapshot at at least this token. Optional `wait_ms` / `on_exceeded` (same values as HTTP). Omitted `at_least` leaves `resume_from` byte-for-byte today's path. |
 | `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |
 | `on_exceeded` | string? | No | `wait` \| `fetchPrimary` \| `fail`. |
 | `conflate` | object? | No | Opt-in keyed conflation. Omitted = every visible event. See below. |
-| `cross_partition_access` | boolean? | No | Waives the `PARTITION_FILTER_REQUIRED` guard for the snapshot of a subscription with no partition filter on a partitioned table (and a named query's count); a named-query subscribe whose definition binds no partition key needs it too. Omitted when `false`. It waives that guard only: the snapshot and every live event are what the credential's access grants allow, no more. Not accepted on the data-plane listener, where the guard decides. The long-poll transport takes it on the same `subscribe` message sent to `…/stream/longpoll/{sessionId}/send` (**BL-1227, next train**). |
+| `cross_partition_access` | boolean? | No | Waives the `PARTITION_FILTER_REQUIRED` guard for the snapshot of a subscription with no partition filter on a partitioned table (and a named query's count); a named-query subscribe whose definition binds no partition key needs it too. Omitted when `false`. It waives that guard only: the snapshot and every live event are what the credential's access grants allow, no more. Not accepted on the data-plane listener, where the guard decides. The long-poll transport takes it on the same `subscribe` message sent to `…/stream/longpoll/{sessionId}/send` (**BL-1227, 0.9.0**). |
 
 **`conflate`:**
 
@@ -4583,7 +4583,7 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `interval_ms` | number | Yes | Flush interval in milliseconds. Valid range 1…60_000. |
 | `collapse_inserts` | bool | No | When true, matching in-scope inserts are held latest-wins per key. Default `false` (omitted on the wire). Delivered `op` stays `"insert"`. |
 
-(**BL-035, next train**) A `filter` or a `conflate.key` that names an [array column](../guides/array-columns.md) is refused with an `error` message, code `ARRAY_COLUMN_UNSUPPORTED` (*"… an array column cannot be used in a subscription filter …"*, *"… cannot be a conflation key (conflate.key) …"*); the subscription is not created. Selecting one is fine.
+(**BL-035, 0.9.0**) A `filter` or a `conflate.key` that names an [array column](../guides/array-columns.md) is refused with an `error` message, code `ARRAY_COLUMN_UNSUPPORTED` (*"… an array column cannot be used in a subscription filter …"*, *"… cannot be a conflation key (conflate.key) …"*); the subscription is not created. Selecting one is fine.
 
 Default `conflate` holds only **value `update` events** where the row was visible both before and after. `insert`, `delete`, enter-scope, and leave-scope **flush** any pending update for that key and are delivered immediately. Therefore on an **insert-only** (append-only) stream default `conflate` reduces the event rate by zero and `values_skipped` never appears. That subscribe still registers; `snapshot_complete` includes a `CONFLATE_NOOP` warning when the conflate key is not the table PK. Set `collapse_inserts: true` to collapse matching inserts. A `latestPerKey` MQ result table (PK = group key) conflates via `prev` on `update` without the flag. Conflated `change` messages set `values_skipped` (count of dropped intermediate value events, including collapsed inserts). That marker is **intentional loss** and is not a `gap`. See [browser-tier read limits](../guides/browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
@@ -4652,7 +4652,7 @@ Re-authenticate an existing WebSocket session with a refreshed JWT (or API key) 
 |---|---|---|---|
 | `type` | string | Yes | Always `"re_auth"` |
 | `token` | string | Yes | Refreshed bearer JWT or API key |
-| `user_token` | string? | No | The user token, as on `auth` (**BL-1223, next train**). A session opened with one must send one for the same user; a session opened without one cannot add one. Either is `AUTH_TOKEN_INVALID`. |
+| `user_token` | string? | No | The user token, as on `auth` (**BL-1223, 0.9.0**). A session opened with one must send one for the same user; a session opened without one cannot add one. Either is `AUTH_TOKEN_INVALID`. |
 
 A **failed** `re_auth` still closes the session (fail-closed). A successful refresh does **not** re-snapshot. Without `re_auth`, JWT expiry closes the socket (`AUTH_TOKEN_EXPIRED`) and every browser re-snapshots.
 
@@ -4703,7 +4703,7 @@ Open a write stream to a table for continuous high-throughput inserts without pe
 
 **Server responds with:** `stream_ready`.
 
-**Authorization** (**BL-1227, next train**). `stream_open` needs the `write` role permission on the table, as `POST …/tables/{name}/rows` does; the check runs before the table is looked up, so a credential without it learns nothing about which tables exist. A refusal is an `error` message for the stream `id` with HTTP's code (`INSUFFICIENT_PERMISSIONS`, `AUTHORIZATION_DENIED` or `AUTH_TOKEN_MISSING`). Up to 0.8.0 a write stream checked no role. On a table with PLS or RLS the rows are then written under the same write rules as HTTP, with the access grants of the credential (a grant at `write` or `admin` lifts the write side); a grant that decides a stream is audited once per stream, with the first batch of rows it decides, and again only when the grants that decide it change (a `re_auth`, or a role change that re-keys the session) ([Audit](#audit-access_grant_used)).
+**Authorization** (**BL-1227, 0.9.0**). `stream_open` needs the `write` role permission on the table, as `POST …/tables/{name}/rows` does; the check runs before the table is looked up, so a credential without it learns nothing about which tables exist. A refusal is an `error` message for the stream `id` with HTTP's code (`INSUFFICIENT_PERMISSIONS`, `AUTHORIZATION_DENIED` or `AUTH_TOKEN_MISSING`). Up to 0.8.0 a write stream checked no role. On a table with PLS or RLS the rows are then written under the same write rules as HTTP, with the access grants of the credential (a grant at `write` or `admin` lifts the write side); a grant that decides a stream is audited once per stream, with the first batch of rows it decides, and again only when the grants that decide it change (a `re_auth`, or a role change that re-keys the session) ([Audit](#audit-access_grant_used)).
 
 ---
 
@@ -4809,7 +4809,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, next train**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, next train**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, next train**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, 0.9.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, 0.9.0**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, 0.9.0**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**Next train**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**
@@ -4885,7 +4885,7 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
-| `column_types` | object? | (**BL-035, next train**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). **Omitted when the snapshot has none.** A column named here holds an array of that type; a column that is not named holds a scalar. |
+| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). **Omitted when the snapshot has none.** A column named here holds an array of that type; a column that is not named holds a scalar. |
 
 **Example:**
 ```json
@@ -4975,7 +4975,7 @@ Incremental row change on an active subscription. Sent whenever a row matching t
 | `version` | number | Per-database sequence version of this change. Do not infer gaps from holes. |
 | `values_skipped` | number? | Present on conflated value updates: count of intermediate updates dropped. **Not** a `gap`. |
 | `token` | string? | C-1 token of **this event's** WAL position. Hand to HTTP `?at_least=` to be sure the read sees this change. |
-| `column_types` | object? | (**BL-035, next train**) As on `snapshot`: the array columns `row` / `prev` carry, name to type name; omitted when there is none. |
+| `column_types` | object? | (**BL-035, 0.9.0**) As on `snapshot`: the array columns `row` / `prev` carry, name to type name; omitted when there is none. |
 
 **Example — insert:**
 ```json
@@ -5134,7 +5134,7 @@ Acknowledges durable receipt of rows through the given sequence number. May incl
 }
 ```
 
-`FORBIDDEN_WRITE` at an index is a row PLS or RLS refused; the frame's other rows are written. (**BL-1227, next train**) With
+`FORBIDDEN_WRITE` at an index is a row PLS or RLS refused; the frame's other rows are written. (**BL-1227, 0.9.0**) With
 `mode: "upsert"` that includes a row whose key names a stored row the caller may not write (another partition, another RLS
 owner): an upsert may replace only a row the caller may write.
 
@@ -5201,9 +5201,9 @@ All bulk-load endpoints are under `/api/databases/{db}/bulk-load`. The `:append`
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:append` | Append rows (column-batch frames, or JSON column arrays). |
 | `POST` | `/api/databases/{db}/bulk-load/{jobId}:commit` | Commit the session. |
 | `GET` | `/api/databases/{db}/bulk-load/{jobId}` | Get session status and progress. (Listed as `{jobId}:status` until **WorkloadCore, 0.3.0**; the route has always been `{jobId}`.) |
-| `POST` | `/api/databases/{db}/bulk-load/{jobId}:abort` | Abort the session. The beginning credential only (**BL-1278, BL-1170, next train**). |
-| `GET` | `/api/databases/{db}/bulk-load:list` | List the sessions this credential began (**BL-1278, BL-1170, next train**). |
-| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. The beginning credential, or a database admin who also holds `bulkload` (**BL-1278, BL-1170, next train**). (Listed under `{jobId}` until **WorkloadCore, 0.3.0**; the route has always been this.) |
+| `POST` | `/api/databases/{db}/bulk-load/{jobId}:abort` | Abort the session. The beginning credential only (**BL-1278, BL-1170, 0.9.0**). |
+| `GET` | `/api/databases/{db}/bulk-load:list` | List the sessions this credential began (**BL-1278, BL-1170, 0.9.0**). |
+| `POST` | `/api/databases/{db}/bulk-load:force-abort` | Operator abort; the job id is in the body. The beginning credential, or a database admin who also holds `bulkload` (**BL-1278, BL-1170, 0.9.0**). (Listed under `{jobId}` until **WorkloadCore, 0.3.0**; the route has always been this.) |
 
 ---
 
@@ -5218,7 +5218,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `database` | string | Yes | Database name (must match `{db}` in path). |
 | `tables` | string[] | Yes | Tables this load writes to. Index 0 is the primary table. Single-element array for single-table loads. When more than one table is listed, each row in `:append` calls must carry a `"_table"` discriminator field naming its destination. Empty array is rejected (400). |
 | `options` | object? | No | Load options (see below). |
-| `idempotencyKey` | string? | No | Client-supplied key. If the same key is received within the server's idempotency window (default 10 min) while the prior job is still in-flight, the same `jobId` is returned without re-acquiring the lock. The key returns that `jobId` only for the credential that began the job; another credential is `403 AUTHORIZATION_DENIED` and the job is unchanged (**BL-1278, BL-1170, next train**). |
+| `idempotencyKey` | string? | No | Client-supplied key. If the same key is received within the server's idempotency window (default 10 min) while the prior job is still in-flight, the same `jobId` is returned without re-acquiring the lock. The key returns that `jobId` only for the credential that began the job; another credential is `403 AUTHORIZATION_DENIED` and the job is unchanged (**BL-1278, BL-1170, 0.9.0**). |
 
 **Load options:**
 
@@ -5226,7 +5226,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
-| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. (**BL-035, next train**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
 | `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
@@ -5235,7 +5235,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `postLoadMqBehavior` | string? | `"auto"` | `"auto"`, `"skip"` (`"deferred"` until 0.3.x; refused `400` from the 0.4.0 — use `"auto"`) | Controls materialized-query handling after commit, for **all four** MQ types whose source tables are in this load. `"auto"` (default): the load's queries are brought current by the server, and you wait on `mqRebuildStatus` (below) — **do not** also call `POST .../materialized-queries/{name}:refresh` for these tables: it runs the table's pass that was starting anyway or, once that has run, re-scans the whole source table. (**WorkloadCore S10, 0.3.0**) `"auto"` records a pending job, as `"deferred"` did, and starts the table's **deferred pass** for each table it wrote right after the commit (multi-table and transform loads included): a fold of the load's segments for every query the fold can plan, the load's rows applied as inserts for any other query directly over the table, a rebuild for the rest (**WorkloadCore S17, 0.3.0**: by a background rebuild job after the pass, so the other queries on the table are not held behind one long rebuild), and the queries built on them caught up. The load does no materialized-query work while its rows stream and is not paced to a drain. Until the pass ends its queries read as behind (`isStale: true`, `pendingDeferredJobs` ≥ 1, `current: false`). Before S10, how `"auto"` did it depended on the table: a table of only `aggregate` and `latestPerKey`/`firstPerKey` queries was folded as the load wrote its segments and written by the table's pass after the commit; on any other table the queries accumulated during the load's own pass and published by shadow-swap after the commit (the ingest-fed path). (**WorkloadCore S09, 0.3.0**) Every `"auto"` load's maintenance runs after the commit point, in the background, and `:commit` waits for it only as long as `mqWaitMs` allows (below): on a table of only aggregates and latest / first per key the load used to write its queries before `:commit` returned, with `mqRebuildStatus: "completed"` (**ColumnarCore S12, 0.2.0**). `"skip"`: no pending job, no pass and no rebuild; use for multi-step pipelines that call `:refresh` explicitly themselves. (**LoadSpeed K31, 0.4.0**) `"deferred"` is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message saying to use `"auto"`: it was folded into `"auto"`, which since M.3 leaves a loading table's pass to the quiet period as `"deferred"` did, and which with `mqWaitMs` 0 (the default) does not wait at `:commit`. Until then: `"deferred"` (**BatchFirst S08, 0.1.40**): the load writes only the table, marks its queries behind (`isStale: true`; **WorkloadCore S10, 0.3.0**: owed the pass, not marked stale as `"skip"` leaves them), and records a durable pending job; the table's deferred pass brings them current once bulk ingest into the table has been quiet for 2 s, or once the oldest pending job has waited 60 s, or at once on `:refresh` of any owed query — and an update, delete or upsert of the table brings its queries current before it applies. It was for very large or many back-to-back loads: many loads, one pass (a server before 0.1.40 refused it `400` too). See [Deferred loads](../guides/materialized.md#deferred-loads). |
 | `identityInsert` | bool? | `false` | `true`, `false`, null | Job-scoped identity-insert (same semantics as ordinary insert `identityInsert`). When `true`, every autoIncrement column must be present/non-null on every appended row; values (including literal `0`) are stored as-is with **no** ID allocation; after a **successful job commit** the runtime counter advances to `max(inserted)` per `(table, column)`. Failed or aborted jobs do **not** bump the counter. Null/`false` = default bulk-load path (missing/null autoIncrement values coerce to `0`; bulk-load alone does not allocate IDs or bump the counter). Equivalent to Bond `isAutoIncrementDisabled: true` for large ingest. |
 | `applyTransforms` | bool? | null | `true`, `false`, null | **Transform intent.** The server computes every write-time value (derived columns, expression defaults, checks) for the rows you append, and expands the lock set to the transform-graph closure. Mutually exclusive with `preTransformed`. |
-| `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. An identity column is refused `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`, the same as a server-time column: use `applyTransforms` (**BL-1278, BL-1170, next train**). |
+| `preTransformed` | bool? | null | `true`, `false`, null | **Transform intent.** The rows are already materialized — every derived column is present in the payload — so the server writes the named tables as-is with no transform pipeline. Mutually exclusive with `applyTransforms`. An identity column is refused `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`, the same as a server-time column: use `applyTransforms` (**BL-1278, BL-1170, 0.9.0**). |
 | `durability` | string? | the database's level for a load: `"os"` in a database at `os`, else `"strict"` | `"strict"`, `"os"` | (**Lead S26c, 0.6.0**) The job's own durability. `"strict"`: every segment file, its directory and the job's commit record are fsynced before the job is visible, so it survives a power loss — what every load did before. `"os"`: the files are written and renamed and the commit record written, none of it fsynced: it survives a process crash, and after a power loss it is kept whole or dropped whole and reported `"lost"` ([`GET {jobId}`](#get-jobid)). The server syncs an `"os"` job in the background from its commit; until then every durable write on the database waits for it. An `"os"` load writes no WAL frame. A table's own level does not change the default: an `unlogged` table still gets `"strict"`. Refused `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level: any other value (`"unlogged"` and `"memory"` are table and database levels, not a load's; case-sensitive), `"strict"` in a database at `os` (its WAL is not written through), and `"os"` for a job of several tables, a table with vector columns, or an edge or vector table — so a multi-table load into an `os` database is refused. See [Bulk Load — a load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
 
 **Transform intent is mandatory for a table with write-time compute.**
@@ -5314,7 +5314,7 @@ Content-Type: application/json
 **Authorization (**BL-1031, 0.5.0**).** `:begin` returns `403` `AUTHORIZATION_DENIED` when any table the load will
 write — the tables in the request, plus transform targets when `applyTransforms` is set — has partition-level or
 row-level security, unless the caller holds, **at `write`**, the access grant for each restriction the table has:
-`all-partitions` where the table has PLS and `all-rows` where it has RLS (**BL-1227, next train**; up to 0.8.0 only an app
+`all-partitions` where the table has PLS and `all-rows` where it has RLS (**BL-1227, 0.9.0**; up to 0.8.0 only an app
 `service_role` key, `mk_svc_`, was admitted). An app service key and a user assigned `db_admin` on the database hold both
 grants; a user can also hold them through a role. A server API key (`mk_srv_`), a custom key not linked to a holder (even one whose own role is `db_admin`),
 a plain user, a holder of partition grants only, a user whose token only claims `db_admin`, and a service key that presents
@@ -5332,7 +5332,7 @@ user of the database, or through a role — or load a table with no PLS or RLS p
 
 ### `POST {jobId}:append`
 
-Append frames of rows to an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is appended (**BL-1278, BL-1170, next train**).
+Append frames of rows to an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is appended (**BL-1278, BL-1170, 0.9.0**).
 
 **Each frame is checked against its table before any of it is applied** (**Lead S27a, 0.6.0**). A frame is refused
 `400 INVALID_REQUEST` — none of its rows applied, the frames before it credited (`nextSequence` unchanged past them), the job still
@@ -5451,10 +5451,10 @@ values  := Int64, Timestamp : rowCount × i64   (Timestamp: 100-ns ticks since 1
          | Bool            : bitmap
          | ScaledDecimal   : scale:u8 (≤ 18), then rowCount × i64 — each value v / 10^scale (ColumnarCore S13)
          | String          : dictCount:u32, then dictCount × (len:u32 utf8), then rowCount × u32 codes
-         | Array           : elementKind:u8  offsets:(rowCount + 1) × u32  elements        (BL-035, next train)
+         | Array           : elementKind:u8  offsets:(rowCount + 1) × u32  elements        (BL-035, 0.9.0)
 ```
 
-(**BL-035, next train**) **Kind 9, `Array`**, carries an [array column](../guides/array-columns.md): one whole array per row.
+(**BL-035, 0.9.0**) **Kind 9, `Array`**, carries an [array column](../guides/array-columns.md): one whole array per row.
 
 ```
 Array   := elementKind:u8  offsets:(rowCount + 1) × u32  elements
@@ -5579,7 +5579,7 @@ Content-Type: application/json
 | Code | Status | When |
 |---|---|---|
 | `BULK_LOAD_JOB_NOT_FOUND` | 404 | `jobId` not found or session expired. |
-| `AUTHORIZATION_DENIED` | 403 | (**BL-1227, next train**) The appending credential does not hold, at `write`, the access grant for each restriction (PLS, RLS) of a table the job locks; asked at every `:append`, not only at `:begin` ([authorization](#post-begin)). |
+| `AUTHORIZATION_DENIED` | 403 | (**BL-1227, 0.9.0**) The appending credential does not hold, at `write`, the access grant for each restriction (PLS, RLS) of a table the job locks; asked at every `:append`, not only at `:begin` ([authorization](#post-begin)). |
 | `BULK_LOAD_INVALID_STATE` | 409 | Job is not in `"appending"` state. |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**WorkloadCore S16, 0.3.0**) The job's load already failed for capacity — for example its memory wait ran out after `:begin` returned. `Retry-After` is set; it is what `:commit` would answer (it used to be a 409 asking for `:commit`). |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, 0.6.0**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
@@ -5597,7 +5597,7 @@ Content-Type: application/json
 
 ### `POST {jobId}:commit`
 
-Commit the session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is committed (**BL-1278, BL-1170, next train**). All sealed segments become queryable. (**Lead S21b, 0.6.0**) A job whose last body is column-batch frames
+Commit the session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is committed (**BL-1278, BL-1170, 0.9.0**). All sealed segments become queryable. (**Lead S21b, 0.6.0**) A job whose last body is column-batch frames
 can [commit in that body's end frame](#a-body-that-commits-its-job-lead-s21b-060) instead, with the same options and the same
 answer; `:commit` is for a job whose last rows went as JSON, a resumed job whose bodies the server already holds, or an empty job.
 A job begun with `afterJobId` is refused here too, `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED`, if the job it follows did not commit.
@@ -5614,12 +5614,12 @@ the server stops before the job's commit point, or its commit fails, nothing of 
 - **The outcome comes from [`GET {jobId}`](#get-jobid)**: `state` is `"accepted"` while the commit runs, then `"completed"` (with the
   job's rows and commit `token`) or `"lost"` (`errorCode` `BULK_LOAD_LOST`) — or, for a `validation: "strict"` job whose commit
   found a duplicate key, `"failed"` with `errorCode` `BULK_LOAD_DUPLICATE_PK` (**BL-1163, 0.6.0**: it read `"lost"`). Ask with
-  `waitMs` to be answered when it settles. Both SDKs ask as soon as the accepted answer arrives (**BL-1140, next train**). After a
+  `waitMs` to be answered when it settles. Both SDKs ask as soon as the accepted answer arrives (**BL-1140, 0.9.0**). After a
   restart that cut the job off, `GET {jobId}` answers `"lost"` (`200`, `errorCode` `BULK_LOAD_LOST`): load it again. Once the server's
   log has moved past the job (a checkpoint), it answers `404 BULK_LOAD_JOB_NOT_FOUND`. A `404` before one hour from the accepted answer is
   still lost: nothing of it is durable, load it again. A `404` at or after that hour is unknown: it cannot tell a lost job from a
   committed one the server has forgotten, and that tick is the first on which a committed header may be forgotten. Both SDKs reject it
-  as unknown rather than lost (**BL-1140, next train**). The server keeps a committed job's
+  as unknown rather than lost (**BL-1140, 0.9.0**). The server keeps a committed job's
   record for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A `200` `state: "lost"` with
   `BULK_LOAD_LOST` is unchanged: load it again. A job that passed its commit point is never answered `"lost"`, even when work after it
   failed (**Lead group 7 review, 0.6.0**). Don't infer the outcome from the token: a lost job's token reads as covered once the log
@@ -5684,7 +5684,7 @@ queries current, read with the commit's `token` (which waits for them, as for an
 |---|---|---|
 | `BULK_LOAD_DUPLICATE_PK` | 409 | (**Lead S27a, 0.6.0**) A job at `validation: "strict"` holds a primary key twice, or one the table already holds. Nothing of it was committed; the message names the table and the key, and `details` is `{"table", "sampleKeys", "totalDuplicateCount", "withinJob"}` (the check stops at the first key). Deduplicate the source and load it again, load at `"coerce"`, or upsert the rows. The check waits for the writes that were in flight on the table when the job began to commit, so an insert racing the load and the load never both write one key. |
 | `INVALID_REQUEST` | 400 | (**Lead S27a, 0.6.0**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
-| `IDENTITY_STAMP_REQUIRED` and the other insert-transform codes | 400 | (**BL-1277, next train**) `:commit` of a row the insert transform refuses. The code is the one a REST insert already returns for that row (`IDENTITY_STAMP_REQUIRED`, `TRANSFORM_DERIVED_READONLY`, `CONSTRAINT_CHECK_VIOLATION`, `TRANSFORM_ROUTE_UNMATCHED`, `TRANSFORM_ROUTE_AMBIGUOUS`, and the other codes the exception carries), with `rowErrors`. `GET {jobId}` shows `state: "failed"` and that `errorCode`. Nothing was committed. Fix the row and run the load again from `:begin`. A failure after the commit point is still the 500 below and must not be sent again. |
+| `IDENTITY_STAMP_REQUIRED` and the other insert-transform codes | 400 | (**BL-1277, 0.9.0**) `:commit` of a row the insert transform refuses. The code is the one a REST insert already returns for that row (`IDENTITY_STAMP_REQUIRED`, `TRANSFORM_DERIVED_READONLY`, `CONSTRAINT_CHECK_VIOLATION`, `TRANSFORM_ROUTE_UNMATCHED`, `TRANSFORM_ROUTE_AMBIGUOUS`, and the other codes the exception carries), with `rowErrors`. `GET {jobId}` shows `state: "failed"` and that `errorCode`. Nothing was committed. Fix the row and run the load again from `:begin`. A failure after the commit point is still the 500 below and must not be sent again. |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, 0.3.0**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, 0.3.0**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |
 | `WAL_CAPACITY_EXCEEDED` | 503 | The WAL reached its refusal line (`T27`) during the commit. `Retry-After` is set — (**WorkloadCore S16, 0.3.0**) to the server's estimate of when the log will be back under `T26`, from the rate it has been freeing log (1–300 s), not a constant 1 s. (**BL-956, 0.4.0**) At most **30 s** (half of the 60 s a bulk-load request may be refused in a row), and `10` before any rate is measured — it was the time between periodic checkpoints, 300 s by default. |
 
@@ -5703,7 +5703,7 @@ load again: its rows are in the table, and a second load would add them twice.
 
 _The route is `GET /api/databases/{db}/bulk-load/{jobId}` (no `:status` suffix)._
 
-Get current session state and progress. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the body has no `token`, including a committed job whose session is gone (**BL-1278, BL-1170, next train**).
+Get current session state and progress. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the body has no `token`, including a committed job whose session is gone (**BL-1278, BL-1170, 0.9.0**).
 
 (**Lead S30, 0.6.0**) **Query parameter `waitMs`** (`0`–`60000`, default `0`; outside that `400 BULK_LOAD_INVALID_OPTIONS`):
 for a job whose commit is running — `committing`, or `accepted` — the answer waits up to that long for the job to settle (committed,
@@ -5711,7 +5711,7 @@ failed, lost or aborted), then answers as it stands. This is how a client learns
 
 A `404 BULK_LOAD_JOB_NOT_FOUND` before one hour from an accepted answer is still lost: nothing of the job is durable, so load it
 again. A `404` at or after that hour is unknown. It cannot tell a lost job from a committed one the server has forgotten, and that
-tick is the first on which a committed header may be forgotten. Both SDKs treat it as unknown rather than lost (**BL-1140, next train**).
+tick is the first on which a committed header may be forgotten. Both SDKs treat it as unknown rather than lost (**BL-1140, 0.9.0**).
 The server keeps a committed job's record for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer).
 
 **Response body:**
@@ -5740,7 +5740,7 @@ The server keeps a committed job's record for at least an hour after its commit 
 
 ### `GET :list`
 
-List the sessions this credential began. Another credential's job is omitted, not a 403 for the list (**BL-1278, BL-1170, next train**).
+List the sessions this credential began. Another credential's job is omitted, not a 403 for the list (**BL-1278, BL-1170, 0.9.0**).
 
 **Response body:**
 
@@ -5754,11 +5754,11 @@ List the sessions this credential began. Another credential's job is omitted, no
 
 ### `POST {jobId}:abort`
 
-Abort an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**). A missing job is `404 BULK_LOAD_JOB_NOT_FOUND`.
+Abort an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). A missing job is `404 BULK_LOAD_JOB_NOT_FOUND`.
 
 ### `POST {jobId}:force-abort`
 
-Operator abort of an in-flight session. The beginning credential, or a database admin who also holds `bulkload`. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**). Releases table locks and records the abort reason in the WAL.
+Operator abort of an in-flight session. The beginning credential, or a database admin who also holds `bulkload`. Anyone else is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, 0.9.0**). Releases table locks and records the abort reason in the WAL.
 
 **Request body:**
 
@@ -5803,7 +5803,7 @@ Operator abort of an in-flight session. The beginning credential, or a database 
 | 2.12 | 0.5.0 (Horizon) | **Horizon (additive on the wire):** materialized-query create takes `window` (`{ keep, column? }`) and the status reports `window` and `horizon`; `stats.windowCompletionRows` on `/query` and the MQ query endpoint; table create and `PUT …/policy` take `policy.retention` (`{ keep }`; a retention-only `PUT` needs no `storageTemperature`; it cannot be removed — an omitted or `null` `retention` leaves it as it is), and the policy detail and table detail report `retention` and `horizon`; insert, named-mutation insert / upsert and bulk-load `:commit` responses carry `expiredRows` (omitted when 0); a `DELETE …/rows` whose whole `where` is the first cluster column `lt` / `lte` a time runs as an early expiry (with retention) or a range delete (without); `snapshot_complete` gains `horizon` / `horizon_column` / `horizon_column_type`, and two server messages are added, `horizon` and `range_delete` (each with `column_type` on a `Date` column). A windowed result's subscription snapshot is its stored part. |
 | 2.13 | 0.6.0 (Lead) | **Lead S09 (breaking on the wire):** the column-batch frame is `ACB2` (`application/vnd.aouda.column-batch-v2`, `:begin`'s `"column-batch-v2"`): every frame carries a kind and a sequence number, and every body ends with one end frame. A frame query response's row count, `stats`, `totalMatches` and `warnings` move from the `X-Aouda-Row-Count` / `-Stats` / `-Total-Matches` / `-Warnings` headers into the end frame, and an error after the response started is an error end frame rather than a cut connection. `ACB1` bodies and the old media type are refused `415 FRAME_VERSION_UNSUPPORTED`; a query asking only for the old type gets JSON. |
 | 2.14 | 0.6.0 (Lead) | **Lead S12 (breaking on the wire): the REST API as column arrays.** Every JSON write body sends its rows as [column arrays](#column-arrays-the-write-body) — `columns`, `data` (one array per column), optional `absent` (per column, the rows whose cell is not given, which is not null) — on `POST …/tables/{name}/rows`, a branch insert, WebSocket `stream_rows`, a named mutation's `batchParam` argument and the schema seed / `aouda.seed.json`; a body with `rows` (row objects) is refused `400 ROW_OBJECTS_UNSUPPORTED` (new code). Bulk-load `:append` takes frames or one JSON column-array body; NDJSON is refused `415 ROW_OBJECTS_UNSUPPORTED`, `:begin`'s `acceptedAppendFormats` is `["column-batch-v2", "column-arrays"]`, and an unroutable multi-table row is named "Row {n} of this :append" with `details: row={n}`. Reads: the `format` query parameter is removed from `/query` and the named-query execute and batch routes (any `format=` is `400 INVALID_FORMAT`; results are always `{columns, types, data, rowCount, …}`); the materialized-query `POST …/{name}/query` answers `{columns, data, rowCount, stats, token}`; `generatedValues` is `{columns, data}` with one cell per request row; a WebSocket `snapshot` page is `{type, id, columns, data, version, token?}` (`snapshot_complete` and `change` unchanged); vector `:nearest` answers `{rowKeys, distances, executionMs, token}` and graph `:khop` `{nodeIds, hops, executionMs}`; the policy inspector's table and materialized-query `sample` is `{columns, data}`. **Pass-10 (documentation only):** the [graph and vector endpoints](#graph-and-vector-endpoints) are documented. |
-| 2.15 | next train (ArrayColumns, BL-035) | **ArrayColumns (BL-035, next train; additive on the wire):** six [array column](../guides/array-columns.md) types in schema and on every surface — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (JSON: an array, a base64 string for `Byte[]`; `types` and `X-Aouda-Column-Types` name them); one new error code, `ARRAY_COLUMN_UNSUPPORTED` (400), for an array column used where it cannot be; a new frame column kind, **9 `Array`** (an older client reading it fails with its *"unknown kind 9"* error; a query response with an array column is a frame when the client accepts frames; an older TypeScript client reading arrays from JSON — subscriptions, the materialized query endpoint, `returning` — does not fail, and gives plain arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded); `column_types` on subscription `snapshot` and `change` messages and `columnTypes` on the materialized query endpoint's body; the generator route is `GET /api/databases/{db}/schema/typescript`. A server binary from before this train that opens a data directory holding an array column refuses it by the type's number (*"has type 514, which this build does not define"*). `X-Aouda-Protocol-Version` stays `2`. |
-| 2.16 | next train (Grants) | **BL-1227 (breaking on the wire):** what a credential sees on a table with partition- or row-level security is decided by access grants, `all-partitions` and `all-rows` (scope: a table or the database; level `read`, `write`, `admin`), not by key kind. An app service key and a user assigned `db_admin` hold both by implication (a key linked to such a user, or presenting its token, acts as the user); no other credential does. Role permissions take `resourceType` `all-partitions` / `all-rows` (`resourceName` `*` or a table, `actions` one level); new `400` codes `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`, and `AUTH_GRANT_INVALID` widened. New `GET …/auth/admin/users/{id}/access-grants`. `crossPartitionAccess` is a cost waiver only (it waives `PARTITION_FILTER_REQUIRED` and never widens what a credential sees), per call on named-query execute and each batch item, and `cross_partition_access` on a WebSocket / long-poll `subscribe`; the data-plane listener ignores it. The `db_admin`-plus-flag read of every partition is gone, and so are the cross-partition rate limiter, its `429` and the `query_cross_partition` audit row. Every use of a grant is audited as `access_grant_used` (replaces `service_key_pls_bypass`). Bulk load admits a caller that holds, at `write`, the grant for each restriction of a table it locks, at `:begin` and every `:append`. Realtime checks roles as HTTP does (subscribe `read`, `stream_open` `write`, `PERMISSION_REVOKED` on a role change); a server-auth session is checked at the handshake; a join side is scoped as a direct read. Policy inspect identities take `accessGrants`; a sample needs the grants (`sampleReason` `caller_not_granted`). |
-| 2.17 | next train (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal and vector search on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused the same way (**BL-1161, BL-1298, next train**). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/access-grants` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
-| 2.18 | next train (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |
+| 2.15 | 0.9.0 (ArrayColumns, BL-035) | **ArrayColumns (BL-035, 0.9.0; additive on the wire):** six [array column](../guides/array-columns.md) types in schema and on every surface — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]` (JSON: an array, a base64 string for `Byte[]`; `types` and `X-Aouda-Column-Types` name them); one new error code, `ARRAY_COLUMN_UNSUPPORTED` (400), for an array column used where it cannot be; a new frame column kind, **9 `Array`** (an older client reading it fails with its *"unknown kind 9"* error; a query response with an array column is a frame when the client accepts frames; an older TypeScript client reading arrays from JSON — subscriptions, the materialized query endpoint, `returning` — does not fail, and gives plain arrays, a `Byte[]` as base64 text and `Int64[]` elements past 2^53 rounded); `column_types` on subscription `snapshot` and `change` messages and `columnTypes` on the materialized query endpoint's body; the generator route is `GET /api/databases/{db}/schema/typescript`. A server binary from before this train that opens a data directory holding an array column refuses it by the type's number (*"has type 514, which this build does not define"*). `X-Aouda-Protocol-Version` stays `2`. |
+| 2.16 | 0.9.0 (Grants) | **BL-1227 (breaking on the wire):** what a credential sees on a table with partition- or row-level security is decided by access grants, `all-partitions` and `all-rows` (scope: a table or the database; level `read`, `write`, `admin`), not by key kind. An app service key and a user assigned `db_admin` hold both by implication (a key linked to such a user, or presenting its token, acts as the user); no other credential does. Role permissions take `resourceType` `all-partitions` / `all-rows` (`resourceName` `*` or a table, `actions` one level); new `400` codes `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`, and `AUTH_GRANT_INVALID` widened. New `GET …/auth/admin/users/{id}/access-grants`. `crossPartitionAccess` is a cost waiver only (it waives `PARTITION_FILTER_REQUIRED` and never widens what a credential sees), per call on named-query execute and each batch item, and `cross_partition_access` on a WebSocket / long-poll `subscribe`; the data-plane listener ignores it. The `db_admin`-plus-flag read of every partition is gone, and so are the cross-partition rate limiter, its `429` and the `query_cross_partition` audit row. Every use of a grant is audited as `access_grant_used` (replaces `service_key_pls_bypass`). Bulk load admits a caller that holds, at `write`, the grant for each restriction of a table it locks, at `:begin` and every `:append`. Realtime checks roles as HTTP does (subscribe `read`, `stream_open` `write`, `PERMISSION_REVOKED` on a role change); a server-auth session is checked at the handshake; a join side is scoped as a direct read. Policy inspect identities take `accessGrants`; a sample needs the grants (`sampleReason` `caller_not_granted`). |
+| 2.17 | 0.9.0 (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal and vector search on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused the same way (**BL-1161, BL-1298, 0.9.0**). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/access-grants` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
+| 2.18 | 0.9.0 (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |

@@ -37,7 +37,7 @@ You cannot (data-plane restrictions):
 
 - Call `POST .../query` ad-hoc — 404 on the data-plane.
 - Create tables, MQs, or named queries via HTTP.
-- Use `crossPartitionAccess` — the data-plane listener ignores it, and a named-query definition cannot set it. A named-query call accepts it only on the admin listener. (**BL-1227, next train**)
+- Use `crossPartitionAccess` — the data-plane listener ignores it, and a named-query definition cannot set it. A named-query call accepts it only on the admin listener. (**BL-1227, 0.9.0**)
 - Select internal MQ accumulator columns (`_max_bid`, `_first_open_val`, …) — `outputName` aliases are the public surface.
 
 **Admin / operator** paths (ingest servers, Studio, workflow services) are covered in the [Admin appendix](#admin-appendix) at the end of this guide.
@@ -235,7 +235,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
 
 Key design decisions:
 
-- **This schema is a tick tape, and that is the layout to copy only for a tick tape.** `quotes` and `trades` partition on `(ticker, source)` and cluster on `time`, because one ticker holds a great many ticks and every read names the ticker and the source. `partitionStorage` is left unset, so the table is `Auto`: a pair that reaches 10 million rows or 1 GB is promoted to its own directory, and a chart of that ticker reads that directory. A daily series (one row per security per day, plotted across years) partitions on the security, uses a shared bucket and clusters on the date. A shared bucket is written and merged in key order and then time order, so each security keeps one run (**BL-1180, next train**). Up to 0.7.1 the merge ordered by `clusterColumns` only, so on those versions such a series lists the security again as the first `clusterColumns` entry, before the date. A tick tape needs neither: a promoted ticker is its own directory, and clustering on `time` alone keeps that directory in time order. A sensor feed whose old rows are irrelevant is a third layout. All three are in [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45). Copying the tick schema onto either of the others is the mistake that page is there to prevent.
+- **This schema is a tick tape, and that is the layout to copy only for a tick tape.** `quotes` and `trades` partition on `(ticker, source)` and cluster on `time`, because one ticker holds a great many ticks and every read names the ticker and the source. `partitionStorage` is left unset, so the table is `Auto`: a pair that reaches 10 million rows or 1 GB is promoted to its own directory, and a chart of that ticker reads that directory. A daily series (one row per security per day, plotted across years) partitions on the security, uses a shared bucket and clusters on the date. A shared bucket is written and merged in key order and then time order, so each security keeps one run (**BL-1180, 0.9.0**). Up to 0.7.1 the merge ordered by `clusterColumns` only, so on those versions such a series lists the security again as the first `clusterColumns` entry, before the date. A tick tape needs neither: a promoted ticker is its own directory, and clustering on `time` alone keeps that directory in time order. A sensor feed whose old rows are irrelevant is a third layout. All three are in [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45). Copying the tick schema onto either of the others is the mistake that page is there to prevent.
 - **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. The partition key is the `(ticker, source)` pair, the same columns the candles group by. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, 0.4.0**). See [schema](schema.md).
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
 - **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{name}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
@@ -617,7 +617,7 @@ See [Auth — auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhan
 | Schema file includes MQs | `materializedQueries` section in `aouda.schema.json` |
 | `dataPlaneAccess: true` on every MQ the browser reads | Set in the schema file, not patched via table-options HTTP |
 | Named queries select `outputName` columns | `open`, `high`, `low`, `close` — not `_max_bid` / `_first_open_val` |
-| No `crossPartitionAccess` in NQ params | A definition cannot set it, and the data-plane listener ignores it; bind the partition keys in the where clause (**BL-1227, next train**) |
+| No `crossPartitionAccess` in NQ params | A definition cannot set it, and the data-plane listener ignores it; bind the partition keys in the where clause (**BL-1227, 0.9.0**) |
 | Watchlist: both partition keys required | `ticker in $tickers` + `source eq $source` (not just ticker) |
 | Last-price: use `latestPerKey` MQ or `collapse_inserts` | Default `conflate` is a no-op on insert-only streams |
 | Screener: `whenParamPresent` on optional facets | Unmarked optional omit throws `NAMED_QUERY_PARAM_REQUIRED` |
@@ -683,7 +683,7 @@ await client.table("quotes")
   .execute();
 ```
 
-`.Aggregate(...)` is an admin-listener API, and `crossPartitionAccess` is honoured on the admin listener only: the data-plane listener ignores it. The flag waives the partition-filter guard (a scan cost guard) and nothing else. It never widens what the credential sees, so the credential still needs its partition grants. A named query accepts it per call on the admin listener (`crossPartitionAccess` in the execute body or a batch item); a definition cannot set it. (**BL-1227, next train**)
+`.Aggregate(...)` is an admin-listener API, and `crossPartitionAccess` is honoured on the admin listener only: the data-plane listener ignores it. The flag waives the partition-filter guard (a scan cost guard) and nothing else. It never widens what the credential sees, so the credential still needs its partition grants. A named query accepts it per call on the admin listener (`crossPartitionAccess` in the execute body or a batch item); a definition cannot set it. (**BL-1227, 0.9.0**)
 
 ### Ad-hoc query on a candle table (admin HTTP)
 

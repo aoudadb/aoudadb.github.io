@@ -174,7 +174,7 @@ If you do nothing:
 - Subscription behavior:
   - Snapshot + incremental delivery.
   - User filter evaluation.
-  - ADRA-aware event filtering (PLS/RLS) by the credential's grants, and a permission re-read on every subscribe and resume (**BL-1227, next train**: see [Who may subscribe, and what a subscription sees](#who-may-subscribe-and-what-a-subscription-sees)).
+  - ADRA-aware event filtering (PLS/RLS) by the credential's grants, and a permission re-read on every subscribe and resume (**BL-1227, 0.9.0**: see [Who may subscribe, and what a subscription sees](#who-may-subscribe-and-what-a-subscription-sees)).
   - Resume semantics with `resume_from` and change-buffer replay/fallback.
 - Write-stream behavior:
   - `stream_open`, `stream_rows`, `stream_ack`, `stream_close`.
@@ -277,7 +277,7 @@ Invariants:
 
 ### Who may subscribe, and what a subscription sees
 
-A subscription is a read, and it is held to the rules of the HTTP read it mirrors (**BL-1227, next train**):
+A subscription is a read, and it is held to the rules of the HTTP read it mirrors (**BL-1227, 0.9.0**):
 
 - **The same role check.** `subscribe` is authorized as `POST /query` is: the credential needs `read` on the table, and for a
   named-query subscription on **every table the named query touches**. A refusal is the code HTTP answers
@@ -416,9 +416,9 @@ returns until it subscribes again. There is no compatibility shim: upgrade the c
 **`TRUNCATE` sends no notice** — and no row events — today. A client holding a truncated table's rows keeps them until it subscribes
 again.
 
-### Array columns in a subscription (**BL-035, next train**)
+### Array columns in a subscription (**BL-035, 0.9.0**)
 
-(**BL-035, next train**) A table or named-query subscription delivers an [array column](array-columns.md) as an array, a `Byte[]` as base64
+(**BL-035, 0.9.0**) A table or named-query subscription delivers an [array column](array-columns.md) as an array, a `Byte[]` as base64
 text (MessagePack and long-poll alike) and **tells the client which columns are arrays**: every `snapshot` and `change` message that holds an array
 column carries `column_types`, a map from the column's name to its type (`{"Rates":"Double[]"}`). **A column named there holds an
 array of that type; a column not named holds a scalar.** A message without an array column has no `column_types`, so a table
@@ -703,7 +703,7 @@ Sec-WebSocket-Key: <key>
 
 Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `wire_mode` (the negotiated wire mode).
 
-**Which credentials the socket accepts** (**BL-1227, next train**). The handshake asks the same stores, in the same order, as an HTTP
+**Which credentials the socket accepts** (**BL-1227, 0.9.0**). The handshake asks the same stores, in the same order, as an HTTP
 request to that database: the database's own auth database first, then the server auth database. So a **server API key**
 (`mk_srv_`) or a server user's token that works over HTTP on a linked application database also opens its WebSocket and its
 long-poll connect (up to 0.8.0 both were refused with `AUTH_API_KEY_INVALID` / `AUTH_TOKEN_INVALID`). The socket keeps the store
@@ -726,7 +726,7 @@ neither `all-partitions` nor `all-rows`, so on a table with partition or row sec
 
 `resume_from` is optional. Omit it on a fresh subscription; include the last seen version on reconnect.
 
-**`cross_partition_access`** (optional boolean, sent only when `true`) (**BL-1227, next train**) waives the partition-filter guard
+**`cross_partition_access`** (optional boolean, sent only when `true`) (**BL-1227, 0.9.0**) waives the partition-filter guard
 for a subscription that names no partition: a table `subscribe`, or a named-query `subscribe` (`name`, `args`) whose query binds no
 partition key, on a partitioned table that requires a partition filter. Without it that subscribe is refused
 `PARTITION_FILTER_REQUIRED`. It is a **cost waiver, not a grant**: the snapshot and every later event are still what the
@@ -833,9 +833,9 @@ Content-Type: application/json
 ```
 
 A backend acting as a user adds `"userToken":"<user-jwt>"` beside a service-level key — the long-poll form of `X-User-Token`
-(**BL-1223, next train**). A refused credential answers `401` with `{ "code", "message" }` (`AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`,
+(**BL-1223, 0.9.0**). A refused credential answers `401` with `{ "code", "message" }` (`AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`,
 `AUTH_TOKEN_REVOKED`, `AUTH_API_KEY_INVALID`); `500` with `AUTH_DB_UNAVAILABLE` means the auth database could not be read or the
-session's permissions could not be resolved — no session is created, and it is **retryable** (**BL-1223, next train**).
+session's permissions could not be resolved — no session is created, and it is **retryable** (**BL-1223, 0.9.0**).
 
 Expected result: `auth_ok` is returned for valid auth, then `snapshot`/`change` messages flow over the chosen transport.
 
@@ -848,7 +848,7 @@ Common mistake: sending `wireMode: "msgpack"` on long-poll; long-poll supports J
 | Subscribe to table changes | `ITableOperations.SubscribeAsync()` | `TableQuery.subscribe()` | `subscribe` message over WS/long-poll | Implemented | Snapshot then incremental |
 | Typed subscriptions | `ITableOperations<T>.SubscribeAsync()` | Generic `TableQuery<T>.subscribe()` typing | Same protocol payload, typed client mapping only | Implemented | Type mapping is client-side |
 | Resume from version | Automatic in subscription implementation | Automatic re-subscribe with `resume_from` | `resume_from` field in subscribe message | Implemented | At-least-once replay semantics |
-| Subscribe across partitions (waive `PARTITION_FILTER_REQUIRED`) | `WithCrossPartitionAccess()` or `SubscribeOptions.CrossPartitionAccess` | `withCrossPartitionAccess()` or `SubscribeOptions.crossPartitionAccess`; named queries: `NamedQuerySubscribeOptions.crossPartitionAccess` | `cross_partition_access` field in subscribe message | Implemented (**BL-1227, next train**) | A cost waiver, not a grant; ignored on the data-plane listener |
+| Subscribe across partitions (waive `PARTITION_FILTER_REQUIRED`) | `WithCrossPartitionAccess()` or `SubscribeOptions.CrossPartitionAccess` | `withCrossPartitionAccess()` or `SubscribeOptions.crossPartitionAccess`; named queries: `NamedQuerySubscribeOptions.crossPartitionAccess` | `cross_partition_access` field in subscribe message | Implemented (**BL-1227, 0.9.0**) | A cost waiver, not a grant; ignored on the data-plane listener |
 | Open write stream | `OpenWriteStreamAsync(mode)` | `openWriteStream({ mode })` | `stream_open`, `stream_rows`, `stream_ack`, `stream_close` | Implemented | Insert/upsert supported |
 | MessagePack wire mode | `.NET WireMode.MessagePack` | `streaming.wireMode = "msgpack"` | auth `wire_mode` negotiation | Implemented | Long-poll is JSON-only |
 | Long-poll fallback | `.NET EnableLongPollFallback` | `streaming.enableLongPollFallback` | `/stream/longpoll/connect|send|poll|{id}` | Implemented | Fallback used when WS connect fails |

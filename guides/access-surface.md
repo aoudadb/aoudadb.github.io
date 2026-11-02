@@ -48,7 +48,7 @@ HTTP shapes: [HTTP API — Access-surface diff](../reference/http-api.md#access-
 
 Narrowing (tighter RLS, removed column, `dataPlaneAccess` true→false, tighter freshness) is reported but **does not fail CI**.
 
-`service_key` identities are skipped: a service key holds both `all-partitions` and `all-rows` on its database, so it is always full and nothing can widen it. (**BL-1227, next train**)
+`service_key` identities are skipped: a service key holds both `all-partitions` and `all-rows` on its database, so it is always full and nothing can widen it. (**BL-1227, 0.9.0**)
 
 ---
 
@@ -85,8 +85,8 @@ Sibling of `aouda.schema.json` (or `--identities`). Schema `https://aouda.io/ide
 | `kind` | **Required.** `user` or `service_key`. |
 | `userId` | Optional UUID. Omitted → deterministic: SHA-256 of `"aouda.identity:" + name`, first 16 bytes as a GUID. A non-UUID value is `AUTH_IDENTITY_INVALID`. |
 | `claims` | String values only. |
-| `grants` | Each grant needs **all three** of `dimension`, `partitionKey`, `accessLevel` (`read` \| `write` \| `admin`). `partitionKey` is taken verbatim: `""` and keys with outer white space are partitions like any other (**BL-1192, next train**); leaving it out is invalid. |
-| `accessGrants` | Optional, `user` identities only. Each entry is `{ "grant", "table"?, "level" }`: `grant` is `all-partitions` or `all-rows`, `level` is `read` \| `write` \| `admin` and is required, and `table` names one table (leave it out for the whole database). It answers "what would a holder of this grant see?" before the role exists. A `service_key` identity refuses the field (`AUTH_IDENTITY_INVALID`): it already holds both grants by implication. A `user` identity whose `roles` include `db_admin` holds both grants on the database, as an admin user does. The `kind` decides what a fixture holds, never its claims. (**BL-1227, next train**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). |
+| `grants` | Each grant needs **all three** of `dimension`, `partitionKey`, `accessLevel` (`read` \| `write` \| `admin`). `partitionKey` is taken verbatim: `""` and keys with outer white space are partitions like any other (**BL-1192, 0.9.0**); leaving it out is invalid. |
+| `accessGrants` | Optional, `user` identities only. Each entry is `{ "grant", "table"?, "level" }`: `grant` is `all-partitions` or `all-rows`, `level` is `read` \| `write` \| `admin` and is required, and `table` names one table (leave it out for the whole database). It answers "what would a holder of this grant see?" before the role exists. A `service_key` identity refuses the field (`AUTH_IDENTITY_INVALID`): it already holds both grants by implication. A `user` identity whose `roles` include `db_admin` holds both grants on the database, as an admin user does. The `kind` decides what a fixture holds, never its claims. (**BL-1227, 0.9.0**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). |
 
 Cap: 32 identities (`ACCESS_SURFACE_TOO_MANY_IDENTITIES`). Invalid document → `AUTH_IDENTITY_INVALID`. Missing file is a **warning**, not a hard error: public-only (`mk_pub_*`) still runs.
 
@@ -126,15 +126,15 @@ Per table, the response reports:
 
 | Field | Meaning |
 |---|---|
-| `visibility` | `full` · `filtered` · `none`. A `service_key` identity is `full`, because of the grants it holds by implication. A materialized result whose source chain does not resolve to a base table is `none` for every identity, grant holders included, as it is on a live read (**BL-1227, next train**) |
+| `visibility` | `full` · `filtered` · `none`. A `service_key` identity is `full`, because of the grants it holds by implication. A materialized result whose source chain does not resolve to a base table is `none` for every identity, grant holders included, as it is on a live read (**BL-1227, 0.9.0**) |
 | `pls` / `rls` | The contributing predicates |
 | `effective` | The conjunction actually injected into reads |
 | `effectiveHash` | SHA-256 of the canonical `WhereClause` — the same hash the diff compares |
-| `sample` / `sampleReason` | Rows the identity would actually get, when `includeSample` is set (`sample_failed` when it could not be produced; `caller_not_granted` when the **caller** does not itself hold the grants for the table's secured halves: `all-partitions` for PLS, `all-rows` for RLS, at `read`. The verdict is still answered, but the rows are not shown) (**BL-1227, next train**). A table's or a materialized query's sample is column arrays, `{ "columns": […], "data": [[…], …] }` — one array per column, as a query result (**Lead S12, 0.6.0**: it was an array of row objects); a `vectorProbe`'s is `{ "rowKeys": […], "distances": […] }`, as [`:nearest`](graph-vector.md#rest-endpoints) answers |
+| `sample` / `sampleReason` | Rows the identity would actually get, when `includeSample` is set (`sample_failed` when it could not be produced; `caller_not_granted` when the **caller** does not itself hold the grants for the table's secured halves: `all-partitions` for PLS, `all-rows` for RLS, at `read`. The verdict is still answered, but the rows are not shown) (**BL-1227, 0.9.0**). A table's or a materialized query's sample is column arrays, `{ "columns": […], "data": [[…], …] }` — one array per column, as a query result (**Lead S12, 0.6.0**: it was an array of row objects); a `vectorProbe`'s is `{ "rowKeys": […], "distances": […] }`, as [`:nearest`](graph-vector.md#rest-endpoints) answers |
 
 Errors: `AUTH_IDENTITY_NOT_FOUND`, `AUTH_IDENTITY_INVALID`.
 
-**Credential and listener:** admin listener, with a **service key or an admin JWT**. A `db_reader` JWT gets 403, and the route is 404 on the data-plane — this is an operator and CI tool, not something an application calls. The route is open to other admin credentials too (a server key, a custom key holding `db_admin` and not linked to a user), but they hold no grants, so on a table with partition or row security they get the verdict without the `sample` (`sampleReason: "caller_not_granted"`). (**BL-1227, next train**)
+**Credential and listener:** admin listener, with a **service key or an admin JWT**. A `db_reader` JWT gets 403, and the route is 404 on the data-plane — this is an operator and CI tool, not something an application calls. The route is open to other admin credentials too (a server key, a custom key holding `db_admin` and not linked to a user), but they hold no grants, so on a table with partition or row security they get the verdict without the `sample` (`sampleReason: "caller_not_granted"`). (**BL-1227, 0.9.0**)
 
 Run it for one identity per authorization class before you opt a table into the data-plane, and put the output in the migration record.
 
@@ -233,7 +233,7 @@ Branch review renders widenings first (warning), then narrowings. Load `aouda.id
 | Identities in `aouda.schema.json` rejected | `additionalProperties: false` | Keep a sibling file |
 | `AUTH_IDENTITY_INVALID` on a file that looks right | `identities` written as an array, a grant missing `partitionKey` / `accessLevel`, or `accessGrants` on a `service_key` identity (or an entry missing `grant` or `level`) | It is an object keyed by name; grants need all three fields; a service key holds both access grants already |
 | `policy inspect` returns 404 | Called against the data-plane listener | Use the **admin** URL with a service key or admin JWT |
-| `policy inspect` answers the verdict but no `sample`, `sampleReason: "caller_not_granted"` (**BL-1227, next train**) | The calling credential does not hold `all-partitions` / `all-rows` for the table's secured halves, so it could not read those rows itself | Run it with a service key or a `db_admin` user's JWT, or have a role grant the caller the missing grant |
+| `policy inspect` answers the verdict but no `sample`, `sampleReason: "caller_not_granted"` (**BL-1227, 0.9.0**) | The calling credential does not hold `all-partitions` / `all-rows` for the table's secured halves, so it could not read those rows itself | Run it with a service key or a `db_admin` user's JWT, or have a role grant the caller the missing grant |
 
 ---
 
@@ -243,7 +243,7 @@ Branch review renders widenings first (warning), then narrowings. Load `aouda.id
 - Named-mutation access surface (read surface only).
 - Identity file overlays (`aouda.identities.{env}.json`).
 - TypeScript CLI `--access` flag.
-- Embargoes (**BL-418, next train**). Neither the access-surface diff nor policy inspect reports an
+- Embargoes (**BL-418, 0.9.0**). Neither the access-surface diff nor policy inspect reports an
   [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train): a verdict of `full` or
   `restricted` says which rows an identity may see, not how old they must be, and a `sample` is not cut by an embargo's delay. Use
   `GET …/users/{id}/access-grants`, whose `embargoes` list does.

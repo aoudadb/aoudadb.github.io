@@ -116,7 +116,7 @@ curl -X POST http://localhost:5433/api/databases \
 
 ### One auth database is one trust domain
 
-Databases that share an auth database share **users and roles**. Since **BL-1018** (**next train**) they no longer share every
+Databases that share an auth database share **users and roles**. Since **BL-1018** (**0.9.0**) they no longer share every
 sign-in: a token opens only its **allowance** — the databases it was issued for — and the refresh token and native sign-in code behind
 it carry the same allowance.
 
@@ -209,7 +209,7 @@ app.get("/api/admin/tasks", async (req, res) => {
 });
 ```
 
-**The service key sees everything because it holds both grants** (**BL-1227, next train**). Up to 0.3.x a server API key
+**The service key sees everything because it holds both grants** (**BL-1227, 0.9.0**). Up to 0.3.x a server API key
 (`mk_srv_`) saw it all too; it holds no grant, so it gets its role's grants and, on a PLS / RLS table, what a request with no
 user may see (with the usual rules, no row). An admin view like the one above needs this database's `mk_svc_` key, or a user
 with `db_admin` on it — [how visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows).

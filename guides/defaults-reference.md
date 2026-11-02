@@ -209,7 +209,7 @@ See [Materialized queries — windows](materialized.md#windows) and [Retention](
 
 ---
 
-## Array limits (**BL-035, next train**)
+## Array limits (**BL-035, 0.9.0**)
 
 [Array columns](array-columns.md) have two limits, on every surface, with **no configuration key**: **65,536 elements** and
 **1,048,576 bytes (1 MiB) of elements** a value. See [the table of what that means per type](array-columns.md#limits).
@@ -310,7 +310,7 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 | Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
 | The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
-| Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, next train**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
+| Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
 
 Both limits are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
 quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch

@@ -57,7 +57,7 @@ $env:ADMIN_PASSWORD | aouda init `
 ```
 
 `aouda init` never prompts for a password, on any platform: a prompt that reads the terminal is what stalls a script or an agent. Without
-`--admin-password-file` or `--admin-password-stdin` it stops with `ADMIN_CREDENTIALS_REQUIRED` and names both (**BL-1226, next train**;
+`--admin-password-file` or `--admin-password-stdin` it stops with `ADMIN_CREDENTIALS_REQUIRED` and names both (**BL-1226, 0.9.0**;
 before, the message named neither). Windows PowerShell 5.1 encodes what it pipes to a program as ASCII by default, so a password with
 non-ASCII characters belongs in `--admin-password-file` (or in PowerShell 7).
 
@@ -83,7 +83,7 @@ aouda databases create --name cache --server http://localhost:5433 --token <admi
 **Keys are shown once.** `aouda databases create` for a database linked to an auth database (`--kind auth`, or `--auth-enabled`) prints
 that database's three system keys (`mk_anon_`, `mk_svc_`, `mk_pub_`) in `auth.keys` of the response, and only when that create
 generated them. The server keeps a hash, so it cannot show a key again, and a create that finds the keys already issued (the auth
-database already holds that name's system keys) returns none. The CLI says which happened on stderr, also under `--json`, so stdout stays one JSON document: do not merge `2>&1` into a JSON parser (**BL-1226, next train**). To
+database already holds that name's system keys) returns none. The CLI says which happened on stderr, also under `--json`, so stdout stays one JSON document: do not merge `2>&1` into a JSON parser (**BL-1226, 0.9.0**). To
 get a service key afterwards:
 
 - **A named service key** (recommended for a backend): `POST /api/databases/{db}/service-keys` with a server key (`mk_srv_`) returns a
@@ -1083,7 +1083,7 @@ Anything else throws `NotSupportedException` at inference time, naming the type.
 
 A `DateTime` of kind `Local` or `Utc` is written with its offset, and a `DateTime` of kind `Unspecified` (`new DateTime(2026, 3, 1)`) is
 read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on the value, on every machine. See
-[Timestamp — time zones](../reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train) (**BL-1225, next train**).
+[Timestamp — time zones](../reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train) (**BL-1225, 0.9.0**).
 
 > **⚠️ An enum is `Int32` unless you say otherwise.**
 >
@@ -1129,13 +1129,13 @@ read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on th
 > The same trap applies to any property whose C# type you have not checked against the schema
 > file. `bool IsPublic` is `Bool`, not `String`; `DateOnly` is `Date`, not `Timestamp`.
 
-> **⚠️ A typed update writes values. It does not change the table's columns.** (**BL-1178, next train**)
+> **⚠️ A typed update writes values. It does not change the table's columns.** (**BL-1178, 0.9.0**)
 >
 > `UpdateAsync(new { name = "b" })` sets `name` and leaves every other column in place. It does not reconcile, whatever
 > `ReconcilePolicy` is.
 >
 > `AutoReconcileSchema` still defaults to `true`. `ReconcilePolicy` defaults to `Safe`: before the first typed insert, the client
-> adds the columns the class has and the table lacks, and it does not drop a column the class omits. (**BL-1178, next train**)
+> adds the columns the class has and the table lacks, and it does not drop a column the class omits. (**BL-1178, 0.9.0**)
 > `Unsafe` is opt-in. It drops non-key columns the class does not declare — a derived column such as `SearchText`, a
 > server-stamped column, or a column left off the row type on purpose — and it never drops a primary-key column.
 >
@@ -1150,9 +1150,9 @@ read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on th
 > });
 > ```
 >
-> From the next train (**BL-1177**), the server refuses HTTP DDL on a table that schema apply created, in every `InferenceMode`.
+> From the 0.9.0 (**BL-1177**), the server refuses HTTP DDL on a table that schema apply created, in every `InferenceMode`.
 > A default client is `Safe`, so that insert no longer tries to drop a column the class omits: the write succeeds and the column
-> stays. (**BL-1178, next train**) An explicit `Unsafe` client still fails that drop with `AoudaSchemaException`, and the column
+> stays. (**BL-1178, 0.9.0**) An explicit `Unsafe` client still fails that drop with `AoudaSchemaException`, and the column
 > survives. On 0.7.0 and earlier the default was `Unsafe`: in `On` (the default) or `Off`, the drop succeeded and the insert
 > reported success. `Safe` is no fix for a class that has a property the table lacks: the add is refused too, and the write throws.
 > Bulk load never reconciles.
@@ -1238,7 +1238,7 @@ await client.Schema.CreateTableAsync(new CreateTableRequest
 });
 ```
 
-(**BL-035, next train**) A column can also hold a whole array per row — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` or
+(**BL-035, 0.9.0**) A column can also hold a whole array per row — `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` or
 `String[]` — see [Array columns](../guides/array-columns.md). The embedded engine does not take them yet.
 
 ### Schema Operations via TypeScript Client
@@ -1746,9 +1746,9 @@ If a database has Application Auth enabled (see [Getting-Started-Auth.md](auth.m
 | **Stored in** | `_serverauth` | `_auth` (app auth database) |
 | **Scope** | One or more databases (each role's `scope`) | One specific database |
 | **Use case** | Backend services, CI/CD, cross-database access | Frontend clients, per-database backend access |
-| **PLS / RLS** | Enforced from 0.4.0 (**0.4.0**); up to 0.3.x never enforced. Holds no grant that lifts them (**BL-1227, next train**) | `mk_anon_`: enforced, holds no grant; `mk_svc_`: holds `all-partitions` and `all-rows` on its database |
+| **PLS / RLS** | Enforced from 0.4.0 (**0.4.0**); up to 0.3.x never enforced. Holds no grant that lifts them (**BL-1227, 0.9.0**) | `mk_anon_`: enforced, holds no grant; `mk_svc_`: holds `all-partitions` and `all-rows` on its database |
 
-For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use scoped server API keys (`mk_…`, from `/api/auth/admin/api-keys`). A server API key holds no grant that lifts partition- or row-level security (**BL-1227, next train**): on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)).
+For a backend that only needs one database with app auth, the `mk_svc_` key is the simplest option. For cross-database access or databases without app auth, use scoped server API keys (`mk_…`, from `/api/auth/admin/api-keys`). A server API key holds no grant that lifts partition- or row-level security (**BL-1227, 0.9.0**): on a protected table send `X-User-Token`, or use that database's `mk_svc_` key ([how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)).
 
 ### Common Auth Error Codes
 

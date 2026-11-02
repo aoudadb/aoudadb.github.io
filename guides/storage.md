@@ -258,7 +258,7 @@ If you run server defaults and do not set per-database overrides:
   - A dropped table's directory is deleted with the drop. If that delete fails (a file held open, a permission) or the
     process stops between the drop and the delete, the next open removes it: a `t{id}` directory that no table holds,
     whose id is below the catalog's table-id allocator. The open leaves it while the database has a branch, a restore
-    stopped part-way, or a point-in-time restore is pending (**BL-1255, next train**).
+    stopped part-way, or a point-in-time restore is pending (**BL-1255, 0.9.0**).
   - Default non-partitioned path uses `data/seg_*`.
   - No `_delta` path: late-arriving rows are flushed inline, and `_delta` is neither written nor read (**ColumnarRead, 0.3.0**).
   - A table's segments are the ones its catalog names; no read lists a directory, and a segment directory the

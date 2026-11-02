@@ -255,7 +255,7 @@ All `transforms` on one table must share one `kind`. `A → B → A` fails at **
 
 Insert a `kind=quote` row into `Ingest`: it is stored on `TradeQuote` only; subscribers to `Ingest` do not see it; subscribers to `TradeQuote` see one insert event. `tee` differs: the ingress row **is** stored, and copies go to every matching target.
 
-The landing is an insert by the caller. PLS and RLS run on the target row after derived columns and the identity stamp, and a refusal is the same `403` and code as `POST …/tables/{target}/rows` of that row. (**BL-1304, next train**)
+The landing is an insert by the caller. PLS and RLS run on the target row after derived columns and the identity stamp, and a refusal is the same `403` and code as `POST …/tables/{target}/rows` of that row. (**BL-1304, 0.9.0**)
 
 `route` predicates must be both **disjoint** and **exhaustive**:
 
