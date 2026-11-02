@@ -277,7 +277,7 @@ If you enable auth and keep defaults:
 Invariants:
 
 - App auth endpoints require API key when app auth database is linked.
-- `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`.
+- `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`. `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused (**BL-1281, next train**): create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls`.
 - Service-key + `X-User-Token` impersonation flow must still validate/revocation-check user token.
 - Only a credential that holds `all-partitions` / `all-rows` is lifted past PLS / RLS (**BL-1227, next train**); a principal
   without a user id and without those grants gets the deny-by-default context (no partition grants, a missing RLS key
@@ -423,7 +423,7 @@ Primary evidence:
 | Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-pls`, `auth-db-rls` | table create/update payload | Authorization mode per table |
 | Table `permissionDimension` | string? | `null` | non-empty when needed | table payload | Required for `auth-db-pls`; the grant namespace, selects no column |
 | Table `permissionColumn` | string? | `null` | a column of the table (exact name) | table payload | Required for `auth-db-pls`; refused with other modes (**BL-1176, 0.7.0**) |
-| Table `rlsResolverName` | string? | `null` | existing resolver name | table payload | Required for `auth-db-rls` |
+| Table `rlsResolverName` | string? | `null` | existing resolver name | table payload | Required for `auth-db-rls`. Refused on `jwt-claim`, including an omitted `authMode` (**BL-1281, next train**) |
 
 Precedence and operational notes:
 
@@ -624,7 +624,7 @@ Recommended tuning/operation sequence:
 | Sign-in keeps failing then returns account locked | Exceeded lockout threshold | Wait lockout duration or re-enable user via admin API |
 | User has new grants but behavior still old briefly | Cached permission context not yet refreshed for session | Trigger next request and verify `_permission_version` increment happened |
 | `auth-db-pls` table rejects write unexpectedly | Grant exists but `access_level` is read-only or partition key not granted | Update partition grant to proper key and `write` access level |
-| RLS seems ignored for a table | Resolver not attached or table mode misconfigured | Verify `rlsResolverName` and `authMode` in table schema, then retest with non-admin user |
+| RLS seems ignored for a table | The table is `jwt-claim`, or the resolver is not on a mode that takes one. `rlsResolverName` on `jwt-claim` (including an omitted `authMode`) is `400 INVALID_REQUEST` at create and options; schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, next train**) | Set `authMode` to `auth-db-rls` or `auth-db-pls` with `rlsResolverName`, then retest with a caller that does not hold `all-rows` |
 | Service key + `X-User-Token` request returns 401 | User token invalid/revoked/expired | Refresh user token and retry; ensure service key kind supports impersonation flow |
 
 ## 2.15 Verification ledger

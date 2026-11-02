@@ -84,8 +84,8 @@ application.
 | `CircuitBreakerPolicy` | `CircuitBreakerPolicy.Default` (opens after 5 failures in 30 s) | While open, calls fail at once with `CircuitBreakerOpenException`. `CircuitBreakerPolicy.Disabled` turns it off. |
 | `ServerAuth` / `AppAuth` | none | Server auth (`ServerAuthOptions`: `ApiKey`, `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`). Mutually exclusive. See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
 | `AutoCreateSchema` | `false` | Typed inserts create a missing table from the type. |
-| `AutoReconcileSchema` | `true` | Before the first typed write to a table, compare it with the type and change the table to match (see `ReconcilePolicy`). ⚠️ Set `false` for tables from `aouda.schema.json`: since **BL-1177 (next train)** the server refuses DDL on them, and the write fails with `AoudaSchemaException`. |
-| `ReconcilePolicy` | `Unsafe` | `Unsafe` adds missing columns **and drops every column the type does not declare**, including derived and server-stamped columns. `Safe` only adds. Bulk load never reconciles. See [Schema § what `InferenceMode` decides](../guides/schema.md#what-inferencemode-decides-and-what-it-does-not). |
+| `AutoReconcileSchema` | `true` | Before the first typed insert to a table, compare it with the type and change the table to match (see `ReconcilePolicy`). A typed update does not reconcile. (**BL-1178, next train**) ⚠️ Set `false` for tables from `aouda.schema.json`: since **BL-1177 (next train)** the server refuses DDL on them, and an insert that needs to add or drop a column fails with `AoudaSchemaException`. |
+| `ReconcilePolicy` | `Safe` | Default `Safe` only adds columns the row type has and the table lacks. `Unsafe` is opt-in and drops non-key columns a row type omits; a primary-key column stays. A typed update does not reconcile. (**BL-1178, next train**) Bulk load never reconciles. See [Schema § what `InferenceMode` decides](../guides/schema.md#what-inferencemode-decides-and-what-it-does-not). |
 | `TreatMissingAsEmpty` | `false` | A query on a missing table returns no rows instead of an error. |
 | `ConsistencyTokenStore` | in-memory, per client | Holds the read-your-writes token. Share one store between clients that must see each other's writes. See [Freshness](../guides/freshness.md). |
 
@@ -695,6 +695,26 @@ await foreach (var evt in client.NamedQueries.SubscribeAsync(
 The rows are the credential's grants, flag or not. The alternative is to bind the partition key in the definition's `where` clause: it
 needs no flag and works on the data-plane listener, where the flag is ignored
 ([`crossPartitionAccess` on the data-plane listener](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
+
+---
+
+## 8b) Which databases a sign-in opens (**BL-1018, next train**)
+
+An application sign-in gives a token that opens only its **allowance**: the databases of the auth database on which the user holds
+a role. `SignInAsync(email, password, deviceInfo, databases)` narrows it to the databases you name — never wider; a name the user
+holds no role on, or an empty list, is refused (`AoudaRequestException`, `400 INVALID_REQUEST`). Native sign-in narrows the same way
+with `AuthorizationCodeRequest.Databases`. The token's `aud` lists the allowance and its `iss` is the auth database's URL.
+
+```csharp
+// One sign-in for the two apps this front end serves
+await client.Auth.SignInAsync("alice@example.com", password, deviceInfo: "Alice's laptop",
+    databases: new[] { "orders", "reports" });
+```
+
+A token used at a database outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`. A **refresh** refused with that code ends
+the client's session like `AUTH_REFRESH_TOKEN_INVALID`: the SDK clears its tokens and raises `TokensChanged` with `SignedOut`, and the
+realtime transports stop reconnecting — sign in again for that database. See
+[the token allowance](../auth/reference.md#the-token-allowance).
 
 ---
 

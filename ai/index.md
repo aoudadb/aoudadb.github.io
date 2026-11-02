@@ -539,7 +539,7 @@ Recommended tuning sequence:
 | Service key request fails with `X-User-Token` error | User token expired/revoked/invalid | Refresh/reissue user token, retry |
 | Fan-out query returns too few rows | Missing partition grants for dimension | Add grants for missing partition keys |
 | Write denied on granted partition | Grant is `read` level only | Promote to `write`/`admin` access level |
-| RLS seems not applied | Table mode/resolver binding mismatch; or a resolver on a `jwt-claim` table, which is ignored; or the caller holds `all-rows` (a service key, a `db_admin` user, or a role grant) (**BL-1227, next train**) | Verify `authMode` and `rlsResolverName` on table; use the resolver on an `auth-db-rls` table; check what the caller holds with `GET …/auth/admin/users/{id}/access-grants` |
+| RLS seems not applied | The caller holds `all-rows` (a service key, a `db_admin` user, or a role grant) (**BL-1227, next train**), or the table is not a mode that takes a resolver. `rlsResolverName` on `jwt-claim` (including when `authMode` is omitted) is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, next train**) | Put the resolver on `auth-db-rls` or `auth-db-pls`; check what the caller holds with `GET …/auth/admin/users/{id}/access-grants` |
 | No full keys in create-database response | Keys already existed and are one-time display | Use `POST .../auth/admin/regenerate-keys` |
 
 ## 2.15 Verification ledger

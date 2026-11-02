@@ -212,7 +212,7 @@ Use a single dedicated auth database to issue and validate JWTs for multiple dow
                    │   Endpoints: /api/databases/auth/auth/.. │
                    └──────────────────────┬───────────────────┘
                                           │
-                          JWT (RS256, iss=.../auth, aud=auth)
+                          JWT (RS256, iss=.../auth, aud=[auth])
                                           │
               ┌───────────────────────────┼──────────────────────────┐
               ▼                           ▼                          ▼
@@ -224,12 +224,17 @@ Use a single dedicated auth database to issue and validate JWTs for multiple dow
 **How it works:**
 1. Create one `auth` database with `kind: "auth"`. No other databases needed.
 2. Auth endpoints are available at `/api/databases/auth/auth/...` — the `{db}` segment equals the auth database name.
-3. After signup/signin, JWTs are issued with `iss = {server}/api/databases/auth` and `aud = auth`.
+3. After signup/signin, JWTs are issued with `iss = {server}/api/databases/auth` and `aud = ["auth"]` — the token's allowance, an
+   array of the databases it may open (**BL-1018, next train**; `aud` was the string `"auth"`). A service validates the issuer and
+   checks that `aud` names the database it serves.
 4. Any downstream service validates the JWT against the OIDC discovery endpoint.
 
 **When to use:** Microservice architectures where auth is a separate concern; Auth0/Clerk replacement with self-hosted performance; organizations that want a single identity provider for multiple independent data services.
 
-**Every database linked to the auth database is one trust domain:** a refresh token or a native sign-in code issued at one gives a session at another ([use cases](use-cases.md#one-auth-database-is-one-trust-domain), BL-1018). Link only databases whose users may be signed in to all of them.
+**A token opens only its allowance** (**BL-1018, next train**): the databases linked to the auth database on which the user holds a
+role, or the part of them the sign-in named in `databases`. Every linked database's token carries the auth database's issuer; a
+token, refresh token or native sign-in code used at a database outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`. See
+[the token allowance](reference.md#the-token-allowance) and [use cases](use-cases.md#one-auth-database-is-one-trust-domain).
 
 **Setup:**
 

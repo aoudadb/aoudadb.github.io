@@ -402,7 +402,8 @@ batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered ta
   65,536 elements and 1 MiB of elements.
 - **An invalid array value is refused at `:append`**, `400 INVALID_REQUEST`, naming the table, column, frame and row. None of that
   frame's rows is applied, the frames before it stay, and the job stays open. (Under `applyTransforms` the values are checked at
-  `:commit`, where the transforms run: the refusal names the table, column and row, and nothing of the job is committed.)
+  `:commit`, where the transforms run: the refusal names the table, column and row, and nothing of the job is committed.
+  (**BL-1277, next train**) That refusal is `400` with the transform's own code, not `500`.)
 
   ```text
   400 INVALID_REQUEST
@@ -622,13 +623,15 @@ job's rows have ended and it holds its place in its tables' commit order, and th
 
 ```csharp
 var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { CommitWait = BulkLoadCommitWait.Accepted });
-// handle.State == BulkLoadCommitState.Accepted: not durable yet
-var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost
+// handle.State == BulkLoadCommitState.Accepted: not durable yet.
+// The outcome request started when this answer arrived (**BL-1140, next train**).
+var outcome = await handle.Outcome;   // Committed (rows, commit token) or Lost; a 404 after an hour throws
 ```
 
 ```typescript
 const handle = await client.table('trades').bulkLoad(batches, { commitWait: 'accepted' });
-const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
+// The outcome request started when this answer arrived (**BL-1140, next train**).
+const outcome = await handle.outcome;   // { state: 'committed' | 'lost' }; a 404 after an hour throws BulkLoadOutcomeUnknownError
 ```
 
 - ⚠️ **An accepted job is not durable and may be lost.** If the server stops before the job's commit point, or its commit fails,
@@ -638,12 +641,14 @@ const outcome = await handle.outcome;   // { state: 'committed' | 'lost', ... }
 - **A read with the handle's token waits until the job is visible** — on the primary, for the materialized queries over the loading
   tables, and on a replica — so reading your own load with the token never shows it half there. Do not read the outcome off the
   token: a lost job's token reads as covered once the log moves past it.
-- **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. After a
-  restart that cut the job off, the server answers it `lost`; once its log has moved past the job, `404` — the same answer for an
-  accepted job: load it again. ⚠️ Read the outcome promptly: a committed job's record is kept for at least an hour after its commit
-  (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer), and a `404` asked after that cannot tell a lost job from a committed one
-  the server has forgotten. A job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is
-  committed and its rows become visible at the next restart (note 6 below; **Lead group 7 review, 0.6.0**).
+- **The outcome comes from `GET {jobId}`**, which both SDKs ask with `waitMs` so they are answered when the job settles. They ask as
+  soon as the accepted answer arrives (**BL-1140, next train**). After a restart that cut the job off, the server answers `200`
+  `state: "lost"` with `BULK_LOAD_LOST`: load it again. Once its log has moved past the job, `404 BULK_LOAD_JOB_NOT_FOUND`. A `404`
+  within an hour of the accepted answer is still lost (nothing durable; load it again). A `404` after that hour cannot tell a lost job
+  from a committed one the server has forgotten, and the SDKs reject it as unknown rather than lost (**BL-1140, next train**). A
+  committed job's record is kept for at least an hour after its commit (or `Aouda:BulkLoad:IdempotencyWindowMinutes`, if longer). A
+  job whose commit point passed is never `lost`, even if work after it failed: like any such load, it is committed and its rows become
+  visible at the next restart (note 6 below; **Lead group 7 review, 0.6.0**).
 - **A `validation: "strict"` job's key check runs at its commit point, after the accepted answer**, so a key it holds twice or one the
   table already holds is its outcome: `GET {jobId}` answers `state: "failed"`, `errorCode: "BULK_LOAD_DUPLICATE_PK"`, and the SDKs
   raise what they raise for the same load without the accepted wait (`BulkLoadDuplicatePkException`; an `AoudaApiError` coded
@@ -987,7 +992,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |
 | `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
 | `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, 0.6.0**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-060). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
-| `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and the whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
+| `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and an identity column is refused the same way (`preTransformed` → `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`) (**BL-1278, BL-1170, next train**). The whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
 | `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, 0.1.40**). |
 | `Aouda:BulkLoad:SessionRetentionMinutes` | int | `10` | `>=1` | Server config | Retention for terminal sessions. |
@@ -1143,10 +1148,10 @@ Expected checks:
 
 ### Scenario 3: Operator force-abort of stuck job
 
-When to use: in-flight job is blocked and client path is no longer trusted.
+When to use: in-flight job is blocked and client path is no longer trusted. The call is allowed for the credential that began the job, or for a database admin who also holds `bulkload`. Another `bulkload` holder is `403 AUTHORIZATION_DENIED` and the job is not aborted (**BL-1278, BL-1170, next train**).
 
 Steps:
-1. Call `GET .../bulk-load:list` and identify active `jobId`.
+1. Call `GET .../bulk-load:list` and identify active `jobId` (the list contains only jobs this credential began).
 2. Call `POST .../bulk-load:force-abort` with `jobId` and reason.
 3. Confirm `GET .../{jobId}` returns `aborted`.
 

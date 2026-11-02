@@ -308,7 +308,10 @@ Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissi
 - `ResolveVectorAccess` calls `AdraVectorAccessFilter` similarly.
 - An empty allowed-partition set returns an empty result immediately (deny-by-default).
 - `null` permissions means embedded mode, with no auth context: unrestricted on a table no auth database governs, and **empty** on an
-  `auth-db` PLS table or a table with an RLS resolver (BL-950). A service key's context is not `null`: it holds the grants. PLS is lifted by the `all-partitions` grant and RLS by `all-rows`, independently, so a credential holding one is still restricted by the other. On a `jwt-claim` PLS table, graph and vector reads return nothing to a credential without `all-partitions` (BL-1279). Graph and vector reads are not audited yet (BL-1289), so they write no `access_grant_used` row. (**BL-1227, next train**)
+  `auth-db` PLS table or a table with an RLS resolver (BL-950). A service key's context is not `null`: it holds the grants. PLS is lifted by the `all-partitions` grant and RLS by `all-rows`, independently, so a credential holding one is still restricted by the other. On a `jwt-claim` PLS table, graph traversal, k-hop, shortest path, and nearest-neighbour search scope a tenant to the bound claim and no other partition, and a claim-routed scan skips unpartitioned segments. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`. `all-partitions` at `read` sees every partition, including unpartitioned segments. A null permission context returns nothing. (**BL-1279, next train**) A grant that widened the read writes one `access_grant_used` row per grant (`operation` `graph` or `vector`, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, next train**) (**BL-1227, next train**)
+- A credential that holds an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) on the
+  table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
+  and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, next train**)
 
 **Key invariant:** Filtered ANN layer 1 (partition pruning) and ADRA PLS partition grants are the same mechanism — ADRA grants narrow which partitions the ANN scan considers, at no extra cost.
 
@@ -455,7 +458,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
-| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, next train**; it was "no partition" in one place and a partition in another) |
+| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, next train**; it was "no partition" in one place and a partition in another). `null` on an `auth-db-pls` table is `403 AUTH_PLS_GRANT_NOT_FOUND` unless the caller holds `all-partitions` at `write` (**BL-1204, next train**) |
 
 ### NearestNeighborsAsync query parameters
 
@@ -826,7 +829,7 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | `ShortestPathAsync` is slow or returns a long path | `StoreCsc: false`; using unidirectional BFS | Re-create the edge table with `StoreCsc: true` for bidirectional BFS (requires data reload) |
 | ANN recall is low | Too few IVF cells probed relative to corpus distribution | Increase `IvfCells` (requires recreating column config); or verify `partitionKey` is not too restrictive |
 | Edge traversal returns unexpected nodes | Cross-partition traversal not supported in Stage 1; edges from other partitions not reachable from a cross-partition query | Ensure the start node's partition is accessible and edges are routed to the same partition as their source |
-| Traversal or `:nearest` returns nothing | `permissions` non-null with no partition grants for this table, a `jwt-claim` PLS table read without `all-partitions` (BL-1279), or `permissions = null` on an auth-db-governed table | Verify ADRA PLS grants are configured for the calling user; or give the caller the `all-partitions` grant (a service key and a `db_admin` user hold it); `permissions = null` is embedded mode only (**BL-1227, next train**) |
+| Traversal or `:nearest` returns nothing | `permissions` non-null with no partition grants, a `jwt-claim` PLS read whose bound claim is not that partition, or `permissions = null` on a jwt-claim PLS table or an auth-db-governed table | A tenant sees only its bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`, not an empty `200`. `all-partitions` at `read` sees every partition (**BL-1279, next train**). `permissions = null` is embedded mode only (**BL-1227, next train**) |
 
 ---
 

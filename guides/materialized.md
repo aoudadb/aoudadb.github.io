@@ -319,6 +319,14 @@ the resolver allows — and a result over a `jwt-claim` source is read whole by 
 result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
 See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
+(**BL-418, next train**) **An embargo holder cannot read a result over the embargoed table.** A result is computed once for every
+reader, so it cannot be cut by one caller's delay: its query endpoint, a `/query` or named query that names it, and a subscription to
+it answer `403 AUTH_EMBARGO_UNSUPPORTED` to a credential holding an
+[embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) on the source (or on the result table).
+The holder's reads of the source table itself work, with the cutoff applied as any read's security is — a read the server routes
+to a result carries that cutoff as part of its question, and is answered from the result only where the routing rules below prove
+the answer equal.
+
 ## 2.4 Availability status (implementation honesty)
 
 ### Available now
@@ -1970,7 +1978,9 @@ Monitor first:
   stored rows changed since it (a compaction, or a stored row replaced since; (**WorkloadCore S11, 0.3.0**) a flush
   alone no longer counts — the checkpoint is retaken when the result's segments move). A query over another query's result
   is rebuilt from that result whenever its upstream took writes after the checkpoint. A database without a log restores
-  results only after a clean shutdown.
+  results only after a clean shutdown. A `filter` over a table without a primary key
+  is restored from its checkpoint only when its source took no write since it; otherwise it is rebuilt (its rows have no key, so
+  they cannot be rewritten idempotently on a replica) (**ColumnarMerge S08, 0.2.0**).
 - (**WorkloadCore S11, 0.3.0**) **Opening a database never rebuilds a query.** Before, the open rebuilt every query it
   could not restore, one after another, before the database came up — so a restart took as long as scanning every
   source once per query. Now the open restores what it can and returns; the others come back **behind and `Building`**

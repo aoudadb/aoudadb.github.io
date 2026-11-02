@@ -121,10 +121,10 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | Endpoint | Method | Auth Required | Description |
 |----------|--------|---------------|-------------|
 | `.../auth/signup` | POST | None (public POST; 403 `AUTH_SIGNUP_DISABLED` unless `allowSelfSignup`) | Register a new user |
-| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens. Optional `deviceInfo`: your description of the device, at most 512 UTF-8 bytes, shown in the session list (**NativeClients, 0.4.0**) |
-| `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token |
+| `.../auth/signin` | POST | API key (anon or higher) | Sign in, receive tokens. Optional `deviceInfo`: your description of the device, at most 512 UTF-8 bytes, shown in the session list (**NativeClients, 0.4.0**). Optional `databases`: the databases the token may open — see [The token allowance](#the-token-allowance) (**BL-1018, next train**) |
+| `.../auth/refresh` | POST | API key (anon or higher) | Refresh access token. The new token keeps the session's allowance; a refresh at a database outside it is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` and does not spend the refresh token (**BL-1018, next train**) |
 | `.../auth/signout` | POST | User JWT | End **this** session (**NativeClients, 0.4.0**) — it ended every session of the user. Optional body `{ "scope": "local" \| "others" \| "global" }`: `others` ends every other session and keeps this one, `global` ends all. See [Sessions are devices](#sessions-are-devices) |
-| `.../auth/authorize` | POST | User JWT | Native sign-in, step 1 (**NativeClients, 0.4.0**): issue a single-use code for a registered native client. Body `{ clientId, redirectUri, codeChallenge, codeChallengeMethod: "S256", state? }` → `{ code, state, redirectTo, expiresIn: 60, aal }`. See [Native sign-in](#native-sign-in-through-the-browser) |
+| `.../auth/authorize` | POST | User JWT | Native sign-in, step 1 (**NativeClients, 0.4.0**): issue a single-use code for a registered native client. Body `{ clientId, redirectUri, codeChallenge, codeChallengeMethod: "S256", state?, databases? }` → `{ code, state, redirectTo, expiresIn: 60, aal }`. `databases` (**BL-1018, next train**) narrows the code's allowance to part of the caller's; omitted, the code carries the caller's whole allowance. See [Native sign-in](#native-sign-in-through-the-browser) |
 | `.../auth/token` | POST | None (public) | Native sign-in, step 2 (**NativeClients, 0.4.0**): redeem the code. Body `{ grantType: "authorization_code", code, codeVerifier, clientId, redirectUri, deviceInfo? }` → the sign-in response, a **new session** at the code's `aal` |
 | `.../auth/sessions` | GET | User JWT | The caller's sessions, one per device (**NativeClients, 0.4.0**): `{ "sessions": [{ id, deviceInfo, userAgent, ipAddress, createdAt, lastSeenAt, aal, current }] }`, most recently used first |
 | `.../auth/sessions/{id}` | DELETE | User JWT | End one of the caller's sessions — sign another device out (204) (**NativeClients, 0.4.0**). Another user's session, or an unknown id: `404 AUTH_SESSION_NOT_FOUND` |
@@ -132,10 +132,10 @@ All endpoints under `/api/databases/{db}/auth/...`.
 | `.../auth/me` | PATCH | User JWT | Update user metadata |
 | `.../auth/password` | PUT | User JWT | Change password |
 | `.../auth/request-password-reset` | POST | API key (anon or higher) | Request a 6-digit OTP emailed to the user; always returns 200 |
-| `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success |
+| `.../auth/reset-password` | POST | API key (anon or higher) | Submit OTP + new password; returns token pair on success. Optional `databases`, as on sign-in; a `databases` the allowance rule refuses is `400` and leaves the OTP usable (**BL-1018, next train**) |
 | `.../auth/mfa/enroll` | POST | User JWT | Enrol a TOTP or phone MFA factor. Phone enrol is idempotent per-user: a second call returns 409 `AUTH_MFA_FACTOR_ALREADY_ENROLLED` if a phone factor already exists (same or different number). To replace a number: `DELETE .../auth/mfa/factors/{id}` then enrol again |
 | `.../auth/mfa/challenge` | POST | User JWT | Create a challenge for an enrolled factor; sends SMS for phone factors |
-| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success. The `aal2` session **replaces** the one verified from (**NativeClients, 0.4.0**): the same device, its `deviceInfo` kept unless the request gives `deviceInfo` |
+| `.../auth/mfa/verify` | POST | User JWT | Submit OTP or TOTP code; returns new token pair with `aal2` on success. The `aal2` session **replaces** the one verified from (**NativeClients, 0.4.0**): the same device, its `deviceInfo` kept unless the request gives `deviceInfo`, and its allowance kept — never widened (**BL-1018, next train**) |
 | `.../auth/mfa/factors` | GET | User JWT | List enrolled MFA factors |
 | `.../auth/mfa/factors/{id}` | DELETE | User JWT | Delete an enrolled MFA factor |
 
@@ -161,9 +161,38 @@ This applies to connections opened with a user's token; one opened with an API k
 > **Signing out is per device now.** A client that called `signout` to sign the user out *everywhere* must send
 > `{ "scope": "global" }`.
 
-⚠️ **A session is not bound to the database it was opened at** (**BL-1018**, open). Its refresh token refreshes at any database
-linked to the same auth database, and at the auth database's own path, for a session there. Databases that share an auth database
-are one trust domain: see [who should share one](use-cases.md#one-auth-database-is-one-trust-domain).
+#### The token allowance
+
+(**BL-1018, next train**) Every application token, its refresh-token family and every native sign-in code carry an **allowance**: the
+set of databases they may open, at most 64. The access token's `iss` is the **auth database's** URL
+(`{base_url}/api/databases/{authDb}`), whichever database's path minted or refreshed it, and its `aud` is the allowance, always a JSON
+array. A token is accepted at a database when that database's auth database issued it and the database is the auth database itself or
+is in the allowance. Anywhere else it is refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` — on HTTP, on the WebSocket handshake and
+`re_auth`, on a long-poll connect, and as an `X-User-Token` beside a service key.
+
+- **Sign-in and password reset** give the databases of this auth database (it and every database linked to it) on which the user holds
+  a role — an assignment scoped to that database, or one with no scope (every database). A user who holds a role on none of them is
+  refused `403 AUTHORIZATION_DENIED`: an allowance is never empty, and there is no fallback to every linked database. This holds at
+  the auth database's own path too. An administrator who creates a user must assign a role before that user can sign in.
+- **`databases`** in the request narrows that set; it never widens it. A name the user holds no role on, a database not linked to this
+  auth database, an unknown name, a blank name, an empty array or more than 64 names is `400 INVALID_REQUEST` — nothing is dropped
+  silently, and nothing is minted. The check runs after the password is verified, so it reveals nothing about an account. A user with
+  roles on more than 64 databases must name the ones it needs.
+- **Signup** gives the database signed up on (the self-signup role is scoped to it); a `databases` field is ignored.
+- **Refresh** keeps the family's allowance. A refresh at a database outside it (other than the auth database) is
+  `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` before the refresh token is spent, so the same token still refreshes where it belongs.
+- **MFA verify and step-up** keep the session's allowance; they never widen it.
+- **Native sign-in.** `authorize` stores the caller's allowance on the code, or the part of it `databases` names (a name outside it,
+  or an empty array, is `400`). A code redeemed at a database outside its allowance is refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`
+  and is spent — start again.
+- **Unlinking** a database from the auth database takes it out of every allowance at once: a token or family that names it no longer
+  opens it. Stored allowances are not rewritten; naming an unlinked database opens nothing. A database linked later is not in any
+  existing allowance — the user signs in again to reach it.
+
+Server-auth tokens (`/api/auth/signin`, setup) are unchanged: they carry no allowance and keep their issuer and audience.
+
+One sign-in covering several applications is the allowance doing its job: either accept the role-derived default, or name the
+databases with `databases`. See [one auth database is one trust domain](use-cases.md#one-auth-database-is-one-trust-domain).
 
 #### Native sign-in through the browser
 
@@ -198,9 +227,9 @@ was ended). A failed redemption spends the code — start again. At `authorize`:
 `AUTH_REDIRECT_URI_NOT_REGISTERED`, `AUTH_PKCE_METHOD_UNSUPPORTED` (`S256` only), `AUTH_PKCE_CHALLENGE_INVALID`. Both endpoints share
 sign-in's rate limit.
 
-⚠️ **A code is not bound to the database it was created at** (**BL-1018**, open): a code from `authorize` at one database can be
-redeemed at `token` on any database linked to the same auth database, or at the auth database's own path. See
-[one auth database is one trust domain](use-cases.md#one-auth-database-is-one-trust-domain).
+A code carries an allowance (**BL-1018, next train**): the web session's, or the part of it `authorize`'s `databases` names. Redeemed
+at a database outside it, the code is refused `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` and spent. See
+[the token allowance](#the-token-allowance).
 
 > **MFA endpoints require a user JWT** — the access token returned from sign-in. Send `Authorization: Bearer <accessToken>` directly; no API key is required or expected. If you are building a BFF that proxies MFA requests, forward the user JWT unchanged in `Authorization` — do not replace it with your service key. See [§14 — BFF / Gateway Proxying Auth Endpoints](client-integration.md#14-bff--gateway-proxying-auth-endpoints).
 
@@ -247,7 +276,7 @@ Signin response for a user with `forcePasswordChange` set:
 
 ### Application Auth Admin Endpoints
 
-All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
+All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `service_role` key, a `db_admin` user, or a server key (`mk_srv_`) — may call every one. A restricted admin may call the ones that do not raise its reach (**BL-1240, next train**): the seeded system role `db_operator` (it administers without the implied all-partitions / all-rows grants), a custom role with `admin`, and an `mk_adm_` key on the user-management routes. Assigning `db_admin` or an all-* grant, changing a role that carries one, renaming a role to or from `db_admin`, writing an RLS resolver, regenerating keys, minting a privileged key, and writing a user who already holds those grants on any database its auth database governs are `403 AUTHORIZATION_DENIED` and need `db_admin`. The other seeded system roles are `db_admin`, `db_writer`, `db_reader`, `anonymous` and `public`.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -266,11 +295,11 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `.../admin/sessions/user/{userId}` | DELETE | End every session of a user (access and refresh, as disable does) |
 | `.../admin/users/{id}/roles` | GET | List user's roles |
 | `.../admin/users/{id}/roles` | PUT | Replace user's role assignments: `{ "roles": [{ "roleName", "scope" }] }`; an item that names no role is skipped, and the old assignments are still replaced |
-| `.../admin/users/{id}/access-grants` | GET | The `all-partitions` / `all-rows` grants the user holds on a database, with their source: `?database=` (required on an auth database's route). An auth-admin key (`mk_adm_`) may call it (**BL-1227, next train**) |
+| `.../admin/users/{id}/access-grants` | GET | The `all-partitions` / `all-rows` grants the user holds on a database, with their source: `?database=` (required on an auth database's route). An auth-admin key (`mk_adm_`) may call it (**BL-1227, next train**). Also lists the user's `embargoes` there (**BL-418, next train**) |
 | `.../admin/users/{id}/claims` | GET | List custom claims minted onto the user's JWT |
 | `.../admin/users/{id}/claims` | PUT | Replace custom claims (`{ "claims": { "tenant_id": "acme" } }`). Empty object clears. `AUTH_CLAIM_INVALID` on a blank key, a nested name, or a reserved name (`sub`, `email`, `iss`, `aud`, `iat`, `exp`, `nbf`, `aal`, `db_roles`, and the authenticator names `auth_type`, `api_key_kind`, `api_key_id`, `api_key_prefix`, `api_key_name`, `aouda_auth_db` — **BL-1031, 0.5.0**) |
 | `.../admin/roles` | GET | List roles |
-| `.../admin/roles` | POST | Create custom role. A permission may be an access grant (`all-partitions` / `all-rows`, **BL-1227, next train**) |
+| `.../admin/roles` | POST | Create custom role. A permission may be an access grant (`all-partitions` / `all-rows`, **BL-1227, next train**) or an `embargo` (**BL-418, next train**) |
 | `.../admin/roles/{id}` | PATCH | Update role (a `permissions` array, when sent, replaces the role's permissions) |
 | `.../admin/roles/{id}` | DELETE | Delete custom role |
 | `.../admin/api-keys` | GET | List API keys |
@@ -294,6 +323,18 @@ These routes take a **server key** (`mk_srv_`), not `mk_svc_` and not a `db_admi
 | DELETE | `/api/databases/{db}/service-keys/{name}` | Revoke every live row of that name |
 | POST | `/api/databases/{db}/service-keys/{name}/rotate` | New secret. `{ "overlapSeconds" }` `0` revokes now; a positive value leaves the old secret valid until `validUntil` |
 | POST / GET / DELETE / POST `…/rotate` | `/api/databases/{authDb}/auth-admin-keys` | The same, for `mk_adm_` on an application auth database |
+
+#### Scoped service keys (**BL-1239, next train**)
+
+Same caller as the table above: a server key (`mk_srv_`). `{db}` is a linked application database. The body is `{ name, roles, expiresAt? }`. `roles` is one or more role names in that database's auth database; each is stored with scope `{db}`. `db_admin`, `db_operator`, `anonymous` and `public` are `400`, and so is an unknown role. The key (`mk_scp_`) holds those roles' access grants on `{db}` and no implied pair. It never administers `{db}`: every `…/auth/admin/…` route is `403 INSUFFICIENT_PERMISSIONS`, even when one of its roles carries `admin`. Rotate keeps the roles.
+
+| Method | Path | What |
+|--------|------|------|
+| POST / GET | `/api/databases/{db}/scoped-service-keys` | Mint / list. The list items include `roles` |
+| DELETE | `/api/databases/{db}/scoped-service-keys/{name}` | Revoke every live row of that name |
+| POST | `/api/databases/{db}/scoped-service-keys/{name}/rotate` | New secret, same roles. `{ "overlapSeconds" }` as for service keys |
+
+`POST …/auth/admin/api-keys` with `kind: "scoped_service"` is `400`. `GET` and `POST /api/databases` with an `mk_scp_` key — live or only the prefix — are **403** `AUTH_KEY_ROUTE_MISMATCH`.
 
 `mk_adm_` is accepted on that auth database's user, grant, session, audit, and MFA admin routes. It is not `service_role` (PLS / RLS stay enforced) and it cannot mint keys, regenerate system keys, define roles, change signup settings, or edit RLS. Call those routes as `/api/databases/{authDb}/auth/admin/…`.
 
@@ -411,7 +452,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 |-------|------|----------|-------|
 | `name` | string | **Yes** | Unique role name. |
 | `description` | string | No | |
-| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (`"table"` by default; `"all-partitions"` or `"all-rows"` for an access grant — anything else is `400 AUTH_GRANT_INVALID`, where up to 0.8.0 any string was stored), `resourceName` (default `"*"` for a `table` permission), `actions` (**string**, e.g. `"read"` or `"read,write"`). For an access grant `resourceName` and `actions` are **required** — `*` or a table name, and exactly one of `read`, `write`, `admin` — and a system role cannot carry one (**BL-1227, next train**). |
+| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (`"table"` by default; `"all-partitions"` or `"all-rows"` for an access grant — anything else is `400 AUTH_GRANT_INVALID`, where up to 0.8.0 any string was stored), `resourceName` (default `"*"` for a `table` permission), `actions` (**string**, e.g. `"read"` or `"read,write"`). For an access grant `resourceName` and `actions` are **required** — `*` or a table name, and exactly one of `read`, `write`, `admin` — and a system role cannot carry one (**BL-1227, next train**). `"embargo"` delays one table for the role's holders: `resourceName` a table with a row time (not `*`), `actions` whole seconds from `1` to `2678400` ([§19.8b](authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train); **BL-418, next train**). |
 
 ```json
 {
@@ -426,7 +467,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 **400 `INVALID_REQUEST`:** missing `name`, duplicate name, or malformed JSON. Body is `{ "error", "message", "suggestion", "requestId" }` — log it. `permissions` is not required.
 
-**400 `AUTH_GRANT_INVALID`, `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`** (**BL-1227, next train**): a refused access grant — an unknown `resourceType`, a missing or multiple level, a missing `resourceName`, a `null` entry or a system role; a table the database does not have; a table with no PLS (`all-partitions`) or no RLS resolver (`all-rows`). Nothing is written. The request shapes, messages and worked example are in [§19.8a of Data Authorization](authorization.md#198a-admin-api-access-grants-on-roles).
+**400 `AUTH_GRANT_INVALID`, `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`** (**BL-1227, next train**): a refused access grant — an unknown `resourceType`, a missing or multiple level, a missing `resourceName`, a `null` entry or a system role; a table the database does not have; a table with no PLS (`all-partitions`) or no RLS resolver (`all-rows`). For an `embargo` (**BL-418, next train**): a blank or `*` table, a delay outside 1–2678400 whole seconds, a system role, a table the database does not have, or a table with no row time. Nothing is written. The request shapes, messages and worked example are in [§19.8a of Data Authorization](authorization.md#198a-admin-api-access-grants-on-roles).
 
 **`POST .../admin/api-keys`** — Create a `custom` API key. Returns `201 Created`. The raw key is returned **only in this response** — it is stored hashed, and cannot be recovered later.
 
@@ -455,7 +496,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 **`GET .../admin/api-keys`** — Lists keys (wrapped: `{ "apiKeys": [...] }`). Never returns the raw `key`, only `keyPrefix`. Each item includes `userId` (`null` for an unlinked key) so an operator can see which user's grants a given key inherits without cross-referencing the grants table separately.
 
-**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name. Filter matching is **case-sensitive** (same as grant create / PLS check): `?dimension=source` will not list a grant stored as `"Source"`. See [Data Authorization §19.8](authorization.md#198-admin-api-partition-grants).
+**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name. The filter is exact (**BL-430, next train**): `?dimension=source` lists the grants stored as `source`, and a capitalised name lists none of those. A name an older build stored with a capital is listed only by that spelling. See [Data Authorization §19.8](authorization.md#198-admin-api-partition-grants).
 
 ```json
 {
@@ -479,13 +520,13 @@ To add a single role without dropping existing roles, first `GET` current roles,
 
 ### ADRA Admin Endpoints
 
-All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role` API key, `db_admin` user JWT, or server admin token.
+All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `service_role` key, a `db_admin` user, or a server key (`mk_srv_`) — may call every one. A restricted admin may call the ones that do not raise its reach (**BL-1240, next train**): the seeded system role `db_operator` (it administers without the implied all-partitions / all-rows grants), a custom role with `admin`, and an `mk_adm_` key on the user-management routes. Assigning `db_admin` or an all-* grant, changing a role that carries one, renaming a role to or from `db_admin`, writing an RLS resolver, regenerating keys, minting a privileged key, and writing a user who already holds those grants on any database its auth database governs are `403 AUTHORIZATION_DENIED` and need `db_admin`. The other seeded system roles are `db_admin`, `db_writer`, `db_reader`, `anonymous` and `public`.
 
 **Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-partition-grants)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` must match the table's `permissionDimension` byte-for-byte (case-sensitive); the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). A casing mismatch still 201s and never matches at check time (BL-430). `partitionKey` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, next train**) |
+| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` is lower case and must match the table's `permissionDimension` byte-for-byte; the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). An upper-case letter is `400 AUTH_GRANT_INVALID` and the message gives the lower-case spelling (**BL-430, next train**). `partitionKey` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, next train**) |
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 
@@ -510,9 +551,10 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. Require `service_role`
 | `AUTH_TOKEN_MISSING` | 401 | No `Authorization` header on a protected endpoint | Add `Authorization: Bearer <token>` header |
 | `AUTH_TOKEN_INVALID` | 401 | Token is malformed or has an invalid signature — or (**BL-980, 0.4.0**) an application database's token whose `iss` is not the database's URL issuer (the `"aouda"` issuer is no longer accepted beside it) | Discard token; force re-sign-in |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired | Use refresh token to get a new access token |
+| `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, next train**) The token is valid, but its allowance (`aud`) does not include this database — on HTTP, the realtime handshake and `re_auth`, `X-User-Token`, a refresh, or a native code's redemption (which spends the code). A refused refresh does not spend its refresh token | Do not retry. Sign in again — naming this database in `databases` if the default does not include it — or use the token at a database it was issued for. If the user holds no role on this database, an administrator must assign one |
 | `AUTH_TOKEN_REVOKED` | 401 | Token was revoked — the session signed out or was ended by an administrator, the account was disabled, or the password changed. Also sent on an open WebSocket as `auth_error` (**NativeClients, 0.4.0**) | Redirect to sign-in |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. If you still see it, you are talking to a pre-BL-355 server. Post-sign-in endpoints (`me`, `signout`, `mfa/*`, `password`) return `AUTH_TOKEN_MISSING` when no JWT is sent. |
-| `AUTH_API_KEY_INVALID` | 401 | API key is not recognized, revoked, or expired | Regenerate via the admin regenerate-keys endpoint. A live `mk_svc_` / `mk_adm_` on `GET`/`POST /api/databases` is **403** `AUTH_KEY_ROUTE_MISMATCH`, not this code (**BL-1128**). |
+| `AUTH_API_KEY_INVALID` | 401 | API key is not recognized, revoked, or expired | Regenerate via the admin regenerate-keys endpoint. A live `mk_svc_` / `mk_scp_` / `mk_adm_` on `GET`/`POST /api/databases` is **403** `AUTH_KEY_ROUTE_MISMATCH`, not this code (**BL-1128**; `mk_scp_` is **BL-1239, next train**). |
 | `AUTH_ACCOUNT_DISABLED` | 423 | (**NativeClients, 0.4.0**) A refresh for an account an administrator disabled. Nothing the account held refreshes | Sign out locally; tell the user the account is disabled |
 | `AUTH_REFRESH_TOKEN_INVALID` | 401 | Refresh token is expired, revoked, or reused (theft detected). Also the losing call of two concurrent refreshes with one token (**BL-841, 0.3.0**): it revokes the family, including the token the winning call received. A reuse ends the whole session (**NativeClients, 0.4.0**): its access tokens are refused too (`AUTH_TOKEN_REVOKED`) | Redirect to sign-in; entire token family is invalidated. Refresh a shared session from one place only. (**BL-980, 0.4.0**) Also a refresh token whose stored `aal` is missing or not `aal1` / `aal2` — only an older build left one; it is not read as an `aal1` session |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | (**BL-841 / BL-850, 0.3.0**) The server is out of capacity for this request: a refresh, sign-in, sign-up, password set / change / reset, or an admin user write. `Retry-After` is set. Nothing was changed — a refused refresh leaves its refresh token live. (**BL-944, 0.4.0**) Also a bearer JWT whose check was refused (it was `401 AUTH_TOKEN_INVALID`), a password reset refused at the hash and an MFA verify refused after its code was accepted: the reset OTP and the MFA challenge (and a backup code) stay usable — and a reset whose new password is too weak no longer spends its OTP. (**NativeClients, 0.4.0**) Also a native sign-in's `POST …/auth/token`: the code is put back, so the same code and verifier can be retried within its 60 s | Retry the **same** request (the same refresh token, OTP, challenge or code) after `Retry-After`. (**BL-944, 0.4.0**) A sign-up refused part-way — after its user was written, at the role grant — is rolled back, so its retry succeeds instead of finding the email taken |
@@ -589,8 +631,16 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
-| `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate | Insert a row whose fields fall within the user's RLS scope |
-| `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope | Update only fields that keep the row visible to the user |
+| `AUTH_RLS_INSERT_VIOLATION` | 403 | Inserted row does not satisfy the resolved RLS predicate. A null cell does not satisfy the predicate when the operator is `ne`, `lt`, or `lte` (**BL-1251, next train**) | Insert a row whose fields fall within the user's RLS scope |
+| `AUTH_RLS_UPDATE_SET_VIOLATION` | 403 | UPDATE `SET` values would move the row outside the RLS predicate scope. A null cell does not satisfy the predicate when the operator is `ne`, `lt`, or `lte` (**BL-1251, next train**) | Update only fields that keep the row visible to the user |
+| `BATCH_RLS_PREFIX_APPLIED` | 403 | A `rows/batch` update's RLS write check refused operation `k` ≥ 1. Operations `0` to `k − 1` were applied; the refused row was not written. No `Retry-After`. Do not re-send the batch as-is. A refusal of the first operation is `AUTH_RLS_UPDATE_SET_VIOLATION` and applies nothing (**BL-1303, next train**) | Read what was stored and send a new batch for what is still legal. Do not re-send this batch |
+
+### Embargo Errors (**BL-418, next train**)
+
+| Error Code | HTTP | Meaning | Action |
+|------------|------|---------|--------|
+| `AUTH_EMBARGO_UNSUPPORTED` | 403 | The caller holds an [embargo](authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) on the table and the surface cannot apply its cutoff: a write, a materialized query, graph traversal, vector search or a branch query (a write that names no table is refused for any embargo holder) | Read the table through the query or subscription API; write with a credential that holds no embargo |
+| `SUBSCRIPTION_EMBARGO_RESET` | WS error | An embargoed subscription ended: its hold reached `Aouda:Streaming:EmbargoHoldMaxEvents`, or the caller's embargo on the table changed | Subscribe again, fresh (no `resume_from`); `@aouda/client` does this itself |
 
 ### ADRA Partition Grant Admin Errors
 
@@ -598,9 +648,9 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 |------------|------|---------|--------|
 | `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
 | `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
-| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant | For a partition grant, check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, next train**) |
-| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission names a table no governed database has (case-sensitive) | Fix the table name, or use `*` (**BL-1227, next train**) |
-| `AUTH_GRANT_NOT_APPLICABLE` | 400 | The named table lacks the security the grant lifts (no PLS for `all-partitions`, no RLS for `all-rows`) | Drop the grant; it would lift nothing (**BL-1227, next train**) |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant or embargo | For a partition grant, check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, next train**); for an `embargo`, one table and whole seconds 1–2678400 (**BL-418, next train**) |
+| `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table no governed database has (case-sensitive) | Fix the table name, or use `*` for a grant (**BL-1227, next train**; embargo **BL-418, next train**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | The named table lacks the security the grant lifts (no PLS for `all-partitions`, no RLS for `all-rows`), or has no row time for an `embargo` | Drop the grant; it would lift nothing (**BL-1227, next train**). An embargo needs a first cluster column of type `Timestamp` or `Date` (**BL-418, next train**) |
 
 ### ADRA RLS Resolver Admin Errors
 
@@ -650,6 +700,7 @@ try {
 
 - **`anon` keys** (`mk_anon_`) are safe to embed in frontend code — they grant limited access only.
 - **`service_role` keys** (`mk_svc_`) must be kept secret — they hold `all-partitions` and `all-rows` on their database, so they read and write every row of every table (**BL-1227, next train**).
+- **Scoped service keys** (`mk_scp_`) must be kept secret too. They hold only the roles they were minted with, on that one database, and not the implied pair (**BL-1239, next train**).
 - **Server keys** (`mk_srv_`) must be kept secret and stored in environment variables.
 - **What each key may read (**0.4.0**; **BL-1227, next train**):** a key sees past partition- and row-level security only
   through the access grants it holds. The `service_role` key (`mk_svc_`) holds both on its database, by implication. Every other key
@@ -708,7 +759,7 @@ stream whose outcome an `all-partitions` or `all-rows` grant decided, by any cre
 | `action` | `access_grant_used` |
 | `resource` | `{database}/{table}` |
 | `user_id` | The user, or for a key without a user the key's own id |
-| `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
+| `detail` | A JSON object: `grant` (`all-partitions` or `all-rows`), `scope` (`database` or `table`), `level`, `source` (`implied:service_key`, `implied:db_admin` or `role:<name>`), `surface` (`http`, `ws`, `long-poll`, `bulk-load`), `operation` (`query`, `count`, `named-query`, `materialized-query`, `graph`, `vector`, `insert`, `update`, `delete`, `bulk-load`, `truncate`, `seed`, `subscribe`, `rekey`), `table`, and `subscriptionId`, `jobId` or `streamId` when there is one |
 
 - A row is written only when a grant **decided** the outcome: the table has the restriction the grant lifts (PLS for `all-partitions`, an RLS
   resolver for `all-rows`). For a read, the row is written only when neither half denied it; a write is recorded when its gate is
@@ -721,7 +772,7 @@ stream whose outcome an `all-partitions` or `all-rows` grant decided, by any cre
   stream (again when the grants that decide it change). **Never one per live event.** An upsert is an `insert`.
 - It goes to the auth database that governs the data, else to the one that authenticated the credential. The write is best-effort: a failure is
   logged and never fails the request.
-- `crossPartitionAccess` on its own writes nothing: it is a cost waiver, not a grant. Graph and vector reads are not audited yet (BL-1289).
+- `crossPartitionAccess` on its own writes nothing: it is a cost waiver, not a grant. Graph traversal, k-hop, shortest path, and nearest-neighbour search write one row per grant that widened the read (`operation` `graph` or `vector`, the edge or vector table, once per request). A tenant's claim-scoped read, a refused read, and a table without the restriction write none. (**BL-1289, next train**)
 - Read them with `GET …/auth/admin/audit-log?action=access_grant_used` (`from`, `to`, `userId`, `limit`, `offset` also filter).
 
 ---
@@ -743,9 +794,9 @@ Aouda Application Auth exposes standard OIDC Discovery and JWKS endpoints so any
 | OIDC Discovery | `GET /api/databases/{db}/auth/.well-known/openid-configuration` |
 | JWKS (public keys) | `GET /api/databases/{db}/auth/.well-known/jwks.json` |
 
-Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database.
+Both endpoints are **publicly accessible** — no API key or JWT required. The discovery document contains the `issuer` value, which matches the `iss` claim in all new JWTs for that database. (**BL-1018, next train**) The issuer is the **auth database's** URL: the document at a database linked to a separate auth database names that auth database, the same issuer every database linked to it advertises.
 
-> **Only that issuer is accepted** (**BL-980, 0.4.0**). A request on a database path validates a JWT against the database's URL issuer (and, for a database linked to a separate auth database, that auth database's URL issuer) — nothing else. Builds up to 0.3.x also accepted the default issuer `"aouda"` beside it; a token carrying it on a database path is now `401 AUTH_TOKEN_INVALID`, so a client holding one signs in again. `"aouda"` remains the issuer of the **server** auth database's tokens (`/api/auth/signin`, setup).
+> **Only that issuer is accepted** (**BL-980, 0.4.0**). A request on a database path validates a JWT against its auth database's URL issuer — nothing else (**BL-1018, next train**: the database's own URL is no longer a second accepted issuer for a linked database; a token from before the train signs in again). Builds up to 0.3.x also accepted the default issuer `"aouda"` beside it; a token carrying it on a database path is now `401 AUTH_TOKEN_INVALID`, so a client holding one signs in again. `"aouda"` remains the issuer of the **server** auth database's tokens (`/api/auth/signin`, setup).
 
 > **Non-standard discovery path — read before using `AddJwtBearer`.**
 > The OIDC discovery document is served at `…/auth/.well-known/openid-configuration`, which is one path segment deeper than the OIDC convention of `{issuer}/.well-known/openid-configuration`. Because the `issuer` is `{base_url}/api/databases/{db}`, any library that auto-constructs the metadata URL from `Authority` alone will try the wrong path and get a 404, causing JWT validation to fail on every request.
@@ -756,8 +807,8 @@ Both endpoints are **publicly accessible** — no API key or JWT required. The d
 
 | Claim | Value |
 |-------|-------|
-| `iss` | `{base_url}/api/databases/{db}` |
-| `aud` | auth database name |
+| `iss` | `{base_url}/api/databases/{authDb}` — the auth database's URL (**BL-1018, next train**; it was the path database's) |
+| `aud` | The token's allowance: a JSON array of the database names it may open (**BL-1018, next train**; it was the auth database's name). See [the token allowance](#the-token-allowance) |
 | `sub` | user ID (UUID) |
 | `email` | user email |
 | `iat` | issued-at timestamp |
@@ -898,21 +949,27 @@ if (map.TryGetValue("derive", out var scopedRoles) && scopedRoles.Contains("app_
 
 Use `AddJwtBearer` with the OIDC `Authority` and `MetadataAddress`. The middleware fetches the JWKS and validates signatures, issuer, and expiry.
 
+> **Issuer and audience** (**BL-1018, next train**). The issuer is the **auth database's** URL, for every database linked to it, and
+> `aud` is the token's allowance — an array of database names. A service that serves database `mydb` validates the auth database's
+> issuer and `mydb` as the audience: a token whose allowance does not name `mydb` is then refused by the service as it is by Aouda.
+> Until this train the issuer was the database's own URL and `aud` was the auth database's name.
+
 > **`MetadataAddress` is required.** Aouda's discovery document is at `{authority}/auth/.well-known/openid-configuration`, not the conventional `{authority}/.well-known/openid-configuration`. If you set only `Authority`, ASP.NET Core constructs the wrong URL, the JWKS fetch fails silently at startup, and every request returns 401. Always provide `MetadataAddress` explicitly.
 
 ```csharp
 builder.Services.AddAuthentication().AddJwtBearer(options =>
 {
     var aoudaBase = "https://your-aouda-server.com";
-    var db        = "mydb";  // the application database name
-    var issuer    = $"{aoudaBase}/api/databases/{db}";
+    var db        = "mydb";       // the application database this service serves
+    var authDb    = "mydb_auth";  // the auth database mydb is linked to (mydb itself if it is its own)
+    var issuer    = $"{aoudaBase}/api/databases/{authDb}";
 
     // Required: discovery path has an extra /auth/ segment — auto-derivation from Authority is wrong.
     options.MetadataAddress = $"{issuer}/auth/.well-known/openid-configuration";
 
     // Authority is still used for issuer validation in incoming tokens.
     options.Authority = issuer;
-    options.Audience  = "mydb_auth";  // the auth database name
+    options.Audience  = db;  // the token's allowance must name this database
 
     // If your Aouda server uses HTTP (local dev only):
     // options.RequireHttpsMetadata = false;
@@ -940,8 +997,8 @@ const JWKS = createRemoteJWKSet(
 
 async function verifyAoudaToken(token) {
     const { payload } = await jwtVerify(token, JWKS, {
-        issuer:   'https://your-aouda-server.com/api/databases/mydb',
-        audience: 'mydb_auth',
+        issuer:   'https://your-aouda-server.com/api/databases/mydb_auth', // the auth database
+        audience: 'mydb',                                               // the database this service serves
     });
     // payload.db_roles is a native object: { "_auth": ["db_admin"], "derive": ["app_derive_connect"] }
     return payload;
@@ -959,10 +1016,12 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: https://your-aouda-server.com/api/databases/mydb
+          issuer-uri: https://your-aouda-server.com/api/databases/mydb_auth
+          audiences: mydb
 ```
 
-Spring Security auto-discovers the JWKS from the OIDC discovery endpoint.
+Spring Security auto-discovers the JWKS from the OIDC discovery endpoint. The issuer is the auth database; the audience is the
+database the service serves.
 
 ---
 
@@ -981,8 +1040,8 @@ func verifyToken(tokenStr string) (jwt.Token, error) {
     keySet, _ := cache.Get(ctx, "https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json")
     return jwt.Parse([]byte(tokenStr), jwt.WithKeySet(keySet),
         jwt.WithValidate(true),
-        jwt.WithIssuer("https://your-aouda-server.com/api/databases/mydb"),
-        jwt.WithAudience("mydb_auth"))
+        jwt.WithIssuer("https://your-aouda-server.com/api/databases/mydb_auth"), // the auth database
+        jwt.WithAudience("mydb"))                                                // the database this service serves
 }
 ```
 
@@ -996,8 +1055,8 @@ import jwt
 from jwt import PyJWKClient
 
 JWKS_URL = "https://your-aouda-server.com/api/databases/mydb/auth/.well-known/jwks.json"
-ISSUER   = "https://your-aouda-server.com/api/databases/mydb"
-AUDIENCE = "mydb_auth"
+ISSUER   = "https://your-aouda-server.com/api/databases/mydb_auth"  # the auth database
+AUDIENCE = "mydb"                                                   # the database this service serves
 
 jwks_client = PyJWKClient(JWKS_URL)
 
@@ -1272,8 +1331,8 @@ Your application reads Aouda Auth configuration from `appsettings.json` / `appse
 // appsettings.Development.json  ← git-ignored, each developer maintains their own
 {
   "AoudaAuth": {
-    "Authority":    "http://localhost:5433/api/databases/derive",
-    "Audience":     "_auth",
+    "Authority":    "http://localhost:5433/api/databases/_auth",
+    "Audience":     "derive",
     "ServerUrl":    "http://localhost:5433",
     "DatabaseName": "derive",
     "AnonKey":      "mk_anon_a1b2c3d4e5f6...",
@@ -1284,8 +1343,8 @@ Your application reads Aouda Auth configuration from `appsettings.json` / `appse
 
 | Key | Purpose | Where It Comes From |
 |-----|---------|---------------------|
-| `Authority` | Base URL for OIDC Discovery — used by `options.Authority` in `AddJwtBearer` | Constructed from server URL + database name |
-| `Audience` | JWT `aud` claim — always the auth database name | Always `_auth` (unless you named it differently) |
+| `Authority` | Base URL for OIDC Discovery and the expected `iss` — used by `options.Authority` in `AddJwtBearer` | Server URL + the **auth database** name (**BL-1018, next train**; it was the application database) |
+| `Audience` | A name the JWT `aud` claim must contain — the token's allowance is an array of database names | The application database this service serves, e.g. `derive` (**BL-1018, next train**; it was the auth database name) |
 | `ServerUrl` | Aouda server base URL — used to construct the `AoudaClient` | Your server address |
 | `DatabaseName` | Which database the `AoudaClient` connects to | The `name` from `POST /api/databases` (e.g. `derive`) |
 | `AnonKey` | `mk_anon_...` — public auth endpoints (signup, signin, password reset) | From create-database or regenerate-keys response |
@@ -1304,7 +1363,7 @@ builder.Services.AddAuthentication()
         // Required — do NOT rely only on Authority; the discovery URL won't be derived correctly.
         options.MetadataAddress      = $"{authority}/auth/.well-known/openid-configuration";
         options.Authority            = authority;
-        options.Audience             = builder.Configuration["AoudaAuth:Audience"] ?? "_auth";
+        options.Audience             = builder.Configuration["AoudaAuth:Audience"]!;
         options.RequireHttpsMetadata = false; // dev only — remove for production
     });
 
@@ -1333,8 +1392,8 @@ appsettings.Development.template.json   ← checked in, shows structure with pla
 ```json
 {
   "AoudaAuth": {
-    "Authority":    "http://localhost:5433/api/databases/derive",
-    "Audience":     "_auth",
+    "Authority":    "http://localhost:5433/api/databases/_auth",
+    "Audience":     "derive",
     "ServerUrl":    "http://localhost:5433",
     "DatabaseName": "derive",
     "AnonKey":      "REPLACE_WITH_MK_ANON_KEY",

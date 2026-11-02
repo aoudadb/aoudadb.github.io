@@ -217,6 +217,13 @@ await client.auth.revokeSession(sessions.find((s) => !s.current)!.id);
 ```
 
 C#: `SignInAsync(email, password, deviceInfo)`, `SignOutAsync(SignOutScope.Others)`, `ListSessionsAsync()`, `RevokeSessionAsync(id)`.
+
+**Which databases the token opens** (**BL-1018, next train**). The token's `iss` is the auth database's URL and its `aud` is its
+**allowance** — the databases it may open: by default every database of the auth database on which the user holds a role. To sign in
+for some of them only, name them: `signIn(email, password, { databases: ["orders"] })` /
+`SignInAsync(email, password, deviceInfo, databases: new[] { "orders" })`. Elsewhere the token is
+`401 AUTH_DATABASE_NOT_IN_ALLOWANCE`. A service that validates tokens itself checks the auth database's issuer and that `aud` names
+its own database. See [the token allowance](reference.md#the-token-allowance).
 What a session is, and what ends one: [Sessions are devices](reference.md#sessions-are-devices).
 
 ### Keeping tokens across restarts (**NativeClients, 0.4.0**)
@@ -243,8 +250,9 @@ var restarted = new AoudaClient(new AoudaClientOptions { ServerUrl = url, Databa
     AppAuth = new AppAuthOptions { Token = saved.AccessToken, RefreshToken = saved.RefreshToken } });
 ```
 
-When a refresh is refused because the session is over — `AUTH_REFRESH_TOKEN_INVALID` (ended, or a reused token) or
-`AUTH_ACCOUNT_DISABLED` — the SDKs clear their tokens and report `signedOut` / `SignedOut`, so the app deletes what it stored rather than
+When a refresh is refused because the session is over — `AUTH_REFRESH_TOKEN_INVALID` (ended, or a reused token),
+`AUTH_ACCOUNT_DISABLED`, or `AUTH_DATABASE_NOT_IN_ALLOWANCE` (the client's database is not in the session's allowance, **BL-1018, next
+train**) — the SDKs clear their tokens and report `signedOut` / `SignedOut`, so the app deletes what it stored rather than
 re-seeding a dead pair on every start. An explicit `refresh()` / `RefreshAsync()` rejects with that code; a transient refusal (`503`)
 keeps the tokens for a retry. Sign-out refreshes an expired access token first; `signOut({ scope: "others" | "global" })` rejects
 when the server ended nothing, while a plain `signOut()` stays best-effort.

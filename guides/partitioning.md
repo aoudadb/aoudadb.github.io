@@ -380,6 +380,7 @@ or `in` (including a constrained prefix of a composite partition key):
   not narrowed); it now reads only the partitions its values name, like a string or integer key. One
   exception, on purpose: a floating-point key's `-0.0` and `0.0` are two partitions that compare equal,
   so an equality on a zero reads every partition rather than guess which one holds its rows.
+- An `eq` or `in` on a key column with a time function prunes by the function's partition name (the day, hour, minute, week, month, or year the writer stored), and a query for one timestamp reads that partition's rows and still drops every other cold partition (**BL-1205, next train**).
 - This is a distinct mechanism from cluster-column pruning (physical column statistics on non-partition
   columns) — the two operate on different inputs and are reported separately (see `2.13`).
 

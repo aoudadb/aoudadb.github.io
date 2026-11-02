@@ -116,26 +116,31 @@ curl -X POST http://localhost:5433/api/databases \
 
 ### One auth database is one trust domain
 
-Databases that share an auth database **share sign-ins**, not only users (**BL-1018**, open). An access token is checked against
-the database it was issued for — a token from a sign-in at `orders-service` is refused at `products-service` — but the session
-behind it is not:
+Databases that share an auth database share **users and roles**. Since **BL-1018** (**next train**) they no longer share every
+sign-in: a token opens only its **allowance** — the databases it was issued for — and the refresh token and native sign-in code behind
+it carry the same allowance.
 
-- a **refresh token** from a sign-in at one database refreshes at any other database linked to the same auth database, and at the
-  auth database's own path, and gives a session there;
-- a **native sign-in code** (`POST …/auth/authorize`, [native sign-in](reference.md#native-sign-in-through-the-browser)) created at one database can be redeemed
-  (`POST …/auth/token`) at another, for a session there.
+- **Sign-in** at any of them (or at the auth database itself) gives the databases on which the user holds a role. A user with
+  `db_writer` scoped to `orders-service` only gets a token that opens `orders-service` and is refused at `products-service`
+  (`401 AUTH_DATABASE_NOT_IN_ALLOWANCE`); a user with roles on both gets one token that opens both. A user with no role on any of them
+  cannot sign in (`403`).
+- **`databases`** on sign-in, password reset or native `authorize` narrows that set — a front end for one application names its own
+  database, so its tokens open nothing else even for a user who holds roles elsewhere. It never widens it: a database the user holds
+  no role on is `400`.
+- **Refresh** and a **native code's redemption** are refused outside the allowance, so a stolen refresh token or code opens only what
+  the sign-in that issued it could.
 
-So whoever holds a user's refresh token or code — the user, or anyone who took it — can open a session as that user on every
-database that shares the auth database. The user's roles still decide what each session may do; what does not separate the
-databases is the sign-in. 0.3.0 behaved the same for refresh tokens.
+**Multi-database sign-in** — one sign-in that covers several applications — is the allowance doing its job: either accept the
+role-derived default, or name the databases in `databases`. Every token carries the auth database's issuer; its `aud` lists the
+allowance, so a service that validates tokens itself checks that `aud` names its database. See
+[the token allowance](reference.md#the-token-allowance).
 
-**Share an auth database** among databases that serve the same users as one product, where a user signed in at one is meant to be
-signed in at all of them: the services of one application, the databases of one tenant.
+**Share an auth database** among databases that serve the same users, where one identity and one set of roles is right: the services
+of one application, the databases of one tenant.
 
-**Do not share one** between databases whose sign-ins must stay apart: different customers or tenants, a public app and an internal
-or admin tool, a test and a production database, an application whose users must not get a session at another one. Give each its own
-auth database, as above. Whether refresh tokens and codes will be bound to the database that issued them is an open decision; until
-it is made, this is the behaviour.
+**Do not share one** between databases whose users and administrators must stay apart — different customers or tenants, a test and a
+production database. The allowance limits what a sign-in opens; it does not separate the user list, the roles an administrator of the
+auth database can assign, or the auth database's signing keys. Give each its own auth database, as above.
 
 ---
 
