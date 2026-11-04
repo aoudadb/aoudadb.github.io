@@ -375,6 +375,13 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
   `float[]` property is filled from the widened text, an `object` property gets a `JsonElement`, and a failure arrives as an
   `InvalidOperationException` (BL-1245). Give a typed subscription the exact CLR type above.
   `ToDataTable` columns have the array type.
+- **A POCO with array properties writes and creates its columns** (**BL-1374, next train**). `double[]`, `float[]`, `int[]`, `long[]`,
+  `byte[]` and `string[]` properties map to `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` and `String[]` (nullable
+  columns; a `byte[]` is the `Byte[]` column, a scalar `byte` stays `Byte`). `GetTable<T>().InsertAsync` / `InsertManyAsync` /
+  `BulkLoadAsync`, `GetTable(name).InsertAsync(entity)`, `UpdateAsync(new { … })`, `AutoCreateSchema` and the default reconcile all
+  take them. The match is on the exact CLR type: `uint[]`, `short[]`, `bool[]`, `decimal[]`, `int?[]`, jagged arrays and
+  `List<T>` / `IReadOnlyList<T>` properties are refused (`NotSupportedException` naming the property) before anything is sent;
+  mark them `[AoudaIgnore]`. In 0.9.0 every typed write of such a POCO threw `unsupported type 'Int32[]'`.
 - **Writes** take the same arrays: dictionary rows (as JSON; a row whose only array values are `byte[]` may go in a frame, as base64 text, with the same result), `UpdateAsync`, named-mutation arguments and
   `batchParam` rows. A NaN or infinity element is refused by the server (`AoudaRequestException`, status 400), and locally
   (`ArgumentException`, before sending) in a `batchParam` row and on the write stream:

@@ -433,7 +433,7 @@ into the column. TypeScript: `column.doubleArray`, `float32Array`, `int32Array`,
 rows)` — a typed array per row is kept as it is, a plain array is converted once, `float32Array` rounds a `number` to the nearest
 float at construction, and `int32Array`, `int64Array` and `byteArray` refuse an out-of-range element with a `RangeError`. Both
 SDKs check the limits and finiteness before they send (`ColumnBatch.Validate()` / `validate()`, called for you on every send), and send the batch as frames
-when the server advertises them and as JSON column arrays otherwise. POCO bulk load with an array property is refused.
+when the server advertises them and as JSON column arrays otherwise. `AoudaTable<T>.BulkLoadAsync` of a POCO with array properties works too (**BL-1374, next train**).
 
 ```csharp
 var batch = ColumnBatch.Of(
