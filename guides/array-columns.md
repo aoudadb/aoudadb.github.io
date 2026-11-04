@@ -407,9 +407,8 @@ full size; the whole table took 0.46 ×.
 - **Sorting, grouping, aggregating, joining or keying on an array column.** See the table above.
 - **An array column on an edge table.** Refused (see the table above): an edge table stores only its source, destination and
   label.
-- **Embedded and POCO mapping.** `Aouda.Embedded` refuses the six names (BL-1213), and the C# client refuses POCO schema
-  inference and POCO writes (`InsertAsync(entity)`) with an array property (`NotSupportedException`). Reading into a POCO with an
-  array property works. Write dictionaries or column batches.
+- **Embedded mapping.** `Aouda.Embedded` refuses the six names (BL-1213) and keeps inferring a CLR array property as a JSON
+  `String` column.
 - **Studio can read an array column but not edit one**: no edit, no add-row field, no filter, sort, group or join on it.
 - **The cold encoding is not configurable.** The cold tier chooses how to store an array column's pages; the column takes `Auto` only.
 
