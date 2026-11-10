@@ -96,6 +96,12 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
 
+**Configured keys (**BL-1377, next train**).** A `mk_srv_` or `mk_scp_` key can be declared in server configuration
+(`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) instead of minted. It authenticates exactly as a minted key of that
+kind, against the auth database it was declared for, with the same claims and the same privilege gates; it never appears in the
+`api-keys` listings, because it is configuration and not a row. A configured scoped key whose role does not exist yet is denied with
+`403`, not `401`, and works once the role exists. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
+
 **Named service keys and overlapping rotation (**BL-1032, 0.5.0**).** A server key (`mk_srv_`) mints extra service keys for a database that has a linked auth database:
 
 | Method | Path | Body | Result |
@@ -696,7 +702,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, 0.9.0**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
 | `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
-| `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. |
+| `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. The server log names the rejected key by fingerprint (**BL-1377, next train**): match it with `aouda keys hash --key-stdin`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
 | `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
 | `NOT_AUTHENTICATED` | 401 | Authentication required (database has auth enabled but no valid token) |
