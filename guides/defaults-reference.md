@@ -334,8 +334,24 @@ are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing
 
 The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
+## Configured API keys (**BL-1377, next train**) {#configured-api-keys}
+
+Credentials declared in configuration instead of minted into the data a wipe destroys. Nothing is configured by default. Full
+guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
+
+| Setting | Default | What it means |
+|---|---|---|
+| `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key the server honours once the server auth database exists (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
+| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key, readable only by its owner. Set at most one of the key, the file and the systemd credential `aouda-server-key` |
+| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further `server_admin` and `scoped_service` keys, with secrets as `{ "env": NAME }` or `{ "hash": "sha256:<hex>" }` |
+
+A key is the kind's prefix (`mk_srv_`, `mk_scp_`) and at least 32 characters of `A-Z a-z 0-9 _ -`; `openssl rand -hex 32` is the
+generator. A change takes a restart; an invalid declaration fails the start naming the entry. The startup log
+(`Aouda.Server.Startup`, `Information`) lists each configured key by name, kind, auth database, fingerprint and source.
+
 ## Related docs
 
+- [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, next train**) - declaring keys in configuration
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into
 - [Materialized queries](materialized.md#where-a-materialized-querys-result-lives) — where a query's result table lives, and why the default changed
 - [Server configuration](server-configuration.md) — where each of these keys is set (`appsettings.json`, `AOUDA_*` env vars, CLI flags) and what survives a restart
