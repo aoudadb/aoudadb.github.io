@@ -338,8 +338,10 @@ A subscription's `snapshot` and `change` messages carry a **`column_types`** obj
  "column_types":{"Tenors":"Int32[]","Rates":"Double[]","Residuals":"Float32[]"}, … }
 ```
 
-**The rule for a client: a column named in `column_types` holds an array of that type; a column not named holds a scalar.**
-`column_types` is left out when the message holds no array column, so a table without arrays is unchanged. The materialized
+**The rule for a client: a column named in `column_types` with an array type holds an array of that type; a column not named holds a scalar.**
+A `snapshot` also names its `Timestamp` columns (`"Timestamp"`, value in .NET ticks — see the
+[Timestamp semantics](../reference/http-api.md#timestamp-semantics); **IR quote report, next train**); a `change` names array columns only.
+`column_types` is left out when the message holds neither, so a table without arrays or timestamps is unchanged. The materialized
 query endpoint (`POST …/materialized-queries/{name}/query`) answers `columnTypes` the same way. MessagePack keeps `-0`; long-poll
 carries the same fields. A `latestPerKey` subscription delivers array payload columns like any other.
 
