@@ -416,6 +416,13 @@ returns until it subscribes again. There is no compatibility shim: upgrade the c
 **`TRUNCATE` sends no notice** — and no row events — today. A client holding a truncated table's rows keeps them until it subscribes
 again.
 
+### Timestamp columns in a subscription (**IR quote report, next train**)
+
+A `Timestamp` column arrives as a JSON **number**: .NET ticks since `0001-01-01T00:00:00Z`, UTC (`639298350326250000` is
+`2026-11-09T15:30:32.625Z`). The `snapshot` names the column in `column_types` (`{"DateTime":"Timestamp"}`), and a client keeps that
+for the `change` messages, which do not repeat it. `@aouda/client` hands a `Date`; elsewhere, Unix milliseconds are
+`(ticks − 621355968000000000) / 10000`. A column declared `String` is text. Details: [Timestamp semantics](../reference/http-api.md#timestamp-semantics).
+
 ### Array columns in a subscription (**BL-035, 0.9.0**)
 
 (**BL-035, 0.9.0**) A table or named-query subscription delivers an [array column](array-columns.md) as an array, a `Byte[]` as base64
