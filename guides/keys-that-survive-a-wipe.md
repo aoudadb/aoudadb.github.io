@@ -4,7 +4,7 @@ nav_order: 2.5
 parent: "Guides"
 ---
 
-# Keys that survive a wipe (**BL-1377, next train**)
+# Keys that survive a wipe (**BL-1377, 0.10.0**)
 
 A key Aouda mints is a random value generated **inside the data a wipe destroys**. Every wipe, fresh machine and CI run therefore
 produces new credentials that must be carried to every client, and a sender nobody updated fails with `AUTH_API_KEY_INVALID`

@@ -375,7 +375,7 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
   `float[]` property is filled from the widened text, an `object` property gets a `JsonElement`, and a failure arrives as an
   `InvalidOperationException` (BL-1245). Give a typed subscription the exact CLR type above.
   `ToDataTable` columns have the array type.
-- **A POCO with array properties writes and creates its columns** (**BL-1374, next train**). `double[]`, `float[]`, `int[]`, `long[]`,
+- **A POCO with array properties writes and creates its columns** (**BL-1374, 0.9.1**). `double[]`, `float[]`, `int[]`, `long[]`,
   `byte[]` and `string[]` properties map to `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` and `String[]` (nullable
   columns; a `byte[]` is the `Byte[]` column, a scalar `byte` stays `Byte`). `GetTable<T>().InsertAsync` / `InsertManyAsync` /
   `BulkLoadAsync`, `GetTable(name).InsertAsync(entity)`, `UpdateAsync(new { … })`, `AutoCreateSchema` and the default reconcile all
