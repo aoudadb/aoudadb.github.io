@@ -383,7 +383,7 @@ database; the auth database it names is neither declared nor existing; a declare
 (and a link to it fails the start); a quarantine for any other reason still fails the start. The check of every entry is
 read-only, but a failure partway through a pass can leave the auth databases already created; the next start converges them
 without change. Databases created from configuration skip the replication hook, as before. `DELETE` of a declared database is
-undone by the next start, which creates it again, empty. After a backup restore the same reconcile runs; a conflict there does
+undone by the next start, which creates it again, empty. After a backup restore the same reconcile runs as the last step, once the restored databases are open (a declared database deleted since the backup comes back from it, with its files and auth options); a conflict there does
 not stop the server (engines open, memory evaluation resumes): it is logged and returned as `declarationConflict` on the restore
 response, and the next process start fails on it until the declaration or the catalog is changed. A declaration cannot say "must be
 unlinked" or "must not exist", and a database removed from the file is left alone. The names `_serverauth`,
