@@ -290,6 +290,12 @@ If you run server defaults and do not set per-database overrides:
   - (**Lead S26, 0.6.0**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
     a table records its durability level, and a database its level in place of `enableWal`. A data directory written by an
     earlier build is refused at open naming the version found and the version expected; there is no migration.
+  - (**BL-1378, next train**) The catalog format is **17**: an auth database's `_api_keys` and `_user_partition_grants` tables carry
+    a `source` column (where a key or grant came from: created through the API, or declared in configuration). The format version
+    marks the **whole data directory**, so a directory written by 0.10.0 or earlier (format 16) is refused as a whole, every
+    database in it and not only the auth databases, naming the version found and the version expected. There is no migration and no
+    upgrade path before 1.0: delete the data directory and start fresh. A server key and keys declared in configuration come back
+    on the fresh start; keys and partition grants created through the API do not.
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
