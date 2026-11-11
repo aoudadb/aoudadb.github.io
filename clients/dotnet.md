@@ -638,7 +638,7 @@ on a linked application database opens its socket too. Details: [Real-time Strea
 (**BL-1381, next train**) A `Timestamp` cell is a `DateTime` of kind `Utc` on every subscription surface (table, named query, typed),
 with the 100 ns tick kept, in the snapshot rows and in each change's `Row`, `PreviousRow` and `Key`. The server names a `Timestamp`
 column in the snapshot only; the SDK keeps those names for the life of the subscription (across a reconnect, a gap resume and a
-`SLOW_CONSUMER` fresh subscribe) and replaces them when a new snapshot arrives. A null stays null; a value that is not a tick count ends
+`SLOW_CONSUMER` fresh subscribe) and replaces them when a new snapshot arrives; a resumed stream that sends no snapshot keeps the old names. A null stays null; a value that is not a tick count ends
 the subscription with an `InvalidDataException` naming the column. No converter or option is needed. Wire detail:
 [Real-time Streaming](../guides/real-time.md) (Timestamp columns in a subscription).
 
