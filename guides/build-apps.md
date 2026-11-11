@@ -153,7 +153,7 @@ import { tasksPage, tasksSetDone } from "./generated/aouda";
 const client = createAoudaClient({
   serverUrl: "https://data.example.com",   // the data-plane listener
   database: "tasks",
-  appAuth: { apiKey: "mk_pub_..." },       // safe to ship; useless on the admin listener
+  apiKey: "mk_pub_...",                    // safe to ship; useless on the admin listener
 });
 await client.connect();
 

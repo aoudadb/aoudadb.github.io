@@ -137,7 +137,9 @@ The same four routes under `/api/databases/{authDb}/auth-admin-keys` mint `mk_ad
 
 `POST /api/databases/{db}/auth/admin/regenerate-keys` takes `{ "overlapSeconds"? }` the same way and returns `validUntil` (`null` when the previous system keys were revoked at once). Named keys are not swept. (**BL-1378, next train**) A system kind that is **declared** in configuration is not regenerated: its row stays live with the same id, and `anonKey` / `serviceRoleKey` / `publicKey` is **absent** from the response for it (all three declared: none are returned).
 
-`Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_` (and accepts `mk_scp_`); `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_scp_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings. `mk_scp_` on `serverAuth` is **BL-1239, 0.9.0**.
+`Aouda.Client` takes a key of any kind in one setting, `AoudaClientOptions.ApiKey` (**BL-1385, next train**): `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_`. Every kind goes out the same way, `Authorization: Bearer <key>` to the same URLs; the server resolves the kind, and the auth database that checks it, from the key. The client reads the prefix only to refuse a value that is not an Aouda key (a JWT goes in `AppAuth.Token` or `ServerAuth.Token`), to choose the auth endpoints a sign-in on that client calls (`/api/auth/...` for `mk_srv_`, the database's own for every other kind), and to allow `UserToken` (`X-User-Token`) beside `mk_svc_` or `mk_srv_` only. The old `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin` are removed. `@aouda/client` does the same with the top-level `apiKey` and `userToken` options (**BL-1385, next train**); its `appAuth` and `serverAuth` hold a signed-in session (`token`, `refreshToken`) and take no key, and the `authAdmin` option is removed.
+
+A key of the wrong kind for a route is refused by the server naming the kind the route needs (`403 AUTH_KEY_ROUTE_MISMATCH` on `GET|POST /api/databases` for an application key); `Aouda.Client`'s `Databases.ListAsync` / `CreateAsync` add that this needs `AoudaClientOptions.ApiKey` set to a `mk_srv_` key.
 
 **Scoped service keys (**BL-1239, 0.9.0**).** A server key mints them on a linked application database. `db_admin`, `db_operator`, `anonymous`, `public` and an unknown role are `400`. `POST …/auth/admin/api-keys` with `kind: "scoped_service"` is `400`.
 
@@ -1881,7 +1883,7 @@ Base path: `/api/databases/{db}/materialized-queries`
 | GET | `/{name}` | Read | Status for one query; `404` if missing. |
 | POST | `/` | Admin | Create a query. Body below. `204 No Content` on success. (**BL-884, 0.3.0**) A create whose first build is refused for capacity (memory, or a full WAL) still answers `204`: the definition is durable, the query exists **behind** (`current: false`) and is built once there is room. It used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists". |
 | DELETE | `/{name}` | Admin | Drop query and storage; `204` on success. |
-| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). (**BL-035, 0.9.0**) A result that carries an [array column](../guides/array-columns.md) adds **`columnTypes`** to the body, a map from each array column's name to its type (`{"Tenors":"Int32[]","Rates":"Double[]"}`); it is absent when the result has none, and the body has no `types`. A client treats a column that is not named there as a scalar. |
+| POST | `/{name}/query` | Read | Return the materialized rows as column arrays (see response; **Lead S12, 0.6.0**: they were row objects). (**BL-035, 0.9.0**) A result that carries an [array column](../guides/array-columns.md) adds **`columnTypes`** to the body, a map from each array column's name to its type (`{"Tenors":"Int32[]","Rates":"Double[]"}`); it is absent when the result has none, and the body has no `types`. (**BL-1402, next train**) It also names each `Timestamp` column (`"Timestamp"`, .NET ticks) and each `Date` column (`"Date"`, days since the Unix epoch), spelled as a snapshot's `column_types`, and is absent only when the result has none of the three kinds; every `latestPerKey` result carries its ordering `Timestamp`, so it is present on those. A body with no rows (a denied read, an unresolved source chain) names the result table's types as well. A client treats a column that is not named there as a scalar. |
 | POST | `:refresh` | Admin | **Pooled refresh (BL-474)**: rebuild several queries, decoding each shared source table **once**. Select with `sourceTable` (optionally `staleOnly`) **or** `names` — exactly one of the two. Returns per-name outcomes; see below. |
 | POST | `/{name}:refresh` | Admin | Trigger a full rebuild of the MQ result table (shadow-build pattern). `await: true` waits up to the server window (`Aouda:MaterializedQueries:RefreshAwaitTimeout`, default 120s — see below): **200** `{ "status": "complete" }` when the wait finishes, **202** `{ "status": "scheduled" }` on timeout (refresh **keeps running**). `await: false` is fire-and-forget **202** `scheduled`. Result table is readable with stale data throughout. A **202 never cancels the rebuild**, regardless of why the wait ended. |
 
@@ -3584,7 +3586,34 @@ This is **not** “ready for schema apply or traffic”. A database can be `Drop
 
 #### `GET /ready`
 
-Readiness probe. 200 when `DatabaseManager` is initialized and **critical** components (catalog, WAL) are healthy. 503 otherwise (body includes `ready: false` and `reason`).
+Readiness probe: 200 when nothing is missing, 503 with **everything** that is still missing (**BL-1393, next train**). No credential is needed, and the route is answered in setup mode and while the server is starting, to any caller (not only loopback).
+
+```json
+{
+  "ready": false,
+  "reasons": [
+    { "code": "setup_required", "message": "The server is in setup mode: no admin account exists. ..." },
+    { "code": "database_pending", "message": "Declared database 'ledger' (Aouda:Databases) does not exist yet.", "subject": "ledger" }
+  ]
+}
+```
+
+`reasons` is always present, and empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server.
+
+| `code` | Meaning | `subject` |
+|---|---|---|
+| `not_initialized` | The engine has not finished opening its databases. | none |
+| `server_starting` | The auth bootstrap has not completed, so the server is not accepting requests yet. | none |
+| `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
+| `setup_required` | No admin exists; the server is in setup mode. | none |
+| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. | none |
+| `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
+| `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
+| `database_reconcile_failed` | The reconcile of `Aouda:Databases` after a restore was refused; the server keeps running. | the database, when one is named |
+| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: a server key waits for the first admin, a scoped key for its auth database and database to be open. | the key's name |
+| `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
+
+A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up. `aouda status` prints every reason.
 
 `/ready` does **not** fail because an operator database is `Creating` or `Dropping` — that would take the whole node out of a load balancer for a long drop. Per-database readiness is `GET /api/databases/{name}` (`state=Active`) and `/health/detailed`.
 
@@ -3592,7 +3621,7 @@ The `memory` component is critical too. Either of these makes `/ready` return 50
 limit, or a database holding more than 110 % of what it was granted. A database's grant is its **governed ceiling** — the
 process's budget, or its hard cap where it has one — not its nominal share, so using room it was given never fails readiness
 (**BL-788, 0.3.0**; WorkloadCore S06 deleted elastic lending and the "tightened" verdict). Before that, a database inside
-its ceiling could hold `/ready` at 503 for as long as it used it. The `reason` names the database, its usage and its grant, and the `memory` component's details carry them as
+its ceiling could hold `/ready` at 503 for as long as it used it. The reason (`component_unhealthy`, subject `memory`) names the database, its usage and its grant, and the `memory` component's details carry them as
 `overBudgetDatabase`, `overBudgetUsedBytes` and `overBudgetGrantBytes`.
 
 Use as a Kubernetes `readinessProbe`.
@@ -4490,7 +4519,7 @@ column and copy the values."*); a `schema apply` that asks for it answers `200` 
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, 0.9.0)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. **On a JSON read a `Timestamp` is a number, not text** (**IR quote report, 0.10.0**): .NET ticks — 100 ns units since `0001-01-01T00:00:00Z`, always UTC — in a `/query` columnar `data` array, a subscription `snapshot` page or `change` row, a materialized query's body and a named query's rows alike (`639298350326250000` is `2026-11-09T15:30:32.625Z`; subtract `621355968000000000` for Unix ticks, divide by `10000` for Unix milliseconds). A column the schema declares `String` is text, whatever it holds, so two feeds can differ in shape because their tables differ in column type, not because the server formats them differently. The type is named, so no client has to guess: a columnar response's `types`, the `X-Aouda-Column-Types` header, and a subscription `snapshot`'s `column_types` (`{"DateTime":"Timestamp"}`) all say `Timestamp`. The `@aouda/client` TypeScript SDK reads such a subscription column as a `Date`. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **text with no offset is read as UTC, never in the time zone of the server or the client, and a time of day with no date (`"10:30"`) is refused (BL-1225, 0.9.0)**; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. **On a JSON read a `Timestamp` is a number, not text** (**IR quote report, 0.10.0**): .NET ticks — 100 ns units since `0001-01-01T00:00:00Z`, always UTC — in a `/query` columnar `data` array, a subscription `snapshot` page or `change` row, a materialized query's body and a named query's rows alike (`639298350326250000` is `2026-11-09T15:30:32.625Z`; subtract `621355968000000000` for Unix ticks, divide by `10000` for Unix milliseconds). A column the schema declares `String` is text, whatever it holds, so two feeds can differ in shape because their tables differ in column type, not because the server formats them differently. The type is named, so no client has to guess: a columnar response's `types`, the `X-Aouda-Column-Types` header, and a subscription `snapshot`'s `column_types` (`{"DateTime":"Timestamp"}`) all say `Timestamp`. The `@aouda/client` TypeScript SDK reads such a subscription column as a `Date`. A `Date` column is named the same way (`"Date"`, **BL-1391, next train**; its value is a number of days since the Unix epoch, unchanged on the wire), so a client can tell a day from an `Int32`; `Aouda.Client` then hands a UTC `DateTime` at midnight and `@aouda/client` a JavaScript `Date` at 00:00:00 UTC of that day in a subscription (a query result's `Date` column stays the day number in TypeScript). For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
@@ -4919,7 +4948,7 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
-| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). **Omitted when the snapshot has neither.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column that is not named holds another scalar. A `change` does not repeat a `Timestamp` column's name — a client keeps the snapshot's. |
+| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, next train**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. A `change` does not repeat a `Timestamp` or `Date` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
 
 **Example:**
 ```json

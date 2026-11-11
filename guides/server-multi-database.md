@@ -551,6 +551,12 @@ These can be declared in config to provision databases at startup or to set defa
 | `Aouda:Databases:<name>:WriteConcern` | `string` | `One` | `One`, `Majority`, `All` |
 | `Aouda:Databases:<name>:WriteConcernTimeoutMs` | `int` | `5000` | ACK wait timeout (≥ 100 ms) |
 | `Aouda:Databases:<name>:OnWriteConcernTimeout` | `string` | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` |
+| `Aouda:Databases:<name>:SchemaFile` | `string?` | `null` | Path of a schema file the server applies to this database at start, after the declared databases and the auth startup and before the server is ready. Absolute, or relative to the server's working directory. Refused on a `Kind: auth` database. Omitted = nothing is applied (**BL-1388, next train**) |
+| `Aouda:Databases:<name>:SchemaEnvironment` | `string?` | `null` | The overlay, as the CLI's `--env`: `aouda.schema.<env>.json` next to the file is merged over it when it exists. Needs `SchemaFile` (**BL-1388, next train**) |
+| `Aouda:Databases:<name>:SchemaAllowDestructive` | `bool` | `false` | Lets the start-time apply run destructive changes (drop table, drop column). When `false` they are refused, logged, and the start goes on. Needs `SchemaFile` (**BL-1388, next train**) |
+| `Aouda:Databases:<authdb>:Roles:<role>` | `object` | none | Custom roles of a `Kind: auth` database: `Description` and `Permissions` (a list of `ResourceType`, `ResourceName`, `Actions`, as the roles API takes them). Created when missing and converged when present at start, after the schema apply; roles not listed are never touched; a system role cannot be listed, and a role that is the signup role of the auth database or of a database linked to it cannot carry an `all-partitions` / `all-rows` grant (the start fails naming the role and the database) (**BL-1392, next train**) |
+
+An invalid or unreadable `SchemaFile`, or a declared role the roles API would refuse, **fails the start** and names the database and the file or role. A destructive change without `SchemaAllowDestructive` is *refused*, not failed: it is logged and kept in the server's schema-apply state, and the catalog stays as it is (**BL-1388, next train**). See [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start).
 
 ### Logging
 
@@ -880,7 +886,7 @@ curl -s http://localhost:5000/api/databases
 | `504 REQUEST_TIMEOUT` on heavy query | Query exceeded `RequestTimeoutMs` | Increase timeout or add predicates to reduce scan scope |
 | `403 Forbidden` on `POST /api/server/shutdown` | Non-loopback caller | Only call from same machine (e.g., `curl -X POST http://localhost:5000/api/server/shutdown`) |
 | `/ready` returns 503 shortly after start | Startup delay window active | Wait for `StartupDelaySeconds` (default 10 s) before load-balancer routing |
-| `/ready` returns 503 after startup | Catalog or WAL check failing | Call `/health/detailed`; check `catalog` and `wal` component statuses; inspect logs |
+| `/ready` returns 503 after startup | Something listed in `reasons` is still missing (**BL-1393, next train**) | Read `reasons[].code`: `setup_required`, `database_pending` / `database_not_open` (an `Aouda:Databases` entry), `configured_key_inactive`, or `component_unhealthy` (then call `/health/detailed`; check `catalog` and `wal`); inspect logs. All codes: [HTTP API](../reference/http-api.md#get-ready) |
 | Database stays in `Creating` state after restart | Process crashed during `CreateDatabaseAsync` | Delete partial directory and retry `POST /api/databases`; or call admin cleanup |
 | High memory pressure on one database | Tables fully loaded in hot tier | Add `Aouda:Databases:{db}:MaxMemoryShareBytes` cap; review table `StoragePolicy` |
 | Write concern timeouts on insert | Replica ACK slower than `WriteConcernTimeoutMs` | Increase timeout or switch `OnWriteConcernTimeout` to `DegradeAndLog`; check replication lag via `/admin/replication/topology` |

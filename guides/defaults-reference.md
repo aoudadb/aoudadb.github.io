@@ -361,8 +361,8 @@ Full guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
 | Setting | Default | What it means |
 |---|---|---|
 | `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key declared for the server auth database; its row exists once that database does (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
-| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key, readable only by its owner. Set at most one of the key, the file and the systemd credential `aouda-server-key` |
-| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, next train**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }` or `{ "hash": "sha256:<hex>" }` |
+| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key. No permission check (**BL-1401, next train**), so a secret mounted `0444` works; a missing, unreadable or empty file fails the start. Set at most one of the key, the file and the systemd credential `aouda-server-key` |
+| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, next train**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }`, `{ "file": PATH }` (**BL-1389, next train**) or `{ "hash": "sha256:<hex>" }` |
 
 A key is the kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`) and at least 32 characters of `A-Z a-z 0-9 _ -`;
 `openssl rand -hex 32` is the generator. A change takes a restart; an invalid declaration fails the start naming the entry. The
@@ -386,6 +386,8 @@ directory and a plain start bring back the same set; only schema and data need r
 | Setting | Default | What it means |
 |---|---|---|
 | `Aouda:Databases:<db>:Kind` (**BL-1379, next train**) | `data` | `data`, or `auth` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `Durability` on an `auth` entry must be absent or `strict`) |
+| `Aouda:Databases:<db>:SchemaFile`, `:SchemaEnvironment`, `:SchemaAllowDestructive` (**BL-1388, next train**) | none, none, `false` | With `Kind: data`: a schema file the server applies at start, with an optional overlay and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
+| `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, next train**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
 | `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, next train**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
 ```json
@@ -421,8 +423,8 @@ unlinked" or "must not exist", and a database removed from the file is left alon
 **A declarative link creates no API key.** A key minted at start has no reader, so it would be an orphan `db_admin` credential. After
 a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when a later release declares them in the
 identities file or an operator calls `regenerate-keys` (which returns them once); a `POST /api/databases` that links still returns
-them as before. Startup order after a wipe: declared databases and links, then `_serverauth` / `Aouda:Auth:RootUser`, then the
-configured keys. `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
+them as before. Startup order after a wipe: declared databases and links, then `_serverauth` / `Aouda:Auth:RootUser`, then each
+declared `SchemaFile` (**BL-1388, next train**), then declared `Roles` (**BL-1392, next train**), then the configured keys. `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
 has one line per entry (created, converged or unchanged; linked or already linked).
 
 ## Related docs

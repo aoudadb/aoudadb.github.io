@@ -16,20 +16,20 @@ parent: "Auth and Authorization"
 
 ## 10. Integrating with the .NET Client
 
-The .NET client supports keyless browser login: URL + database is enough, then `SignInAsync`. Backends still pass `ApiKey` (`mk_svc_*`).
+The .NET client supports keyless browser login: URL + database is enough, then `SignInAsync`. Backends set `ApiKey`, one setting for a key of any kind (**BL-1385, next train**).
 
-### AppAuthOptions vs ServerAuthOptions
+### One `ApiKey`; `AppAuth` and `ServerAuth` are sessions
 
-The .NET client uses two separate options types — one per auth system:
+`AoudaClientOptions.ApiKey` takes `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key. It is sent as `Authorization: Bearer <key>` to the same URLs whatever the kind; the server resolves the kind from the key. The client reads the prefix only to refuse a value that is not an Aouda key (a JWT is not a key), to choose the auth endpoints a sign-in on that client calls (`/api/auth/...` for `mk_srv_`, `/api/databases/{db}/auth/...` for every other kind), and to allow `UserToken` beside `mk_svc_` or `mk_srv_`.
+
+What is left of the two options types is what is a different mechanism, a signed-in session:
 
 | Property | `AppAuthOptions` | `ServerAuthOptions` |
 |----------|:-:|:-:|
-| `ApiKey` | Optional (`mk_svc_*` for backends; not required for browser login) | Yes (`mk_srv_`) |
 | `Token` / `RefreshToken` | Yes | Yes |
 | `Email` / `Password` | **Not available** — use `SignInAsync()` | Yes |
-| `UserToken` | Yes (with service keys) | Yes (with `mk_srv_`) |
 
-Use `AppAuth = new AppAuthOptions { ... }` for Application Auth (this document). Use `ServerAuth = new ServerAuthOptions { ... }` for [Server Auth](../getting-started/index.md#8-server-authentication--securing-database-access). The two are mutually exclusive — setting both throws an `ArgumentException` at construction time.
+`ApiKey` and `UserToken` are on `AoudaClientOptions`. `ApiKey` cannot be combined with `ServerAuth` or with an `AppAuth` that holds a token; `AppAuth` and `ServerAuth` are mutually exclusive; `UserToken` requires a `mk_svc_` or `mk_srv_` `ApiKey`. Each refusal names the setting or key kind it needs, at construction time. `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin` are gone (**BL-1385, next train**). Use `AppAuth = new AppAuthOptions { ... }` for a signed-in application user (this document), and `ServerAuth = new ServerAuthOptions { ... }` for a signed-in server user, see [Server Auth](../getting-started/index.md#8-server-authentication--securing-database-access).
 
 ### Backend: Service Key (Full Access)
 
@@ -41,10 +41,7 @@ var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    AppAuth = new AppAuthOptions
-    {
-        ApiKey = Environment.GetEnvironmentVariable("AOUDA_SERVICE_KEY")  // mk_svc_...
-    }
+    ApiKey = Environment.GetEnvironmentVariable("AOUDA_SERVICE_KEY")  // mk_svc_...
 });
 
 // Full database access — no user sign-in needed
@@ -64,11 +61,8 @@ var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    AppAuth = new AppAuthOptions
-    {
-        ApiKey = "mk_svc_x7y8z9...",
-        UserToken = userJwtFromFrontend  // JWT from frontend request
-    }
+    ApiKey = "mk_svc_x7y8z9...",
+    UserToken = userJwtFromFrontend  // JWT from frontend request
 });
 
 // Queries are PLS-scoped to the user identified by the JWT
@@ -111,7 +105,7 @@ var adminClient = new AoudaClient(new AoudaClientOptions
     ServerAuth = new ServerAuthOptions
     {
         Email = "admin@example.com",
-        Password = "AdminPass123!"  // Email+Password only available in ServerAuthOptions
+        Password = "AdminPass123!"  // Email+Password only available in ServerAuthOptions; a server key is AoudaClientOptions.ApiKey
     }
 });
 ```
@@ -120,7 +114,7 @@ var adminClient = new AoudaClient(new AoudaClientOptions
 
 ## 11. Integrating with the TypeScript Client
 
-The TypeScript client uses `appAuth` for Application Auth endpoints (`/api/databases/{db}/auth/...`) and `serverAuth` for Server Auth endpoints (`/api/auth/...`). The two are mutually exclusive. User sign-in is always explicit via `client.auth.signIn()` — there is no `email`/`password` option in the constructor.
+The TypeScript client takes an API key of any kind in one top-level option, `apiKey` (**BL-1385, next train**), with `userToken` beside it. `appAuth` (a signed-in application user's `token` and `refreshToken`) and `serverAuth` (a server user's) are sessions, not keys, and take no key; the two are mutually exclusive, and a key beside `serverAuth` or beside an `appAuth` that holds a token is refused at construction. A sign-in calls the Server Auth endpoints (`/api/auth/...`) for an `mk_srv_` key or `serverAuth`, and the database's own (`/api/databases/{db}/auth/...`) otherwise. `userToken` is accepted beside `mk_svc_` or `mk_srv_` only. There is no `authAdmin` option any more. User sign-in is always explicit via `client.auth.signIn()` — there is no `email`/`password` option in the constructor.
 
 ### Backend: Service Key
 
@@ -130,9 +124,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  appAuth: {
-    apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... — KEEP SECRET
-  },
+  apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... — KEEP SECRET
 });
 
 await client.connect();
@@ -145,10 +137,8 @@ const allOrders = await client.table("orders").limit(10).execute();
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  appAuth: {
-    apiKey: process.env.AOUDA_SERVICE_KEY,
-    userToken: req.headers["x-user-token"],  // JWT from frontend
-  },
+  apiKey: process.env.AOUDA_SERVICE_KEY,
+  userToken: req.headers["x-user-token"],  // JWT from frontend
 });
 ```
 
@@ -513,10 +503,10 @@ app.MapPost("/mfa/challenge", async (HttpContext ctx, HttpClient aoudaHttp) =>
 
 ### Choosing the Right Client Mode (AoudaClient SDK)
 
-For BFF code that proxies auth operations, prefer calling Aouda's HTTP endpoints directly over constructing an `AoudaClient` for each user session — the SDK's `AppAuthOptions` does not support a combination of API key + pre-obtained user token simultaneously.
+For BFF code that proxies auth operations, prefer calling Aouda's HTTP endpoints directly over constructing an `AoudaClient` for each user session — the SDK's `AppAuth` session (a user JWT) cannot be combined with an API key; to act for a user beside a service key use `UserToken`.
 
 | Scenario | Approach |
 |----------|---------|
 | Proxy signin/signout/me/mfa from browser → Aouda | Forward HTTP requests with user JWT in Authorization |
-| Backend data queries scoped to user | Use `AoudaClient` with `AppAuthOptions { ApiKey = serviceKey, UserToken = userJwt }` |
-| Backend admin operations | Use `AoudaClient` with `AppAuthOptions { ApiKey = serviceKey }` |
+| Backend data queries scoped to user | Use `AoudaClient` with `AoudaClientOptions { ApiKey = serviceKey, UserToken = userJwt }` |
+| Backend admin operations | Use `AoudaClient` with `AoudaClientOptions { ApiKey = serviceKey }` |

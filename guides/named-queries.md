@@ -436,7 +436,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "https://data.example.com", // data-plane listener
   database: "trading",
-  appAuth: { apiKey: process.env.AOUDA_PUB_KEY! }, // mk_pub_…
+  apiKey: process.env.AOUDA_PUB_KEY!, // mk_pub_…
 });
 await client.connect();
 // after user sign-in, attach the user JWT — do not put identity in args

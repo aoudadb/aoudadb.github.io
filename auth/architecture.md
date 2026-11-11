@@ -43,7 +43,7 @@ Your backend is the only component that talks to Aouda. End users never connect 
 const db = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  appAuth: { apiKey: process.env.AOUDA_SERVICE_KEY },  // mk_svc_...
+  apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... (BL-1385, next train: a top-level option)
 });
 
 // Handle login from your frontend
@@ -66,10 +66,8 @@ app.get("/api/my-orders", async (req, res) => {
   const userScopedClient = createAoudaClient({
     serverUrl: "http://localhost:5433",
     database: "myapp",
-    appAuth: {
-      apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... (service key)
-      userToken: userJwt,                     // JWT from frontend → sent as X-User-Token
-    },
+    apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... (service key)
+    userToken: userJwt,                     // JWT from frontend → sent as X-User-Token
   });
   const orders = await userScopedClient.table("orders").execute();
   res.json(orders.rows);
@@ -112,7 +110,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "https://data.example.com", // the data-plane listener behind TLS
   database: "myapp",
-  appAuth: { apiKey: import.meta.env.VITE_AOUDA_PUB_KEY }, // mk_pub_...
+  apiKey: import.meta.env.VITE_AOUDA_PUB_KEY, // mk_pub_...
 });
 
 await client.connect();
@@ -156,7 +154,7 @@ var authClient = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    AppAuth = new AppAuthOptions { ApiKey = "mk_svc_xyz789..." }
+    ApiKey = "mk_svc_xyz789..."
 });
 
 // Sign up users

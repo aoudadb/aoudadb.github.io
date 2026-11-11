@@ -421,7 +421,7 @@ await using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5000",
     DatabaseName = "appdb",
-    ServerAuth = new ServerAuthOptions { ApiKey = "mk_srv_..." }
+    ApiKey = "mk_srv_..."   // BL-1385, next train: one setting for a key of any kind
 });
 
 // Trigger an immediate backup
@@ -457,7 +457,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5000",
   database: "appdb",
-  serverAuth: { apiKey: "mk_srv_..." },
+  apiKey: "mk_srv_...",   // BL-1385, next train: one option for a key of any kind
 });
 
 // Trigger backup

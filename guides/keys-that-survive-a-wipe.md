@@ -71,8 +71,9 @@ Aouda__Auth__RootUser__Email=admin@example.com
 Aouda__Auth__RootUser__Password=...
 ```
 
-The key comes from one of: `Aouda:Auth:Bootstrap:ServerKey`, a file named by `Aouda:Auth:Bootstrap:ServerKeyFile` (readable only
-by its owner, as `--password-file` is), or the systemd credential `aouda-server-key` (`LoadCredential=`). Set at most one.
+The key comes from one of: `Aouda:Auth:Bootstrap:ServerKey`, a file named by `Aouda:Auth:Bootstrap:ServerKeyFile` (no permission check, so a Docker or
+Kubernetes secret mounted `0444` works; **BL-1401, next train**: before, a file readable beyond its owner failed the start; a missing,
+unreadable or empty file still does, naming the path and never the content), or the systemd credential `aouda-server-key` (`LoadCredential=`). Set at most one.
 
 ⚠️ **The key's row is made when the server auth database is, and that is when the first admin exists.** Until then the server is in
 setup mode and answers `503` to everything except the first-run setup routes, so a server key alone is not enough: set
@@ -97,7 +98,9 @@ exists. A declared key never widens the first-run setup window: that route is ex
 | `authDatabase` | Which auth database the key lives in. Defaults to `auth` for every kind but `server_admin` |
 | `database` | Every kind but `server_admin`: the application database the key's roles are scoped to |
 | `roles` | `scoped_service` only. The roles `db_admin`, `db_operator`, `anonymous` and `public` are refused, as they are for a minted scoped key. A system kind takes **no** `roles` |
-| `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere |
+| `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "file": PATH }` (**BL-1389, next train**) reads the key from a file, see below. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere. A secret is exactly one of `env`, `file` and `hash`; a rotation may mix them across the list |
+
+**A secret from a file (**BL-1389, next train**).** `{ "file": "/run/secrets/feeder_key" }` reads the key from a file, so a Docker or systemd secret never passes through an environment variable. The file holds the key and nothing else: exactly one trailing newline (`\n`, `\r\n` or `\r`) is ignored and nothing else is trimmed, so a key with a trailing space fails the shape rule instead of being trimmed. A relative path is read from the identities file's directory, not the working directory, and `$NAME` / `${NAME}` in the path are expanded from the environment first, so systemd's `{ "file": "$CREDENTIALS_DIRECTORY/feeder" }` works as written (an unset variable fails the start naming the entry and the variable). The file is read once, at start, as strict UTF-8: a UTF-8 byte-order mark is ignored, and a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused as unreadable. A missing, unreadable, non-UTF-8 or empty file, or content that is not a key of the entry's kind, stops the server, and the message names the entry and the path, never the content. The startup log lists the key with source `file`. No permission check is made on the file, because Docker mounts file-based secrets readable by everyone in the container (`0444`) by default.
 
 A literal plaintext `key` in the file is **refused**: a credential never sits in a file that is committed, copied and attached to
 tickets. `auth_admin` and user-linked keys are not declarable.

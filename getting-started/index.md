@@ -371,6 +371,35 @@ List<Order> bigOrders = await db.GetTable<Order>()
     .ToListAsync();
 ```
 
+**Positional records and other constructor-built types** (**BL-1390, next train**). A row type with no public parameterless
+constructor, such as a positional record, is built through its single public constructor. Each parameter is bound to the result
+column of the same name (case-insensitive; a `[AoudaColumn]` on the same-named property renames the column), then the remaining
+settable properties (`init`, `required`, `set`) are written:
+
+```csharp
+public sealed record Trade(long Id, string Name, double Price, int? Lots = null)
+{
+    public string? Desk { get; init; }
+}
+
+List<Trade> trades = await db.GetTable<Trade>().ToListAsync();
+```
+
+- A column the type does not use is ignored.
+- A column missing from the result is an error naming the type, the parameter and the column, unless the parameter has a default
+  value, is `Nullable<T>`, or is a nullable reference (`string?`); then it gets that default or `null`.
+- A null cell given to a non-nullable value-type parameter gives `default(T)`, exactly as it does for a property.
+- A class that has a parameterless constructor keeps using it. A class with several public constructors and no parameterless one is
+  refused when `GetTable<T>()` is called, and the error lists them; give it a parameterless constructor (or a single constructor).
+  There is no attribute to choose one.
+- A parameter whose property is `[AoudaIgnore]`d is not a column: it is never read or required and gets `default(T)` (`null` for a reference type). `AoudaIgnore` applies to properties, so on a record write `[property: AoudaIgnore] object State`. The embedded engine's schema inference honours `[AoudaIgnore]` too.
+- A `record struct` works the same way, and so does a struct that declares exactly one public constructor (before, it was built as
+  `default` and its properties written).
+- Writing reads the type's public properties, so a record's properties are the columns. A get-only property that only a
+  constructor sets is not a column.
+
+The same holds in the embedded engine and for `ClientColumnarResult.ToObjects<T>()`.
+
 ### Synchronous API (Scripts and AI Agents)
 
 For simple scripts or AI agent scenarios where async isn't needed:
@@ -678,6 +707,22 @@ var client = new AoudaClient(new AoudaClientOptions
     CircuitBreakerPolicy = CircuitBreakerPolicy.Disabled,
 });
 ```
+
+##### A rejected key is not a retry (**BL-1386, next train**)
+
+The client does not retry a rejected API key (a signed-in session may refresh its token; a key cannot): HTTP 401 (`AUTH_API_KEY_INVALID`, `AUTH_TOKEN_*`) or an HTTP 403 that refuses the credential itself (`AUTH_KEY_ROUTE_MISMATCH`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `AUTH_ACCOUNT_DISABLED`). Retrying with the same key cannot succeed, and a writer that treats the error as "try again later" drops or endlessly re-buffers every row while the key is bad. `AuthFailurePolicy` makes it explicit, and is opt-in (the default changes nothing):
+
+```csharp
+AuthFailurePolicy = new AuthFailurePolicy
+{
+    FailFast = true,       // throw AoudaAuthenticationFatalException: stop, the credential is bad
+    SustainedAfter = 3,    // consecutive failures with no success between them (default 3)
+    OnSustained = info =>  // once per streak; carries no key
+        alerts.Raise($"Aouda rejected our key: {info.ErrorCode} x{info.ConsecutiveFailures} since {info.FirstSeenAt:u}"),
+}
+```
+
+`AoudaAuthenticationFatalException` is an `AoudaAuthenticationException` (an existing `catch` still sees it) with the original failure as `InnerException`. A batch writer (`CreateBatchWriter`) faults on one even when `ContinueOnError` is set, instead of dropping batch after batch; `BulkLoadAsync` surfaces it on `:begin`. A 403 `AUTHORIZATION_DENIED` (and `AUTH_PLS_*`, `AUTH_GRANT_*`) is not an authentication failure: the key is valid and a different table may be allowed. The streak counts HTTP requests through the client's transport; a realtime socket's own handshake is not counted, and an authentication failure does not count toward the circuit breaker. The client does not persist or re-send what it could not write: a caller that must not lose rows holds them until the key is fixed (a durable spool is a separate card, BL-1387, not built). An HTTP 403 now reports `StatusCode` 403 (it reported 400), and an authentication failure's `ErrorCode` carries the server's code (the client reads both of the server's error shapes), so `AUTH_KEY_ROUTE_MISMATCH` and the other 403 refusals match the policy.
 
 ### Connecting with the TypeScript Client
 
@@ -1609,7 +1654,7 @@ All server auth endpoints are under `/api/auth/...` and resolve to the internal 
 ### SDK Usage with Server Auth
 
 > **Server Auth vs Application Auth use separate options types.**
-> The .NET client uses `ServerAuth = new ServerAuthOptions { ... }` for server-level access and `AppAuth = new AppAuthOptions { ... }` for application-user access. The TypeScript client uses `serverAuth` and `appAuth` respectively. These two properties are mutually exclusive.
+> The .NET client takes an API key of any kind in one setting, `ApiKey` (**BL-1385, next train**; a `mk_srv_` key is server-level access). `ServerAuth = new ServerAuthOptions { ... }` is a server user's sign-in (email and password, or a server JWT) and `AppAuth = new AppAuthOptions { ... }` an application user's session (a JWT and its refresh token). The TypeScript client has the same shape: a top-level `apiKey` (**BL-1385, next train**) and `serverAuth` / `appAuth` sessions that take no key. `serverAuth` and `appAuth` are mutually exclusive.
 
 #### .NET Client
 
@@ -1622,10 +1667,7 @@ var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    ServerAuth = new ServerAuthOptions
-    {
-        ApiKey = "mk_srv_..."       // Server API key — no refresh needed, long-lived
-    }
+    ApiKey = "mk_srv_..."           // Server API key — no refresh needed, long-lived
 });
 
 var rows = await client.GetTable("orders").Limit(10).ToListAsync();
@@ -1651,7 +1693,7 @@ ServerAuth = new ServerAuthOptions
 
 #### TypeScript Client
 
-Use `serverAuth` for server-level access. The TypeScript client does not support `email`/`password` in the constructor; use the REST API directly for server auth sign-in if needed.
+Use `apiKey` with a `mk_srv_` key for server-level access (**BL-1385, next train**; `serverAuth` is a server user's session, and takes no key). The TypeScript client does not support `email`/`password` in the constructor; use the REST API directly for server auth sign-in if needed.
 
 ```typescript
 import { createAoudaClient } from "@aouda/client";
@@ -1659,16 +1701,14 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  serverAuth: {
-    apiKey: "mk_srv_...",  // Server API key
-  },
+  apiKey: "mk_srv_...",  // Server API key
 });
 
 await client.connect();
 const rows = await client.table("orders").limit(10).execute();
 ```
 
-For pre-obtained server JWT:
+For a pre-obtained server JWT (a session, not a key):
 
 ```typescript
 serverAuth: { token: "eyJhbG...", refreshToken: "..." }

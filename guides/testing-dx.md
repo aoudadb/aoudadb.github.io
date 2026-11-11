@@ -374,7 +374,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  serverAuth: { apiKey: "mk_srv_example" },
+  apiKey: "mk_srv_example",
 });
 
 const mem = await client.admin.server.memory();
