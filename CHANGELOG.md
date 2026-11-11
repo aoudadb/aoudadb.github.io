@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Databases, application auth databases and their links can be declared in configuration (aouda BL-1379, next train).** `Aouda:Databases:<db>:Kind` (`data` or `auth`) and `:AuthDatabase` (the application auth database to link to) bring back the same set after a wipe and a plain start; only schema and data need re-applying. A declarative link creates no API key. The start fails, naming the entry, on anything it cannot reconcile (a kind mismatch, a link that differs from the catalog's, an auth database that is neither declared nor existing). Fixed: a restart used to drop the auth link, signup settings and auth-database flags of a database declared in `Aouda:Databases`. See [Declared databases](guides/defaults-reference.md#declared-databases).
+
 ## 0.10.0 — 2026-11-11
 
 Server **0.10.0** / `@aouda/client` **0.10.0** / `Aouda.Client` **0.10.0**. Studio pin follows npm.
