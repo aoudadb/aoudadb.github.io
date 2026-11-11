@@ -129,13 +129,13 @@ A named query over a non-opted-in table is still **allowed to apply** — operat
 
 **Persist time (schema apply):** named-query cost is `1 + joinCount`. Defaults: max 3 joins, max cost 8. Exceed → `NAMED_QUERY_TOO_MANY_JOINS` / `NAMED_QUERY_COST_EXCEEDED` with a modelling-fix string ("split the query or drop a join"). Override: `Aouda:NamedQuery:MaxJoins` / `MaxCost`.
 
-**Runtime (data-plane only):** per-identity sliding window, default 60 permits / 60 seconds. One permit per execute, per **batch envelope**, per mutation execute, per subscribe attempt. Exceed → `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After`. Disabled on admin-only deployments. Config: `Aouda:IdentityQuota:PermitLimit` / `WindowSeconds` / `Enabled`.
+**Runtime (data-plane only):** per-identity sliding window, default 60 permits / 60 seconds. One permit per execute, per **batch envelope**, per mutation execute; a subscribe attempt spends none (**BL-1383, next train**) (see below). Exceed → `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After`. Disabled on admin-only deployments. Config: `Aouda:IdentityQuota:PermitLimit` / `WindowSeconds` / `Enabled`.
 
 **Several devices, one identity.** The quota and the subscription caps (`Aouda:WebSocket:MaxSubscriptionsPerConnection`,
 default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not the device, so a user on a browser, a desktop
 agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
 minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
-subscriptions. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
+subscriptions. Two more per-identity bounds apply (**BL-1383, next train**): a **connection limit** (`MaxConnectionsPerIdentity`, default 16; WebSocket and long-poll sessions together; refused inside the handshake with `IDENTITY_CONNECTION_LIMIT_EXCEEDED`, which a client must treat as final rather than reconnect in a loop) and a **subscribe-rate bucket** (`Aouda:WebSocket:SubscribeRate`, burst 512, 32 per second; `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`). For a public (`mk_pub_*`) key the identity is the key plus the visitor's remote address, so the anonymous visitors of one app are not one identity. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
 (**NativeClients, 0.4.0**).
 
 **Server clock.** Every response carries a `Date` header that a browser can read cross-origin (**NativeClients, next
@@ -245,6 +245,8 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | `AUTH_KEY_LISTENER_MISMATCH` | `mk_pub_*` on admin | Use the data-plane URL, or use `mk_svc_*` / operator JWT on admin |
 | `TABLE_NOT_FOUND` for a table you created | `dataPlaneAccess` false | Set true; re-apply; check join tables too |
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
+| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, next train**) | 16 connections per identity (public key: per remote address) | Close unused sockets; terminal for the handshake |
+| `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, next train**) | Subscribe bucket empty | Wait `retry_after_ms` / `Retry-After` |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
 | Data-plane named-query 404 with no token | Listed-route non-disclosure | Expected. Admin listener still 401. Use `mk_pub_*` or an entitled JWT. |
 | Data-plane named-mutation 404 with a valid, entitled JWT | Same listed-route non-disclosure, but the cause is the caller's RBAC role lacking `write` on this database (e.g. `db_reader`) — **not** the name and not PLS/RLS | Same masked 404 as "no token" (not 403). Check `db_roles` scope for this database before suspecting the artifact name; see [RBAC vs PLS/RLS](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls) |
