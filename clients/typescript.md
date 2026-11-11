@@ -1338,7 +1338,8 @@ queuing, and iterating it afterwards throws.)
 `limits` (`maxSubscriptionsPerConnection`, `maxSubscriptionsPerIdentity`, `maxConnectionsPerIdentity`, `subscribeBurst`,
 `subscribeRefillPerSecond`) and `protocol` (`version`, `capabilities`) — so an application can size itself instead of meeting a hard
 error first. It is `undefined` before the streaming connection is open, from an older server, and over the long-poll fallback (its
-handshake carries none). Three refusals have typed errors:
+handshake carries none). Three refusals have typed errors, all `AoudaApiError`s (status 429) and **not** `AoudaConnectionError`s, so a
+catch for connection failures does not swallow a cap:
 
 - **`IDENTITY_CONNECTION_LIMIT_EXCEEDED`** (`AoudaConnectionLimitError`): the identity already holds its connections. It is
   **terminal** on both transports: the first `connect()` rejects with it, a reconnect stops and reports it, and every consumer of
