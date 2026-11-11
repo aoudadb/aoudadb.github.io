@@ -392,6 +392,7 @@ List<Trade> trades = await db.GetTable<Trade>().ToListAsync();
 - A class that has a parameterless constructor keeps using it. A class with several public constructors and no parameterless one is
   refused when `GetTable<T>()` is called, and the error lists them; give it a parameterless constructor (or a single constructor).
   There is no attribute to choose one.
+- A parameter whose property is `[AoudaIgnore]`d is not a column: it is never read or required and gets `default(T)` (`null` for a reference type). `AoudaIgnore` applies to properties, so on a record write `[property: AoudaIgnore] object State`. The embedded engine's schema inference honours `[AoudaIgnore]` too.
 - A `record struct` works the same way, and so does a struct that declares exactly one public constructor (before, it was built as
   `default` and its properties written).
 - Writing reads the type's public properties, so a record's properties are the columns. A get-only property that only a
@@ -721,7 +722,7 @@ AuthFailurePolicy = new AuthFailurePolicy
 }
 ```
 
-`AoudaAuthenticationFatalException` is an `AoudaAuthenticationException` (an existing `catch` still sees it) with the original failure as `InnerException`. A batch writer (`CreateBatchWriter`) faults on one even when `ContinueOnError` is set, instead of dropping batch after batch; `BulkLoadAsync` surfaces it on `:begin`. A 403 `AUTHORIZATION_DENIED` (and `AUTH_PLS_*`, `AUTH_GRANT_*`) is not an authentication failure: the key is valid and a different table may be allowed. The streak counts HTTP requests through the client's transport; a realtime socket's own handshake is not counted, and an authentication failure does not count toward the circuit breaker. The client does not persist or re-send what it could not write: a caller that must not lose rows holds them until the key is fixed (a durable spool is a separate card, BL-1387, not built). An HTTP 403 now reports `StatusCode` 403 (it reported 400).
+`AoudaAuthenticationFatalException` is an `AoudaAuthenticationException` (an existing `catch` still sees it) with the original failure as `InnerException`. A batch writer (`CreateBatchWriter`) faults on one even when `ContinueOnError` is set, instead of dropping batch after batch; `BulkLoadAsync` surfaces it on `:begin`. A 403 `AUTHORIZATION_DENIED` (and `AUTH_PLS_*`, `AUTH_GRANT_*`) is not an authentication failure: the key is valid and a different table may be allowed. The streak counts HTTP requests through the client's transport; a realtime socket's own handshake is not counted, and an authentication failure does not count toward the circuit breaker. The client does not persist or re-send what it could not write: a caller that must not lose rows holds them until the key is fixed (a durable spool is a separate card, BL-1387, not built). An HTTP 403 now reports `StatusCode` 403 (it reported 400), and an authentication failure's `ErrorCode` carries the server's code (the client reads both of the server's error shapes), so `AUTH_KEY_ROUTE_MISMATCH` and the other 403 refusals match the policy.
 
 ### Connecting with the TypeScript Client
 

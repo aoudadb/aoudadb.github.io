@@ -387,7 +387,7 @@ directory and a plain start bring back the same set; only schema and data need r
 |---|---|---|
 | `Aouda:Databases:<db>:Kind` (**BL-1379, next train**) | `data` | `data`, or `auth` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `Durability` on an `auth` entry must be absent or `strict`) |
 | `Aouda:Databases:<db>:SchemaFile`, `:SchemaEnvironment`, `:SchemaAllowDestructive` (**BL-1388, next train**) | none, none, `false` | With `Kind: data`: a schema file the server applies at start, with an optional overlay and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
-| `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, next train**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
+| `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, next train**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
 | `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, next train**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
 ```json

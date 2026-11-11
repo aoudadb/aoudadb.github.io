@@ -169,7 +169,7 @@ then `--password-file /run/secrets/aouda_admin_password`.
     "roles": ["quote_writer"], "secrets": [ { "file": "/run/secrets/feeder_key" } ] } ] }
 ```
 
-The file holds the key and nothing else (one trailing newline is ignored). A relative path is read from the identities file's directory. The file is read once, at start; a missing, unreadable or empty file stops the server. Docker mounts file-based secrets as `0444` by default, and this source does not refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
+The file holds the key and nothing else (one trailing newline is ignored). A relative path is read from the identities file's directory, and `$NAME` / `${NAME}` in the path are expanded from the environment (systemd's `$CREDENTIALS_DIRECTORY/feeder` works as written). The file is read once, at start, as UTF-8 (a UTF-8 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused); a missing, unreadable or empty file stops the server. Docker mounts file-based secrets as `0444` by default, and this source does not refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
 
 ---
 
