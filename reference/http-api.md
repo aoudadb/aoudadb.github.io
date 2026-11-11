@@ -116,8 +116,8 @@ key of that kind, with the same claims and the same privilege gates; authenticat
 
 `GET /api/auth/admin/configured-keys` (server key; **BL-1378, next train**) lists the declarations and the state of each secret's row:
 `{ declarationSourceConfigured, keys: [{ id, name, kind, authDatabase, database, fingerprint, secretSource, state }] }`. `state` is
-`materialised`, `revoked`, or `pending` (the auth database, or the row, does not exist yet); `secretSource` is `env`, `hash` or
-`bootstrap`; `id` is the row's id (what `DELETE .../api-keys/{id}` takes). It never carries a secret or a hash. `GET /api/server/metrics`
+`materialised`, `revoked`, or `pending` (the auth database, or the row, does not exist yet); `secretSource` is `env`, `file`, `hash` or
+`bootstrap` (the kind of source, never a path or a value); `id` is the row's id (what `DELETE .../api-keys/{id}` takes). It never carries a secret or a hash. `GET /api/server/metrics`
 carries `rejectedApiKeys` (**BL-1378, next train**): `{ server_admin, scoped_service, service_role, auth_admin, public, anon, other }`,
 the number of API keys refused as a credential over HTTP since start, by kind only. See
 [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
