@@ -334,7 +334,7 @@ are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing
 
 The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
-## Configured API keys (**BL-1377, next train**) {#configured-api-keys}
+## Configured API keys (**BL-1377, 0.10.0**) {#configured-api-keys}
 
 Credentials declared in configuration instead of minted into the data a wipe destroys. Nothing is configured by default. Full
 guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
@@ -351,7 +351,7 @@ generator. A change takes a restart; an invalid declaration fails the start nami
 
 ## Related docs
 
-- [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, next train**) - declaring keys in configuration
+- [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, 0.10.0**) - declaring keys in configuration
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into
 - [Materialized queries](materialized.md#where-a-materialized-querys-result-lives) — where a query's result table lives, and why the default changed
 - [Server configuration](server-configuration.md) — where each of these keys is set (`appsettings.json`, `AOUDA_*` env vars, CLI flags) and what survives a restart

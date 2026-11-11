@@ -13,7 +13,17 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
-- **API keys can be declared in configuration, so a wipe or a fresh machine re-mints nothing (aouda BL-1377, next train).** `Aouda:Auth:Bootstrap:ServerKey` (with `Aouda:Auth:RootUser`) gives a fresh server a working `mk_srv_` key with no sign-in or mint call, and `Aouda:Auth:Keys:File` declares further `server_admin` and `scoped_service` keys with secrets as environment references or `sha256:` hashes. They are checked before the stored keys, for the auth database they were declared for, and survive a wipe because they never enter the database. A rejected key is now named by fingerprint in the server log, and `aouda keys hash --key-stdin` prints the fingerprint of a key you hold. New guide [Keys that survive a wipe](guides/keys-that-survive-a-wipe.md); the keys are in [Defaults Reference](guides/defaults-reference.md#configured-api-keys) and the [HTTP API](reference/http-api.md).
+## 0.10.0 — 2026-11-11
+
+Server **0.10.0** / `@aouda/client` **0.10.0** / `Aouda.Client` **0.10.0**. Studio pin follows npm.
+
+- **A subscription snapshot names its `Timestamp` columns (IR quote report, 0.10.0).** `column_types` on a `snapshot` message now also names each `Timestamp` column (`{"DateTime":"Timestamp"}`); the value on the wire is unchanged (UTC .NET ticks). `@aouda/client` 0.10.0 hands a `Date` for such a column in snapshots and changes, and `Aouda.Client` 0.10.0 a UTC `DateTime`. **Breaking for a caller that converted the number itself.** See [Real-time](guides/real-time.md) (Timestamp columns in a subscription).
+
+- **The C# typed table API no longer requires `T : new()` (BL-1376, 0.10.0).** `GetTable<T>()` and the typed query methods accept any `notnull` type; a type that is an interface, abstract, or has no public parameterless constructor is refused at run time naming the type. A `required` member now maps.
+
+- **A POCO with array properties writes and creates its columns (BL-1374, 0.9.1).** Shipped in `Aouda.Client` 0.9.1.
+
+- **API keys can be declared in configuration, so a wipe or a fresh machine re-mints nothing (aouda BL-1377, 0.10.0).** `Aouda:Auth:Bootstrap:ServerKey` (with `Aouda:Auth:RootUser`) gives a fresh server a working `mk_srv_` key with no sign-in or mint call, and `Aouda:Auth:Keys:File` declares further `server_admin` and `scoped_service` keys with secrets as environment references or `sha256:` hashes. They are checked before the stored keys, for the auth database they were declared for, and survive a wipe because they never enter the database. A rejected key is now named by fingerprint in the server log, and `aouda keys hash --key-stdin` prints the fingerprint of a key you hold. New guide [Keys that survive a wipe](guides/keys-that-survive-a-wipe.md); the keys are in [Defaults Reference](guides/defaults-reference.md#configured-api-keys) and the [HTTP API](reference/http-api.md).
 
 - **Named-query `params.required` default is documented explicitly.** Omitting `required` means **required** (`true`), not optional. A `whenParamPresent` condition needs `"required": false` on that param or schema apply fails with `NAMED_QUERY_OPTIONAL_PREDICATE_INVALID`. Spelled out in [Named queries](guides/named-queries.md#optional-predicates-whenparampresent), [browser-tier read limits](guides/browser-tier-read-limits.md#optional-predicates-whenparampresent), [market data](guides/market-data.md), and the [HTTP API](reference/http-api.md) named-query definition fields / error table.
 
