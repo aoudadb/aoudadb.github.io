@@ -115,9 +115,15 @@ naming both entries. `database` is compared exactly as the catalog spells it: `D
 difference in case declares a second key.
 
 A declared system key is **the** key of its kind. Linking a database generates and returns only the kinds you did **not** declare
-(declare all three and nothing is generated or printed), and `regenerate-keys` leaves declared rows live, with the same ids, and
-mints only the others. In the response of a create-with-auth, a link or a regenerate, `anonKey`, `serviceRoleKey` and `publicKey`
-are therefore **absent** for a declared kind. Revoking a declared system key (by id) retracts it, and nothing replaces it.
+and that are missing (declare all three and nothing is generated or printed), and `regenerate-keys` leaves declared rows live, with
+the same ids, and mints only the others. In the response of a create-with-auth, a link or a regenerate, `anonKey`,
+`serviceRoleKey` and `publicKey` are therefore **absent** for a declared kind. A link never regenerates a kind that is fine: it
+mints the missing kinds only. Revoking a declared system key (by id) retracts it, and nothing replaces it.
+
+**Declaring a kind on a database that is already linked replaces the generated key.** The next start revokes the generated key of
+that kind and database (the same revoke as any other, listed with its own `source: "minted"`), so there is one live key of the kind
+and it is the one you declared. If you revoke the declared key afterwards, the generated one does not come back. Remove the
+declaration instead and the next link generates that kind again, leaving the other kinds' keys alone.
 
 **Every listed secret is live, and each is its own row.** To rotate a declared key, add the new secret, deploy and restart, move
 the clients, then remove the old secret and restart again (its row is retracted at that start). Removing a secret or an entry never
@@ -135,6 +141,12 @@ The kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_` or `mk_anon_`), th
 `A-Z a-z 0-9 _ -`, not one repeated character and no run of more than 8 equal characters. That is a floor, not a proof of entropy:
 generate keys with `openssl rand -hex 32` and put the prefix in front.
 
+**A secret is one row.** Declaring the secret of a key that already exists in that auth database (one minted earlier, revoked or
+not) is refused with an error that names the existing row (its id, name and source, never the secret): revoke and delete that key,
+or declare a different secret. At start the error fails the start; it also abandons the creation of an auth database. `aouda keys
+check` runs offline and cannot see a database, so it reports only the clashes it can: the same secret twice in the file, or in the
+file and in `Aouda__Auth__Bootstrap__ServerKey`.
+
 The declared `kind` must match the prefix wherever the server can see the plaintext (an `env` secret or the server key). For a
 `hash` secret it cannot, and a mismatch there changes only the credential-kind label in the failure log, never the privilege.
 
@@ -148,8 +160,9 @@ aouda keys check --file identities.json
 
 (**BL-1378, next train**) It loads the file with the environment of the process that runs it, exactly as the server does, prints each
 declaration (name, kind, auth database, database, the fingerprint and source of each secret) and never a secret or a hash. It exits
-`1` naming the entry on the first error, and warns when a scoped entry names a database that no `service_role`, `public` or `anon`
-declaration mentions. It needs no server and no data directory, so it runs in CI.
+`1` naming the entry on the first error, and warns **once per database** that scoped entries name and no `service_role`, `public`
+or `anon` declaration mentions. If `Aouda__Auth__Bootstrap__ServerKey` is set in its environment it is checked with the file, as the
+start does (the same name or the same secret is refused). It needs no server and no data directory, so it runs in CI.
 
 ## Seeing and managing the keys
 
@@ -188,7 +201,9 @@ database than the one it is declared for (the commonest cause is a typo in `auth
 `3a1f9c02 x3 (declared as 'tullett-feeder'; its row is revoked)` when its row is revoked. Only a key refused as a credential is
 counted; a valid key refused for its route is not a failing sender.
 
-A fingerprint is the first 8 hex characters of the key's SHA-256. It is a log field only. Match it to a declared key in the startup
+A fingerprint is the first 8 hex characters of the key's SHA-256. It is a log field, and the `GET /api/auth/admin/configured-keys`
+answer for a server key; the `keyPrefix` a key listing shows for a declared key is the kind's prefix, `#` and a fragment of the
+row id, not the fingerprint. Match it to a declared key in the startup
 log, which lists each declared key by name, kind, auth database, fingerprint and source (`env`, `hash` or `bootstrap`), or hash
 the dead key a legacy sender still holds:
 
