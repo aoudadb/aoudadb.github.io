@@ -789,7 +789,8 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
 - **`client.ServerLimits`** holds what the server sent in `auth_ok`: `MaxSubscriptionsPerConnection`, `MaxSubscriptionsPerIdentity`,
   `MaxConnectionsPerIdentity`, `SubscribeBurst`, `SubscribeRefillPerSecond`, `ProtocolVersion` and `Capabilities`. It is `null` before the
   first WebSocket connection, over long-poll, and against a server that does not send them. `SUBSCRIPTION_LIMIT_EXCEEDED` reaches you
-  as an `AoudaRequestException` with the server's message, which names the cap and what raises it.
+  as an `AoudaSubscriptionLimitException` (an `AoudaRequestException`, not a connection error) with the server's message, which names the cap
+  and what raises it.
 
 ---
 
