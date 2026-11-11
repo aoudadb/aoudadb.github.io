@@ -114,7 +114,7 @@ var adminClient = new AoudaClient(new AoudaClientOptions
 
 ## 11. Integrating with the TypeScript Client
 
-The TypeScript client uses `appAuth` for Application Auth endpoints (`/api/databases/{db}/auth/...`) and `serverAuth` for Server Auth endpoints (`/api/auth/...`). The two are mutually exclusive. User sign-in is always explicit via `client.auth.signIn()` — there is no `email`/`password` option in the constructor.
+The TypeScript client takes an API key of any kind in one top-level option, `apiKey` (**BL-1385, next train**), with `userToken` beside it. `appAuth` (a signed-in application user's `token` and `refreshToken`) and `serverAuth` (a server user's) are sessions, not keys, and take no key; the two are mutually exclusive, and a key beside `serverAuth` or beside an `appAuth` that holds a token is refused at construction. A sign-in calls the Server Auth endpoints (`/api/auth/...`) for an `mk_srv_` key or `serverAuth`, and the database's own (`/api/databases/{db}/auth/...`) otherwise. `userToken` is accepted beside `mk_svc_` or `mk_srv_` only. There is no `authAdmin` option any more. User sign-in is always explicit via `client.auth.signIn()` — there is no `email`/`password` option in the constructor.
 
 ### Backend: Service Key
 
@@ -124,9 +124,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  appAuth: {
-    apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... — KEEP SECRET
-  },
+  apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... — KEEP SECRET
 });
 
 await client.connect();
@@ -139,10 +137,8 @@ const allOrders = await client.table("orders").limit(10).execute();
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  appAuth: {
-    apiKey: process.env.AOUDA_SERVICE_KEY,
-    userToken: req.headers["x-user-token"],  // JWT from frontend
-  },
+  apiKey: process.env.AOUDA_SERVICE_KEY,
+  userToken: req.headers["x-user-token"],  // JWT from frontend
 });
 ```
 

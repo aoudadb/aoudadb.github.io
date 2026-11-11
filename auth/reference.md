@@ -88,7 +88,7 @@ aouda start --port 5433 --data-dir ./data
 #   const db = createAoudaClient({
 #     serverUrl: "http://localhost:5433",
 #     database: "myapp",
-#     appAuth: { apiKey: SERVICE_KEY }
+#     apiKey: SERVICE_KEY
 #   });
 #
 #   app.post("/api/signup", async (req, res) => {

@@ -1653,7 +1653,7 @@ All server auth endpoints are under `/api/auth/...` and resolve to the internal 
 ### SDK Usage with Server Auth
 
 > **Server Auth vs Application Auth use separate options types.**
-> The .NET client takes an API key of any kind in one setting, `ApiKey` (**BL-1385, next train**; a `mk_srv_` key is server-level access). `ServerAuth = new ServerAuthOptions { ... }` is a server user's sign-in (email and password, or a server JWT) and `AppAuth = new AppAuthOptions { ... }` an application user's session (a JWT and its refresh token). The TypeScript client uses `serverAuth` and `appAuth` respectively. These two properties are mutually exclusive.
+> The .NET client takes an API key of any kind in one setting, `ApiKey` (**BL-1385, next train**; a `mk_srv_` key is server-level access). `ServerAuth = new ServerAuthOptions { ... }` is a server user's sign-in (email and password, or a server JWT) and `AppAuth = new AppAuthOptions { ... }` an application user's session (a JWT and its refresh token). The TypeScript client has the same shape: a top-level `apiKey` (**BL-1385, next train**) and `serverAuth` / `appAuth` sessions that take no key. `serverAuth` and `appAuth` are mutually exclusive.
 
 #### .NET Client
 
@@ -1692,7 +1692,7 @@ ServerAuth = new ServerAuthOptions
 
 #### TypeScript Client
 
-Use `serverAuth` for server-level access. The TypeScript client does not support `email`/`password` in the constructor; use the REST API directly for server auth sign-in if needed.
+Use `apiKey` with a `mk_srv_` key for server-level access (**BL-1385, next train**; `serverAuth` is a server user's session, and takes no key). The TypeScript client does not support `email`/`password` in the constructor; use the REST API directly for server auth sign-in if needed.
 
 ```typescript
 import { createAoudaClient } from "@aouda/client";
@@ -1700,16 +1700,14 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  serverAuth: {
-    apiKey: "mk_srv_...",  // Server API key
-  },
+  apiKey: "mk_srv_...",  // Server API key
 });
 
 await client.connect();
 const rows = await client.table("orders").limit(10).execute();
 ```
 
-For pre-obtained server JWT:
+For a pre-obtained server JWT (a session, not a key):
 
 ```typescript
 serverAuth: { token: "eyJhbG...", refreshToken: "..." }

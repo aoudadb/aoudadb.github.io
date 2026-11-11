@@ -178,7 +178,7 @@ const tasks = await client.table("tasks")
 const db = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "taskapp",
-  appAuth: { apiKey: process.env.AOUDA_SERVICE_KEY },
+  apiKey: process.env.AOUDA_SERVICE_KEY,
 });
 
 app.post("/api/signup", async (req, res) => {
@@ -193,10 +193,8 @@ app.get("/api/tasks", async (req, res) => {
   const userScopedClient = createAoudaClient({
     serverUrl: "http://localhost:5433",
     database: "taskapp",
-    appAuth: {
-      apiKey: process.env.AOUDA_SERVICE_KEY,
-      userToken: userJwt,  // forwarded as X-User-Token — PLS scoped to this user
-    },
+    apiKey: process.env.AOUDA_SERVICE_KEY,
+    userToken: userJwt,  // forwarded as X-User-Token — PLS scoped to this user
   });
   const tasks = await userScopedClient.table("tasks").execute();
   res.json(tasks.rows);

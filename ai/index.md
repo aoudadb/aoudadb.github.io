@@ -377,7 +377,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  appAuth: { apiKey: "mk_svc_..." }
+  apiKey: "mk_svc_..."
 });
 
 await client.auth.signIn("admin@myapp.com", "Pass123!");
@@ -390,7 +390,7 @@ await client.auth.createPartitionGrant("550e8400-e29b-41d4-a716-446655440000", {
 
 Expected result: authenticated admin creates partition grant through app admin API wrapper.
 
-Common mistake: providing both `apiKey` and `token` in `appAuth`. Browser login does not need `appAuth`.
+Common mistake: providing both `apiKey` and `appAuth.token` (a key and a signed-in session are two credentials; `apiKey` is a top-level option since **BL-1385, next train**). Browser login needs neither.
 
 ### HTTP/protocol examples
 

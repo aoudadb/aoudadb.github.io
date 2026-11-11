@@ -156,19 +156,19 @@ await client.auth.signIn('user@example.com', 'secret', { deviceInfo: 'Ann’s la
 await client.auth.signOut({ scope: 'others' });
 const devices = await client.auth.listSessions();
 
-// App auth with service key (backend service acting on behalf of users)
+// A service key (backend service acting on behalf of users). `apiKey` takes a key of any kind (BL-1385, next train)
 const backend = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
-  appAuth: { apiKey: 'mk_svc_abc123...' },
+  apiKey: 'mk_svc_abc123...',
 });
 await backend.connect();
 
-// Server/admin auth with API key
+// A server key, for server/admin calls: the same option
 const admin = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
-  serverAuth: { apiKey: 'mk_srv_abc123...' },
+  apiKey: 'mk_srv_abc123...',
 });
 await admin.connect();
 ```
@@ -192,13 +192,42 @@ A token used elsewhere is `401` with the exported code `AUTH_DATABASE_NOT_IN_ALL
 like `AUTH_REFRESH_TOKEN_INVALID` — the client clears its tokens, reports `"signedOut"` and does not retry, and the realtime transports
 stop reconnecting. See [the token allowance](../auth/reference.md#the-token-allowance).
 
+**One `apiKey` (BL-1385, next train, breaking).** `apiKey` is a top-level option and takes a key of any kind: `mk_svc_`,
+`mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key. `userToken` moves to the top level too. Removed, with no
+alias: `appAuth.apiKey`, `serverAuth.apiKey`, `appAuth.userToken`, `serverAuth.userToken`, the `authAdmin` option and the `AuthAdminOptions`
+type. Every kind goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves the kind; the client reads the
+prefix only to refuse a value that is not an `mk_` key (a JWT goes in `appAuth.token` / `serverAuth.token`), to sign in at `/api/auth`
+for an `mk_srv_` key and at the database's own auth endpoints for every other kind, and to allow `userToken` beside `mk_svc_` /
+`mk_srv_` only. `client.databases.list()` with a `mk_svc_` key is refused by the server (`AUTH_KEY_ROUTE_MISMATCH`): it needs a `mk_srv_` key.
+
 **Auth option rules:**
-- `appAuth` and `serverAuth` are mutually exclusive. Omitting both still exposes `client.auth` for keyless browser login.
-- Within each, `apiKey` and `token` are mutually exclusive.
+- `appAuth` (a signed-in application user's session) and `serverAuth` (a server user's) are mutually exclusive. Omitting both still exposes `client.auth` for keyless browser login. Neither takes a key.
+- `apiKey` cannot be combined with `serverAuth`, or with an `appAuth` that holds a token: a key and a signed-in session are two credentials, refused at construction. `userToken` beside a key that cannot carry one is refused too.
 - `refreshToken` requires `token` to also be set.
 - Browser signup/signin do not need `apiKey`. Backends pass `mk_svc_*`. `mk_pub_*` is for pre-auth named queries on the [data-plane listener](../guides/direct-client-access.md).
 
-**Common mistake:** passing `apiKey` at the top level (no such option exists — it must be nested inside `appAuth` or `serverAuth`).
+**Common mistake:** passing `apiKey` inside `appAuth` or `serverAuth`. Before this train that was the only place it went; now there is no such field, and the key is the top-level `apiKey`.
+
+**A refused credential (BL-1386, next train).** The client never retries a 401 or a credential-refusing 403, but a writer that treats
+the error as "try again later" drops or re-buffers every row while the key is bad. Opt in with `authFailurePolicy`:
+
+```typescript
+const client = new AoudaClient({
+  serverUrl, database, apiKey,
+  authFailurePolicy: {
+    failFast: true,                       // throw AoudaAuthenticationFatalError (an AoudaAuthenticationError; `cause` is the original)
+    sustainedAfter: 3,                    // default 3
+    onSustained: (info) => alert(info),   // once per streak: { errorCode, statusCode, consecutiveFailures, firstSeenAt, lastSeenAt, requestId }
+  },
+});
+```
+
+Fatal is HTTP 401, and HTTP 403 with `AUTH_KEY_ROUTE_MISMATCH`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `AUTH_API_KEY_INVALID`,
+`AUTH_API_KEY_REQUIRED`, `AUTH_TOKEN_*` or `AUTH_ACCOUNT_DISABLED`; not `AUTHORIZATION_DENIED`, `AUTH_PLS_*` or `AUTH_GRANT_*` (the key is
+valid). A streak is consecutive such failures with no successful request between them, counted over HTTP requests (queries, inserts,
+bulk load, schema calls); a realtime socket's own handshake is not counted, an authentication failure stays out of the circuit
+breaker, and neither the error nor `info` carries the key. The SDK has no batch writer: a loop of `insert` / `bulkLoad` calls should
+stop on `AoudaAuthenticationFatalError`.
 
 ---
 
@@ -1105,6 +1134,14 @@ The subscription delivers two event types via `onChange`:
 - `op: "delete"` — a row was deleted; `key` contains the deleted primary key.
 
 An `onSnapshot` callback receives the initial consistent snapshot of existing rows when the subscription first connects.
+
+**Dates and timestamps in a subscription** (**BL-1391, next train**). A snapshot page names a `Timestamp` or `Date` column in
+`column_types`, and the SDK hands a JavaScript `Date` for both, in the snapshot and in every later change's `row` and `prev` (a change
+does not repeat the names). A `Timestamp` arrives on the wire as .NET ticks (UTC) and becomes its instant, rounded to the millisecond.
+A `Date` arrives as whole days since 1970-01-01 and becomes a `Date` at **00:00:00 UTC** of that day: read it with `getUTCFullYear()` /
+`getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. **Breaking for a caller that read the
+day number itself.** A change event's own `key` payload (a delete) stays the wire value. Query results are different: there a `Date`
+column is still the day number.
 (**Lead S14, 0.6.0**) The server sends a snapshot's pages as column arrays; the SDK gives you rows, as before. A snapshot
 whose pages carry fewer rows than the server counted (`snapshot_complete`'s `row_count`) is an error (`onError`, and the
 subscription ends) — never a snapshot with rows missing.
@@ -1387,10 +1424,16 @@ Full typed `client.admin.*` surface covering all server management operations.
 ### Health and Metrics
 
 ```typescript
-const health = await client.admin.health();
+const health = await client.admin.health.check();
+const readiness = await client.admin.health.ready(); // { ready, reasons } (BL-1393, next train)
 const metrics = await client.admin.metrics();
 const info = await client.admin.server.info();
 ```
+
+`admin.health.ready()` returns every reason the server is not ready (**BL-1393, next train**). `ReadinessResponse` is
+`{ ready, reasons }`, each reason `{ code, message, subject? }` with a stable `code` (`setup_required`, `database_pending`,
+`database_not_open`, `configured_key_inactive`, `component_unhealthy`, and the rest listed under [`GET /ready`](../reference/http-api.md#get-ready)); `reasons`
+is empty when `ready`. The single `reason` string is gone, so a caller that printed it prints `reasons` instead.
 
 ### Replication
 

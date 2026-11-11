@@ -457,7 +457,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5000",
   database: "appdb",
-  serverAuth: { apiKey: "mk_srv_..." },
+  apiKey: "mk_srv_...",   // BL-1385, next train: one option for a key of any kind
 });
 
 // Trigger backup

@@ -71,8 +71,9 @@ Aouda__Auth__RootUser__Email=admin@example.com
 Aouda__Auth__RootUser__Password=...
 ```
 
-The key comes from one of: `Aouda:Auth:Bootstrap:ServerKey`, a file named by `Aouda:Auth:Bootstrap:ServerKeyFile` (readable only
-by its owner, as `--password-file` is), or the systemd credential `aouda-server-key` (`LoadCredential=`). Set at most one.
+The key comes from one of: `Aouda:Auth:Bootstrap:ServerKey`, a file named by `Aouda:Auth:Bootstrap:ServerKeyFile` (no permission check, so a Docker or
+Kubernetes secret mounted `0444` works; **BL-1401, next train**: before, a file readable beyond its owner failed the start; a missing,
+unreadable or empty file still does, naming the path and never the content), or the systemd credential `aouda-server-key` (`LoadCredential=`). Set at most one.
 
 ⚠️ **The key's row is made when the server auth database is, and that is when the first admin exists.** Until then the server is in
 setup mode and answers `503` to everything except the first-run setup routes, so a server key alone is not enough: set

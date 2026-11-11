@@ -210,7 +210,7 @@ const dataPlane = "https://data.example.com"; // :5434 behind TLS
 const client = new AoudaClient({
   serverUrl: dataPlane,
   database: "trading",
-  appAuth: { apiKey: import.meta.env.VITE_AOUDA_PUB_KEY }, // mk_pub_…
+  apiKey: import.meta.env.VITE_AOUDA_PUB_KEY, // mk_pub_…
 });
 await client.connect();
 

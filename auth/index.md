@@ -468,7 +468,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5000",
   database: "appdb",
-  appAuth: { apiKey: "mk_svc_..." }
+  apiKey: "mk_svc_..."
 });
 
 await client.auth.signIn("admin@app.com", "p@ssword123");
@@ -478,7 +478,7 @@ console.log(resolvers.length);
 
 Expected result: authenticated session and successful RLS resolver query via `/auth/admin` wrapper path.
 
-Common mistake: providing both `apiKey` and `token` in `appAuth` (mutually exclusive). Browser login does not need `appAuth` at all.
+Common mistake: providing both `apiKey` and `appAuth.token` (refused at construction: a key and a signed-in session are two credentials; `apiKey` is a top-level option since **BL-1385, next train**). Browser login needs neither.
 
 ### HTTP/protocol examples
 
