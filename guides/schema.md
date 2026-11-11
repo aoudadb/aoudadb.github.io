@@ -891,7 +891,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 #### MigrationSource
 
-`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply. (**BL-980, 0.4.0**) These four are the only values: `StartupApply` is gone, and a migration history naming it — or any other unknown source, or a number — is refused when it is read.
+`MigrationSource` is stored in each `MigrationHistoryEntry` and identifies what triggered the apply. (**BL-980, 0.4.0**) These five are the only values: `StartupApply` is gone (the start-time apply of a declared database is `DeclaredApply`, below), and a migration history naming it — or any other unknown source, or a number — is refused when it is read.
 
 | Value | Meaning |
 |---|---|
@@ -899,6 +899,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
 | `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = Extend`). |
 | `BranchMerge` | Change applied by merging a branch into the parent catalog. |
+| `DeclaredApply` | The server applied the `SchemaFile` a declared database names, at start (**BL-1388, next train**). |
 
 ### E) Schema JSON field reference (complete)
 

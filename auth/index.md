@@ -458,7 +458,7 @@ Console.WriteLine($"{me.Email} {auth.ExpiresIn}");
 
 Expected result: sign-in returns access/refresh tokens, and subsequent calls use the authenticated user context.
 
-Common mistake: providing both `ApiKey` and `Token` in `AppAuthOptions` (validation rejects mutually exclusive setup). Browser login does not need `AppAuth` at all.
+Common mistake: providing both `AoudaClientOptions.ApiKey` and `AppAuth.Token` (validation rejects mutually exclusive setup: a key and a signed-in session are two credentials). Browser login needs neither.
 
 ### TypeScript example (app auth + ADRA admin wrapper)
 

@@ -506,7 +506,7 @@ await using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5000",
     DatabaseName = "appdb",
-    ServerAuth = new ServerAuthOptions { ApiKey = "mk_srv_..." }
+    ApiKey = "mk_srv_..."   // BL-1385, next train: one setting for a key of any kind
 });
 
 // Backup management

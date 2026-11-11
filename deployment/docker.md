@@ -162,6 +162,15 @@ secrets:
 
 then `--password-file /run/secrets/aouda_admin_password`.
 
+**API keys from secrets (BL-1389, next train).** A key declared in the identities file (`Aouda:Auth:Keys:File`) can be read from a secret file, so it never passes through an environment variable:
+
+```json
+{ "identities": [ { "name": "feeder", "kind": "scoped_service", "database": "deposit",
+    "roles": ["quote_writer"], "secrets": [ { "file": "/run/secrets/feeder_key" } ] } ] }
+```
+
+The file holds the key and nothing else (one trailing newline is ignored). A relative path is read from the identities file's directory. The file is read once, at start; a missing, unreadable or empty file stops the server. Docker mounts file-based secrets as `0444` by default, and this source does not refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
+
 ---
 
 ## Logs

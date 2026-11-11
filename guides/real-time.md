@@ -431,6 +431,8 @@ A `Timestamp` column arrives as a JSON **number**: .NET ticks since `0001-01-01T
 for the `change` messages, which do not repeat it. `@aouda/client` hands a `Date`; elsewhere, Unix milliseconds are
 `(ticks − 621355968000000000) / 10000`. A column declared `String` is text. Details: [Timestamp semantics](../reference/http-api.md#timestamp-semantics).
 
+(**BL-1391, next train**) A `Date` column is a JSON number too, a count of days since the Unix epoch, and the `snapshot` now names it as `"Date"` in `column_types` (`{"day":"Date"}`), on every page, so a client can tell it from an `Int32`. The value on the wire is unchanged and a `change` does not repeat the name. `Aouda.Client` ignores the new name (a `Date` stays a number there); `@aouda/client` needs a change to read it.
+
 (**BL-1381, next train**) The C# SDK (`Aouda.Client`) hands a `DateTime` of kind `Utc`, 100 ns tick kept, in the snapshot and in every
 change: `Row`, `PreviousRow` and a delete's `Key` (a `Timestamp` primary key) — also after a reconnect, a gap resume or a
 `SLOW_CONSUMER` fresh subscribe, and on a named-query subscription. It remembers the names the latest snapshot gave; a fresh snapshot

@@ -82,7 +82,10 @@ application.
 | `Timeout` | 30 s | Deadline for one request. Bulk load uses its own, `BulkLoadOptions.RequestTimeout` (§7). |
 | `RetryPolicy` | `RetryPolicy.Default` (3 retries, exponential backoff; `Aouda.Client.Resilience`) | Retries of transient failures; see §8 for what a write may and may not repeat. `RetryPolicy.None` turns retries off. |
 | `CircuitBreakerPolicy` | `CircuitBreakerPolicy.Default` (opens after 5 failures in 30 s) | While open, calls fail at once with `CircuitBreakerOpenException`. `CircuitBreakerPolicy.Disabled` turns it off. |
-| `ServerAuth` / `AppAuth` | none | Server auth (`ServerAuthOptions`: `ApiKey`, `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`). Mutually exclusive. See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
+| `ApiKey` (**BL-1385, next train**) | none | An Aouda API key of any kind: `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key. Sent as `Authorization: Bearer`; the server resolves the kind. A value without the `mk_` prefix is refused at construction. Replaces `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin`, which are removed. `Databases.ListAsync` / `CreateAsync` need a `mk_srv_` key here. |
+| `UserToken` (**BL-1385, next train**) | none | A user's JWT sent as `X-User-Token` beside the key; needs a `mk_svc_` or `mk_srv_` `ApiKey`. Moved here from `AppAuthOptions` / `ServerAuthOptions`. |
+| `ServerAuth` / `AppAuth` | none | A signed-in session, not a key: server auth (`ServerAuthOptions`: `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`: `Token` + `RefreshToken`). Mutually exclusive with each other, and with `ApiKey` (a key and a session are two credentials). See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
+| `AuthFailurePolicy` (**BL-1386, next train**) | nothing happens | Opt-in: `FailFast` throws `AoudaAuthenticationFatalException` for a rejected key instead of a failure a caller may retry later; `OnSustained` is called once after `SustainedAfter` (default 3) failures in a row. See [Getting Started](../getting-started/index.md#a-rejected-key-is-not-a-retry-bl-1386-next-train). |
 | `AutoCreateSchema` | `false` | Typed inserts create a missing table from the type. |
 | `AutoReconcileSchema` | `true` | Before the first typed insert to a table, compare it with the type and change the table to match (see `ReconcilePolicy`). A typed update does not reconcile. (**BL-1178, 0.9.0**) ⚠️ Set `false` for tables from `aouda.schema.json`: since **BL-1177 (0.9.0)** the server refuses DDL on them, and an insert that needs to add or drop a column fails with `AoudaSchemaException`. |
 | `ReconcilePolicy` | `Safe` | Default `Safe` only adds columns the row type has and the table lacks. `Unsafe` is opt-in and drops non-key columns a row type omits; a primary-key column stays. A typed update does not reconcile. (**BL-1178, 0.9.0**) Bulk load never reconciles. See [Schema § what `InferenceMode` decides](../guides/schema.md#what-inferencemode-decides-and-what-it-does-not). |
@@ -97,7 +100,7 @@ using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "https://db.example.com",
     DatabaseName = "myapp",
-    ServerAuth = new ServerAuthOptions { ApiKey = "mk_srv_..." },
+    ApiKey = "mk_srv_...",
     Timeout = TimeSpan.FromSeconds(30),
 });
 ```
@@ -135,6 +138,9 @@ ClientColumnarResult perCustomer = await client.GetTable("orders")
     .AggregateAsync();
 // Columns: customer, COUNT, SUM_total — one row per group (perCustomer.ToRows(), or GetColumn<T>(name))
 ```
+
+A row type may be a positional record or any type with a single public constructor and no parameterless one: each constructor
+parameter is bound to the column of the same name (**BL-1390, next train**; see [Getting Started](../getting-started/index.md)).
 
 Query results arrive as column-batch frames and are read into typed columns; the values are the ones the JSON answer would
 give.
@@ -824,6 +830,7 @@ handles (namespace `Aouda.Client` unless noted):
 |---|---|
 | `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. |
 | `AoudaAuthenticationException` / `AoudaNotFoundException` (`Aouda.Abstractions`) / `AoudaMisdirectedRequestException` | `401` / `404` / `421`. |
+| `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, next train**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |
 | `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY` — with `StatusCode` set. |

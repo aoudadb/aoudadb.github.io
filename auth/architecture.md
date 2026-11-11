@@ -156,7 +156,7 @@ var authClient = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    AppAuth = new AppAuthOptions { ApiKey = "mk_svc_xyz789..." }
+    ApiKey = "mk_svc_xyz789..."
 });
 
 // Sign up users

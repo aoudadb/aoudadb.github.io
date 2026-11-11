@@ -97,7 +97,9 @@ exists. A declared key never widens the first-run setup window: that route is ex
 | `authDatabase` | Which auth database the key lives in. Defaults to `auth` for every kind but `server_admin` |
 | `database` | Every kind but `server_admin`: the application database the key's roles are scoped to |
 | `roles` | `scoped_service` only. The roles `db_admin`, `db_operator`, `anonymous` and `public` are refused, as they are for a minted scoped key. A system kind takes **no** `roles` |
-| `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere |
+| `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "file": PATH }` (**BL-1389, next train**) reads the key from a file, see below. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere. A secret is exactly one of `env`, `file` and `hash`; a rotation may mix them across the list |
+
+**A secret from a file (**BL-1389, next train**).** `{ "file": "/run/secrets/feeder_key" }` reads the key from a file, so a Docker or systemd secret never passes through an environment variable. The file holds the key and nothing else: exactly one trailing newline (`\n`, `\r\n` or `\r`) is ignored and nothing else is trimmed, so a key with a trailing space fails the shape rule instead of being trimmed. A relative path is read from the identities file's directory, not the working directory. The file is read once, at start: a missing, unreadable, non-UTF-8 or empty file, or content that is not a key of the entry's kind, stops the server, and the message names the entry and the path, never the content. The startup log lists the key with source `file`. No permission check is made on the file, because Docker mounts file-based secrets readable by everyone in the container (`0444`) by default.
 
 A literal plaintext `key` in the file is **refused**: a credential never sits in a file that is committed, copied and attached to
 tickets. `auth_admin` and user-linked keys are not declarable.

@@ -219,6 +219,42 @@ The admin HTTP create endpoint still exists and still works; the schema file is 
 
 ---
 
+## Let the server apply it at start
+
+*(**BL-1388, next train**)*
+
+If you declare your databases in configuration (`Aouda:Databases`), the server can apply each database's schema file itself, so a wipe of the data directory followed by a plain start gives you the databases, their auth links, their keys **and** their tables, with no per-database script. It is **opt-in**: a database without a `SchemaFile` is not touched, and the server never looks for a file on its own.
+
+```json
+"Aouda": {
+  "Databases": {
+    "derive_auth": { "Kind": "auth" },
+    "ledger": {
+      "AuthDatabase": "derive_auth",
+      "SchemaFile": "/etc/aouda/schemas/ledger.json",
+      "SchemaEnvironment": "prod"
+    }
+  }
+}
+```
+
+What happens, in this order: the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `SchemaFile` is read and validated (all of them, before any database is changed) and applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
+
+| You want to know | Answer |
+|---|---|
+| Is it safe to restart? | Yes. A file already in effect gives an empty diff: nothing is written, no history entry. A changed file applies only the difference. |
+| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema, an overlay that adds a table. A change that cannot be applied fails the start too. |
+| What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"SchemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
+| Which tables can I still change over HTTP? | None that the file created: a table schema apply creates refuses HTTP DDL in every inference mode, whether the CLI, the API or the start-time apply created it. |
+| Where is the history? | `GET /api/databases/{db}/schema/history`, with the source `DeclaredApply`. |
+| Do the CLI and the API still work? | Yes, unchanged. The catalog is the runtime truth; the next start applies the file again, and does not remove what you added through the API unless the file omits it **and** `SchemaAllowDestructive` is set. |
+
+`SchemaEnvironment` is the CLI's `--env`: `aouda.schema.<env>.json` next to the file is merged over it when it exists. An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
+
+Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, next train**). Seed files are not applied at start.
+
+---
+
 ## Moving from Inference to Declarative Schema
 
 Aouda can create tables automatically when you insert data (**inference mode**). For production and team workflows, we recommend moving to **declarative schema**: a single `aouda.schema.json` in git, applied via CLI or CI.
