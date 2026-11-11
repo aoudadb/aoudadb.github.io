@@ -378,7 +378,14 @@ database's whole record, which dropped its auth link, signup settings and auth-d
 The start **fails**, naming the entry and changing nothing, when: a declared `auth` entry is a data database in the catalog, or the
 reverse, or an internal database such as `_serverauth`; a declared `AuthDatabase` differs from the link already recorded for that
 database; the auth database it names is neither declared nor existing; a declared database is registered but not open (list it in
-`Aouda:SkipDatabases` to start without it; a link to a skipped database fails the start). A declaration cannot say "must be
+`Aouda:SkipDatabases` to start without it; a link to a skipped database fails the start). The exception is a declared database an
+**operator quarantined** (`aouda databases quarantine`): quarantine is a deliberate isolation, so it is skipped with a warning
+(and a link to it fails the start); a quarantine for any other reason still fails the start. The check of every entry is
+read-only, but a failure partway through a pass can leave the auth databases already created; the next start converges them
+without change. Databases created from configuration skip the replication hook, as before. `DELETE` of a declared database is
+undone by the next start, which creates it again, empty. After a backup restore the same reconcile runs; a conflict there does
+not stop the server (engines open, memory evaluation resumes): it is logged and returned as `declarationConflict` on the restore
+response, and the next process start fails on it until the declaration or the catalog is changed. A declaration cannot say "must be
 unlinked" or "must not exist", and a database removed from the file is left alone. The names `_serverauth`,
 `_auth` and `_settings` are never declarable (`_serverauth` is created by `Aouda:Auth:RootUser` or setup).
 

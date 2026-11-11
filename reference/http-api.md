@@ -3945,6 +3945,8 @@ At least one of `backupId` or `targetTime` is required.
 }
 ```
 
+`declarationConflict` (**BL-1379, next train**) is present only when the restored catalog conflicts with the databases declared in `Aouda:Databases` (for example a declared link that differs from the recorded one): the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
+
 PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6). `lastAppliedCommitUtc` is that commit, in UTC.
 
 **Errors:**
