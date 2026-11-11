@@ -351,20 +351,32 @@ are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing
 
 The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
-## Configured API keys (**BL-1377, 0.10.0**) {#configured-api-keys}
+## Configured API keys (**BL-1377, 0.10.0; rows since BL-1378, next train**) {#configured-api-keys}
 
-Credentials declared in configuration instead of minted into the data a wipe destroys. Nothing is configured by default. Full
-guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
+Credentials declared in configuration instead of minted into the data a wipe destroys. Nothing is configured by default. A
+declaration is **intent**: each declared secret becomes a real `_api_keys` row (`source = config`) when its auth database is created,
+at every start and after a restore, and the row is what authenticates (**BL-1378, next train**; 0.10.0 authenticated from memory).
+Full guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
 
 | Setting | Default | What it means |
 |---|---|---|
-| `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key the server honours once the server auth database exists (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
+| `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key declared for the server auth database; its row exists once that database does (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
 | `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key, readable only by its owner. Set at most one of the key, the file and the systemd credential `aouda-server-key` |
-| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further `server_admin` and `scoped_service` keys, with secrets as `{ "env": NAME }` or `{ "hash": "sha256:<hex>" }` |
+| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, next train**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }` or `{ "hash": "sha256:<hex>" }` |
 
-A key is the kind's prefix (`mk_srv_`, `mk_scp_`) and at least 32 characters of `A-Z a-z 0-9 _ -`; `openssl rand -hex 32` is the
-generator. A change takes a restart; an invalid declaration fails the start naming the entry. The startup log
-(`Aouda.Server.Startup`, `Information`) lists each configured key by name, kind, auth database, fingerprint and source.
+A key is the kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`) and at least 32 characters of `A-Z a-z 0-9 _ -`;
+`openssl rand -hex 32` is the generator. A change takes a restart; an invalid declaration fails the start naming the entry. The
+startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by name, kind, auth database, fingerprint and source.
+
+(**BL-1378, next train**) What is **not** a setting, and what to expect:
+
+- **Removing a declaration revokes its row at the next start** (marked `config-removed`, one warning per row); declaring it again
+  revives that row. A row an operator revoked stays revoked whatever the file says, and a wipe resets that. With none of the three
+  settings above set, nothing is retracted; an empty identities file retracts every configured row.
+- **A declared `service_role`, `public` or `anon` key takes the place of the one a link or `regenerate-keys` would generate**: only
+  the undeclared kinds are generated, and `anonKey` / `serviceRoleKey` / `publicKey` are absent from a response for a declared kind.
+- `aouda keys check --file <path>` validates the file offline; `GET /api/auth/admin/configured-keys` lists the declarations and the
+  state of their rows; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind.
 
 ## Declared databases (**BL-1379, next train**) {#declared-databases}
 
