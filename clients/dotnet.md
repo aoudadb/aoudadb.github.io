@@ -720,15 +720,46 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   synthetic `Snapshot` event (current version and token), then the live events. One that joins while the first snapshot is still arriving
   waits for it; one that joins while the connection is down waits until the resubscribe is sent. Events are shared **by reference**:
   rows are not copied per consumer, so do not mutate them.
-- **One slow consumer does not slow the rest.** Each enumerator has a queue of 10 000 events; one that falls further behind ends with an
-  `AoudaRequestException` (`CLIENT_CONSUMER_OVERFLOW`) and leaves, the others and the server subscription go on.
+- **One slow consumer does not slow the rest — and no consumer may stall without limit.** Each enumerator has a queue of 10 000
+  events. One that falls further behind (a long pause, a slow handler through a burst) ends with an `AoudaRequestException` whose
+  `ErrorCode` is `CLIENT_CONSUMER_OVERFLOW` and leaves; the others and the server subscription go on. **This holds for a subscription
+  nobody shares as well**: before this train the client buffered without limit, now a single consumer that cannot keep up is ended with
+  that error (no resume: subscribe again for a new snapshot), and the server subscription is closed when it was the last. Catch it
+  where you read the stream if a burst of more than 10 000 events between two reads is possible.
 - **A joiner may get a subscription of its own.** The shared subscription keeps at most 100 000 rows (the server's `MaxSnapshotRows`) to
   seed joiners. Beyond that, or when it cannot keep them exact (the SDK learns the key columns from the first `delete` it receives, so a
-  projection that leaves out the primary key, or a table without one, cannot be kept), a later subscriber opens its own server
-  subscription instead. Nothing is lost: the subscribers already reading are unaffected.
+  projection that leaves out the primary key, a table without one, rows equal in every column, an `upsert` before any delete (the
+  server sends no previous row with one), or a change it cannot match, cannot be kept), a later subscriber opens its own server
+  subscription instead; later subscribers may share that one in turn, so for such a table the sharing ratio stays near 1. Nothing is
+  lost: the subscribers already reading are unaffected.
+- **Snapshot warnings are raised once per server snapshot** (to the client's `NamedArtifactWarning` sink), not once per consumer: a
+  subscriber that joins later is not told again.
+- **Resuming from a sequence you hold.** `SubscribeOptions.ResumeFrom` (the `Version` of the last event you saw) sends `resume_from`
+  on the first subscribe, so the stream continues from there (the server answers with a snapshot when it cannot resume; the first
+  event is then a snapshot, otherwise a change). A subscribe with a `ResumeFrom` never shares a server subscription: it continues its
+  own stream, and one reconnect before its first event resumes from the same point.
 - **A reconnect resubscribes once per shared subscription** (with `resume_from`), however many consumers it has, over the WebSocket and
   the long-poll transport alike. A server error, a refused subscribe included, reaches every consumer of that subscription.
 - `AoudaClient.ActiveConsumers` and `AoudaClient.ActiveServerSubscriptions` give the sharing ratio.
+
+### Limits, refusals and reconnects (**BL-1383, next train**)
+
+- **The identity's connection limit is terminal.** A streaming connection refused because the identity already holds
+  `Aouda:WebSocket:MaxConnectionsPerIdentity` connections (`IDENTITY_CONNECTION_LIMIT_EXCEEDED`: an `auth_error` on the WebSocket, HTTP 429
+  on long-poll `connect`) throws `AoudaConnectionLimitException`. The SDK does not retry in a loop and does not fall back to long-poll
+  (its sessions count too). If a connection that was up is refused on its reconnect, every consumer of every subscription on it ends
+  with that exception. Close a connection the identity no longer needs, or share one `AoudaClient`, then subscribe again. The global
+  pool's `CONNECTION_LIMIT_EXCEEDED` is not this: it is retried.
+- **Reconnects back off.** The delay between reconnects grows (`ReconnectBaseDelay` doubling, capped at `ReconnectMaxDelay`) and starts
+  over only after a connection has stayed up for 10 seconds, so a server that authenticates and then closes is not hammered.
+- **A rate-limited subscribe is retried.** When the per-identity subscribe-rate bound refuses a subscribe (`SUBSCRIBE_RATE_EXCEEDED`),
+  the SDK waits the server's `retry_after_ms` and sends it again, at most three times, then ends every consumer of that subscription with
+  `AoudaSubscribeRateLimitException` (`RetryAfter` holds the last wait). A reconnect that resubscribes many shared subscriptions is
+  spaced (the first 100 at once, then 28 a second).
+- **`client.ServerLimits`** holds what the server sent in `auth_ok`: `MaxSubscriptionsPerConnection`, `MaxSubscriptionsPerIdentity`,
+  `MaxConnectionsPerIdentity`, `SubscribeBurst`, `SubscribeRefillPerSecond`, `ProtocolVersion` and `Capabilities`. It is `null` before the
+  first WebSocket connection, over long-poll, and against a server that does not send them. `SUBSCRIPTION_LIMIT_EXCEEDED` reaches you
+  as an `AoudaRequestException` with the server's message, which names the cap and what raises it.
 
 ---
 
