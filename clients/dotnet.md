@@ -696,6 +696,40 @@ The rows are the credential's grants, flag or not. The alternative is to bind th
 needs no flag and works on the data-plane listener, where the flag is ignored
 ([`crossPartitionAccess` on the data-plane listener](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
 
+### Many subscribers of one query share one subscription (**BL-1384, next train**)
+
+Every `SubscribeAsync` on one `AoudaClient` shares by **(name, canonical arguments, options)**: the first opens the server subscription,
+the next ones read the same stream, and the last one disposed closes it (one `unsubscribe`). A table subscribe shares by its canonical
+filter (the same `Where` in another property order is the same filter). The options are part of the identity: `Conflate`,
+`OrderByIndex`, `AtLeast` / `WaitMs` / `OnExceeded` and `CrossPartitionAccess`. There is **no opt-out**; for an independent stream, build
+another `AoudaClient`. A subscribe with an explicit `SubscribeOptions.ResumeFrom` never shares.
+
+```csharp
+// Twenty widgets, one server subscription.
+for (var i = 0; i < 20; i++)
+    _ = Task.Run(async () =>
+    {
+        await foreach (var evt in client.NamedQueries.SubscribeAsync("quotes_by_ticker", args, null, ct))
+            Render(evt);
+    });
+
+Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSubscriptions} server subscription(s)");
+```
+
+- **Each consumer has its own snapshot.** A subscriber that joins a subscription already open is handed the rows it holds as one
+  synthetic `Snapshot` event (current version and token), then the live events. One that joins while the first snapshot is still arriving
+  waits for it; one that joins while the connection is down waits until the resubscribe is sent. Events are shared **by reference**:
+  rows are not copied per consumer, so do not mutate them.
+- **One slow consumer does not slow the rest.** Each enumerator has a queue of 10 000 events; one that falls further behind ends with an
+  `AoudaRequestException` (`CLIENT_CONSUMER_OVERFLOW`) and leaves, the others and the server subscription go on.
+- **A joiner may get a subscription of its own.** The shared subscription keeps at most 100 000 rows (the server's `MaxSnapshotRows`) to
+  seed joiners. Beyond that, or when it cannot keep them exact (the SDK learns the key columns from the first `delete` it receives, so a
+  projection that leaves out the primary key, or a table without one, cannot be kept), a later subscriber opens its own server
+  subscription instead. Nothing is lost: the subscribers already reading are unaffected.
+- **A reconnect resubscribes once per shared subscription** (with `resume_from`), however many consumers it has, over the WebSocket and
+  the long-poll transport alike. A server error, a refused subscribe included, reaches every consumer of that subscription.
+- `AoudaClient.ActiveConsumers` and `AoudaClient.ActiveServerSubscriptions` give the sharing ratio.
+
 ---
 
 ## 8b) Which databases a sign-in opens (**BL-1018, next train**)
