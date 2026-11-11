@@ -1300,8 +1300,67 @@ Every subscription and write stream on a client shares **one** WebSocket per
 not open another. Bind as many live views as the application needs — a list, a detail pane, a
 presence feed — and they multiplex.
 
+**Identical subscribes share one server subscription** (**BL-1384, next train**). Every `subscribe`
+on one client — `client.namedQueries.subscribe(name, args, options)` and
+`client.table(name)…subscribe(options)` — is shared by *(name or table, arguments or filter,
+options)*. The first opens the server subscription, later identical ones join it, and the last one
+to unsubscribe closes it. Arguments and filters are compared by content, not by the order of their
+keys; the options that count are `conflate`, `atLeast`, `waitMs`, `onExceeded`, `orderByIndex` and
+`crossPartitionAccess`. Twenty components binding the same view cost the server one subscription,
+not twenty. This holds over the WebSocket and over the long-poll fallback alike. There is no opt-out:
+for an independent stream, use another client instance.
+
+What stays yours, per call: `onSnapshot`, `onChange`, `onError` (and the notice callbacks), your
+own event iterator, and `keyOf` (it fills `key` on *your* insert and update events, which arrive
+with `key: null`). A consumer that joins an entry already running is handed the rows the entry
+holds as a snapshot, then its own `snapshot` event — no second request reaches the server. One that
+joins while the snapshot is still arriving, or while the client re-subscribes fresh, waits for it. (A joiner's callbacks run a
+microtask after `subscribe()` returns.)
+Rows are shared between consumers, not copied: treat them as read-only.
+A callback that throws (and a throwing `keyOf`) is reported to *that* consumer's `onError` — logged with `console.error` when it has
+none — and never stops the others receiving the event. `for await … break` disposes the consumer. Arguments the key cannot represent
+(a `Map`, a `Set`, a class instance, an invalid `Date`, a cycle) make that subscribe unshared; `args: {}` and no args are one query.
+
+Four cases do **not** share, and the consumer gets a server subscription of its own:
+
+- a subscribe that passes `resumeFrom` (it asks for a position in the stream);
+- a late joiner when the entry holds more than 100 000 rows (a fixed SDK limit that equals the server's default `MaxSnapshotRows`; changing the server key does not change it);
+- a late joiner when the entry's rows cannot be kept current — most often a projection that omits
+  the primary key, so a `delete` (which carries only the key) cannot be applied;
+- anything with different arguments or options.
+
+A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`); the
+other consumers of the subscription and the server subscription are not affected. (A consumer
+driven by callbacks that is never iterated is not "behind": past that many unread events it stops
+queuing, and iterating it afterwards throws.)
+
+**Server limits and refusals** (**BL-1383, next train**). `client.serverLimits` holds what the server sent in `auth_ok` —
+`limits` (`maxSubscriptionsPerConnection`, `maxSubscriptionsPerIdentity`, `maxConnectionsPerIdentity`, `subscribeBurst`,
+`subscribeRefillPerSecond`) and `protocol` (`version`, `capabilities`) — so an application can size itself instead of meeting a hard
+error first. It is `undefined` before the streaming connection is open, from an older server, and over the long-poll fallback (its
+handshake carries none). Three refusals have typed errors, all `AoudaApiError`s (status 429) and **not** `AoudaConnectionError`s, so a
+catch for connection failures does not swallow a cap:
+
+- **`IDENTITY_CONNECTION_LIMIT_EXCEEDED`** (`AoudaConnectionLimitError`): the identity already holds its connections. It is
+  **terminal** on both transports: the first `connect()` rejects with it, a reconnect stops and reports it, and every consumer of
+  every subscription hears it. The client does **not** fall back to long-poll, which counts against the same limit.
+- **`SUBSCRIBE_RATE_EXCEEDED`**: the server's per-identity subscribe bucket was empty. The client waits for `retry_after_ms` (or the
+  long-poll `Retry-After` header) and sends the subscribe again, up to 3 times; then every consumer fails with
+  `AoudaSubscribeRateLimitError` (`retryAfterMs`). A reconnect that replays more than 256 subscriptions spreads the rest out (one every
+  40 ms) so recovery does not trip the bucket itself.
+- **`SUBSCRIPTION_LIMIT_EXCEEDED`** (`AoudaSubscriptionLimitError`): the server's message, which names the cap and the count, is the
+  error's `message`, unchanged.
+
+A reconnect's backoff starts over only after the connection has **stayed up for 10 seconds**, not as soon as `auth_ok` arrives, so a
+server that authenticates and then closes is retried at 1, 2, 4, 8 … seconds rather than once a second.
+
+If the server refuses a shared subscription (an `error` message), **every** consumer of it hears: its
+`onError` is called and its iterator throws. `client.activeConsumers` and
+`client.activeServerSubscriptions` count the client's consumers and its open server subscriptions;
+their ratio is how much sharing the application gets.
+
 The transport owns reconnection. On a drop it reconnects with exponential backoff and jitter, then
-re-sends each live subscription with `resume_from` set to the last version it saw, so the server
+re-sends each live server subscription — **once per shared subscription**, whatever the number of consumers — with `resume_from` set to the last version it saw, so the server
 can replay from its buffer or fall back to a fresh snapshot. A `gap` is answered the same way.
 Subscription ids are stable for the life of the `Subscription` object and are reused across
 reconnects, which is what the server expects — see [the `id`

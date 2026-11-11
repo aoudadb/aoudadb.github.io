@@ -275,6 +275,14 @@ Invariants:
 - Authorization filtering is enforced in subscription delivery and write validation paths.
 - Long-poll transport negotiates JSON wire mode only.
 
+### Many readers of one subscription (**BL-1384, next train**)
+
+The official SDKs share identical subscriptions on one client: every subscribe with the same name, canonical arguments and options
+(`conflate`, `orderByIndex`, `atLeast` / `waitMs` / `onExceeded`, `crossPartitionAccess`) reads one server subscription, and the last
+reader to leave closes it. The server sees one subscription, so the per-connection and per-identity caps count distinct
+feeds, not widgets. A subscribe with `resume_from` never shares, and sharing does not merge subscriptions whose arguments differ. See
+[C#](../clients/dotnet.md) and [TypeScript](../clients/typescript.md) for the details (late joiners, per-consumer queues).
+
 ### Who may subscribe, and what a subscription sees
 
 A subscription is a read, and it is held to the rules of the HTTP read it mirrors (**BL-1227, 0.9.0**):
@@ -580,7 +588,10 @@ Primary proving tests:
 |---|---|---|---|---|---|
 | `Aouda:WebSocket:EnableCompression` | bool | `true` | `true/false` | server config | Enables compressed WS accept context |
 | `Aouda:WebSocket:EnableMessagePack` | bool | `true` | `true/false` | server config | If `false`, `wire_mode=msgpack` auth is rejected |
-| `Aouda:WebSocket:MaxConnections` | int | `10000` | `>=1` | server config | Global connection cap |
+| `Aouda:WebSocket:MaxConnections` | int | `10000` | `>=1` | server config | Global connection cap (`CONNECTION_LIMIT_EXCEEDED`, a plain `error` frame before authentication; long-poll `connect` 429) |
+| `Aouda:WebSocket:MaxConnectionsPerIdentity` (**BL-1383, next train**) | int | `16` | `>=1` | server config | Live connections (WebSocket and long-poll) per identity; enforced in the handshake, after identity resolution and before `auth_ok`, as an `auth_error` with `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (long-poll `connect`: 429, same code). A public-key identity includes the remote address; a no-auth database has no limit |
+| `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` (**BL-1383, next train**) | int | `1024` | `>=1` | server config | Live subscriptions for a service key without `user_token` (a key with one is a user and keeps `MaxSubscriptionsPerIdentity`) |
+| `Aouda:WebSocket:SubscribeRate:Burst` / `RefillPerSecond` (**BL-1383, next train**) | int / number | `512` / `32` | `>=1` / `>=0` | server config | Per-identity token bucket on subscribe attempts (one refused for another reason still costs a token); both listeners and long-poll `/send`; independent of `IdentityQuota:Enabled`. Over it: `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` |
 | `Aouda:WebSocket:HeartbeatInterval` | timespan | `00:00:20` | positive | server config | Server heartbeat emit interval |
 | `Aouda:WebSocket:IdleTimeout` | timespan | `00:05:00` | positive | server config | Idle close threshold |
 | `Aouda:WebSocket:LongPollWaitTimeout` | timespan | `00:00:25` | positive | server config | Max long-poll block |

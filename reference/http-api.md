@@ -163,7 +163,7 @@ If `Aouda:Listeners:DataPlane:Bind` is unset, behaviour equals today: one admin 
 
 **Table opt-in.** Catalog field `dataPlaneAccess` defaults to **false**. On the data-plane listener, for `mk_pub_*` and user JWT (not service keys): every table touched by a named query, batch element, or named mutation must have `dataPlaneAccess: true`. Otherwise **404 `TABLE_NOT_FOUND`** (the table is invisible). Admin listener ignores the flag.
 
-**Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After` (readable cross-origin since the **architecture review, 0.3.0**), code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope, per named-mutation execute, and per WebSocket subscribe attempt.
+**Per-identity quotas** apply on the data-plane only (sliding window; default 60 permits / 60 s). Exceed → HTTP **429**, `Retry-After` (readable cross-origin since the **architecture review, 0.3.0**), code `IDENTITY_QUOTA_EXCEEDED`. One permit per named-query execute, per batch envelope and per named-mutation execute. A WebSocket or long-poll subscribe attempt spends **no** permit (**BL-1383, next train**); it is bounded by a per-identity token bucket (`Aouda:WebSocket:SubscribeRate`, burst 512, 32 per second), `SUBSCRIBE_RATE_EXCEEDED`.
 
 **`Date`** is on every response and readable cross-origin (**NativeClients, 0.4.0**): a browser client can compare a
 server-stamped time with the server's clock rather than its own.
@@ -728,6 +728,9 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | PLS: `Where.Or` predicate shape is incompatible with safe auth-db-pls partition enforcement |
 | `AUTH_KEY_LISTENER_MISMATCH` | 401 | `mk_pub_*` presented on the admin listener (or a key used on a listener that does not accept it) |
 | `IDENTITY_QUOTA_EXCEEDED` | 429 | Data-plane per-identity request quota exceeded. `Retry-After` is set. |
+| `CONNECTION_LIMIT_EXCEEDED` | WS `error` frame before auth / 429 | The server's global connection pool (`Aouda:WebSocket:MaxConnections`) is full. Retry later. |
+| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` | WS `auth_error` / 429 | (**BL-1383, next train**) The identity already holds `MaxConnectionsPerIdentity` (default 16) connections, WebSocket and long-poll together. Sent inside the handshake, after identity resolution and before `auth_ok`; long-poll `connect` answers 429. A client must not reconnect in a loop. |
+| `SUBSCRIBE_RATE_EXCEEDED` | WS error | (**BL-1383, next train**) The identity's subscribe token bucket is empty (an attempt refused for another reason still costs a token). The frame carries `retry_after_ms`; a long-poll `/send` also sets `Retry-After`. |
 | `AUTH_GRANT_INVALID` | 400 | A grant in the request is invalid: a partition grant with missing or invalid fields, or a role permission with an unknown `resourceType`, an `all-partitions` / `all-rows` entry without exactly one level (`read`, `write` or `admin`) or without `resourceName`, a null entry, or one on a system role (**BL-1227, 0.9.0**). An `embargo` with a blank or `*` table or a delay that is not whole seconds from 1 to 2678400 (**BL-418, 0.9.0**) |
 | `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table that exists in no database the role can apply to. Table names are case-sensitive (**BL-1227, 0.9.0**; embargo **BL-418, 0.9.0**) |
 | `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS (no resolver, or a `jwt-claim` table) (**BL-1227, 0.9.0**). `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records the change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, 0.9.0**). An `embargo` on a table with no row time (**BL-418, 0.9.0**) |
@@ -816,7 +819,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE` | WS error | Definition has a `serverTime` parameter; only one-shot reads bind the server's clock (**NativeClients, 0.4.0**) |
 | `NAMED_QUERY_SERVER_TIME_INVALID` | 400 | A `serverTime` parameter supplied in `args`, or (schema apply) declared where only a `Timestamp` comparison may use it (**NativeClients, 0.4.0**) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
-| `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32) or per-identity (128) subscription cap |
+| `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32), per-identity (128) or, for a service key without `user_token`, per-service-key (1 024) subscription cap (**BL-1383, next train**). The message names the cap, the count and the setting. A `subscribe` that re-sends a held `id` replaces it and is never refused by the cap (**BL-1383, next train**) |
 | `SUBSCRIPTION_EMBARGO_RESET` | WS error | (**BL-418, 0.9.0**) An embargoed subscription ended and was removed: more changes were held back than `Aouda:Streaming:EmbargoHoldMaxEvents` (default 100 000) — at subscribe, the rows still inside the embargo already exceed it (narrow the filter) — or the caller's embargo on the table changed. Subscribe again, fresh (no `resume_from`); `@aouda/client` does this once per snapshot it receives |
 | `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
@@ -4623,7 +4626,7 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
 
-**Limits:** per-connection 32 subscriptions, per-identity 128. Exceed → `SUBSCRIPTION_LIMIT_EXCEEDED`.
+**Limits:** per-connection 32 subscriptions, per-identity 128 (a service key without `user_token`: 1 024) (**BL-1383, next train**). Exceed → `SUBSCRIPTION_LIMIT_EXCEEDED`. A re-sent `id` replaces and never trips the cap. The limits that apply to the connection (`limits`: `max_subscriptions_per_connection`, `max_subscriptions_per_identity`, `max_connections_per_identity`, `subscribe_burst`, `subscribe_refill_per_second`) and the server's `protocol` (`version`, `capabilities`) arrive in `auth_ok` (**BL-1383, next train**). A subscribe is also bounded per identity by a token bucket: over it, `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`.
 
 **The `id` contract, in full.** An `id` identifies a subscription **on one connection**; it is not
 global, and it is not a resource the client has to garbage-collect.
