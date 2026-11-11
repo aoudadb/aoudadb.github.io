@@ -292,10 +292,12 @@ If you run server defaults and do not set per-database overrides:
     earlier build is refused at open naming the version found and the version expected; there is no migration.
   - (**BL-1378, next train**) The catalog format is **17**: an auth database's `_api_keys` and `_user_partition_grants` tables carry
     a `source` column (where a key or grant came from: created through the API, or declared in configuration). The format version
-    marks the **whole data directory**, so a directory written by 0.10.0 or earlier (format 16) is refused as a whole, every
-    database in it and not only the auth databases, naming the version found and the version expected. There is no migration and no
-    upgrade path before 1.0: delete the data directory and start fresh. A server key and keys declared in configuration come back
-    on the fresh start; keys and partition grants created through the API do not.
+    marks the **whole data directory**. A directory written by 0.10.0 or earlier (format 16) makes the **server refuse to start**:
+    before any database is opened the registry is read and the first database whose catalog declares another format ends the
+    start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
+    written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
+    first with the build that wrote it, then delete the data directory and start fresh. A server key and keys declared in
+    configuration come back on the fresh start; keys and partition grants created through the API do not.
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
