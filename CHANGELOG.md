@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A C# subscription change delivers `Timestamp` cells as UTC `DateTime`s, and a typed subscription into a `DateTime` property no longer throws (BL-1381, next train).** `Aouda.Client` 0.10.0 typed the snapshot only; the first change after it carried the raw tick number (the server names a `Timestamp` in the snapshot's `column_types` only). The SDK now keeps the snapshot's names and types every change — `Row`, `PreviousRow` and a delete's `Key` — also after a reconnect, a gap resume or a `SLOW_CONSUMER` fresh subscribe. See [Real-time](guides/real-time.md) (Timestamp columns in a subscription) and the [.NET client](clients/dotnet.md).
+
 ## 0.10.0 — 2026-11-11
 
 Server **0.10.0** / `@aouda/client` **0.10.0** / `Aouda.Client` **0.10.0**. Studio pin follows npm.
