@@ -275,6 +275,14 @@ Invariants:
 - Authorization filtering is enforced in subscription delivery and write validation paths.
 - Long-poll transport negotiates JSON wire mode only.
 
+### Many readers of one subscription (**BL-1384, next train**)
+
+The official SDKs share identical subscriptions on one client: every subscribe with the same name, canonical arguments and options
+(`conflate`, `orderByIndex`, `atLeast` / `waitMs` / `onExceeded`, `crossPartitionAccess`) reads one server subscription, and the last
+reader to leave closes it. The server sees one subscription, so the per-connection and per-identity caps count distinct
+feeds, not widgets. A subscribe with `resume_from` never shares, and sharing does not merge subscriptions whose arguments differ. See
+[C#](../clients/dotnet.md) and [TypeScript](../clients/typescript.md) for the details (late joiners, per-consumer queues).
+
 ### Who may subscribe, and what a subscription sees
 
 A subscription is a read, and it is held to the rules of the HTTP read it mirrors (**BL-1227, 0.9.0**):

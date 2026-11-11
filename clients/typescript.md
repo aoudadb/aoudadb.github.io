@@ -1324,12 +1324,12 @@ none — and never stops the others receiving the event. `for await … break` d
 Four cases do **not** share, and the consumer gets a server subscription of its own:
 
 - a subscribe that passes `resumeFrom` (it asks for a position in the stream);
-- a late joiner when the entry holds more than 100 000 rows (the server's `MaxSnapshotRows` default);
+- a late joiner when the entry holds more than 100 000 rows (a fixed SDK limit that equals the server's default `MaxSnapshotRows`; changing the server key does not change it);
 - a late joiner when the entry's rows cannot be kept current — most often a projection that omits
   the primary key, so a `delete` (which carries only the key) cannot be applied;
 - anything with different arguments or options.
 
-A consumer that falls more than 10 000 events behind its own iterator is ended with an error; the
+A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`); the
 other consumers of the subscription and the server subscription are not affected. (A consumer
 driven by callbacks that is never iterated is not "behind": past that many unread events it stops
 queuing, and iterating it afterwards throws.)

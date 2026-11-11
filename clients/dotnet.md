@@ -723,15 +723,27 @@ filter (the same `Where` in another property order is the same filter). The opti
 another `AoudaClient`. A subscribe with an explicit `SubscribeOptions.ResumeFrom` never shares.
 
 ```csharp
-// Twenty widgets, one server subscription.
-for (var i = 0; i < 20; i++)
-    _ = Task.Run(async () =>
+// Twenty widgets, one server subscription. Each consumer is attached once it has received its first
+// event (its snapshot), so the counts are read only after all twenty have one.
+var firstEvents = 0;
+var allAttached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var widgets = Enumerable.Range(0, 20).Select(_ => Task.Run(async () =>
+{
+    var first = true;
+    await foreach (var evt in client.NamedQueries.SubscribeAsync("quotes_by_ticker", args, null, ct))
     {
-        await foreach (var evt in client.NamedQueries.SubscribeAsync("quotes_by_ticker", args, null, ct))
-            Render(evt);
-    });
+        if (first)
+        {
+            first = false;
+            if (Interlocked.Increment(ref firstEvents) == 20) allAttached.TrySetResult();
+        }
+        Render(evt);
+    }
+})).ToArray();
 
+await allAttached.Task;
 Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSubscriptions} server subscription(s)");
+// prints: 20 consumers on 1 server subscription(s)
 ```
 
 - **Each consumer has its own snapshot.** A subscriber that joins a subscription already open is handed the rows it holds as one
@@ -744,7 +756,7 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   nobody shares as well**: before this train the client buffered without limit, now a single consumer that cannot keep up is ended with
   that error (no resume: subscribe again for a new snapshot), and the server subscription is closed when it was the last. Catch it
   where you read the stream if a burst of more than 10 000 events between two reads is possible.
-- **A joiner may get a subscription of its own.** The shared subscription keeps at most 100 000 rows (the server's `MaxSnapshotRows`) to
+- **A joiner may get a subscription of its own.** The shared subscription keeps at most 100 000 rows (a fixed SDK limit that equals the server's default `MaxSnapshotRows`; changing the server key does not change it) to
   seed joiners. Beyond that, or when it cannot keep them exact (the SDK learns the key columns from the first `delete` it receives, so a
   projection that leaves out the primary key, a table without one, rows equal in every column, an `upsert` before any delete (the
   server sends no previous row with one), or a change it cannot match, cannot be kept), a later subscriber opens its own server
@@ -768,7 +780,7 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   (its sessions count too). If a connection that was up is refused on its reconnect, every consumer of every subscription on it ends
   with that exception. Close a connection the identity no longer needs, or share one `AoudaClient`, then subscribe again. The global
   pool's `CONNECTION_LIMIT_EXCEEDED` is not this: it is retried.
-- **Reconnects back off.** The delay between reconnects grows (`ReconnectBaseDelay` doubling, capped at `ReconnectMaxDelay`) and starts
+- **Reconnects back off.** The delay between reconnects grows (from 1 second, doubling, capped at 30 seconds; not configurable through the public API) and starts
   over only after a connection has stayed up for 10 seconds, so a server that authenticates and then closes is not hammered.
 - **A rate-limited subscribe is retried.** When the per-identity subscribe-rate bound refuses a subscribe (`SUBSCRIBE_RATE_EXCEEDED`),
   the SDK waits the server's `retry_after_ms` and sends it again, at most three times, then ends every consumer of that subscription with

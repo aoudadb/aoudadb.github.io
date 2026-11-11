@@ -310,16 +310,16 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 | Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
 | Live subscriptions for one service key without a `user_token`, across every connection (**BL-1383, next train**) | `1024` | `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` |
 | Live connections (WebSocket and long-poll) for one identity (**BL-1383, next train**) | `16` | `Aouda:WebSocket:MaxConnectionsPerIdentity` |
-| Live connections for one service key or server admin key (**BL-1383, next train**) | `64` | `Aouda:WebSocket:MaxConnectionsPerServiceKey` |
+| Live connections for one service key or server admin key (`mk_srv_`) without a `user_token` (**BL-1383, next train**) | `64` | `Aouda:WebSocket:MaxConnectionsPerServiceKey` |
 | Subscribe attempts: bucket size per identity (**BL-1383, next train**) | `512` | `Aouda:WebSocket:SubscribeRate:Burst` |
 | Subscribe attempts: refill per second (**BL-1383, next train**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
 | The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
 | Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
 
-Both limits are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
+The identity quota and the subscription caps are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
 quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch
-envelope or one named-mutation execute; a subscribe attempt spends **no** permit (**BL-1383, next train**) (before BL-1383 it spent one,
+envelope or one named-mutation execute; a subscribe attempt spends **no** permit (**BL-1383, next train**; before it, a subscribe spent one,
 and a reconnect replay of 60 subscriptions exhausted the window). A heartbeat every 30 s is 2 permits a minute per device, so
 three devices heartbeating spend 6 of the default 60 — leave room for page loads (batch them) and typing indicators, and
 measure before raising.
@@ -333,8 +333,8 @@ so anonymous visitors of one app do not share these limits; a service key's is t
 is known only if `Aouda:ForwardedHeaders` is configured: without it every visitor of a public key shares the proxy's address, so
 one connection budget, one subscription cap and one subscribe bucket. Configure it before relying on per-visitor limits.
 The server refuses to start on a cap below 1, a burst below 1 or a negative refill. `auth_ok.limits` reports `0` for a limit
-that does not apply (a no-auth database has no per-identity limit). The provisional numbers (`16`, `64`, `512`, `32`) and the
-service-key subscription cap are replaced by measured values before release. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
+that does not apply (a no-auth database has no per-identity limit). The numbers `16`, `64`, `512` and `32` and the
+service-key subscription cap are the current defaults and are provisional. See [Direct client access](direct-client-access.md) (**NativeClients, 0.4.0** — the keys were
 in no guide before).
 
 ## Runtime: GC and thread pool

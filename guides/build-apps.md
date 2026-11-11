@@ -448,7 +448,7 @@ await sub.unsubscribe();
 
 Do not hand-roll the frames. Both SDKs return the same subscription object as table subscribe, so paging, `gap` → `resume_from`, reconnect, `re_auth`, and slow-consumer recovery are transport paths you already have.
 
-**Two design rules that are not optional at scale.** Without a relay, you get **one subscription per client per thing it watches** — and the limits are hard:
+**Two design rules that are not optional at scale.** Without a relay, each client holds a subscription **per distinct thing it watches** (identical subscriptions on one SDK client are shared and count once) — and the limits are hard:
 
 | Limit | Default | Error |
 |---|---|---|
@@ -459,7 +459,7 @@ Do not hand-roll the frames. Both SDKs return the same subscription object as ta
 | Send-buffer high-water mark | 1 MiB | close with `SLOW_CONSUMER` |
 | Other requests per identity | 60 permits / 60 s | `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After` |
 
-So: **make subscriptions collection-shaped, not item-shaped.** A named query taking a list parameter (`{ "column": "id", "op": "in", "param": "ids" }`, capped with `maxItems`) lets one subscription cover a whole grid. A query taking a single id, subscribed once per row, hits 32 on any real dashboard. And measure real permit usage against `Aouda:IdentityQuota:PermitLimit` before cutover — do not raise the limit first and measure afterwards. A subscribe attempt costs no permit (**BL-1383, next train**); it is bounded by the subscribe-rate bucket instead.
+So: **make subscriptions collection-shaped, not item-shaped.** A named query taking a list parameter (`{ "column": "id", "op": "in", "param": "ids" }`, capped with `maxItems`) lets one subscription cover a whole grid. A query taking a single id, subscribed once per row with a different id each time, is one distinct subscription per row and hits 32 at 32 rows; SDK sharing does not merge those, because the arguments differ. And measure real permit usage against `Aouda:IdentityQuota:PermitLimit` before cutover — do not raise the limit first and measure afterwards. A subscribe attempt costs no permit (**BL-1383, next train**); it is bounded by the subscribe-rate bucket instead.
 
 > **Be honest about `conflate`.** It holds only a **value update** to a row that is visible before *and* after. On an **insert-only** stream — a tick feed, an event log, an audit table — it reduces the event rate by **zero**, and `values_skipped` never fires. Conflation never collapses an insert, a delete, or a row leaving your visibility scope, because a client that misses one of those has a permanently wrong grid. For last-value-per-key, model it as a `latestPerKey` materialized query (step 8) and subscribe to that. Be precise about what that buys you: the MQ result table holds one row per key, so the grid stays bounded no matter how many ticks arrive — but MQ upserts do not carry `prev` today, so a subscribe over the MQ does not throttle the **event rate** either. It is the correct catalog shape, not a rate limiter. If you need a hard cap on messages per second right now, that belongs in a service that owns the fan-out. Details and the current caveats: [conflate is a no-op on insert-only streams](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
@@ -761,7 +761,7 @@ Before reporting the work complete:
 | A read gateway that forwards a query and maps the result back | A deployable artifact that adds no trust, plus a second place the column list can drift | A named query |
 | Hand-rolling WebSocket frames | You will reimplement snapshot paging, `gap`/`resume_from`, `re_auth`, and reconnect — badly | `namedQueries.subscribe` |
 | `mk_svc_*` in a frontend bundle | The admin listener is reachable if that key ever escapes your network | `mk_pub_*`, which is designed to be public and useless on admin |
-| One subscription per row | 32 per connection is hit by any real dashboard | A capped list parameter; one subscription per view |
+| One subscription per row, each with its own id | 32 per connection is reached at 32 rows; SDK sharing does not merge distinct arguments | A capped list parameter, one subscription per view |
 | Ten independent executes on page load | Ten permits, and ten snapshots that can disagree | The batch envelope: one permit, one snapshot |
 | `conflate` on a tick feed | Zero reduction, and a false sense that throttling is handled | A `latestPerKey` MQ, subscribed — it bounds rows per key, not yet the event rate |
 | Raising `PermitLimit` because of a 429 | You have hidden the design problem and will find it again at scale | Measure, batch, then size the quota from the measurement |
@@ -806,7 +806,7 @@ Before reporting the work complete:
 | `AUTH_KEY_LISTENER_MISMATCH` | `mk_pub_*` sent to the admin listener, or the reverse | `mk_pub_*` → data-plane; `mk_svc_*` → admin |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | `client.table(t).subscribe(...)` sends a target | `client.namedQueries.subscribe(name, args)` |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | The definition has joins, `selectExpr`, `distinct`, or an offset | Only the live path is restricted; HTTP execute still works. Split the view or poll it |
-| `SUBSCRIPTION_LIMIT_EXCEEDED` | Item-shaped subscriptions × N clients | A capped list parameter; one subscription per view |
+| `SUBSCRIPTION_LIMIT_EXCEEDED` | Item-shaped subscriptions (distinct arguments per row) × N clients | A capped list parameter, one subscription per view |
 | `429 IDENTITY_QUOTA_EXCEEDED` on page load | N independent executes | Batch, honour `Retry-After`, then size `PermitLimit` from measurement |
 | Socket closed with `SLOW_CONSUMER` | 1 MiB send buffer exceeded — the client cannot keep up | Conflate value updates, narrow the projection, or reduce the subscription's scope |
 | `PARTITION_FILTER_REQUIRED` | The predicate does not pin every partition key. `in` **does** satisfy it; ranges and prefixes do not | Add `eq`/`in` on each partition key — [the exact rule](browser-tier-read-limits.md#partition-filter-rule) |
