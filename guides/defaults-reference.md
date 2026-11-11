@@ -349,6 +349,53 @@ A key is the kind's prefix (`mk_srv_`, `mk_scp_`) and at least 32 characters of 
 generator. A change takes a restart; an invalid declaration fails the start naming the entry. The startup log
 (`Aouda.Server.Startup`, `Information`) lists each configured key by name, kind, auth database, fingerprint and source.
 
+## Declared databases (**BL-1379, next train**) {#declared-databases}
+
+Databases, application auth databases and the links between them, declared in `Aouda:Databases` so that a wipe of the data
+directory and a plain start bring back the same set; only schema and data need re-applying. Nothing is declared by default.
+
+| Setting | Default | What it means |
+|---|---|---|
+| `Aouda:Databases:<db>:Kind` (**BL-1379, next train**) | `data` | `data`, or `auth` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `Durability` on an `auth` entry must be absent or `strict`) |
+| `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, next train**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
+
+```json
+"Databases": {
+  "derive_auth": { "Kind": "auth" },
+  "ledger":      { "AuthDatabase": "derive_auth" },
+  "reports":     { "AuthDatabase": "derive_auth", "Durability": "os" }
+}
+```
+
+**The rule:** configuration owns the operational fields of a database it declares (`MaxMemoryShareBytes`, `MemoryWeight`,
+`DefaultTemperature`, `Durability`, `ReplicationMode`, `WriteConcern`, `WriteConcernTimeoutMs`, `OnWriteConcernTimeout`), and
+re-applies them at every start; the catalog owns everything else, including the signup settings (`signup-settings` is not
+declarable, and a change made through it survives every restart). A declaration creates what is missing, converges what it owns, and
+refuses what it cannot reconcile; it never overwrites a field it does not name. The passes run in the same order whatever the order
+in the file: auth databases, then data databases, then links. Before **BL-1379, next train** a restart replaced a declared
+database's whole record, which dropped its auth link, signup settings and auth-database flags.
+
+The start **fails**, naming the entry and changing nothing, when: a declared `auth` entry is a data database in the catalog, or the
+reverse, or an internal database such as `_serverauth`; a declared `AuthDatabase` differs from the link already recorded for that
+database; the auth database it names is neither declared nor existing; a declared database is registered but not open (list it in
+`Aouda:SkipDatabases` to start without it; a link to a skipped database fails the start). The exception is a declared database an
+**operator quarantined** (`aouda databases quarantine`): quarantine is a deliberate isolation, so it is skipped with a warning
+(and a link to it fails the start); a quarantine for any other reason still fails the start. The check of every entry is
+read-only, but a failure partway through a pass can leave the auth databases already created; the next start converges them
+without change. Databases created from configuration skip the replication hook, as before. `DELETE` of a declared database is
+undone by the next start, which creates it again, empty. After a backup restore the same reconcile runs; a conflict there does
+not stop the server (engines open, memory evaluation resumes): it is logged and returned as `declarationConflict` on the restore
+response, and the next process start fails on it until the declaration or the catalog is changed. A declaration cannot say "must be
+unlinked" or "must not exist", and a database removed from the file is left alone. The names `_serverauth`,
+`_auth` and `_settings` are never declarable (`_serverauth` is created by `Aouda:Auth:RootUser` or setup).
+
+**A declarative link creates no API key.** A key minted at start has no reader, so it would be an orphan `db_admin` credential. After
+a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when a later release declares them in the
+identities file or an operator calls `regenerate-keys` (which returns them once); a `POST /api/databases` that links still returns
+them as before. Startup order after a wipe: declared databases and links, then `_serverauth` / `Aouda:Auth:RootUser`, then the
+configured keys. `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
+has one line per entry (created, converged or unchanged; linked or already linked).
+
 ## Related docs
 
 - [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, 0.10.0**) - declaring keys in configuration
