@@ -96,11 +96,31 @@ All credentials are sent as `Authorization: Bearer <credential>`. The server ide
 
 The server dispatches to the correct auth handler based on prefix — no configuration needed from the client.
 
-**Configured keys (**BL-1377, 0.10.0**).** A `mk_srv_` or `mk_scp_` key can be declared in server configuration
-(`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) instead of minted. It authenticates exactly as a minted key of that
-kind, against the auth database it was declared for, with the same claims and the same privilege gates; it never appears in the
-`api-keys` listings, because it is configuration and not a row. A configured scoped key whose role does not exist yet is denied with
-`403`, not `401`, and works once the role exists. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
+**Configured keys (**BL-1377, 0.10.0; rows since BL-1378, next train**).** A `mk_srv_` or `mk_scp_` key (and, **BL-1378, next train**,
+a `mk_svc_`, `mk_pub_` or `mk_anon_` one) can be declared in server configuration (`Aouda:Auth:Bootstrap:ServerKey`,
+`Aouda:Auth:Keys:File`) instead of minted. (**BL-1378, next train**) A declaration becomes a **row** of the auth database it is declared
+for (`source: "config"`) when that database is created, at start and after a restore, and the row authenticates exactly as a minted
+key of that kind, with the same claims and the same privilege gates; authentication never creates it, so a declared key with no row is
+`401` like any unknown key. (0.10.0 authenticated a declared key from memory and kept it out of the `api-keys` listings; that is gone.)
+
+- **Listings carry `source`.** Every item of `GET /api/auth/admin/keys`, `GET .../auth/admin/api-keys`, `GET /api/auth/admin/api-keys`
+  and `GET .../scoped-service-keys` (and the named service-key lists) has `source`: `"minted"`, `"config"` or `"config-removed"`.
+- **Revoke is the normal flow.** `DELETE` of a declared key (`.../api-keys/{id}`, `.../keys/{id}`, or `.../scoped-service-keys/{name}`)
+  makes it `401 API key has been revoked`; the row stays `config` and revoked across restarts. `DELETE .../api-keys/{id}` also works on a
+  declared `anon` / `service_role` / `public` row (`is_system`), which it still refuses for a generated one.
+- **Rotate is refused.** `POST .../scoped-service-keys/{name}/rotate` on a declared key is `409 INVALID_REQUEST`, "declared in
+  configuration; change the declaration".
+- **Removing a declaration** revokes its row at the next start and marks it `config-removed`; declaring it again revives it. A row an
+  operator revoked is never revived.
+- A configured scoped key whose role does not exist yet is denied with `403`, not `401`, and works once the role exists.
+
+`GET /api/auth/admin/configured-keys` (server key; **BL-1378, next train**) lists the declarations and the state of each secret's row:
+`{ declarationSourceConfigured, keys: [{ id, name, kind, authDatabase, database, fingerprint, secretSource, state }] }`. `state` is
+`materialised`, `revoked`, or `pending` (the auth database, or the row, does not exist yet); `secretSource` is `env`, `hash` or
+`bootstrap`; `id` is the row's id (what `DELETE .../api-keys/{id}` takes). It never carries a secret or a hash. `GET /api/server/metrics`
+carries `rejectedApiKeys` (**BL-1378, next train**): `{ server_admin, scoped_service, service_role, auth_admin, public, anon, other }`,
+the number of API keys refused as a credential over HTTP since start, by kind only. See
+[Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
 
 **Named service keys and overlapping rotation (**BL-1032, 0.5.0**).** A server key (`mk_srv_`) mints extra service keys for a database that has a linked auth database:
 
@@ -115,7 +135,7 @@ kind, against the auth database it was declared for, with the same claims and th
 
 The same four routes under `/api/databases/{authDb}/auth-admin-keys` mint `mk_adm_` for an **application** auth database (not a data database, not server auth). That credential is accepted on that database's user, grant, session, audit, and MFA admin routes, and refused on role definitions, API-key minting, `regenerate-keys`, signup settings, RLS resolvers, and every data route.
 
-`POST /api/databases/{db}/auth/admin/regenerate-keys` takes `{ "overlapSeconds"? }` the same way and returns `validUntil` (`null` when the previous system keys were revoked at once). Named keys are not swept.
+`POST /api/databases/{db}/auth/admin/regenerate-keys` takes `{ "overlapSeconds"? }` the same way and returns `validUntil` (`null` when the previous system keys were revoked at once). Named keys are not swept. (**BL-1378, next train**) A system kind that is **declared** in configuration is not regenerated: its row stays live with the same id, and `anonKey` / `serviceRoleKey` / `publicKey` is **absent** from the response for it (all three declared: none are returned).
 
 `Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_` (and accepts `mk_scp_`); `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_scp_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings. `mk_scp_` on `serverAuth` is **BL-1239, 0.9.0**.
 
@@ -124,7 +144,7 @@ The same four routes under `/api/databases/{authDb}/auth-admin-keys` mint `mk_ad
 | Method | Path | Body | Result |
 |--------|------|------|--------|
 | POST | `/api/databases/{db}/scoped-service-keys` | `{ "name", "roles", "expiresAt"? }` | `201` and the secret once: `{ name, key, keyPrefix, roles, expiresAt, createdAt }` |
-| GET | `/api/databases/{db}/scoped-service-keys` | | Live keys: `{ keys: [{ name, keyPrefix, roles, expiresAt, createdAt }] }` |
+| GET | `/api/databases/{db}/scoped-service-keys` | | Live keys: `{ keys: [{ name, keyPrefix, roles, expiresAt, createdAt, source }] }` (`source` **BL-1378, next train**) |
 | DELETE | `/api/databases/{db}/scoped-service-keys/{name}` | | `204` |
 | POST | `/api/databases/{db}/scoped-service-keys/{name}/rotate` | `{ "overlapSeconds" }` | `201` with the new secret, the same `roles`, and `validUntil` |
 
@@ -886,7 +906,7 @@ Lists databases visible to the caller.
 | `authDatabaseKind` | `"none"` \| `"server"` \| `"application"` | Identifies whether **this** database is an auth store. `"server"` is the server-level admin auth database (`/api/auth/admin/...`). `"application"` is an end-user auth database. `"none"` for regular data databases — this does **not** mean the data DB is unlinked. |
 | `auth.enabled` | `boolean` | `true` when this database is linked to an auth database. Always present on list/get/create. |
 | `auth.database` | `string` \| `null` | Linked auth database name, or `null` when unlinked. |
-| `auth.keys` | object \| omitted | `anonKey` / `serviceRoleKey` / `publicKey` — **create and regenerate only**. GET and list omit `keys` and never re-emit `mk_*`. |
+| `auth.keys` | object \| omitted | `anonKey` / `serviceRoleKey` / `publicKey` — **create and regenerate only**. GET and list omit `keys` and never re-emit `mk_*`. (**BL-1378, next train**) Each field is **omitted** when that kind is declared in configuration (it was not generated); the whole object is omitted when all three are. |
 
 **Internal database definition:**
 
