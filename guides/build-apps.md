@@ -454,10 +454,12 @@ Do not hand-roll the frames. Both SDKs return the same subscription object as ta
 |---|---|---|
 | Subscriptions per WebSocket connection | **32** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
 | Subscriptions per identity | **128** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
+| Connections per identity (**BL-1383, next train**) | **16** | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` |
+| Subscribe attempts per identity (**BL-1383, next train**) | burst **512**, **32**/s | `SUBSCRIBE_RATE_EXCEEDED` |
 | Send-buffer high-water mark | 1 MiB | close with `SLOW_CONSUMER` |
-| Requests per identity | 60 permits / 60 s | `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After` |
+| Other requests per identity | 60 permits / 60 s | `429 IDENTITY_QUOTA_EXCEEDED` + `Retry-After` |
 
-So: **make subscriptions collection-shaped, not item-shaped.** A named query taking a list parameter (`{ "column": "id", "op": "in", "param": "ids" }`, capped with `maxItems`) lets one subscription cover a whole grid. A query taking a single id, subscribed once per row, hits 32 on any real dashboard. And measure real permit usage against `Aouda:IdentityQuota:PermitLimit` before cutover — do not raise the limit first and measure afterwards.
+So: **make subscriptions collection-shaped, not item-shaped.** A named query taking a list parameter (`{ "column": "id", "op": "in", "param": "ids" }`, capped with `maxItems`) lets one subscription cover a whole grid. A query taking a single id, subscribed once per row, hits 32 on any real dashboard. And measure real permit usage against `Aouda:IdentityQuota:PermitLimit` before cutover — do not raise the limit first and measure afterwards. A subscribe attempt costs no permit (**BL-1383, next train**); it is bounded by the subscribe-rate bucket instead.
 
 > **Be honest about `conflate`.** It holds only a **value update** to a row that is visible before *and* after. On an **insert-only** stream — a tick feed, an event log, an audit table — it reduces the event rate by **zero**, and `values_skipped` never fires. Conflation never collapses an insert, a delete, or a row leaving your visibility scope, because a client that misses one of those has a permanently wrong grid. For last-value-per-key, model it as a `latestPerKey` materialized query (step 8) and subscribe to that. Be precise about what that buys you: the MQ result table holds one row per key, so the grid stays bounded no matter how many ticks arrive — but MQ upserts do not carry `prev` today, so a subscribe over the MQ does not throttle the **event rate** either. It is the correct catalog shape, not a rate limiter. If you need a hard cap on messages per second right now, that belongs in a service that owns the fan-out. Details and the current caveats: [conflate is a no-op on insert-only streams](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams).
 
@@ -724,6 +726,8 @@ Branch on `error`; show `suggestion` to whoever can act on it; log `requestId`. 
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | The definition has joins, `selectExpr`, `distinct`, or an offset | Split the view, or poll it — HTTP execute still works |
 | `TABLE_NOT_FOUND` on a table that exists | `dataPlaneAccess: false`, browser-tier | Opt the table in — and check the join tables |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` | Item-shaped subscriptions | Make the definition take a capped list parameter |
+| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, next train**) | The identity already holds the maximum number of connections | Close unused sockets; do not retry in a loop |
+| `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, next train**) | Subscribing faster than the per-identity bucket refills | Wait `retry_after_ms`; pace a reconnect replay |
 | `429 IDENTITY_QUOTA_EXCEEDED` | Too many requests for one identity | Batch; honour `Retry-After`; then size the quota from measurement |
 | `PARTITION_FILTER_REQUIRED` | The predicate does not pin every partition key | Add `eq`/`in` on each one — [the exact rule](browser-tier-read-limits.md#partition-filter-rule) |
 | `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` at apply | Add a numeric cap |
