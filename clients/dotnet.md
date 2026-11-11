@@ -374,6 +374,8 @@ var rows = await samples.Where("Id", "eq", 300L).ToListAsync();
   throws, no element is converted. Typed subscriptions are **not** exact: they go through System.Text.Json, so an `int[]` column fills a `double[]` property and a
   `float[]` property is filled from the widened text, an `object` property gets a `JsonElement`, and a failure arrives as an
   `InvalidOperationException` (BL-1245). Give a typed subscription the exact CLR type above.
+  A `Timestamp` column fills a `DateTime`, `DateTime?` or `DateTimeOffset` property in the snapshot **and in every change**
+  (**BL-1381, next train**; 0.10.0 did it for the snapshot only and a change threw); a `long` property does not read.
   `ToDataTable` columns have the array type.
 - **A POCO with array properties writes and creates its columns** (**BL-1374, 0.9.1**). `double[]`, `float[]`, `int[]`, `long[]`,
   `byte[]` and `string[]` properties map to `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]` and `String[]` (nullable
@@ -630,6 +632,15 @@ The wire contract is in the [HTTP API reference](../reference/http-api.md#websoc
 the same credential; `SubscribeAsync` is authorized by the same role check (`read` on the table, and for a named query every table it
 touches), and the server re-reads the credential's permissions on every subscribe. A server API key (`mk_srv_`) that works over HTTP
 on a linked application database opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
+
+### Timestamp columns in a subscription
+
+(**BL-1381, next train**) A `Timestamp` cell is a `DateTime` of kind `Utc` on every subscription surface (table, named query, typed),
+with the 100 ns tick kept, in the snapshot rows and in each change's `Row`, `PreviousRow` and `Key`. The server names a `Timestamp`
+column in the snapshot only; the SDK keeps those names for the life of the subscription (across a reconnect, a gap resume and a
+`SLOW_CONSUMER` fresh subscribe) and replaces them when a new snapshot arrives; a resumed stream that sends no snapshot keeps the old names. A null stays null; a value that is not a tick count ends
+the subscription with an `InvalidDataException` naming the column. No converter or option is needed. Wire detail:
+[Real-time Streaming](../guides/real-time.md) (Timestamp columns in a subscription).
 
 ### Subscribing across partitions
 

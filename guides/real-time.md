@@ -423,6 +423,14 @@ A `Timestamp` column arrives as a JSON **number**: .NET ticks since `0001-01-01T
 for the `change` messages, which do not repeat it. `@aouda/client` hands a `Date`; elsewhere, Unix milliseconds are
 `(ticks − 621355968000000000) / 10000`. A column declared `String` is text. Details: [Timestamp semantics](../reference/http-api.md#timestamp-semantics).
 
+(**BL-1381, next train**) The C# SDK (`Aouda.Client`) hands a `DateTime` of kind `Utc`, 100 ns tick kept, in the snapshot and in every
+change: `Row`, `PreviousRow` and a delete's `Key` (a `Timestamp` primary key) — also after a reconnect, a gap resume or a
+`SLOW_CONSUMER` fresh subscribe, and on a named-query subscription. It remembers the names the latest snapshot gave; a fresh snapshot
+replaces them. A typed subscription (`GetTable<T>().SubscribeAsync()`) fills a `DateTime`, `DateTime?` or `DateTimeOffset` property
+(offset zero); a `long` property for a `Timestamp` column no longer reads. Until this train, `Aouda.Client` 0.10.0 typed the snapshot
+only, and the first change delivered the raw tick number (an untyped `JsonElement`; a typed subscription threw). `@aouda/client` leaves a
+delete's `key` as the server sent it (ticks).
+
 ### Array columns in a subscription (**BL-035, 0.9.0**)
 
 (**BL-035, 0.9.0**) A table or named-query subscription delivers an [array column](array-columns.md) as an array, a `Byte[]` as base64

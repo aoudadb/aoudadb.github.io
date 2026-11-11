@@ -14,6 +14,7 @@ Public, user-facing release notes. Engine phase status lives in the server
 ## Unreleased
 
 - **Databases, application auth databases and their links can be declared in configuration (aouda BL-1379, next train).** `Aouda:Databases:<db>:Kind` (`data` or `auth`) and `:AuthDatabase` (the application auth database to link to) bring back the same set after a wipe and a plain start; only schema and data need re-applying. A declarative link creates no API key. The start fails, naming the entry, on anything it cannot reconcile (a kind mismatch, a link that differs from the catalog's, an auth database that is neither declared nor existing). Fixed: a restart used to drop the auth link, signup settings and auth-database flags of a database declared in `Aouda:Databases`. See [Declared databases](guides/defaults-reference.md#declared-databases).
+- **A C# subscription change delivers `Timestamp` cells as UTC `DateTime`s, and a typed subscription into a `DateTime` property no longer throws (BL-1381, next train).** `Aouda.Client` 0.10.0 typed the snapshot only; the first change after it carried the raw tick number (the server names a `Timestamp` in the snapshot's `column_types` only). The SDK now keeps the snapshot's names and types every change — `Row`, `PreviousRow` and a delete's `Key` — also after a reconnect, a gap resume or a `SLOW_CONSUMER` fresh subscribe. See [Real-time](guides/real-time.md) (Timestamp columns in a subscription) and the [.NET client](clients/dotnet.md).
 
 ## 0.10.0 — 2026-11-11
 
