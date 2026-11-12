@@ -770,7 +770,7 @@ older server ignores the field and answers `PARTITION_FILTER_REQUIRED`.
 **A subscription that spans partitions.** A subscription with no partition filter would read every partition of the table, so a
 partitioned table's guard refuses it unless the flag is set; a service key, a `db_admin` user or any credential holding
 `all-partitions` then receives the events of **every** partition, including partitions created after it subscribed, while a
-credential with partition grants receives only its own. The rule, and the choice between a per-partition filter, a named query
+credential with entitlements receives only its own. The rule, and the choice between a per-partition filter, a named query
 and the flag, are in
 [A subscription that spans partitions](partitioning.md#a-subscription-that-spans-partitions).
 

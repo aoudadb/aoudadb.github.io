@@ -266,7 +266,7 @@ Aouda has **four** API key types. Understanding when to use each is critical.
 | **App `public` key** | `mk_pub_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **data** — named queries, mutations, subscriptions (plus auth) |
 | **App `service_role` key** | `mk_svc_` | Auto-generated on `auth.enabled` | One database | `_auth` | Per-database backend access, admin tools |
 
-Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control. A `custom` key can optionally be **linked to a user** (`userId` at creation) — the key then inherits that user's `auth-db-pls` partition-grants and RBAC roles, giving a non-interactive service a durable credential scoped to exactly the partitions it needs, without the implied grants `mk_svc_` holds on its whole database — unless the linked user is a `db_admin`, whose grants the key then
+Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control. A `custom` key can optionally be **linked to a user** (`userId` at creation) — the key then inherits that user's `auth-db-entitlement` entitlements and RBAC roles, giving a non-interactive service a durable credential scoped to exactly the partitions it needs, without the implied grants `mk_svc_` holds on its whole database — unless the linked user is a `db_admin`, whose grants the key then
 holds too (**BL-1227, 0.9.0**). See [Data Authorization §19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services) and the [`POST .../admin/api-keys` reference](reference.md).
 
 `mk_pub_` arrived with the data-plane listener in server `0.1.7`. Signup/signin/refresh/password-reset are **keyless**. `mk_anon_` is **denied on data routes** — if you are giving a frontend read access before login, that is `mk_pub_`, on the data-plane, through [named queries](../guides/named-queries.md). Full rules: [Direct client access](../guides/direct-client-access.md).
@@ -280,7 +280,7 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 | Frontend reading data directly | App `public` key (`mk_pub_`) | Safe to expose; named artifacts only; PLS/RLS enforced; data-plane only |
 | Frontend that only signs users in (data goes through your backend) | None — `new AoudaClient({ serverUrl, database })` | Signup/signin are public POSTs |
 | Backend accessing one database (app auth enabled) | App `service_role` key (`mk_svc_`) | Holds `all-partitions` and `all-rows` on that database (**BL-1227, 0.9.0**) |
-| Non-interactive service that should see only specific partitions (a feeder job, a scoped integration) | `custom` key linked to a user (`userId`) | Durable like `mk_svc_`, but genuinely scoped via `auth-db-pls` partition-grants — it holds no access grant unless its user does |
+| Non-interactive service that should see only specific partitions (a feeder job, a scoped integration) | `custom` key linked to a user (`userId`) | Durable like `mk_svc_`, but genuinely scoped via `auth-db-entitlement` entitlements — it holds no access grant unless its user does |
 | Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases; from 0.4.0 PLS / RLS apply to it (send `X-User-Token`, or use each database's `mk_svc_`, to read protected tables) |
 | CI/CD pipeline | Server API key (`mk_srv_`) | Scoped to test databases |
 | Admin tooling | Server admin JWT or server API key | Full control |
@@ -347,7 +347,7 @@ X-User-Token: eyJhbGciOiJSUzI1NiIs...     ← User JWT (for PLS enforcement)
 The middleware:
 1. Validates the service key (Layer 1 — connection authorized).
 2. Validates the user JWT from `X-User-Token`.
-3. Replaces the request's identity with the user's: on HTTP, PLS, RLS and RBAC all use the user — the user's partition grants,
+3. Replaces the request's identity with the user's: on HTTP, PLS, RLS and RBAC all use the user — the user's entitlements,
    claims (tenant_id, user_id) and roles. The service key's own roles and the grants it holds do not apply to the request: it holds only what the user holds.
    A realtime session with a user token applies the user's PLS, RLS and RBAC, as the HTTP read it mirrors (**BL-1227, 0.9.0**).
 

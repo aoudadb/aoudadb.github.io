@@ -180,7 +180,7 @@ On a partitioned table the guard defaults **on**. A query must include `eq` or `
 
 Pinned by `PartitionFilterRuleTests` and `PartitionFilterRuleDataPlaneTests`. Error `PARTITION_FILTER_REQUIRED` names the **missing** columns and the satisfying operators.
 
-On the data-plane listener (the browser tier) the guard always decides: the listener ignores `crossPartitionAccess`. Browser-tier alternatives: the watchlist `in` shape, auth-db-pls fan-out, or an MQ over the universe. Full page: [What a browser-tier read cannot do](browser-tier-read-limits.md#partition-filter-rule).
+On the data-plane listener (the browser tier) the guard always decides: the listener ignores `crossPartitionAccess`. Browser-tier alternatives: the watchlist `in` shape, auth-db-entitlement fan-out, or an MQ over the universe. Full page: [What a browser-tier read cannot do](browser-tier-read-limits.md#partition-filter-rule).
 
 ### The `crossPartitionAccess` flag: a cost waiver, never a grant
 
@@ -188,11 +188,11 @@ On the data-plane listener (the browser tier) the guard always decides: the list
 does one thing, for every credential, on every admin-listener surface: it waives `PARTITION_FILTER_REQUIRED`. It **never widens what the credential
 sees**:
 
-- A user with partition grants who sets the flag reads exactly the partitions it is granted, and a `jwt-claim` user reads only its own
+- A user with entitlements who sets the flag reads exactly the partitions it is granted, and a `jwt-claim` user reads only its own
   tenant. Where PLS injects the caller's partition on the table's partition-key column, the guard is already satisfied and the flag
   changes nothing.
 - A credential that holds no grant at all on a PLS table (an `mk_srv_` key, a custom key not linked to a user, a token that only
-  claims `db_admin`) is refused as before, with or without the flag: `403 AUTH_PLS_GRANT_NOT_FOUND` on `auth-db-pls`,
+  claims `db_admin`) is refused as before, with or without the flag: `403 AUTH_ENTITLEMENT_NOT_FOUND` on `auth-db-entitlement`,
   `403 AUTH_PLS_TENANT_CLAIM_MISSING` on `jwt-claim`. Up to 0.8.0 any credential with `db_admin` in its `db_roles` could read every
   partition of a PLS table by sending the flag, as an audited exception; that read is gone.
   The read of every partition is now the [`all-partitions` grant](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)
@@ -259,7 +259,7 @@ the partition value **is** the caller's identity, and you need Option A or Optio
   "tables": {
     "RoomMembers": {
       "partitionKey": [{ "column": "UserId" }],
-      "authMode": "auth-db-pls",
+      "authMode": "auth-db-entitlement",
       "permissionDimension": "UserId",
       "permissionColumn": "UserId"
     }
@@ -269,14 +269,14 @@ the partition value **is** the caller's identity, and you need Option A or Optio
 
 Three things that are easy to get wrong here:
 
-- `authMode: "auth-db-pls"` enables PLS on its own. `partitionLevelSecurity: true` is the older, separate
+- `authMode: "auth-db-entitlement"` enables PLS on its own. `partitionLevelSecurity: true` is the older, separate
   way to say the same thing and is not needed alongside it.
-- **`permissionColumn` is required, and it is not inferred** (**BL-1176, 0.7.0**). The dimension is the grant namespace and
-  selects no column, even when it is spelled like one — `permissionDimension: "UserId"` alone is refused. `auth-db-pls` compares the
-  grant keys with the declared column and needs no partition key for it; `partitionLevelSecurity: true` under `jwt-claim` still
+- **`permissionColumn` is required, and it is not inferred** (**BL-1176, 0.7.0**). The dimension is the entitlement namespace and
+  selects no column, even when it is spelled like one — `permissionDimension: "UserId"` alone is refused. `auth-db-entitlement` compares the
+  entitlement keys with the declared column and needs no partition key for it; `partitionLevelSecurity: true` under `jwt-claim` still
   requires one (*"Partition-level security can only be enabled on tables with a partition key."*). Option A is about the
   partitioned layout this section starts from, so keep the key there.
-- `permissionDimension` is only read in `auth-db-pls` mode. On a `jwt-claim` table it is refused
+- `permissionDimension` is only read in `auth-db-entitlement` mode. On a `jwt-claim` table it is refused
   (*"authMode 'jwt-claim' cannot be combined with permissionDimension"*; **BL-1363, 0.9.0**), as is a
   `rlsResolverName` there; next to `auth-db-rls` it is a hard apply error (*"authMode 'auth-db-rls' cannot be
   combined with permissionDimension"*).
@@ -305,12 +305,12 @@ The resolver itself is **admin HTTP, not schema apply** — `POST /api/databases
 with `"columnName": "UserId", "operator": "Eq", "valueSource": "UserId"`. See
 [RLS resolvers](../auth/authorization.md#199-admin-api-rls-resolvers).
 
-**A partition grant does not require a partitioned table.** This is the part that surprises people: an RLS
-rule with `valueSource: "PartitionGrant"` reads the caller's grants for a dimension and injects them as an
+**An entitlement does not require a partitioned table.** This is the part that surprises people: an RLS
+rule with `valueSource: "Entitlement"` reads the caller's entitlements for a dimension and injects them as an
 ordinary `IN` predicate on a named column. It never consults the partition router, so it works exactly the
-same on an unpartitioned table. A grant's `partitionKey` field is a key *within the grant document* — it is
+same on an unpartitioned table. An entitlement's `key` field is a value *within the entitlement* — it is
 not a claim about the table's physical layout. That is what lets a "user belongs to many rooms" app keep
-grant-based authorization while dropping partitioning it does not have the volume to justify.
+entitlement-based authorization while dropping partitioning it does not have the volume to justify.
 
 Without one of these three, the definition can never execute for a user-token caller. That is worth stating plainly, because the runtime error suggests `.WithCrossPartitionAccess()` — a query-builder method. On the admin listener a named query takes the flag **per call** (`crossPartitionAccess` on the call or batch item, `cross_partition_access` on its subscribe) and a table subscribe takes `cross_partition_access`, and the error names whichever applies (**BL-1227, 0.9.0**; see [the flag](#the-crosspartitionaccess-flag-a-cost-waiver-never-a-grant)). A browser-tier caller cannot use it: the data-plane listener ignores it, so those three options are the only ways to a runnable definition there.
 
@@ -320,7 +320,7 @@ Without one of these three, the definition can never execute for a user-token ca
 |---|---|
 | A small membership / roster / inbox table, whatever the auth model | **Option C** — no partition key, `auth-db-rls`; the guard never applies |
 | Each user sees only their own rows, on a table partitioned for volume | **Option A** — PLS injects the value; the client cannot override it. **Option C also works here** and prunes identically — see below |
-| A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values — or Option C with a `PartitionGrant` rule |
+| A caller legitimately reads several partitions they own | Option B with `in`, plus RLS or a grant check on the values — or Option C with a `Entitlement` rule |
 | A trusted backend reads across all partitions | A service key (it holds `all-partitions`) with `crossPartitionAccess`: an ad-hoc query, a named-query call or a `subscribe` with the flag set — or a filter on every partition key (or a named query binding them). The grant lifts PLS, the flag lifts the partition filter (**BL-1227, 0.9.0**) |
 | A browser reads across all partitions | Not available — see [browser-tier read limits](browser-tier-read-limits.md#partition-filter-rule) |
 
@@ -344,7 +344,7 @@ what the subscription sees is decided by the credential's grants:
 | Credential | Snapshot and events with the flag |
 |---|---|
 | App service key, or a `db_admin` user (holds `all-partitions`) | Every partition of the table. Events of partitions **created after** the subscription started are delivered too |
-| A user with `auth-db-pls` grants | Exactly its granted partitions; an event in another partition is not delivered |
+| A user with `auth-db-entitlement` grants | Exactly its granted partitions; an event in another partition is not delivered |
 | A `jwt-claim` user | Its own tenant's partition only |
 | A key with no grant (`mk_srv_`, a custom key not linked to a user, `mk_anon_`) | Refused or empty, as for the same query; the flag does not change that |
 | A browser (`mk_pub_`, the data-plane listener) | The flag is ignored: the guard decides |
@@ -425,7 +425,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - Audit logging of every use of a grant (`access_grant_used`); the cross-partition rate limiter and the `query_cross_partition` / `service_key_pls_bypass` rows are gone (**BL-1227, 0.9.0**).
 - ADRA bridge behavior:
   - Unified enforcer dispatches by `AuthorizationMode`.
-  - `auth-db-pls` query/write enforcement paths are implemented for permission-context-driven partition grants.
+  - `auth-db-entitlement` query/write enforcement paths are implemented for permission-context-driven entitlements.
 
 ### Planned / proposed
 
@@ -446,7 +446,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 | P6 | Epic A/B/C/F reports | Multi-database registry/manager/routes, database field in protocol, client multidb wiring, per-db config/memory/metrics | Further API ergonomics and parity surfaces continue in follow-up work | `docs/BACKLOG.md` |
 | P7 | `P7-Task8-MultiDatabaseScenarios-Report.md` | Scenario validation of multi-db lifecycle, isolation, WAL recovery, memory budget, route behavior | Some scenario breadth noted as partial in report (table durability override limitations) | `docs/BACKLOG.md` |
 | P12 | Task G1/G2/G3/G4 reports | PLS flag + jwt-claim enforcement; history: an admin cross-partition read and a rate limiter, both replaced by the `all-partitions` grant and a cost-waiver flag (**BL-1227, 0.9.0**) | The grants phase (BL-1227) replaced the service-key bypass audit of P14 BL-041 with `access_grant_used` | `docs/tasks/Grants/Grants-Overview.md` |
-| P14 | `P14-ADRA-Tasks.md`, `P14-TaskS4-EnhancedPLS.md` | Unified enforcer dispatch and auth-db-pls permission-context path, safer OR/fan-out handling model | Ongoing ADRA hardening and full ecosystem parity | `docs/BACKLOG.md` BL-044 (+ future ADRA tasks) |
+| P14 | `P14-ADRA-Tasks.md`, `P14-TaskS4-EnhancedPLS.md` | Unified enforcer dispatch and auth-db-entitlement permission-context path, safer OR/fan-out handling model | Ongoing ADRA hardening and full ecosystem parity | `docs/BACKLOG.md` BL-044 (+ future ADRA tasks) |
 | P45 | `docs/tasks/P45/P45-PruningAndShape-Overview.md` (sessions S01–S08) | Exact partition-key and hash-bucket segment pruning; cached segment discovery; background cold-segment coalescing so streaming-write segment shape stops decaying; declarable `initialBucketCount`/promotion thresholds/`pkUniqueness` with a cardinality-derived default; byte-sized page splitting for cheaper materialization | Bucket-count rebalancing of an existing table; partial-bucket accrual across a bulk-load `:commit` boundary | `docs/BACKLOG.md` BL-300 (manual migration route), BL-381 (deferred) |
 
 ## 2.6 Capability coverage matrix
@@ -469,7 +469,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
 | Partition-level security (`partitionLevelSecurity`) | Yes | No | No | P12 G1 report + schema/model fields | Valid only for partitioned tables |
 | jwt-claim PLS enforcement | Yes | No | No | P12 G2 report + `PartitionSecurityEnforcer.cs` | Injects/validates partition scope from claim |
 | `all-partitions` grant (replaces the admin cross-partition read; **BL-1227, 0.9.0**) | Yes | No | No | Grants phase, `docs/tasks/Grants/` + `PartitionSecurityEnforcer.cs` | Held by a service key and a `db_admin` user by implication, or through a role; every use writes `access_grant_used` |
-| auth-db-pls enforcement path | Yes | No | No | P14 S4 task + `PartitionSecurityEnforcer.cs` | PermissionContext-driven grant routing |
+| auth-db-entitlement enforcement path | Yes | No | No | P14 S4 task + `PartitionSecurityEnforcer.cs` | PermissionContext-driven grant routing |
 | `access_grant_used` audit (replaces the service-key bypass audit; **BL-1227, 0.9.0**) | Yes | No | No | `AccessGrantAudit.cs` + the controllers | One row per table and grant, per request, job, stream, subscribe and re-key that a grant decided; never per event |
 | PLS helper support for `WhereClause.Groups` | No | Yes | No | `Messages.cs` + `PartitionSecurityEnforcer.cs` + BL-044 | Server has groups in protocol; helper logic not fully groups-aware |
 | Partition-key and hash-bucket segment pruning | Yes | No | No | P45 overview + S02 report | Exact for `eq`/`in`/constrained composite prefix; never prunes a bucket on a range predicate |
@@ -508,7 +508,7 @@ the reason, unless the scan was an explicit, intentional cross-partition read (s
   - Partitioned-table queries usually must include full partition-key equality filters unless explicit cross-partition access is requested.
 - Security boundary:
   - PLS adds identity-derived partition scoping on top of query enforcement.
-  - ADRA (`auth-db-pls`) extends this from single-claim matching to permission-context grant sets.
+  - ADRA (`auth-db-entitlement`) extends this from single-claim matching to permission-context entitlement sets.
 - Runtime invariants:
   - Route database must match body database for scoped request DTOs.
   - Partition enforcement decisions occur before table query execution.
@@ -588,9 +588,9 @@ table only when a recent window of every sensor is still many segments and every
   statistics on a physical column — a "last 50 messages in this room" or "this month's rows" read skips
   the segments that provably cannot contain a match. It is best-effort rather than exact, but on a table
   that fails the first line above, the whole table is a handful of segments anyway.
-- **Row isolation still works.** `auth-db-rls` needs no partition key, including its `PartitionGrant`
+- **Row isolation still works.** `auth-db-rls` needs no partition key, including its `Entitlement`
   value source — see [Live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table).
-  Only `auth-db-pls` and `jwt-claim` PLS require one.
+  Only `auth-db-entitlement` and `jwt-claim` PLS require one.
 
 **What you avoid:** `RequirePartitionFilter`. On an unpartitioned table there is no guard, so a named
 query with `params: {}` is legal, a subscribe works, and `PARTITION_FILTER_REQUIRED` cannot occur. On a
@@ -707,7 +707,7 @@ Core modules:
    - body `database` must match route `{db}`.
 3. Engine resolution: `DatabaseManager` resolves `{db}` engine.
 4. Security scope:
-   - `PartitionSecurityEnforcer.EnforceQueryScope(...)` applies jwt-claim or auth-db-pls mode.
+   - `PartitionSecurityEnforcer.EnforceQueryScope(...)` applies jwt-claim or auth-db-entitlement mode.
    - `RlsPredicateInjector` can add row-level predicates for auth-db-rls mode tables.
 5. Cross-partition and grant path:
    - a holder of `all-partitions` gets no partition predicate, and the use is recorded as `access_grant_used` once per request (**BL-1227, 0.9.0**),
@@ -888,7 +888,7 @@ Common mistake: omitting `database` in request body or mismatching route/body da
 | Database CRUD | `.Databases` client surface (P6 C2) | `client.databases.list/create/get/drop` | `/api/databases` endpoints | Implemented | Database-scoped operations shipped |
 | Database-scoped data/schema routes | .NET client routes with `DatabaseName` | Client paths built from configured `database` | `/api/databases/{db}/...` | Implemented | Flat route era replaced |
 | PLS table configuration | table options DTOs | table create/update payload fields supported | table create/update options endpoints | Implemented | Includes `partitionLevelSecurity`, `authMode`, etc. |
-| auth-db-pls runtime enforcement | server/engine internal | server/engine internal | query path enforcement in controller/enforcer | Implemented | Requires PermissionContext path |
+| auth-db-entitlement runtime enforcement | server/engine internal | server/engine internal | query path enforcement in controller/enforcer | Implemented | Requires PermissionContext path |
 
 ### B) Missing API matrix
 
@@ -1000,7 +1000,7 @@ Suggested tuning sequence:
 |---|---|---|
 | `400` saying body database must match path database | Route/body mismatch | Ensure request body `database` equals `/api/databases/{db}` segment |
 | Query on partitioned table fails with partition filter required | Missing `eq`/`in` on every partition-key column (ranges and prefixes do not count) and the flag is not set | Add `eq`/`in` on the missing keys (named in the error), or set `crossPartitionAccess` (the data-plane listener ignores it, so the browser tier cannot). See [partition-filter rule](#partition-filter-rule-p40) |
-| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key's own call sets `cross_partition_access`, which waives the guard, so it hides the gap; the browser tier cannot send the flag | First ask whether the table clears [the partitioning rule](#should-this-table-have-a-partition-key-p45) — on a membership or roster table it usually does not, and dropping `partitionKey` for `auth-db-rls` removes the guard outright. Otherwise set `authMode: "auth-db-pls"` + `permissionDimension` + `permissionColumn` (the partition-key column) so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
+| A named query deploys fine, then every `subscribe` fails with `PARTITION_FILTER_REQUIRED` — but a service key works | The table is partitioned and the definition neither binds the partition key nor has PLS configured. The service key's own call sets `cross_partition_access`, which waives the guard, so it hides the gap; the browser tier cannot send the flag | First ask whether the table clears [the partitioning rule](#should-this-table-have-a-partition-key-p45) — on a membership or roster table it usually does not, and dropping `partitionKey` for `auth-db-rls` removes the guard outright. Otherwise set `authMode: "auth-db-entitlement"` + `permissionDimension` + `permissionColumn` (the partition-key column) so the caller's own value is injected, or bind the key as a parameter. See [live subscriptions on a partitioned table](#live-subscriptions-on-a-partitioned-table) |
 | A named artifact returns `404 NOT_FOUND` to a user token, but exists in the catalog export | On the data-plane listener a permission denial is deliberately masked as "not found", so callers cannot enumerate artifacts | Read the **server** log: it records the real denial reason, code and subject for every masked 404. Grant the caller access — re-deploying the artifact will not change it |
 | A grant's use is not in the audit log | The grant did not decide the outcome (the table has no PLS / RLS for it, or the request was refused first), or the audit write failed (best-effort; check the server log) | Read `GET …/auth/admin/audit-log?action=access_grant_used`; a caller without a grant, or a table with neither PLS nor RLS, writes none **(BL-1227, 0.9.0)** |
 | PLS behavior seems odd with nested/grouped filter shapes | `WhereClause.Groups` helper adoption gap | Keep partition conditions in top-level `and`/`or` until BL-044 work lands |
@@ -1022,7 +1022,7 @@ Last verification date (UTC): `2026-09-10`.
 |---|---|---|---|---|
 | Partition key filter enforcement and the cross-partition flag | `tests/Aouda.Engine.Api.Tests/TableQueryPartitionTests.cs`, `tests/Aouda.Server.Tests/PartitionEnforcementIntegrationTests.cs` | Pass (historical/phase evidence) | Strong | Covers required-filter and cross-partition execution paths |
 | Partition storage path behavior (including nested paths) | `tests/Aouda.Server.Tests/NestedPartitionIntegrationTests.cs` | Pass (historical/phase evidence) | Medium/Strong | Validates nested partition routing semantics |
-| PLS query and grant enforcement | `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`, `tests/Aouda.Engine.Auth.Tests/PLS/PartitionSecurityEnforcerTests.cs` | Pass (historical/phase evidence) | Strong | Includes jwt-claim and auth-db-pls logic branches |
+| PLS query and grant enforcement | `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`, `tests/Aouda.Engine.Auth.Tests/PLS/PartitionSecurityEnforcerTests.cs` | Pass (historical/phase evidence) | Strong | Includes jwt-claim and auth-db-entitlement logic branches |
 | Multi-database lifecycle and isolation scenarios | `tests/Aouda.Testing.Tests/AoudaTestServer_MultiDatabase.cs` + P7 scenario report | Pass (historical/phase evidence) | Medium/Strong | Covers create/list/drop/isolation/recovery classes of behavior |
 | Protocol serialization for database-scoped messages | `tests/Aouda.Protocol.Tests/SerializationTests.cs` | Pass (historical/phase evidence) | Medium | Verifies DTO field serialization contracts |
 

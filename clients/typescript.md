@@ -243,6 +243,28 @@ INSUFFICIENT_PERMISSIONS` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_
 means the caller's role lacks the `named-query` / `named-mutation` `execute` row for it; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. See
 [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
 
+### Entitlements (**BL-1418, next train**)
+
+An entitlement is one row `(user, dimension, key, level)` that lets a user reach the rows of an `auth-db-entitlement` table whose
+`permissionColumn` equals `key` (see [Data Authorization §19.8](../auth/authorization.md#198-admin-api-entitlements)). The admin
+wrappers are on `client.auth` and need a `db_admin` caller; they ship with the next `@aouda/client` release (no version is claimed here):
+
+```ts
+const e = await client.auth.createEntitlement(userId, { dimension: 'chat_room', key: 'room_42', level: 'write' }); // -> Entitlement
+const all = await client.auth.listEntitlements(userId, { dimension: 'chat_room' });                               // -> Entitlement[]
+await client.auth.deleteEntitlement(userId, e.id);                                                                 // -> void
+```
+
+| Type | Shape |
+|---|---|
+| `CreateEntitlementRequest` | `{ dimension: string; key: string; level?: string; grantedBy?: string; validFrom?: string; validTo?: string }`. `key` is sent verbatim (`""` is a key) and must be a string |
+| `Entitlement` | `{ id; userId; dimension; key; level; grantedBy?; validFrom?; validTo?; createdAt }` |
+| `EntitlementsListResponse` | `{ entitlements: Entitlement[] }` (the wire shape; `listEntitlements` returns the array) |
+| `authMode` | `'jwt-claim' \| 'auth-db-entitlement' \| 'auth-db-rls'` |
+
+The wrappers call `POST|GET /api/databases/{db}/auth/admin/users/{userId}/entitlements` and
+`DELETE …/entitlements/{entitlementId}`. The .NET client has no typed wrapper for these routes: call them over HTTP.
+
 ---
 
 ## 4) Query Builder
@@ -302,7 +324,7 @@ const open = await client.table('orders')
 ```
 
 **The flag is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: what the query returns is what
-the credential's grants allow, with the flag or without it. A user with partition grants sees only those partitions, and a
+the credential's grants allow, with the flag or without it. A user with entitlements sees only those partitions, and a
 credential that holds no grant at all on a table with partition-level security is still refused there. Which
 credentials hold the grant: [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 The **data-plane** listener (the browser tier) ignores the flag. For subscriptions and named queries see
@@ -1240,7 +1262,7 @@ const sub2 = client.table('orders')
 The SDK sends `cross_partition_access: true` on the `subscribe` message, only when you ask, and sends it again on every resubscribe after
 a reconnect. **It is a cost waiver, not a grant**: it waives `PARTITION_FILTER_REQUIRED` and nothing else, so the snapshot and the events
 are what the credential's grants allow (a service key, or a user with the `all-partitions` grant, sees every partition, those created
-later too; a user with partition grants sees only its own). The data-plane listener ignores it. An older server ignores the field and
+later too; a user with entitlements sees only its own). The data-plane listener ignores it. An older server ignores the field and
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The wire rule:
 [A subscription that spans partitions](../guides/partitioning.md#a-subscription-that-spans-partitions).
 

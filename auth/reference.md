@@ -491,7 +491,7 @@ A key or user holding only this role runs `insert_quote` and is refused every ta
 | `roles` | array | No | RBAC roles for this key: `[{ "role": "db_writer", "scope": null }]`. `scope` is a database name or `null` for all databases — same shape as user role assignments. |
 | `expiresAt` | string? | No | ISO-8601 timestamp. Omit for a non-expiring key. |
 | `kind` | string | No | Defaults to `"custom"`. `"anon"`, `"service_role"`, `"public"`, and `"server_admin"` are reserved — they are singleton, system-managed keys and this endpoint rejects creating them (`400 INVALID_REQUEST`). |
-| `userId` | string? (GUID) | No | Links this key to an existing user (its `id`). The key's principal then resolves that user's `auth-db-pls` partition-grants and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — a key holds no access grant unless it is linked to a user who does ([Visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows); **BL-1227, 0.9.0**) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
+| `userId` | string? (GUID) | No | Links this key to an existing user (its `id`). The key's principal then resolves that user's `auth-db-entitlement` entitlements and roles through the ordinary per-user path. Without it the key has no user: its roles' grants apply, and on a PLS / RLS table it sees what a request with no user may see — a key holds no access grant unless it is linked to a user who does ([Visibility is granted](authorization.md#visibility-is-granted-all-partitions-and-all-rows); **BL-1227, 0.9.0**) — see [§19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services). **Only valid with `kind: "custom"`** — set together with a reserved `kind` returns `400 INVALID_REQUEST`. Must reference an existing user; a nonexistent `userId` is rejected rather than silently creating an orphaned key. |
 
 ```json
 {
@@ -508,19 +508,19 @@ A key or user holding only this role runs `insert_quote` and is refused every ta
 }
 ```
 
-**`GET .../admin/api-keys`** — Lists keys (wrapped: `{ "apiKeys": [...] }`). Never returns the raw `key`, only `keyPrefix`. Each item includes `userId` (`null` for an unlinked key) so an operator can see which user's grants a given key inherits without cross-referencing the grants table separately.
+**`GET .../admin/api-keys`** — Lists keys (wrapped: `{ "apiKeys": [...] }`). Never returns the raw `key`, only `keyPrefix`. Each item includes `userId` (`null` for an unlinked key) so an operator can see which user's entitlements a given key inherits.
 
-**`GET .../admin/users/{id}/partition-grants`** — Returns ADRA partition grants for the user. Optional query parameter `?dimension=` filters by dimension name. The filter is exact (**BL-430, 0.9.0**): `?dimension=source` lists the grants stored as `source`, and a capitalised name lists none of those. A name an older build stored with a capital is listed only by that spelling. See [Data Authorization §19.8](authorization.md#198-admin-api-partition-grants).
+**`GET .../admin/users/{id}/entitlements`** — Returns the entitlements of the user. Optional query parameter `?dimension=` filters by dimension name. The filter is exact (**BL-430, 0.9.0**): `?dimension=source` lists the entitlements stored as `source`, and a capitalised name lists none of those. A name an older build stored with a capital is listed only by that spelling. See [Data Authorization §19.8](authorization.md#198-admin-api-entitlements).
 
 ```json
 {
-  "grants": [
+  "entitlements": [
     {
       "id":           "3fa85f64-5717-4562-b3fc-2c963f66afa6",
       "userId":       "...",
       "dimension":    "client",
-      "partitionKey": "123",
-      "accessLevel":  "read",
+      "key":          "123",
+      "level":        "read",
       "grantedBy":    null,
       "validFrom":    null,
       "validTo":      null,
@@ -536,19 +536,19 @@ A key or user holding only this role runs `insert_quote` and is refused every ta
 
 All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `service_role` key, a `db_admin` user, or a server key (`mk_srv_`) — may call every one. A restricted admin may call the ones that do not raise its reach (**BL-1240, 0.9.0**): the seeded system role `db_operator` (it administers without the implied all-partitions / all-rows grants), a custom role with `admin`, and an `mk_adm_` key on the user-management routes. Assigning `db_admin` or an all-* grant, changing a role that carries one, renaming a role to or from `db_admin`, writing an RLS resolver, regenerating keys, minting a privileged key, and writing a user who already holds those grants on any database its auth database governs are `403 AUTHORIZATION_DENIED` and need `db_admin`. The other seeded system roles are `db_admin`, `db_writer`, `db_reader`, `anonymous` and `public`.
 
-**Partition Grants** — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-partition-grants)):
+**Entitlements** (**BL-1418, next train**) — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-entitlements)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/users/{userId}/partition-grants` | POST | Create a partition grant (returns 201). A grant is `dimension`, `partitionKey`, `accessLevel` — it names no table or column. `dimension` is lower case and must match the table's `permissionDimension` byte-for-byte; the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). An upper-case letter is `400 AUTH_GRANT_INVALID` and the message gives the lower-case spelling (**BL-430, 0.9.0**). `partitionKey` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, 0.9.0**) |
-| `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
-| `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
+| `.../admin/users/{userId}/entitlements` | POST | Create an entitlement (returns 201). An entitlement is `dimension`, `key`, `level` — it names no table or column. `dimension` is lower case and must match the table's `permissionDimension` byte-for-byte; the key is compared with the column the table declares as `permissionColumn` (**BL-1176, 0.7.0**). An upper-case letter is `400 AUTH_GRANT_INVALID` and the message gives the lower-case spelling (**BL-430, 0.9.0**). `key` is taken verbatim — `""` and outer white space are keys, never trimmed; only a missing or `null` key is refused (**BL-1192, 0.9.0**) |
+| `.../admin/users/{userId}/entitlements` | GET | List the user's entitlements; the response is `{ "entitlements": [ ... ] }`; optional `?dimension=` filter |
+| `.../admin/users/{userId}/entitlements/{entitlementId}` | DELETE | Delete an entitlement (204 / 404) |
 
 **RLS Resolvers** — define within-partition row filter rules ([§19.9](authorization.md#199-admin-api-rls-resolvers)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `.../admin/rls-resolvers` | POST | Create a resolver with `name`, `resolverType`, `rules` and optional `writeCheckRules` (returns 201). A resolver names no table — a table binds it by `rlsResolverName` — and its name is unique in the auth database (**BL-1176, 0.7.0**). `valueConfig` is a string. Value sources: `UserId`, `Literal`, `PartitionGrant` (`{"dimension":"<name>"}`, named explicitly) |
+| `.../admin/rls-resolvers` | POST | Create a resolver with `name`, `resolverType`, `rules` and optional `writeCheckRules` (returns 201). A resolver names no table — a table binds it by `rlsResolverName` — and its name is unique in the auth database (**BL-1176, 0.7.0**). `valueConfig` is a string. Value sources: `UserId`, `Literal`, `Entitlement` (`{"dimension":"<name>"}`, named explicitly) |
 | `.../admin/rls-resolvers` | GET | List resolvers with their rules (no table filter since **BL-1176, 0.7.0**) |
 | `.../admin/rls-resolvers/{id}` | GET | Get resolver with full rules list |
 | `.../admin/rls-resolvers/{id}` | PATCH | Update resolver description and/or replace rules |
@@ -630,15 +630,15 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `se
 
 ### Partition-Level Security (PLS) Errors
 
-These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
+These are returned for `jwt-claim` and `auth-db-entitlement` table enforcement.
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | JWT has no `tenant_id` claim (or the table's bound claim), or it is empty or white space, for a `jwt-claim` PLS table | Ensure JWT includes the `tenant_id` claim |
 | `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | Explicit partition filter does not match the JWT `tenant_id` | Match the filter to the user's `tenant_id` claim |
 | `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Write targets a partition outside the caller's `tenant_id` | Write to the caller's own partition only |
-| `AUTH_PLS_GRANT_NOT_FOUND` | 403 | Partition not in the user's grant set (`auth-db-pls`) | Create a partition grant for the user via admin API |
-| `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` | 403 | Partition is granted but `access_level` is `read` (write attempted) | Update the grant to `access_level: "write"` or `"admin"` |
+| `AUTH_ENTITLEMENT_NOT_FOUND` | 403 | (**BL-1418, next train**) Partition not in the user's entitlements (`auth-db-entitlement`) | Create an entitlement for the user via admin API |
+| `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` | 403 | The key has an entitlement but its `level` is `read` (write attempted) | Update the entitlement to `level: "write"` or `"admin"` |
 | `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | `Where.Or` predicate mixes partition and non-partition conditions in a fan-out query | Move non-partition conditions to `Where.And` |
 
 ### Row-Level Security (RLS) Errors
@@ -656,13 +656,13 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 | `AUTH_EMBARGO_UNSUPPORTED` | 403 | The caller holds an [embargo](authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) on the table and the surface cannot apply its cutoff: a write, a materialized query, graph traversal, vector search or a branch query (a write that names no table is refused for any embargo holder) | Read the table through the query or subscription API; write with a credential that holds no embargo |
 | `SUBSCRIPTION_EMBARGO_RESET` | WS error | An embargoed subscription ended: its hold reached `Aouda:Streaming:EmbargoHoldMaxEvents`, or the caller's embargo on the table changed | Subscribe again, fresh (no `resume_from`); `@aouda/client` does this itself |
 
-### ADRA Partition Grant Admin Errors
+### ADRA Entitlement Admin Errors
 
 | Error Code | HTTP | Meaning | Action |
 |------------|------|---------|--------|
 | `AUTH_GRANT_NOT_FOUND` | 404 | Grant ID not found | Verify the `grantId` in the DELETE request |
 | `AUTH_GRANT_DUPLICATE` | 409 | Grant already exists for this user/dimension/partition | Reuse the existing grant or delete and recreate |
-| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant or embargo | For a partition grant, check that `dimension`, `partitionKey`, and `accessLevel` are all present (`partitionKey` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, 0.9.0**); for an `embargo`, one table and whole seconds 1–2678400 (**BL-418, 0.9.0**) |
+| `AUTH_GRANT_INVALID` | 400 | Grant request has missing or invalid fields, or a role permission is not a valid access grant or embargo | For an entitlement, check that `dimension`, `key`, and `level` are all present (`key` may be `""`, but not `null`); for a role permission, see [§19.8a](authorization.md#198a-admin-api-access-grants-on-roles) (**BL-1227, 0.9.0**); for an `embargo`, one table and whole seconds 1–2678400 (**BL-418, 0.9.0**) |
 | `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table no governed database has (case-sensitive) | Fix the table name, or use `*` for a grant (**BL-1227, 0.9.0**; embargo **BL-418, 0.9.0**) |
 | `AUTH_GRANT_NOT_APPLICABLE` | 400 | The named table lacks the security the grant lifts (no PLS for `all-partitions`, no RLS for `all-rows`), or has no row time for an `embargo` | Drop the grant; it would lift nothing (**BL-1227, 0.9.0**). An embargo needs a first cluster column of type `Timestamp` or `Date` (**BL-418, 0.9.0**) |
 
@@ -672,7 +672,7 @@ These are returned for `jwt-claim` and `auth-db-pls` table enforcement.
 |------------|------|---------|--------|
 | `AUTH_RESOLVER_NOT_FOUND` | 404 | Resolver ID not found | Verify the `resolverId` in the request |
 | `AUTH_RESOLVER_NAME_CONFLICT` | 400 | A resolver with the same name already exists in the auth database (names are unique; **BL-1176, 0.7.0**) | Choose a unique resolver name |
-| `AUTH_RESOLVER_INVALID` | 400 | Resolver request has missing or invalid fields, or a `PartitionGrant` rule does not name its dimension | Check that `name`, `resolverType` and at least one rule are present, and that each `PartitionGrant` `valueConfig` is `{"dimension":"<name>"}` or the admin pass-through |
+| `AUTH_RESOLVER_INVALID` | 400 | Resolver request has missing or invalid fields, or a `Entitlement` rule does not name its dimension | Check that `name`, `resolverType` and at least one rule are present, and that each `Entitlement` `valueConfig` is `{"dimension":"<name>"}` or the admin pass-through |
 | `AUTH_CLAIM_INVALID` | 400 | Custom claim key is blank or invalid | Use a non-empty claim name; `PUT …/users/{id}/claims` |
 
 ### Handle by Error Code
@@ -1186,7 +1186,7 @@ In Aouda, the traditional tradeoff between JWT-embedded claims (fast, stale) and
 
 | Scenario | Supabase RLS | Aouda ADRA |
 |---|---|---|
-| User belongs to 5 teams | Embed `team_ids` in JWT claim | Resolve from `_user_partition_grants` at query time |
+| User belongs to 5 teams | Embed `team_ids` in JWT claim | Resolve from `_user_entitlements` at query time |
 | User has 500 permission grants | JWT becomes multi-KB, impacts latency | JWT stays thin; grants in memory-first auth DB |
 | Permission revoked | Effective at next JWT refresh (up to 15 min) | Effective on next request (permission version counter) |
 | Policy requires DB lookup | Avoid — too slow per-row | Allowed — auth DB lookup costs ~0.01ms |
@@ -1201,7 +1201,7 @@ In Aouda, the traditional tradeoff between JWT-embedded claims (fast, stale) and
 | Policy location | In the database as SQL objects | In auth DB (`_rls_resolvers` table) |
 | Manage policies | SQL migrations or Supabase dashboard | Admin API (`PATCH /rls-resolvers/{id}`) |
 | Test policies | Run SQL queries with `set local role` | Unit test resolver evaluation against mock auth DB |
-| Admin pass-through | `set local role service_role` | `PartitionGrant` with `{"role":"…","effect":"allow-all"}`, or an `all-rows` grant (**BL-1227, 0.9.0**) |
+| Admin pass-through | `set local role service_role` | `Entitlement` with `{"role":"…","effect":"allow-all"}`, or an `all-rows` grant (**BL-1227, 0.9.0**) |
 | Compound predicates | Full SQL `OR`/`AND` | Composite resolver with `combinator: OR/AND` |
 
 ---
