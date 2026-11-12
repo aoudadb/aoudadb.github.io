@@ -114,8 +114,8 @@ tickets. `auth_admin` and user-linked keys are not declarable.
 | `anon` | `mk_anon_` | `anonymous` scoped to `database` | The `anon` key it generates |
 
 Their rows are `is_system`, as generated ones are. Declare **exactly one** per (auth database, database, kind) or the start fails
-naming both entries. `database` is compared exactly as the catalog spells it: `Deposit` and `deposit` are two databases, so a
-difference in case declares a second key.
+naming both entries. `database` is compared without regard to case, as the catalog resolves a database name (only a table name is
+ordinal): `Deposit` and `deposit` are one database, so declaring both is the same refusal (**BL-1378, next train**).
 
 A declared system key is **the** key of its kind. Linking a database generates and returns only the kinds you did **not** declare
 and that are missing (declare all three and nothing is generated or printed), and `regenerate-keys` leaves declared rows live, with
@@ -136,7 +136,14 @@ disturbs the other secrets' rows. A running WebSocket or long-poll session authe
 ("declared in configuration; change the declaration"); a minted scoped key rotates as before.
 
 A change to the file or to the server key takes a **restart**. An invalid file, a missing environment variable or an unreadable
-path **fails the start** with a message naming the entry (never a secret).
+path **fails the start** with a message naming the entry (never a secret). (**BL-1378, next train**) So does an auth database that
+exists but cannot be opened (quarantined, or it failed to open) while keys are declared for it: the message names the database and
+the entries, because the server would otherwise start ready and answer `401` to keys you declared. An auth database that does
+not exist yet is not an error; its keys are `pending` until it is created.
+
+(**BL-1378, next train**) A secret kept while its declared `kind` changes (a `hash` secret re-declared as another kind) keeps its
+row and has its `kind`, system flag and `keyPrefix` updated with the roles at the next start; a declared system key then replaces
+the generated one of that kind.
 
 ### What a key must look like
 
@@ -207,7 +214,7 @@ counted; a valid key refused for its route is not a failing sender.
 A fingerprint is the first 8 hex characters of the key's SHA-256. It is a log field, and the `GET /api/auth/admin/configured-keys`
 answer for a server key; the `keyPrefix` a key listing shows for a declared key is the kind's prefix, `#` and a fragment of the
 row id, not the fingerprint. Match it to a declared key in the startup
-log, which lists each declared key by name, kind, auth database, fingerprint and source (`env`, `hash` or `bootstrap`), or hash
+log, which lists each declared key by name, kind, auth database, fingerprint and source (`env`, `file`, `hash` or `bootstrap`), or hash
 the dead key a legacy sender still holds:
 
 ```bash
