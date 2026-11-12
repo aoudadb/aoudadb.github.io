@@ -1128,7 +1128,7 @@ Anything else throws `NotSupportedException` at inference time, naming the type.
 
 A `DateTime` of kind `Local` or `Utc` is written with its offset, and a `DateTime` of kind `Unspecified` (`new DateTime(2026, 3, 1)`) is
 read as UTC; a `Timestamp` is the instant and a `Date` is the calendar day on the value, on every machine. See
-[Timestamp — time zones](../reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-next-train) (**BL-1225, 0.9.0**).
+[Timestamp — time zones](../reference/timestamp.md#which-instant-which-day-time-zones-bl-1225-090) (**BL-1225, 0.9.0**).
 
 > **⚠️ An enum is `Int32` unless you say otherwise.**
 >

@@ -16,6 +16,8 @@ created, at every start, and after a restore. After a wipe nothing needs to be r
 is read again and the rows come back with the auth database. Keys Aouda mints still work, for throwaway cases and for anything
 created at runtime.
 
+The databases a declared key belongs to can be declared too, so a wipe brings back the whole set: [Declared databases](declared-databases.md).
+
 (**BL-1378, 0.11.0**) **0.10.0 authenticated a declared key from memory:** no row, no listing, no revoke. That is gone. A declared
 key is a row, so it is listed, queried, revoked and retracted through the same flows as a minted one. If you relied on a declared
 key being invisible to the key listings, it no longer is.

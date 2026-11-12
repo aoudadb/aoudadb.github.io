@@ -91,7 +91,7 @@ implication; nothing is stored. Every other credential holds only what a role gi
 | Custom key, not linked to a user | nothing | Even if it carries the `db_admin` role: a role on a key lets it create tables and manage the database, it does not widen what rows it reads. |
 | `mk_anon_…`, `mk_pub_…`, no credential | nothing | |
 
-**Restricted admin (**BL-1240, 0.9.0**).** A full admin of a database is a caller whose grants there include `implied:db_admin` or `implied:service_key`, or a server key (`mk_srv_`). Everyone else who can already call the admin routes is a restricted admin: `db_operator`, a custom role whose `*` row includes `admin`, a custom key holding `db_admin`, and an `mk_adm_` key. A restricted admin is refused `403 AUTHORIZATION_DENIED` — the message names the operation and says it needs `db_admin` — when it would assign `db_admin` or an all-* grant, change or delete a role that carries one, rename a role to or from `db_admin`, write an RLS resolver, regenerate keys, mint a key that holds `db_admin`, `db_operator` or an all-* grant or that is linked to a user who holds them, or change such a user (including its own roles, claims and partition grants). A user holds them when it does on any database its auth database governs, not only the one in the route. A description-only change of a grant-carrying role is allowed. Signup still cannot be set to `db_admin` or a grant-carrying role (`400`), including by a full admin. An [embargo row](#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) is privileged the same way (**BL-418, 0.9.0**): only a full admin may store, change or remove one, or rename a role that carries one.
+**Restricted admin (**BL-1240, 0.9.0**).** A full admin of a database is a caller whose grants there include `implied:db_admin` or `implied:service_key`, or a server key (`mk_srv_`). Everyone else who can already call the admin routes is a restricted admin: `db_operator`, a custom role whose `*` row includes `admin`, a custom key holding `db_admin`, and an `mk_adm_` key. A restricted admin is refused `403 AUTHORIZATION_DENIED` — the message names the operation and says it needs `db_admin` — when it would assign `db_admin` or an all-* grant, change or delete a role that carries one, rename a role to or from `db_admin`, write an RLS resolver, regenerate keys, mint a key that holds `db_admin`, `db_operator` or an all-* grant or that is linked to a user who holds them, or change such a user (including its own roles, claims and partition grants). A user holds them when it does on any database its auth database governs, not only the one in the route. A description-only change of a grant-carrying role is allowed. Signup still cannot be set to `db_admin` or a grant-carrying role (`400`), including by a full admin. An [embargo row](#198b-embargo-a-delayed-view-of-a-table-bl-418-090) is privileged the same way (**BL-418, 0.9.0**): only a full admin may store, change or remove one, or rename a role that carries one.
 
 **Give the grants to anyone else with a role.** A grant is a role permission with `resourceType` `all-partitions` or `all-rows`; the
 holder is any user the role is assigned to (the assignment's `scope` limits the database). Roles are the only carrier: there is no
@@ -134,7 +134,7 @@ logging](reference.md#audit-logging).
 **What changed.**
 
 - *0.4.0:* only an app's service key was exempt from PLS and RLS; server API keys (`mk_srv_…`) lost the exemption they had up to 0.3.x.
-- *Next train* (**BL-1227**): the service-key exemption and the `db_admin` cross-partition read are replaced by the two grants above.
+- *0.9.0* (**BL-1227**): the service-key exemption and the `db_admin` cross-partition read are replaced by the two grants above.
   An app service key behaves as before. **A user with the `db_admin` role now holds both grants on its database: it sees every RLS
   row and every partition, where it saw only its own grants or what a resolver showed it.** A **key** whose role is `db_admin`
   (`mk_srv_…`, a custom key) can no longer read a PLS table across partitions by sending `"crossPartitionAccess": true` — the flag
@@ -810,7 +810,7 @@ Each item of a role's `permissions` is `{ "resourceType", "resourceName", "actio
 | `table` (default) | A table name, or `*` (default) | A comma-separated string of RBAC actions, for example `"read,write"` |
 | `all-partitions` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
 | `all-rows` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
-| `embargo` (**BL-418, 0.9.0**) | One table's name (case-sensitive); `*` is refused | Whole seconds, `1` to `2678400` (31 days), digits only — see [Embargo](#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) |
+| `embargo` (**BL-418, 0.9.0**) | One table's name (case-sensitive); `*` is refused | Whole seconds, `1` to `2678400` (31 days), digits only — see [Embargo](#198b-embargo-a-delayed-view-of-a-table-bl-418-090) |
 
 For `all-partitions` and `all-rows`, all three fields are required: there is no default name and no default level. A grant is a
 *second* permission, not a replacement: a role that should read `sales` and see every row of it carries both a `table` permission

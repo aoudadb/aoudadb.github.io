@@ -24,7 +24,7 @@ explicitly granted this many bytes) or **fell back** (`GCMemoryInfo` or physical
 *has* this much memory; nothing says you own it alone).
 
 `MaxTotalRamBytes` defaults to **`0`, meaning "derive it from the host"** (the two rows below); any positive value you set is
-kept as is, and it is an RSS ceiling for the whole process ([sizing](sizing.md)). (**Next train:** the default was 2 GiB, and the
+kept as is, and it is an RSS ceiling for the whole process ([sizing](sizing.md)). (**0.4.0:** the default was 2 GiB, and the
 server derived the budget whenever the value equalled it, so an explicit `--max-memory 2147483648` was silently replaced by
 70 % of the container's limit, or 40 % of the host's memory where there was none — 26 GB on a 64 GB machine. An explicit 2 GiB
 is now honoured.)
@@ -315,7 +315,7 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 | Subscribe attempts: refill per second (**BL-1383, 0.11.0**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
 | The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
-| Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
+| Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
 
 The identity quota and the subscription caps are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
 quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch
@@ -379,6 +379,8 @@ startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by n
   state of their rows; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind.
 
 ## Declared databases (**BL-1379, 0.11.0**) {#declared-databases}
+
+The full reference, a worked example and the wipe-and-start walkthrough are on [Declared databases](declared-databases.md).
 
 Databases, application auth databases and the links between them, declared in `Aouda:Databases` so that a wipe of the data
 directory and a plain start bring back the same set; only schema and data need re-applying. Nothing is declared by default.
