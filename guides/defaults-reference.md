@@ -361,7 +361,7 @@ Full guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
 | Setting | Default | What it means |
 |---|---|---|
 | `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key declared for the server auth database; its row exists once that database does (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
-| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key. No permission check (**BL-1401, 0.11.0**), so a secret mounted `0444` works; a missing, unreadable or empty file fails the start. Set at most one of the key, the file and the systemd credential `aouda-server-key` |
+| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key. No permission check (**BL-1401, 0.11.0**), so a secret mounted `0444` works; a missing, unreadable or empty file fails the start. `$NAME` / `${NAME}` in the path are expanded, a relative path resolves against the working directory, the content is strict UTF-8 with one trailing newline removed (**BL-1425, 0.12.0**; [secret files](keys-that-survive-a-wipe.md#secret-files)). Set at most one of the key, the file and the systemd credential `aouda-server-key` |
 | `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, 0.11.0**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }`, `{ "file": PATH }` (**BL-1389, 0.11.0**) or `{ "hash": "sha256:<hex>" }` |
 
 A key is the kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`) and at least 32 characters of `A-Z a-z 0-9 _ -`;
@@ -376,7 +376,17 @@ startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by n
 - **A declared `service_role`, `public` or `anon` key takes the place of the one a link or `regenerate-keys` would generate**: only
   the undeclared kinds are generated, and `anonKey` / `serviceRoleKey` / `publicKey` are absent from a response for a declared kind.
 - `aouda keys check --file <path>` validates the file offline; `GET /api/auth/admin/configured-keys` lists the declarations and the
-  state of their rows; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind.
+  state of their rows; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind, over HTTP, WebSocket and long-poll, with `rejectedApiKeysByTransport` and `rejectedApiKeysByReason` (**BL-1428, BL-1430, 0.12.0**; [counting refused keys](keys-that-survive-a-wipe.md#counting-refused-keys)).
+
+## First admin (**BL-1423, 0.12.0**)
+
+| Setting | Default | What it means |
+|---|---|---|
+| `Aouda:Auth:RequireFirstAdmin` | `false` | `true`: a server with no admin and no root password or dev admin fails the start, naming both ways out, instead of sitting in setup mode |
+| `Aouda:Auth:DevAdmin:Enabled` (`AOUDA_DEV_ADMIN`, `aouda start --dev-admin`) | `false` | Development and tests only: a random throwaway admin and `mk_srv_` key at every start, printed once on stdout. Refused in Production |
+| `Aouda:Auth:DevAdmin:Email` | `admin@aouda.local` | The throwaway admin's email |
+
+Full rules and the exact refusals: [Development admin](development-admin.md).
 
 ## Declared databases (**BL-1379, 0.11.0**) {#declared-databases}
 

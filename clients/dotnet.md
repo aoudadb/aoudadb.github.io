@@ -86,6 +86,7 @@ application.
 | `UserToken` (**BL-1385, 0.11.0**) | none | A user's JWT sent as `X-User-Token` beside the key; needs a `mk_svc_` or `mk_srv_` `ApiKey`. Moved here from `AppAuthOptions` / `ServerAuthOptions`. |
 | `ServerAuth` / `AppAuth` | none | A signed-in session, not a key: server auth (`ServerAuthOptions`: `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`: `Token` + `RefreshToken`). Mutually exclusive with each other, and with `ApiKey` (a key and a session are two credentials). See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
 | `AuthFailurePolicy` (**BL-1386, 0.11.0**) | nothing happens | Opt-in: `FailFast` throws `AoudaAuthenticationFatalException` for a rejected key instead of a failure a caller may retry later; `OnSustained` is called once after `SustainedAfter` (default 3) failures in a row. See [Getting Started](../getting-started/index.md#a-rejected-key-is-not-a-retry-bl-1386-0110). |
+| `SubscriptionConsumerQueueCapacity` (**BL-1421, 0.12.0**) | `10_000` | The unread-event bound of every subscription consumer on this client (table and named-query subscribes, typed tables too). Validated `>= 1` when the client is built (`ArgumentOutOfRangeException`-style refusal at construction). `SubscribeOptions.ConsumerQueueCapacity` overrides it for one subscription. See §8a. |
 | `AutoCreateSchema` | `false` | Typed inserts create a missing table from the type. |
 | `AutoReconcileSchema` | `true` | Before the first typed insert to a table, compare it with the type and change the table to match (see `ReconcilePolicy`). A typed update does not reconcile. (**BL-1178, 0.9.0**) ⚠️ Set `false` for tables from `aouda.schema.json`: since **BL-1177 (0.9.0)** the server refuses DDL on them, and an insert that needs to add or drop a column fails with `AoudaSchemaException`. |
 | `ReconcilePolicy` | `Safe` | Default `Safe` only adds columns the row type has and the table lacks. `Unsafe` is opt-in and drops non-key columns a row type omits; a primary-key column stays. A typed update does not reconcile. (**BL-1178, 0.9.0**) Bulk load never reconciles. See [Schema § what `InferenceMode` decides](../guides/schema.md#what-inferencemode-decides-and-what-it-does-not). |
@@ -757,11 +758,17 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
   waits for it; one that joins while the connection is down waits until the resubscribe is sent. Events are shared **by reference**:
   rows are not copied per consumer, so do not mutate them.
 - **One slow consumer does not slow the rest — and no consumer may stall without limit.** Each enumerator has a queue of 10 000
-  events. One that falls further behind (a long pause, a slow handler through a burst) ends with an `AoudaRequestException` whose
+  events by default; (**BL-1421, 0.12.0**) `AoudaClientOptions.SubscriptionConsumerQueueCapacity` (default `10_000`, validated `>= 1` when the
+  client is built) sets it for every subscription on the client, and `SubscribeOptions.ConsumerQueueCapacity` overrides it for one subscription
+  (also validated `>= 1`). The capacity is **not part of the sharing identity**: subscribes that differ only in it still share one server
+  subscription, each with its own queue. One that falls further behind (a long pause, a slow handler through a burst) ends with an `AoudaRequestException` whose
   `ErrorCode` is `CLIENT_CONSUMER_OVERFLOW` and leaves; the others and the server subscription go on. **This holds for a subscription
   nobody shares as well**: before this train the client buffered without limit, now a single consumer that cannot keep up is ended with
   that error (no resume: subscribe again for a new snapshot), and the server subscription is closed when it was the last. Catch it
-  where you read the stream if a burst of more than 10 000 events between two reads is possible.
+  where you read the stream if a burst of more than the capacity between two reads is possible. (**BL-1421, 0.12.0**) The message says what happened
+  and the recovery: `The subscription consumer fell behind: <capacity> events were queued unread. It was removed from the shared subscription; the
+  other consumers are unaffected. There is no resume: subscribe again to get a fresh snapshot. To tolerate a longer stall, raise
+  AoudaClientOptions.SubscriptionConsumerQueueCapacity (client-wide) or SubscribeOptions.ConsumerQueueCapacity (this subscription); or read faster.`
 - **A joiner may get a subscription of its own.** The shared subscription keeps at most 100 000 rows (a fixed SDK limit that equals the server's default `MaxSnapshotRows`; changing the server key does not change it) to
   seed joiners. Beyond that, or when it cannot keep them exact (the SDK learns the key columns from the first `delete` it receives, so a
   projection that leaves out the primary key, a table without one, rows equal in every column, an `upsert` before any delete (the
@@ -829,7 +836,7 @@ handles (namespace `Aouda.Client` unless noted):
 | Exception | When |
 |---|---|
 | `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. |
-| `AoudaAuthenticationException` / `AoudaNotFoundException` (`Aouda.Abstractions`) / `AoudaMisdirectedRequestException` | `401` / `404` / `421`. |
+| `AoudaAuthenticationException` / `AoudaNotFoundException` (`Aouda.Abstractions`) / `AoudaMisdirectedRequestException` | `401` / `404` / `421`. (**BL-1422, 0.12.0**) The `Message` of every HTTP `401` and `403` refusal now carries the server's `suggestion` (which names the key kind and prefix the route takes) and the option to set (`AoudaClientOptions.ApiKey`, `ServerAuth`, `AppAuth` or `ServerUrl`), with the kind of credential this client was sending (for example `a service key (mk_svc_) set as AoudaClientOptions.ApiKey`). The key itself is never in the message. `ErrorCode`, `StatusCode`, `RequestId` and `Details` are unchanged; only `Message` is longer, so match on `ErrorCode`, not on the text. WebSocket and long-poll auth frames carry the server's message only; the option hint is added on HTTP. |
 | `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, 0.11.0**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |

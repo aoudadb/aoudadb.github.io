@@ -426,7 +426,9 @@ curl -s -X POST \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-Success looks like any other query result: column arrays (`columns`, `types`, `data`, `rowCount`). (**Lead S12, 0.6.0**) There is no `format` parameter any more; `?format=` is refused `400 INVALID_FORMAT`. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. On the **data-plane listener**, a missing token or an unentitled caller (`mk_anon_*`, user JWT without `db_reader`) is the **same** 404 — not 401/403 — so names are not enumerable. The **admin listener** still returns 401 (`AUTH_TOKEN_MISSING`) / 403 (`AUTHORIZATION_DENIED`). Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
+Success looks like any other query result: column arrays (`columns`, `types`, `data`, `rowCount`). (**Lead S12, 0.6.0**) There is no `format` parameter any more; `?format=` is refused `400 INVALID_FORMAT`. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. On the **data-plane listener**, a missing token or an unentitled caller (`mk_anon_*`, a user JWT whose roles carry no `named-query` `execute` row for this name) is the **same** 404 — not 401/403 — so names are not enumerable. The **admin listener** still returns 401 (`AUTH_TOKEN_MISSING`) / 403 (`INSUFFICIENT_PERMISSIONS`, or `AUTHORIZATION_DENIED` for a caller with no role on the database).
+
+**Permission (BL-1417, 0.12.0, breaking).** The caller's role needs `{ "resourceType": "named-query", "resourceName": "<name or *>", "actions": "execute" }` (a named mutation: `named-mutation`). Table `read` / `write` do not run an artifact, and an execute row gives no table API. `db_admin` and a `mk_svc_` service key need no row; `db_reader` holds `named-query *`, `db_writer`, `db_operator` and `public` hold both kinds, `anonymous` neither. A custom role that ran artifacts on its table right before 0.12.0 must add the rows. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls) for the shapes, the upgrade behaviour and the server's start-up Warning. Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
 
 ### TypeScript (`@aouda/client`)
 
@@ -492,6 +494,8 @@ HTTP **200** means the envelope was accepted. A missing name or a bind/ADRA fail
 ```
 
 Envelope **400** (no `results`): empty array, more than 32 elements, or a **named-mutation** name (`NAMED_QUERY_BATCH_MUTATION`).
+
+**Permission (BL-1417, 0.12.0).** The route itself needs only an authenticated caller. Each slot is checked for its own `named-query` `execute` row; a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND`, exactly like an unknown name, on both listeners. A caller who may execute none of the slots therefore gets HTTP 200 with every slot masked, where before 0.12.0 a caller holding only table rights got a route-level 403. (**BL-1417 review, next train**) In that case the envelope carries `"token": ""`, not a live consistency token.
 
 ```typescript
 const slots = await client.namedQueries.batch([
@@ -863,7 +867,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Symptom | Cause | Action |
 |---|---|---|
 | `404 NAMED_QUERY_NOT_FOUND` | Name not deployed or typo | Apply schema; use the schema key as a string literal |
-| Data-plane execute 404 (no 401/403) | Missing token or `mk_anon_*` / unentitled JWT on a listed named-query route | Expected on the data-plane. Use `mk_pub_*`, an entitled user JWT, or a service key. Admin listener still 401/403. |
+| Data-plane execute 404 (no 401/403) | Missing token, `mk_anon_*`, or a caller whose roles hold no `named-query` / `named-mutation` `execute` row for the name (a table `read` / `write` does not count, **BL-1417, 0.12.0**) | Expected on the data-plane. Use `mk_pub_*` (role `public`), an entitled user JWT, or a service key; for a custom role, add the `execute` row. Admin listener still 401/403 (`INSUFFICIENT_PERMISSIONS`, details name the artifact). |
 | `404 TABLE_NOT_FOUND` on a table that exists | Data-plane + browser-tier + `dataPlaneAccess: false` | Set `dataPlaneAccess: true` on every touched table **and** MQ entry (including joins) |
 | `400 NAMED_QUERY_BIND_FAILED` | Arg type/constraint | Check `params` (`maxLength`, `min`/`max`, `enum`, `maxItems`) |
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |

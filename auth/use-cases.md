@@ -320,8 +320,8 @@ curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-
 | Role | Permissions |
 |------|------------|
 | `db_admin` | Full access — read, write, delete, create/alter/drop tables, manage users |
-| `db_writer` | Read, write, and delete data in all tables |
-| `db_reader` | Read-only access to all tables |
+| `db_writer` | Read, write, and delete data in all tables; runs every named query and mutation (**BL-1417, 0.12.0**) |
+| `db_reader` | Read-only access to all tables; runs every named query, no mutation (**BL-1417, 0.12.0**) |
 | `anonymous` | No data access (can call auth endpoints only). Customizable by admins. |
 
 ---

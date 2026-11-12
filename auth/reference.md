@@ -452,7 +452,7 @@ To add a single role without dropping existing roles, first `GET` current roles,
 |-------|------|----------|-------|
 | `name` | string | **Yes** | Unique role name. |
 | `description` | string | No | |
-| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (`"table"` by default; `"all-partitions"` or `"all-rows"` for an access grant — anything else is `400 AUTH_GRANT_INVALID`, where up to 0.8.0 any string was stored), `resourceName` (default `"*"` for a `table` permission), `actions` (**string**, e.g. `"read"` or `"read,write"`). For an access grant `resourceName` and `actions` are **required** — `*` or a table name, and exactly one of `read`, `write`, `admin` — and a system role cannot carry one (**BL-1227, 0.9.0**). `"embargo"` delays one table for the role's holders: `resourceName` a table with a row time (not `*`), `actions` whole seconds from `1` to `2678400` ([§19.8b](authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090); **BL-418, 0.9.0**). |
+| `permissions` | array | No | Omit or `[]` creates a role that grants nothing. Each item: `resourceType` (`"table"` by default; `"all-partitions"` or `"all-rows"` for an access grant; `"embargo"`; and, **BL-1417, 0.12.0**, `"named-mutation"` / `"named-query"` for the right to run named artifacts, with `actions` exactly `execute` and a required `resourceName`: one artifact's exact name or a lone `*` — anything else is `400 AUTH_GRANT_INVALID`, where up to 0.8.0 any string was stored), `resourceName` (default `"*"` for a `table` permission), `actions` (**string**, e.g. `"read"` or `"read,write"`). For an access grant `resourceName` and `actions` are **required** — `*` or a table name, and exactly one of `read`, `write`, `admin` — and a system role cannot carry one (**BL-1227, 0.9.0**). `"embargo"` delays one table for the role's holders: `resourceName` a table with a row time (not `*`), `actions` whole seconds from `1` to `2678400` ([§19.8b](authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090); **BL-418, 0.9.0**). |
 
 ```json
 {
@@ -465,9 +465,23 @@ To add a single role without dropping existing roles, first `GET` current roles,
 }
 ```
 
+(**BL-1417, 0.12.0**) A role that **runs one named mutation and nothing else** carries only the execute row, with no table permission:
+
+```json
+{
+  "name": "quote_inserter",
+  "description": "Runs insert_quote, touches no table directly",
+  "permissions": [
+    { "resourceType": "named-mutation", "resourceName": "insert_quote", "actions": "execute" }
+  ]
+}
+```
+
+A key or user holding only this role runs `insert_quote` and is refused every table route (`403 INSUFFICIENT_PERMISSIONS`); the mutation still runs under the caller's own PLS, RLS and embargoes. The same shape is `POST …/roles` on the server route and a declared role in `Aouda:Databases:<auth>:Roles`. A role that also runs queries adds `{ "resourceType": "named-query", "resourceName": "*", "actions": "execute" }`. A table `read` / `write` no longer runs a named artifact: a **custom role that ran one before 0.12.0 must add these rows** (nothing is added for it, and there is no flag to restore the old rule). The built-in roles carry them: `db_operator`, `db_writer` and `public` hold `named-mutation *` and `named-query *`, `db_reader` holds `named-query *`, `anonymous` holds none, and `db_admin` needs none. See [Data Authorization §19.0](authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
+
 **400 `INVALID_REQUEST`:** missing `name`, duplicate name, or malformed JSON. Body is `{ "error", "message", "suggestion", "requestId" }` — log it. `permissions` is not required.
 
-**400 `AUTH_GRANT_INVALID`, `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`** (**BL-1227, 0.9.0**): a refused access grant — an unknown `resourceType`, a missing or multiple level, a missing `resourceName`, a `null` entry or a system role; a table the database does not have; a table with no PLS (`all-partitions`) or no RLS resolver (`all-rows`). For an `embargo` (**BL-418, 0.9.0**): a blank or `*` table, a delay outside 1–2678400 whole seconds, a system role, a table the database does not have, or a table with no row time. Nothing is written. The request shapes, messages and worked example are in [§19.8a of Data Authorization](authorization.md#198a-admin-api-access-grants-on-roles).
+**400 `AUTH_GRANT_INVALID`, `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`** (**BL-1227, 0.9.0**): a refused access grant — a `resourceName` with a `*` that is not alone (`quote*`; **BL-1415, 0.12.0**: only a lone `*` is a wildcard, for every resource type), a `named-mutation` / `named-query` row whose `actions` is not exactly `execute` or whose name is blank or a pattern (**BL-1417, 0.12.0**), an unknown `resourceType`, a missing or multiple level, a missing `resourceName`, a `null` entry or a system role; a table the database does not have; a table with no PLS (`all-partitions`) or no RLS resolver (`all-rows`). For an `embargo` (**BL-418, 0.9.0**): a blank or `*` table, a delay outside 1–2678400 whole seconds, a system role, a table the database does not have, or a table with no row time. Nothing is written. The request shapes, messages and worked example are in [§19.8a of Data Authorization](authorization.md#198a-admin-api-access-grants-on-roles).
 
 **`POST .../admin/api-keys`** — Create a `custom` API key. Returns `201 Created`. The raw key is returned **only in this response** — it is stored hashed, and cannot be recovered later.
 

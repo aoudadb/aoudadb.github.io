@@ -72,7 +72,7 @@ Allowed: `/health` `/ready` `/startup`, app-auth except `/auth/admin/*`, OIDC/JW
 
 The data-plane listener **ignores `crossPartitionAccess`** (**BL-1227, 0.9.0**): the partition-filter guard decides, and the error says the flag is not accepted there. The flag only waives that guard on the admin listener and never widens what a credential sees — [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener).
 
-Listed named-artifact routes still **do not enumerate names**. On the data-plane, unsigned, `mk_anon_*`, and other unentitled callers get **404** `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — not 401 vs 404. Unlisted paths stay empty 404 (D-11). The admin listener keeps 401/403 so operators can tell missing token from denied. Invalid credentials stay 401 on both listeners.
+Listed named-artifact routes still **do not enumerate names**. On the data-plane, unsigned, `mk_anon_*`, and other unentitled callers (a caller whose roles hold no `named-query` / `named-mutation` `execute` row for the name, whatever table rights they hold; **BL-1417, 0.12.0**) get **404** `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — not 401 vs 404. Unlisted paths stay empty 404 (D-11). The admin listener keeps 401/403 so operators can tell missing token from denied. Invalid credentials stay 401 on both listeners.
 
 ---
 
@@ -249,7 +249,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | Subscribe bucket empty | Wait `retry_after_ms` / `Retry-After` |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
 | Data-plane named-query 404 with no token | Listed-route non-disclosure | Expected. Admin listener still 401. Use `mk_pub_*` or an entitled JWT. |
-| Data-plane named-mutation 404 with a valid, entitled JWT | Same listed-route non-disclosure, but the cause is the caller's RBAC role lacking `write` on this database (e.g. `db_reader`) — **not** the name and not PLS/RLS | Same masked 404 as "no token" (not 403). Check `db_roles` scope for this database before suspecting the artifact name; see [RBAC vs PLS/RLS](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls) |
+| Data-plane named-mutation 404 with a valid, entitled JWT | Same listed-route non-disclosure, but the cause is the caller's RBAC role lacking a `named-mutation` `execute` row for this artifact (**BL-1417, 0.12.0**; before 0.12.0: lacking `write` on this database) — a table `write` does not count, and it is **not** the name and not PLS/RLS | Same masked 404 as "no token" (not 403). Check the role's `execute` row, then its `db_roles` scope for this database, before suspecting the artifact name; see [RBAC vs PLS/RLS](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls) |
 | WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `name` |
 | WS `DATA_PLANE_WRITE_STREAM` | `stream_open` on data-plane | Ingest from a service key on admin, or HTTP named mutation |
 

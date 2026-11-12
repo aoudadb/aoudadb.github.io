@@ -109,6 +109,8 @@ docker compose up
 - Aouda at `http://localhost:5000`
 - Aouda Studio at `http://localhost:3000`
 
+The compose file needs a first admin: `AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). Without either, the server container exits at start with a message naming both. See [Docker](../deployment/docker.md#compose-and-the-first-admin).
+
 ### 4. Aouda.Setup — interactive installer (Windows + Linux)
 
 No PowerShell or bash knowledge required. Extract the release archive and run:
@@ -596,6 +598,8 @@ docker compose up
 
 - **Aouda** at `http://localhost:5000`
 - **Aouda Studio** at `http://localhost:3000`
+
+The compose file needs a first admin: `AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). Without either, the server container exits at start with a message naming both. See [Docker](../deployment/docker.md#compose-and-the-first-admin).
 
 Studio connects to Aouda automatically. No additional configuration needed — open `http://localhost:3000` to browse your databases.
 
@@ -1451,8 +1455,8 @@ Default roles (applied per database):
 | Role | Permissions |
 |------|------------|
 | `db_admin` | Full access — read, write, delete, create/alter/drop tables, manage users |
-| `db_writer` | Read, write, and delete data |
-| `db_reader` | Read-only access |
+| `db_writer` | Read, write, and delete data; runs every named query and mutation (**BL-1417, 0.12.0**) |
+| `db_reader` | Read-only access; runs every named query, no mutation (**BL-1417, 0.12.0**) |
 
 The server admin (superuser) has implicit `db_admin` on ALL databases. Regular server users and API keys must be granted roles for each database they need access to.
 
