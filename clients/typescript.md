@@ -229,6 +229,20 @@ bulk load, schema calls); a realtime socket's own handshake is not counted, an a
 breaker, and neither the error nor `info` carries the key. The SDK has no batch writer: a loop of `insert` / `bulkLoad` calls should
 stop on `AoudaAuthenticationFatalError`.
 
+**Refusals that name the key kind and the option (BL-1422).** Server side, since **0.12.0**, a refusal's `suggestion` names the key kind and prefix
+the route takes (`AUTH_API_KEY_INVALID`, `AUTH_TOKEN_MISSING`, `AUTH_KEY_LISTENER_MISMATCH`, `AUTH_KEY_ROUTE_MISMATCH`, and a `403` RBAC denial
+of an auth-admin, browser-tier or scoped key). **Not yet released in `@aouda/client`** (merged to the client's `main`, shipping with the next
+release, which is prepared separately; no version is claimed here): the `message` of an HTTP 401 or 403 with one of those codes (and
+`AUTH_API_KEY_REQUIRED`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `UNAUTHORIZED`, `AUTH_TOKEN_INVALID` / `_EXPIRED` / `_REVOKED`, `AUTHORIZATION_DENIED`) then carries
+that `suggestion` (for `AUTHORIZATION_DENIED` its `details`) and the option to set (`apiKey`, `serverAuth`, `appAuth`, `serverUrl`) with the
+kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400, ...) keeps the
+server's message exactly. The `/ready` reason codes `schema_pending` and `schema_drift` are documented in the [HTTP API](../reference/http-api.md#get-ready).
+
+**Named queries and mutations need an `execute` row (server 0.12.0, BL-1417).** The client sends named-artifact calls as before. A `403
+INSUFFICIENT_PERMISSIONS` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` on a call that worked before
+means the caller's role lacks the `named-query` / `named-mutation` `execute` row for it; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. See
+[Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
+
 ---
 
 ## 4) Query Builder
@@ -1366,8 +1380,13 @@ Four cases do **not** share, and the consumer gets a server subscription of its 
   the primary key, so a `delete` (which carries only the key) cannot be applied;
 - anything with different arguments or options.
 
-A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`); the
-other consumers of the subscription and the server subscription are not affected. (A consumer
+A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in every released `@aouda/client`; the
+other consumers of the subscription and the server subscription are not affected. **Not yet released** (BL-1421, merged to the client's `main`, shipping with
+the next `@aouda/client` release, which is prepared separately; no version is claimed here): the bound becomes
+`AoudaClientOptions.subscriptionConsumerQueueCapacity` (default 10 000, an integer of at least 1, refused at construction otherwise) with a
+per-subscription `consumerQueueCapacity` on `subscribe` (table and named query) that is not part of the sharing key, and overflow ends the consumer with the new
+`AoudaConsumerOverflowError` (`code: "CLIENT_CONSUMER_OVERFLOW"`) on its iterator and `onError`, carrying the C# SDK's message. The old message text goes away; match on `code`.
+(A consumer
 driven by callbacks that is never iterated is not "behind": past that many unread events it stops
 queuing, and iterating it afterwards throws.)
 

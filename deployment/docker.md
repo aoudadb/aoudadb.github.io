@@ -140,7 +140,24 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6
 
 To see why, read the body from outside the container: `curl -s http://localhost:5000/ready` (`/ready` needs no credential). The image's own `wget` does not print the body of a `503`, so `docker exec aouda wget -qO- http://localhost:5000/ready` shows nothing.
 
-Create the admin at start with `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD`, or by hand as in the next section. The repository's `docker-compose.yml` does the first for you (**BL-1407, next train**): it sets both variables from `AOUDA_ROOT_EMAIL` (default `admin@aouda.local`) and `AOUDA_ROOT_PASSWORD`, which is required and has no default, because port 5000 is published and a known default would be a known credential. Compose refuses to start without it, so put it in a `.env` file next to the compose file or export it.
+Create the admin at start with `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD`, or by hand as in the next section. The repository's `docker-compose.yml` does it for you.
+
+### Compose and the first admin
+
+(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**) `docker-compose.yml` needs one of two things, and a container that has neither exits at start instead of sitting `unhealthy`:
+
+| You set | What happens |
+|---|---|
+| `AOUDA_ROOT_PASSWORD` (and optionally `AOUDA_ROOT_EMAIL`, default `admin@aouda.local`) | The first admin is created at start from `AOUDA_AUTH__ROOTUSER__EMAIL` / `AOUDA_AUTH__ROOTUSER__PASSWORD`. The password has **no default**, because port 5000 is published and a known default would be a known credential. Put both in a `.env` file next to the compose file or export them; remove them afterwards if you like, the admin lives in the data volume |
+| `AOUDA_DEV_ADMIN=true` | Development and tests only. The server makes a random throwaway admin and server key at every start and prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda` for the `AOUDA-DEV-ADMIN` line. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD`. See [Development admin](../guides/development-admin.md) |
+| neither, on a new volume | The container exits with `The server has no admin and was given no way to create one, and Aouda:Auth:RequireFirstAdmin is set (docker-compose.yml sets it).` followed by both ways out |
+| neither, on a volume that already holds an admin | Starts normally |
+
+How it works: `docker-compose.yml` sets `AOUDA_AUTH__REQUIREFIRSTADMIN: "true"`, passes the root email and password and `AOUDA_DEV_ADMIN` through, and sets `ASPNETCORE_ENVIRONMENT: ${AOUDA_DEV_ADMIN:+Development}`. Before 0.12.0 the compose file set no admin, so a fresh volume left the container `unhealthy` for ever (`setup_required`). The refusal comes from the server, not from compose's interpolation, so its reason is in `docker compose logs aouda`.
+
+⚠️ **Leave `AOUDA_DEV_ADMIN` unset unless you mean it.** Any non-empty value, `false` included, switches the container to the Development environment (an empty value is treated as Production, where the flag is refused).
+
+To create the admin by hand instead, drop the `AOUDA_AUTH__REQUIREFIRSTADMIN` and `AOUDA_AUTH__ROOTUSER__*` lines from the compose file and use the next section; the container then reports `unhealthy` with the reason `setup_required` until the admin exists, which you read with `curl -s http://localhost:5000/ready` **from the host**. The image's own `wget` health check prints no body for a `503`, so it can never show the reasons.
 
 ---
 

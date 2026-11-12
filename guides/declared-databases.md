@@ -84,7 +84,8 @@ auth database receive. A `Roles` block on a `Kind: data` entry therefore has no 
 (`Roles can only be declared on a Kind 'auth' database`). Declare the roles on the auth database the data databases link to.
 
 - Each role is created when missing and converged to the declared description and permissions when it exists. A role that is not declared is never touched, so roles made through the API stay.
-- A `Permissions` item is `ResourceType` (`table`, the default; or `all-partitions`, `all-rows`, `embargo`), `ResourceName` (a table name, or `*`) and `Actions` (for a `table` item a comma-separated list, default `read`; for an all-* grant exactly one level), the same fields as `POST .../roles`.
+- A `Permissions` item is `ResourceType` (`table`, the default; or `all-partitions`, `all-rows`, `embargo`; and, **BL-1417, 0.12.0**, `named-mutation` or `named-query`), `ResourceName` (a table name, or `*`; for a named artifact its exact name or `*`) and `Actions` (for a `table` item a comma-separated list, default `read`; for an all-* grant exactly one level; for a named artifact exactly `execute`), the same fields as `POST .../roles`. The same validator runs, so a `ResourceName` with a `*` that is not alone (`quote*`) fails the start (**BL-1415, 0.12.0**), as does an `execute` item with another `Actions`.
+- Running a named query or mutation needs an `execute` item (**BL-1417, 0.12.0**): `{ "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }`. The `quote_writer` role in the example below, which holds only a table `write`, does **not** run named mutations. At start the server logs one Warning per auth database naming the custom roles that hold table `read` / `write` and no execute row. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
 - A role name is compared without case: declaring one twice is refused. A role with no body is refused; write `{}` for a role with no description and no permissions.
 - Roles are applied **after** the schema, so a permission may name a table the schema file creates.
 - A system role cannot be declared, and the signup role of a database cannot carry an `all-partitions` or `all-rows` grant. Both fail the start.
@@ -147,7 +148,7 @@ Aouda__Databases__reports__AuthDatabase=derive_auth
 Aouda__Databases__reports__Durability=os
 ```
 
-(`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies; see
+(`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies, and `aouda schema check` validates it offline (**BL-1419, 0.12.0**; [Check a schema file offline](schema-check.md)); the start runs the same checks on every file before it changes any database; see
 [Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
 schema file creates, which is why the roles are applied after it.
 
@@ -217,6 +218,7 @@ quarantined, is a decision and is not listed. `aouda status` prints every reason
 ## Related
 
 - [Keys that survive a wipe](keys-that-survive-a-wipe.md): declaring keys in configuration
+- [Check a schema file offline](schema-check.md) and [Upgrading and the data-directory format](upgrading.md)
 - [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start)
 - [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname)
 - [Defaults reference: declared databases](defaults-reference.md#declared-databases)

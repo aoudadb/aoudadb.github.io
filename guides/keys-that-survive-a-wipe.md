@@ -76,6 +76,8 @@ Aouda__Auth__RootUser__Password=...
 The key comes from one of: `Aouda:Auth:Bootstrap:ServerKey`, a file named by `Aouda:Auth:Bootstrap:ServerKeyFile` (no permission check, so a Docker or
 Kubernetes secret mounted `0444` works; **BL-1401, 0.11.0**: before, a file readable beyond its owner failed the start; a missing,
 unreadable or empty file still does, naming the path and never the content), or the systemd credential `aouda-server-key` (`LoadCredential=`). Set at most one.
+Since 0.12.0 every such file is read by one reader with one set of rules, listed in [Secret files](#secret-files); `$NAME` in the
+`ServerKeyFile` path is expanded now, so `ServerKeyFile=$CREDENTIALS_DIRECTORY/server-key` works.
 
 ⚠️ **The key's row is made when the server auth database is, and that is when the first admin exists.** Until then the server is in
 setup mode and answers `503` to everything except the first-run setup routes, so a server key alone is not enough: set
@@ -183,7 +185,73 @@ start does (the same name or the same secret is refused). It needs no server and
 - `GET /api/auth/admin/configured-keys` (a server key) lists every declaration with the state of its row in each auth database:
   `materialised`, `revoked`, or `pending` (the auth database does not exist yet). It names the entry, kind, auth database,
   database, fingerprint and where the secret comes from; it never carries a secret or a hash.
-- `GET /api/server/metrics` carries `rejectedApiKeys`: how many API keys were refused as a credential since start, by kind only.
+- `GET /api/server/metrics` carries `rejectedApiKeys`: how many API keys were refused since start, by kind only, and two splits of the same total
+  (**BL-1428, BL-1430, 0.12.0**): `rejectedApiKeysByTransport`, `{ "http": n, "websocket": n, "longpoll": n }`, and `rejectedApiKeysByReason`,
+  `{ "credential": n, "listener_mismatch": n, "route_mismatch": n }`. Each always lists all of its keys and sums to `rejectedApiKeys`. See
+  [Counting refused keys](#counting-refused-keys).
+
+### Counting refused keys (**BL-1428, BL-1430, 0.12.0**) {#counting-refused-keys}
+
+`GET /api/server/metrics` answers (the fields this section is about; `databases` and `process` are as before):
+
+```json
+{
+  "rejectedApiKeys": { "server_admin": 0, "scoped_service": 0, "service_role": 0, "auth_admin": 0, "public": 0, "anon": 0, "other": 0 },
+  "rejectedApiKeysByTransport": { "http": 0, "websocket": 0, "longpoll": 0 },
+  "rejectedApiKeysByReason": { "credential": 0, "listener_mismatch": 0, "route_mismatch": 0 }
+}
+```
+
+- **Every transport counts.** 0.11.0 counted HTTP authentication only, so a feeder whose key was revoked or mistyped on its WebSocket `auth`
+  message never moved the counter. Since 0.12.0 a key refused at the WebSocket `auth` or `re_auth` message, or at a long-poll connect, is
+  counted too, once per refusal, in the same per-kind dictionary. A rising `websocket` with a flat `http` is the feeder-lockout signal.
+- **`rejectedApiKeysByReason`** tells a dead key from a misrouted one. `credential` is a key the auth database refused (unknown, revoked,
+  expired, linked user disabled). `listener_mismatch` is a valid `mk_pub_` key sent to the admin listener (`AUTH_KEY_LISTENER_MISMATCH`), and
+  `route_mismatch` is an application key sent to a server catalog route such as `GET /api/databases` (`AUTH_KEY_ROUTE_MISMATCH`). The set is
+  closed at three; the finer credential reasons (revoked, expired, unknown) stay in the log line, because one refusal can carry the text of two
+  auth databases. Before 0.12.0 the two mismatch cases were not counted over HTTP at all (they were counted on WebSocket and long-poll only).
+- **Labels are closed**: the key kinds are those of the known prefixes (an invented prefix is `other`), the transports are the three above,
+  and a key is never in a label. A route mismatch is decided by the key's prefix alone, as the `403` already was, so an invented `mk_svc_` key
+  on `GET /api/databases` counts as one `route_mismatch`.
+- **Not counted**: a JWT (it is not a key), and a session that is already open. An API-key session is not re-checked mid-session (a key's
+  revocation is read at connect and at `re_auth`), so a key revoked while its socket stays open is counted when it next authenticates.
+- The log line for a refused key (caller address and the fingerprints of the keys refused since the last line, never a key) exists on the
+  WebSocket and long-poll paths as well as HTTP.
+
+## Secret files (**BL-1425, 0.12.0**) {#secret-files}
+
+Every secret the server reads from a file goes through **one reader**, so the rules are the same wherever a file is named. Before 0.12.0
+each setting had its own reader and they disagreed on variables, relative paths, encodings and wording.
+
+| Setting | A relative path resolves against | Permission check |
+|---|---|---|
+| An identities-file secret `{ "file": PATH }` | the directory of the identities file | none |
+| `Aouda:Auth:Bootstrap:ServerKeyFile` | the process's working directory (a setting is named by no file) | none |
+| The cluster key, `Aouda:ReplicaSet:KeyFile` | the process's working directory | none |
+| The systemd credentials `aouda-server-key` and `aouda-admin-password` (`$CREDENTIALS_DIRECTORY/<name>`) | not applicable: the path is systemd's, no `$NAME` expansion | none |
+| `aouda create-admin --password-file`, `aouda init --admin-password-file` | not applicable: the shell expands the path | **refuses a file readable beyond its owner** (an operator-made file for one command; `--password-stdin` reads no file) |
+
+The rules, for the first four rows:
+
+- **Path.** `$NAME` and `${NAME}` are expanded from the environment first. An unset or empty variable fails the start naming the variable; a `$` that
+  starts no name is a literal. The expansion is never shown: messages quote the path as written, and a path containing `mk_` is shown as
+  `<redacted>`.
+- **Content.** Read as strict UTF-8. A UTF-8 byte-order mark is removed; a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused,
+  never guessed at. **Exactly one** trailing newline (`\n`, `\r\n` or `\r`) is removed and nothing else is trimmed. Nothing left is an error.
+- **No permission check.** Docker and Kubernetes mount a secret `0444`.
+- **Messages.** `<setting> names secret file '<path>', which cannot be read (<ExceptionType>).` or `<setting> names secret file '<path>', which is empty.`
+  The content is never in a message or a log line.
+
+What changed for an existing deployment (0.11.0 to 0.12.0):
+
+- `ServerKeyFile` now expands `$NAME`/`${NAME}`, and a missing file reads `... which cannot be read (FileNotFoundException).`, where it read `does not exist`.
+- A systemd credential that is not UTF-8 is refused (it used to guess UTF-16/32 from a byte-order mark), and an empty one reads
+  `systemd credential '<name>' names secret file '...', which is empty.`
+- The cluster `KeyFile` no longer trims surrounding whitespace (one trailing newline only), expands `$NAME`, and a missing file is a
+  `SecretFileException`, not `FileNotFoundException`.
+- An identities-file path defect reads `identity '<name>': the file path ...` (it was `has a 'file' secret whose path ...`).
+- Not changed: `Aouda:Auth:RootUser:Password` is a value or the `aouda-admin-password` credential (there is no password-file setting), and
+  `Aouda:Auth:Bootstrap:ServerKey` and an `{ "env": NAME }` secret are not files.
 
 ## Roles, wipes and ordering
 

@@ -164,6 +164,8 @@ docker compose up
 
 - Aouda at `http://localhost:5000`
 - Studio at `http://localhost:3000`
+
+The compose file needs a first admin: `AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). Without either, the server container exits at start with a message naming both. See [Docker](../deployment/docker.md#compose-and-the-first-admin).
 - Named volume for persistent data
 
 ### Docker Compose — Cluster

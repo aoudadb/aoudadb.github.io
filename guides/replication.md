@@ -417,7 +417,7 @@ Key implementation anchors:
 | `...Subscriptions[*].Tables.Mode` | enum | `All` | `All`, `Include`, `Exclude` | appsettings/env | Include/Exclude require names |
 | `...Subscriptions[*].Tables.TableNames` | string[] | `[]` | non-empty for Include/Exclude | appsettings/env | Resolved to `TableId` at connect |
 | `Aouda:ReplicaSet:ThisNode:Archive:*` | object | n/a | see archive fields | appsettings/env | Effective archive config on a backup node; starts `WalArchiveWorker` when enabled + destinationed |
-| `Aouda:ReplicaSet:KeyFile` | string? | `null` | file path | appsettings/env | HMAC keyfile auth when set. ⚠️ Without it nothing on the replication port is authenticated — see the warning in §2.10.1 |
+| `Aouda:ReplicaSet:KeyFile` | string? | `null` | file path | appsettings/env | HMAC keyfile auth when set. Read as the other secret files are (**BL-1425, 0.12.0**): `$NAME` expanded, relative to the working directory, strict UTF-8, one trailing newline removed and no other trimming ([secret files](keys-that-survive-a-wipe.md#secret-files)). ⚠️ Without it nothing on the replication port is authenticated — see the warning in §2.10.1 |
 | `Aouda:ReplicaSet:HeartbeatIntervalMs` | int | `2000` | positive | appsettings/env | Heartbeat period |
 | `Aouda:ReplicaSet:ElectionTimeoutMs` | int | `10000` | positive | appsettings/env | Failure/election threshold |
 | `Aouda:ReplicaSet:ReplicationPort` | int | `5433` | `1..65535` | appsettings/env | WAL stream port; election uses `+1` |

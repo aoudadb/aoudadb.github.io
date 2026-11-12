@@ -169,7 +169,7 @@ If you enable auth and keep defaults:
 | `Aouda:Auth:FailedSigninCeiling:PermitLimit` | `100` | Integer ≥ 1 when enabled | Failures allowed per window; successes do not count. Once the ceiling trips, **every** sign-in on that database is 429 until the window drains (correct passwords included) |
 | `Aouda:Auth:FailedSigninCeiling:WindowSeconds` | `300` | Integer ≥ 1 when enabled | Sliding window; counter is per process |
 | `AuthDatabaseOptions.Kind` | `Application` | `Application`, `Server` | Explicit auth DB creation defaults to app auth kind |
-| Default roles | `db_admin`, `db_writer`, `db_reader`, `anonymous` | Fixed (not configurable) | Baseline RBAC scaffolding seeded at auth DB creation |
+| Default roles | `db_admin`, `db_writer`, `db_reader`, `anonymous` (and `db_operator`, `public`) | Fixed (not configurable) | Baseline RBAC scaffolding seeded at auth DB creation. Since **BL-1417, 0.12.0** they also carry the `named-query` / `named-mutation` `execute` rows that decide who runs named artifacts ([§19.0](authorization.md#190-rbac-is-a-separate-gate-from-plsrls)) |
 | App auth API key gate | API key required on app auth routes | Fixed (not configurable) | Prevents direct JWT-only calling of signup/signin/refresh endpoints |
 
 ## 2.4 Availability status (implementation honesty)
