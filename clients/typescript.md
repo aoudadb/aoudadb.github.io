@@ -1308,7 +1308,7 @@ A client older than this ignores both messages, so its rows include ones the ser
 
 #### Embargoed tables (**BL-418, 0.9.0**)
 
-A credential whose role carries an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train)
+A credential whose role carries an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090)
 on a table reads it on a delay: queries return only rows at least N seconds old, and a subscription's changes arrive as they come of
 age. Nothing changes in the calls you make. Two error codes are exported for it:
 

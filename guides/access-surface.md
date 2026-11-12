@@ -244,7 +244,7 @@ Branch review renders widenings first (warning), then narrowings. Load `aouda.id
 - Identity file overlays (`aouda.identities.{env}.json`).
 - TypeScript CLI `--access` flag.
 - Embargoes (**BL-418, 0.9.0**). Neither the access-surface diff nor policy inspect reports an
-  [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train): a verdict of `full` or
+  [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090): a verdict of `full` or
   `restricted` says which rows an identity may see, not how old they must be, and a `sample` is not cut by an embargo's delay. Use
   `GET …/users/{id}/access-grants`, whose `embargoes` list does.
 

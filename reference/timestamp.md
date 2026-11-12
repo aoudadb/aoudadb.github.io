@@ -39,7 +39,7 @@ ticks            = unixMilliseconds * 10000 + 621355968000000000
 
 Clients may send instants as `DateTimeOffset` or as ISO-8601 strings **with** an offset (e.g. `+05:00`). Aouda accepts them
 and stores the **UTC instant**. **Only the instant in time is persisted.** (Text with no offset is UTC:
-[time zones](#which-instant-which-day-time-zones-bl-1225-next-train).)
+[time zones](#which-instant-which-day-time-zones-bl-1225-090).)
 
 - **What is preserved:** the universal instant (the same as converting to UTC and storing that moment).
 - **What is not preserved:** the offset, or which local representation was used at insert. That differs from SQL Server
@@ -104,7 +104,7 @@ as the day before.
 ## On the wire
 
 - **Insert / upsert:** an ISO-8601 string (`"2026-06-23T14:00:00Z"`, with an offset, or without one — which is **UTC**,
-  see [time zones](#which-instant-which-day-time-zones-bl-1225-next-train)) or an `Int64` **ticks**
+  see [time zones](#which-instant-which-day-time-zones-bl-1225-090)) or an `Int64` **ticks**
   number. Both are accepted; a string is converted to UTC ticks before storage. A boolean or a fractional number is refused.
 - **Filter value:** an ISO-8601 string or an `Int64` ticks number, read exactly as on insert (`QueryTranslator.NormalizeFilterValue`
   handles both): `where ts eq "2026-03-01T00:00:00"` is `2026-03-01T00:00:00Z`.
