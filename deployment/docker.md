@@ -162,7 +162,7 @@ secrets:
 
 then `--password-file /run/secrets/aouda_admin_password`.
 
-**API keys from secrets (BL-1389, next train).** A key declared in the identities file (`Aouda:Auth:Keys:File`) can be read from a secret file, so it never passes through an environment variable:
+**API keys from secrets (BL-1389, 0.11.0).** A key declared in the identities file (`Aouda:Auth:Keys:File`) can be read from a secret file, so it never passes through an environment variable:
 
 ```json
 { "identities": [ { "name": "feeder", "kind": "scoped_service", "database": "deposit",

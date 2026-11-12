@@ -221,7 +221,7 @@ The admin HTTP create endpoint still exists and still works; the schema file is 
 
 ## Let the server apply it at start
 
-*(**BL-1388, next train**)*
+*(**BL-1388, 0.11.0**)*
 
 If you declare your databases in configuration (`Aouda:Databases`), the server can apply each database's schema file itself, so a wipe of the data directory followed by a plain start gives you the databases, their auth links, their keys **and** their tables, with no per-database script. It is **opt-in**: a database without a `SchemaFile` is not touched, and the server never looks for a file on its own.
 
@@ -251,7 +251,7 @@ What happens, in this order: the declared databases and their links are reconcil
 
 `SchemaEnvironment` is the CLI's `--env`: `aouda.schema.<env>.json` next to the file is merged over it when it exists. An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
 
-Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, next train**). Seed files are not applied at start.
+Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
 
 ---
 

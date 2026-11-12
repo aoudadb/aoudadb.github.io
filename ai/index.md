@@ -390,7 +390,7 @@ await client.auth.createPartitionGrant("550e8400-e29b-41d4-a716-446655440000", {
 
 Expected result: authenticated admin creates partition grant through app admin API wrapper.
 
-Common mistake: providing both `apiKey` and `appAuth.token` (a key and a signed-in session are two credentials; `apiKey` is a top-level option since **BL-1385, next train**). Browser login needs neither.
+Common mistake: providing both `apiKey` and `appAuth.token` (a key and a signed-in session are two credentials; `apiKey` is a top-level option since **BL-1385, 0.11.0**). Browser login needs neither.
 
 ### HTTP/protocol examples
 

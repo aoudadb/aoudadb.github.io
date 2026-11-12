@@ -4,7 +4,7 @@ nav_order: 2.5
 parent: "Guides"
 ---
 
-# Keys that survive a wipe (**BL-1377, 0.10.0; reworked by BL-1378, next train**)
+# Keys that survive a wipe (**BL-1377, 0.10.0; reworked by BL-1378, 0.11.0**)
 
 A key Aouda mints is a random value generated **inside the data a wipe destroys**. Every wipe, fresh machine and CI run therefore
 produces new credentials that must be carried to every client, and a sender nobody updated fails with `AUTH_API_KEY_INVALID`
@@ -16,7 +16,7 @@ created, at every start, and after a restore. After a wipe nothing needs to be r
 is read again and the rows come back with the auth database. Keys Aouda mints still work, for throwaway cases and for anything
 created at runtime.
 
-(**BL-1378, next train**) **0.10.0 authenticated a declared key from memory:** no row, no listing, no revoke. That is gone. A declared
+(**BL-1378, 0.11.0**) **0.10.0 authenticated a declared key from memory:** no row, no listing, no revoke. That is gone. A declared
 key is a row, so it is listed, queried, revoked and retracted through the same flows as a minted one. If you relied on a declared
 key being invisible to the key listings, it no longer is.
 
@@ -72,7 +72,7 @@ Aouda__Auth__RootUser__Password=...
 ```
 
 The key comes from one of: `Aouda:Auth:Bootstrap:ServerKey`, a file named by `Aouda:Auth:Bootstrap:ServerKeyFile` (no permission check, so a Docker or
-Kubernetes secret mounted `0444` works; **BL-1401, next train**: before, a file readable beyond its owner failed the start; a missing,
+Kubernetes secret mounted `0444` works; **BL-1401, 0.11.0**: before, a file readable beyond its owner failed the start; a missing,
 unreadable or empty file still does, naming the path and never the content), or the systemd credential `aouda-server-key` (`LoadCredential=`). Set at most one.
 
 ⚠️ **The key's row is made when the server auth database is, and that is when the first admin exists.** Until then the server is in
@@ -98,14 +98,14 @@ exists. A declared key never widens the first-run setup window: that route is ex
 | `authDatabase` | Which auth database the key lives in. Defaults to `auth` for every kind but `server_admin` |
 | `database` | Every kind but `server_admin`: the application database the key's roles are scoped to |
 | `roles` | `scoped_service` only. The roles `db_admin`, `db_operator`, `anonymous` and `public` are refused, as they are for a minted scoped key. A system kind takes **no** `roles` |
-| `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "file": PATH }` (**BL-1389, next train**) reads the key from a file, see below. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere. A secret is exactly one of `env`, `file` and `hash`; a rotation may mix them across the list |
+| `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "file": PATH }` (**BL-1389, 0.11.0**) reads the key from a file, see below. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere. A secret is exactly one of `env`, `file` and `hash`; a rotation may mix them across the list |
 
-**A secret from a file (**BL-1389, next train**).** `{ "file": "/run/secrets/feeder_key" }` reads the key from a file, so a Docker or systemd secret never passes through an environment variable. The file holds the key and nothing else: exactly one trailing newline (`\n`, `\r\n` or `\r`) is ignored and nothing else is trimmed, so a key with a trailing space fails the shape rule instead of being trimmed. A relative path is read from the identities file's directory, not the working directory, and `$NAME` / `${NAME}` in the path are expanded from the environment first, so systemd's `{ "file": "$CREDENTIALS_DIRECTORY/feeder" }` works as written (an unset variable fails the start naming the entry and the variable). The file is read once, at start, as strict UTF-8: a UTF-8 byte-order mark is ignored, and a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused as unreadable. A missing, unreadable, non-UTF-8 or empty file, or content that is not a key of the entry's kind, stops the server, and the message names the entry and the path, never the content. The startup log lists the key with source `file`. No permission check is made on the file, because Docker mounts file-based secrets readable by everyone in the container (`0444`) by default.
+**A secret from a file (**BL-1389, 0.11.0**).** `{ "file": "/run/secrets/feeder_key" }` reads the key from a file, so a Docker or systemd secret never passes through an environment variable. The file holds the key and nothing else: exactly one trailing newline (`\n`, `\r\n` or `\r`) is ignored and nothing else is trimmed, so a key with a trailing space fails the shape rule instead of being trimmed. A relative path is read from the identities file's directory, not the working directory, and `$NAME` / `${NAME}` in the path are expanded from the environment first, so systemd's `{ "file": "$CREDENTIALS_DIRECTORY/feeder" }` works as written (an unset variable fails the start naming the entry and the variable). The file is read once, at start, as strict UTF-8: a UTF-8 byte-order mark is ignored, and a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused as unreadable. A missing, unreadable, non-UTF-8 or empty file, or content that is not a key of the entry's kind, stops the server, and the message names the entry and the path, never the content. The startup log lists the key with source `file`. No permission check is made on the file, because Docker mounts file-based secrets readable by everyone in the container (`0444`) by default.
 
 A literal plaintext `key` in the file is **refused**: a credential never sits in a file that is committed, copied and attached to
 tickets. `auth_admin` and user-linked keys are not declarable.
 
-#### The three system kinds (**BL-1378, next train**)
+#### The three system kinds (**BL-1378, 0.11.0**)
 
 | `kind` | Prefix | Holds | Take the place of |
 |---|---|---|---|
@@ -115,7 +115,7 @@ tickets. `auth_admin` and user-linked keys are not declarable.
 
 Their rows are `is_system`, as generated ones are. Declare **exactly one** per (auth database, database, kind) or the start fails
 naming both entries. `database` is compared without regard to case, as the catalog resolves a database name (only a table name is
-ordinal): `Deposit` and `deposit` are one database, so declaring both is the same refusal (**BL-1378, next train**).
+ordinal): `Deposit` and `deposit` are one database, so declaring both is the same refusal (**BL-1378, 0.11.0**).
 
 A declared system key is **the** key of its kind. Linking a database generates and returns only the kinds you did **not** declare
 and that are missing (declare all three and nothing is generated or printed), and `regenerate-keys` leaves declared rows live, with
@@ -136,12 +136,12 @@ disturbs the other secrets' rows. A running WebSocket or long-poll session authe
 ("declared in configuration; change the declaration"); a minted scoped key rotates as before.
 
 A change to the file or to the server key takes a **restart**. An invalid file, a missing environment variable or an unreadable
-path **fails the start** with a message naming the entry (never a secret). (**BL-1378, next train**) So does an auth database that
+path **fails the start** with a message naming the entry (never a secret). (**BL-1378, 0.11.0**) So does an auth database that
 exists but cannot be opened (quarantined, or it failed to open) while keys are declared for it: the message names the database and
 the entries, because the server would otherwise start ready and answer `401` to keys you declared. An auth database that does
 not exist yet is not an error; its keys are `pending` until it is created.
 
-(**BL-1378, next train**) A secret kept while its declared `kind` changes (a `hash` secret re-declared as another kind) keeps its
+(**BL-1378, 0.11.0**) A secret kept while its declared `kind` changes (a `hash` secret re-declared as another kind) keeps its
 row and has its `kind`, system flag and `keyPrefix` updated with the roles at the next start; a declared system key then replaces
 the generated one of that kind.
 
@@ -168,7 +168,7 @@ aouda keys check --file identities.json
 #   tullett-feeder  scoped_service  auth/deposit  fingerprint 3a1f9c02 (env), 91c0aa17 (hash)
 ```
 
-(**BL-1378, next train**) It loads the file with the environment of the process that runs it, exactly as the server does, prints each
+(**BL-1378, 0.11.0**) It loads the file with the environment of the process that runs it, exactly as the server does, prints each
 declaration (name, kind, auth database, database, the fingerprint and source of each secret) and never a secret or a hash. It exits
 `1` naming the entry on the first error, and warns **once per database** that scoped entries name and no `service_role`, `public`
 or `anon` declaration mentions. If `Aouda__Auth__Bootstrap__ServerKey` is set in its environment it is checked with the file, as the

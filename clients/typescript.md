@@ -156,7 +156,7 @@ await client.auth.signIn('user@example.com', 'secret', { deviceInfo: 'Ann’s la
 await client.auth.signOut({ scope: 'others' });
 const devices = await client.auth.listSessions();
 
-// A service key (backend service acting on behalf of users). `apiKey` takes a key of any kind (BL-1385, next train)
+// A service key (backend service acting on behalf of users). `apiKey` takes a key of any kind (BL-1385, 0.11.0)
 const backend = new AoudaClient({
   serverUrl: 'http://localhost:5000',
   database: 'mydb',
@@ -192,7 +192,7 @@ A token used elsewhere is `401` with the exported code `AUTH_DATABASE_NOT_IN_ALL
 like `AUTH_REFRESH_TOKEN_INVALID` — the client clears its tokens, reports `"signedOut"` and does not retry, and the realtime transports
 stop reconnecting. See [the token allowance](../auth/reference.md#the-token-allowance).
 
-**One `apiKey` (BL-1385, next train, breaking).** `apiKey` is a top-level option and takes a key of any kind: `mk_svc_`,
+**One `apiKey` (BL-1385, 0.11.0, breaking).** `apiKey` is a top-level option and takes a key of any kind: `mk_svc_`,
 `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key. `userToken` moves to the top level too. Removed, with no
 alias: `appAuth.apiKey`, `serverAuth.apiKey`, `appAuth.userToken`, `serverAuth.userToken`, the `authAdmin` option and the `AuthAdminOptions`
 type. Every kind goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves the kind; the client reads the
@@ -208,7 +208,7 @@ for an `mk_srv_` key and at the database's own auth endpoints for every other ki
 
 **Common mistake:** passing `apiKey` inside `appAuth` or `serverAuth`. Before this train that was the only place it went; now there is no such field, and the key is the top-level `apiKey`.
 
-**A refused credential (BL-1386, next train).** The client never retries a 401 or a credential-refusing 403, but a writer that treats
+**A refused credential (BL-1386, 0.11.0).** The client never retries a 401 or a credential-refusing 403, but a writer that treats
 the error as "try again later" drops or re-buffers every row while the key is bad. Opt in with `authFailurePolicy`:
 
 ```typescript
@@ -1135,7 +1135,7 @@ The subscription delivers two event types via `onChange`:
 
 An `onSnapshot` callback receives the initial consistent snapshot of existing rows when the subscription first connects.
 
-**Dates and timestamps in a subscription** (**BL-1391, next train**). A snapshot page names a `Timestamp` or `Date` column in
+**Dates and timestamps in a subscription** (**BL-1391, 0.11.0**). A snapshot page names a `Timestamp` or `Date` column in
 `column_types`, and the SDK hands a JavaScript `Date` for both, in the snapshot and in every later change's `row` and `prev` (a change
 does not repeat the names). A `Timestamp` arrives on the wire as .NET ticks (UTC) and becomes its instant, rounded to the millisecond.
 A `Date` arrives as whole days since 1970-01-01 and becomes a `Date` at **00:00:00 UTC** of that day: read it with `getUTCFullYear()` /
@@ -1337,7 +1337,7 @@ Every subscription and write stream on a client shares **one** WebSocket per
 not open another. Bind as many live views as the application needs — a list, a detail pane, a
 presence feed — and they multiplex.
 
-**Identical subscribes share one server subscription** (**BL-1384, next train**). Every `subscribe`
+**Identical subscribes share one server subscription** (**BL-1384, 0.11.0**). Every `subscribe`
 on one client — `client.namedQueries.subscribe(name, args, options)` and
 `client.table(name)…subscribe(options)` — is shared by *(name or table, arguments or filter,
 options)*. The first opens the server subscription, later identical ones join it, and the last one
@@ -1371,7 +1371,7 @@ other consumers of the subscription and the server subscription are not affected
 driven by callbacks that is never iterated is not "behind": past that many unread events it stops
 queuing, and iterating it afterwards throws.)
 
-**Server limits and refusals** (**BL-1383, next train**). `client.serverLimits` holds what the server sent in `auth_ok` —
+**Server limits and refusals** (**BL-1383, 0.11.0**). `client.serverLimits` holds what the server sent in `auth_ok` —
 `limits` (`maxSubscriptionsPerConnection`, `maxSubscriptionsPerIdentity`, `maxConnectionsPerIdentity`, `subscribeBurst`,
 `subscribeRefillPerSecond`) and `protocol` (`version`, `capabilities`) — so an application can size itself instead of meeting a hard
 error first. It is `undefined` before the streaming connection is open, from an older server, and over the long-poll fallback (its
@@ -1425,12 +1425,12 @@ Full typed `client.admin.*` surface covering all server management operations.
 
 ```typescript
 const health = await client.admin.health.check();
-const readiness = await client.admin.health.ready(); // { ready, reasons } (BL-1393, next train)
+const readiness = await client.admin.health.ready(); // { ready, reasons } (BL-1393, 0.11.0)
 const metrics = await client.admin.metrics();
 const info = await client.admin.server.info();
 ```
 
-`admin.health.ready()` returns every reason the server is not ready (**BL-1393, next train**). `ReadinessResponse` is
+`admin.health.ready()` returns every reason the server is not ready (**BL-1393, 0.11.0**). `ReadinessResponse` is
 `{ ready, reasons }`, each reason `{ code, message, subject? }` with a stable `code` (`setup_required`, `database_pending`,
 `database_not_open`, `configured_key_inactive`, `component_unhealthy`, and the rest listed under [`GET /ready`](../reference/http-api.md#get-ready)); `reasons`
 is empty when `ready`. The single `reason` string is gone, so a caller that printed it prints `reasons` instead.

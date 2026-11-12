@@ -1921,7 +1921,7 @@ is the shape of "the latest curve per curve id":
   rows by every column. Give the table a key, or leave the array out of `select`.
 - **The values survive** the build, incremental maintenance, a rebuild and a restart, bit for bit.
 - **Reading it.** `POST …/materialized-queries/{name}/query` answers the result with a **`columnTypes`** object naming the array
-  columns (`{"Tenors":"Int32[]","Rates":"Double[]"}`; absent when the result has none). (**BL-1402, next train**) It names `Timestamp`
+  columns (`{"Tenors":"Int32[]","Rates":"Double[]"}`; absent when the result has none). (**BL-1402, 0.11.0**) It names `Timestamp`
   and `Date` columns too (`"Timestamp"`, `"Date"`), so a `latestPerKey` result, which always carries its ordering Timestamp, has it. A subscription to the result is an
   ordinary table subscription: its `snapshot` and `change` messages carry `column_types`, and a client treats a column not named
   there as a scalar. See [Array columns](array-columns.md#subscriptions-long-poll-and-materialized-queries).

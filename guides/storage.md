@@ -290,7 +290,7 @@ If you run server defaults and do not set per-database overrides:
   - (**Lead S26, 0.6.0**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
     a table records its durability level, and a database its level in place of `enableWal`. A data directory written by an
     earlier build is refused at open naming the version found and the version expected; there is no migration.
-  - (**BL-1378, next train**) The catalog format is **17**: an auth database's `_api_keys` and `_user_partition_grants` tables carry
+  - (**BL-1378, 0.11.0**) The catalog format is **17**: an auth database's `_api_keys` and `_user_partition_grants` tables carry
     a `source` column (where a key or grant came from: created through the API, or declared in configuration). The format version
     marks the **whole data directory**. A directory written by 0.10.0 or earlier (format 16) makes the **server refuse to start**:
     before any database is opened the registry is read and the first database whose catalog declares another format ends the

@@ -308,23 +308,23 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 |---|---|---|
 | Live subscriptions on one WebSocket connection | `32` | `Aouda:WebSocket:MaxSubscriptionsPerConnection` |
 | Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
-| Live subscriptions for one service key without a `user_token`, across every connection (**BL-1383, next train**) | `1024` | `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` |
-| Live connections (WebSocket and long-poll) for one identity (**BL-1383, next train**) | `16` | `Aouda:WebSocket:MaxConnectionsPerIdentity` |
-| Live connections for one service key or server admin key (`mk_srv_`) without a `user_token` (**BL-1383, next train**) | `64` | `Aouda:WebSocket:MaxConnectionsPerServiceKey` |
-| Subscribe attempts: bucket size per identity (**BL-1383, next train**) | `512` | `Aouda:WebSocket:SubscribeRate:Burst` |
-| Subscribe attempts: refill per second (**BL-1383, next train**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
+| Live subscriptions for one service key without a `user_token`, across every connection (**BL-1383, 0.11.0**) | `1024` | `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` |
+| Live connections (WebSocket and long-poll) for one identity (**BL-1383, 0.11.0**) | `16` | `Aouda:WebSocket:MaxConnectionsPerIdentity` |
+| Live connections for one service key or server admin key (`mk_srv_`) without a `user_token` (**BL-1383, 0.11.0**) | `64` | `Aouda:WebSocket:MaxConnectionsPerServiceKey` |
+| Subscribe attempts: bucket size per identity (**BL-1383, 0.11.0**) | `512` | `Aouda:WebSocket:SubscribeRate:Burst` |
+| Subscribe attempts: refill per second (**BL-1383, 0.11.0**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
 | The window | `60` s | `Aouda:IdentityQuota:WindowSeconds` |
 | Changes held back for one [embargoed](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-next-train) subscription before it ends with `SUBSCRIPTION_EMBARGO_RESET` (**BL-418, 0.9.0**) | `100000` | `Aouda:Streaming:EmbargoHoldMaxEvents` |
 
 The identity quota and the subscription caps are **per identity**, not per device: a user signed in on a browser tab, a desktop agent and a phone shares one
 quota and one subscription budget. Size them from the per-device sum. One permit is one named-query execute, one batch
-envelope or one named-mutation execute; a subscribe attempt spends **no** permit (**BL-1383, next train**; before it, a subscribe spent one,
+envelope or one named-mutation execute; a subscribe attempt spends **no** permit (**BL-1383, 0.11.0**; before it, a subscribe spent one,
 and a reconnect replay of 60 subscriptions exhausted the window). A heartbeat every 30 s is 2 permits a minute per device, so
 three devices heartbeating spend 6 of the default 60 — leave room for page loads (batch them) and typing indicators, and
 measure before raising.
 
-A subscribe is bounded by its own **token bucket per identity** (**BL-1383, next train**): every attempt costs one token, one the server then refuses for another reason included; an attempt the bucket itself refuses costs nothing and is told when to retry,
+A subscribe is bounded by its own **token bucket per identity** (**BL-1383, 0.11.0**): every attempt costs one token, one the server then refuses for another reason included; an attempt the bucket itself refuses costs nothing and is told when to retry,
 on both listeners and on long-poll `/send`, and `Aouda:IdentityQuota:Enabled=false` does not switch it off.
 Over the bound the server answers `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` (a `Retry-After` header on a long-poll
 `/send`). The connection limit counts WebSocket and long-poll sessions together and refuses inside the handshake with
@@ -351,24 +351,24 @@ are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing
 
 The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
-## Configured API keys (**BL-1377, 0.10.0; rows since BL-1378, next train**) {#configured-api-keys}
+## Configured API keys (**BL-1377, 0.10.0; rows since BL-1378, 0.11.0**) {#configured-api-keys}
 
 Credentials declared in configuration instead of minted into the data a wipe destroys. Nothing is configured by default. A
 declaration is **intent**: each declared secret becomes a real `_api_keys` row (`source = config`) when its auth database is created,
-at every start and after a restore, and the row is what authenticates (**BL-1378, next train**; 0.10.0 authenticated from memory).
+at every start and after a restore, and the row is what authenticates (**BL-1378, 0.11.0**; 0.10.0 authenticated from memory).
 Full guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
 
 | Setting | Default | What it means |
 |---|---|---|
 | `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key declared for the server auth database; its row exists once that database does (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
-| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key. No permission check (**BL-1401, next train**), so a secret mounted `0444` works; a missing, unreadable or empty file fails the start. Set at most one of the key, the file and the systemd credential `aouda-server-key` |
-| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, next train**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }`, `{ "file": PATH }` (**BL-1389, next train**) or `{ "hash": "sha256:<hex>" }` |
+| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key. No permission check (**BL-1401, 0.11.0**), so a secret mounted `0444` works; a missing, unreadable or empty file fails the start. Set at most one of the key, the file and the systemd credential `aouda-server-key` |
+| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, 0.11.0**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }`, `{ "file": PATH }` (**BL-1389, 0.11.0**) or `{ "hash": "sha256:<hex>" }` |
 
 A key is the kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`) and at least 32 characters of `A-Z a-z 0-9 _ -`;
 `openssl rand -hex 32` is the generator. A change takes a restart; an invalid declaration fails the start naming the entry. The
 startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by name, kind, auth database, fingerprint and source.
 
-(**BL-1378, next train**) What is **not** a setting, and what to expect:
+(**BL-1378, 0.11.0**) What is **not** a setting, and what to expect:
 
 - **Removing a declaration revokes its row at the next start** (marked `config-removed`, one warning per row); declaring it again
   revives that row. A row an operator revoked stays revoked whatever the file says, and a wipe resets that. With none of the three
@@ -378,17 +378,17 @@ startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by n
 - `aouda keys check --file <path>` validates the file offline; `GET /api/auth/admin/configured-keys` lists the declarations and the
   state of their rows; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind.
 
-## Declared databases (**BL-1379, next train**) {#declared-databases}
+## Declared databases (**BL-1379, 0.11.0**) {#declared-databases}
 
 Databases, application auth databases and the links between them, declared in `Aouda:Databases` so that a wipe of the data
 directory and a plain start bring back the same set; only schema and data need re-applying. Nothing is declared by default.
 
 | Setting | Default | What it means |
 |---|---|---|
-| `Aouda:Databases:<db>:Kind` (**BL-1379, next train**) | `data` | `data`, or `auth` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `Durability` on an `auth` entry must be absent or `strict`) |
-| `Aouda:Databases:<db>:SchemaFile`, `:SchemaEnvironment`, `:SchemaAllowDestructive` (**BL-1388, next train**) | none, none, `false` | With `Kind: data`: a schema file the server applies at start, with an optional overlay and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
-| `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, next train**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
-| `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, next train**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
+| `Aouda:Databases:<db>:Kind` (**BL-1379, 0.11.0**) | `data` | `data`, or `auth` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `Durability` on an `auth` entry must be absent or `strict`) |
+| `Aouda:Databases:<db>:SchemaFile`, `:SchemaEnvironment`, `:SchemaAllowDestructive` (**BL-1388, 0.11.0**) | none, none, `false` | With `Kind: data`: a schema file the server applies at start, with an optional overlay and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
+| `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, 0.11.0**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
+| `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, 0.11.0**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
 ```json
 "Databases": {
@@ -403,7 +403,7 @@ directory and a plain start bring back the same set; only schema and data need r
 re-applies them at every start; the catalog owns everything else, including the signup settings (`signup-settings` is not
 declarable, and a change made through it survives every restart). A declaration creates what is missing, converges what it owns, and
 refuses what it cannot reconcile; it never overwrites a field it does not name. The passes run in the same order whatever the order
-in the file: auth databases, then data databases, then links. Before **BL-1379, next train** a restart replaced a declared
+in the file: auth databases, then data databases, then links. Before **BL-1379, 0.11.0** a restart replaced a declared
 database's whole record, which dropped its auth link, signup settings and auth-database flags.
 
 The start **fails**, naming the entry and changing nothing, when: a declared `auth` entry is a data database in the catalog, or the
@@ -424,7 +424,7 @@ unlinked" or "must not exist", and a database removed from the file is left alon
 a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when a later release declares them in the
 identities file or an operator calls `regenerate-keys` (which returns them once); a `POST /api/databases` that links still returns
 them as before. Startup order after a wipe: declared databases and links, then `_serverauth` / `Aouda:Auth:RootUser`, then each
-declared `SchemaFile` (**BL-1388, next train**), then declared `Roles` (**BL-1392, next train**), then the configured keys. `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
+declared `SchemaFile` (**BL-1388, 0.11.0**), then declared `Roles` (**BL-1392, 0.11.0**), then the configured keys. `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
 has one line per entry (created, converged or unchanged; linked or already linked).
 
 ## Related docs
