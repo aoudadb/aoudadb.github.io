@@ -179,12 +179,12 @@ A relay typically holds **one** Aouda subscription per data partition and fans i
 |---|---|---|
 | Subscriptions per WebSocket connection | **32** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
 | Subscriptions per identity | **128** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
-| Subscriptions per service key (no `user_token`) (**BL-1383, next train**) | **1 024** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
-| Connections per identity, WebSocket and long-poll (**BL-1383, next train**) | **16** | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` |
-| Subscribe attempts per identity (**BL-1383, next train**) | burst **512**, **32** per second | `SUBSCRIBE_RATE_EXCEEDED` |
+| Subscriptions per service key (no `user_token`) (**BL-1383, 0.11.0**) | **1 024** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
+| Connections per identity, WebSocket and long-poll (**BL-1383, 0.11.0**) | **16** | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` |
+| Subscribe attempts per identity (**BL-1383, 0.11.0**) | burst **512**, **32** per second | `SUBSCRIBE_RATE_EXCEEDED` |
 | Send-buffer high-water mark | 1 MiB | close with `SLOW_CONSUMER` |
 
-The server tells a connecting client its limits in `auth_ok` (`limits`) (**BL-1383, next train**). The connection and rate defaults here are provisional.
+The server tells a connecting client its limits in `auth_ok` (`limits`) (**BL-1383, 0.11.0**). The connection and rate defaults here are provisional.
 
 The design consequence is concrete: **make subscriptions collection-shaped, not item-shaped.** A named query that takes a list parameter (`{ "column": "ticker", "op": "in", "param": "tickers" }`, constrained with `maxItems`) lets one subscription cover a whole watchlist or grid. A named query that takes a single id, subscribed once per row with a different id each time, is a distinct subscription per row and hits 32 on a dashboard with that many rows; SDK sharing does not help there, because the arguments differ. (Per-key merging of such subscriptions is not built.)
 
@@ -192,7 +192,7 @@ Then use `conflate` with a key **on a table that actually emits value updates**.
 
 ### Requests are metered per identity, not per connection
 
-The data-plane applies a sliding window per identity — default **60 permits / 60 seconds**, one permit per execute, per **batch envelope** and per mutation. Exceeding it returns `429 IDENTITY_QUOTA_EXCEEDED` with `Retry-After`. A **subscribe attempt no longer spends a permit** (**BL-1383, next train**); it is bounded by its own per-identity token bucket (above), so mounting a dashboard's subscriptions or replaying them after a reconnect does not use up the HTTP quota.
+The data-plane applies a sliding window per identity — default **60 permits / 60 seconds**, one permit per execute, per **batch envelope** and per mutation. Exceeding it returns `429 IDENTITY_QUOTA_EXCEEDED` with `Retry-After`. A **subscribe attempt no longer spends a permit** (**BL-1383, 0.11.0**); it is bounded by its own per-identity token bucket (above), so mounting a dashboard's subscriptions or replaying them after a reconnect does not use up the HTTP quota.
 
 That makes the batch envelope a capacity decision, not just a latency one: a dashboard that fires ten independent named queries on load burns ten permits; the same ten in one batch burn **one** — and come from **one read snapshot**, so the panels cannot disagree with each other. Use joins when one panel's filter comes from another panel's data, and batch when they are genuinely independent.
 
@@ -251,8 +251,8 @@ Hand this to whoever (or whatever) is writing the plan.
 | `SCHEMA_EXPR_UNKNOWN_FUNCTION` on apply | Unknown `call` `fn`, wrong arity, or non-literal `cast` type | Names are lowercase and the list is closed — [`call` functions](insert-transforms.md#call--string-and-rounding-functions) |
 | `SUBSCRIPTION_LIMIT_EXCEEDED` after deleting a relay | Item-shaped subscriptions × N browsers | Make the named query take a list parameter; one subscription per view, not one per row |
 | `429 IDENTITY_QUOTA_EXCEEDED` on page load | N independent executes | Use the batch envelope; then size `PermitLimit` from measurement |
-| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, next train**) | One identity holds 16 sockets (tabs, devices, a reconnect loop) | Close what is not needed; do not retry in a loop; raise `MaxConnectionsPerIdentity` only from measurement |
-| `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, next train**) | A resubscribe loop, or a mass reconnect replay | Wait `retry_after_ms` (frame) or `Retry-After` (long-poll `/send`); pace the replay |
+| `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | One identity holds 16 sockets (tabs, devices, a reconnect loop) | Close what is not needed; do not retry in a loop; raise `MaxConnectionsPerIdentity` only from measurement |
+| `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | A resubscribe loop, or a mass reconnect replay | Wait `retry_after_ms` (frame) or `Retry-After` (long-poll `/send`); pace the replay |
 | `404 TABLE_NOT_FOUND` on a table that exists | `dataPlaneAccess: false`, browser-tier, data-plane | Opt in — and check join tables too |
 | Studio shows a connect error after adding the listener | Studio is pointed at the data-plane | Studio and Hub use the **admin** URL |
 | Ingest throughput fell after adding transforms | Write amplification on small batches | Batch size is the tuning parameter; avoid stacking `tee`s on a hot path |

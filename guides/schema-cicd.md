@@ -316,7 +316,7 @@ Full examples are also under `examples/github-actions/schema-deploy-typescript.y
   Use `schema validate` in a job that should **fail** if the server has drifted from the schema file (e.g. someone changed the DB by hand). Exit code 0 = in sync, 1 = drift.
 
 - **Letting the server apply the file at start**  
-  A declared database can name its schema file (`Aouda:Databases:<name>:SchemaFile`, optional `SchemaEnvironment`, `SchemaAllowDestructive`) and the server applies it at start, before it is ready (**BL-1388, next train**). That replaces an apply step in a *wipe and restart* flow, not the PR diff or `schema validate` jobs above. See [Schema management](schema-management.md#let-the-server-apply-it-at-start).
+  A declared database can name its schema file (`Aouda:Databases:<name>:SchemaFile`, optional `SchemaEnvironment`, `SchemaAllowDestructive`) and the server applies it at start, before it is ready (**BL-1388, 0.11.0**). That replaces an apply step in a *wipe and restart* flow, not the PR diff or `schema validate` jobs above. See [Schema management](schema-management.md#let-the-server-apply-it-at-start).
 
 - **Environment overlays**  
   Use `--env prod` when applying to production so the CLI merges `aouda.schema.prod.json` (replication factor, table durability levels, etc.) before sending to the server.

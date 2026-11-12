@@ -478,7 +478,7 @@ console.log(resolvers.length);
 
 Expected result: authenticated session and successful RLS resolver query via `/auth/admin` wrapper path.
 
-Common mistake: providing both `apiKey` and `appAuth.token` (refused at construction: a key and a signed-in session are two credentials; `apiKey` is a top-level option since **BL-1385, next train**). Browser login needs neither.
+Common mistake: providing both `apiKey` and `appAuth.token` (refused at construction: a key and a signed-in session are two credentials; `apiKey` is a top-level option since **BL-1385, 0.11.0**). Browser login needs neither.
 
 ### HTTP/protocol examples
 

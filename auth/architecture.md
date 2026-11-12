@@ -43,7 +43,7 @@ Your backend is the only component that talks to Aouda. End users never connect 
 const db = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... (BL-1385, next train: a top-level option)
+  apiKey: process.env.AOUDA_SERVICE_KEY,  // mk_svc_... (BL-1385, 0.11.0: a top-level option)
 });
 
 // Handle login from your frontend

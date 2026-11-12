@@ -899,7 +899,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
 | `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = Extend`). |
 | `BranchMerge` | Change applied by merging a branch into the parent catalog. |
-| `DeclaredApply` | The server applied the `SchemaFile` a declared database names, at start (**BL-1388, next train**). |
+| `DeclaredApply` | The server applied the `SchemaFile` a declared database names, at start (**BL-1388, 0.11.0**). |
 
 ### E) Schema JSON field reference (complete)
 

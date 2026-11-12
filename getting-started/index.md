@@ -371,7 +371,7 @@ List<Order> bigOrders = await db.GetTable<Order>()
     .ToListAsync();
 ```
 
-**Positional records and other constructor-built types** (**BL-1390, next train**). A row type with no public parameterless
+**Positional records and other constructor-built types** (**BL-1390, 0.11.0**). A row type with no public parameterless
 constructor, such as a positional record, is built through its single public constructor. Each parameter is bound to the result
 column of the same name (case-insensitive; a `[AoudaColumn]` on the same-named property renames the column), then the remaining
 settable properties (`init`, `required`, `set`) are written:
@@ -708,7 +708,7 @@ var client = new AoudaClient(new AoudaClientOptions
 });
 ```
 
-##### A rejected key is not a retry (**BL-1386, next train**)
+##### A rejected key is not a retry (**BL-1386, 0.11.0**)
 
 The client does not retry a rejected API key (a signed-in session may refresh its token; a key cannot): HTTP 401 (`AUTH_API_KEY_INVALID`, `AUTH_TOKEN_*`) or an HTTP 403 that refuses the credential itself (`AUTH_KEY_ROUTE_MISMATCH`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `AUTH_ACCOUNT_DISABLED`). Retrying with the same key cannot succeed, and a writer that treats the error as "try again later" drops or endlessly re-buffers every row while the key is bad. `AuthFailurePolicy` makes it explicit, and is opt-in (the default changes nothing):
 
@@ -1654,7 +1654,7 @@ All server auth endpoints are under `/api/auth/...` and resolve to the internal 
 ### SDK Usage with Server Auth
 
 > **Server Auth vs Application Auth use separate options types.**
-> The .NET client takes an API key of any kind in one setting, `ApiKey` (**BL-1385, next train**; a `mk_srv_` key is server-level access). `ServerAuth = new ServerAuthOptions { ... }` is a server user's sign-in (email and password, or a server JWT) and `AppAuth = new AppAuthOptions { ... }` an application user's session (a JWT and its refresh token). The TypeScript client has the same shape: a top-level `apiKey` (**BL-1385, next train**) and `serverAuth` / `appAuth` sessions that take no key. `serverAuth` and `appAuth` are mutually exclusive.
+> The .NET client takes an API key of any kind in one setting, `ApiKey` (**BL-1385, 0.11.0**; a `mk_srv_` key is server-level access). `ServerAuth = new ServerAuthOptions { ... }` is a server user's sign-in (email and password, or a server JWT) and `AppAuth = new AppAuthOptions { ... }` an application user's session (a JWT and its refresh token). The TypeScript client has the same shape: a top-level `apiKey` (**BL-1385, 0.11.0**) and `serverAuth` / `appAuth` sessions that take no key. `serverAuth` and `appAuth` are mutually exclusive.
 
 #### .NET Client
 
@@ -1693,7 +1693,7 @@ ServerAuth = new ServerAuthOptions
 
 #### TypeScript Client
 
-Use `apiKey` with a `mk_srv_` key for server-level access (**BL-1385, next train**; `serverAuth` is a server user's session, and takes no key). The TypeScript client does not support `email`/`password` in the constructor; use the REST API directly for server auth sign-in if needed.
+Use `apiKey` with a `mk_srv_` key for server-level access (**BL-1385, 0.11.0**; `serverAuth` is a server user's session, and takes no key). The TypeScript client does not support `email`/`password` in the constructor; use the REST API directly for server auth sign-in if needed.
 
 ```typescript
 import { createAoudaClient } from "@aouda/client";

@@ -275,7 +275,7 @@ Invariants:
 - Authorization filtering is enforced in subscription delivery and write validation paths.
 - Long-poll transport negotiates JSON wire mode only.
 
-### Many readers of one subscription (**BL-1384, next train**)
+### Many readers of one subscription (**BL-1384, 0.11.0**)
 
 The official SDKs share identical subscriptions on one client: every subscribe with the same name, canonical arguments and options
 (`conflate`, `orderByIndex`, `atLeast` / `waitMs` / `onExceeded`, `crossPartitionAccess`) reads one server subscription, and the last
@@ -431,9 +431,9 @@ A `Timestamp` column arrives as a JSON **number**: .NET ticks since `0001-01-01T
 for the `change` messages, which do not repeat it. `@aouda/client` hands a `Date`; elsewhere, Unix milliseconds are
 `(ticks − 621355968000000000) / 10000`. A column declared `String` is text. Details: [Timestamp semantics](../reference/http-api.md#timestamp-semantics).
 
-(**BL-1391, next train**) A `Date` column is a JSON number too, a count of days since the Unix epoch, and the `snapshot` now names it as `"Date"` in `column_types` (`{"day":"Date"}`), on every page, so a client can tell it from an `Int32`. The value on the wire is unchanged and a `change` does not repeat the name. `Aouda.Client` reads it: a `Date` cell is a UTC `DateTime` at midnight (as a query result's is) in the snapshot, in a change's `Row` and `PreviousRow` and in a delete's `Key`, and a typed `DateOnly`, `DateOnly?` or `DateTime` property gets the day; a day count a `DateTime` cannot hold ends the subscription naming the column. `@aouda/client` hands a JavaScript `Date` at **00:00:00 UTC** of that day for it, in the snapshot and in every later change's `row` and `prev` (**breaking** for a caller that read the day number itself): read the calendar date with `getUTCFullYear()` / `getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. A query result's `Date` column is unchanged, still the day number.
+(**BL-1391, 0.11.0**) A `Date` column is a JSON number too, a count of days since the Unix epoch, and the `snapshot` now names it as `"Date"` in `column_types` (`{"day":"Date"}`), on every page, so a client can tell it from an `Int32`. The value on the wire is unchanged and a `change` does not repeat the name. `Aouda.Client` reads it: a `Date` cell is a UTC `DateTime` at midnight (as a query result's is) in the snapshot, in a change's `Row` and `PreviousRow` and in a delete's `Key`, and a typed `DateOnly`, `DateOnly?` or `DateTime` property gets the day; a day count a `DateTime` cannot hold ends the subscription naming the column. `@aouda/client` hands a JavaScript `Date` at **00:00:00 UTC** of that day for it, in the snapshot and in every later change's `row` and `prev` (**breaking** for a caller that read the day number itself): read the calendar date with `getUTCFullYear()` / `getUTCMonth()` / `getUTCDate()` or `toISOString().slice(0, 10)`, never the local-time getters. A query result's `Date` column is unchanged, still the day number.
 
-(**BL-1381, next train**) The C# SDK (`Aouda.Client`) hands a `DateTime` of kind `Utc`, 100 ns tick kept, in the snapshot and in every
+(**BL-1381, 0.11.0**) The C# SDK (`Aouda.Client`) hands a `DateTime` of kind `Utc`, 100 ns tick kept, in the snapshot and in every
 change: `Row`, `PreviousRow` and a delete's `Key` (a `Timestamp` primary key) — also after a reconnect, a gap resume or a
 `SLOW_CONSUMER` fresh subscribe, and on a named-query subscription. It remembers the names the latest snapshot gave; a fresh snapshot
 replaces them. A typed subscription (`GetTable<T>().SubscribeAsync()`) fills a `DateTime`, `DateTime?` or `DateTimeOffset` property
@@ -591,9 +591,9 @@ Primary proving tests:
 | `Aouda:WebSocket:EnableCompression` | bool | `true` | `true/false` | server config | Enables compressed WS accept context |
 | `Aouda:WebSocket:EnableMessagePack` | bool | `true` | `true/false` | server config | If `false`, `wire_mode=msgpack` auth is rejected |
 | `Aouda:WebSocket:MaxConnections` | int | `10000` | `>=1` | server config | Global connection cap (`CONNECTION_LIMIT_EXCEEDED`, a plain `error` frame before authentication; long-poll `connect` 429) |
-| `Aouda:WebSocket:MaxConnectionsPerIdentity` (**BL-1383, next train**) | int | `16` | `>=1` | server config | Live connections (WebSocket and long-poll) per identity; enforced in the handshake, after identity resolution and before `auth_ok`, as an `auth_error` with `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (long-poll `connect`: 429, same code). A public-key identity includes the remote address; a no-auth database has no limit |
-| `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` (**BL-1383, next train**) | int | `1024` | `>=1` | server config | Live subscriptions for a service key without `user_token` (a key with one is a user and keeps `MaxSubscriptionsPerIdentity`) |
-| `Aouda:WebSocket:SubscribeRate:Burst` / `RefillPerSecond` (**BL-1383, next train**) | int / number | `512` / `32` | `>=1` / `>=0` | server config | Per-identity token bucket on subscribe attempts (one refused for another reason still costs a token); both listeners and long-poll `/send`; independent of `IdentityQuota:Enabled`. Over it: `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` |
+| `Aouda:WebSocket:MaxConnectionsPerIdentity` (**BL-1383, 0.11.0**) | int | `16` | `>=1` | server config | Live connections (WebSocket and long-poll) per identity; enforced in the handshake, after identity resolution and before `auth_ok`, as an `auth_error` with `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (long-poll `connect`: 429, same code). A public-key identity includes the remote address; a no-auth database has no limit |
+| `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` (**BL-1383, 0.11.0**) | int | `1024` | `>=1` | server config | Live subscriptions for a service key without `user_token` (a key with one is a user and keeps `MaxSubscriptionsPerIdentity`) |
+| `Aouda:WebSocket:SubscribeRate:Burst` / `RefillPerSecond` (**BL-1383, 0.11.0**) | int / number | `512` / `32` | `>=1` / `>=0` | server config | Per-identity token bucket on subscribe attempts (one refused for another reason still costs a token); both listeners and long-poll `/send`; independent of `IdentityQuota:Enabled`. Over it: `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` |
 | `Aouda:WebSocket:HeartbeatInterval` | timespan | `00:00:20` | positive | server config | Server heartbeat emit interval |
 | `Aouda:WebSocket:IdleTimeout` | timespan | `00:05:00` | positive | server config | Idle close threshold |
 | `Aouda:WebSocket:LongPollWaitTimeout` | timespan | `00:00:25` | positive | server config | Max long-poll block |

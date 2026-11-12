@@ -16,7 +16,7 @@ parent: "Auth and Authorization"
 
 ## 10. Integrating with the .NET Client
 
-The .NET client supports keyless browser login: URL + database is enough, then `SignInAsync`. Backends set `ApiKey`, one setting for a key of any kind (**BL-1385, next train**).
+The .NET client supports keyless browser login: URL + database is enough, then `SignInAsync`. Backends set `ApiKey`, one setting for a key of any kind (**BL-1385, 0.11.0**).
 
 ### One `ApiKey`; `AppAuth` and `ServerAuth` are sessions
 
@@ -29,7 +29,7 @@ What is left of the two options types is what is a different mechanism, a signed
 | `Token` / `RefreshToken` | Yes | Yes |
 | `Email` / `Password` | **Not available** — use `SignInAsync()` | Yes |
 
-`ApiKey` and `UserToken` are on `AoudaClientOptions`. `ApiKey` cannot be combined with `ServerAuth` or with an `AppAuth` that holds a token; `AppAuth` and `ServerAuth` are mutually exclusive; `UserToken` requires a `mk_svc_` or `mk_srv_` `ApiKey`. Each refusal names the setting or key kind it needs, at construction time. `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin` are gone (**BL-1385, next train**). Use `AppAuth = new AppAuthOptions { ... }` for a signed-in application user (this document), and `ServerAuth = new ServerAuthOptions { ... }` for a signed-in server user, see [Server Auth](../getting-started/index.md#8-server-authentication--securing-database-access).
+`ApiKey` and `UserToken` are on `AoudaClientOptions`. `ApiKey` cannot be combined with `ServerAuth` or with an `AppAuth` that holds a token; `AppAuth` and `ServerAuth` are mutually exclusive; `UserToken` requires a `mk_svc_` or `mk_srv_` `ApiKey`. Each refusal names the setting or key kind it needs, at construction time. `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin` are gone (**BL-1385, 0.11.0**). Use `AppAuth = new AppAuthOptions { ... }` for a signed-in application user (this document), and `ServerAuth = new ServerAuthOptions { ... }` for a signed-in server user, see [Server Auth](../getting-started/index.md#8-server-authentication--securing-database-access).
 
 ### Backend: Service Key (Full Access)
 
@@ -114,7 +114,7 @@ var adminClient = new AoudaClient(new AoudaClientOptions
 
 ## 11. Integrating with the TypeScript Client
 
-The TypeScript client takes an API key of any kind in one top-level option, `apiKey` (**BL-1385, next train**), with `userToken` beside it. `appAuth` (a signed-in application user's `token` and `refreshToken`) and `serverAuth` (a server user's) are sessions, not keys, and take no key; the two are mutually exclusive, and a key beside `serverAuth` or beside an `appAuth` that holds a token is refused at construction. A sign-in calls the Server Auth endpoints (`/api/auth/...`) for an `mk_srv_` key or `serverAuth`, and the database's own (`/api/databases/{db}/auth/...`) otherwise. `userToken` is accepted beside `mk_svc_` or `mk_srv_` only. There is no `authAdmin` option any more. User sign-in is always explicit via `client.auth.signIn()` — there is no `email`/`password` option in the constructor.
+The TypeScript client takes an API key of any kind in one top-level option, `apiKey` (**BL-1385, 0.11.0**), with `userToken` beside it. `appAuth` (a signed-in application user's `token` and `refreshToken`) and `serverAuth` (a server user's) are sessions, not keys, and take no key; the two are mutually exclusive, and a key beside `serverAuth` or beside an `appAuth` that holds a token is refused at construction. A sign-in calls the Server Auth endpoints (`/api/auth/...`) for an `mk_srv_` key or `serverAuth`, and the database's own (`/api/databases/{db}/auth/...`) otherwise. `userToken` is accepted beside `mk_svc_` or `mk_srv_` only. There is no `authAdmin` option any more. User sign-in is always explicit via `client.auth.signIn()` — there is no `email`/`password` option in the constructor.
 
 ### Backend: Service Key
 
