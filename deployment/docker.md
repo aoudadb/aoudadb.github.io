@@ -136,6 +136,12 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6
 
 ⚠️ **`--start-period=60s` is doing real work**: WAL recovery on a large database can legitimately take minutes, and a probe that starts immediately will kill a server that is recovering correctly.
 
+⚠️ **A fresh container is `unhealthy` until it has a first admin.** A server with no admin is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since 0.11.0, BL-1393). That is the probe telling the truth, not a fault, and it ends the moment the admin exists. The image's `HEALTHCHECK` stays strict on purpose, and so does the Helm readiness probe: a pod with no admin stays NotReady. Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for the admin too.
+
+To see why, read the body from outside the container: `curl -s http://localhost:5000/ready` (`/ready` needs no credential). The image's own `wget` does not print the body of a `503`, so `docker exec aouda wget -qO- http://localhost:5000/ready` shows nothing.
+
+Create the admin at start with `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD`, or by hand as in the next section. The repository's `docker-compose.yml` does the first for you (**BL-1407, next train**): it sets both variables from `AOUDA_ROOT_EMAIL` (default `admin@aouda.local`) and `AOUDA_ROOT_PASSWORD`, which is required and has no default, because port 5000 is published and a known default would be a known credential. Compose refuses to start without it, so put it in a `.env` file next to the compose file or export it.
+
 ---
 
 ## The first admin
