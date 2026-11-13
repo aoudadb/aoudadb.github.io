@@ -2611,9 +2611,24 @@ neither restriction is unchanged, and turning protection on is not this check. T
 
 **Response:** `201 Created` with table detail
 
+<a id="table-names"></a>**Table names** (**BL-1468, next train; breaking**). One rule for every way a table gets a name: this
+create, the rename below, `POST …/edge-tables`, `…:create-vector-column`, the embedded API, and every table a schema file declares.
+A table name:
+
+- is not empty and not whitespace only, and is not `.` or `..`;
+- contains none of `/ \ : * ? " < > |`;
+- does not start or end with a period (`.`) or a space;
+- does not start with `__mqbuild_`, which is reserved for the engine's own materialized-query build tables.
+
+Anything else (letters, digits, `_`, `-`, other Unicode) is allowed. Matching is exact (`orders` and `Orders` are two tables). A
+name that breaks the rule is `400 INVALID_REQUEST` and the message names the rule it broke, for example *Table name cannot start or
+end with a period or space (invalid for directory names).* Before, only the embedded create applied this rule; the HTTP create and
+rename, the graph and vector creates and the schema apply accepted any name.
+
 #### `DELETE /api/databases/{db}/tables/{name}`
 
-Delete a table. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
+Delete a table. A `__mqbuild_*` name is `404 TABLE_NOT_FOUND` (**BL-1468, next train**): a materialized query's build table is not
+addressable. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
 table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, 0.9.0**) A table that already has
 PLS or RLS answers `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and `all-rows`
 where RLS applies. RBAC `drop` is still required and is not enough. A table with neither restriction is unchanged.
@@ -2622,7 +2637,8 @@ where RLS applies. RBAC `drop` is still required and is not enough. A table with
 
 #### `PATCH /api/databases/{db}/tables/{name}`
 
-Rename a table.
+Rename a table. `newName` follows the [table-name rule](#table-names): breaking it is `400 INVALID_REQUEST` (**BL-1468, next
+train**). A `__mqbuild_*` `{name}` is `404 TABLE_NOT_FOUND`.
 
 **Request:**
 
