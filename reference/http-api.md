@@ -794,7 +794,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SYSTEM_TABLE_WRITE_REFUSED` | 403 | (**BL-1434, next train**) An ordinary write or DDL on `_mv_definitions` or `_mv_values`; only the engine writes them. Define through the materialized-value endpoints; set inputs on your own tables. |
 | `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**BL-1434, next train**) A `cellRef` node outside a materialized-value definition. |
 | `EXPR_CELLREF_INVALID` | 400 | (**BL-1434, next train**) A malformed `cellRef`: an empty table, column or key, a key part that is not a non-null literal, or two key columns that differ only in case. |
-| `MV_DEFINITION_INVALID` | 400 | (**BL-1434, next train**) A malformed definition: a bad model or name, a `colRef`, `param` or row-reading `conditional`, a result type a cell cannot hold. Nothing was written. |
+| `MV_DEFINITION_INVALID` | 400 | (**BL-1434, next train**) A malformed definition: a bad model or name, a `colRef`, `param` or `conditional`, a result type a cell cannot hold. Nothing was written. |
 | `MV_REFERENCE_INVALID` | 400 | (**BL-1434, next train**) A `cellRef` names a table, column or cell that does not exist or cannot be read, or a key literal of the wrong type. |
 | `MV_REFERENCE_NOT_PRIMARY_KEY` | 400 | (**BL-1434, next train**) A `cellRef`'s key is not exactly the table's strict primary key; the message names the key. |
 | `MV_CYCLE` | 400 | (**BL-1434, next train**) The definitions would form a cycle; the message names its members in order. |
@@ -802,8 +802,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `MV_DEFINITION_NOT_FOUND` | 404 | (**BL-1434, next train**) No cell of that model and name. |
 | `MV_DEFINITION_EXISTS` | 409 | (**BL-1434, next train**) A cell of that model and name exists; alter it. |
 | `MV_DEFINITION_IN_USE` | 409 | (**BL-1434, next train**) Other cells read this one and the delete (or an alter of its type) would break them; the message names them. |
-| `MV_TABLE_REFERENCED` | 409 | (**BL-1434, next train**) DDL on a table or column a cell reads; the message names the cells. `TRUNCATE` is allowed. |
-| `MV_NOT_MAINTAINED` | 503 | (**BL-1434, next train**) This node maintains no materialized values (a replica, a branch, or a server whose replication role is not resolved yet). Reads are served; define and wait on the primary. |
+| `MV_TABLE_REFERENCED` | 409 | (**BL-1434, next train**) DDL on a table or column a cell reads (any primary-key change, a drop, rename or type change of a read column, a drop of a materialized query whose result a cell reads); the message names the cells. `TRUNCATE` is allowed. |
+| `MV_NOT_MAINTAINED` | 503 | (**BL-1434, next train**) This node maintains no materialized values and is not a replica (a branch, a server whose replication role is not resolved yet, or a promoted node until BL-1441 is fixed); a replica answers definitions `503 READ_ONLY` and token reads `421 MV_TOKEN_REQUIRES_PRIMARY`. Reads are served; define and wait on the primary. |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
@@ -1911,7 +1911,7 @@ Insert rows into a table on a branch; they are written to the branch's own segme
 | `GET` | `/api/databases/{db}/materialized-values?model={model}` | `200` | The definitions of a model (all models when `model` is omitted), ordered by `(model, name)`, ordinal. |
 | `GET` | `/api/databases/{db}/materialized-values/{model}/{name}/explain` | `200` | A cell, its formula, the input rows it reads and the cells it reads and is read by. |
 
-**Who may call.** Only a **definer**. On a database governed by an auth database: a `db_admin` user or the database's `mk_svc_` service key. A `db_operator`, a reader and a scoped key get `403 INSUFFICIENT_PERMISSIONS`; anonymous is `401`. An open database stays open, as every admin route is. Path segments are ordinal (case-exact) and percent-decoded once.
+**Who may call.** Only a **definer**. On a governed database (one linked to an auth database, or, on a server with a server auth database, one linked to none, which the server auth database governs (BL-1017)): a user holding `db_admin` on the database (a server user, such as the server admin, on a database the server auth database governs) or the database's own `mk_svc_` service key. A `db_operator`, a reader, a scoped key, an anon key and the server key `mk_srv_` get `403 INSUFFICIENT_PERMISSIONS` (a `ProtocolError`, code in `"code"`); a request with no credential is `401`. A database on a server with no auth at all is open, as every admin route is. Path segments are ordinal (case-exact) and percent-decoded once.
 
 **Define**, body:
 
@@ -1921,23 +1921,23 @@ Insert rows into a table on a branch; they are written to the branch's own segme
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model`, `name` | string | Yes | The cell's identity; at most 200 characters each. |
-| `valueType` | string | Yes | One scalar type in its exact spelling: `Bool`, `Byte`, `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Float32`, `Double`, `String`, `Guid`, `Date`, `Timestamp`, or `Decimal(p,s)` (no spaces). |
-| `expression` | object | Yes | An [expression node](#expression-node-format). A definition may hold `literal`, `arithmetic`, `coalesce`, `call` and `cellRef`; not `colRef`, `param` or a row-reading `conditional`. |
+| `model`, `name` | string | Yes | The cell's identity; non-empty, at most 200 characters each, no leading or trailing white space, no control characters. |
+| `valueType` | string | Yes | One scalar type in its exact spelling: `Bool`, `Byte`, `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Float32`, `Double`, `String`, `Guid`, `Date`, `Timestamp`, or `Decimal(p,s)` (no spaces; `1 <= p <= 18`, `0 <= s <= p`). |
+| `expression` | object | Yes | An [expression node](#expression-node-format). A definition may hold `literal`, `arithmetic`, `coalesce`, `call` and `cellRef`; not `colRef`, `param` or `conditional` (use the `if` call). |
 
 `PUT` takes `{ "valueType", "expression" }` for the cell in the path. A definition response (`201` as `{ "definitions": [...] }`, `200` for one cell) is `{ model, name, valueType, expression, references: [{ table, key, column }], createdUtc, version }`; `explain` returns `{ cell, expression, inputs, reads, readBy, watermark }`, where `cell`, `reads` and `readBy` carry `{ model, name, version, valueType, computedAt, value, error }`, `inputs` are the cell's **own** table references, and every position is an "at least".
 
 All three mutating routes stamp `X-Aouda-Token` (the node's position after the change), so a client can [wait](#consistency-tokens-and-freshness) for the value its change produces, including an alter of the cell's `valueType`, which rewrites the stored value as the new type's text. Every change writes one audit row per cell to the governing auth database's `_audit_log`: `materialized_value_defined`, `materialized_value_altered`, `materialized_value_deleted`.
 
-**Refusals.** `400 INVALID_REQUEST` for a malformed body; the `MV_*` codes in the [error table](#error-codes); `403 SYSTEM_TABLE_WRITE_REFUSED` for an ordinary write or DDL on `_mv_definitions` or `_mv_values`. A node that maintains no values (a replica, a branch, a server whose role is not resolved) refuses the three mutating routes with `503 MV_NOT_MAINTAINED` (a replica's write guard may answer `503 READ_ONLY` first).
+**Refusals.** `400 INVALID_REQUEST` for a malformed body; the `MV_*` codes in the [error table](#error-codes); `403 SYSTEM_TABLE_WRITE_REFUSED` for an ordinary write or DDL on `_mv_definitions` or `_mv_values`. A replica refuses the three mutating routes with `503 READ_ONLY` (its write guard). A node that maintains no values and is not a replica (a branch, a server whose role is not resolved, a promoted node until BL-1441 is fixed) refuses them with `503 MV_NOT_MAINTAINED`.
 
-**DDL on a table a cell reads.** Drop, rename, a primary-key change, or a drop or type change of a read column, on the table routes **and** `schema/apply`, is refused `409 MV_TABLE_REFERENCED` naming the cells (an apply records it as a failed entry in a `200`). `TRUNCATE` is allowed. The prefix `_mv_` is reserved: creating or renaming a table into it (any case) is refused.
+**DDL on a table a cell reads.** Drop or rename of the table, any change to its primary key (a key column, read or not, or a looser uniqueness), a drop, rename or type change of a read column, or a drop of a materialized query whose result a cell reads, on the table routes **and** `schema/apply`, is refused `409 MV_TABLE_REFERENCED` naming the cells (an apply records it as a failed entry in a `200`). `TRUNCATE` is allowed. The prefix `_mv_` is reserved: creating or renaming a table into it (any case) is refused.
 
 **Values are rows.** There is no route that writes or reads a value. An input is an ordinary write on your own table. A value is a row of `_mv_values` with the columns `model`, `name`, `valueType`, `value` (the type's canonical text, null for a null value or an error), `error` (null, or at most 1000 characters), `computedAtPosition` and `computedAtTerm`, read with `POST /api/databases/{db}/query` (also `/query/count`, a named query, a join side) filtered on `model` and `name`.
 
-**`waitFor`.** On a read of `_mv_values`, `at_least` + `waitMs` are judged by the **maintainer's progress**, not the node's position: the answer comes once every commit up to the token has been recomputed, and a commit that left the cell unchanged satisfies it. A wait that runs out is `409 TOKEN_UNSATISFIED` **whatever `onExceeded` says**. A node that is a replica answers a presented token `421 MV_TOKEN_REQUIRES_PRIMARY`. A value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and a position is "at least".
+**`waitFor`.** On a read of `_mv_values`, `at_least` + `waitMs` are judged by the **maintainer's progress**, not the node's position: the answer comes once every commit up to the token has been recomputed, and a commit that left the cell unchanged satisfies it. A wait that runs out is `409 TOKEN_UNSATISFIED` **whatever `onExceeded` says** (`fetchPrimary` is not `421`; `fail` answers at once). A replica answers a presented token `421 MV_TOKEN_REQUIRES_PRIMARY` (for a read preference that lets a replica serve; with the default `Primary` a replica answers `421 MISDIRECTED_REQUEST` first). A value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and a position is "at least".
 
-**Security by default.** On a governed database the first definition creates `_mv_values` and `_mv_definitions` as `auth-db-entitlement` tables on `model` (dimensions `mv_value_model` and `mv_definition_model`, data-plane access off): admin and the service key read every model, anyone else only the models they hold an entitlement for, and a reader with none is `403 AUTH_ENTITLEMENT_NOT_FOUND`. A later definition never resets it. An open database gets plain tables.
+**Security by default.** On a governed database the first definition creates `_mv_values` and `_mv_definitions` as `auth-db-entitlement` tables on `model` (dimensions `mv_value_model` and `mv_definition_model`, data-plane access off): a definer reads every model, anyone else (the server key `mk_srv_` included) only the models they hold an entitlement for, and a caller with none is `403 AUTH_ENTITLEMENT_NOT_FOUND` in the [auth error shape](#auth-error-responses) (the code is in `"error"`). Grant a model with an entitlement on `mv_value_model` whose key is the model name (and on `mv_definition_model` for its formulas). A later definition never resets it. An open database gets plain tables.
 
 **Subscribing.** A cell is the ordinary `subscribe` on `_mv_values` with `filter` `{model eq, name eq}`, a model with `{model eq}`; see [WebSocket Streaming](#websocket-streaming-protocol).
 
@@ -3185,7 +3185,6 @@ Each value in `setExpr` is an expression node:
 ```
 
 (**BL-1434, next train**) `cellRef` reads one cell: a column of the row of `table` whose full strict primary key is `key` (literal values only, one per key column). It is valid only in a [materialized value](#materialized-value-endpoints) definition; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, and a malformed one is `400 EXPR_CELLREF_INVALID`. (**BL-1434, next train**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Materialized Values](../guides/materialized-values.md#the-thirteen-functions)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
-'
 **Extended response when `returning` is set:**
 
 ```json

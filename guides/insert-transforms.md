@@ -166,7 +166,7 @@ The presence pattern in [Named queries](named-queries.md) uses a `write` stamp f
 | `cast` | 2 | `cast(value, "TypeName")`; the type must be a **string literal**. A decimal target is spelled with its precision and scale, `cast(value, "Decimal(18,6)")`, and rounds half away from zero to that scale (**LoadSpeed S13, 0.4.0**: plain `"Decimal"` is refused) |
 | `min` / `max` | 2 or more | (**BL-1434, next train**) The smallest or largest number |
 | `abs` | 1 | (**BL-1434, next train**) The absolute value; `abs` of the smallest `Int64` overflows |
-| `eq` / `ne` | 2 | (**BL-1434, next train**) Bool |
+| `eq` / `ne` | 2 | (**BL-1434, next train**) Bool. Two `Date`, `Timestamp` or `Guid` values do not compare (an error) |
 | `gt` / `gte` / `lt` / `lte` | 2 | (**BL-1434, next train**) Bool; numbers or strings. Two `Date`, `Timestamp` or `Guid` values do not compare |
 | `if` | 3 | (**BL-1434, next train**) `if(condition, then, else)`: only the chosen branch is evaluated |
 | `and` / `or` | 2 or more | (**BL-1434, next train**) Bool; stops at the first operand that decides it |

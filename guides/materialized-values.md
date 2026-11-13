@@ -44,7 +44,7 @@ Tax     = if(Profit > 0, round(Profit * 0.22, 2), 0)     ->   132.00
 
 Edit the `Revenue` input row and `Profit` and `Tax` follow. A cell whose value did not change publishes nothing.
 
-**Materialized value or materialized query?** A [materialized query](materialized.md) maintains a **set of rows** from a query (joins, groups, aggregates). A materialized value maintains **one cell** from a formula. They compose in one direction: a cell may read a row of a materialized query's result, which is how a `SUM` over many rows becomes the input of a cell. A materialized query whose source chain reaches `_mv_values` is refused, and a query or filter over `_mv_values.value` sees the value as **text**, so a numeric `ORDER BY` or `SUM` over it is not numeric.
+**Materialized value or materialized query?** A [materialized query](materialized.md) maintains a **set of rows** from a query (joins, groups, aggregates). A materialized value maintains **one cell** from a formula. They compose in one direction: a cell may read a row of a materialized query's result, which is how a `SUM` over many rows becomes the input of a cell. A materialized query may be built over `_mv_values`, but no cell may read its result: a `cellRef` to a materialized query whose source chain reaches an `_mv_` table is refused with `400 MV_REFERENCE_INVALID`. A query or filter over `_mv_values.value` sees the value as **text**, so a numeric `ORDER BY` or `SUM` over it is not numeric.
 
 ---
 
@@ -63,7 +63,9 @@ A cell can also read a row of a materialized query's result (a table with a prim
 
 ## Defining a model
 
-(**BL-1434, next train**) One request defines any number of cells, **all or none**: if one is invalid, nothing is written and the answer names every fault. A request holds at most 10 000 definitions.
+(**BL-1434, next train**) One request defines any number of cells, **all or none**: if one is invalid, nothing is written and the answer names every fault (a cycle or a chain that is too deep is reported once the other faults are fixed). A request holds at most 10 000 definitions; more is `400 INVALID_REQUEST`.
+
+Defining needs a **definer** credential; see [Security](#security) for which one, because on a server with a server auth database the server key `mk_srv_` is **not** one.
 
 `POST /api/databases/{db}/materialized-values` (the full contract is in the [HTTP reference](../reference/http-api.md#materialized-value-endpoints)). These are the first four of the ten definitions in the C# and TypeScript SDKs' shared test model:
 
@@ -230,7 +232,7 @@ Each definition has four fields:
 
 | Field | Meaning |
 |-------|---------|
-| `model`, `name` | The cell's identity. Case-exact, at most 200 characters each. |
+| `model`, `name` | The cell's identity. Case-exact, non-empty, at most 200 characters each, no leading or trailing white space and no control characters. |
 | `valueType` | The type the cell holds. **Required.** `Decimal(18,2)`, `Int64`, `String`, ... See [Value types](#value-types). |
 | `expression` | The formula, an [expression tree](../reference/http-api.md#expression-node-format). |
 
@@ -244,7 +246,7 @@ Each definition has four fields:
 | `call` | A function: the existing `round`, `roundTo`, `concat`, `cast`, `upper`, `lower`, `trim`, `substring` (see [Insert transforms](insert-transforms.md)) and the thirteen below. |
 | `cellRef` | **Reads a cell.** `{"type":"cellRef","table":"inputs","key":{"Field":{"type":"literal","value":"Revenue"},"Year":{"type":"literal","value":2026}},"column":"Value"}`. The key holds **literal** values only, one for every key column. |
 
-A formula **cannot** contain `colRef` (there is no current row), `param`, or a `conditional` that tests a row. A `cellRef` anywhere else (a `setExpr`, a derived column, a named query or mutation, a `selectExpr`, a materialized query's output) is refused with `400 EXPR_CELLREF_NOT_ALLOWED`; a malformed one with `400 EXPR_CELLREF_INVALID`.
+A formula **cannot** contain `colRef` (there is no current row), `param`, or a `conditional` (its `when` always names a column, so it reads a row: use `if`). A `cellRef` anywhere else (a `setExpr`, a derived column, a named query or mutation, a `selectExpr`, a materialized query's output) is refused with `400 EXPR_CELLREF_NOT_ALLOWED`; a malformed one with `400 EXPR_CELLREF_INVALID`.
 
 **Reading another cell** is a `cellRef` to `_mv_values` with the model and the name as the key and `value` as the column: `{"type":"cellRef","table":"_mv_values","key":{"model":{"type":"literal","value":"pnl"},"name":{"type":"literal","value":"Revenue"}},"column":"value"}`. Only the `value` column of another cell may be read, and its type is that cell's declared type.
 
@@ -262,7 +264,7 @@ A formula **cannot** contain `colRef` (there is no current row), `param`, or a `
 | `and`, `or` | two or more Bool | Bool; evaluation stops at the first operand that decides it. |
 | `not` | one Bool | Bool. |
 
-Only numbers, strings and bools compare. Comparing two `Date`, `Timestamp` or `Guid` cells is a run-time error, and so an error cell. A literal of the wrong kind in a call (`eq("a", 1)`) is refused when you define.
+Only numbers, strings and bools compare (`gt`, `gte`, `lt` and `lte` take numbers or strings, not bools). Comparing two `Date`, `Timestamp` or `Guid` cells, with `eq` and `ne` too, is a run-time error, and so an error cell. A literal of the wrong kind in a call (`eq("a", 1)`) is refused when you define. A null operand makes a comparison null; `if` with a null condition takes the `else` branch.
 
 ### What is refused when you define
 
@@ -275,7 +277,7 @@ Only numbers, strings and bools compare. Comparing two `Date`, `Timestamp` or `G
 | A chain of more than **16** cells, each reading the next | `400 MV_DEPTH_EXCEEDED` |
 | A cell that already exists (use alter) | `409 MV_DEFINITION_EXISTS` |
 | A delete of a cell other cells read, or an alter of its type that they would no longer accept | `409 MV_DEFINITION_IN_USE`, naming the readers |
-| A drop, rename, primary-key change, or drop or type change of a read column, of a table a cell reads | `409 MV_TABLE_REFERENCED`, naming the cells, through the table routes **and** `schema/apply` (where it is a failed entry in a `200`) |
+| A drop or rename of a table a cell reads; any change to its primary key (a key column, read or not, or a looser uniqueness); a drop, rename or type change of a column a cell reads; a drop of a materialized query whose result a cell reads | `409 MV_TABLE_REFERENCED`, naming the cells, through the table routes **and** `schema/apply` (where it is a failed entry in a `200`) |
 | An unknown cell on alter, delete, get or explain | `404 MV_DEFINITION_NOT_FOUND` |
 
 `TRUNCATE` of an input table is allowed: the cells recompute from the empty table. Deleting an input **row** that a cell reads is allowed too, and the cells that depend on it go null.
@@ -289,11 +291,11 @@ Only numbers, strings and bools compare. Comparing two `Date`, `Timestamp` or `G
 | `valueType` | Canonical text | SDK value (C# / TypeScript) |
 |-------------|----------------|-----------------------------|
 | `Bool` | `true`, `false` | `bool` / `boolean` |
-| `Byte`, `Int16`, `Int32`, `UInt16`, `UInt32` | plain digits, no `+`, no leading zero | `byte`, `short`, `int`, `ushort`, `uint` / `number` |
-| `Int64` | plain digits | `long` / `bigint` |
-| `UInt64` | plain digits | `ulong` / `bigint` |
-| `Decimal(p,s)` | exactly `s` digits after the point: `1.50`, `0.00`, `-0.05` | `decimal` / the canonical `string` |
-| `Float32`, `Double` | the shortest text that reads back to the same number; `-0` is `0`; no `NaN` or infinity | `float`, `double` / `number` |
+| `Byte`, `Int16`, `Int32`, `UInt16`, `UInt32` | digits, with a leading `-` when negative; no `+`, no leading zero, no `-0` | `byte`, `short`, `int`, `ushort`, `uint` / `number` |
+| `Int64` | the same: `-42`, `9007199254740993` | `long` / `bigint` |
+| `UInt64` | digits | `ulong` / `bigint` |
+| `Decimal(p,s)` | exactly `s` digits after the point: `1.50`, `0.00`, `-0.05`. `1 <= p <= 18`, `0 <= s <= p` | `decimal` / the canonical `string` |
+| `Float32`, `Double` | the shortest text that reads back to the same number, in exponent form for large or small magnitudes (`1E+20`, `5E-324`); `-0` is `0`; no `NaN` or infinity | `float`, `double` / `number` |
 | `String` | unchanged | `string` / `string` |
 | `Guid` | lower-case, hyphenated | `Guid` / `string` |
 | `Date` | `yyyy-MM-dd` | `DateOnly` / `Date` |
@@ -327,7 +329,7 @@ A value row has these columns:
 | `computedAtPosition` | The log position the maintainer read **before** it looked up the inputs. The value reflects the commits up to there **at least**. |
 | `computedAtTerm` | The replication term the value was computed in. |
 
-A cell that has not been computed yet, one that is not defined, and one the caller may not see all read as **no row**; the SDKs return `null` for all three.
+A cell that has not been computed yet and one that is not defined both read as **no row**; the SDKs return `null` for both (C# `GetAsync<T>` with a non-nullable `T` returns `default(T)` instead, BL-1451: ask for `decimal?` to tell a missing cell from `0`). A cell in a model the caller holds no entitlement for is **not** no row: the read is refused `403 AUTH_ENTITLEMENT_NOT_FOUND` (see [Security](#security)), and the SDKs raise their not-granted error.
 
 There is no route that writes a value and none that reads one: **an input is an ordinary upsert, and a value is read with the ordinary query.**
 
@@ -347,9 +349,9 @@ In the SDKs an error cell is a value with `IsError` set and the text in `Error`;
 
 To read your own write, wait for it:
 
-1. Every write (an ordinary upsert, or an SDK `Set`) and every definition call returns a **consistency token**: the `X-Aouda-Token` response header, or `token` in the body. The SDKs remember the tokens they have seen.
+1. Every write (an ordinary insert, update or upsert, or an SDK `Set`) returns a **consistency token**: the `X-Aouda-Token` response header, or `token` in the body. A definition call returns it in the header only. The SDKs remember the tokens they have seen.
 2. Read `_mv_values` with that token: `POST /query?at_least=<token>&waitMs=3000`. The server answers once the maintainer has **at least** recomputed every commit up to the token. A commit that left the cell unchanged still satisfies it, because the wait is judged by the maintainer's progress, not by the row's position.
-3. If the maintainer has not caught up within `waitMs`, the answer is `409 TOKEN_UNSATISFIED`, **whatever `onExceeded` says**, never an old value. Retry.
+3. If the maintainer has not caught up within `waitMs`, the answer is `409 TOKEN_UNSATISFIED`, never an old value. Retry. It is `409` **whatever `onExceeded` says**: `fetchPrimary` does not turn it into a `421`, and `fail` answers `409` at once, without waiting.
 
 `waitMs` defaults to 250 and is capped at 30 000. The SDKs wait up to **5 seconds** by default and accept 0 to 30 seconds. See also [Freshness](freshness.md).
 
@@ -364,7 +366,7 @@ Which tokens are a valid cover for a `waitFor`:
 | A subscription **change** event's token on `_mv_values` | Yes. It can lag its own pass, and tokens are not ordered across events: **keep the highest token you have seen.** |
 | A notice's token (`horizon`, `range_delete`) | **No** |
 
-A token read on a **replica** is refused with `421 MV_TOKEN_REQUIRES_PRIMARY`: send it to the primary, or read without a token.
+A token read on a **replica** (with a read preference that lets a replica serve, such as `readPreference=secondary`) is refused with `421 MV_TOKEN_REQUIRES_PRIMARY`: send it to the primary, or read without a token.
 
 What the maintainer does promise: one pass computes every woken cell once, in dependency order, from its own results. A cell is never computed from a stale operand of the same pass, and no change event carries one. That is a statement about the values among themselves, **not** an atomic read across the input row.
 
@@ -397,14 +399,34 @@ See [Real-time streaming](real-time.md) for the protocol.
 
 (**BL-1434, next train**)
 
-**Who may define.** On a database governed by an auth database: a `db_admin` user or the database's `mk_svc_` service key. A `db_operator`, a reader and a scoped key get `403 INSUFFICIENT_PERMISSIONS`; anonymous is `401`. On an open database (no auth database) the routes are open, as every admin route is. Every definition, alter and delete writes one audit row per cell: `materialized_value_defined`, `materialized_value_altered` or `materialized_value_deleted`.
+**Which databases are governed.** A database is governed when it is linked to an auth database, when it is one, or, once the server has a **server auth database** (a server started with a root user or with `AOUDA_DEV_ADMIN`), when it is linked to none: the server auth database then governs it. Only a database on a server with no auth at all is open.
+
+**Who may define.** On a governed database, only a caller who holds `db_admin`'s implied access to every row of the database:
+
+- a user holding `db_admin` on the database (on a database the server auth database governs: a server user with `db_admin` on it, such as the server admin, signed in with `POST /api/auth/signin`);
+- or the database's own `mk_svc_` service key (a database linked to an auth database has one).
+
+Everyone else gets `403 INSUFFICIENT_PERMISSIONS` (a `ProtocolError`: the code is in `"code"`): a `db_operator`, a reader, a scoped key, an anon key, and **the server key `mk_srv_`**, which is not a definer. A request with no credential is `401`. On an open database the routes are open, as every admin route is. Every definition, alter and delete writes one audit row per cell: `materialized_value_defined`, `materialized_value_altered` or `materialized_value_deleted`.
 
 **Who may read, by default.** On a governed database the first definition creates `_mv_values` and `_mv_definitions` with `auth-db-entitlement` security on the `model` column, with the dimensions `mv_value_model` and `mv_definition_model` and data-plane access off. So:
 
-- An admin and the service key read every model.
+- A definer (above) reads every model. The server key `mk_srv_` does **not**: without an entitlement it is refused like any reader.
 - Anyone else reads **only the models they have been granted**. The owner grants a model with an [entitlement](../auth/authorization.md) on the dimension `mv_value_model` (the key is the model name). A second entitlement, on `mv_definition_model`, shows the formulas in `_mv_definitions`. The existing entitlement routes do it; there is no grant specific to materialized values.
-- A reader with no entitlement is refused `403 AUTH_ENTITLEMENT_NOT_FOUND`, as on any `auth-db-entitlement` table, and so is a query whose `where` names a model the reader holds none for.
+- A reader with no entitlement is refused `403 AUTH_ENTITLEMENT_NOT_FOUND`, as on any `auth-db-entitlement` table, and so is a query whose `where` names a model the reader holds none for. This is an auth error, so the code is in `"error"`, not in `"code"`: `{"error":"AUTH_ENTITLEMENT_NOT_FOUND","message":"Access denied for query on table '_mv_values'. ...","suggestion":"...","detail":"..."}`.
 - A later definition never resets what the owner set. The owner can change the tables' security with the ordinary table-options routes. On an open database the tables are plain.
+
+Granting a reader the model `pnl` on a database linked to an auth database, with a definer's credential (the user needs a role on the database, such as `db_reader`, as for any read):
+
+```bash
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/<userId>/entitlements \
+  -H "Authorization: Bearer <service key or db_admin token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "dimension": "mv_value_model", "key": "pnl", "level": "read" }'
+```
+
+The reader's next query of `_mv_values` filtered on `model = "pnl"` answers `200`. The same call with `"dimension": "mv_definition_model"` lets them read the model's rows of `_mv_definitions`.
+
+**Limit (BL-1452):** on a database the **server** auth database governs (no auth database of its own) there is no entitlement route: `…/auth/admin/users/{id}/entitlements` answers `400 INVALID_REQUEST` ("does not have application auth enabled") and the server admin API has none. There, only definers read values. To give readers models, link the database to an auth database.
 
 **What a value reveals.** A formula reads its inputs **as the database**, not as the viewer. A viewer who may see a value may therefore see a number derived from rows they cannot read. Grant a model to the people who may see its numbers.
 
@@ -415,10 +437,10 @@ See [Real-time streaming](real-time.md) for the protocol.
 (**BL-1434, next train**)
 
 - **Every open recomputes every cell**: a clean restart, a crash, an exact restore and a point-in-time restore. Until it has finished, a `waitFor` read waits (and answers `409 TOKEN_UNSATISFIED` if the wait runs out). A value row never claims a position from a different log history: a row stamped with another term, or with a position the log has not reached, is rewritten.
-- A **replica** serves `_mv_values` as the primary's replicated rows and runs no maintainer, so it cannot judge a token: a token read is `421 MV_TOKEN_REQUIRES_PRIMARY`, and reads without a token are served. A replica configured with a list of replicated tables must include `_mv_values` to serve values.
-- A node that does not maintain values (a replica, a branch, or a server whose replication role is not yet resolved) refuses `waitFor` and definition changes with `503 MV_NOT_MAINTAINED`; a replica's write guard may answer a definition change `503 READ_ONLY` first. Either way: define and wait on the primary, read anywhere. A standalone server's first values appear a moment after the start, once its role is resolved. The SDKs do not retry a `MV_NOT_MAINTAINED`: it is the node's state, not overload.
+- A **replica** serves `_mv_values` as the primary's replicated rows and runs no maintainer, so it cannot judge a token. A read that a replica may serve (a read preference such as `readPreference=secondary`; with the default `Primary` a replica answers every read `421 MISDIRECTED_REQUEST`) is served without a token and refused `421 MV_TOKEN_REQUIRES_PRIMARY` with one. A definition change on a replica is `503 READ_ONLY` (its write guard). A replica configured with a list of replicated tables must include `_mv_values` to serve values.
+- A node that does not maintain values and is not a replica (a branch, a server whose replication role is not yet resolved, or a promoted node, below) refuses `waitFor` and definition changes with `503 MV_NOT_MAINTAINED`. Either way: define and wait on the primary, read anywhere. A standalone server's first values appear a moment after the start, once its role is resolved. The SDKs do not retry a `MV_NOT_MAINTAINED`: it is the node's state, not overload.
 - A **branch** serves its parent's flushed values and maintains none.
-- Promotion starts the maintainer on the promoted node and demotion stops it. **Known limit (BL-1441):** after a promotion, reads on the promoted node still go through the replica overlay (the old primary's rows) and the node's own writes stay hidden. This affects every table, not only `_mv_values`, and is not fixed in this train. Do not rely on a failover to a replica for correct values.
+- Demotion stops the maintainer. **Known limit (BL-1441):** after a promotion, reads on the promoted node still go through the replica overlay (the old primary's rows) and the node's own writes stay hidden. This affects every table, not only `_mv_values`, and is not fixed in this train. Until it is, a promoted node keeps the maintainer suspended: it serves the last replicated values and refuses `waitFor` and definition changes with `503 MV_NOT_MAINTAINED`. Do not rely on a failover to a replica for live values.
 
 ---
 
@@ -444,7 +466,10 @@ There is no configuration key for any of this.
 - **BL-1441**: promotion, above.
 - **BL-1449**: in the TypeScript client, two first `subscribe` calls on a fresh client can race the WebSocket opening, and the second fails with a connection error. Wait for the first subscription's snapshot before starting the second.
 - **BL-1405**: a cell reads an input by its full primary key only.
-- **BL-1447**: in the C# SDK a `waitFor` of nearly the client's own request timeout (30 s by default) can race it, and the timed-out read is retried. Keep waits well under the client's timeout. The TypeScript client raises the request timeout above the wait.
+- **BL-1452**: no entitlement route on a database the server auth database governs; there only definers read values (see [Security](#security)).
+- **BL-1451**: in the C# SDK `GetAsync<T>` with a non-nullable `T` returns `default(T)` for a missing cell.
+- **BL-1447**: in the C# SDK a `waitFor` of nearly the client's own request timeout (30 s by default) can race it: the read times out client-side as `AoudaTimeoutException` (not `MaterializedValueNotCaughtUpException`) and is retried up to 3 times, each counted against the circuit breaker. Keep waits well under `AoudaClientOptions.Timeout`. The TypeScript client raises the request timeout above the wait.
+- **BL-1450**: in the TypeScript client every HTTP request leaves an `abort` listener on the client's lifetime signal, so a long-lived client's memory grows per request and Node warns `MaxListenersExceededWarning` after 11 requests. A dashboard that polls `get` on one client for hours is the case it hurts.
 
 ---
 
@@ -465,8 +490,9 @@ There is no configuration key for any of this.
 | `409 MV_TABLE_REFERENCED` | DDL on a table or column a cell reads | Delete or change the definitions first (`TRUNCATE` is allowed) |
 | `409 TOKEN_UNSATISFIED` | The maintainer did not reach your token within `waitMs` | Retry, with a longer wait if the model is large |
 | `421 MV_TOKEN_REQUIRES_PRIMARY` | A token read went to a replica | Send it to the primary, or read without a token |
-| `503 MV_NOT_MAINTAINED` | This node maintains no values | Define and wait on the primary |
+| `503 MV_NOT_MAINTAINED` | This node maintains no values (a branch, a role not yet resolved, a promoted node: BL-1441) | Define and wait on the primary |
+| `503 READ_ONLY` on a definition route | The node is a replica | Define on the primary |
 | `403 SYSTEM_TABLE_WRITE_REFUSED` | An ordinary write or DDL on `_mv_*` | Set inputs on your own tables; define through the endpoints |
 | `400 EXPR_CELLREF_NOT_ALLOWED`, `EXPR_CELLREF_INVALID` | A `cellRef` outside a definition, or a malformed one | Move it into a definition; give literal keys |
-| `403 INSUFFICIENT_PERMISSIONS` on a definition route | The caller is not a definer | Use a `db_admin` user or the service key |
-| `403 AUTH_ENTITLEMENT_NOT_FOUND` reading `_mv_values` | No entitlement on that model | The owner grants the model |
+| `403 INSUFFICIENT_PERMISSIONS` on a definition route | The caller is not a definer (the server key `mk_srv_` is not one) | Use a `db_admin` user or the database's `mk_svc_` service key; on a database the server auth database governs, a server user with `db_admin` on it |
+| `403 AUTH_ENTITLEMENT_NOT_FOUND` reading `_mv_values` (code in `"error"`) | No entitlement on that model (the server key holds none) | The owner grants the model |
