@@ -197,7 +197,7 @@ each of those queries in `Error` (its query answers `400`, not ready) until a `:
 `SchemaAllowDestructive` to get past it.
 
 **Table names in a schema file** follow the one [table-name rule](../reference/http-api.md#table-names): no `/ \ : * ? " < > |`,
-no leading or trailing period or space, not empty, `.` or `..`, and no `__mqbuild_` prefix (**BL-1468, next train; breaking**).
+no leading or trailing period or space, not empty, `.` or `..`, and no `__mqbuild_` or `_mv_` prefix (**BL-1468, next train; breaking**).
 Before, the schema apply created such a table; now a file that declares one fails `aouda schema check` and **fails the start**,
 naming the database, the file and the rule — also for a table the database already has. A schema file has no rename and HTTP DDL
 on a declared table is refused, so the way out is a clean cut: read the table's rows out (for example with `POST …/query`), give
