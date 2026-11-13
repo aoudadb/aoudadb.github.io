@@ -26,7 +26,7 @@ parent: "Getting Started"
 - **[Email, SMS & Notifications](../auth/notifications.md)** — SendGrid, GatewayAPI, **console provider** (local OTP testing), and server config for password reset and MFA OTP delivery
 - **[Client Integration](../auth/client-integration.md)** — .NET and TypeScript client examples, API keys and credential types, X-User-Token for backend user context, **BFF/gateway proxying auth endpoints**
 - **[Use Cases & User Management](../auth/use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
-- **[Data Authorization: Three Modes](../auth/authorization.md)** — jwt-claim, auth-db-pls (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS (`auth-db-pls` + `rlsResolverName`), reference use cases
+- **[Data Authorization: Three Modes](../auth/authorization.md)** — jwt-claim, auth-db-entitlement (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS (`auth-db-entitlement` + `rlsResolverName`), reference use cases
 - **[Direct client access](../guides/direct-client-access.md)** — `mk_pub_*`, listeners. OAuth authorization-code + PKCE is **not shipped**.
 - **[Reference](../auth/reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
 

@@ -12,7 +12,7 @@
           "ruleOrder": 0,
           "columnName": "id",
           "operator": "In",
-          "valueSource": "PartitionGrant",
+          "valueSource": "Entitlement",
           "valueConfig": "{\"dimension\":\"room_membership\"}",
           "combinator": "Or"
         },
@@ -34,7 +34,7 @@
           "ruleOrder": 0,
           "columnName": "room_id",
           "operator": "In",
-          "valueSource": "PartitionGrant",
+          "valueSource": "Entitlement",
           "valueConfig": "{\"dimension\":\"room_membership\"}",
           "combinator": null
         }
@@ -51,12 +51,12 @@
       ]
     }
   ],
-  "grants": [
+  "entitlements": [
     {
       "email": "bob@test.local",
       "dimension": "room_membership",
-      "partitionKey": "room-private",
-      "accessLevel": "write"
+      "key": "room-private",
+      "level": "write"
     }
   ]
 }

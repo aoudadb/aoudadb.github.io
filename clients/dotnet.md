@@ -681,7 +681,7 @@ await foreach (var evt in client.GetTable("orders")
 
 **It is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: the snapshot and every event are what the
 credential's grants allow (a service key, or a user with the `all-partitions` grant, receives every partition, those created later
-too; a user with partition grants receives only its own). The data-plane listener ignores it. An older server ignores the field and
+too; a user with entitlements receives only its own). The data-plane listener ignores it. An older server ignores the field and
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The flag itself writes nothing to the audit log; a grant that
 decides what a subscription sees is audited once per subscription
 ([Authorization](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)).

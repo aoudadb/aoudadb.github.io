@@ -290,14 +290,18 @@ If you run server defaults and do not set per-database overrides:
   - (**Lead S26, 0.6.0**) The catalog format is **12** and the database registry format (`Server/databases.json`) **3**:
     a table records its durability level, and a database its level in place of `enableWal`. A data directory written by an
     earlier build is refused at open naming the version found and the version expected; there is no migration.
-  - (**BL-1378, 0.11.0**) The catalog format is **17**: an auth database's `_api_keys` and `_user_partition_grants` tables carry
-    a `source` column (where a key or grant came from: created through the API, or declared in configuration). The format version
+  - (**BL-1378, 0.11.0**) The catalog format is **17**: an auth database's `_api_keys` table and its per-user permission table carry
+    a `source` column (where a key or permission row came from: created through the API, or declared in configuration). The format version
     marks the **whole data directory**. A directory written by 0.10.0 or earlier (format 16) makes the **server refuse to start**:
     before any database is opened the registry is read and the first database whose catalog declares another format ends the
     start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
     written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
     first with the build that wrote it, then delete the data directory and start fresh. A server key and keys declared in
-    configuration come back on the fresh start; keys and partition grants created through the API do not.
+    configuration come back on the fresh start; keys and entitlements created through the API do not.
+  - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
+    `id`, `user_id`, `dimension`, `entitlement_key`, `level`, `granted_by`, `valid_from`, `valid_to`, `created_at` and `source`, and an RLS resolver
+    rule's value source is stored as `Entitlement`. A format-17 directory makes the server refuse to start with
+    `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>`; there is no migration (see [Upgrading](upgrading.md#upgrading-to-entitlements-bl-1418-0130)).
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.

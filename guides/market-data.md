@@ -602,11 +602,11 @@ Each user's JWT carries a claim matching the partition key (for example ticker s
 
 See [Auth — jwt-claim mode](../auth/authorization.md#193-mode-1-jwt-claim-default).
 
-### Pattern 2 — `auth-db-pls` (multi-ticker watchlists)
+### Pattern 2 — `auth-db-entitlement` (multi-ticker watchlists)
 
 When a user may access many tickers (watchlist, portfolio), store grants in the auth database. Fan-out: a named-query subscription automatically merges results from all granted tickers. Revoke access on the next request without re-issuing JWTs.
 
-See [Auth — auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) and [Division of responsibility](division-of-responsibility.md).
+See [Auth — auth-db-entitlement](../auth/authorization.md#194-mode-2-auth-db-entitlement-enhanced-pls) and [Division of responsibility](division-of-responsibility.md).
 
 ---
 
@@ -683,7 +683,7 @@ await client.table("quotes")
   .execute();
 ```
 
-`.Aggregate(...)` is an admin-listener API, and `crossPartitionAccess` is honoured on the admin listener only: the data-plane listener ignores it. The flag waives the partition-filter guard (a scan cost guard) and nothing else. It never widens what the credential sees, so the credential still needs its partition grants. A named query accepts it per call on the admin listener (`crossPartitionAccess` in the execute body or a batch item); a definition cannot set it. (**BL-1227, 0.9.0**)
+`.Aggregate(...)` is an admin-listener API, and `crossPartitionAccess` is honoured on the admin listener only: the data-plane listener ignores it. The flag waives the partition-filter guard (a scan cost guard) and nothing else. It never widens what the credential sees, so the credential still needs its entitlements. A named query accepts it per call on the admin listener (`crossPartitionAccess` in the execute body or a batch item); a definition cannot set it. (**BL-1227, 0.9.0**)
 
 ### Ad-hoc query on a candle table (admin HTTP)
 

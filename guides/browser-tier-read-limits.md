@@ -116,7 +116,7 @@ Pinned by `PartitionFilterRuleTests` (engine, per operator, including the watchl
 
 **Why.** The guard is an access gate, not a pruner. Segment discovery is not partition-pruned, so a prefix on a row scan is `crossPartitionAccess` by another name.
 
-**Instead of a prefix on a row query:** enumerate the free key with a key-only DISTINCT, then pass it as an `in` parameter; or auth-db-pls fan-out; or an MQ keyed the other way.
+**Instead of a prefix on a row query:** enumerate the free key with a key-only DISTINCT, then pass it as an `in` parameter; or auth-db-entitlement fan-out; or an MQ keyed the other way.
 
 ---
 
@@ -126,7 +126,7 @@ Pinned by `PartitionFilterRuleTests` (engine, per operator, including the watchl
 
 **Why.** A definition that granted an unbounded scan would not be reviewable at persist time (`D-20`). The flag is a **cost guard**, not a confidentiality boundary: it waives the partition-filter guard and nothing else, so it never changes which rows a credential sees. It is unreachable from the browser by design.
 
-**Instead:** bind the partition key in the named query's `where` clause, or configure PLS on the table so the caller's partition is injected (auth-db-pls fan-out: the server injects the caller's grants); an aggregate / latest-per-key MQ over the universe with `dataPlaneAccess: true`; or `in` covering every partition key.
+**Instead:** bind the partition key in the named query's `where` clause, or configure PLS on the table so the caller's partition is injected (auth-db-entitlement fan-out: the server injects the caller's grants); an aggregate / latest-per-key MQ over the universe with `dataPlaneAccess: true`; or `in` covering every partition key.
 
 Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess: true` on the **admin** listener. That is not a browser-tier recipe.
 
