@@ -827,6 +827,73 @@ realtime transports stop reconnecting — sign in again for that database. See
 
 ---
 
+## 8c) Materialized values (**BL-1434, next train**)
+
+A [materialized value](../guides/materialized-values.md) is a named, computed cell: a formula over rows of ordinary tables and other cells, kept current by the server. `client.MaterializedValues` (namespace `Aouda.Client.MaterializedValues`; the value types `MvValueType` and `MvScalarType` are in `Aouda.Protocol.MaterializedValues`, `ScalarExprNode` in `Aouda.Protocol`) defines, sets inputs of, reads, waits for, subscribes to and explains them. It is on `AoudaClient`, not on `IAoudaClient`. The definition calls need a **definer**: a `db_admin` user or the database's `mk_svc_` service key; on a database the server auth database governs, a server user with `db_admin` on it. The server key `mk_srv_` is **not** a definer, and reads no values without an entitlement ([Security](../guides/materialized-values.md#security)).
+
+```csharp
+using Aouda.Client;
+using Aouda.Client.MaterializedValues;
+using Aouda.Protocol;                      // ScalarExprNode
+using Aouda.Protocol.MaterializedValues;   // MvValueType, MvScalarType
+
+// A definer: here the database's service key.
+using var client = new AoudaClient(new AoudaClientOptions
+{
+    ServerUrl = "http://localhost:5433", DatabaseName = "myapp", ApiKey = "mk_svc_...",
+});
+var model = client.MaterializedValues.Model("pnl");
+
+// An input table with the natural composite key a cell read needs.
+await client.MaterializedValues.CreateInputTableAsync(
+    "inputs",
+    [new MvKeyColumn("Field", MvValueType.Of(MvScalarType.String)), new MvKeyColumn("Year", MvValueType.Of(MvScalarType.Int64))],
+    [new MvColumn("Value", MvValueType.Decimal(18, 2)), new MvColumn("Label", MvValueType.Of(MvScalarType.String))]);
+
+// One request, all or none; each cell declares its type.
+static ScalarExprNode Input(string field, string column) => MvExpr.Cell("inputs", column, ("Field", field), ("Year", 2026L));
+var dec2 = MvValueType.Decimal(18, 2);
+await model.DefineAsync(
+[
+    new("Revenue", dec2, Input("Revenue", "Value")),
+    new("Cost", dec2, Input("Cost", "Value")),
+    new("Profit", dec2, MvExpr.Sub(MvExpr.Ref("pnl", "Revenue"), MvExpr.Ref("pnl", "Cost"))),
+    new("Tax", dec2, MvExpr.If(MvExpr.Gt(MvExpr.Ref("pnl", "Profit"), MvExpr.Lit(0m)),
+                               MvExpr.Round(MvExpr.Mul(MvExpr.Ref("pnl", "Profit"), MvExpr.Lit(0.22m)), 2), MvExpr.Lit(0m))),
+]);
+
+// Set inputs (ordinary writes), then wait for the value they produce.
+await model.SetAsync(MvInputCell.Of("inputs", "Value", ("Field", "Revenue"), ("Year", 2026L)), 1000m);
+var token = (await model.SetAsync(MvInputCell.Of("inputs", "Value", ("Field", "Cost"), ("Year", 2026L)), 400m)).Token!;
+decimal? tax = await model.GetAsync<decimal?>("Tax", new MvGetOptions { WaitFor = MvWaitFor.AtLeast(token, TimeSpan.FromSeconds(10)) });   // 132.00
+```
+
+- **Members.** `DefineAsync` (one cell or many) / `AlterAsync` / `DeleteAsync` / `GetDefinitionAsync` / `ListAsync`; `SetAsync`; `GetAsync` (an `MvValue`) and `GetAsync<T>`; `SubscribeAsync(cell, options)` / `SubscribeAsync(options)` (an `IAsyncEnumerable<MvValueEvent>`); `ExplainAsync`. The expression builder is `MvExpr`: `Lit`, `Cell`, `Ref`, `Add` `Sub` `Mul` `Div`, `Min` `Max` `Abs`, `Eq` `Ne` `Gt` `Gte` `Lt` `Lte`, `If`, `And` `Or` `Not`, `Round`, `Coalesce`, `Concat`, `Cast`. At most `MaterializedValuesApi.MaxDefinitionsPerRequest` cells per `DefineAsync` call (10 000).
+- **`SetAsync` is two ordinary writes**, not one atomic upsert: an update, and when no row matched an insert. Two concurrent first writes of one new key race; the loser's insert is refused as a duplicate and its update is retried once, so both succeed and the last one wins. It returns the write's consistency token.
+- **`GetAsync` returns `null`** for a cell that has not been computed or is not defined. A cell in a model the caller holds no entitlement for raises `MaterializedValueNotGrantedException`. A cell that could not be computed is an `MvValue` with `IsError` and the text in `Error`. An `MvValue` carries `Value` (decoded by the cell's `valueType`), `Text` (the canonical text), `Error`, `ComputedAtPosition`, `ComputedAtTerm` and `Token`.
+- **`GetAsync<T>` never converts.** `T` must be the decoded type of the cell (`decimal` for `Decimal(p,s)`, `long` for `Int64`, `DateOnly` for `Date`, ...), its `Nullable<T>`, or `object`. An error cell raises `MaterializedValueCellErrorException`; a mismatch, or a null **value** into a non-nullable `T`, raises `MaterializedValueTypeException`. A **missing** cell (not computed, not defined) returns `default(T)` for a non-nullable `T`, so `GetAsync<decimal>` answers `0m` (BL-1451): ask for `decimal?` to tell a missing cell from zero.
+- **`MvWaitFor`.** `MvWaitFor.AtLeast(token, timeout)` waits for a token; `MvWaitFor.Observed(timeout)` waits for the client's own stored token (read-your-writes). The default is `Observed(5 s)`; `0 <= timeout <= 30 s`. A commit that left the cell unchanged satisfies it. A lapse is `MaterializedValueNotCaughtUpException`, never a stale value. The value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and `ComputedAtPosition` is an "at least".
+- **Subscribing** is an ordinary table subscribe on `_mv_values` filtered on `model` (and `name`), case-exact; it resumes after a reconnect from the last version seen. `MvValueEvent.CoverToken` is a snapshot's token and an insert, update or delete's token, and is `null` for a notice (`horizon`, `range_delete`): keep the highest cover seen and pass it to `MvWaitFor.AtLeast`. A revoked entitlement ends the feed with `MaterializedValueGrantRevokedException`.
+- **`ExplainAsync`** returns a cell, its formula, the input rows it reads, the cells it reads and is read by, and the maintainer's watermark. Positions are "at least".
+
+**Typed errors.** Every refusal is an instance of the exception its status already maps to, with the materialized-value type on top (namespace `Aouda.Client.Exceptions`):
+
+| Code (status) | Exception |
+|---|---|
+| `MV_DEFINITION_INVALID`, `MV_REFERENCE_INVALID`, `MV_REFERENCE_NOT_PRIMARY_KEY`, `MV_CYCLE`, `MV_DEPTH_EXCEEDED` (400); `MV_DEFINITION_EXISTS`, `MV_DEFINITION_IN_USE`, `MV_TABLE_REFERENCED` (409) | `MaterializedValueDefinitionException`, with a `Kind` |
+| `MV_DEFINITION_NOT_FOUND` (404) | `MaterializedValueNotFoundException` |
+| `INSUFFICIENT_PERMISSIONS` (403) on a definition call | `MaterializedValueNotDefinerException` |
+| `AUTH_ENTITLEMENT_NOT_FOUND` (403) on a value read | `MaterializedValueNotGrantedException` |
+| `TOKEN_UNSATISFIED` (409) on a value read | `MaterializedValueNotCaughtUpException` |
+| `MV_TOKEN_REQUIRES_PRIMARY` (421) | `MaterializedValueReplicaException` |
+| `MV_NOT_MAINTAINED` (503) | `MaterializedValueNotMaintainedException`: **not retried** by the client and not counted against its circuit breaker; it is the node's state, not overload |
+| `PERMISSION_REVOKED` on a subscription | `MaterializedValueGrantRevokedException` |
+| (SDK-side) a row the SDK cannot decode; a type mismatch; an error cell asked for as a value | `MaterializedValueDecodeException`, `MaterializedValueTypeException`, `MaterializedValueCellErrorException` |
+
+**Value mapping.** `Bool` is `bool`; `Byte`, `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64` are `byte`, `short`, `int`, `long`, `ushort`, `uint`, `ulong`; `Decimal(p,s)` is `decimal` and keeps its scale (`1.50`); `Float32`, `Double` are `float`, `double`; `String` is `string`; `Guid` is `Guid`; `Date` is `DateOnly`; `Timestamp` is `DateTime` (UTC). The canonical text of each is in [Materialized Values: value types](../guides/materialized-values.md#value-types).
+
+**Known issue (BL-1447).** A `waitFor` of nearly the client's own request timeout (`AoudaClientOptions.Timeout`, 30 s by default) can race it: the read times out client-side as `AoudaTimeoutException` (not `MaterializedValueNotCaughtUpException`) and is retried up to 3 times, each counted against the circuit breaker. Keep waits well under the timeout.
+
 ## 9) Errors
 
 Server errors are `AoudaException` (namespace `Aouda.Abstractions`) or a subclass, with `ErrorCode`, `StatusCode`, `RequestId`

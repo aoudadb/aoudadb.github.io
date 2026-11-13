@@ -24,6 +24,8 @@ If your question is "How do I use streaming now?", start with:
 - `2.12 Scenario playbooks`
 - **P37 (current):** [HTTP API WebSocket](../reference/http-api.md#websocket-streaming-protocol) — path is `/api/databases/{db}/ws`; snapshots page then `snapshot_complete`; overflow is a server `gap` (`last_seq`, `discarded`), not client `seq > last + 1`; opt-in `conflate` sets `values_skipped` (distinct from `gap`) **on value updates only** — it is a no-op on insert-only streams; `re_auth` keeps subscriptions through token refresh. Browser-tier callers subscribe **by named-query name**. See [Named queries](named-queries.md#subscribe-by-name), [Direct client access](direct-client-access.md), and [browser-tier read limits](browser-tier-read-limits.md).
 
+(**BL-1434, next train**) **Subscribing to a computed cell.** A [materialized value](materialized-values.md#live-subscribe-to-a-cell-or-a-model) is a row of `_mv_values`, so it is the ordinary table `subscribe` with a `model` (and `name`) filter: no new message. A settle sends each changed cell once, and an unchanged recompute sends nothing.
+
 If your question is "What is implemented vs missing?", jump to:
 - `2.4 Availability status`
 - `2.5 Phase coverage matrix`

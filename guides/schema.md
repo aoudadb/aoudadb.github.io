@@ -1016,6 +1016,9 @@ computed output, a `SET` expression and a `selectExpr`:
 | `cast(x, "Decimal(p,s)")` | rounded half away from zero to scale `s` |
 | An integer `SUM / COUNT` in a computed output | 6 places |
 | Any of these with a `Double` or `Float32` operand | `Double` — `round` / `roundTo` of a `Double` stay `Double` |
+| `min`, `max`, `abs` | (**BL-1434, next train**) widen like arithmetic |
+| `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not` | (**BL-1434, next train**) Bool |
+| `if(c, a, b)` | (**BL-1434, next train**) the type of `a` and `b` when they agree; otherwise no type is inferred |
 
 A result past 18 digits is an error, never a wrapped value and never a silent `Double`. A computed value stored in a
 `Decimal(p,s)` column is then rounded half away from zero to that column's scale (table above).
