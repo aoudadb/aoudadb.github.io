@@ -426,7 +426,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/<userId>
 
 The reader's next query of `_mv_values` filtered on `model = "pnl"` answers `200`. The same call with `"dimension": "mv_definition_model"` lets them read the model's rows of `_mv_definitions`.
 
-**On a database the server auth database governs** (no auth database of its own, the usual development setup) (**BL-1452, next train**). Its readers are server users, so the grant goes through the server auth admin API, `POST /api/auth/admin/users/{userId}/entitlements`, with the same body; `…/auth/admin/users/{id}/entitlements` under `/api/databases/{db}` answers `400` there ("does not have application auth enabled"). Create the server user, give them a role on the database (such as `db_reader`, scoped to it), then grant the model:
+**On a database the server auth database governs** (no auth database of its own, the usual development setup) (**BL-1434, next train**). Its readers are server users, so the grant goes through the server auth admin API, `POST /api/auth/admin/users/{userId}/entitlements`, with the same body; `…/auth/admin/users/{id}/entitlements` under `/api/databases/{db}` answers `400` there ("does not have application auth enabled"). Create the server user, give them a role on the database (such as `db_reader`, scoped to it), then grant the model:
 
 ```bash
 curl -X POST http://localhost:5433/api/auth/admin/users/<serverUserId>/entitlements   -H "Authorization: Bearer <server key mk_srv_, or a server user's token with db_admin on the server auth database>"   -H "Content-Type: application/json"   -d '{ "dimension": "mv_value_model", "key": "pnl", "level": "read" }'
