@@ -360,8 +360,7 @@ Before, the merge dropped such a member without a word: an overlay turning parti
 
 Every path reads a schema document with one reader: `schema check`, `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
 and its overlay before sending anything; `npx @aouda/client` sends the base file as written, so the server refuses an unknown member in
-it, and merges an `--env` overlay itself, applying only `settings.durability` and per-table `policy` and `durability` — check an overlay
-with `aouda schema check --env <name>` until that client refuses an overlay's other members too), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
+it, and merges an `--env` overlay itself, refusing the same overlay members), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
 member in another case, is **refused**, never ignored:
 
 ```text
