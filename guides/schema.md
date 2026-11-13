@@ -1053,7 +1053,8 @@ type](../getting-started/index.md#how-a-c-property-becomes-a-column-type).
 
 Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`. Omit the `function` field (or use `"None"`) to use the column value as-is for routing.
 
-**Common mistake:** Using `"Hash"` as a partition function — this is not a valid schema-file `function` value. Partition hashing for storage routing (XxHash64) is applied internally by the storage engine when `partitionStorage = "Shared"` or `"Auto"`. You do not need to, and cannot, configure it via the schema file.
+**Common mistake:** Using `"Hash"` as a partition function — this is not a valid schema-file `function` value; the reader refuses it
+with the list above (**BL-1460, next train**: the JSON Schema offered it and the reader accepted it until the apply refused it). Partition hashing for storage routing (XxHash64) is applied internally by the storage engine when `partitionStorage = "Shared"` or `"Auto"`. You do not need to, and cannot, configure it via the schema file.
 
 **Example — time-partitioned table (partition by day):**
 

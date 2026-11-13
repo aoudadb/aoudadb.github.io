@@ -339,10 +339,29 @@ The overlay's name comes from the base file's: `<base without .json>.<env>.json`
 `orders.schema.prod.json`). An overlay is read as strictly as the base file: an unknown or wrong-case member is refused
 (`SCHEMA_UNKNOWN_MEMBER`), and an overlay that exists but cannot be read, or is empty, is an error naming it (**BL-1460, next train**).
 
+**Exactly these members may appear in an overlay** (**BL-1460, next train**):
+
+| Where | Members |
+|---|---|
+| Root | `$schema`, `extends`, `settings`, `tables` |
+| `settings` | `durability` (`replicationFactor`) |
+| `tables.<a table of the base file>` | `policy` (`storageTemperature`, `retention`), `durability` (`level`, `replicationFactor`) |
+
+Any other member, including one the base file may carry (`partitionLevelSecurity`, `authMode`, `plsClaimBinding`, `dataPlaneAccess`,
+`namedQueries`, `database`, `settings.allowTruncatingTimestampToDate`, …), is refused, never ignored:
+
+```text
+SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED: member 'partitionLevelSecurity' at /tables/orders is not allowed in an overlay: an overlay overrides only settings.durability and an existing table's policy and durability. Move it to the base file.
+```
+
+Before, the merge dropped such a member without a word: an overlay turning partition-level security on applied with it off.
+
 ### Member names are exact (**BL-1460, next train**)
 
 Every path reads a schema document with one reader: `schema check`, `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
-before sending it; `npx @aouda/client` sends it as written, and the server refuses it), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
+and its overlay before sending anything; `npx @aouda/client` sends the base file as written, so the server refuses an unknown member in
+it, and merges an `--env` overlay itself, applying only `settings.durability` and per-table `policy` and `durability` — check an overlay
+with `aouda schema check --env <name>` until that client refuses an overlay's other members too), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
 member in another case, is **refused**, never ignored:
 
 ```text

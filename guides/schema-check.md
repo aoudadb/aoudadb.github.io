@@ -39,11 +39,15 @@ In this order, stopping at the first stage that fails:
    error: aouda.schema.json: /tables/orders/Policy: unknown member 'Policy' at /tables/orders; did you mean 'policy'? Member names are case-sensitive. (SCHEMA_UNKNOWN_MEMBER)
    ```
 
-   When no member is close it lists the members known there (`… Known members here: …`). Then a wrong JSON type (`"nullable": "yes"`)
+   When no member is close it lists the members known there (`… Known members here: …`). A name longer than 64 characters is shown cut
+   to 64 and `…`, with no suggestion; at most 20 problems are listed, then `and N more.` Then a wrong JSON type (`"nullable": "yes"`)
    and the document's own rules (column types, partition functions, a `clusterColumns` entry that is not a column of the table, …).
 3. **The `--env` overlay**, read the same way, and the merge. An `--env` with no overlay file is a **warning**, not an error: `environment
    '<name>' has no overlay file (<path>); the base file alone was checked, as the server would read it.` (the server also uses the base
-   file). An overlay that exists but cannot be read, or is empty, is an error naming it (**BL-1460, next train**; it was skipped).
+   file). An overlay that exists but cannot be read, or is empty, is an error naming it (**BL-1460, next train**; it was skipped). An
+   overlay member the merge does not apply — anything but `$schema`, `extends`, `settings.durability` and a table's `policy` and
+   `durability` — is an error, `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` (**BL-1460, next train**; it was dropped). See
+   [Environment overlays](schema-management.md#environment-overlays).
 4. **The apply-time checks that need no tables**: authorization mode and its resolver or column, partition-level security needing a partition
    key, partition and `pkUniqueness` values, column defaults, and the shape and ceilings of named queries and named mutations. They are the same
    functions the apply path calls, not copies of them. `check` uses the **default** named-query ceilings (max 3 joins, max cost 8), not the
