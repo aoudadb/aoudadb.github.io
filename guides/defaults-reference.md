@@ -388,6 +388,19 @@ startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by n
 
 Full rules and the exact refusals: [Development admin](development-admin.md).
 
+## Materialized values (limits, no settings) (**BL-1434, next train**) {#materialized-values-limits}
+
+[Materialized values](materialized-values.md) add **no configuration key**. The numbers you may meet are limits:
+
+| Limit | Value |
+|-------|-------|
+| Cells in a chain, each reading the next | 16 (`MV_DEPTH_EXCEEDED`) |
+| Definitions in one request | 10 000 |
+| Model or cell name | 200 characters |
+| `error` text of a cell | 1000 characters |
+| `waitMs` on a read of `_mv_values` | default 250 ms, cap 30 000 ms |
+| Default wait of `Get` / `get` in both SDKs | 5 s (`0` to `30` s allowed) |
+
 ## Declared databases (**BL-1379, 0.11.0**) {#declared-databases}
 
 The full reference, a worked example and the wipe-and-start walkthrough are on [Declared databases](declared-databases.md).

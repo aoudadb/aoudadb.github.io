@@ -833,7 +833,7 @@ Each item of a role's `permissions` is `{ "resourceType", "resourceName", "actio
 
 | `resourceType` | `resourceName` | `actions` |
 |---|---|---|
-| `table` (default) | A table name, or `*` (default) | A comma-separated string of RBAC actions, for example `"read,write"` |
+| `table` (default) | A table name, case-sensitive (the exact name) (**BL-1434, next train**), or `*` (default) | A comma-separated string of RBAC actions, for example `"read,write"` |
 | `all-partitions` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
 | `all-rows` | `*` for the whole database, or one table's name (case-sensitive) | **Exactly one** of `read`, `write`, `admin` |
 | `embargo` (**BL-418, 0.9.0**) | One table's name (case-sensitive); `*` is refused | Whole seconds, `1` to `2678400` (31 days), digits only — see [Embargo](#198b-embargo-a-delayed-view-of-a-table-bl-418-090) |
