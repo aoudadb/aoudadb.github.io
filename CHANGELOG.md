@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Studio: editing a named query or named mutation keeps what the wizard does not show (aouda BL-1470, next Studio release).** A re-save used to rebuild the definition from the wizard's fields and silently drop `count`, `aggregates`, `groupBy`, `perKey`, `orderByChoices`, `freshness`, `batchParam`, a join's `where`, `or` / `groups` / `ignoreCase` / `whenParamPresent` in a where, and every sort column but the first. The editor now writes back every member you do not change exactly as stored and lists the ones it cannot edit as read-only; the parameter **required** box now writes `"required": false` when unticked (an unticked box used to save a required parameter). See [Studio §5.6](guides/studio.md#56-named-artifacts).
+
 ## 0.13.0 — 2026-11-12
 
 Server **0.13.0** / `@aouda/client` **0.13.0** / `Aouda.Client` **0.13.0**. Studio pin follows npm.
