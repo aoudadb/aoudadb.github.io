@@ -136,7 +136,8 @@ If you do nothing beyond starting local dev:
 | `DevServerOptions.Port` | `5433` | Predictable local endpoint for agent bootstrapping |
 | `DevServerOptions.DatabaseName` | `default` | Immediate target DB without extra setup |
 | `DevServerOptions.DataPath` | `null` | Ephemeral local run for quick experiments |
-| `DevServerOptions.EnableAuth` | `false` | Auth is opt-in in dev mode unless explicitly enabled |
+| `DevServerOptions.EnableAuth` | `false` | Links the dev database to app auth and prints its keys. Every dev server needs a first admin before any data call (**BL-1473, next train**), with or without this option: see the `Bind` row |
+| `DevServerOptions.Bind` | `null` (**BL-1473, next train**) | The dev server listens on **loopback only**, on `Port`. To listen on other interfaces set an address in the form `aouda start --bind` takes: `host:port` or `host`, an IP literal (IPv6 in brackets, `[::1]:5433`), `0.0.0.0` or `*` for every interface, e.g. `0.0.0.0:5433`. **Do not bind it beyond loopback on a network you do not trust:** it speaks plain HTTP (tokens and passwords cross the network in clear), allows every browser origin (CORS), and has no rate limiting, request timeouts or forwarded-header handling; use `aouda start` for that. **First admin:** like `aouda start`, a server with no admin yet answers only the setup calls, and only from the machine it runs on (`503 SETUP_REQUIRED` otherwise); create the admin with `curl -X POST http://localhost:5433/api/auth/setup -H "Content-Type: application/json" -d '{"email":"admin@example.com","password":"..."}'`, or start with `ASPNETCORE_ENVIRONMENT=Development` and `AOUDA_DEV_ADMIN=true`, which creates a throwaway admin and prints one `AOUDA-DEV-ADMIN` line. The setup route refuses a request that carries an `Origin` header (`403 SETUP_FROM_BROWSER_REFUSED`): call it from curl, not from a web page. There is no `aouda dev` command; the dev server is `DevServerHost` in `Aouda.Server`, used by `Aouda.Testing`'s `AoudaTestServer` (in-memory, no port, no setup mode) and by hosts that call `DevServerHost.RunAsync` |
 | `TokenOptions.AccessTokenLifetime` | `15m` | Short-lived user access tokens |
 | `TokenOptions.RefreshTokenLifetime` | `30d` | Long-lived sessions for app flows |
 | `TokenOptions.Issuer` | `"aouda"` | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}`, and (**0.4.0**) only that issuer is accepted for them |
@@ -190,8 +191,8 @@ If you do nothing beyond starting local dev:
 
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
-| One-command local dev bootstrap | Yes | No | No | `DevServerHost.cs`, `DevServerIntegrationTests.cs` | Includes banner + schema-on-write mode |
-| Auth-enabled local bootstrap (`--auth`) | Yes | No | No | `DevServerHost.cs`, `DevServerOptions.cs`, CLI tests | Prints generated keys or key-prefix fallback guidance |
+| Local dev host (`DevServerHost`; no `aouda dev` command) | Yes | No | No | `DevServerHost.cs`, `DevServerIntegrationTests.cs` | Loopback by default; needs a first admin before any data call (**BL-1473, next train**); banner + schema-on-write mode |
+| Auth-enabled local bootstrap (`EnableAuth`) | Yes | No | No | `DevServerHost.cs`, `DevServerOptions.cs`, CLI tests | Prints generated keys or key-prefix fallback guidance; the first admin still comes first |
 | Auto-link/create auth DB during DB create | Yes | No | No | `DatabasesController.cs` | Handles 0/1/many auth DB shorthand rules |
 | Two-layer app auth gate | Yes | No | No | `AuthenticationMiddleware.cs`, middleware integration tests | App auth endpoints require API key layer |
 | Service key + `X-User-Token` user-context | Yes | No | No | `AuthenticationMiddleware.cs`, integration tests | Validates JWT and revocation; non-service keys ignore header |
@@ -256,7 +257,7 @@ Implementation anchors:
 
 ### Walk-through A: Local agent bootstrap with auth
 
-1. Agent runs `aouda start`, creates auth-enabled DB via API, captures keys.
+1. A host starts the dev server (`DevServerHost.RunAsync()`, loopback unless `Bind` says otherwise); the first admin is created at `POST /api/auth/setup` or by `AOUDA_DEV_ADMIN=true` (**BL-1473, next train**). With `aouda start` instead, the agent creates the auth-enabled DB via API and captures keys.
 2. `DevServerHost.RunAsync()` starts app and calls `EnsureAppAuthEnabledAsync(...)`.
 3. Host resolves/creates app auth DB and links app DB.
 4. If keys are newly generated, host prints `Anon key` and `Service role key`; if not, prints key prefixes + regeneration hint.
