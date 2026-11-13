@@ -354,7 +354,9 @@ Every such member is listed, each with its JSON pointer and, when one is close, 
 names are case-sensitive.` for a wrong case). Nothing is applied. Before, the server dropped the member: `"nulable": true` made a
 non-nullable column, `"partitionLevelSecurty": true` left partition-level security off, and a named query's `"where": {"adn": […]}`
 lost its filter and returned every row. A table has no `description` (a column does) and a materialized query has no `authMode`,
-`permissionDimension` or `permissionColumn`: those are refused too. Run `schema check` on every file and overlay to list them all.
+`permissionDimension` or `permissionColumn`: those are refused too. The materialized-query ones were redundant and never read: a
+materialized query's result is always filtered by its source table's partition- and row-level security, so the source table's security
+always applied. Remove them. Run `schema check` on every file and overlay to list them all.
 
 ### Summary
 
