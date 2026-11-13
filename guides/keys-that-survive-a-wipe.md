@@ -159,7 +159,7 @@ generate keys with `openssl rand -hex 32` and put the prefix in front.
 not) is refused with an error that names the existing row (its id, name and source, never the secret): revoke and delete that key,
 or declare a different secret. At start the error fails the start; it also abandons the creation of an auth database. `aouda keys
 check` runs offline and cannot see a database, so it reports only the clashes it can: the same secret twice in the file, or in the
-file and in `Aouda__Auth__Bootstrap__ServerKey`.
+file and in the server key, wherever the server key comes from.
 
 The declared `kind` must match the prefix wherever the server can see the plaintext (an `env` secret or the server key). For a
 `hash` secret it cannot, and a mismatch there changes only the credential-kind label in the failure log, never the privilege.
@@ -167,16 +167,43 @@ The declared `kind` must match the prefix wherever the server can see the plaint
 ### Check the file before you deploy
 
 ```bash
-aouda keys check --file identities.json
+aouda keys check                           # the configuration `aouda start` would read here
+aouda keys check --file identities.json    # this identities file in place of Aouda:Auth:Keys:File
+aouda keys check -- --dev-admin            # with the arguments you give `aouda start`, after --
 # ok: 3 declaration(s), 4 secret(s)
+#   bootstrap-server-key  server_admin  _serverauth  fingerprint 5d02e7a1 (bootstrap)
 #   tullett-feeder  scoped_service  auth/deposit  fingerprint 3a1f9c02 (env), 91c0aa17 (hash)
 ```
 
-(**BL-1378, 0.11.0**) It loads the file with the environment of the process that runs it, exactly as the server does, prints each
-declaration (name, kind, auth database, database, the fingerprint and source of each secret) and never a secret or a hash. It exits
-`1` naming the entry on the first error, and warns **once per database** that scoped entries name and no `service_role`, `public`
-or `anon` declaration mentions. If `Aouda__Auth__Bootstrap__ServerKey` is set in its environment it is checked with the file, as the
-start does (the same name or the same secret is refused). It needs no server and no data directory, so it runs in CI.
+(**BL-1461, next train**) **It runs the server's own key validation over the server's own configuration.** It reads the
+configuration the way `aouda start` reads it, through the same code, in the directory and environment it runs in: `appsettings.json`
+and `appsettings.<environment>.json` from the working directory, environment variables in both spellings (`AOUDA_AUTH__BOOTSTRAP__SERVERKEY`
+and `Aouda__Auth__Bootstrap__ServerKey`), the arguments after `--`, and the systemd credential `aouda-server-key` when
+`CREDENTIALS_DIRECTORY` is set. Then it calls what the start calls: the dev-admin guards, the server key from whichever source sets it
+(`ServerKey`, `ServerKeyFile`, the credential; two at once is an error), the identities file, and the clashes between them (the same
+name, the same secret, a `server_admin` entry next to the dev-admin flag). `--file` stands for `Aouda:Auth:Keys:File`, exactly as
+`--Aouda:Auth:Keys:File=<path>` after `--` would.
+
+It prints each declaration (name, kind, auth database, database, the fingerprint and source of each secret) and never a secret or a
+hash, and warns **once per database** that scoped entries name and no `service_role`, `public` or `anon` declaration mentions, and
+when no key is declared at all. On an error it prints the line the start would print, `CONFIGURED_KEYS_INVALID: <message>` (or
+`DEV_ADMIN_REFUSED:`, `CONFIGURATION_INVALID:`), and exits `1`; the start exits `78` with the same line
+([exit statuses](../deployment/linux.md#when-the-start-is-refused)). **It checks what it can without the data directory**: a declared
+secret that is already a row in an auth database, and a role a scoped key names that does not exist, are not seen. It needs no
+server, so it runs in CI, and in the container you deploy:
+
+```bash
+docker compose run --rm --no-deps --entrypoint aouda aouda keys check
+```
+
+That runs in the image's working directory with the service's environment, secrets and mounts, so it reads what the server will.
+Run by hand on a systemd host, it has no `CREDENTIALS_DIRECTORY` and does not see the `aouda-server-key` credential; run it inside
+the unit's credentials and working directory:
+`sudo systemd-run --pipe --wait -p User=aouda -p WorkingDirectory=/opt/aouda -p LoadCredential=aouda-server-key:<path> /opt/aouda/Aouda.Server keys check`.
+
+Before the next train it read the identities file and `Aouda__Auth__Bootstrap__ServerKey` only, so a server key from
+`appsettings.json`, `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`, `ServerKeyFile` or the credential was never checked: the check said `ok` and
+the start refused (a shared secret, a name clash, a key of the wrong kind in the key file, two sources at once).
 
 ## Seeing and managing the keys
 

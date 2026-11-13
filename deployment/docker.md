@@ -150,7 +150,7 @@ Create the admin at start with `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__RO
 |---|---|
 | `AOUDA_ROOT_PASSWORD` (and optionally `AOUDA_ROOT_EMAIL`, default `admin@aouda.local`) | The first admin is created at start from `AOUDA_AUTH__ROOTUSER__EMAIL` / `AOUDA_AUTH__ROOTUSER__PASSWORD`. The password has **no default**, because port 5000 is published and a known default would be a known credential. Put both in a `.env` file next to the compose file or export them; remove them afterwards if you like, the admin lives in the data volume |
 | `AOUDA_DEV_ADMIN=true` | Development and tests only. The server makes a random throwaway admin and server key at every start and prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda` for the `AOUDA-DEV-ADMIN` line. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD`. See [Development admin](../guides/development-admin.md) |
-| neither, on a new volume | The container exits with `The server has no admin and was given no way to create one, and Aouda:Auth:RequireFirstAdmin is set (docker-compose.yml sets it).` followed by both ways out |
+| neither, on a new volume | The container exits with `The server has no admin and was given no way to create one, and Aouda:Auth:RequireFirstAdmin is set (docker-compose.yml sets it).` followed by both ways out. (**BL-1461, next train**) The line starts `FIRST_ADMIN_REQUIRED: ` and the exit status is `78` |
 | neither, on a volume that already holds an admin | Starts normally |
 
 How it works: `docker-compose.yml` sets `AOUDA_AUTH__REQUIREFIRSTADMIN: "true"`, passes the root email and password and `AOUDA_DEV_ADMIN` through, and sets `ASPNETCORE_ENVIRONMENT: ${AOUDA_DEV_ADMIN:+Development}`. Before 0.12.0 the compose file set no admin, so a fresh volume left the container `unhealthy` for ever (`setup_required`). The refusal comes from the server, not from compose's interpolation, so its reason is in `docker compose logs aouda`.
@@ -196,9 +196,37 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
 
 ---
 
+## A container that keeps restarting
+
+(**BL-1461, next train**) A start refused for its configuration (a bad key declaration, a declared database that cannot be linked,
+no first admin under `RequireFirstAdmin`, a data directory in another format) exits with status **78** and prints two lines on
+standard error, the first `<CODE>: <message>` naming the setting. The codes and the exact lines are in
+[the exit status table](linux.md#when-the-start-is-refused).
+
+⚠️ **Docker's `restart:` policies cannot exempt an exit status.** `unless-stopped`, `always` and `on-failure` all restart a container
+that exited 78, so a refused configuration is a restart loop, and the loop itself tells you nothing: **the first line of the
+container's output is what names the setting.** (systemd can stop on it, with `RestartPreventExitStatus=78`; Docker has no equivalent.)
+
+```bash
+docker compose logs --no-log-prefix aouda | grep -E '^[A-Z_]+: ' | tail -1   # e.g. CONFIGURED_KEYS_INVALID: ...
+docker compose ps -a aouda                                                   # STATUS: Restarting (78) ...
+```
+
+Check the key declaration before you deploy, in the container you deploy, with its environment, secrets and mounts:
+
+```bash
+docker compose run --rm --no-deps --entrypoint aouda aouda keys check
+```
+
+It runs the server's own key validation over the configuration the server will read and exits `1` with the same first line the start
+would print. See [Check the file before you deploy](../guides/keys-that-survive-a-wipe.md#check-the-file-before-you-deploy).
+
+---
+
 ## Logs
 
-The container logs to stdout, so `docker logs aouda` is all of it.
+The container logs to stdout, so `docker logs aouda` is all of it. (**BL-1461, next train**) The one exception is a refused start's two
+lines, which go to standard error; `docker logs` shows both streams.
 
 ⚠️ **The default log level is `Warning`** for every category except startup narration. If a line the documentation mentions is not appearing, that is usually why — see [Defaults reference](../guides/defaults-reference.md#logging-defaults).
 

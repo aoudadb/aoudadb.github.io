@@ -29,8 +29,10 @@ DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<catalog root file>
   the end of the line).
 - The server also logs the whole message at **critical** level before the start fails, so the code is the first token of that log line, and the
   exception that stops the host starts with the same line.
-- There is **no distinct process exit status**: the host maps no startup failure to one, so match the code in the output. `aouda doctor` and
-  `aouda status` never load the catalog and do not report it.
+- (**BL-1461, next train**) `aouda start` prints the same first line on standard error, then the prose, then one fixed line, and **exits
+  with status 78**, the status of every start refused for its configuration ([exit statuses](../deployment/linux.md#when-the-start-is-refused));
+  the systemd unit does not restart it. Until then there was no distinct exit status (the process aborted), so match the code in the output
+  with 0.13.0 and earlier. `aouda doctor` and `aouda status` never load the catalog and do not report it.
 - A shard or journal that disagrees with its root, a root that is not JSON, and a format-1 flat catalog are different refusals (corruption or a
   very old directory) and carry **no code**.
 - Builds released before the code existed (0.11.0 and earlier) print the prose only; its first sentence is `<path>: catalog root declares format

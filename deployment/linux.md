@@ -162,6 +162,9 @@ Group=aouda
 # hides the message telling you which.
 Restart=on-failure
 RestartSec=10
+# 78 is a start refused for its configuration: a restart fails the same way, so the unit
+# goes straight to `failed` and the first journal line names the setting.
+RestartPreventExitStatus=78
 
 MemoryAccounting=yes
 MemoryMax=80%
@@ -311,8 +314,40 @@ aouda doctor --output json
 | `65` | `doctor` found at least one **failed** check (warnings alone do not fail it) |
 | `69` | `status`: the server is running but not serving (still recovering, or nothing answered `/ready` within the probe's deadline) |
 | `70` | `status`: the server is not running |
+| `71` | The service manager (systemd, the SCM) refused an operation or could not be reached. (**BL-1461, next train**) It was `78` in 0.13.0 and earlier |
 | `77` | Not permitted — `service install` or `service uninstall` without root (an elevated prompt on Windows) |
-| `78` | The service manager (systemd, the SCM) refused an operation or could not be reached |
+| `78` | (**BL-1461, next train**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. See [When the start is refused](#when-the-start-is-refused) |
+
+These are the same on every platform and for every way of running the server (`aouda start`, the unit, the container). `aouda keys
+check` exits `0` when the key declaration is valid and `1` when the start would refuse it.
+
+### When the start is refused
+
+(**BL-1461, next train**) A start refused for its configuration prints two lines on **standard error** and exits with status `78`
+(`EX_CONFIG` in `sysexits.h`). The first line is `<CODE>: <message>`, one line, naming the setting and, where there is one, the
+remedy; the second is always the same:
+
+```text
+CONFIGURED_KEYS_INVALID: Configured keys 'bootstrap-server-key' and 'ops-admin' share one secret.
+aouda: the start was refused for its configuration (exit status 78). Restarting with the same configuration fails the same way: fix the setting named above, then start again.
+```
+
+| Code | Refused because |
+|---|---|
+| `CONFIGURED_KEYS_INVALID` | The server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the `aouda-server-key` credential) or the identities file (`Aouda:Auth:Keys:File`) is invalid: a bad entry, a clash between them, two sources of the server key at once. [`aouda keys check`](../guides/keys-that-survive-a-wipe.md#check-the-file-before-you-deploy) finds these before you deploy |
+| `DEV_ADMIN_REFUSED` | `AOUDA_DEV_ADMIN` / `Aouda:Auth:DevAdmin:Enabled` in Production, next to a root-user password, or on a replication node |
+| `CONFIGURATION_INVALID` | A setting has a value the server does not accept (a port out of range, `AOUDA_DEV_ADMIN=yes`, ...) |
+| `FIRST_ADMIN_REQUIRED` | `Aouda:Auth:RequireFirstAdmin` is set and there is neither a root-user password nor the dev-admin flag |
+| `DECLARED_DATABASES_REFUSED` | A database in `Aouda:Databases` cannot be created, converged or linked as declared |
+| `DECLARED_SCHEMA_REFUSED` | A schema file a declared database names cannot be read or applied |
+| `DECLARED_ROLES_REFUSED` | A role a declared auth database lists cannot be created or converged |
+| `DATA_DIRECTORY_FORMAT_REFUSED` | The data directory was written in another format. Its first line is `DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<p>`, the prose follows, then the second line above. See [Upgrading](../guides/upgrading.md) |
+
+The unit names `78` in `RestartPreventExitStatus=`, so a refused start goes to `failed` at once instead of being restarted five times;
+`journalctl -u aouda` shows the two lines. Fix the setting, then `systemctl reset-failed aouda` and `systemctl start aouda`. Any other
+failed start (a port already bound, a disk error) exits non-zero with something other than `78`, and the unit restarts it. A unit
+written by an earlier `aouda service install` lacks the line: re-run the install, or add `RestartPreventExitStatus=78` under
+`[Service]` and `systemctl daemon-reload`.
 
 ### Upgrading from an install made before `aouda service install`
 
