@@ -802,6 +802,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `IDENTITY_STAMP_REQUIRED` | 400 | Service role omitted a required identity-stamped column |
 | `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | `plsClaimBinding` / identity source is not a bindable spelling (`subject` or `claim:<name>`) |
 | `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE` | 400 | A named mutation's `values` / `set` / `setExpr` names a server-time column (**NativeClients, 0.4.0**) |
+| `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, next train**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
+| `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, next train**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda schema check --env`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint. Fix: move the member to the base file. Before, it was dropped |
 | `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp) |
 
 #### State Errors (4xx)
@@ -1853,7 +1855,30 @@ partition-level security off).
 was applied and names the table. That includes `dryRun: true`. Nothing in the document is applied. Dropping the table is not this
 refusal. Dropping every old column and adding one new column is allowed when `allowDestructive` is true.
 
-(**BL-1281, 0.9.0**) A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, stays HTTP `200`: that change is `Failed`, `reason` names `auth-db-rls` and `auth-db-entitlement`, and the table is not written. A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
+(**BL-1281, 0.9.0**) A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
+A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, is refused (below).
+
+**The body is read strictly** (**BL-1460, next train**). The body is `{ "schema": { … }, "options": { "allowDestructive": false,
+"dryRun": false } }` and nothing else; `options` and both flags are optional, and a flag is `true` or `false` (a string is refused).
+In the document, a member the schema format does not have, or a known member in another case, is refused, never ignored:
+`400 SCHEMA_UNKNOWN_MEMBER`, every such member named with its JSON pointer and, when one is close, the member meant:
+
+```json
+{ "error": "Invalid schema: unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?", "code": "SCHEMA_UNKNOWN_MEMBER" }
+```
+
+Before, the member was dropped (`"nulable": true` made a non-nullable column; a misspelt `"dryrun"` applied for real).
+
+**Document-level errors refuse the whole document** (**BL-1460, next train**). The checks that need no catalog run first, with the
+server's named-query ceilings: authorization mode and its resolver or column (the BL-1281 case above), partition-level security without a
+partition key, partition and `pkUniqueness` values, column defaults, the shape and ceilings of named queries and mutations, and the
+document rules (column types, a `partitionKey` or `clusterColumns` entry that is not a column of the table, …). Any of them is
+`400 INVALID_REQUEST` naming each `<JSON pointer>: <reason>`, and **nothing is applied**, `dryRun` or not. Before, the valid tables beside
+the error were created and the bad one came back as a `Failed` entry in a `200`. What needs the catalog (a named query that names a
+missing column, a reference to another table) is still found per change during the apply.
+
+`GET …/schema/export` writes the document as `schema apply` reads it: no `null` members (it used to write `"or": null` in a `where`),
+so an export applies back as no change.
 
 
 #### `POST /api/databases/{db}/schema/diff?access=true`
@@ -1876,7 +1901,11 @@ With `?access=true`:
 
 Posting identities requires **Admin**. `?access=true` without identities is **Read**.
 
-**400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`.
+**400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`. The document and the wrapper are read as
+strictly as by `schema/apply` (**BL-1460, next train**): an unknown or wrong-case member is `SCHEMA_UNKNOWN_MEMBER` (the wrapper's members
+are exactly `schema`, `identities`, `resolvers`, `baseResolvers`), and a document-level error is `INVALID_REQUEST` before any plan is
+computed, so a diff never shows a plan for a document `schema/apply` would refuse whole. (A named query that names a missing column is
+found only by the apply, against the catalog.)
 
 (**BL-1209, 0.9.0**) A branch name is one segment of 1–64 ASCII letters, digits, or hyphens, not `main` and not a Windows device name. `/`, `\`, `..`, a drive, a rooted name, a trailing dot or space, and `_` are refused. Every branch route answers `400 INVALID_REQUEST` and writes nothing.
 

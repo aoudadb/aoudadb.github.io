@@ -244,13 +244,16 @@ What happens, in this order: the declared databases and their links are reconcil
 | You want to know | Answer |
 |---|---|
 | Is it safe to restart? | Yes. A file already in effect gives an empty diff: nothing is written, no history entry. A changed file applies only the difference. |
-| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema, an overlay that adds a table. A change that cannot be applied fails the start too. |
+| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, next train**), an overlay that adds a table or cannot be read. A change that cannot be applied fails the start too. |
 | What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"SchemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
 | Which tables can I still change over HTTP? | None that the file created: a table schema apply creates refuses HTTP DDL in every inference mode, whether the CLI, the API or the start-time apply created it. |
 | Where is the history? | `GET /api/databases/{db}/schema/history`, with the source `DeclaredApply`. |
 | Do the CLI and the API still work? | Yes, unchanged. The catalog is the runtime truth; the next start applies the file again, and does not remove what you added through the API unless the file omits it **and** `SchemaAllowDestructive` is set. |
 
-`SchemaEnvironment` is the CLI's `--env`: `aouda.schema.<env>.json` next to the file is merged over it when it exists. An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
+`SchemaEnvironment` is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
+file: `<file without .json>.<env>.json`, so `aouda.schema.json` → `aouda.schema.prod.json` and `rates.aouda.schema.json` →
+`rates.aouda.schema.prod.json` (**BL-1460, next train**; before, every file in one directory shared `aouda.schema.<env>.json`). An
+overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, next train**; it was skipped). An can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
 
 Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
 
@@ -331,6 +334,47 @@ Use overlays to keep one schema definition and vary only settings (e.g. replicat
 - `aouda.schema.prod.json` — production overrides.
 
 Overlays can only change **database-level settings** (`settings.durability`) and **per-table policy and durability** (`policy`, `durability`). They may not add or remove tables, and may not specify columns, partition keys, or cluster columns. The structural definition (columns, partitionKey, clusterColumns) always comes from the base file. Select overlay with `--env staging` or `AOUDA_ENVIRONMENT=prod`. See ADR 0019 for the exact merge rules.
+
+The overlay's name comes from the base file's: `<base without .json>.<env>.json` beside it (`orders.schema.json` with `--env prod` reads
+`orders.schema.prod.json`). An overlay is read as strictly as the base file: an unknown or wrong-case member is refused
+(`SCHEMA_UNKNOWN_MEMBER`), and an overlay that exists but cannot be read, or is empty, is an error naming it (**BL-1460, next train**).
+
+**Exactly these members may appear in an overlay** (**BL-1460, next train**):
+
+| Where | Members |
+|---|---|
+| Root | `$schema`, `extends`, `settings`, `tables` |
+| `settings` | `durability` (`replicationFactor`) |
+| `tables.<a table of the base file>` | `policy` (`storageTemperature`, `retention`), `durability` (`level`, `replicationFactor`) |
+
+Any other member, including one the base file may carry (`partitionLevelSecurity`, `authMode`, `plsClaimBinding`, `dataPlaneAccess`,
+`namedQueries`, `database`, `settings.allowTruncatingTimestampToDate`, …), is refused, never ignored:
+
+```text
+SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED: member 'partitionLevelSecurity' at /tables/orders is not allowed in an overlay: an overlay overrides only settings.durability and an existing table's policy and durability. Move it to the base file.
+```
+
+Before, the merge dropped such a member without a word: an overlay turning partition-level security on applied with it off.
+
+### Member names are exact (**BL-1460, next train**)
+
+Every path reads a schema document with one reader: `schema check`, `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
+and its overlay before sending anything; `npx @aouda/client` sends the base file as written, so the server refuses an unknown member in
+it, and merges an `--env` overlay itself, refusing the same overlay members), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
+member in another case, is **refused**, never ignored:
+
+```text
+400 SCHEMA_UNKNOWN_MEMBER
+Invalid schema: unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?
+```
+
+Every such member is listed, each with its JSON pointer and, when one is close, the member meant (`… did you mean 'nullable'? Member
+names are case-sensitive.` for a wrong case). Nothing is applied. Before, the server dropped the member: `"nulable": true` made a
+non-nullable column, `"partitionLevelSecurty": true` left partition-level security off, and a named query's `"where": {"adn": […]}`
+lost its filter and returned every row. A table has no `description` (a column does) and a materialized query has no `authMode`,
+`permissionDimension` or `permissionColumn`: those are refused too. The materialized-query ones were redundant and never read: a
+materialized query's result is always filtered by its source table's partition- and row-level security, so the source table's security
+always applied. Remove them. Run `schema check` on every file and overlay to list them all.
 
 ### Summary
 
