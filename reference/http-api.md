@@ -203,12 +203,23 @@ See [Direct client access](../guides/direct-client-access.md) for configuration,
 | `/api/auth/setup` | No (setup mode only, localhost) | None |
 | `/api/auth/signin`, `/api/auth/refresh` | No | None (these produce credentials) |
 | `/api/auth/signout`, `/api/auth/me`, etc. | Yes | Server JWT |
-| `/api/auth/admin/*` | Yes (`db_admin`) | Server JWT or `mk_srv_` with admin role |
+| `/api/auth/admin/*`, `/admin/*` (except `GET /admin/replication/topology`), `/api/admin/*`, `/api/server/*` | Yes (`admin` on the server auth database; see below) | Server JWT or server key whose role gives `admin` on the server auth database, or `mk_srv_` (**BL-1466, 0.13.1**) |
+| `GET /admin/replication/topology` | No | None — member addresses, roles, read candidates and primary only; no database names (**BL-1466, 0.13.1**) |
 | `/api/databases/{db}/auth/signup\|signin\|refresh\|request-password-reset\|reset-password` | No | None (public POST; bearer ignored) |
 | `/api/databases/{db}/auth/me\|signout\|password` | Yes (Layer 1 + 2) | API key + user JWT in `X-User-Token`, or user JWT directly |
 | `/api/databases/{db}/query\|tables\|rows\|...` | **Only if db has linked auth** | Any valid credential (see below) |
 | `/api/databases/{db}/...` (no linked auth db), **server auth database exists**, admin listener | Yes (Layer 1 + 2) | Server JWT, `mk_srv_`, or a server key with a role on `{db}` — every route, `DELETE /api/databases/{db}`, WebSocket and long-poll included (**BL-1017, 0.4.0**) |
 | `/api/databases/{db}/...` (no linked auth db), no server auth database, or the data-plane listener | No | None — open access |
+
+(**BL-1466, 0.13.1**) On the server routes above, authenticating against the server auth database is not enough: the caller needs
+`admin` on the server auth database: the `db_admin` or `db_operator` role assigned globally, to `*` or to the server auth database,
+or a server admin key (`mk_srv_`). Any other credential that database holds gets **403** `AUTHORIZATION_DENIED`, whose `details`
+begins `requiredOperation=Admin, database=_serverauth`: a key from `POST /api/auth/admin/api-keys` with a role on one database, a
+server user with no role or a read role, and a server user who is `db_admin` of one database only — that user administers that
+database and no other (a global or `*` `db_admin` administers every database, application databases included).
+Creating a server admin key (`POST /api/auth/admin/keys`) needs `db_admin`: a `db_operator` may list and revoke them, and is refused
+with **403** `AUTHORIZATION_DENIED` (`"Creating a server admin key (mk_srv_) needs db_admin on the server auth database."`) when it
+creates one. A request body that fails validation is answered **400** before the authorization check.
 
 #### How Data Endpoint Auth Works
 
@@ -4050,7 +4061,7 @@ those details with the resource mode.
 
 ### Backup/Restore Endpoints
 
-All endpoints live under `/admin/backup/`. Auth is enforced by the server auth middleware (same as all `/admin/*` routes) — no `[Authorize]` attributes on the controller.
+All endpoints live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
 
 #### Summary
 
@@ -4292,6 +4303,10 @@ the position a consistency token for that database is covered at here: `walPosit
 replica has seen a bulk load committed and not fetched all of its segments (`jobId` empty when its closing frame could not be
 decoded; `loadsHeld` counts every such load). `bulkLoadHold` is `null` when there is none. A read presenting a token at or past
 the hold waits, then answers `TOKEN_UNSATISFIED` or `TOKEN_FETCH_PRIMARY` as for any lagging replica.
+
+(**BL-1466, 0.13.1**) `members` is the topology's member list with what the anonymous topology no longer carries: each
+member's `perDatabaseStatus` (`{ "<database>": { "walPosition", "lagBytes" } }`) and, for a connected secondary, its `subscriptions`
+(`[{ "database", "filterMode", "tableNames" }]`; `null` otherwise). On a standalone node it holds the node itself.
 
 ---
 
@@ -4674,7 +4689,11 @@ data: {"timestampUtc":"...","level":"Information","category":"...","message":"..
 
 #### `GET /admin/replication/topology`
 
-Get cluster topology.
+Get cluster topology: the replica set's name, its members (address, role, temperature profile, hidden, read candidate), the
+read candidates and the primary. No credential is needed — a node joining with `--join` reads it before it has one — so it names no
+database and carries no WAL position or table subscription (**BL-1466, 0.13.1**: each member's `perDatabaseStatus` is now `{}`
+and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replication/status`](#get-adminreplicationstatus) as
+`members`).
 
 **Response:**
 
