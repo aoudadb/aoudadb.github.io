@@ -236,6 +236,11 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
 
+⚠️ `create-admin` needs the server **stopped**: a running server holds its data directory, and `create-admin` then exits `1`
+naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, next train**). A server with a
+declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile` or the systemd credential `aouda-server-key`) needs no
+admin and has no setup mode.
+
 Three supported ways, in order of preference:
 
 ```bash

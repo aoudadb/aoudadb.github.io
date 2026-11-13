@@ -382,7 +382,6 @@ startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by n
 
 | Setting | Default | What it means |
 |---|---|---|
-| `Aouda:Auth:RequireFirstAdmin` | `false` | `true`: a server with no admin and no root password or dev admin fails the start, naming both ways out, instead of sitting in setup mode |
 | `Aouda:Auth:DevAdmin:Enabled` (`AOUDA_DEV_ADMIN`, `aouda start --dev-admin`) | `false` | Development and tests only: a random throwaway admin and `mk_srv_` key at every start, printed once on stdout. Refused in Production |
 | `Aouda:Auth:DevAdmin:Email` | `admin@aouda.local` | The throwaway admin's email |
 

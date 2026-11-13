@@ -799,7 +799,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 |------|-------------|-------------|
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable. (**BL-944, 0.4.0**) Also the answer to a refusal no other code names: a request the server refused for capacity with no more specific code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `WRITE_CONFLICT`) is `503 SERVICE_UNAVAILABLE` with `Retry-After: 10`, never a `500` — nothing was applied; retry after `Retry-After` |
 | `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this) |
-| `SETUP_REQUIRED` | 503 | The server has no admin yet and is in setup mode: only setup status and a local `POST /api/auth/setup` are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
+| `SETUP_REQUIRED` | 503 | The server has no admin yet and nothing declared (no server key, no `RootUser`), and is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, next train**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice |
@@ -3580,9 +3580,42 @@ Service information.
 }
 ```
 
+#### The probes: one meaning each
+
+(**BL-1462, next train**) Three probes, each answering one question, to **every caller** (no credential, loopback or not) in
+every state the process can answer in. None of them is gated by setup mode.
+
+| Probe | Question | Use it for |
+|---|---|---|
+| `GET /health` | Is the process alive? | Kubernetes `livenessProbe`. Never a deploy gate. |
+| `GET /startup` | Has the start sequence finished? | Kubernetes `startupProbe`. |
+| `GET /ready` | Can the server serve application traffic? | Kubernetes `readinessProbe`, a load balancer, a deploy gate, a Docker `HEALTHCHECK`, and therefore Compose `depends_on: condition: service_healthy`. |
+
+What each answers, by state:
+
+| State | `/health` | `/startup` | `/ready` |
+|---|---|---|---|
+| Opening databases (WAL replay) | `200` `{"status":"healthy"}` | `503` `{"status":"starting","reason":"The engine has not finished opening its databases."}` | `503`, `not_initialized` |
+| Start sequence running (auth, declared schema files, roles, grants, keys) | `200` | `503` `{"status":"starting","reason":"The start sequence has not finished ..."}` | `503`, `server_starting`; during the schema apply also `schema_applying` (with `progress`) and `schema_pending` |
+| Setup mode (nothing declared, no admin) | `200` | `200` `{"status":"started","reason":null}` | `503`, `setup_required` |
+| Serving | `200` | `200` | `200` `{"ready":true,"reasons":[]}` |
+| Serving, a critical component unhealthy | `200` | `200` | `503`, `component_unhealthy` |
+| Shutting down | `200` | `200` | `503`, `draining` only |
+
+**Docker Compose.** `depends_on: condition: service_healthy` waits for the dependency's healthcheck, so that healthcheck must
+be `/ready`: the dependent service then starts once the server can serve it (started, not in setup mode, declared schemas
+applied). The image's `HEALTHCHECK` and the repository's `docker-compose.yml` use `/ready`. A service that must start while the
+server is still in setup mode (a tool that creates the first admin) uses `condition: service_started` and polls `/startup`.
+
+Before this, `/health` answered `503 SETUP_REQUIRED` to a caller off the server's host while the server was in setup mode, and
+`/startup` answered `503` for as long as setup mode lasted, so a Kubernetes `startupProbe` restarted a server that had finished
+starting, every five minutes, for ever. `/startup` also turned `200` as soon as the databases were open, before the declared
+schema files were applied; it now waits for the whole start sequence.
+
 #### `GET /health`
 
-Liveness probe. **Always 200** if the process is running. Fast. Use as a Kubernetes `livenessProbe`.
+Liveness probe. **Always 200** if the process is running, to every caller, in setup mode too (**BL-1462, next train**). Fast, no
+I/O. Use as a Kubernetes `livenessProbe`.
 
 This is **not** “ready for schema apply or traffic”. A database can be `Dropping` or `Creating` while `/health` returns 200.
 
@@ -3602,27 +3635,42 @@ Readiness probe: 200 when nothing is missing, 503 with **everything** that is st
 {
   "ready": false,
   "reasons": [
-    { "code": "setup_required", "message": "The server is in setup mode: no admin account exists. ..." },
+    { "code": "setup_required", "message": "The server is in setup mode: nothing is declared and no admin account exists. ..." },
     { "code": "database_pending", "message": "Declared database 'ledger' (Aouda:Databases) does not exist yet.", "subject": "ledger" }
   ]
 }
 ```
 
-`reasons` is always present, and empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server.
+During a start-time schema apply (**BL-1462, next train**):
+
+```json
+{
+  "ready": false,
+  "reasons": [
+    { "code": "server_starting", "message": "The server is still starting: the auth bootstrap has not completed." },
+    { "code": "schema_applying", "message": "Applying the schema file of declared database 'orders' (Aouda:Databases): 4 of 11 done.", "subject": "orders", "progress": { "done": 4, "total": 11 } },
+    { "code": "schema_pending", "message": "Declared database 'reports' (Aouda:Databases) has a schema file that has not been applied yet.", "subject": "reports" }
+  ]
+}
+```
+
+`reasons` is always present, and empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server. `progress` (`done`, `total`, integers) is present only on `schema_applying` (**BL-1462, next train**).
 
 | `code` | Meaning | `subject` |
 |---|---|---|
 | `not_initialized` | The engine has not finished opening its databases. | none |
 | `server_starting` | The auth bootstrap has not completed, so the server is not accepting requests yet. | none |
 | `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
-| `setup_required` | No admin exists; the server is in setup mode. | none |
-| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. | none |
+| `draining` | (**BL-1462, next train**) The server is shutting down: it finishes the requests in flight and takes no new ones. Listed **alone**: nothing else is evaluated on a server that is going away. | none |
+| `setup_required` | The server is in setup mode: nothing is declared (no server key, no `Aouda:Auth:RootUser`, no dev admin) and no admin exists. A declared server key is not setup mode (**BL-1462, next train**). | none |
+| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. Also listed when `Aouda:Auth:RootUser:Email` is set and no password is (neither `Password` nor the systemd credential `aouda-admin-password`) (**BL-1462, next train**). | none |
 | `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
 | `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
 | `database_reconcile_failed` | The reconcile of `Aouda:Databases` after a restore was refused; the server keeps running. | the database, when one is named |
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
+| `schema_applying` | (**BL-1462, next train**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
 | `schema_drift` | The start-time apply of a declared `SchemaFile` refused a change (a destructive one without `SchemaAllowDestructive`, or one the engine does not apply), so the catalog is not what the file says; the start went on. `503` until you allow the change or update the file, and restart. A failed apply fails the start instead, so there is no `/ready` to ask (**BL-1406, 0.11.0**). | the database |
-| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: a server key waits for the first admin, a scoped key for its auth database and database to be open. | the key's name |
+| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: its auth database or database is not open. A server key no longer waits for a first admin: declaring one ends setup mode (**BL-1462, next train**). | the key's name |
 | `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
 
 A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up. `aouda status` prints every reason.
@@ -3640,11 +3688,16 @@ Use as a Kubernetes `readinessProbe`.
 
 #### `GET /startup`
 
-Startup probe. 200 when bootstrap is complete (`DatabaseManager` initialized). 503 while still starting. Use as a Kubernetes `startupProbe`; once it returns 200, switch to liveness + readiness.
+Startup probe. `200` `{"status":"started","reason":null}` once the whole start sequence has finished: databases opened, then
+the auth bootstrap, the declared schema files, roles, grants and keys. **Setup mode included**: a server waiting for its first
+admin has finished starting, and restarting it changes nothing (**BL-1462, next train**; before, it was `200` as soon as the
+databases were open, and `503` for as long as setup mode lasted). `503` `{"status":"starting","reason":"..."}` before that; `GET
+/ready` says which step. Use as a Kubernetes `startupProbe`, with a `failureThreshold` × `periodSeconds` that covers WAL recovery
+plus any start-time schema apply; once it returns 200, switch to liveness + readiness.
 
 #### `GET /health/detailed`
 
-Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane).
+Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane). Answered in setup mode to every caller, like the three probes (**BL-1462, next train**).
 
 The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, 0.3.0** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, 0.3.0**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, or a database holding more than 110 % of its ceiling. (**WorkloadCore S06, 0.3.0**: the budget is never tightened in-process any more, so there is no "tightening" verdict; a database's ceiling is the server's budget unless it has a hard cap.)
 
