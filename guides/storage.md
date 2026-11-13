@@ -298,10 +298,10 @@ If you run server defaults and do not set per-database overrides:
     written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
     first with the build that wrote it, then delete the data directory and start fresh. A server key and keys declared in
     configuration come back on the fresh start; keys and entitlements created through the API do not.
-  - (**BL-1418, next train**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
+  - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
     `id`, `user_id`, `dimension`, `entitlement_key`, `level`, `granted_by`, `valid_from`, `valid_to`, `created_at` and `source`, and an RLS resolver
     rule's value source is stored as `Entitlement`. A format-17 directory makes the server refuse to start with
-    `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>`; there is no migration (see [Upgrading](upgrading.md#upgrading-to-entitlements-bl-1418-next-train)).
+    `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>`; there is no migration (see [Upgrading](upgrading.md#upgrading-to-entitlements-bl-1418-0130)).
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.

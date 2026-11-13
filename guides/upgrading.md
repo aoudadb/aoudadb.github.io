@@ -14,7 +14,7 @@ repository's `docs/dev/Upgrade-Notes.md`.
 To keep the data across a bump: **export it with the build that wrote it, delete the data directory, start the new build fresh, load the export.**
 
 Status: the refusal code described here is shipped in **0.12.0** (**BL-1420**). The format version is **17** in 0.11.0 and 0.12.0, so a 0.11.0
-directory starts on 0.12.0 unchanged. The next server release writes format **18** (**BL-1418, next train**): see [Upgrading to entitlements](#upgrading-to-entitlements-bl-1418-next-train).
+directory starts on 0.12.0 unchanged. Server **0.13.0** writes format **18** (**BL-1418, 0.13.0**) and refuses a 17 directory: see [Upgrading to entitlements](#upgrading-to-entitlements-bl-1418-0130).
 
 ## Detecting a refusal: `DATA_DIRECTORY_FORMAT_REFUSED`
 
@@ -60,15 +60,15 @@ The last column is the first line a server that **reads that version and carries
 | 15 | development builds only | allowance on `_refresh_tokens` and `_authorization_codes` | `found=14 expected=15` |
 | 16 | 0.9.x and 0.10.0 | bulk-load commit header carries the beginning principal | `found=15 expected=16` |
 | 17 | 0.11.0 (and 0.12.0) | `source` on `_api_keys` and the per-user permission table | `DATA_DIRECTORY_FORMAT_REFUSED: found=16 expected=17 path=<root file>` |
-| 18 | next server release (**BL-1418, next train**) | the per-user permission table is `_user_entitlements` (`entitlement_key`, `level`); RLS resolver value source `Entitlement` | `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<root file>` |
+| 18 | 0.13.0 (**BL-1418**) | the per-user permission table is `_user_entitlements` (`entitlement_key`, `level`); RLS resolver value source `Entitlement` | `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<root file>` |
 
 In the shortened rows the line is the same as in the first two, with `path=<root file>`. Formats 1 to 5 (0.2.x and earlier) are not listed: a build
 with the code refuses a root declaring 2 to 5 under the same line with that `found`, and the format-1 flat catalog and an interrupted format-1
 migration marker are refused by name without a code. Formats 8, 9, 11, 12 and 15 were only ever written by development builds.
 
-## Upgrading to entitlements (**BL-1418, next train**)
+## Upgrading to entitlements (**BL-1418, 0.13.0**)
 
-The next server release renames the per-user permission rows `(user, dimension, key, level)` that an `auth-db-entitlement` table checks. This is a clean cut
+Server 0.13.0 renames the per-user permission rows `(user, dimension, key, level)` that an `auth-db-entitlement` table checks. This is a clean cut
 (pre-1.0): **no alias, no migration, no reader of the old shapes.** One wipe, then edit your schema files, scripts and clients.
 
 **What an old data directory gets.** Format 17 (written by 0.11.0 and 0.12.0) is refused whole, every database in the directory, with the first line

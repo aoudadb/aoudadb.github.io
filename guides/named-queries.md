@@ -495,7 +495,7 @@ HTTP **200** means the envelope was accepted. A missing name or a bind/ADRA fail
 
 Envelope **400** (no `results`): empty array, more than 32 elements, or a **named-mutation** name (`NAMED_QUERY_BATCH_MUTATION`).
 
-**Permission (BL-1417, 0.12.0).** The route itself needs only an authenticated caller. Each slot is checked for its own `named-query` `execute` row; a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND`, exactly like an unknown name, on both listeners. A caller who may execute none of the slots therefore gets HTTP 200 with every slot masked, where before 0.12.0 a caller holding only table rights got a route-level 403. (**BL-1417 review, next train**) In that case the envelope carries `"token": ""`, not a live consistency token.
+**Permission (BL-1417, 0.12.0).** The route itself needs only an authenticated caller. Each slot is checked for its own `named-query` `execute` row; a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND`, exactly like an unknown name, on both listeners. A caller who may execute none of the slots therefore gets HTTP 200 with every slot masked, where before 0.12.0 a caller holding only table rights got a route-level 403. (**BL-1417 review, 0.13.0**) In that case the envelope carries `"token": ""`, not a live consistency token.
 
 ```typescript
 const slots = await client.namedQueries.batch([

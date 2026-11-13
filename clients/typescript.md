@@ -231,8 +231,7 @@ stop on `AoudaAuthenticationFatalError`.
 
 **Refusals that name the key kind and the option (BL-1422).** Server side, since **0.12.0**, a refusal's `suggestion` names the key kind and prefix
 the route takes (`AUTH_API_KEY_INVALID`, `AUTH_TOKEN_MISSING`, `AUTH_KEY_LISTENER_MISMATCH`, `AUTH_KEY_ROUTE_MISMATCH`, and a `403` RBAC denial
-of an auth-admin, browser-tier or scoped key). **Not yet released in `@aouda/client`** (merged to the client's `main`, shipping with the next
-release, which is prepared separately; no version is claimed here): the `message` of an HTTP 401 or 403 with one of those codes (and
+of an auth-admin, browser-tier or scoped key). In `@aouda/client` **0.12.0** (npm, 2026-11-12) the `message` of an HTTP 401 or 403 with one of those codes (and
 `AUTH_API_KEY_REQUIRED`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `UNAUTHORIZED`, `AUTH_TOKEN_INVALID` / `_EXPIRED` / `_REVOKED`, `AUTHORIZATION_DENIED`) then carries
 that `suggestion` (for `AUTHORIZATION_DENIED` its `details`) and the option to set (`apiKey`, `serverAuth`, `appAuth`, `serverUrl`) with the
 kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400, ...) keeps the
@@ -243,11 +242,11 @@ INSUFFICIENT_PERMISSIONS` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_
 means the caller's role lacks the `named-query` / `named-mutation` `execute` row for it; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. See
 [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
 
-### Entitlements (**BL-1418, next train**)
+### Entitlements (**BL-1418, 0.13.0**)
 
 An entitlement is one row `(user, dimension, key, level)` that lets a user reach the rows of an `auth-db-entitlement` table whose
 `permissionColumn` equals `key` (see [Data Authorization §19.8](../auth/authorization.md#198-admin-api-entitlements)). The admin
-wrappers are on `client.auth` and need a `db_admin` caller; they ship with the next `@aouda/client` release (no version is claimed here):
+wrappers are on `client.auth` and need a `db_admin` caller; they ship in `@aouda/client` **0.13.0** (0.12.0 still has the `PartitionGrant` names):
 
 ```ts
 const e = await client.auth.createEntitlement(userId, { dimension: 'chat_room', key: 'room_42', level: 'write' }); // -> Entitlement
@@ -1402,12 +1401,11 @@ Four cases do **not** share, and the consumer gets a server subscription of its 
   the primary key, so a `delete` (which carries only the key) cannot be applied;
 - anything with different arguments or options.
 
-A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in every released `@aouda/client`; the
-other consumers of the subscription and the server subscription are not affected. **Not yet released** (BL-1421, merged to the client's `main`, shipping with
-the next `@aouda/client` release, which is prepared separately; no version is claimed here): the bound becomes
+A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in `@aouda/client` before **0.12.0**; the
+other consumers of the subscription and the server subscription are not affected. (**BL-1421, 0.12.0**) From `@aouda/client` 0.12.0 (npm, 2026-11-12) the bound is
 `AoudaClientOptions.subscriptionConsumerQueueCapacity` (default 10 000, an integer of at least 1, refused at construction otherwise) with a
 per-subscription `consumerQueueCapacity` on `subscribe` (table and named query) that is not part of the sharing key, and overflow ends the consumer with the new
-`AoudaConsumerOverflowError` (`code: "CLIENT_CONSUMER_OVERFLOW"`) on its iterator and `onError`, carrying the C# SDK's message. The old message text goes away; match on `code`.
+`AoudaConsumerOverflowError` (`code: "CLIENT_CONSUMER_OVERFLOW"`) on its iterator and `onError`, carrying the C# SDK's message. The old message text is gone; match on `code`.
 (A consumer
 driven by callbacks that is never iterated is not "behind": past that many unread events it stops
 queuing, and iterating it afterwards throws.)

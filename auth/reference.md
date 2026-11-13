@@ -536,7 +536,7 @@ A key or user holding only this role runs `insert_quote` and is refused every ta
 
 All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `service_role` key, a `db_admin` user, or a server key (`mk_srv_`) — may call every one. A restricted admin may call the ones that do not raise its reach (**BL-1240, 0.9.0**): the seeded system role `db_operator` (it administers without the implied all-partitions / all-rows grants), a custom role with `admin`, and an `mk_adm_` key on the user-management routes. Assigning `db_admin` or an all-* grant, changing a role that carries one, renaming a role to or from `db_admin`, writing an RLS resolver, regenerating keys, minting a privileged key, and writing a user who already holds those grants on any database its auth database governs are `403 AUTHORIZATION_DENIED` and need `db_admin`. The other seeded system roles are `db_admin`, `db_writer`, `db_reader`, `anonymous` and `public`.
 
-**Entitlements** (**BL-1418, next train**) — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-entitlements)):
+**Entitlements** (**BL-1418, 0.13.0**) — manage which partition keys a user is allowed to access in each dimension ([§19.8](authorization.md#198-admin-api-entitlements)):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -637,7 +637,7 @@ These are returned for `jwt-claim` and `auth-db-entitlement` table enforcement.
 | `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | JWT has no `tenant_id` claim (or the table's bound claim), or it is empty or white space, for a `jwt-claim` PLS table | Ensure JWT includes the `tenant_id` claim |
 | `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | Explicit partition filter does not match the JWT `tenant_id` | Match the filter to the user's `tenant_id` claim |
 | `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Write targets a partition outside the caller's `tenant_id` | Write to the caller's own partition only |
-| `AUTH_ENTITLEMENT_NOT_FOUND` | 403 | (**BL-1418, next train**) Partition not in the user's entitlements (`auth-db-entitlement`) | Create an entitlement for the user via admin API |
+| `AUTH_ENTITLEMENT_NOT_FOUND` | 403 | (**BL-1418, 0.13.0**) Partition not in the user's entitlements (`auth-db-entitlement`) | Create an entitlement for the user via admin API |
 | `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` | 403 | The key has an entitlement but its `level` is `read` (write attempted) | Update the entitlement to `level: "write"` or `"admin"` |
 | `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | `Where.Or` predicate mixes partition and non-partition conditions in a fan-out query | Move non-partition conditions to `Where.And` |
 
