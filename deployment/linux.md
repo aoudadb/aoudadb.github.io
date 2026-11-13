@@ -312,7 +312,8 @@ aouda doctor --output json
 | `69` | `status`: the server is running but not serving (still recovering, or nothing answered `/ready` within the probe's deadline) |
 | `70` | `status`: the server is not running |
 | `77` | Not permitted — `service install` or `service uninstall` without root (an elevated prompt on Windows) |
-| `78` | The service manager (systemd, the SCM) refused an operation or could not be reached |
+| `71` | The service manager (systemd, the SCM) refused an operation or could not be reached |
+| `78` | `aouda start` only: the start was refused for its configuration. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)); the unit does not restart it (`RestartPreventExitStatus=78`), because the same configuration fails the same way. (**BL-1463, next train**) A start whose only problem is a file that could not be read yet exits `1` instead, so it is restarted |
 
 ### Upgrading from an install made before `aouda service install`
 

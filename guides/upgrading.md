@@ -29,7 +29,8 @@ DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<catalog root file>
   the end of the line).
 - The server also logs the whole message at **critical** level before the start fails, so the code is the first token of that log line, and the
   exception that stops the host starts with the same line.
-- There is **no distinct process exit status**: the host maps no startup failure to one, so match the code in the output. `aouda doctor` and
+- (**BL-1463, next train**) `aouda start` exits with status **78** (`EX_CONFIG`) and prints the refusal as a finding on standard error
+  (`error    DATA_DIRECTORY_FORMAT_REFUSED`, then the line above); the systemd unit does not restart it. `aouda doctor` and
   `aouda status` never load the catalog and do not report it.
 - A shard or journal that disagrees with its root, a root that is not JSON, and a format-1 flat catalog are different refusals (corruption or a
   very old directory) and carry **no code**.
