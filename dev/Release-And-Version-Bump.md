@@ -42,6 +42,14 @@ Pages mark behaviour that is on `main` but not yet released as `(BL-NNN, next tr
 - Leave the marker on anything that is still unreleased.
 - A marker left saying `next train` after the tag exists tells a reader the page describes a server they cannot install yet.
 
+Do not find them by eye. Fetch the sibling checkouts (`git fetch` in `aouda`, `aouda-client-ts`, `aouda-studio`; the script never does), then run:
+
+```bash
+python3 scripts/check-next-train.py        # siblings found next to this repo; --aouda / --client-ts / --studio to point at them
+```
+
+It reads each sibling's `origin/main` changelog (`--ref` to change it) and fails, with `file:line`, the BL id, the release it shipped in and the replacement `(**BL-NNN, X.Y.Z**)`, for every marker whose id is in a released section. Run it after the tag exists, and again as the last step before the PR. A marker with no BL id (`Lead S12 (next train)`) is not checked; retire those by hand (`grep -rni "next train" --include=*.md --include=*.txt .`). Tests: `python3 -m unittest discover -s scripts -p "test_*.py"`.
+
 Also move `CHANGELOG.md` **Unreleased** bullets into a dated section that names the same versions. Keep Unreleased for not-yet-shipped clarifications only.
 
 ---
@@ -49,7 +57,7 @@ Also move `CHANGELOG.md` **Unreleased** bullets into a dated section that names 
 ## 3. Moment 2 (stop)
 
 - [ ] Matrix row matches the versions the maintainer approved
-- [ ] `next train` markers for this train now name the version
+- [ ] `next train` markers for this train now name the version, and `python3 scripts/check-next-train.py` exits 0
 - [ ] Changelog dated section reviewed
 - [ ] Ready to **commit** on a branch, push it, and **open the PR**? (publishes nothing)
 - [ ] Ready to **merge**? (the docs site deploys from `main`; merge after the versions the pages cite exist)
