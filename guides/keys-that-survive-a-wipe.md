@@ -188,7 +188,10 @@ It prints each declaration (name, kind, auth database, database, the fingerprint
 hash, and warns **once per database** that scoped entries name and no `service_role`, `public` or `anon` declaration mentions, and
 when no key is declared at all. On an error it prints the line the start would print, `CONFIGURED_KEYS_INVALID: <message>` (or
 `DEV_ADMIN_REFUSED:`, `CONFIGURATION_INVALID:`), and exits `1`; the start exits `78` with the same line
-([exit statuses](../deployment/linux.md#when-the-start-is-refused)). **It checks what it can without the data directory**: a declared
+([exit statuses](../deployment/linux.md#when-the-start-is-refused)). When a file it needs cannot be read (the identities file, a
+`file` secret, the server key file, `appsettings.json`) it prints one line, `aouda keys check: could not check: <message>`, and exits
+`2`: the start would fail too, but not with `78`, because a missing file may be a volume not yet mounted. Run it where the files
+are. **It checks what it can without the data directory**: a declared
 secret that is already a row in an auth database, and a role a scoped key names that does not exist, are not seen. It needs no
 server, so it runs in CI, and in the container you deploy:
 
@@ -197,9 +200,19 @@ docker compose run --rm --no-deps --entrypoint aouda aouda keys check
 ```
 
 That runs in the image's working directory with the service's environment, secrets and mounts, so it reads what the server will.
-Run by hand on a systemd host, it has no `CREDENTIALS_DIRECTORY` and does not see the `aouda-server-key` credential; run it inside
-the unit's credentials and working directory:
-`sudo systemd-run --pipe --wait -p User=aouda -p WorkingDirectory=/opt/aouda -p LoadCredential=aouda-server-key:<path> /opt/aouda/Aouda.Server keys check`.
+On a systemd host, run it with what the unit gives the server, which a login shell does not have: the `Environment=` lines, the
+credentials and the start arguments. `systemctl cat aouda` shows them; pass each `Environment=` and `LoadCredential=` line as a `-p`
+option and the arguments after `start` after `--`:
+
+```bash
+systemctl cat aouda            # copy the Environment=, LoadCredential= and ExecStart= arguments from here
+sudo systemd-run --pipe --wait -p User=aouda -p WorkingDirectory=/opt/aouda \
+  -p Environment=AOUDA__AUTH__ROOTUSER__EMAIL=admin@example.com \
+  -p LoadCredential=aouda-server-key:/etc/aouda/server-key \
+  /opt/aouda/Aouda.Server keys check -- --data-path /var/lib/aouda --port 5433
+```
+
+On Windows, run it from the install directory with the service's environment: that is the server's working directory.
 
 Before the next train it read the identities file and `Aouda__Auth__Bootstrap__ServerKey` only, so a server key from
 `appsettings.json`, `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`, `ServerKeyFile` or the credential was never checked: the check said `ok` and

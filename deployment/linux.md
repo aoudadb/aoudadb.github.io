@@ -319,7 +319,13 @@ aouda doctor --output json
 | `78` | (**BL-1461, next train**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. See [When the start is refused](#when-the-start-is-refused) |
 
 These are the same on every platform and for every way of running the server (`aouda start`, the unit, the container). `aouda keys
-check` exits `0` when the key declaration is valid and `1` when the start would refuse it.
+check` exits `0` when the key declaration is valid, `1` when the start would refuse it, and `2` when it could not check (a file it
+names cannot be read).
+
+⚠️ **`78` means the configuration itself is wrong**: what it says (invalid content, a duplicate, a reference to something that does not
+exist, a refused format), not whether the machine could act on it. A start that fails **while doing** what the configuration asks — a
+key file, identities file or schema file that cannot be read (a volume not yet mounted, a permission), a data directory that cannot be
+written, a full disk, an engine fault — is not `78`: it fails as any other start, and the unit restarts it.
 
 ### When the start is refused
 
@@ -334,18 +340,19 @@ aouda: the start was refused for its configuration (exit status 78). Restarting 
 
 | Code | Refused because |
 |---|---|
-| `CONFIGURED_KEYS_INVALID` | The server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the `aouda-server-key` credential) or the identities file (`Aouda:Auth:Keys:File`) is invalid: a bad entry, a clash between them, two sources of the server key at once. [`aouda keys check`](../guides/keys-that-survive-a-wipe.md#check-the-file-before-you-deploy) finds these before you deploy |
+| `CONFIGURED_KEYS_INVALID` | The server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the `aouda-server-key` credential) or the identities file (`Aouda:Auth:Keys:File`) is invalid: a bad entry, a clash between them, two sources of the server key at once, a key of the wrong kind. Not a file that cannot be read. [`aouda keys check`](../guides/keys-that-survive-a-wipe.md#check-the-file-before-you-deploy) finds these before you deploy |
 | `DEV_ADMIN_REFUSED` | `AOUDA_DEV_ADMIN` / `Aouda:Auth:DevAdmin:Enabled` in Production, next to a root-user password, or on a replication node |
 | `CONFIGURATION_INVALID` | A setting has a value the server does not accept (a port out of range, `AOUDA_DEV_ADMIN=yes`, ...) |
 | `FIRST_ADMIN_REQUIRED` | `Aouda:Auth:RequireFirstAdmin` is set and there is neither a root-user password nor the dev-admin flag |
-| `DECLARED_DATABASES_REFUSED` | A database in `Aouda:Databases` cannot be created, converged or linked as declared |
-| `DECLARED_SCHEMA_REFUSED` | A schema file a declared database names cannot be read or applied |
-| `DECLARED_ROLES_REFUSED` | A role a declared auth database lists cannot be created or converged |
+| `DECLARED_DATABASES_REFUSED` | The declaration in `Aouda:Databases` contradicts itself or the catalog: a kind that differs from the existing database's, an `AuthDatabase` that does not exist and is not declared, a database that is registered and does not open |
+| `DECLARED_SCHEMA_REFUSED` | A schema file a declared database names is invalid, or the server refuses it as a whole (for example a change to a partition key) |
+| `DECLARED_ROLES_REFUSED` | A role a declared auth database lists is invalid (an unknown action, a grant the role may not hold) |
 | `DATA_DIRECTORY_FORMAT_REFUSED` | The data directory was written in another format. Its first line is `DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<p>`, the prose follows, then the second line above. See [Upgrading](../guides/upgrading.md) |
 
 The unit names `78` in `RestartPreventExitStatus=`, so a refused start goes to `failed` at once instead of being restarted five times;
 `journalctl -u aouda` shows the two lines. Fix the setting, then `systemctl reset-failed aouda` and `systemctl start aouda`. Any other
-failed start (a port already bound, a disk error) exits non-zero with something other than `78`, and the unit restarts it. A unit
+failed start (a port already bound, a file that cannot be read, a disk error) exits non-zero with something other than `78`, and the
+unit restarts it, up to five times in 300 s. A unit
 written by an earlier `aouda service install` lacks the line: re-run the install, or add `RestartPreventExitStatus=78` under
 `[Service]` and `systemctl daemon-reload`.
 

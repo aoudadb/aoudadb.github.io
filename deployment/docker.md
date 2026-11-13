@@ -198,7 +198,7 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
 
 ## A container that keeps restarting
 
-(**BL-1461, next train**) A start refused for its configuration (a bad key declaration, a declared database that cannot be linked,
+(**BL-1461, next train**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase` does not exist,
 no first admin under `RequireFirstAdmin`, a data directory in another format) exits with status **78** and prints two lines on
 standard error, the first `<CODE>: <message>` naming the setting. The codes and the exact lines are in
 [the exit status table](linux.md#when-the-start-is-refused).
