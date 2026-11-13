@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **A restart of a declared database with materialized queries no longer reports `schema_drift` (aouda BL-1468, next train).** On 0.13.0 the start-time apply read each materialized query's in-flight build table (`__mqbuild_<query>_<id>`, created by the rebuilds a restart runs in the background) as a table the schema file does not declare: `/ready` answered `503` `schema_drift`, or, with `SchemaAllowDestructive: true`, the apply dropped those tables and the affected queries stayed in `Error` until a `:refresh`. These tables are now in no schema export, diff, apply or table list, and a schema file may not declare a table whose name starts with `__mqbuild_`. See [Declared databases](guides/declared-databases.md#the-order-a-start-follows). If you set `SchemaAllowDestructive: true` only for this, set it back.
+
 ## 0.13.0 — 2026-11-12
 
 Server **0.13.0** / `@aouda/client` **0.13.0** / `Aouda.Client` **0.13.0**. Studio pin follows npm.

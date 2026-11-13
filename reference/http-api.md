@@ -2232,7 +2232,7 @@ List all tables with statistics.
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables) |
+| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables). A materialized query's build table (`__mqbuild_<query>_<id>`, present while it rebuilds) is never listed, with either value (**BL-1468, next train**) |
 
 **Response:**
 

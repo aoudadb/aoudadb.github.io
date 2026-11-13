@@ -186,7 +186,16 @@ there is no `/ready` to ask):
 6. **Configured key rows**, in their auth databases.
 7. The server is marked ready.
 
-Re-running a converged start is a no-op: the schema diff is empty and nothing is written. Deleting a declared database through
+Re-running a converged start is a no-op: the schema diff is empty and nothing is written. The diff compares the file with the
+database's tables as `aouda schema export` shows them, which never includes the engine's own scratch tables: a materialized
+query's build table, `__mqbuild_<query>_<id>`, which exists while the query rebuilds. A restart rebuilds, in the background and
+while step 4 runs, every materialized query whose result it cannot restore exactly (after an unclean stop, for example), so
+those tables are routinely there; they are not drift, and the apply neither reports nor drops them (**BL-1468, next train**). On
+0.13.0 it did: `/ready` answered `503` `schema_drift` with one `refused: DropTable __mqbuild_…: Destructive change requires
+AllowDestructive: true` per query, and with `SchemaAllowDestructive: true` it dropped them under the running rebuilds, which left
+each of those queries in `Error` (its query answers `400`, not ready) until a `:refresh`. No data was lost either way. Do not set
+`SchemaAllowDestructive` to get past it. Table names starting with `__mqbuild_` are reserved: a schema file that declares one is
+refused by `aouda schema check` and fails the start (**BL-1468, next train**). Deleting a declared database through
 the API is undone by the next start, which creates it again, empty. A database you remove from the file is left alone; a
 declaration cannot say "must not exist".
 
