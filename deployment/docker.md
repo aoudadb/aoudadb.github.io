@@ -149,8 +149,8 @@ service starts once the server can serve it. That is what the repository's `dock
 must start while the server is still in setup mode (one that creates the first admin) uses `condition: service_started` and polls
 `/startup` itself.
 
-⚠️ **A container with nothing declared is `unhealthy` until it has a first admin.** A server with no admin and no declared server
-key is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since
+⚠️ **A new container with nothing declared is `unhealthy` until it has a first admin.** A server whose data volume has never been
+set up, with no declared server key or first admin, is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since
 0.11.0, BL-1393). That is the probe telling the truth, not a fault. `/health` and `/startup` answer `200` meanwhile (**BL-1462,
 next train**). Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for setup
 too.
@@ -160,7 +160,7 @@ To see why, read the body from outside the container: `curl -s http://localhost:
 ### Setup mode only when nothing is declared
 
 (**BL-1462, next train**) Declare how the server is operated and it starts ready. Setup mode, the interactive first run, exists
-only for a server that declares none of these and has no admin in its data volume:
+only for a data volume that has **never been set up** (no server auth database) and a server that declares none of these:
 
 | You declare | What happens at start |
 |---|---|
@@ -168,6 +168,8 @@ only for a server that declares none of these and has no admin in its data volum
 | A first admin: `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD` (or the systemd credential `aouda-admin-password`) | The admin is created once; no setup mode. An email with no password is listed by `/ready` as `root_user_unusable` |
 | `AOUDA_DEV_ADMIN=true` | Development and tests only: a throwaway admin and server key, printed once. See [Development admin](../guides/development-admin.md) |
 | none of them, on a new volume | **Setup mode**: `/startup` 200, `/ready` 503 `setup_required`, every other route `503 SETUP_REQUIRED` off the server's host |
+| none of them, on a volume set up before that still has a user or an active server key (minted or once declared) | Starts normally, operated by them. **Never setup mode again**: a set-up server back in setup mode could be claimed by any loopback caller |
+| none of them, on a volume set up before that has no user and no active server key (a restore, every key revoked) | **The start is refused**: `SERVER_HAS_NO_OPERATOR: this data directory has been set up before ...`, naming the ways out (declare a server key, set `RootUser`, or `--dev-admin` for development). Declare one and restart |
 | none of them, on a volume that already holds an admin | Starts normally |
 
 Before this, a declared server key did **not** end setup mode: it was inert until a human created an admin, so a fully
@@ -201,20 +203,24 @@ ignored.
 container:
 
 ```bash
-docker exec aouda wget -qO- --header 'Content-Type: application/json' \
-  --post-data '{"email":"admin@example.com","password":"<something long>"}' \
-  http://localhost:5000/api/auth/setup
+printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
+  docker exec -i aouda wget -qO- --header 'Content-Type: application/json' \
+    --post-file=/dev/stdin http://localhost:5000/api/auth/setup
 ```
 
+The password goes on standard input, never on a command line (a command line is readable in `/proc/<pid>/cmdline` and kept by
+shell history); `printf` is a shell builtin, so it appears in no process's arguments. Escape a `"` or `\` in the password for
+JSON.
+
 The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
-else missing). Studio's setup page does the same when Studio reaches the server from its own host.
+else missing).
 
 ⚠️ **`aouda create-admin` refuses while the server runs** (**BL-1462, next train**). The server holds its data directory (an
 exclusive lock on `/data/Server/aouda.lock`), and `create-admin` opens the directory itself, so next to a running server it exits
 `1` with:
 
 ```
-The data directory '/data' is in use by another Aouda process (it holds Server/aouda.lock). Two processes on one data directory are not safe, so nothing was opened. To create the first admin on a running server in setup mode, call POST /api/auth/setup from the server's own host (or use Studio's setup page there); otherwise stop the server and run this command again.
+The data directory '/data' is in use by another Aouda process (it holds Server/aouda.lock). Two processes on one data directory are not safe, so nothing was opened. To create the first admin on a running server in setup mode, call POST /api/auth/setup from the server's own host; otherwise stop the server and run this command again.
 ```
 
 Before, it succeeded: a second process wrote to the live data directory, and the running server stayed in setup mode until a

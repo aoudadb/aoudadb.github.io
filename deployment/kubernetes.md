@@ -36,30 +36,37 @@ kubectl get pods,svc -n aouda
 |---|---|---|
 | `startupProbe` | `/startup` | The start sequence has finished: databases open, auth, declared schema files, roles, grants and keys. Setup mode included |
 | `livenessProbe` | `/health` | Always, while the process answers |
-| `readinessProbe` | `/ready` | The pod can serve application traffic; `503` with every reason otherwise, `draining` once the pod is stopping |
+| `readinessProbe` | `/ready` | The pod can serve application traffic; `503` with every reason otherwise |
 
 `probes.startup.failureThreshold` × `probes.startup.periodSeconds` (default 30 × 10 s) must cover WAL recovery **plus** any
-start-time schema apply; raise it for a large declared schema. Before this, `/startup` answered `503` for as long as the pod was in
+start-time schema apply; raise it for a large declared schema. The port is open for the whole start, so the probes see it
+(`/startup` 503, `/ready` with `not_initialized`, `server_starting`, `schema_applying` and its `progress`). Before this, `/startup` answered `503` for as long as the pod was in
 setup mode, so Kubernetes restarted a pod that had finished starting every five minutes, for ever.
 
 **Declare a server key and there is no setup mode.** The pod starts ready, operated through the key, with no human admin:
 
 ```bash
-kubectl create secret generic aouda-server-key -n aouda \
-  --from-literal=server-key="mk_srv_$(openssl rand -hex 32)"
+printf 'mk_srv_%s' "$(openssl rand -hex 32)" |
+  kubectl create secret generic aouda-server-key -n aouda --from-file=server-key=/dev/stdin
 helm upgrade --install aouda ./charts/aouda-cluster --namespace aouda \
   --set auth.serverKeySecret.name=aouda-server-key
 ```
 
-(`auth.serverKeySecret.key` defaults to `server-key`; the chart passes it as `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`.) With no key
-declared, a pod with no admin is in setup mode: `/startup` is `200`, `/ready` is `503 setup_required`, and the pod stays NotReady.
+(`auth.serverKeySecret.key` defaults to `server-key`; the chart passes it as `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`. The key reaches
+kubectl on standard input, not on its command line.) ⚠️ With `replicaCount` above 1 every replica gets the key, and each creates
+its own server auth database at its first start, before replication assigns it a role: that is aouda **BL-1396** (startup writes on
+a replicated node), not handled by this chart yet.
+
+With no key declared, a pod whose volume has never been set up is in setup mode: `/startup` is `200`, `/ready` is `503 setup_required`, and the pod stays NotReady.
 Create the first admin over a port-forward, which reaches the pod as loopback:
 
 ```bash
 kubectl port-forward -n aouda pod/aouda-0 5000:5000 &
-curl -s -X POST http://localhost:5000/api/auth/setup -H 'Content-Type: application/json' \
-  -d '{"email":"admin@example.com","password":"<something long>"}'
+printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
+  curl -s -X POST http://localhost:5000/api/auth/setup -H 'Content-Type: application/json' --data-binary @-
 ```
+
+The password goes on standard input, never on curl's command line.
 
 `kubectl exec ... aouda create-admin` refuses while the server runs in the pod: the server holds the data directory.
 

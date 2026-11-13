@@ -1466,7 +1466,10 @@ Auth state is stored in an internal database called `_serverauth`. This database
 
 When the server starts with no admin accounts **and nothing declared**, it enters **setup mode**. In setup mode, only the bootstrap endpoint is available, and only from localhost.
 
-(**BL-1462, next train**) Setup mode exists only when nothing is declared. A declared server key
+(**BL-1462, next train**) Setup mode exists only for a data directory that has **never been set up** (no server auth database)
+and nothing is declared. Once set up, a server never re-enters it: with no user, an active server key (minted or once
+declared) operates it, and with no user, no active key and nothing declared the start is refused (`SERVER_HAS_NO_OPERATOR`,
+naming the ways out). A declared server key
 (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the systemd credential `aouda-server-key`, or a `server_admin` entry in the
 identities file) means no setup mode: the server auth database is created with no user and the key operates the server from
 the first start, with no human admin. A declared `Aouda:Auth:RootUser` creates the first admin at start (Option B below). Setup

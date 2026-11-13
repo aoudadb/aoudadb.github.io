@@ -798,8 +798,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable. (**BL-944, 0.4.0**) Also the answer to a refusal no other code names: a request the server refused for capacity with no more specific code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `WRITE_CONFLICT`) is `503 SERVICE_UNAVAILABLE` with `Retry-After: 10`, never a `500` — nothing was applied; retry after `Retry-After` |
-| `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this) |
-| `SETUP_REQUIRED` | 503 | The server has no admin yet and nothing declared (no server key, no `RootUser`), and is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, next train**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
+| `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log, then the auth bootstrap, the declared schema files, roles, keys and replication) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this). (**BL-1462, next train**) The port is open for the whole start, and this answers every caller but the health probes, loopback included |
+| `SETUP_REQUIRED` | 503 | The server's data directory has never been set up and nothing is declared (no server key, no `RootUser`), so it is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, next train**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice |
@@ -3585,6 +3585,11 @@ Service information.
 (**BL-1462, next train**) Three probes, each answering one question, to **every caller** (no credential, loopback or not) in
 every state the process can answer in. None of them is gated by setup mode.
 
+**The port opens before the start sequence runs.** The listener comes up first, and WAL replay, the auth bootstrap, the declared
+schema files, roles, keys and replication run behind it, so the probes can watch the start. Every other request, loopback
+included, is `503 SERVER_STARTING` with `Retry-After: 5` until the start has finished. (Before, the port stayed closed until the
+whole start was over, so a caller saw connection refused and then the final state.)
+
 | Probe | Question | Use it for |
 |---|---|---|
 | `GET /health` | Is the process alive? | Kubernetes `livenessProbe`. Never a deploy gate. |
@@ -3597,10 +3602,10 @@ What each answers, by state:
 |---|---|---|---|
 | Opening databases (WAL replay) | `200` `{"status":"healthy"}` | `503` `{"status":"starting","reason":"The engine has not finished opening its databases."}` | `503`, `not_initialized` |
 | Start sequence running (auth, declared schema files, roles, grants, keys) | `200` | `503` `{"status":"starting","reason":"The start sequence has not finished ..."}` | `503`, `server_starting`; during the schema apply also `schema_applying` (with `progress`) and `schema_pending` |
-| Setup mode (nothing declared, no admin) | `200` | `200` `{"status":"started","reason":null}` | `503`, `setup_required` |
+| Setup mode (a data directory never set up, nothing declared) | `200` | `200` `{"status":"started","reason":null}` | `503`, `setup_required` |
 | Serving | `200` | `200` | `200` `{"ready":true,"reasons":[]}` |
 | Serving, a critical component unhealthy | `200` | `200` | `503`, `component_unhealthy` |
-| Shutting down | `200` | `200` | `503`, `draining` only |
+| Shutting down | The listener closes first: new connections are refused and requests already in flight finish. There is no "draining" answer. | | |
 
 **Docker Compose.** `depends_on: condition: service_healthy` waits for the dependency's healthcheck, so that healthcheck must
 be `/ready`: the dependent service then starts once the server can serve it (started, not in setup mode, declared schemas
@@ -3661,8 +3666,7 @@ During a start-time schema apply (**BL-1462, next train**):
 | `not_initialized` | The engine has not finished opening its databases. | none |
 | `server_starting` | The auth bootstrap has not completed, so the server is not accepting requests yet. | none |
 | `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
-| `draining` | (**BL-1462, next train**) The server is shutting down: it finishes the requests in flight and takes no new ones. Listed **alone**: nothing else is evaluated on a server that is going away. | none |
-| `setup_required` | The server is in setup mode: nothing is declared (no server key, no `Aouda:Auth:RootUser`, no dev admin) and no admin exists. A declared server key is not setup mode (**BL-1462, next train**). | none |
+| `setup_required` | The server is in setup mode: its data directory has never been set up (no server auth database), nothing is declared (no server key, no `Aouda:Auth:RootUser`, no dev admin), and no admin exists. A declared server key is not setup mode, and a data directory that has been set up never re-enters it (**BL-1462, next train**). | none |
 | `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. Also listed when `Aouda:Auth:RootUser:Email` is set and no password is (neither `Password` nor the systemd credential `aouda-admin-password`) (**BL-1462, next train**). | none |
 | `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
 | `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, or quarantined by something other than an operator). | the database |

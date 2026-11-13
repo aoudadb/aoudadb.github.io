@@ -77,8 +77,8 @@ refused next to `AOUDA_ROOT_PASSWORD`. See [Docker](../deployment/docker.md#comp
 
 (**BL-1462, next train**) It made a server with no admin, no root password and no dev admin **fail the start** instead of waiting in
 setup mode; `docker-compose.yml` set it, so under `restart: unless-stopped` a forgotten password was a restart loop. It is deleted, with
-no replacement: setup mode now exists only when nothing is declared, so a server that declares a server key needs no admin at all, and a
-server that declares nothing waits in setup mode with `/ready` answering `503 setup_required` and naming the ways out. A leftover
+no replacement: setup mode now exists only for a data directory never set up with nothing declared, so a server that declares a server
+key needs no admin at all, and a new server that declares nothing waits in setup mode with `/ready` answering `503 setup_required` and naming the ways out. A leftover
 `AOUDA_AUTH__REQUIREFIRSTADMIN` is ignored. See [Docker](../deployment/docker.md#setup-mode-only-when-nothing-is-declared).
 
 ## See also
