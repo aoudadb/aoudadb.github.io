@@ -316,7 +316,7 @@ time slice ([2.11e](#window-expiry)).
 (**BL-1227, 0.9.0**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
 lifted past each half by its own grant **on the source table**: `all-partitions` lifts the source's PLS and `all-rows` its RLS, each
 alone. A grant that names the result table lifts nothing. A holder of one grant is still restricted by the other half — for
-example `all-partitions` alone reads every partition of a result over an `auth-db-pls` source with an RLS resolver, but only the rows
+example `all-partitions` alone reads every partition of a result over an `auth-db-entitlement` source with an RLS resolver, but only the rows
 the resolver allows — and a result over a `jwt-claim` source is read whole by a holder of `all-partitions`. Each use of a grant on a
 result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
 See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).

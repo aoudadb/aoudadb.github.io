@@ -14,7 +14,7 @@ repository's `docs/dev/Upgrade-Notes.md`.
 To keep the data across a bump: **export it with the build that wrote it, delete the data directory, start the new build fresh, load the export.**
 
 Status: the refusal code described here is shipped in **0.12.0** (**BL-1420**). The format version is **17** in 0.11.0 and 0.12.0, so a 0.11.0
-directory starts on 0.12.0 unchanged.
+directory starts on 0.12.0 unchanged. Server **0.13.0** writes format **18** (**BL-1418, 0.13.0**) and refuses a 17 directory: see [Upgrading to entitlements](#upgrading-to-entitlements-bl-1418-0130).
 
 ## Detecting a refusal: `DATA_DIRECTORY_FORMAT_REFUSED`
 
@@ -59,11 +59,44 @@ The last column is the first line a server that **reads that version and carries
 | 14 | 0.8.0 | one encoding for a partition key | `found=13 expected=14` |
 | 15 | development builds only | allowance on `_refresh_tokens` and `_authorization_codes` | `found=14 expected=15` |
 | 16 | 0.9.x and 0.10.0 | bulk-load commit header carries the beginning principal | `found=15 expected=16` |
-| 17 | 0.11.0 (and 0.12.0) | `source` on `_api_keys` and `_user_partition_grants` | `DATA_DIRECTORY_FORMAT_REFUSED: found=16 expected=17 path=<root file>` |
+| 17 | 0.11.0 (and 0.12.0) | `source` on `_api_keys` and the per-user permission table | `DATA_DIRECTORY_FORMAT_REFUSED: found=16 expected=17 path=<root file>` |
+| 18 | 0.13.0 (**BL-1418**) | the per-user permission table is `_user_entitlements` (`entitlement_key`, `level`); RLS resolver value source `Entitlement` | `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<root file>` |
 
 In the shortened rows the line is the same as in the first two, with `path=<root file>`. Formats 1 to 5 (0.2.x and earlier) are not listed: a build
 with the code refuses a root declaring 2 to 5 under the same line with that `found`, and the format-1 flat catalog and an interrupted format-1
 migration marker are refused by name without a code. Formats 8, 9, 11, 12 and 15 were only ever written by development builds.
+
+## Upgrading to entitlements (**BL-1418, 0.13.0**)
+
+Server 0.13.0 renames the per-user permission rows `(user, dimension, key, level)` that an `auth-db-entitlement` table checks. This is a clean cut
+(pre-1.0): **no alias, no migration, no reader of the old shapes.** One wipe, then edit your schema files, scripts and clients.
+
+**What an old data directory gets.** Format 17 (written by 0.11.0 and 0.12.0) is refused whole, every database in the directory, with the first line
+
+```text
+DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>
+```
+
+Export what you need with the build that wrote it, delete the data directory, start the new build, load the export, and create the entitlements again.
+A replica refuses a primary of the other format the same way.
+
+| What | Before | Now | What the old form gets |
+|---|---|---|---|
+| Table `authMode` | `auth-db-pls` | `auth-db-entitlement` (`jwt-claim` and `auth-db-rls` unchanged) | `400 Invalid authMode. Valid values: jwt-claim, auth-db-entitlement, auth-db-rls.`; a schema file fails `aouda schema check`, `schema apply` and a declared-schema start with `Unsupported authMode 'auth-db-pls'. Valid values: jwt-claim, auth-db-entitlement, auth-db-rls.` |
+| Create | `POST /api/databases/{db}/auth/admin/users/{id}/partition-grants` | `POST …/users/{id}/entitlements` | `404` |
+| List | `GET …/partition-grants[?dimension=]` returning `{ "grants": [...] }` | `GET …/entitlements[?dimension=]` returning `{ "entitlements": [...] }` | `404`; a client reading `grants` from the new route finds nothing |
+| Delete | `DELETE …/partition-grants/{grantId}` | `DELETE …/entitlements/{entitlementId}` | `404` |
+| Body and item fields | `partitionKey`, `accessLevel` | `key`, `level` (`dimension`, `grantedBy`, `validFrom`, `validTo`, `id`, `userId`, `createdAt` unchanged) | the old names are not read: `key` missing is `400 AUTH_GRANT_INVALID` |
+| Error codes | `AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` | `AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` (both `403`) | code that matches the old strings never fires. The `AUTH_PLS_TENANT_*`, `AUTH_PLS_WRITE_SCOPE_VIOLATION`, `AUTH_PLS_UNSUPPORTED_OR_SHAPE` and `AUTH_GRANT_*` codes are unchanged |
+| RLS resolver rule `valueSource` | `PartitionGrant` | `Entitlement` (`UserId`, `Literal`, `Claim` unchanged) | not a known source: an unknown source denies every row (fail closed) |
+| `policy inspect` test identity, and the identity fixture file | `grants[]` of `{ dimension, partitionKey, accessLevel }` | `entitlements[]` of `{ dimension, key, level }` | an old `grants` member is not read: the identity holds no entitlements and an entitlement table denies it |
+| Auth database storage | table `_user_partition_grants`, columns `partition_key`, `access_level` | table `_user_entitlements`, columns `entitlement_key`, `level` | refused by the format check above |
+| `@aouda/client` | `createPartitionGrant`, `listPartitionGrants`, `deletePartitionGrant`, `CreatePartitionGrantRequest`, `PartitionGrant`, `PartitionGrantsListResponse`, `authMode: 'auth-db-pls'` | `createEntitlement`, `listEntitlements`, `deleteEntitlement`, `CreateEntitlementRequest`, `Entitlement`, `EntitlementsListResponse`, `authMode: 'auth-db-entitlement'` (with the next `@aouda/client` release) | a client built against the old names fails loudly: `404` on the route, `400` on the mode |
+| `Aouda.Client` (.NET) | no typed wrapper | no typed wrapper (the public API names nothing from this list) | none |
+
+**Unchanged on purpose:** the role permission types `all-partitions` and `all-rows`, `permissionDimension`, `permissionColumn`, `partitionLevelSecurity`,
+`plsClaimBinding`, jwt-claim PLS and its `AUTH_PLS_TENANT_*` codes, a table's own `partitionKey` (storage), the `access-grants` endpoints and `Aouda:Adra:GrantCaps`.
+Roles live in the auth database, so after the wipe declare them again as before.
 
 ## What every release's notes carry
 

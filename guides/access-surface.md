@@ -67,8 +67,8 @@ Sibling of `aouda.schema.json` (or `--identities`). Schema `https://aouda.io/ide
       "email": "alice@test.local",
       "roles": ["db_reader"],
       "claims": { "tenant_id": "acme" },
-      "grants": [
-        { "dimension": "org", "partitionKey": "acme", "accessLevel": "read" }
+      "entitlements": [
+        { "dimension": "org", "key": "acme", "level": "read" }
       ],
       "accessGrants": [
         { "grant": "all-rows", "table": "Orders", "level": "read" }
@@ -85,7 +85,7 @@ Sibling of `aouda.schema.json` (or `--identities`). Schema `https://aouda.io/ide
 | `kind` | **Required.** `user` or `service_key`. |
 | `userId` | Optional UUID. Omitted → deterministic: SHA-256 of `"aouda.identity:" + name`, first 16 bytes as a GUID. A non-UUID value is `AUTH_IDENTITY_INVALID`. |
 | `claims` | String values only. |
-| `grants` | Each grant needs **all three** of `dimension`, `partitionKey`, `accessLevel` (`read` \| `write` \| `admin`). `partitionKey` is taken verbatim: `""` and keys with outer white space are partitions like any other (**BL-1192, 0.9.0**); leaving it out is invalid. |
+| `entitlements` | Each entitlement needs **all three** of `dimension`, `key`, `level` (`read` \| `write` \| `admin`). `key` is taken verbatim: `""` and keys with outer white space are partitions like any other (**BL-1192, 0.9.0**); leaving it out is invalid. |
 | `accessGrants` | Optional, `user` identities only. Each entry is `{ "grant", "table"?, "level" }`: `grant` is `all-partitions` or `all-rows`, `level` is `read` \| `write` \| `admin` and is required, and `table` names one table (leave it out for the whole database). It answers "what would a holder of this grant see?" before the role exists. A `service_key` identity refuses the field (`AUTH_IDENTITY_INVALID`): it already holds both grants by implication. A `user` identity whose `roles` include `db_admin` holds both grants on the database, as an admin user does. The `kind` decides what a fixture holds, never its claims. (**BL-1227, 0.9.0**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). |
 
 Cap: 32 identities (`ACCESS_SURFACE_TOO_MANY_IDENTITIES`). Invalid document → `AUTH_IDENTITY_INVALID`. Missing file is a **warning**, not a hard error: public-only (`mk_pub_*`) still runs.
@@ -231,7 +231,7 @@ Branch review renders widenings first (warning), then narrowings. Load `aouda.id
 | Missing identities: warning, still exit 1 | Public-only still caught `dataPlaneAccess` | Expected |
 | `npx @aouda/client schema diff --access` missing | Not shipped | Use `aouda schema diff --access` |
 | Identities in `aouda.schema.json` rejected | `additionalProperties: false` | Keep a sibling file |
-| `AUTH_IDENTITY_INVALID` on a file that looks right | `identities` written as an array, a grant missing `partitionKey` / `accessLevel`, or `accessGrants` on a `service_key` identity (or an entry missing `grant` or `level`) | It is an object keyed by name; grants need all three fields; a service key holds both access grants already |
+| `AUTH_IDENTITY_INVALID` on a file that looks right | `identities` written as an array, an entitlement missing `key` / `level`, or `accessGrants` on a `service_key` identity (or an entry missing `grant` or `level`) | It is an object keyed by name; entitlements need all three fields; a service key holds both access grants already |
 | `policy inspect` returns 404 | Called against the data-plane listener | Use the **admin** URL with a service key or admin JWT |
 | `policy inspect` answers the verdict but no `sample`, `sampleReason: "caller_not_granted"` (**BL-1227, 0.9.0**) | The calling credential does not hold `all-partitions` / `all-rows` for the table's secured halves, so it could not read those rows itself | Run it with a service key or a `db_admin` user's JWT, or have a role grant the caller the missing grant |
 

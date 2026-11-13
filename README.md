@@ -54,3 +54,7 @@ bundle exec jekyll build -d /tmp/aouda-site      # any directory outside the rep
 python3 scripts/check-anchors.py /tmp/aouda-site # exit 1 and one line per broken link
 python3 -m unittest discover -s scripts -p "test_*.py"
 ```
+
+A `(**BL-NNN, next train**)` marker must go once the work ships. `python3 scripts/check-next-train.py` fails on every marker whose BL id
+is already in a released section of the `aouda`, `aouda-client-ts` or `aouda-studio` changelog (sibling checkouts, their `origin/main`;
+see [dev/Release-And-Version-Bump.md](dev/Release-And-Version-Bump.md) section 2).

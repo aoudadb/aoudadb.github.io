@@ -16,11 +16,11 @@ Aouda supports three table-level authorization modes, each suited to a different
 
 ## 19.0 RBAC is a separate gate from PLS/RLS
 
-Everything else on this page — `jwt-claim`, `auth-db-pls`, `auth-db-rls` — decides **which rows** an already-authorized caller may see or write. It has nothing to do with whether the caller may invoke the artifact at all. That's a coarser, separate gate: **RBAC role membership, scoped per database**, and it is what actually authorizes named-query and named-mutation **execute**.
+Everything else on this page — `jwt-claim`, `auth-db-entitlement`, `auth-db-rls` — decides **which rows** an already-authorized caller may see or write. It has nothing to do with whether the caller may invoke the artifact at all. That's a coarser, separate gate: **RBAC role membership, scoped per database**, and it is what actually authorizes named-query and named-mutation **execute**.
 
 - A role assignment's `scope` is a database name (or `null`/`"*"` for all databases) — never a table, a named query, or a named mutation. See [Auth reference — Application Auth Admin Endpoints](reference.md#application-auth-admin-endpoints) for the wire shape (`{ "roleName": "db_reader", "scope": "mydb" }`).
 - Running a named query or named mutation is authorised by the caller's role carrying a **`named-query` / `named-mutation` `execute` permission** (**BL-1417, 0.12.0, breaking**): `{ "resourceType": "named-mutation", "resourceName": "insert_quote", "actions": "execute" }`. `actions` is exactly `execute` (no list, no other spelling, no default). `resourceName` is required: one artifact's exact name (ordinal: `insert_quote` does not admit `Insert_Quote`) or a lone `*` for every artifact of that kind (`named-query *` runs no mutation, `named-mutation *` runs no query). A pattern such as `insert_*` is refused (`AUTH_GRANT_INVALID`); the artifact need not exist yet. A table `read` / `write` **no longer runs an artifact**, and an `execute` row gives no access to the table API: a key that holds only `insert_quote` runs that mutation and is refused `POST …/tables/quotes/rows` with `403 INSUFFICIENT_PERMISSIONS`. `db_admin` (and so a `mk_svc_` service key) needs no row. A JWT `permissions` claim never answers an execute; the server reads the caller's roles. The rows are accepted by the roles API (application and server routes, create and patch) and by a declared role; the full shapes and refusals are in [a role permission](#a-role-permission).
-- `execute` lifts no security. The artifact reads and writes under the **caller's own** PLS, RLS and embargoes, and `dataPlaneAccess` still decides whether its table exists on the data plane. A caller holding `execute *` and no partition grant gets no rows (a query) or `403 AUTHORIZATION_DENIED` (a mutation). `execute *` is not an `all-partitions` or `all-rows` grant.
+- `execute` lifts no security. The artifact reads and writes under the **caller's own** PLS, RLS and embargoes, and `dataPlaneAccess` still decides whether its table exists on the data plane. A caller holding `execute *` and no entitlement gets no rows (a query) or `403 AUTHORIZATION_DENIED` (a mutation). `execute *` is not an `all-partitions` or `all-rows` grant.
 - On the [data-plane listener](../guides/direct-client-access.md), a caller without the row gets the masked `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND`, the same as an unknown name or an unsigned caller ([wire reference](../reference/http-api.md#error-codes)) — so a 404 on a name you know is right does not necessarily mean the name is wrong. On the admin listener it is `403 INSUFFICIENT_PERMISSIONS` (or `AUTHORIZATION_DENIED` for a caller with no roles on the database), with the artifact, not a table, in `details`: `requiredOperation=Execute, artifactKind=named-mutation, artifact=<name>`.
 
 | Caller | Result |
@@ -29,7 +29,7 @@ Everything else on this page — `jwt-claim`, `auth-db-pls`, `auth-db-rls` — d
 | Valid JWT, role carries `execute` on this artifact (or `*`) | 200 (PLS/RLS then apply to the caller's rows) |
 | Valid JWT, role carries only table `read,write,delete` | **Same 404** on the data plane, `403 INSUFFICIENT_PERMISSIONS` on the admin listener |
 
-If a call 404s and the name is right, check the caller's role for the `execute` row first, then its `db_roles` scope for that database. PLS/RLS denials that *do* pass the RBAC gate surface their own codes (`AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_RLS_INSERT_VIOLATION`, etc. — see [§19.3](#193-mode-1-jwt-claim-default) onward), not this masked 404.
+If a call 404s and the name is right, check the caller's role for the `execute` row first, then its `db_roles` scope for that database. PLS/RLS denials that *do* pass the RBAC gate surface their own codes (`AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_RLS_INSERT_VIOLATION`, etc. — see [§19.3](#193-mode-1-jwt-claim-default) onward), not this masked 404.
 
 **The built-in roles carry the rows** (`resourceName` `*`, `actions` `execute`; written when an auth database is created, and again at start for one that lacks them):
 
@@ -42,9 +42,9 @@ If a call 404s and the name is right, check the caller's role for the `execute` 
 
 **What an existing custom role gets (breaking).** Nothing. A custom role that ran a named artifact on its table right **must add rows**, e.g. `{ "resourceType": "named-query", "resourceName": "*", "actions": "execute" }` (and `named-mutation`); until it does, every call by it is refused as in the table above, and the server logs a Warning. There is no fallback to the table right and no flag to restore it. At start the server logs **one Warning per auth database** that names the custom roles which hold table `read` / `write` and no execute row; it reads `Auth database '<name>': <n> custom role(s) hold table read/write and no execute row, so they can no longer run a named query or named mutation`, then the roles. A key that only runs `insert_quote` should drop its table `write` in the same change. `/ready` is unchanged: a role without an execute row is a policy, not a fault.
 
-**What an existing built-in role gets.** In 0.12.0 an existing auth database gains the rows of the table above at its next start, whatever the role held before, and a system role whose execute row an operator removed by hand gets it back at the next start; to narrow, create a custom role. (**BL-1417 review, next train**) The next release changes this to *never widen on upgrade*: a built-in role that already exists gets `named-mutation *` only while it holds a table row on `*` whose actions list `write`, and `named-query *` only with a table row on `*` listing `read` (what the old rule asked of a named artifact), judged from its current rows. Table rights given table by table (`orders`) give nothing, because an execute row cannot say which artifacts: add rows by name. Only roles flagged as system are seeded, so a custom role named like a built-in never gains a row; a role the seeding creates gets its full set; and the start-up Warning also names built-in roles other than `db_admin` and `anonymous` that were left without an execute row. A node configured with `Aouda:Join` or `Aouda:ReplicaSet`, or running as a replica, skips the seeding.
+**What an existing built-in role gets.** In 0.12.0 an existing auth database gains the rows of the table above at its next start, whatever the role held before, and a system role whose execute row an operator removed by hand gets it back at the next start; to narrow, create a custom role. (**BL-1417 review, 0.13.0**) Since 0.13.0 the rule is *never widen on upgrade*: a built-in role that already exists gets `named-mutation *` only while it holds a table row on `*` whose actions list `write`, and `named-query *` only with a table row on `*` listing `read` (what the old rule asked of a named artifact), judged from its current rows. Table rights given table by table (`orders`) give nothing, because an execute row cannot say which artifacts: add rows by name. Only roles flagged as system are seeded, so a custom role named like a built-in never gains a row; a role the seeding creates gets its full set; and the start-up Warning also names built-in roles other than `db_admin` and `anonymous` that were left without an execute row. A node configured with `Aouda:Join` or `Aouda:ReplicaSet`, or running as a replica, skips the seeding.
 
-**Batch and subscribe.** `POST …/named-queries/batch` needs an authenticated caller and nothing more; each slot is authorised for its own `named-query` row, and a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND` on both listeners. That is HTTP 200 with a masked slot, where a caller holding only table rights used to get a route-level 403: a client that read "403 on the batch" as "no access" must read the slots. A named-query subscribe asks the same question, and the re-check when permissions change mid-session asks it again: a role that loses the row ends the subscription with `PERMISSION_REVOKED`. (**BL-1417 review, next train**) A batch in which no slot is admitted answers `{ "results": [ …NAMED_QUERY_NOT_FOUND slots… ], "token": "" }` instead of carrying a live consistency token; a slot that names a *mutation* is `NAMED_QUERY_BATCH_MUTATION` only to a caller that may execute that mutation (to anyone else it is an unknown slot); and a named-query subscribe to a mutation's name is `NAMED_QUERY_NOT_FOUND` unless the caller may execute that mutation.
+**Batch and subscribe.** `POST …/named-queries/batch` needs an authenticated caller and nothing more; each slot is authorised for its own `named-query` row, and a slot the caller may not execute is that slot's `NAMED_QUERY_NOT_FOUND` on both listeners. That is HTTP 200 with a masked slot, where a caller holding only table rights used to get a route-level 403: a client that read "403 on the batch" as "no access" must read the slots. A named-query subscribe asks the same question, and the re-check when permissions change mid-session asks it again: a role that loses the row ends the subscription with `PERMISSION_REVOKED`. (**BL-1417 review, 0.13.0**) A batch in which no slot is admitted answers `{ "results": [ …NAMED_QUERY_NOT_FOUND slots… ], "token": "" }` instead of carrying a live consistency token; a slot that names a *mutation* is `NAMED_QUERY_BATCH_MUTATION` only to a caller that may execute that mutation (to anyone else it is an unknown slot); and a named-query subscribe to a mutation's name is `NAMED_QUERY_NOT_FOUND` unless the caller may execute that mutation.
 
 ---
 
@@ -53,15 +53,15 @@ If a call 404s and the name is right, check the caller's role for the `execute` 
 | Mode | Partition routing | Row filtering | JWT requires | Auth DB queried |
 |------|------------------|---------------|:---:|:---:|
 | `jwt-claim` | Single partition from the bound claim (`plsClaimBinding`, default `tenant_id`) | No row filtering | Bound claim, or `sub` when binding is `subject` | No |
-| `auth-db-pls` | All partitions granted in auth DB for the configured dimension | No row filtering (unless combined with RLS) | Identity only | Session cache (hot path) |
+| `auth-db-entitlement` | All partitions granted in auth DB for the configured dimension | No row filtering (unless combined with RLS) | Identity only | Session cache (hot path) |
 | `auth-db-rls` | No partition routing (uses existing PLS or jwt-claim) | Predicate from auth DB resolver injected as WHERE clause | Identity only | Session cache (hot path) |
 
-Both `auth-db-pls` and `auth-db-rls` use a **session cache** as the hot path: resolved permissions are cached in the session record at sign-in. The vast majority of requests read from the session cache (~0.001ms), not the auth DB (~0.01ms). The auth DB itself is always memory-first — even the cold path is sub-millisecond.
+Both `auth-db-entitlement` and `auth-db-rls` use a **session cache** as the hot path: resolved permissions are cached in the session record at sign-in. The vast majority of requests read from the session cache (~0.001ms), not the auth DB (~0.01ms). The auth DB itself is always memory-first — even the cold path is sub-millisecond.
 
-**No resolved permissions means no access** (**BL-950, 0.3.0**). An `auth-db-pls` or `auth-db-rls` table is enforced
+**No resolved permissions means no access** (**BL-950, 0.3.0**). An `auth-db-entitlement` or `auth-db-rls` table is enforced
 from the caller's resolved permissions, and a request that has none is denied, never let through: an anonymous caller, a
 database with **no linked auth database**, and a permission lookup that failed all read no row of such a table and may
-write none (a PLS table answers `403 AUTH_PLS_GRANT_NOT_FOUND`; an RLS table answers an empty result and refuses writes).
+write none (a PLS table answers `403 AUTH_ENTITLEMENT_NOT_FOUND`; an RLS table answers an empty result and refuses writes).
 That holds over HTTP, WebSocket and long-poll, and for graph and vector queries. Only a credential that holds the grant that
 lifts the restriction is let through ([below](#visibility-is-granted-all-partitions-and-all-rows)). So link the auth database
 before you give a table an `auth-db-*` mode: unlinking one makes its tables unreadable to everyone but a holder of the grants, not open.
@@ -79,6 +79,8 @@ holds**, not by its key prefix, a role's name or a request flag. There are two g
 |---|---|---|
 | `all-partitions` | PLS. The holder gets no partition predicate and no fan-out rewrite: it reads every partition of the table, including partitions created later, and (at `write`) writes into any partition. | RLS: a row-level resolver still filters the holder's rows. |
 | `all-rows` | RLS. The holder gets no resolver predicate and no write check from the resolver. | PLS: the holder is still routed to its own partitions. |
+
+**Words: "partition" and "entitlement".** The "partition" in `all-partitions` is a *value of the column that partition-level security secures* — the tenant key on a `jwt-claim` table, an entitlement's `key` on an `auth-db-entitlement` table. It is **not** the table's storage partitioning (`partitionKey`), which a table may lack entirely. An **entitlement** is what an `auth-db-entitlement` table checks that value against: one row `(user, dimension, key, level)` in the auth database ([§19.8](#198-admin-api-entitlements)). `all-partitions` lifts PLS in every mode (`jwt-claim`, `auth-db-entitlement`, edge and vector tables); a holder of `all-partitions` and of entitlements is allowed by the union of the two. `all-rows` lifts RLS. Both keep their names (**BL-1418, 0.13.0**).
 
 A grant has a **scope** and a **level**:
 
@@ -100,14 +102,14 @@ implication; nothing is stored. Every other credential holds only what a role gi
 | Scoped service key (`mk_scp_…`, kind `scoped_service`) (**BL-1239, 0.9.0**) | only the roles it was minted with, on that database | A backend key for one database that must not see every row. It does not receive the implied pair. `X-User-Token` is ignored, and the data-plane opt-in applies. Minted with a server key; `db_admin` cannot be one of its roles. It never administers the database: the admin routes are `403` even when one of its roles carries `admin`. |
 | A user with the `db_admin` role on the database | both, on that database | Read from the user's **role assignment** (its scope is that database, `*`, or none). A token that merely *claims* `db_admin` in `db_roles` holds nothing, and removing the assignment ends the grants on the next request. This includes a **server** user: the bootstrapped server admin user holds `db_admin` with no scope, so its token holds both grants on **every** database (what Studio, signed in as that user, sees). |
 | A user with the `db_operator` role (**BL-1240, 0.9.0**) | nothing | A seeded system role. It administers the database — tables, users, roles, keys — and holds no implied pair. A privileged operation is `403 AUTHORIZATION_DENIED` and needs `db_admin`. |
-| Any key + `X-User-Token` | what the **user** holds | The request runs as the user: a service key presenting a plain user's token gets that user's partition grants, not its own implied ones ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)). |
+| Any key + `X-User-Token` | what the **user** holds | The request runs as the user: a service key presenting a plain user's token gets that user's entitlements, not its own implied ones ([client integration §13](client-integration.md#13-backend-user-context-x-user-token)). |
 | Custom key linked to a user | what that user holds | The key acts as its user. |
 | Server API key (`mk_srv_…`, kind `server_admin`) | nothing | It administers the server (databases, backups, `/api/auth/admin/*`); it is not a data credential. Use a service key, or send the user's token. It works on a linked application database's WebSocket and long-poll connect as it does over HTTP, and still holds no grant there. |
 | Auth-admin key (`mk_adm_…`) | nothing | It manages users and roles of one auth database. It may *read* a user's effective grants ([below](#see-what-a-user-holds)). Assigning `db_admin`, or a role that carries an all-* grant, is `403 AUTHORIZATION_DENIED` and the user's assignments stay; a user JWT can still assign them. A grant added later to a role it already assigned still reaches those users (**BL-1299, 0.9.0**). |
 | Custom key, not linked to a user | nothing | Even if it carries the `db_admin` role: a role on a key lets it create tables and manage the database, it does not widen what rows it reads. |
 | `mk_anon_…`, `mk_pub_…`, no credential | nothing | |
 
-**Restricted admin (**BL-1240, 0.9.0**).** A full admin of a database is a caller whose grants there include `implied:db_admin` or `implied:service_key`, or a server key (`mk_srv_`). Everyone else who can already call the admin routes is a restricted admin: `db_operator`, a custom role whose `*` row includes `admin`, a custom key holding `db_admin`, and an `mk_adm_` key. A restricted admin is refused `403 AUTHORIZATION_DENIED` — the message names the operation and says it needs `db_admin` — when it would assign `db_admin` or an all-* grant, change or delete a role that carries one, rename a role to or from `db_admin`, write an RLS resolver, regenerate keys, mint a key that holds `db_admin`, `db_operator` or an all-* grant or that is linked to a user who holds them, or change such a user (including its own roles, claims and partition grants). A user holds them when it does on any database its auth database governs, not only the one in the route. A description-only change of a grant-carrying role is allowed. Signup still cannot be set to `db_admin` or a grant-carrying role (`400`), including by a full admin. An [embargo row](#198b-embargo-a-delayed-view-of-a-table-bl-418-090) is privileged the same way (**BL-418, 0.9.0**): only a full admin may store, change or remove one, or rename a role that carries one.
+**Restricted admin (**BL-1240, 0.9.0**).** A full admin of a database is a caller whose grants there include `implied:db_admin` or `implied:service_key`, or a server key (`mk_srv_`). Everyone else who can already call the admin routes is a restricted admin: `db_operator`, a custom role whose `*` row includes `admin`, a custom key holding `db_admin`, and an `mk_adm_` key. A restricted admin is refused `403 AUTHORIZATION_DENIED` — the message names the operation and says it needs `db_admin` — when it would assign `db_admin` or an all-* grant, change or delete a role that carries one, rename a role to or from `db_admin`, write an RLS resolver, regenerate keys, mint a key that holds `db_admin`, `db_operator` or an all-* grant or that is linked to a user who holds them, or change such a user (including its own roles, claims and entitlements). A user holds them when it does on any database its auth database governs, not only the one in the route. A description-only change of a grant-carrying role is allowed. Signup still cannot be set to `db_admin` or a grant-carrying role (`400`), including by a full admin. An [embargo row](#198b-embargo-a-delayed-view-of-a-table-bl-418-090) is privileged the same way (**BL-418, 0.9.0**): only a full admin may store, change or remove one, or rename a role that carries one.
 
 **Give the grants to anyone else with a role.** A grant is a role permission with `resourceType` `all-partitions` or `all-rows`; the
 holder is any user the role is assigned to (the assignment's `scope` limits the database). Roles are the only carrier: there is no
@@ -135,9 +137,9 @@ database, each with its `source` (`implied:db_admin` or `role:<name>`) — [§19
 
 **The flag.** `crossPartitionAccess` is not a grant. It waives one thing: the `PARTITION_FILTER_REQUIRED` guard that stops an
 unfiltered scan of a partitioned table. It does so for every credential on every surface (HTTP queries, named queries, WebSocket and
-long-poll subscribe, both SDKs) and never widens what the credential sees: a user with partition grants and the flag reads exactly its
+long-poll subscribe, both SDKs) and never widens what the credential sees: a user with entitlements and the flag reads exactly its
 grants, a `jwt-claim` user reads its own tenant, and a credential that holds no grant at all on a PLS table (no `all-partitions`, no
-partition grant, no tenant claim) is still refused. It is ignored on the data-plane listener. See
+entitlement, no tenant claim) is still refused. It is ignored on the data-plane listener. See
 [§19.7](#197-cross-partition-fan-out-queries) and [Partitioning](../guides/partitioning.md#partition-filter-rule-p40).
 
 **Every use of a grant is audited.** A request, bulk-load job, subscription or write stream whose outcome a grant decided writes one
@@ -163,8 +165,8 @@ still lets it create tables, apply schema and manage the database), and then onl
 
 | Table | A credential holding neither grant, with no user |
 |---|---|
-| `auth-db-rls` | Only rows the table's RLS rule shows to a request with no user — with `UserId` or `PartitionGrant` rules, **none**. Writes are refused. |
-| `auth-db-pls` | `403 AUTH_PLS_GRANT_NOT_FOUND`, with or without `crossPartitionAccess`. |
+| `auth-db-rls` | Only rows the table's RLS rule shows to a request with no user — with `UserId` or `Entitlement` rules, **none**. Writes are refused. |
+| `auth-db-entitlement` | `403 AUTH_ENTITLEMENT_NOT_FOUND`, with or without `crossPartitionAccess`. |
 | `jwt-claim` | `403` — the credential carries no partition claim, with or without `crossPartitionAccess`. |
 | No auth mode | Unchanged: its role's grants. |
 
@@ -186,7 +188,7 @@ The server-admin endpoints (`/api/auth/admin/*`, database management, backups) a
 the grant that lifts **each restriction the table has**: `all-partitions` where it has PLS, `all-rows` where it has RLS, for every table
 the job locks. A service key and a `db_admin` user hold both on their database; any other user holds them only through a role
 ([§19.8a](#198a-admin-api-access-grants-on-roles)). A table with only RLS can be loaded by a holder of `all-rows` alone, and the
-reverse for PLS. Still refused: a server key (`mk_srv_`), a custom key not linked to a user who holds the grants, a plain user, a caller whose partition grants would allow an
+reverse for PLS. Still refused: a server key (`mk_srv_`), a custom key not linked to a user who holds the grants, a plain user, a caller whose entitlements would allow an
 ordinary insert of the same rows, a token that merely claims `db_admin`, a service key presenting a plain user's `X-User-Token`, and a
 user JWT that carries `api_key_kind=service_role`. That name is not a custom claim: storing it is `AUTH_CLAIM_INVALID`. The
 check is asked again at every `:append`, of the credential making the call, so a caller cannot append to another caller's job and a grant
@@ -217,11 +219,11 @@ Is the access rule "one user, one tenant, one partition"?
         Simple SaaS. JWT carries tenant_id claim. No auth DB needed.
 
 Does the user need access to MULTIPLE partitions simultaneously?
-  (e.g. user is in 50 chat rooms, or has grants for 3 data providers)
-  YES → auth-db-pls
-        Partition grants stored in auth DB, resolved at query time.
+  (e.g. user is in 50 chat rooms, or has entitlements for 3 data providers)
+  YES → auth-db-entitlement
+        Entitlements stored in auth DB, resolved at query time.
         Fan-out: a single query returns data from ALL granted partitions.
-        Write access levels: read / write / admin per grant.
+        Write access levels: read / write / admin per entitlement.
 
 Does the table need row-level filtering WITHIN a partition?
   (e.g. "user can only see their own records or their team's records")
@@ -231,7 +233,7 @@ Does the table need row-level filtering WITHIN a partition?
         Compound predicates supported: owner_id = ? OR team_id IN (?).
 
 Do you need BOTH partition routing AND row filtering on the same table?
-  YES → Set **authMode: auth-db-pls** AND **rlsResolverName** together.
+  YES → Set **authMode: auth-db-entitlement** AND **rlsResolverName** together.
         PLS routes to granted partitions; RLS filters rows within each partition.
         The reverse (`auth-db-rls` + `permissionDimension`) is a **schema validation error**.
 ```
@@ -282,54 +284,56 @@ Unknown `plsClaimBinding` spellings fail schema apply (`SCHEMA_IDENTITY_COLUMN_N
 
 ---
 
-## 19.4 Mode 2: `auth-db-pls` (Enhanced PLS)
+## 19.4 Mode 2: `auth-db-entitlement` (Enhanced PLS)
 
-Use `auth-db-pls` when a user needs access to **multiple partitions simultaneously** or when partition grants must change at runtime without re-issuing JWTs.
+(**BL-1418, 0.13.0**) The mode is named `auth-db-entitlement`; `auth-db-entitlement` tables check the caller's [entitlements](#198-admin-api-entitlements).
+
+Use `auth-db-entitlement` when a user needs access to **multiple partitions simultaneously** or when entitlements must change at runtime without re-issuing JWTs.
 
 **A table names two things, and neither is inferred** (**BL-1176, 0.7.0**):
 
-- **`permissionDimension`** is the grant namespace. A partition grant in the auth database is only *(user, dimension, key,
+- **`permissionDimension`** is the entitlement namespace. An entitlement in the auth database is only *(user, dimension, key,
   access level)*: it names no database, table or column, because the auth database is a standalone identity provider and Aouda
-  is one of its consumers. The dimension is a lower-case opaque entitlement name such as `fx_source` (**BL-430, 0.9.0**). It is matched against the grant
+  is one of its consumers. The dimension is a lower-case opaque entitlement name such as `fx_source` (**BL-430, 0.9.0**). It is matched against the entitlement
   byte-for-byte, and it selects no column. A name with an upper-case letter is `400 INVALID_REQUEST`.
-- **`permissionColumn`** is the column the grant keys are compared with, declared beside the dimension. It must name a column of
+- **`permissionColumn`** is the column the entitlement keys are compared with, declared beside the dimension. It must name a column of
   the table (exact name).
 
-Both are **required** for `auth-db-pls` on a table, and the table is refused when either is missing or the column names no column.
+Both are **required** for `auth-db-entitlement` on a table, and the table is refused when either is missing or the column names no column.
 A lower-case dimension spelled like a column (`permissionDimension: "source"` beside a column `Source`) does **not** select that column, and partition-key order does not
 select one either. Up to 0.6.0 the engine inferred the column: a column named like the dimension (ignoring case), else a `tenant_id`
 partition column, else the first partition-key column. A table persisted that way now **denies** every per-user read and write
 until it declares `permissionColumn` — re-apply its schema or set it through the table's options.
 
 So one key can be scoped per product. An fx table declares `permissionDimension: "fx_source"`, `permissionColumn: "Source"`; a rates
-table declares `"rates_source"` and the same column. A grant `fx_source` / `MORN` admits the fx table's `Source = 'MORN'` rows and
+table declares `"rates_source"` and the same column. An entitlement `fx_source` / `MORN` admits the fx table's `Source = 'MORN'` rows and
 nothing in the rates table; the stored value stays `MORN` and the column stays `Source`. The column is not tied to the partition
 key: it can be the second partition-key column (`SecurityId`, then `Source`) or no partition-key column at all. Dropping the declared
 column is refused; renaming it carries the binding.
 
-The other direction works the same way: **one grant, differently named columns.** Each table names its own column, so a grant
+The other direction works the same way: **one entitlement, differently named columns.** Each table names its own column, so an entitlement
 `quote_source` / `MORN` reaches both of these tables, compared with `Source` in one and `QuoteSource` in the other:
 
 ```jsonc
 {
   "tables": {
-    "SpotQuote":   { "authMode": "auth-db-pls", "permissionDimension": "quote_source", "permissionColumn": "Source" /* … */ },
-    "VendorQuote": { "authMode": "auth-db-pls", "permissionDimension": "quote_source", "permissionColumn": "QuoteSource" /* … */ }
+    "SpotQuote":   { "authMode": "auth-db-entitlement", "permissionDimension": "quote_source", "permissionColumn": "Source" /* … */ },
+    "VendorQuote": { "authMode": "auth-db-entitlement", "permissionDimension": "quote_source", "permissionColumn": "QuoteSource" /* … */ }
   }
 }
 ```
 
-A grant whose dimension no table declares is simply not read by Aouda; it is still a valid entitlement for any other consumer of
+An entitlement whose dimension no table declares is simply not read by Aouda; it is still a valid entitlement for any other consumer of
 the auth database.
 
-Edge tables and vector search keep scoping by the grant set — an edge traversal or a nearest-neighbour search needs at least one grant
+Edge tables and vector search keep scoping by the entitlement set — an edge traversal or a nearest-neighbour search needs at least one entitlement
 in the dimension and declares no column (an edge table refuses one). Those inserts are held to that set at `write` (**BL-1204, 0.9.0**). A vector-column table is an ordinary table for its reads, so
-`POST …:create-vector-column` with `auth-db-pls` takes a `permissionColumn` too, and refuses one without `auth-db-pls`.
+`POST …:create-vector-column` with `auth-db-entitlement` takes a `permissionColumn` too, and refuses one without `auth-db-entitlement`.
 
 ### 19.4.1 Setup
 
 ```bash
-# Create a messages table with auth-db-pls
+# Create a messages table with auth-db-entitlement
 curl -X POST http://localhost:5433/api/databases/myapp/tables \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
@@ -343,24 +347,24 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
       { "name": "body", "type": "String" },
       { "name": "sent_at", "type": "Timestamp" }
     ],
-    "authMode": "auth-db-pls",
+    "authMode": "auth-db-entitlement",
     "permissionDimension": "chat_room",
     "permissionColumn": "room_id"
   }'
 ```
 
-Then grant the user access to specific partitions:
+Then give the user an entitlement for to specific partitions:
 
 ```bash
-# Grant Alice read+write access to chat room 42. The path takes her user id, a GUID: the `id` that
+# Give Alice read+write access to chat room 42. The path takes her user id, a GUID: the `id` that
 # POST …/auth/admin/users returned for her (a name or email in its place is a 404).
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "dimension": "chat_room",
-    "partitionKey": "42",
-    "accessLevel": "write"
+    "key": "42",
+    "level": "write"
   }'
 ```
 
@@ -369,7 +373,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400
 When Alice queries `messages` without specifying a `room_id` filter, Aouda automatically routes to **all** her granted partitions and merges the results:
 
 ```bash
-# Returns messages from all rooms Alice has been granted access to
+# Returns messages from all rooms Alice has an entitlement for
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
   -H "Content-Type: application/json" \
@@ -383,23 +387,23 @@ This is the **cross-partition fan-out** pattern — the most common query for ch
 When Alice specifies a partition filter, Aouda validates that she has access to it:
 
 ```bash
-# Returns messages from room 42 — Alice has a grant, succeeds
+# Returns messages from room 42 — Alice has an entitlement, succeeds
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
   -H "Content-Type: application/json" \
   -d '{ "database": "myapp", "table": "messages", "where": { "and": [{ "column": "room_id", "op": "eq", "value": "42" }] } }'
 
-# Returns 403 — Alice has no grant for room 99
+# Returns 403 — Alice has no entitlement for room 99
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
   -H "Content-Type: application/json" \
   -d '{ "database": "myapp", "table": "messages", "where": { "and": [{ "column": "room_id", "op": "eq", "value": "99" }] } }'
 ```
 
-Multi-partition `IN` filter: Aouda intersects the requested set with Alice's grants and routes only to the allowed intersection:
+Multi-partition `IN` filter: Aouda intersects the requested set with Alice's entitlements and routes only to the allowed intersection:
 
 ```bash
-# Rooms 42 and 55 are in Alice's grants; room 99 is not — only 42 and 55 are queried
+# Rooms 42 and 55 are in Alice's entitlements; room 99 is not — only 42 and 55 are queried
 curl -X POST http://localhost:5433/api/databases/myapp/query \
   -H "Authorization: Bearer <alice-jwt>" \
   -H "Content-Type: application/json" \
@@ -412,7 +416,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/query \
 
 ### 19.4.4 Write-Path Access Level Enforcement
 
-`auth-db-pls` enforces **access levels** on writes. A user with `"accessLevel": "read"` can query but not insert, update, or delete.
+`auth-db-entitlement` enforces **access levels** on writes. A user with `"level": "read"` can query but not insert, update, or delete.
 
 | Access Level | Read | Insert | Update/Delete |
 |---|:---:|:---:|:---:|
@@ -424,21 +428,21 @@ A `route` or `tee` into the table is that same write check, by the caller, on th
 
 ```bash
 # Grant Bob (user id 550e8400-…-446655440001) read-only access to room 42 (he can view but not post)
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440001/partition-grants \
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440001/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "dimension": "chat_room",
-    "partitionKey": "42",
-    "accessLevel": "read"
+    "key": "42",
+    "level": "read"
   }'
 ```
 
 **An update may not move a row out of the caller's write scope** (**BL-1227, 0.9.0**). On a PLS table, an UPDATE whose `set`
 names the partition column (matched without case — every key that names it) is held to the insert's rule for the partition it
-names: a partition grant at `write` on `auth-db-pls`, the tenant claim on `jwt-claim`; `all-partitions` at `write` lifts it. An
+names: an entitlement at `write` on `auth-db-entitlement`, the tenant claim on `jwt-claim`; `all-partitions` at `write` lifts it. An
 expression `setExpr` of that column is refused unless lifted (`AUTH_PLS_WRITE_SCOPE_VIOLATION`). Over `PATCH …/rows` and
-`…/rows/batch` the refusal is `403` with the PLS code (`AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` for a grant
+`…/rows/batch` the refusal is `403` with the PLS code (`AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` for an entitlement
 held at `read`, or `AUTH_PLS_WRITE_SCOPE_VIOLATION` on `jwt-claim`); a named mutation's is `403 AUTHORIZATION_DENIED`. On an RLS table a single
 update's write check reads the row as that update leaves it, and a `rows/batch` update reads the row as the earlier operations of that
 batch leave it (**BL-1303, 0.9.0**). Up to 0.8.0 a writer of partition `a` could move its rows into any partition.
@@ -451,13 +455,13 @@ write stream rejects that row with `FORBIDDEN_WRITE` at its index (the frame's o
 not the other tenant's partition. A holder of the lifting grant(s) at `write` is not checked. Up to 0.8.0 the insert check saw only
 the new row, so an upsert replaced another tenant's or another owner's row by key.
 
-**Thin JWT benefit:** A user belonging to 500 chat rooms would add ~10 KB to a JWT if room memberships were embedded as claims. With `auth-db-pls`, the JWT carries only the user's identity; grants live in the auth DB and are resolved from the session cache at query time.
+**Thin JWT benefit:** A user belonging to 500 chat rooms would add ~10 KB to a JWT if room memberships were embedded as claims. With `auth-db-entitlement`, the JWT carries only the user's identity; entitlements live in the auth DB and are resolved from the session cache at query time.
 
 ### 19.4.5 Durable Credentials for Non-Interactive Services
 
 Every example above authenticates with `<alice-jwt>` — a 15-minute access token from a JWT session. That's the right shape for a human sitting in front of a browser, but it's the wrong shape for a backend service, a scheduled feeder job, or anything else that holds one static secret in a config file and never signs in interactively: it would have to implement OAuth-style refresh-token rotation just to stay authenticated.
 
-For that case, link a `custom` API key to a user instead of minting sessions for it. The key is durable (no expiry unless you set one) and its principal resolves that user's `auth-db-pls` partition-grants through the **same** resolution path a JWT session for that user would use — there is no separate "API key scoping" mechanism to reason about, and no bypass.
+For that case, link a `custom` API key to a user instead of minting sessions for it. The key is durable (no expiry unless you set one) and its principal resolves that user's `auth-db-entitlement` entitlements through the **same** resolution path a JWT session for that user would use — there is no separate "API key scoping" mechanism to reason about, and no bypass.
 
 ```bash
 # 1. Create a user to hold the service identity (it never signs in interactively)
@@ -468,12 +472,12 @@ curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users \
 # → { "id": "550e8400-e29b-41d4-a716-446655440002", ... }
 
 # 2. Grant it access to exactly the partitions it should touch (same endpoint as for a human user).
-#    `dimension` is the table's permissionDimension (`quote_source`), lower case (**BL-430, 0.9.0**) and byte-for-byte. The grant names no
+#    `dimension` is the table's permissionDimension (`quote_source`), lower case (**BL-430, 0.9.0**) and byte-for-byte. The entitlement names no
 #    column: the table's permissionColumn (`Source`) is what the key is compared with.
-curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440002/partition-grants \
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440002/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "write" }'
+  -d '{ "dimension": "quote_source", "key": "oslo_bors", "level": "write" }'
 
 # 3. Create a custom API key linked to that user
 curl -X POST http://localhost:5433/api/databases/finance/auth/admin/api-keys \
@@ -498,12 +502,12 @@ curl -X POST http://localhost:5433/api/databases/finance/tables/quotes/rows \
   -H "Authorization: Bearer mk_..." \
   -H "Content-Type: application/json" \
   -d '{ "database": "finance", "columns": ["id", "Source", "instrument_id", "bid", "ask"], "data": [[2], ["bloomberg"], ["EQNR"], [289.10], [289.30]] }'
-# → 403 AUTH_PLS_GRANT_NOT_FOUND — not granted, exactly as it would be for a JWT session
+# → 403 AUTH_ENTITLEMENT_NOT_FOUND — not granted, exactly as it would be for a JWT session
 ```
 
 **Do not** reach for `mk_svc_` for this instead. It holds `all-partitions` and `all-rows` on every table of its database, and every use is audited (**BL-1227, 0.9.0**; see [Visibility is granted](#visibility-is-granted-all-partitions-and-all-rows)) — appropriate when the caller is genuinely trusted with the whole database, not when it should be limited to the `oslo_bors` grant in `quote_source`.
 
-`userId` is only accepted on `kind: "custom"` keys — `anon`, `service_role`, `public`, and `server_admin` stay singleton, system-managed credentials and reject it with `400 INVALID_REQUEST`. Revoke the key (`DELETE .../admin/api-keys/{id}`) to cut the service off immediately, or delete the specific partition grant to narrow its access without rotating the credential.
+`userId` is only accepted on `kind: "custom"` keys — `anon`, `service_role`, `public`, and `server_admin` stay singleton, system-managed credentials and reject it with `400 INVALID_REQUEST`. Revoke the key (`DELETE .../admin/api-keys/{id}`) to cut the service off immediately, or delete the specific entitlement to narrow its access without rotating the credential.
 
 ---
 
@@ -526,7 +530,7 @@ both accepted, after which every table naming that resolver got whichever loaded
 response and the list filter. An auth database created before this change still has the column and refuses resolver creates with a
 message naming the one-time fix (drop `_rls_resolvers.target_table` with the server admin token).
 
-`valueConfig` on the wire is a **string**. Value sources are the code names (`UserId`, `Literal`, `PartitionGrant`). Older docs that said `auth-db-lookup` / `auth-db-grants` / `role-check` named things that were never in the evaluator.
+`valueConfig` on the wire is a **string**. Value sources are the code names (`UserId`, `Literal`, `Entitlement`). Older docs that said `auth-db-lookup` / `auth-db-grants` / `role-check` named things that were never in the evaluator.
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers \
@@ -549,7 +553,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
         "ruleOrder": 1,
         "columnName": "team_id",
         "operator": "In",
-        "valueSource": "PartitionGrant",
+        "valueSource": "Entitlement",
         "valueConfig": "{\"dimension\":\"team\"}",
         "combinator": null
       }
@@ -585,7 +589,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
 
 ### 19.5.3 Admin Pass-Through
 
-A `PartitionGrant` rule whose `valueConfig` JSON string has `"role"` and `"effect":"allow-all"` grants full access when the user holds that role — the resolver returns no predicate (`null`), and the query runs unfiltered within the partition. There is no `role-check` operator or value source.
+A `Entitlement` rule whose `valueConfig` JSON string has `"role"` and `"effect":"allow-all"` grants full access when the user holds that role — the resolver returns no predicate (`null`), and the query runs unfiltered within the partition. There is no `role-check` operator or value source.
 
 ```bash
 # Update resolver to add admin pass-through as the first rule
@@ -598,7 +602,7 @@ curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers
         "ruleOrder": 0,
         "columnName": "id",
         "operator": "Eq",
-        "valueSource": "PartitionGrant",
+        "valueSource": "Entitlement",
         "valueConfig": "{\"role\":\"company_admin\",\"effect\":\"allow-all\"}",
         "combinator": null
       },
@@ -614,7 +618,7 @@ curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers
         "ruleOrder": 2,
         "columnName": "team_id",
         "operator": "In",
-        "valueSource": "PartitionGrant",
+        "valueSource": "Entitlement",
         "valueConfig": "{\"dimension\":\"team\"}",
         "combinator": null
       }
@@ -624,7 +628,7 @@ curl -X PATCH http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers
 
 When a `company_admin` user queries `sales`, the resolver sees the matching pass-through rule first and returns `null` — no predicate is injected, and the user sees all rows in the partition. Non-admin users hit the compound predicate path.
 
-**The pass-through and the `all-rows` grant combine** (**BL-1227, 0.9.0**). The `all-rows` grant is checked **before** any resolver: a holder gets no predicate whether or not the resolver names it, even for a table whose resolver is missing from the holder's resolved set. The pass-through stays for users who hold only a role-based rule. The level matters on writes. A `read` holder's reads are unrestricted, but its UPDATE and DELETE are still scoped to the rows the resolver shows it, exactly as for anyone else, and its inserted and updated rows are write-checked; a holder at `write` or `admin` skips the write check too. `rlsResolverName` on a `jwt-claim` table, including when `authMode` is omitted, is refused (**BL-1281, 0.9.0**): create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. The error names `auth-db-rls` and `auth-db-pls`, the modes a resolver applies on. Give the table one of those modes.
+**The pass-through and the `all-rows` grant combine** (**BL-1227, 0.9.0**). The `all-rows` grant is checked **before** any resolver: a holder gets no predicate whether or not the resolver names it, even for a table whose resolver is missing from the holder's resolved set. The pass-through stays for users who hold only a role-based rule. The level matters on writes. A `read` holder's reads are unrestricted, but its UPDATE and DELETE are still scoped to the rows the resolver shows it, exactly as for anyone else, and its inserted and updated rows are write-checked; a holder at `write` or `admin` skips the write check too. `rlsResolverName` on a `jwt-claim` table, including when `authMode` is omitted, is refused (**BL-1281, 0.9.0**): create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. The error names `auth-db-rls` and `auth-db-entitlement`, the modes a resolver applies on. Give the table one of those modes.
 
 ### 19.5.4 Write-Path Validation
 
@@ -648,7 +652,7 @@ A `route` or `tee` into the table is that same write check, by the caller, on th
 
 ## 19.6 Combined PLS + RLS
 
-A table can use **both** partition routing and row filtering. The working configuration is **`authMode: auth-db-pls` plus `rlsResolverName`** (and `permissionDimension` plus `permissionColumn` for the PLS grants). Setting `auth-db-rls` together with `permissionDimension` is a **schema validation error** (fail-closed).
+A table can use **both** partition routing and row filtering. The working configuration is **`authMode: auth-db-entitlement` plus `rlsResolverName`** (and `permissionDimension` plus `permissionColumn` for the PLS grants). Setting `auth-db-rls` together with `permissionDimension` is a **schema validation error** (fail-closed).
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/tables \
@@ -665,7 +669,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/tables \
       { "name": "value", "type": "Decimal", "precision": 18, "scale": 2 }
     ],
     "partitionLevelSecurity": true,
-    "authMode": "auth-db-pls",
+    "authMode": "auth-db-entitlement",
     "permissionDimension": "portfolio_group",
     "permissionColumn": "portfolio_group_id",
     "rlsResolverName": "portfolio_access"
@@ -685,16 +689,16 @@ join's side, exactly as on a direct read of the table, for a query and a named q
 may read only part of is answered with that part, and a table the caller may read none of joins against no rows. A holder of
 `all-partitions` or `all-rows` is lifted on the joined side as on a direct read (**BL-1227, 0.9.0**); `crossPartitionAccess` is
 not carried to a joined table. Still refused with `403 AUTHORIZATION_DENIED`, naming the table: a joined table whose partition-level
-security refuses the caller (no grant), and a joined materialized-query result whose source security cannot be applied. See [HTTP API — joins and authorization](../reference/http-api.md#post-apidatabasesdbquery).
+security refuses the caller (no entitlement), and a joined materialized-query result whose source security cannot be applied. See [HTTP API — joins and authorization](../reference/http-api.md#post-apidatabasesdbquery).
 
 ---
 
 ## 19.7 Cross-Partition Fan-Out Queries
 
-Fan-out is the **primary** `auth-db-pls` query pattern. When a user queries an `auth-db-pls` table without specifying a partition key filter, Aouda routes to **all** their granted partitions and merges the result set automatically:
+Fan-out is the **primary** `auth-db-entitlement` query pattern. When a user queries an `auth-db-entitlement` table without specifying a partition key filter, Aouda routes to **all** their granted partitions and merges the result set automatically:
 
 ```
-User grants: { portfolio_group: ["grp_3", "grp_7", "grp_12"] }
+User entitlements: { portfolio_group: ["grp_3", "grp_7", "grp_12"] }
 
 Query:   SELECT * FROM portfolio_data ORDER BY value DESC LIMIT 100
 
@@ -715,35 +719,37 @@ This eliminates application-layer aggregation code. The query looks like a norma
 - CRM: "All open deals I'm responsible for across all company partitions I manage"
 
 **A holder of `all-partitions` is not fanned out** (**BL-1227, 0.9.0**). It gets no rewrite and no partition predicate: the query
-reads every partition of the table, including partitions created after it subscribed or connected. A user who holds partition grants
-*and* `all-partitions` at `read` reads everything and, with a partition grant at `write` on `k`, writes `k` only; the grants combine.
-In `jwt-claim` mode the caller's own tenant claim counts as its partition grant for writes.
+reads every partition of the table, including partitions created after it subscribed or connected. A user who holds entitlements
+*and* `all-partitions` at `read` reads everything and, with an entitlement at `write` on `k`, writes `k` only; the grants combine.
+In `jwt-claim` mode the caller's own tenant claim counts as its entitlement for writes.
 
 **The flag is separate** (**BL-1227, 0.9.0**). A query on a partitioned table that names no value for its partition key is
 refused with `PARTITION_FILTER_REQUIRED` unless it sets `crossPartitionAccess` — a cost guard against an accidental full scan,
-independent of who asks. The flag lifts that guard and nothing else: on an `auth-db-pls` table a user with partition grants and the
-flag reads exactly its granted partitions, and a credential holding no grant is still refused `AUTH_PLS_GRANT_NOT_FOUND`. A service key
+independent of who asks. The flag lifts that guard and nothing else: on an `auth-db-entitlement` table a user with entitlements and the
+flag reads exactly its granted partitions, and a credential holding no entitlement is still refused `AUTH_ENTITLEMENT_NOT_FOUND`. A service key
 or an admin user (a holder of `all-partitions`) still needs the flag to scan a partitioned table without a filter on its key. The flag is
 accepted on every surface and by both SDKs; see [Partitioning](../guides/partitioning.md#partition-filter-rule-p40).
 
 ---
 
-## 19.8 Admin API: Partition Grants
+## 19.8 Admin API: Entitlements
+
+(**BL-1418, 0.13.0**) The routes, fields, error codes and the `auth-db-entitlement` mode name on this page are those of server 0.13.0 and later (data-directory format 18).
 
 Manage which partition keys a user is allowed to access in each dimension.
 
-All endpoints are under `/api/databases/{db}/auth/admin/users/{userId}/partition-grants` and require a `service_role` key, `db_admin` user JWT, or server admin token. (These endpoints manage *partition* grants, which scope a user to some partitions. A grant that lifts PLS or RLS altogether is an [access grant on a role](#198a-admin-api-access-grants-on-roles).) `{userId}` is the user's id and `{grantId}` the grant's, both GUIDs — the `id` their create call returned; anything else in their place is a `404`. `grantedBy`, when given, is a user id too.
+All endpoints are under `/api/databases/{db}/auth/admin/users/{userId}/entitlements` and require a `service_role` key, `db_admin` user JWT, or server admin token. (These endpoints manage *entitlements*, which scope a user to some values of the column a table is secured by. A grant that lifts PLS or RLS altogether is an [access grant on a role](#198a-admin-api-access-grants-on-roles).) `{userId}` is the user's id and `{entitlementId}` the entitlement's, both GUIDs — the `id` their create call returned; anything else in their place is a `404`. `grantedBy`, when given, is a user id too.
 
-### Create a Partition Grant
+### Create an Entitlement
 
 ```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
+curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "dimension": "chat_room",
-    "partitionKey": "42",
-    "accessLevel": "write",
+    "key": "42",
+    "level": "write",
     "grantedBy": "550e8400-e29b-41d4-a716-446655440009"
   }'
 ```
@@ -755,56 +761,60 @@ Response (201 Created):
   "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "userId": "550e8400-e29b-41d4-a716-446655440000",
   "dimension": "chat_room",
-  "partitionKey": "42",
-  "accessLevel": "write",
+  "key": "42",
+  "level": "write",
   "grantedBy": "550e8400-e29b-41d4-a716-446655440009",
   "createdAt": "2026-03-26T12:00:00Z"
 }
 ```
 
-`accessLevel` must be `"read"`, `"write"`, or `"admin"`. A missing or empty `dimension`, or a missing or `null` `partitionKey`,
+`level` must be `"read"`, `"write"`, or `"admin"`. A missing or empty `dimension`, or a missing or `null` `key`,
 returns 400 `AUTH_GRANT_INVALID`.
 
-**`partitionKey` is taken verbatim** (**BL-1192, 0.9.0**). It is the partition's value, stored, listed and compared exactly
+The request body is exactly `{ "dimension": string, "key": string, "level": "read"|"write"|"admin", "grantedBy"?: GUID, "validFrom"?: ISO-8601, "validTo"?: ISO-8601 }`; the `201` response is the entitlement `{ "id", "userId", "dimension", "key", "level", "grantedBy", "validFrom", "validTo", "createdAt" }`.
+
+**`key` is taken verbatim** (**BL-1192, 0.9.0**). It is the partition's value, stored, listed and compared exactly
 as sent: `""` grants the empty-string partition, `" "` a different one, and `" a"` is not `"a"` — every partition a write can create
 can be granted. Nothing is trimmed. Up to 0.8.0 the endpoint refused an empty or white-space key and trimmed the others, so
 `" a"` was stored as `"a"` and opened the `a` partition; send the key you mean.
 
 On a `jwt-claim` table the key is the caller's tenant claim, not a grant, and an empty or white-space claim is treated as **no
 claim** (`403 AUTH_PLS_TENANT_CLAIM_MISSING`): an identity provider's "unset" must not read the `""` partition. To give users the
-`""` partition, use `auth-db-pls` and grant it.
+`""` partition, use `auth-db-entitlement` and grant it.
 
-**`dimension` is a lower-case opaque entitlement name** (**BL-1176, 0.7.0**; **BL-430, 0.9.0**). A grant names a dimension and a key,
-nothing else: no database, no table, no column. Every `auth-db-pls` table whose `permissionDimension` is that string honours it, in
+**`dimension` is a lower-case opaque entitlement name** (**BL-1176, 0.7.0**; **BL-430, 0.9.0**). An entitlement names a dimension and a key (and a level),
+nothing else: no database, no table, no column. Every `auth-db-entitlement` table whose `permissionDimension` is that string honours it, in
 every database linked to this auth database, and compares the key with the column that table declares as `permissionColumn`. The
 dimension does not have to look like a column name, and spelling it like one selects nothing: `fx_source` for the fx tables and
 `rates_source` for the rates tables keeps one `MORN` grant from reaching both, though both compare it with a column named `Source`.
 
 The name is lower case. A capital letter is `400 AUTH_GRANT_INVALID`, and the message gives the lower-case
 spelling (`"Source"` → use `source`). HTTP trims outer white space before that check, so `" source "` is `201` and stored as `source`.
-An in-process grant and a resolver JSON `dimension` do not trim: outer white space on those is the same `400`. Matching stays exact (`StringComparison.Ordinal`). Nothing stored is converted: a grant an older
+An in-process entitlement and a resolver JSON `dimension` do not trim: outer white space on those is the same `400`. Matching stays exact (`StringComparison.Ordinal`). Nothing stored is converted: an entitlement an older
 build wrote as `"Source"` keeps that spelling and matches only a table whose `permissionDimension` is `"Source"`, and that table's next
 options change must send the lower-case name. Partition **keys** stay verbatim (**BL-1192, 0.9.0**).
 
-### List Partition Grants
+### List Entitlements
+
+The response is `{ "entitlements": [ { "id", "userId", "dimension", "key", "level", "grantedBy", "validFrom", "validTo", "createdAt" } ] }`, empty when the user holds none (never a bare array).
 
 ```bash
-# All grants for a user
-curl http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
+# All entitlements for a user
+curl http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements \
   -H "Authorization: Bearer <admin-token>"
 
 # Filtered by dimension
-curl "http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants?dimension=chat_room" \
+curl "http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements?dimension=chat_room" \
   -H "Authorization: Bearer <admin-token>"
 ```
 
-### Delete a Partition Grant
+### Delete an Entitlement
 
 ```bash
-curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants/7c9e6679-7425-40de-944b-e07fc1f90ae7 \
+curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements/7c9e6679-7425-40de-944b-e07fc1f90ae7 \
   -H "Authorization: Bearer <admin-token>"
 # 204 No Content on success
-# 404 AUTH_GRANT_NOT_FOUND if grant does not exist
+# 404 AUTH_GRANT_NOT_FOUND ("Entitlement not found.") if the entitlement does not exist
 ```
 
 ---
@@ -907,8 +917,8 @@ curl http://localhost:5433/api/databases/myapp/auth/admin/users/6fc78b31-5fe9-44
 }
 ```
 
-`grants` lists the all-* grants the user holds **on that database**, and nothing else: partition grants are listed by
-[`…/partition-grants`](#198-admin-api-partition-grants). `scope` is `database` or `table` (`table` then names it, and is `null` for a
+`grants` lists the all-* grants the user holds **on that database**, and nothing else: entitlements are listed by
+[`…/entitlements`](#198-admin-api-entitlements). `scope` is `database` or `table` (`table` then names it, and is `null` for a
 database-scope grant), `level` is `read`, `write` or `admin`, and `source` is `role:<name>` for a role-carried grant or `implied:db_admin`
 for the grants an admin user holds by implication (a user with the `db_admin` role gets both, `scope` `database`, `level` `admin`).
 The list is sorted by `grant`, `scope`, `table`, `level` and `source`, and computed afresh on each call. `?database=<name>` picks the
@@ -1040,8 +1050,8 @@ table's `rlsResolverName`) and its `name` is unique in the auth database (**BL-1
 |---|---|---|
 | `UserId` | `"{}"` (ignored) | Authenticated user's id |
 | `Literal` | the comparison **string** (not an object) | Static value. Bool columns do not match `"true"` — use String |
-| `PartitionGrant` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. Empty grants deny that arm. The dimension must be named: a bare `"team"`, `"{}"` or an object without `dimension` is refused at create and PATCH (`AUTH_RESOLVER_INVALID`) and a stored one denies (**BL-1176, 0.7.0**; up to 0.6.0 a bare string was read as the dimension). A dimension with an upper-case letter or outer white space is the same `400 AUTH_RESOLVER_INVALID`, and the message gives the lower-case spelling (**BL-430, 0.9.0**) |
-| `PartitionGrant` (pass-through) | `{"role":"<name>","effect":"allow-all"}` | If the user has the role, resolver returns null (full access) |
+| `Entitlement` | `{"dimension":"<name>"}` | User's granted partition keys for that dimension. No entitlement denies that arm. The dimension must be named: a bare `"team"`, `"{}"` or an object without `dimension` is refused at create and PATCH (`AUTH_RESOLVER_INVALID`) and a stored one denies (**BL-1176, 0.7.0**; up to 0.6.0 a bare string was read as the dimension). A dimension with an upper-case letter or outer white space is the same `400 AUTH_RESOLVER_INVALID`, and the message gives the lower-case spelling (**BL-430, 0.9.0**) |
+| `Entitlement` (pass-through) | `{"role":"<name>","effect":"allow-all"}` | If the user has the role, resolver returns null (full access) |
 | `Claim` | any | Deny sentinel (not implemented — BL-315). Do not use |
 
 **Combinators:** `And` or `Or` on rule N — how N joins with N+1. Last rule has `combinator: null`. Default if omitted is `And`.
@@ -1108,7 +1118,7 @@ curl -X DELETE http://localhost:5433/api/databases/myapp/auth/admin/rls-resolver
 
 Published fixture (byte-identical in the engine tree): [`examples/p43-write-side/`](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side). Schema apply creates tables; [`auth-setup.json`](https://github.com/aoudadb/aoudadb.github.io/blob/main/examples/p43-write-side/auth-setup.json) is **admin HTTP** (users, roles, resolvers, grants) — proof that resolvers are not schema apply.
 
-- `rooms` — `auth-db-rls`: `id In PartitionGrant{room_membership} Or IsPublic Eq Literal true`. Alice has zero grants and still sees the public room. `IsPublic` is **String**.
+- `rooms` — `auth-db-rls`: `id In Entitlement{room_membership} Or IsPublic Eq Literal true`. Alice has zero entitlements and still sees the public room. `IsPublic` is **String**.
 - `messages` — read membership; `writeCheckRules` is `SenderId Eq UserId` only. Alice can insert a stamped row into a private room she cannot read.
 - `notes` — `plsClaimBinding: "subject"` + `"derived": { "identity": "subject" }` on `UserId`.
 
@@ -1118,7 +1128,7 @@ Use a user JWT on the **admin listener**. RLS/PLS need a principal; do not put t
 
 ## 19.10 Reference Use Cases
 
-### Use Case 1 — Chat Application (`auth-db-pls`, hundreds of rooms)
+### Use Case 1 — Chat Application (`auth-db-entitlement`, hundreds of rooms)
 
 {: .warning }
 **Check the volume before copying this shape.** This use case partitions `messages` by `room_id`, and that
@@ -1129,27 +1139,27 @@ there is no bucket for those rooms to share. A directory per room (`Dedicated`) 
 per room on top of that. Either way the layout imposes `PARTITION_FILTER_REQUIRED` on every read and
 every subscribe for the life of the table. See
 [Should this table have a partition key?](../guides/partitioning.md#should-this-table-have-a-partition-key-p45),
-then read [the unpartitioned variant](#the-unpartitioned-variant--same-grants-no-partition-key) below —
+then read [the unpartitioned variant](#the-unpartitioned-variant--same-entitlements-no-partition-key) below —
 for most chat applications that is the one to build.
 
 A user belongs to hundreds of chat rooms. In this use case the `messages` table is partitioned by `room_id` — assume it has cleared the rule above. The application grants partition access at room-join time, and revokes it when the user leaves.
 
 ```bash
 # Grant Alice (user id 550e8400-…-446655440000) write access to 3 rooms (repeat at join time for each room)
-curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
+curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{ "dimension": "chat_room", "partitionKey": "room_42", "accessLevel": "write" }'
+  -d '{ "dimension": "chat_room", "key": "room_42", "level": "write" }'
 
-curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
+curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{ "dimension": "chat_room", "partitionKey": "room_55", "accessLevel": "write" }'
+  -d '{ "dimension": "chat_room", "key": "room_55", "level": "write" }'
 
-curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/partition-grants \
+curl -X POST http://localhost:5433/api/databases/chat/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{ "dimension": "chat_room", "partitionKey": "room_99", "accessLevel": "read" }'
+  -d '{ "dimension": "chat_room", "key": "room_99", "level": "read" }'
 
 # Alice's "all my latest messages" query — fan-out across all her granted rooms
 curl -X POST http://localhost:5433/api/databases/chat/query \
@@ -1169,20 +1179,20 @@ curl -X POST http://localhost:5433/api/databases/chat/tables/messages/rows \
   -H "Authorization: Bearer <alice-jwt>" \
   -H "Content-Type: application/json" \
   -d '{ "database": "chat", "columns": ["room_id", "body"], "data": [["room_99"], ["Hi there"]] }'
-# → 403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS
+# → 403 AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS
 ```
 
-**Why not embed room memberships in the JWT?** A user in 500 rooms would add ~10 KB to the JWT. With `auth-db-pls`, the JWT carries only Alice's identity; room grants live in the auth DB's `_user_partition_grants` table and are resolved from the in-memory session cache at query time. Granting or revoking room access takes effect on the next request — no token re-issuance required.
+**Why not embed room memberships in the JWT?** A user in 500 rooms would add ~10 KB to the JWT. With `auth-db-entitlement`, the JWT carries only Alice's identity; room entitlements live in the auth DB's `_user_entitlements` table and are resolved from the in-memory session cache at query time. Granting or revoking room access takes effect on the next request — no token re-issuance required.
 
-#### The unpartitioned variant — same grants, no partition key
+#### The unpartitioned variant — same entitlements, no partition key
 
-**A partition grant does not require a partitioned table.** The `partitionKey` field on a grant is a key
-*within the grant document*; it is not a claim about the table's physical layout. An `auth-db-rls` rule
-with `valueSource: "PartitionGrant"` reads the caller's grants for a dimension and injects them as an
+**An entitlement does not require a partitioned table.** The `key` field on an entitlement is a value
+*within the entitlement*; it is not a claim about the table's physical layout. An `auth-db-rls` rule
+with `valueSource: "Entitlement"` reads the caller's entitlements for a dimension and injects them as an
 ordinary `IN` predicate on a named column — it never consults the partition router, so it behaves
 identically whether or not the table is partitioned.
 
-That is what lets a chat application keep everything the use case above buys — grants minted at join time,
+That is what lets a chat application keep everything the use case above buys — entitlements minted at join time,
 revoked at leave time, resolved from the session cache, no memberships in the JWT — while dropping a
 partition key its volume does not justify:
 
@@ -1209,7 +1219,7 @@ curl -X POST http://localhost:5433/api/databases/chat/auth/admin/rls-resolvers \
     "resolverType": "ColumnMatch",
     "rules": [
       { "ruleOrder": 0, "columnName": "room_id", "operator": "In",
-        "valueSource": "PartitionGrant", "valueConfig": "{\"dimension\":\"chat_room\"}",
+        "valueSource": "Entitlement", "valueConfig": "{\"dimension\":\"chat_room\"}",
         "combinator": null }
     ],
     "writeCheckRules": [
@@ -1219,23 +1229,23 @@ curl -X POST http://localhost:5433/api/databases/chat/auth/admin/rls-resolvers \
   }'
 ```
 
-The grant `curl`s from the use case above are **unchanged** — same dimension, same `partitionKey` values,
+The entitlement `curl`s from the use case above are **unchanged** — same dimension, same `key` values,
 same admin endpoint.
 
-| | Partitioned (`auth-db-pls`) | Unpartitioned (`auth-db-rls` + `PartitionGrant`) |
+| | Partitioned (`auth-db-entitlement`) | Unpartitioned (`auth-db-rls` + `Entitlement`) |
 |---|---|---|
-| Grants | Minted per room, resolved from session cache | Identical |
+| Entitlements | Minted per room, resolved from session cache | Identical |
 | Unentitled rows | Never routed to | Filtered by the injected predicate |
 | Named query with `params: {}` | Fails `PARTITION_FILTER_REQUIRED` | Legal — RLS supplies the predicate |
 | `subscribe` for a user token | Needs `permissionDimension` or a bound param | Works as-is |
-| Write authorization | Grant `accessLevel` on the target partition | `writeCheckRules` (above), or grant-based rules |
+| Write authorization | Entitlement `level` on the target partition | `writeCheckRules` (above), or entitlement-based rules |
 
 Note that `permissionDimension` and `auth-db-rls` are **mutually exclusive**: declaring both fails apply
 with *"authMode 'auth-db-rls' cannot be combined with permissionDimension."* Pick one mode per table.
 
 #### Layout and authorization mode are independent choices
 
-It is tempting to read the table above as "big rooms → `auth-db-pls`, small rooms → `auth-db-rls`". That
+It is tempting to read the table above as "big rooms → `auth-db-entitlement`, small rooms → `auth-db-rls`". That
 is not the rule, and getting it wrong is how a table ends up partitioned for a reason that was never a
 partitioning reason.
 
@@ -1255,14 +1265,14 @@ which asserts the pruning counters, not just the row set.
 
 What actually separates the two modes:
 
-| | `auth-db-pls` (and `jwt-claim` PLS) | `auth-db-rls` |
+| | `auth-db-entitlement` (and `jwt-claim` PLS) | `auth-db-rls` |
 |---|---|---|
 | Needs a partition key | **Yes** — apply fails without one | No |
 | Can constrain | Only the partition-key column | Any column, compound rules, admin pass-through |
-| Predicate shapes | Equality, or OR-of-equality fan-out over grants | `Eq`, `In`, `Like`, `And`/`Or` combinations |
+| Predicate shapes | Equality, or OR-of-equality fan-out over entitlements | `Eq`, `In`, `Like`, `And`/`Or` combinations |
 | Mixed `Where.Or` from the caller | Rejected — a leak guard | Allowed; RLS nests in its own group |
 | Read cost, same predicate | — identical — | — identical — |
-| Write cost | Grant `accessLevel` check | `UPDATE`/`DELETE` additionally **pre-read** matching rows to evaluate the write check |
+| Write cost | Entitlement `level` check | `UPDATE`/`DELETE` additionally **pre-read** matching rows to evaluate the write check |
 
 So: choose the layout on volume, then choose the mode on policy. The only combination the engine forbids
 is PLS without a partition key.
@@ -1286,7 +1296,7 @@ curl -X POST http://localhost:5433/api/databases/crm/auth/admin/rls-resolvers \
         "ruleOrder": 0,
         "columnName": "id",
         "operator": "Eq",
-        "valueSource": "PartitionGrant",
+        "valueSource": "Entitlement",
         "valueConfig": "{\"role\":\"company_admin\",\"effect\":\"allow-all\"}",
         "combinator": null
       },
@@ -1302,7 +1312,7 @@ curl -X POST http://localhost:5433/api/databases/crm/auth/admin/rls-resolvers \
         "ruleOrder": 2,
         "columnName": "team_id",
         "operator": "In",
-        "valueSource": "PartitionGrant",
+        "valueSource": "Entitlement",
         "valueConfig": "{\"dimension\":\"team\"}",
         "combinator": null
       }
@@ -1335,9 +1345,9 @@ A null does not satisfy `ne`, `lt`, or `lte`, so the insert and the update are r
 
 ---
 
-### Use Case 3 — Financial Platform (`auth-db-pls`, billions of rows on disk)
+### Use Case 3 — Financial Platform (`auth-db-entitlement`, billions of rows on disk)
 
-A financial platform stores billions of security quotes partitioned by their `Source`; grants for it live in the dimension `quote_source`. Users are granted access to specific data providers. Most data resides on disk in a columnar store.
+A financial platform stores billions of security quotes partitioned by their `Source`; entitlements for it live in the dimension `quote_source`. Users are granted access to specific data providers. Most data resides on disk in a columnar store.
 
 ```bash
 # Create the quotes table
@@ -1355,21 +1365,21 @@ curl -X POST http://localhost:5433/api/databases/finance/tables \
       { "name": "ask", "type": "Decimal", "precision": 18, "scale": 6 },
       { "name": "timestamp", "type": "Timestamp" }
     ],
-    "authMode": "auth-db-pls",
+    "authMode": "auth-db-entitlement",
     "permissionDimension": "quote_source",
     "permissionColumn": "Source"
   }'
 
 # Grant an analyst (user id 550e8400-…-446655440003) access to two data sources
-curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/partition-grants \
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{ "dimension": "quote_source", "partitionKey": "oslo_bors", "accessLevel": "read" }'
+  -d '{ "dimension": "quote_source", "key": "oslo_bors", "level": "read" }'
 
-curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/partition-grants \
+curl -X POST http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/entitlements \
   -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -d '{ "dimension": "quote_source", "partitionKey": "nasdaq", "accessLevel": "read" }'
+  -d '{ "dimension": "quote_source", "key": "nasdaq", "level": "read" }'
 
 # Fan-out: latest AAPL quotes from all authorized sources
 curl -X POST http://localhost:5433/api/databases/finance/query \
@@ -1386,8 +1396,8 @@ curl -X POST http://localhost:5433/api/databases/finance/query \
 # → Attempts to access bloomberg or other sources return 403
 
 # Revoke access immediately — effective on the next request, no JWT re-issuance. The last segment is the oslo_bors
-# grant's id: the `id` its create returned, or GET …/partition-grants lists it.
-curl -X DELETE http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/partition-grants/7c9e6679-7425-40de-944b-e07fc1f90ae8 \
+# entitlement's id: the `id` its create returned, or GET …/entitlements lists it.
+curl -X DELETE http://localhost:5433/api/databases/finance/auth/admin/users/550e8400-e29b-41d4-a716-446655440003/entitlements/7c9e6679-7425-40de-944b-e07fc1f90ae8 \
   -H "Authorization: Bearer <admin-token>"
 ```
 

@@ -231,8 +231,7 @@ stop on `AoudaAuthenticationFatalError`.
 
 **Refusals that name the key kind and the option (BL-1422).** Server side, since **0.12.0**, a refusal's `suggestion` names the key kind and prefix
 the route takes (`AUTH_API_KEY_INVALID`, `AUTH_TOKEN_MISSING`, `AUTH_KEY_LISTENER_MISMATCH`, `AUTH_KEY_ROUTE_MISMATCH`, and a `403` RBAC denial
-of an auth-admin, browser-tier or scoped key). **Not yet released in `@aouda/client`** (merged to the client's `main`, shipping with the next
-release, which is prepared separately; no version is claimed here): the `message` of an HTTP 401 or 403 with one of those codes (and
+of an auth-admin, browser-tier or scoped key). In `@aouda/client` **0.12.0** (npm, 2026-11-12) the `message` of an HTTP 401 or 403 with one of those codes (and
 `AUTH_API_KEY_REQUIRED`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `UNAUTHORIZED`, `AUTH_TOKEN_INVALID` / `_EXPIRED` / `_REVOKED`, `AUTHORIZATION_DENIED`) then carries
 that `suggestion` (for `AUTHORIZATION_DENIED` its `details`) and the option to set (`apiKey`, `serverAuth`, `appAuth`, `serverUrl`) with the
 kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400, ...) keeps the
@@ -242,6 +241,28 @@ server's message exactly. The `/ready` reason codes `schema_pending` and `schema
 INSUFFICIENT_PERMISSIONS` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` on a call that worked before
 means the caller's role lacks the `named-query` / `named-mutation` `execute` row for it; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. See
 [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
+
+### Entitlements (**BL-1418, 0.13.0**)
+
+An entitlement is one row `(user, dimension, key, level)` that lets a user reach the rows of an `auth-db-entitlement` table whose
+`permissionColumn` equals `key` (see [Data Authorization §19.8](../auth/authorization.md#198-admin-api-entitlements)). The admin
+wrappers are on `client.auth` and need a `db_admin` caller; they ship in `@aouda/client` **0.13.0** (0.12.0 still has the `PartitionGrant` names):
+
+```ts
+const e = await client.auth.createEntitlement(userId, { dimension: 'chat_room', key: 'room_42', level: 'write' }); // -> Entitlement
+const all = await client.auth.listEntitlements(userId, { dimension: 'chat_room' });                               // -> Entitlement[]
+await client.auth.deleteEntitlement(userId, e.id);                                                                 // -> void
+```
+
+| Type | Shape |
+|---|---|
+| `CreateEntitlementRequest` | `{ dimension: string; key: string; level?: string; grantedBy?: string; validFrom?: string; validTo?: string }`. `key` is sent verbatim (`""` is a key) and must be a string |
+| `Entitlement` | `{ id; userId; dimension; key; level; grantedBy?; validFrom?; validTo?; createdAt }` |
+| `EntitlementsListResponse` | `{ entitlements: Entitlement[] }` (the wire shape; `listEntitlements` returns the array) |
+| `authMode` | `'jwt-claim' \| 'auth-db-entitlement' \| 'auth-db-rls'` |
+
+The wrappers call `POST|GET /api/databases/{db}/auth/admin/users/{userId}/entitlements` and
+`DELETE …/entitlements/{entitlementId}`. The .NET client has no typed wrapper for these routes: call them over HTTP.
 
 ---
 
@@ -302,7 +323,7 @@ const open = await client.table('orders')
 ```
 
 **The flag is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: what the query returns is what
-the credential's grants allow, with the flag or without it. A user with partition grants sees only those partitions, and a
+the credential's grants allow, with the flag or without it. A user with entitlements sees only those partitions, and a
 credential that holds no grant at all on a table with partition-level security is still refused there. Which
 credentials hold the grant: [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 The **data-plane** listener (the browser tier) ignores the flag. For subscriptions and named queries see
@@ -1240,7 +1261,7 @@ const sub2 = client.table('orders')
 The SDK sends `cross_partition_access: true` on the `subscribe` message, only when you ask, and sends it again on every resubscribe after
 a reconnect. **It is a cost waiver, not a grant**: it waives `PARTITION_FILTER_REQUIRED` and nothing else, so the snapshot and the events
 are what the credential's grants allow (a service key, or a user with the `all-partitions` grant, sees every partition, those created
-later too; a user with partition grants sees only its own). The data-plane listener ignores it. An older server ignores the field and
+later too; a user with entitlements sees only its own). The data-plane listener ignores it. An older server ignores the field and
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The wire rule:
 [A subscription that spans partitions](../guides/partitioning.md#a-subscription-that-spans-partitions).
 
@@ -1380,12 +1401,11 @@ Four cases do **not** share, and the consumer gets a server subscription of its 
   the primary key, so a `delete` (which carries only the key) cannot be applied;
 - anything with different arguments or options.
 
-A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in every released `@aouda/client`; the
-other consumers of the subscription and the server subscription are not affected. **Not yet released** (BL-1421, merged to the client's `main`, shipping with
-the next `@aouda/client` release, which is prepared separately; no version is claimed here): the bound becomes
+A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in `@aouda/client` before **0.12.0**; the
+other consumers of the subscription and the server subscription are not affected. (**BL-1421, 0.12.0**) From `@aouda/client` 0.12.0 (npm, 2026-11-12) the bound is
 `AoudaClientOptions.subscriptionConsumerQueueCapacity` (default 10 000, an integer of at least 1, refused at construction otherwise) with a
 per-subscription `consumerQueueCapacity` on `subscribe` (table and named query) that is not part of the sharing key, and overflow ends the consumer with the new
-`AoudaConsumerOverflowError` (`code: "CLIENT_CONSUMER_OVERFLOW"`) on its iterator and `onError`, carrying the C# SDK's message. The old message text goes away; match on `code`.
+`AoudaConsumerOverflowError` (`code: "CLIENT_CONSUMER_OVERFLOW"`) on its iterator and `onError`, carrying the C# SDK's message. The old message text is gone; match on `code`.
 (A consumer
 driven by callbacks that is never iterated is not "behind": past that many unread events it stops
 queuing, and iterating it afterwards throws.)
