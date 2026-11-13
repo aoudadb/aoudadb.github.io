@@ -142,7 +142,7 @@ If you do nothing:
 | Server `Aouda:WebSocket:EnableCompression` | `true` | Accepts permessage-deflate on WebSocket upgrades |
 | Server `Aouda:WebSocket:EnableMessagePack` | `true` | Allows auth-time `wire_mode=msgpack` negotiation |
 | Server `Aouda:WebSocket:MaxConnections` | `10000` | Global concurrent streaming connection cap |
-| Server `Aouda:WebSocket:HeartbeatInterval` | `20s` | Server heartbeat cadence; also the longest an open session outlives a credential that expired or whose user was disabled (a revoked key ends its sessions at once; **BL-1001, next train**, see [Realtime authorization](../reference/http-api.md#realtime-revoked-credential)) |
+| Server `Aouda:WebSocket:HeartbeatInterval` | `20s` | Server heartbeat cadence; also the longest an open session outlives a credential that expired or whose user was disabled (a key revoked on the node ends its sessions there at once; **BL-1001, next train**, see [Realtime authorization](../reference/http-api.md#realtime-revoked-credential)) |
 | Server `Aouda:WebSocket:IdleTimeout` | `5m` | Idle WebSocket auto-close threshold |
 | Server `Aouda:WebSocket:LongPollWaitTimeout` | `25s` | Default long-poll wait horizon |
 | Server `Aouda:WebSocket:LongPollSessionIdleTimeout` | `2m` | Long-poll session expiry window |
