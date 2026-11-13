@@ -291,6 +291,27 @@ Before BL-1223 a realtime session ignored the user token and kept the service ke
 - **Subscribe.** A `subscribe` needs the role permission the HTTP read it mirrors needs: `read` on the table, and for a named-query subscribe (**BL-1417, 0.12.0**) a `named-query` `execute` row for the name (a table `read` no longer counts, and the named query's tables are not asked). A refusal is an `error` message with HTTP's code: `INSUFFICIENT_PERMISSIONS` (a role without the permission), `AUTHORIZATION_DENIED` (no role on this database) or `AUTH_TOKEN_MISSING` (no credential, where HTTP answers `401`). (**BL-1286, 0.9.0**) A `jwt-claim` partition refusal on that `error` frame — WebSocket and long-poll snapshot — uses the HTTP query's code (`AUTH_PLS_TENANT_CLAIM_MISSING`, `AUTH_PLS_TENANT_CLAIM_MISMATCH`, and the other PLS codes query already returns), not `AUTHORIZATION_DENIED`. A named-query batch slot uses the same code. The call is still refused.
 - **`stream_open`** needs `write` on the table, refused with the same codes.
 - **Revoked rights.** When a role change means the session no longer holds the `read` (or, for a named-query subscribe, the `named-query` `execute` row) a live subscription needs, the server ends that subscription with `PERMISSION_REVOKED`, before the next change is delivered.
+- <a id="realtime-revoked-credential"></a>**Revoked or expired credential** (**BL-1001, next train**). An open WebSocket or long-poll session ends when the credential it authenticated with stops authenticating over HTTP. This holds for a user JWT and for **every** API key: `mk_srv_`, `mk_svc_`, `mk_scp_`, `mk_adm_`, `mk_anon_`, `mk_pub_` and custom `mk_` keys, user-linked or not, minted through the API or declared in the identities file. When a service key carries a `user_token`, the session ends when either of them stops authenticating. Up to 0.13.0 a session opened with an API key was never re-checked: a revoked key's socket kept receiving changes, accepted new subscribes and wrote rows until it closed.
+  - **At once, when a key is retired on the node you are connected to.** This covers `DELETE /api/databases/{db}/auth/admin/api-keys/{id}`, `DELETE /api/auth/admin/keys/{id}`, `POST …/auth/admin/regenerate-keys` and a fleet or scoped key `…/rotate` with `overlapSeconds` omitted or `0`, and a fleet or scoped key revoked by name. From the moment the revoke's response is sent, the session handles no further message: a `subscribe` gets no answer, and a `stream_rows` that arrives after that is not written and gets no `stream_ack`. The WebSocket then receives `auth_error` and is closed. A long-poll whose poll is waiting answers `401` at once. A session on a **replica** ends within one heartbeat interval instead (next item): the replica applies the revoke from replication. A declared key removed from the identities file is retired at the next server start, when no session is open.
+  - **A write in flight may or may not have been written.** Rows with a `stream_ack` are written. A `stream_rows` the server was already writing when the key was revoked may still be committed, and its `stream_ack` may never arrive because the socket closes. Treat a `stream_rows` without a `stream_ack` as **unknown**, not as unwritten: re-send it idempotently with a valid credential — in `upsert` mode, or with rows whose primary key makes a repeat harmless — or read the table before re-sending. Re-sending it in `insert` mode can duplicate rows or fail on duplicate keys.
+  - **Within one heartbeat interval, for everything else.** The interval is `Aouda:WebSocket:HeartbeatInterval`, default 20 s. This covers a key whose `expires_at` passes, including the old key after a rotate or `regenerate-keys` with an overlap; a user-linked key whose user is disabled or deleted; and a JWT that is signed out, ended or revoked (Hybrid and Stateful validation). The WebSocket checks at every heartbeat. A long-poll session checks at its next `poll` or `send`, at most once per interval. If the server cannot complete a check (for example it refuses the read for capacity), it checks again at the next interval; that never ends the session.
+  - **What the client receives.** On the WebSocket, an [`auth_error`](#auth_error) frame, then a close with status `1008` (policy violation) and the code as the close reason. On long-poll, `401` with the same code; the session is removed, so the request after that is `404 SESSION_NOT_FOUND`. Open a new session with a valid credential. The codes and messages:
+
+    | Cause | `code` | `message` (WebSocket) |
+    |---|---|---|
+    | API key revoked, deleted, regenerated or rotated away, or removed from the identities file | `AUTH_TOKEN_REVOKED` | `API key has been revoked` |
+    | User-linked API key whose user is disabled or deleted | `AUTH_TOKEN_REVOKED` | `API key's linked user is disabled or no longer exists` |
+    | API key past its `expires_at` | `AUTH_TOKEN_EXPIRED` | `API key has expired` |
+    | JWT (or the `user_token` beside a key) revoked | `AUTH_TOKEN_REVOKED` | `Token has been revoked` |
+    | JWT (or the `user_token` beside a key) expired | `AUTH_TOKEN_EXPIRED` | `Token has expired` |
+
+    The long-poll `message` is the same text followed by `. Authenticate again and open a new long-poll session.`, for example:
+
+    ```json
+    { "code": "AUTH_TOKEN_REVOKED", "message": "API key has been revoked. Authenticate again and open a new long-poll session." }
+    ```
+
+    A session opened with a service key now reports the key's own expiry in `auth_ok.expires_at` (`null` when the key has none).
 - **Access grants.** What a subscription sees on a PLS or RLS table is the credential's access grants, as for the HTTP read it mirrors: the snapshot equals an HTTP query by the same credential, and every live event follows the same rule. A holder of `all-partitions` also receives events of partitions created later. A change to a user's role assignments or role permissions re-keys the live session on the first event after the change (a narrowing then applies to that event). (**BL-1284, 0.9.0**) One session applies one refresh at a time. An older resolution cannot put a revoked partition back. An event which arrives while a refresh is in progress is delivered only when the winning set still allows it. A **widening is not re-snapshotted**: rows the credential could not see before are not pushed, events from the re-key on are, so resubscribe to get the rows. A fresh `subscribe` reads the permissions again. The `crossPartitionAccess` flag is `cross_partition_access` on the `subscribe` message ([`subscribe`](#subscribe)).
 
 **Example:**
@@ -738,7 +759,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, 0.9.0**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
-| `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
+| `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked. On an open WebSocket (`auth_error`) or long-poll session, also an API key revoked, deleted, rotated or regenerated away, removed from the identities file, or whose linked user is disabled (**BL-1001, next train**; see [Realtime authorization](#realtime-revoked-credential)) |
 | `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. The server log names the rejected key by fingerprint (**BL-1377, 0.10.0**): match it with `aouda keys hash --key-stdin`. (**BL-1422, 0.12.0**) The `suggestion` says which kind of key the route takes and, read from the presented key's fixed prefix (never echoed), which kind was sent: `The key presented is a scoped service key (mk_scp_). This route is authenticated by the database's own auth database: use a key issued for this database (service mk_svc_, scoped mk_scp_, or custom mk_), or a server key (mk_srv_) if the server auth database governs it. If the key is of the right kind, it was revoked, has expired, or belongs to another database.` On a server route it reads `... This route is authenticated by the server auth database: use a server key (mk_srv_, or a scoped server key), and check that it has not been revoked or expired.` Counted in `rejectedApiKeys`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
 | `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
@@ -4529,6 +4550,15 @@ Query parameters:
 
 Server-Sent Events endpoint (`text/event-stream`) that emits `log` events as new entries are written.
 
+(**BL-1001, next train**) A stream opened with an API key ends when the key stops authenticating: at once when the key is revoked on this node, otherwise within one `Aouda:WebSocket:HeartbeatInterval` (default 20 s; an expiry, or a linked user disabled). Its last event is `auth_error`, with the codes of [Realtime authorization](#realtime-revoked-credential), and the response then ends:
+
+```text
+event: auth_error
+data: {"code":"AUTH_TOKEN_REVOKED","message":"API key has been revoked"}
+```
+
+Up to 0.13.0 a revoked key's stream stayed open. A stream opened with a JWT is not re-checked.
+
 **Event shape:**
 
 ```text
@@ -4967,7 +4997,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, 0.9.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, 0.9.0**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, 0.9.0**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**0.4.0**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). Also sent to an **open** session whose credential is revoked (`AUTH_TOKEN_REVOKED`) or expires (`AUTH_TOKEN_EXPIRED`), a JWT or any API key, before the server closes it (**BL-1001, next train**: API keys too; see [Realtime authorization](#realtime-revoked-credential)). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, 0.9.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, 0.9.0**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, 0.9.0**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**0.4.0**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**
