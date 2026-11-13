@@ -1710,6 +1710,73 @@ See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#available-now).
 
 ---
 
+## 13a) Materialized Values (**BL-1434, next train**)
+
+A [materialized value](../guides/materialized-values.md) is a named, computed cell: a formula over rows of ordinary tables and other cells, kept current by the server. `client.materializedValues.model(name)` is a handle on one model. The routes need a definer (a `db_admin` user or the service key).
+
+```ts
+import { mv } from "@aouda/client";
+
+const model = client.materializedValues.model("pnl");
+
+// An input table with the natural composite key a cell read needs.
+await client.materializedValues.createInputTable("inputs", {
+  key: [{ name: "Field", type: "String" }, { name: "Year", type: "Int64" }],
+  columns: [{ name: "Value", type: "Decimal(18,2)" }, { name: "Label", type: "String" }],
+});
+
+// One request, all or none; each cell declares its type.
+const input = (field: string, column: string) => mv.cell("inputs", { Field: field, Year: 2026 }, column);
+await model.define([
+  { name: "Revenue", valueType: "Decimal(18,2)", expression: input("Revenue", "Value") },
+  { name: "Cost", valueType: "Decimal(18,2)", expression: input("Cost", "Value") },
+  { name: "Profit", valueType: "Decimal(18,2)", expression: mv.sub(mv.ref("pnl", "Revenue"), mv.ref("pnl", "Cost")) },
+  {
+    name: "Tax",
+    valueType: "Decimal(18,2)",
+    expression: mv.if(
+      mv.gt(mv.ref("pnl", "Profit"), mv.lit(0)),
+      mv.round(mv.mul(mv.ref("pnl", "Profit"), mv.lit(0.22)), 2),
+      mv.lit(0)
+    ),
+  },
+]);
+
+// Set inputs (ordinary writes), then wait for the value they produce.
+const setCell = (field: string, column: string) => mv.input("inputs", column, { Field: field, Year: 2026 });
+await model.set(setCell("Revenue", "Value"), 1000);
+const { token } = await model.set(setCell("Cost", "Value"), 400);
+const tax = await model.get("Tax", { waitFor: mv.waitFor.atLeast(token!, 10_000) });
+// tax.value === "132.00": a Decimal(18,2) cell is a string, never a JS number
+```
+
+- **Members.** `define` / `alter` / `delete` / `getDefinition` / `list`; `set`; `get` (an `MvValue`) and `getTyped(name, kind)`; `subscribe(cell?, options)`; `explain`; `createInputTable`. The expression builder is `mv`: `lit`, `cell`, `ref`, `add` `sub` `mul` `div`, `min` `max` `abs`, `eq` `ne` `gt` `gte` `lt` `lte`, `if`, `and` `or` `not`, `round`, `coalesce`, `concat`, `cast`. At most 10 000 cells per `define`.
+- **`set` is two ordinary writes**, not one atomic upsert (an update, then an insert when no row matched; two concurrent first writes of one key both succeed and the last wins). It writes one column and keeps the row's others, and returns the write's `token`. A `bigint` is written exactly at any magnitude, in a value, a key part or a literal.
+- **`get` returns `null`** for a cell that is not computed, not defined, or not visible to the caller. An error cell is an `MvValue` with `isError` and the text in `error`, not a throw.
+- **`getTyped` is exact and never converts**: kinds `number`, `bigint`, `decimal` (the canonical string), `string`, `boolean`, `date`, `timestamp`, `guid`. A cell of another kind is `MvTypeError`; an error cell is `MvCellError`.
+- **`mv.waitFor.atLeast(token, ms)` / `mv.waitFor.observed(ms)`.** `get` waits for the client's own stored token for up to **5 s** by default (read-your-writes); the range is 0 to 30 000 ms. A commit that left the cell unchanged satisfies it. A lapse is `MvNotCaughtUpError`, never a stale value. The request's own timeout is raised above the wait so the two do not race. The value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and `computedAtPosition` is an "at least".
+- **`subscribe`** is a key-filtered subscription on `_mv_values` through the shared-subscription machinery, each row decoded like `get`'s; filters are case-exact. `MvValueEvent.coverToken` is a snapshot's or a row change's token, and is `undefined` for a notice (`horizon`, `range_delete`). Covers are not monotonic: wait on the **highest** seen (the default `get` does, because the client keeps the highest token any event carried). **Known issue (BL-1449):** two first `subscribe` calls on a fresh client can race the WebSocket opening and the second fails with `AoudaConnectionError`; wait for the first snapshot before the second.
+- **`explain`** returns a cell, its formula, the `inputs` it reads, the cells it `reads` and is `readBy`, and the maintainer's `watermark`. Positions are "at least".
+
+**Typed errors.** Each is an instance of the class the repo already throws for that status:
+
+| Code (status) | Class |
+|---|---|
+| `MV_DEFINITION_INVALID`, `MV_REFERENCE_INVALID`, `MV_REFERENCE_NOT_PRIMARY_KEY`, `MV_CYCLE`, `MV_DEPTH_EXCEEDED` (400) | `MvDefinitionValidationError`, with a `kind` |
+| `MV_DEFINITION_EXISTS`, `MV_DEFINITION_IN_USE`, `MV_TABLE_REFERENCED` (409) | `MvDefinitionConflictError`, with a `kind` (`isMvDefinitionError` tests for both) |
+| `MV_DEFINITION_NOT_FOUND` (404) | `MvDefinitionNotFoundError` |
+| `INSUFFICIENT_PERMISSIONS` (403) on a definition call | `MvNotDefinerError` |
+| `AUTH_ENTITLEMENT_NOT_FOUND` (403) on a value read | `MvNotGrantedError` |
+| `TOKEN_UNSATISFIED` (409) on a value read | `MvNotCaughtUpError` |
+| `MV_TOKEN_REQUIRES_PRIMARY` (421) | `MvReplicaError` |
+| `MV_NOT_MAINTAINED` (503) | `MvNotMaintainedError`: **not retried** and not counted toward the circuit breaker |
+| `PERMISSION_REVOKED` on a subscription | `MvGrantRevokedError` |
+| (SDK-side) an undecodable row; a kind mismatch; an error cell asked for as a value | `MvDecodeError`, `MvTypeError`, `MvCellError` |
+
+**Value mapping.** `Bool` is `boolean`; `Byte`, `Int16`, `Int32`, `UInt16`, `UInt32` and the floats are `number`; `Int64` and `UInt64` are `bigint`; `Decimal(p,s)` is the canonical `string` (never a number); `String` and `Guid` are `string`; `Date` and `Timestamp` are `Date`, with millisecond precision (the value's `text` always holds the exact canonical form). See [Materialized Values: value types](../guides/materialized-values.md#value-types).
+
+---
+
 ## 14) Columnar Output
 
 For high-performance data processing, bypass row conversion and get the raw columnar payload directly. `select()` takes rest args (not an array):

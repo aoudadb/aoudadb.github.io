@@ -749,6 +749,16 @@ that arrives in a bucket folds into that bucket's one group.
   is. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
   history keyset-paged 10,000 at a time needed 8.5 MB against a 512 MB server's 4 MB read ceiling, and was refused on every retry.
 
+## Materialized values: what a model costs (**BL-1434, next train**) {#mv-cost}
+
+A [materialized value](materialized-values.md) model is two ordinary tables, `_mv_definitions` and `_mv_values`, and they sit in the hot tier like any other table (unpartitioned: a value row is small and there is one row per cell).
+
+- **Cells.** One value row per cell. The definitions table holds one row per cell too, with the formula as JSON.
+- **Chain depth.** A chain of cells reading cells is capped at 16.
+- **Per commit.** A commit to a table that some cell reads wakes the cells that read it and everything downstream of them, in one pass, each cell once; only a changed value is written. A one-row recompute, from the commit being acknowledged to the value being readable, was measured at a median of 1.1 ms and a 99th percentile of 2.0 ms on a 28-CPU desktop. That is a measurement on one machine, not a bound, and there is no cost limiter. A commit to a table no cell reads costs nothing you can measure; it was not measured to a bound.
+- **A cold row.** A cell reads an input by its primary key. When the row's copy is cold, or the table holds vectors, the read is a counted scan of that one key rather than an index probe.
+- **Restart.** Every open recomputes every cell, so the time to the first readable value after a restart grows with the number of cells and the size of the inputs they read. A `waitFor` read waits for it.
+
 ## Memory is granted before work starts, and small writes have a reserve (**WorkloadCore S06, 0.3.0**)
 
 Work asks for memory before it starts — at least what it needs, at most what it can use — and waits in its class's queue if it
