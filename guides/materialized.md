@@ -73,7 +73,9 @@ At a high level, Aouda does this:
 
 What is different in Aouda vs many systems:
 - The result is a regular table, not a special hidden object type.
-- The query name is the table name (unified namespace; no `_mq_` prefix).
+- The query name is the table name (unified namespace; no `_mq_` prefix), so it follows the
+  [table-name rule](../reference/http-api.md#table-names), and may not start with `_` or exceed 100 characters. `aouda schema
+  check`, the start and `POST …/materialized-queries` refuse a name that breaks it before anything is created (**BL-1468, next train**).
 - Subscription uses the normal table streaming path (`target = queryName`), not a custom protocol target.
   **A rebuild is announced too (**BL-702, 0.2.0**):** when a change can only be applied by rebuilding the result
   (for example, deleting the source row that held an aggregate's `last`), a subscriber of the result receives the
