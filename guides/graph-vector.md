@@ -313,7 +313,7 @@ Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissi
   table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
   and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, 0.9.0**)
 
-**Key invariant:** Filtered ANN layer 1 (partition pruning) and ADRA PLS partition grants are the same mechanism — ADRA grants narrow which partitions the ANN scan considers, at no extra cost.
+**Key invariant:** Filtered ANN layer 1 (partition pruning) and ADRA PLS entitlements are the same mechanism — ADRA entitlements narrow which partitions the ANN scan considers, at no extra cost.
 
 ---
 
@@ -339,12 +339,12 @@ InsertEdgesAsync / InsertVectorsAsync
 TraverseAsync / KHopNeighborhoodAsync / ShortestPathAsync
     └─ TraverseOperator / KHopNeighborhoodOperator / ShortestPathOperator
            └─ Scans CSR sealed segments; optional CSC for bidirectional BFS
-           └─ Partition-key filter (ADRA grants via IEdgeAccessFilter)
+           └─ Partition-key filter (ADRA entitlements via IEdgeAccessFilter)
 
 NearestNeighborsAsync
     └─ NearestNeighborsOperator
            └─ IVF cell pruning → brute-force distance over fp32 / decoded RaBitQ pages
-           └─ Partition-key filter (ADRA grants via IVectorAccessFilter)
+           └─ Partition-key filter (ADRA entitlements via IVectorAccessFilter)
            └─ Multi-partition fan-out merge (ADR 0032 M2 fix)
 ```
 
@@ -458,7 +458,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
-| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, 0.9.0**; it was "no partition" in one place and a partition in another). `null` on an `auth-db-pls` table is `403 AUTH_PLS_GRANT_NOT_FOUND` unless the caller holds `all-partitions` at `write` (**BL-1204, 0.9.0**) |
+| `partitionKey` | `string?` | `null` | Routes insert to a specific partition's `VectorHraBuffer`; must match the table's declared partition key column function. `null` is no partition; an empty string is a partition of its own (**BL-1184, 0.9.0**; it was "no partition" in one place and a partition in another). `null` on an `auth-db-entitlement` table is `403 AUTH_ENTITLEMENT_NOT_FOUND` unless the caller holds `all-partitions` at `write` (**BL-1204, 0.9.0**) |
 
 ### NearestNeighborsAsync query parameters
 
@@ -829,7 +829,7 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | `ShortestPathAsync` is slow or returns a long path | `StoreCsc: false`; using unidirectional BFS | Re-create the edge table with `StoreCsc: true` for bidirectional BFS (requires data reload) |
 | ANN recall is low | Too few IVF cells probed relative to corpus distribution | Increase `IvfCells` (requires recreating column config); or verify `partitionKey` is not too restrictive |
 | Edge traversal returns unexpected nodes | Cross-partition traversal not supported in Stage 1; edges from other partitions not reachable from a cross-partition query | Ensure the start node's partition is accessible and edges are routed to the same partition as their source |
-| Traversal or `:nearest` returns nothing | `permissions` non-null with no partition grants, a `jwt-claim` PLS read whose bound claim is not that partition, or `permissions = null` on a jwt-claim PLS table or an auth-db-governed table | A tenant sees only its bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`, not an empty `200`. `all-partitions` at `read` sees every partition (**BL-1279, 0.9.0**). `permissions = null` is embedded mode only (**BL-1227, 0.9.0**) |
+| Traversal or `:nearest` returns nothing | `permissions` non-null with no entitlements, a `jwt-claim` PLS read whose bound claim is not that partition, or `permissions = null` on a jwt-claim PLS table or an auth-db-governed table | A tenant sees only its bound claim. A missing, empty, or white-space claim is `403 AUTH_PLS_TENANT_CLAIM_MISSING`, not an empty `200`. `all-partitions` at `read` sees every partition (**BL-1279, 0.9.0**). `permissions = null` is embedded mode only (**BL-1227, 0.9.0**) |
 
 ---
 
@@ -871,10 +871,10 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| ADRA authorization deny for edge traversal | Ensures ADR 0032 early-deny works end-to-end with real permission contexts | `tests/Aouda.Engine.Api.Tests/EdgeAdraAuthTests.cs`: create edge table with `AuthorizationMode.AuthDbPls`; traverse as user with and without PLS grants; assert empty result on deny | High |
-| ADRA authorization deny for ANN search | Same as above for vector path | `tests/Aouda.Engine.Api.Tests/VectorAdraAuthTests.cs`: ANN query with empty grant set returns empty | High |
+| ADRA authorization deny for edge traversal | Ensures ADR 0032 early-deny works end-to-end with real permission contexts | `tests/Aouda.Engine.Api.Tests/EdgeAdraAuthTests.cs`: create edge table with `AuthorizationMode.AuthDbEntitlement`; traverse as user with and without PLS grants; assert empty result on deny | High |
+| ADRA authorization deny for ANN search | Same as above for vector path | `tests/Aouda.Engine.Api.Tests/VectorAdraAuthTests.cs`: ANN query with empty entitlement set returns empty | High |
 | Stage-4 manifest field serialization round-trip | Ensures reserved fields survive `ManifestSerializer` write→read without data loss | `tests/Aouda.Engine.Storage.Tests/Manifest/SegmentManifestStage4ReservationTests.cs`: write manifest with non-default field values (once P23 populates them); verify round-trip | Medium |
-| `NearestNeighborsAsync` multi-partition fan-out merge | ADR 0032 M2 fix: multi-partition ANN must correctly merge results | `tests/Aouda.Engine.Api.Tests/VectorMultiPartitionAnnTests.cs`: insert vectors in 2 partitions; ANN with multi-partition grants; verify merged top-k ordering | Medium |
+| `NearestNeighborsAsync` multi-partition fan-out merge | ADR 0032 M2 fix: multi-partition ANN must correctly merge results | `tests/Aouda.Engine.Api.Tests/VectorMultiPartitionAnnTests.cs`: insert vectors in 2 partitions; ANN with multi-entitlements; verify merged top-k ordering | Medium |
 | MdVector FDE companion column slot (Stage 2 readiness) | Ensure catalog correctly stores `Fde: true` and column slot is reserved | `tests/Aouda.Engine.Api.Tests/MdVectorFdeSlotTests.cs`: create table with `MdVectorColumnConfig`; confirm `Fde` value persists in catalog | Low |
 | Bidirectional BFS path correctness with CSC | `ShortestPathAsync` correctness for asymmetric graphs (directed edges) | Add directed-graph test case in `ShortestPathOperatorTests.cs` where CSR-only path would differ from bidirectional BFS | Medium |
 

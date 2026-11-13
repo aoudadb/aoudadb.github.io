@@ -70,6 +70,10 @@ Default read preference remains **`Primary`**. Replica reads are *safe when you 
 
 ---
 
+## Materialized values (**BL-1434, next train**)
+
+A read of `_mv_values` with a token is judged by the **maintainer's progress**, not by the node's position: it returns once every commit up to the token has been recomputed, and a commit that left the cell unchanged satisfies it. A wait that runs out is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says, and a replica answers `421 MV_TOKEN_REQUIRES_PRIMARY`. A value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it. See [Materialized Values](materialized-values.md#eventual-consistency-and-waitfor).
+
 ## Managed regional replica
 
 Pointing reads at a nearby secondary used to trade latency for a silent bug: the user's own write could be invisible. With the token, that read either sees the write, waits up to `waitMs` (default **250 ms**), or returns a typed error. It never returns the pre-write state.

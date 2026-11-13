@@ -385,7 +385,7 @@ No API key or from-address is required for capture. `InviteUrl` / `PasswordReset
 | `DELETE` | `/admin/notifications/outbox` | Clears all entries |
 
 Every `/admin/notifications` route needs `admin` on the server auth database (a server admin's JWT or a server admin key); any other
-credential gets **403** `AUTHORIZATION_DENIED` (**BL-1466, next train**). The outbox holds one-time codes, so treat access to it as admin
+credential gets **403** `AUTHORIZATION_DENIED` (**BL-1466, 0.13.1**). The outbox holds one-time codes, so treat access to it as admin
 access.
 
 Each entry includes `id`, `channel`, `kind` (`password_reset` \| `invite` \| `mfa_otp` \| `test`), `to`, `subject` (email), `body`, `otp`, `createdAtUtc`.

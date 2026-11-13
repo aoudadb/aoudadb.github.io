@@ -164,6 +164,15 @@ The presence pattern in [Named queries](named-queries.md) uses a `write` stamp f
 | `round` | 2 | `round(value, digits)`, `digits` 0–28, **away from zero** (not banker's rounding). (**LoadSpeed S13, 0.4.0**) Of a decimal, a decimal at scale `digits`; of a `Double`, a `Double` |
 | `roundTo` | 2 | `roundTo(value, step)`, `step` > 0, away from zero — this is the one for tick sizes and price increments. (**LoadSpeed S13, 0.4.0**) Of a decimal, a decimal at the larger of the two scales; of a `Double`, a `Double` |
 | `cast` | 2 | `cast(value, "TypeName")`; the type must be a **string literal**. A decimal target is spelled with its precision and scale, `cast(value, "Decimal(18,6)")`, and rounds half away from zero to that scale (**LoadSpeed S13, 0.4.0**: plain `"Decimal"` is refused) |
+| `min` / `max` | 2 or more | (**BL-1434, next train**) The smallest or largest number |
+| `abs` | 1 | (**BL-1434, next train**) The absolute value; `abs` of the smallest `Int64` overflows |
+| `eq` / `ne` | 2 | (**BL-1434, next train**) Bool. Two `Date`, `Timestamp` or `Guid` values do not compare (an error) |
+| `gt` / `gte` / `lt` / `lte` | 2 | (**BL-1434, next train**) Bool; numbers or strings. Two `Date`, `Timestamp` or `Guid` values do not compare |
+| `if` | 3 | (**BL-1434, next train**) `if(condition, then, else)`: only the chosen branch is evaluated |
+| `and` / `or` | 2 or more | (**BL-1434, next train**) Bool; stops at the first operand that decides it |
+| `not` | 1 | (**BL-1434, next train**) Bool |
+
+(**BL-1434, next train**) The thirteen functions from `min` to `not` are also what a [materialized value](materialized-values.md#the-thirteen-functions) formula uses (with `cellRef`, which is valid only there).
 
 ```json
 {
@@ -196,7 +205,7 @@ Rules worth knowing before you design around it:
 - There is **no timestamp truncation function**. Bucketing a timestamp to a day or an hour is a partition-key function (`TruncateToDay` and friends) or a materialized-query `groupBy` term, not a derived column.
 - Unknown `fn`, wrong arity, or a non-literal `cast` type fails **schema apply** with `SCHEMA_EXPR_UNKNOWN_FUNCTION` — not at insert time. The same validation runs on `namedQueries[].selectExpr` and `namedMutations[].setExpr`.
 
-This is deliberately not a general expression language. It covers normalization — the tidying an ingest hop does — so that hop can be deleted. It does not cover lookups, I/O, or cross-row state; those are still [a service's job](division-of-responsibility.md).
+This is deliberately not a general expression language. It covers normalization — the tidying an ingest hop does — so that hop can be deleted. It does not cover lookups, I/O, or cross-row state; those are still [a service's job](division-of-responsibility.md). (**BL-1434, next train**) A [materialized value](materialized-values.md) formula is the one place an expression may read another row (`cellRef`, by full primary key); insert-time transforms stay row-local.
 
 ---
 

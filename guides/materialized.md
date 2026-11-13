@@ -19,6 +19,8 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 
 > **Declaring MQs in `aouda.schema.json` (new).** Materialized queries can now be declared under a top-level `materializedQueries` map and managed by `schema diff` / `apply` / `export`, instead of only through the .NET helpers or admin HTTP. That is the recommended path for new work — it puts MQ definitions under the same review and CI gate as tables and named queries. Syntax, the five shapes (`latestPerKey`, `firstPerKey`, `aggregate`, `filter`, `topNPerGroup`), and the drop-on-omit semantics are in [Schema management](schema-management.md#materialized-queries-in-the-schema-file). Statements below about MQ lifecycle being .NET-only predate this and are being reworked; the runtime behaviour they describe is unchanged.
 
+> **One cell, not a result set?** (**BL-1434, next train**) A [materialized value](materialized-values.md) maintains a single named item from a formula over cells of ordinary tables. A formula may read a row of a materialized query's result, which is how a `SUM` over many rows feeds a cell. The other direction is closed at the cell: a materialized query may be built over `_mv_values`, but no cell may read its result (a `cellRef` to a materialized query whose source chain reaches an `_mv_` table is `400 MV_REFERENCE_INVALID`), and a query over `_mv_values.value` sees the value as text, not as a number. Dropping a materialized query whose result a cell reads is `409 MV_TABLE_REFERENCED`.
+
 If you are new to materialized queries, start with:
 - `2.1 Why this functionality exists` (plain-language explanation)
 - `2.1.1 What a materialized query is (in plain language)`
@@ -314,7 +316,7 @@ time slice ([2.11e](#window-expiry)).
 (**BL-1227, 0.9.0**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
 lifted past each half by its own grant **on the source table**: `all-partitions` lifts the source's PLS and `all-rows` its RLS, each
 alone. A grant that names the result table lifts nothing. A holder of one grant is still restricted by the other half — for
-example `all-partitions` alone reads every partition of a result over an `auth-db-pls` source with an RLS resolver, but only the rows
+example `all-partitions` alone reads every partition of a result over an `auth-db-entitlement` source with an RLS resolver, but only the rows
 the resolver allows — and a result over a `jwt-claim` source is read whole by a holder of `all-partitions`. Each use of a grant on a
 result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
 See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).

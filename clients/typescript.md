@@ -231,8 +231,7 @@ stop on `AoudaAuthenticationFatalError`.
 
 **Refusals that name the key kind and the option (BL-1422).** Server side, since **0.12.0**, a refusal's `suggestion` names the key kind and prefix
 the route takes (`AUTH_API_KEY_INVALID`, `AUTH_TOKEN_MISSING`, `AUTH_KEY_LISTENER_MISMATCH`, `AUTH_KEY_ROUTE_MISMATCH`, and a `403` RBAC denial
-of an auth-admin, browser-tier or scoped key). **Not yet released in `@aouda/client`** (merged to the client's `main`, shipping with the next
-release, which is prepared separately; no version is claimed here): the `message` of an HTTP 401 or 403 with one of those codes (and
+of an auth-admin, browser-tier or scoped key). In `@aouda/client` **0.12.0** (npm, 2026-11-12) the `message` of an HTTP 401 or 403 with one of those codes (and
 `AUTH_API_KEY_REQUIRED`, `AUTH_DATABASE_NOT_IN_ALLOWANCE`, `UNAUTHORIZED`, `AUTH_TOKEN_INVALID` / `_EXPIRED` / `_REVOKED`, `AUTHORIZATION_DENIED`) then carries
 that `suggestion` (for `AUTHORIZATION_DENIED` its `details`) and the option to set (`apiKey`, `serverAuth`, `appAuth`, `serverUrl`) with the
 kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400, ...) keeps the
@@ -242,6 +241,28 @@ server's message exactly. The `/ready` reason codes `schema_pending` and `schema
 INSUFFICIENT_PERMISSIONS` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` on a call that worked before
 means the caller's role lacks the `named-query` / `named-mutation` `execute` row for it; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. See
 [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
+
+### Entitlements (**BL-1418, 0.13.0**)
+
+An entitlement is one row `(user, dimension, key, level)` that lets a user reach the rows of an `auth-db-entitlement` table whose
+`permissionColumn` equals `key` (see [Data Authorization §19.8](../auth/authorization.md#198-admin-api-entitlements)). The admin
+wrappers are on `client.auth` and need a `db_admin` caller; they ship in `@aouda/client` **0.13.0** (0.12.0 still has the `PartitionGrant` names):
+
+```ts
+const e = await client.auth.createEntitlement(userId, { dimension: 'chat_room', key: 'room_42', level: 'write' }); // -> Entitlement
+const all = await client.auth.listEntitlements(userId, { dimension: 'chat_room' });                               // -> Entitlement[]
+await client.auth.deleteEntitlement(userId, e.id);                                                                 // -> void
+```
+
+| Type | Shape |
+|---|---|
+| `CreateEntitlementRequest` | `{ dimension: string; key: string; level?: string; grantedBy?: string; validFrom?: string; validTo?: string }`. `key` is sent verbatim (`""` is a key) and must be a string |
+| `Entitlement` | `{ id; userId; dimension; key; level; grantedBy?; validFrom?; validTo?; createdAt }` |
+| `EntitlementsListResponse` | `{ entitlements: Entitlement[] }` (the wire shape; `listEntitlements` returns the array) |
+| `authMode` | `'jwt-claim' \| 'auth-db-entitlement' \| 'auth-db-rls'` |
+
+The wrappers call `POST|GET /api/databases/{db}/auth/admin/users/{userId}/entitlements` and
+`DELETE …/entitlements/{entitlementId}`. The .NET client has no typed wrapper for these routes: call them over HTTP.
 
 ---
 
@@ -302,7 +323,7 @@ const open = await client.table('orders')
 ```
 
 **The flag is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: what the query returns is what
-the credential's grants allow, with the flag or without it. A user with partition grants sees only those partitions, and a
+the credential's grants allow, with the flag or without it. A user with entitlements sees only those partitions, and a
 credential that holds no grant at all on a table with partition-level security is still refused there. Which
 credentials hold the grant: [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 The **data-plane** listener (the browser tier) ignores the flag. For subscriptions and named queries see
@@ -1240,7 +1261,7 @@ const sub2 = client.table('orders')
 The SDK sends `cross_partition_access: true` on the `subscribe` message, only when you ask, and sends it again on every resubscribe after
 a reconnect. **It is a cost waiver, not a grant**: it waives `PARTITION_FILTER_REQUIRED` and nothing else, so the snapshot and the events
 are what the credential's grants allow (a service key, or a user with the `all-partitions` grant, sees every partition, those created
-later too; a user with partition grants sees only its own). The data-plane listener ignores it. An older server ignores the field and
+later too; a user with entitlements sees only its own). The data-plane listener ignores it. An older server ignores the field and
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The wire rule:
 [A subscription that spans partitions](../guides/partitioning.md#a-subscription-that-spans-partitions).
 
@@ -1380,12 +1401,11 @@ Four cases do **not** share, and the consumer gets a server subscription of its 
   the primary key, so a `delete` (which carries only the key) cannot be applied;
 - anything with different arguments or options.
 
-A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in every released `@aouda/client`; the
-other consumers of the subscription and the server subscription are not affected. **Not yet released** (BL-1421, merged to the client's `main`, shipping with
-the next `@aouda/client` release, which is prepared separately; no version is claimed here): the bound becomes
+A consumer that falls more than 10 000 events behind its own iterator is ended with a plain `AoudaError` (no dedicated class or `code`, unlike the C# SDK's `CLIENT_CONSUMER_OVERFLOW`) in `@aouda/client` before **0.12.0**; the
+other consumers of the subscription and the server subscription are not affected. (**BL-1421, 0.12.0**) From `@aouda/client` 0.12.0 (npm, 2026-11-12) the bound is
 `AoudaClientOptions.subscriptionConsumerQueueCapacity` (default 10 000, an integer of at least 1, refused at construction otherwise) with a
 per-subscription `consumerQueueCapacity` on `subscribe` (table and named query) that is not part of the sharing key, and overflow ends the consumer with the new
-`AoudaConsumerOverflowError` (`code: "CLIENT_CONSUMER_OVERFLOW"`) on its iterator and `onError`, carrying the C# SDK's message. The old message text goes away; match on `code`.
+`AoudaConsumerOverflowError` (`code: "CLIENT_CONSUMER_OVERFLOW"`) on its iterator and `onError`, carrying the C# SDK's message. The old message text is gone; match on `code`.
 (A consumer
 driven by callbacks that is never iterated is not "behind": past that many unread events it stops
 queuing, and iterating it afterwards throws.)
@@ -1707,6 +1727,73 @@ below the horizon, or with a null time — never written and not in `rowsLoaded`
 segment per time slice; see [Bulk Load](../guides/bulk-load.md#loading-a-table-with-retention).
 
 See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#available-now).
+
+---
+
+## 13a) Materialized Values (**BL-1434, next train**)
+
+A [materialized value](../guides/materialized-values.md) is a named, computed cell: a formula over rows of ordinary tables and other cells, kept current by the server. `client.materializedValues.model(name)` is a handle on one model. The definition calls need a **definer**: a `db_admin` user or the database's `mk_svc_` service key; on a database the server auth database governs, a server user with `db_admin` on it. The server key `mk_srv_` is **not** a definer, and reads no values without an entitlement ([Security](../guides/materialized-values.md#security)).
+
+```ts
+import { mv } from "@aouda/client";
+
+const model = client.materializedValues.model("pnl");
+
+// An input table with the natural composite key a cell read needs.
+await client.materializedValues.createInputTable("inputs", {
+  key: [{ name: "Field", type: "String" }, { name: "Year", type: "Int64" }],
+  columns: [{ name: "Value", type: "Decimal(18,2)" }, { name: "Label", type: "String" }],
+});
+
+// One request, all or none; each cell declares its type.
+const input = (field: string, column: string) => mv.cell("inputs", { Field: field, Year: 2026 }, column);
+await model.define([
+  { name: "Revenue", valueType: "Decimal(18,2)", expression: input("Revenue", "Value") },
+  { name: "Cost", valueType: "Decimal(18,2)", expression: input("Cost", "Value") },
+  { name: "Profit", valueType: "Decimal(18,2)", expression: mv.sub(mv.ref("pnl", "Revenue"), mv.ref("pnl", "Cost")) },
+  {
+    name: "Tax",
+    valueType: "Decimal(18,2)",
+    expression: mv.if(
+      mv.gt(mv.ref("pnl", "Profit"), mv.lit(0)),
+      mv.round(mv.mul(mv.ref("pnl", "Profit"), mv.lit(0.22)), 2),
+      mv.lit(0)
+    ),
+  },
+]);
+
+// Set inputs (ordinary writes), then wait for the value they produce.
+const setCell = (field: string, column: string) => mv.input("inputs", column, { Field: field, Year: 2026 });
+await model.set(setCell("Revenue", "Value"), 1000);
+const { token } = await model.set(setCell("Cost", "Value"), 400);
+const tax = await model.get("Tax", { waitFor: mv.waitFor.atLeast(token!, 10_000) });
+// tax.value === "132.00": a Decimal(18,2) cell is a string, never a JS number
+```
+
+- **Members.** `define` / `alter` / `delete` / `getDefinition` / `list`; `set`; `get` (an `MvValue`) and `getTyped(name, kind)`; `subscribe(cell?, options)`; `explain`; `createInputTable`. The expression builder is `mv`: `lit`, `cell`, `ref`, `add` `sub` `mul` `div`, `min` `max` `abs`, `eq` `ne` `gt` `gte` `lt` `lte`, `if`, `and` `or` `not`, `round`, `coalesce`, `concat`, `cast`. At most 10 000 cells per `define`.
+- **`set` is two ordinary writes**, not one atomic upsert (an update, then an insert when no row matched; two concurrent first writes of one key both succeed and the last wins). It writes one column and keeps the row's others, and returns the write's `token`. A `bigint` is sent as its exact digits in a value, a key part or a literal, so an `Int64` past ±(2^53−1) is never rounded; a literal above the `Int64` maximum is read by the server as a `Double`.
+- **`get` returns `null`** for a cell that is not computed or not defined; a cell in a model the caller holds no entitlement for is `MvNotGrantedError`. An error cell is an `MvValue` with `isError` and the text in `error`, not a throw.
+- **`getTyped` is exact and never converts**: kinds `number`, `bigint`, `decimal` (the canonical string), `string`, `boolean`, `date`, `timestamp`, `guid`. A cell of another kind is `MvTypeError`; an error cell is `MvCellError`.
+- **`mv.waitFor.atLeast(token, ms)` / `mv.waitFor.observed(ms)`.** `get` waits for the client's own stored token for up to **5 s** by default (read-your-writes); the range is 0 to 30 000 ms. A commit that left the cell unchanged satisfies it. A lapse is `MvNotCaughtUpError`, never a stale value. The request's own timeout is raised above the wait so the two do not race. The value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and `computedAtPosition` is an "at least".
+- **`subscribe`** is a key-filtered subscription on `_mv_values` through the shared-subscription machinery, each row decoded like `get`'s; filters are case-exact. `MvValueEvent.coverToken` is a snapshot's or a row change's token, and is `undefined` for a notice (`horizon`, `range_delete`). Covers are not monotonic: wait on the **highest** seen (the default `get` does, because the client keeps the highest token any event carried). **Known issue (BL-1449):** two first `subscribe` calls on a fresh client can race the WebSocket opening and the second fails with `AoudaConnectionError`; wait for the first snapshot before the second. **Known issue (BL-1450):** every HTTP request leaves an `abort` listener on the client's lifetime signal, so a long-lived client's memory grows per request and Node warns `MaxListenersExceededWarning` after 11 requests.
+- **`explain`** returns a cell, its formula, the `inputs` it reads, the cells it `reads` and is `readBy`, and the maintainer's `watermark`. Positions are "at least".
+
+**Typed errors.** Each is an instance of the class the repo already throws for that status:
+
+| Code (status) | Class |
+|---|---|
+| `MV_DEFINITION_INVALID`, `MV_REFERENCE_INVALID`, `MV_REFERENCE_NOT_PRIMARY_KEY`, `MV_CYCLE`, `MV_DEPTH_EXCEEDED` (400) | `MvDefinitionValidationError`, with a `kind` |
+| `MV_DEFINITION_EXISTS`, `MV_DEFINITION_IN_USE`, `MV_TABLE_REFERENCED` (409) | `MvDefinitionConflictError`, with a `kind` (`isMvDefinitionError` tests for both) |
+| `MV_DEFINITION_NOT_FOUND` (404) | `MvDefinitionNotFoundError` |
+| `INSUFFICIENT_PERMISSIONS` (403) on a definition call | `MvNotDefinerError` |
+| `AUTH_ENTITLEMENT_NOT_FOUND` (403) on a value read | `MvNotGrantedError` |
+| `TOKEN_UNSATISFIED` (409) on a value read | `MvNotCaughtUpError` |
+| `MV_TOKEN_REQUIRES_PRIMARY` (421) | `MvReplicaError` |
+| `MV_NOT_MAINTAINED` (503) | `MvNotMaintainedError`: **not retried** and not counted toward the circuit breaker |
+| `PERMISSION_REVOKED` on a subscription | `MvGrantRevokedError` |
+| (SDK-side) an undecodable row; a kind mismatch; an error cell asked for as a value | `MvDecodeError`, `MvTypeError`, `MvCellError` |
+
+**Value mapping.** `Bool` is `boolean`; `Byte`, `Int16`, `Int32`, `UInt16`, `UInt32` and the floats are `number`; `Int64` and `UInt64` are `bigint`; `Decimal(p,s)` is the canonical `string` (never a number); `String` and `Guid` are `string`; `Date` and `Timestamp` are `Date`, with millisecond precision (the value's `text` always holds the exact canonical form). See [Materialized Values: value types](../guides/materialized-values.md#value-types).
 
 ---
 

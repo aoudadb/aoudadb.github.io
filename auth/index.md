@@ -58,7 +58,7 @@ User and operational outcomes:
 
 Scope boundaries:
 
-- This document covers server auth, app auth, RBAC, API key model, PLS, ADRA (`auth-db-pls`), and RLS (`auth-db-rls`).
+- This document covers server auth, app auth, RBAC, API key model, PLS, ADRA (`auth-db-entitlement`), and RLS (`auth-db-rls`).
 - It does not claim OAuth/OIDC full provider parity; OIDC discovery/JWKS support is present for app auth metadata discovery.
 - It does not claim external IdP federation or enterprise SSO flows as shipped features.
 
@@ -187,7 +187,7 @@ If you enable auth and keep defaults:
   - signup, signin, signout, refresh, me, password change.
 - Admin auth APIs:
   - server/admin user-role-key management;
-  - app/admin user-role-key management plus ADRA partition grants and RLS resolvers.
+  - app/admin user-role-key management plus ADRA entitlements and RLS resolvers.
 - API key model:
   - reserved key kinds for system-managed anon/service-role keys;
   - role-scoped key grants and revocation model.
@@ -195,7 +195,7 @@ If you enable auth and keep defaults:
   - default system roles + custom role CRUD + user-role assignment.
 - PLS modes:
   - `jwt-claim` baseline mode;
-  - `auth-db-pls` multi-valued grant resolution for fan-out and write checks.
+  - `auth-db-entitlement` multi-valued grant resolution for fan-out and write checks.
 - RLS mode:
   - `auth-db-rls` resolver/rule model with injected predicates and write-path validation.
 - ADRA resolution + cache:
@@ -224,7 +224,7 @@ If you enable auth and keep defaults:
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
 | P12 | `P12-Authentication-Authorization-Tasks.md`, two-layer reports (S1/S2/S4), auth model and cleanup reports | Core auth engine, server/app auth split, API key gate, default anon/service key generation, app auth endpoints, .NET/TS client auth wiring, `aouda start` + API auth setup | Later fine-grained authorization model (ADRA deepening) deferred to P14 | `docs/BACKLOG.md` |
-| P14 | `P14-ADRA-Tasks.md`, S1/S3/S4/S5/S6/S7 reports | Auth DB permission schema additions, ADRA resolution layer and cache, enhanced PLS (`auth-db-pls`), RLS (`auth-db-rls`), TypeScript ADRA wrappers, auth guide rewrite | Broader cross-SDK parity and future resolver extensions | `docs/BACKLOG.md` |
+| P14 | `P14-ADRA-Tasks.md`, S1/S3/S4/S5/S6/S7 reports | Auth DB permission schema additions, ADRA resolution layer and cache, enhanced PLS (`auth-db-entitlement`), RLS (`auth-db-rls`), TypeScript ADRA wrappers, auth guide rewrite | Broader cross-SDK parity and future resolver extensions | `docs/BACKLOG.md` |
 
 ## 2.6 Capability coverage matrix
 
@@ -239,11 +239,11 @@ If you enable auth and keep defaults:
 | JWT validation modes (SignatureOnly/Hybrid/Stateful) | Yes | No | No | `AuthenticationMiddleware.cs` | Default is `Hybrid` |
 | `X-User-Token` impersonation with service keys | Yes | No | No | P12 S2 report + middleware + integration tests | Rejects invalid/revoked user token |
 | PLS `jwt-claim` single-dimension behavior | Yes | No | No | ADR 0023 + enforcer/tests | Baseline mode |
-| ADRA `auth-db-pls` multi-valued grants | Yes | No | No | P14 S4 + schema + enforcer | Supports fan-out and write-level grant checks |
+| ADRA `auth-db-entitlement` multi-valued entitlements | Yes | No | No | P14 S4 + schema + enforcer | Supports fan-out and write-level grant checks |
 | ADRA `auth-db-rls` resolver-based RLS | Yes | No | No | P14 S5 + RLS evaluator/injector/validator | Includes group-aware predicate composition |
 | Permission version invalidation (`_permission_version`) | Yes | No | No | P14 S1 + `PermissionVersionService.cs` | Supports fast permission refresh behavior |
 | OIDC discovery + JWKS | Yes | No | No | `OidcDiscoveryController.cs` | Public app-auth well-known endpoints |
-| TypeScript ADRA admin wrappers | Yes | No | No | P14 S6 + `auth-client.ts` | Partition grants + RLS resolver wrappers present |
+| TypeScript ADRA admin wrappers | Yes | No | No | P14 S6 + `auth-client.ts` | Entitlements + RLS resolver wrappers present |
 | .NET SDK wrappers for ADRA admin APIs | No | Yes | No | .NET `AuthClient` vs app admin endpoints | Current .NET auth client focuses user auth lifecycle |
 
 ## 2.7 Core concepts and mental model
@@ -277,10 +277,10 @@ If you enable auth and keep defaults:
 Invariants:
 
 - App auth endpoints require API key when app auth database is linked.
-- `auth-db-pls` requires `permissionDimension` (the grant namespace) and `permissionColumn` (the column the grant keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`. `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused (**BL-1281, 0.9.0**): create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls`.
+- `auth-db-entitlement` requires `permissionDimension` (the entitlement namespace) and `permissionColumn` (the column the entitlement keys are compared with); neither is inferred (**BL-1176, 0.7.0**). `auth-db-rls` requires `rlsResolverName`. `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused (**BL-1281, 0.9.0**): create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-entitlement`.
 - Service-key + `X-User-Token` impersonation flow must still validate/revocation-check user token.
 - Only a credential that holds `all-partitions` / `all-rows` is lifted past PLS / RLS (**BL-1227, 0.9.0**); a principal
-  without a user id and without those grants gets the deny-by-default context (no partition grants, a missing RLS key
+  without a user id and without those grants gets the deny-by-default context (no entitlements, a missing RLS key
   denies) on HTTP, WebSocket and long-poll alike (0.4.0).
 - Empty or unsupported complex resolver shapes fail closed instead of broadening access.
 
@@ -341,12 +341,12 @@ Primary evidence:
 - `src/Aouda.Server/Auth/AppAuthController.cs`
 - `tests/Aouda.Server.Tests/AuthenticationMiddlewareIntegrationTests.cs`
 
-### Walk-through B: Data query on `auth-db-pls` table
+### Walk-through B: Data query on `auth-db-entitlement` table
 
 1. Request reaches auth middleware and user principal is resolved.
 2. ADRA resolution service computes allowed partitions for user/dimension.
 3. `PartitionSecurityEnforcer` checks table `AuthorizationMode`.
-4. For `auth-db-pls`, enforcer validates query partition predicates against allowed grants.
+4. For `auth-db-entitlement`, enforcer validates query partition predicates against allowed grants.
 5. For fan-out allowed keys, enforcer composes safe `Where.Or` shape.
 6. Query executes against constrained partition set.
 
@@ -391,7 +391,7 @@ Primary evidence:
 |---|---|---|---|
 | Connection credential vs user credential separation | Often conflated or app-managed manually | Two-layer model built into server middleware and client SDKs | Clear threat boundaries and safer defaults |
 | Dynamic authorization freshness | JWT claim refresh latency often minutes+ | ADRA auth-DB resolution + permission-version invalidation | Fast permission propagation without full re-login |
-| Multi-partition authorization | Often custom logic outside DB | `auth-db-pls` dimension grants with fan-out enforcement | Native multi-tenant/multi-region permission routing |
+| Multi-partition authorization | Often custom logic outside DB | `auth-db-entitlement` dimension entitlements with fan-out enforcement | Native multi-tenant/multi-region permission routing |
 | Row-level constraints | Heavy policy engines or per-row external lookups | In-memory resolver rules injected into query predicates | Fine-grained control with low latency cost |
 | AI-agent onboarding | Multi-step auth setup friction | `aouda start` + API database create, generated anon/service keys, explicit error hints | Faster "auth-on" path for generated apps and tooling |
 | Password reset / invite OTP delivery | External email service required per app | Server-level SendGrid or **console** provider (`Aouda:Auth:Email`) | One provider config for all app auth DBs on the server |
@@ -420,9 +420,9 @@ Primary evidence:
 | `UserService.LockoutThreshold` | int | `10` | positive | auth engine code-level options | Failed-attempt lockout trigger |
 | `UserService.LockoutDuration` | timespan | `15m` | positive | auth engine code-level options | Account lock interval |
 | `AuthDatabaseOptions.Kind` | enum | `Application` | `Application`, `Server` | auth DB create APIs | Distinguishes `_auth`-style vs `_serverauth` style DBs |
-| Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-pls`, `auth-db-rls` | table create/update payload | Authorization mode per table |
-| Table `permissionDimension` | string? | `null` | non-empty when needed | table payload | Required for `auth-db-pls`; the grant namespace, selects no column |
-| Table `permissionColumn` | string? | `null` | a column of the table (exact name) | table payload | Required for `auth-db-pls`; refused with other modes (**BL-1176, 0.7.0**) |
+| Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-entitlement`, `auth-db-rls` | table create/update payload | Authorization mode per table |
+| Table `permissionDimension` | string? | `null` | non-empty when needed | table payload | Required for `auth-db-entitlement`; the entitlement namespace, selects no column |
+| Table `permissionColumn` | string? | `null` | a column of the table (exact name) | table payload | Required for `auth-db-entitlement`; refused with other modes (**BL-1176, 0.7.0**) |
 | Table `rlsResolverName` | string? | `null` | existing resolver name | table payload | Required for `auth-db-rls`. Refused on `jwt-claim`, including an omitted `authMode` (**BL-1281, 0.9.0**) |
 
 Precedence and operational notes:
@@ -493,18 +493,18 @@ Content-Type: application/json
 ```
 
 ```http
-POST /api/databases/appdb/auth/admin/users/{userId}/partition-grants
+POST /api/databases/appdb/auth/admin/users/{userId}/entitlements
 Authorization: Bearer <access_token>
 Content-Type: application/json
 
 {
   "dimension": "tenant_id",
-  "partitionKey": "tenant-a",
-  "accessLevel": "write"
+  "key": "tenant-a",
+  "level": "write"
 }
 ```
 
-Expected result: first call mints tokens, second call creates ADRA partition grant for user.
+Expected result: first call mints tokens, second call creates ADRA entitlement for user.
 
 Common mistake: trying to call app auth endpoints with a JWT-only bearer and no API key in app-auth scope.
 
@@ -515,17 +515,17 @@ Common mistake: trying to call app auth endpoints with a JWT-only bearer and no 
 | App signup/signin/signout/refresh/me/password | `Aouda.Client.Auth.AuthClient` | `client.auth.signUp/signIn/signOut/refresh/me/changePassword` | `/api/databases/{db}/auth/*` | Implemented | End-to-end user flow available |
 | Server auth signin/signout/refresh/me/password | .NET `ServerAuthOptions` + auth pipeline | TS supports `serverAuth` option pathing | `/api/auth/*` | Implemented | Server admin auth plane |
 | Role/user/admin management (server) | HTTP-first; .NET client can call raw admin endpoints | HTTP-first | `/api/auth/admin/*` | Partial | No first-class high-level SDK convenience wrapper parity |
-| Role/user/key management (app admin) | HTTP-first; can be called from .NET transport | TS includes auth admin wrappers for P14 additions | `/api/databases/{db}/auth/admin/*` | Partial | Strong TS wrapper coverage for partition grants + RLS resolvers |
-| Partition grant admin APIs | No dedicated typed wrapper in .NET auth client | `create/list/deletePartitionGrant` | `.../admin/users/{id}/partition-grants` | Partial | Transport-level .NET possible, dedicated helper absent |
+| Role/user/key management (app admin) | HTTP-first; can be called from .NET transport | TS includes auth admin wrappers for P14 additions | `/api/databases/{db}/auth/admin/*` | Partial | Strong TS wrapper coverage for entitlements + RLS resolvers |
+| Entitlement admin APIs | No dedicated typed wrapper in .NET auth client | `createEntitlement / listEntitlements / deleteEntitlement` | `.../admin/users/{id}/entitlements` | Partial | Transport-level .NET possible, dedicated helper absent |
 | RLS resolver admin APIs | No dedicated typed wrapper in .NET auth client | `create/list/get/update/deleteRlsResolver` | `.../admin/rls-resolvers` | Partial | TS wrappers added in P14 S6 |
-| Table auth mode config (`jwt-claim` / `auth-db-pls` / `auth-db-rls`) | Table create/update DTOs | `CreateTableRequest.authMode` and related fields | table create/update policy payloads | Implemented | Validation enforced in server/catalog |
+| Table auth mode config (`jwt-claim` / `auth-db-entitlement` / `auth-db-rls`) | Table create/update DTOs | `CreateTableRequest.authMode` and related fields | table create/update policy payloads | Implemented | Validation enforced in server/catalog |
 | OIDC discovery / JWKS | HTTP consumption | HTTP consumption | `/.well-known/openid-configuration`, `/.well-known/jwks.json` | Implemented | Public app-auth metadata endpoints |
 
 ### B) Missing API matrix
 
 | Intended capability | Missing API surface | Current workaround | Planned source | Priority |
 |---|---|---|---|---|
-| Dedicated .NET wrappers for ADRA admin endpoints (partition grants + RLS resolvers) | High-level `Aouda.Client.Auth` methods analogous to TS wrappers | Call HTTP admin endpoints directly via transport/client internals | Follow-up SDK parity tasks after P14 | High |
+| Dedicated .NET wrappers for ADRA admin endpoints (entitlements + RLS resolvers) | High-level `Aouda.Client.Auth` methods analogous to TS wrappers | Call HTTP admin endpoints directly via transport/client internals | Follow-up SDK parity tasks after P14 | High |
 | Unified SDK parity for all server/admin auth operations | Full strongly-typed convenience APIs in both .NET and TS for all admin endpoints | Use HTTP endpoints directly where wrapper absent | Future auth SDK hardening work | Medium |
 | External IdP/federated auth integration APIs | Provider config/metadata management APIs | Use native Aouda auth flows today | Future architecture/tasking (not P12/P14 shipped scope) | Medium |
 
@@ -547,14 +547,14 @@ Expected result checks:
 - signup/signin succeed with API key + credentials;
 - authenticated reads/writes work according to assigned roles.
 
-### Scenario 2: Production-safe migration from `jwt-claim` to `auth-db-pls`
+### Scenario 2: Production-safe migration from `jwt-claim` to `auth-db-entitlement`
 
 When to use:
 - users require access to multiple partitions (multi-tenant operator, region fan-out).
 
 Steps:
-1. Define table `authMode = auth-db-pls` with `permissionDimension` and `permissionColumn`.
-2. Create partition grants for pilot users through app admin API.
+1. Define table `authMode = auth-db-entitlement` with `permissionDimension` and `permissionColumn`.
+2. Create entitlements for pilot users through app admin API.
 3. Validate read fan-out and write access-level enforcement on non-prod traffic.
 4. Roll out grant migration user cohort by user cohort.
 
@@ -608,11 +608,11 @@ Recommended tuning/operation sequence:
 
 1. Keep token validation in `Hybrid` unless strict stateful constraints are required.
 2. Use short access token lifetime and rely on refresh path.
-3. Roll out ADRA grants/resolvers incrementally with test users before broad enablement.
+3. Roll out ADRA entitlements/resolvers incrementally with test users before broad enablement.
 
 | Question | Practical answer |
 |---|---|
-| Which auth mode should I start with? | Start with `jwt-claim`, then move to `auth-db-pls` / `auth-db-rls` when dynamic permissions are needed |
+| Which auth mode should I start with? | Start with `jwt-claim`, then move to `auth-db-entitlement` / `auth-db-rls` when dynamic permissions are needed |
 | How do I force quick permission propagation? | Use ADRA permission changes that increment `_permission_version` and rely on next-request refresh |
 | How do I debug "why was this denied"? | Inspect auth error code + request id + relevant grant/resolver rows in auth DB |
 
@@ -623,8 +623,8 @@ Recommended tuning/operation sequence:
 | `AUTH_API_KEY_REQUIRED` on app auth endpoint | Hitting a pre-BL-355 server, or a non-public `/auth/*` path | Public signup/signin/refresh/password-reset are keyless. `/me`, `/signout`, `/mfa/*` still need a user JWT (`AUTH_TOKEN_MISSING` if absent). |
 | Sign-in keeps failing then returns account locked | Exceeded lockout threshold | Wait lockout duration or re-enable user via admin API |
 | User has new grants but behavior still old briefly | Cached permission context not yet refreshed for session | Trigger next request and verify `_permission_version` increment happened |
-| `auth-db-pls` table rejects write unexpectedly | Grant exists but `access_level` is read-only or partition key not granted | Update partition grant to proper key and `write` access level |
-| RLS seems ignored for a table | The table is `jwt-claim`, or the resolver is not on a mode that takes one. `rlsResolverName` on `jwt-claim` (including an omitted `authMode`) is `400 INVALID_REQUEST` at create and options; schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, 0.9.0**) | Set `authMode` to `auth-db-rls` or `auth-db-pls` with `rlsResolverName`, then retest with a caller that does not hold `all-rows` |
+| `auth-db-entitlement` table rejects write unexpectedly | The entitlement's `level` is `read`, or the key has no entitlement | Update entitlement to proper key and `write` access level |
+| RLS seems ignored for a table | The table is `jwt-claim`, or the resolver is not on a mode that takes one. `rlsResolverName` on `jwt-claim` (including an omitted `authMode`) is `400 INVALID_REQUEST` at create and options; schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-entitlement` (**BL-1281, 0.9.0**) | Set `authMode` to `auth-db-rls` or `auth-db-entitlement` with `rlsResolverName`, then retest with a caller that does not hold `all-rows` |
 | Service key + `X-User-Token` request returns 401 | User token invalid/revoked/expired | Refresh user token and retry; ensure service key kind supports impersonation flow |
 
 ## 2.15 Verification ledger
@@ -674,7 +674,7 @@ _Updated 2026-04-08 after P14/P16 completion._
 ### Remaining gaps
 
 - SDK parity gap:
-  - .NET auth client has user lifecycle methods but no first-class ADRA admin wrappers equivalent to TypeScript's `create/list/deletePartitionGrant` and RLS resolver methods.
+  - .NET auth client has user lifecycle methods but no first-class ADRA admin wrappers equivalent to TypeScript's `createEntitlement / listEntitlements / deleteEntitlement` and RLS resolver methods.
   - user impact: .NET consumers may rely on raw HTTP/admin transport for advanced authz configuration.
 - Federation/enterprise auth gap:
   - external IdP federation workflows are not documented as shipped first-class Aouda functionality. BL-043 (OAuth PKCE) and BL-042 (token introspection) explicitly deferred until needed.

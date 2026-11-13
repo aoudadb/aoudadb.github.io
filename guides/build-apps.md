@@ -338,9 +338,9 @@ Either can be used alone, together, or not at all — [Auth and Authorization](.
 | Mode | Use when | Cost |
 |---|---|---|
 | `jwt-claim` | The user belongs to exactly one tenant/partition, carried as a JWT claim | Cheapest; nothing to maintain |
-| `auth-db-pls` | The user may reach **many** partitions (a watchlist, a set of rooms, a portfolio) | Grants stored in the auth database, plus `permissionDimension` and `permissionColumn` (**BL-1176, 0.7.0**) |
+| `auth-db-entitlement` | The user may reach **many** partitions (a watchlist, a set of rooms, a portfolio) | Grants stored in the auth database, plus `permissionDimension` and `permissionColumn` (**BL-1176, 0.7.0**) |
 | `auth-db-rls` | The filter is a row predicate rather than a partition — "rows I own", "rows my team owns" | A named resolver with rules |
-| `auth-db-pls` + `rlsResolverName` | Both: partition isolation *and* a row predicate inside it | Both of the above |
+| `auth-db-entitlement` + `rlsResolverName` | Both: partition isolation *and* a row predicate inside it | Both of the above |
 
 Worked setups for all of them, including admin pass-through, write-check (read vs write predicates), identity stamp, and `plsClaimBinding`: [Data authorization](../auth/authorization.md). Pin the chat pattern with [examples/p43-write-side/](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) — stamp the principal into the row and gate writes with `writeCheckRules`; do not send `SenderId` as an argument or keep a hub that "knows who I am".
 
@@ -421,7 +421,7 @@ Two failure semantics to design around **before** you apply this, because both s
 - A failed `check` **fails the whole batch**. It does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted first. (The failing row *index* is not on the error today.)
 - `route` must be **exhaustive**. An unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row quietly left behind — so declare a catch-all route to a quarantine table, as above.
 
-The expression substrate is deliberately closed: `literal`, `colRef`, `arithmetic`, `coalesce`, `conditional`, `param`, and a `call` allowlist covering case, trim, concat, substring, rounding (`roundTo` is the one for tick sizes), and numeric casts. It covers normalization so the ingest hop can be deleted. It does not cover lookups, I/O, or cross-row state — and a lookup table encoded as a `conditional` tree is the signal that you should keep the service. Full reference: [Insert-time transforms](insert-transforms.md).
+The expression substrate is deliberately closed: `literal`, `colRef`, `arithmetic`, `coalesce`, `conditional`, `param`, and a `call` allowlist covering case, trim, concat, substring, rounding (`roundTo` is the one for tick sizes), and numeric casts. It covers normalization so the ingest hop can be deleted. It does not cover lookups, I/O, or cross-row state — and a lookup table encoded as a `conditional` tree is the signal that you should keep the service. Full reference: [Insert-time transforms](insert-transforms.md). (**BL-1434, next train**) The one exception to "no cross-row state" is a [materialized value](materialized-values.md): its formula may read a row of another table by primary key with `cellRef`, and only there.
 
 **Alternatives.** Multi-row expression updates, `TRUNCATE`, `DELETE` with a limit, and `RETURNING` are available to trusted callers — [Bulk mutations](bulk-mutations.md). Anything that resolves an identifier against another system, quarantines and notifies, or needs a loop stays in a service; that is [the correct answer](division-of-responsibility.md#what-stays-in-application-services), not a workaround.
 
@@ -588,9 +588,9 @@ The showcase, and the table to check your feature list against. If something you
 | A bulk import or a migration | Bulk load, multi-table atomic, idempotency keys, identity-insert | [Bulk load](bulk-load.md) |
 | A high-rate event or telemetry ingest | Write stream (`insert`/`upsert`), plus `route`/`tee` to fan rows out | [Real-time](real-time.md) · [Insert-time transforms](insert-transforms.md) |
 | An append-only audit or event log | Table clustered on time, `ColdPreferred` temperature, durability `strict` | [Time-series](time-series.md) · [Hot/cold](hot-cold.md) |
-| Multi-tenant row isolation (SaaS) | `auth-db-rls` with a named resolver, or `auth-db-pls` if you want grant-level access tiers. **Whether the table also gets a `partitionKey` is a separate, volume-only decision** | [Layout vs mode](../auth/authorization.md#layout-and-authorization-mode-are-independent-choices) · [Partitioning](partitioning.md) |
+| Multi-tenant row isolation (SaaS) | `auth-db-rls` with a named resolver, or `auth-db-entitlement` if you want grant-level access tiers. **Whether the table also gets a `partitionKey` is a separate, volume-only decision** | [Layout vs mode](../auth/authorization.md#layout-and-authorization-mode-are-independent-choices) · [Partitioning](partitioning.md) |
 | "Only rows I own" | `auth-db-rls` with a named resolver | [Mode 3: auth-db-rls](../auth/authorization.md#195-mode-3-auth-db-rls-row-level-security) |
-| Users who span many tenants/rooms/tickers | `auth-db-pls` with `permissionDimension`, `permissionColumn` and partition grants (no `partitionKey` needed since **BL-1176, 0.7.0**); or `auth-db-rls` with a `PartitionGrant` rule, which takes the same grants | [Mode 2: auth-db-pls](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls) · [The unpartitioned variant](../auth/authorization.md#the-unpartitioned-variant--same-grants-no-partition-key) |
+| Users who span many tenants/rooms/tickers | `auth-db-entitlement` with `permissionDimension`, `permissionColumn` and entitlements (no `partitionKey` needed since **BL-1176, 0.7.0**); or `auth-db-rls` with a `Entitlement` rule, which takes the same grants | [Mode 2: auth-db-entitlement](../auth/authorization.md#194-mode-2-auth-db-entitlement-enhanced-pls) · [The unpartitioned variant](../auth/authorization.md#the-unpartitioned-variant--same-entitlements-no-partition-key) |
 | Role-based admin screens | Server auth + RBAC (read/write/delete/admin per table) | [Data authorization](../auth/authorization.md) |
 | Sign-up, sign-in, refresh, password change | Application auth, called directly from the browser | [Setup and flows](../auth/setup.md) |
 | MFA | TOTP enrolment and verification (HTTP; not wrapped by the SDKs) | [Auth reference](../auth/reference.md) |
@@ -625,7 +625,7 @@ The path above is the one that removes the most work. It is not the only support
 | Edge / serverless functions | Treat them as trusted services with `mk_svc_*`; mind connection lifetime and that subscriptions want a long-lived socket | Streaming from a short-lived function | [Direct client access](direct-client-access.md) |
 | Regulated: the database may not be internet-reachable | Gateway pattern — but still author reads as named queries and run the access gate | The extra hop. You keep every reviewability property | [Division of responsibility](division-of-responsibility.md) |
 | Single-process .NET app, or a test suite | **Embedded mode** — engine in-process, no server, no network | Multi-client access, replication, Studio | [Getting started](../getting-started/index.md) |
-| A browser needs cross-partition analytics | **Refused by design.** Use `auth-db-pls` fan-out, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener) |
+| A browser needs cross-partition analytics | **Refused by design.** Use `auth-db-entitlement` fan-out, or an MQ over the whole universe | Arbitrary cross-partition scans from a browser | [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener) |
 | You already have an application | Start from the existing-app branch below | Nothing — it is the same destination | [Adoption](adoption.md) |
 
 ---

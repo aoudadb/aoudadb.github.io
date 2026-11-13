@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Array columns: one whole array per row
 
-(**BL-035, 0.9.0**) Everything on this page is new in the next server train, and nothing here exists in the current release.
+(**BL-035, 0.9.0**) Everything on this page shipped in server 0.9.0 (2026-11-02); no earlier release has array columns.
 
 An **array column** holds one whole array per row: a curve's 400 forward points, a fit's 100 residuals, a feature vector's
 history. You write the array whole, read it whole, and never ask the engine about a single element. There are six types, one per

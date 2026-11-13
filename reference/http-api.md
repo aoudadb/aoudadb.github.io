@@ -203,15 +203,15 @@ See [Direct client access](../guides/direct-client-access.md) for configuration,
 | `/api/auth/setup` | No (setup mode only, localhost) | None |
 | `/api/auth/signin`, `/api/auth/refresh` | No | None (these produce credentials) |
 | `/api/auth/signout`, `/api/auth/me`, etc. | Yes | Server JWT |
-| `/api/auth/admin/*`, `/admin/*` (except `GET /admin/replication/topology`), `/api/admin/*`, `/api/server/*` | Yes (`admin` on the server auth database; see below) | Server JWT or server key whose role gives `admin` on the server auth database, or `mk_srv_` (**BL-1466, next train**) |
-| `GET /admin/replication/topology` | No | None — member addresses, roles, read candidates and primary only; no database names (**BL-1466, next train**) |
+| `/api/auth/admin/*`, `/admin/*` (except `GET /admin/replication/topology`), `/api/admin/*`, `/api/server/*` | Yes (`admin` on the server auth database; see below) | Server JWT or server key whose role gives `admin` on the server auth database, or `mk_srv_` (**BL-1466, 0.13.1**) |
+| `GET /admin/replication/topology` | No | None — member addresses, roles, read candidates and primary only; no database names (**BL-1466, 0.13.1**) |
 | `/api/databases/{db}/auth/signup\|signin\|refresh\|request-password-reset\|reset-password` | No | None (public POST; bearer ignored) |
 | `/api/databases/{db}/auth/me\|signout\|password` | Yes (Layer 1 + 2) | API key + user JWT in `X-User-Token`, or user JWT directly |
 | `/api/databases/{db}/query\|tables\|rows\|...` | **Only if db has linked auth** | Any valid credential (see below) |
 | `/api/databases/{db}/...` (no linked auth db), **server auth database exists**, admin listener | Yes (Layer 1 + 2) | Server JWT, `mk_srv_`, or a server key with a role on `{db}` — every route, `DELETE /api/databases/{db}`, WebSocket and long-poll included (**BL-1017, 0.4.0**) |
 | `/api/databases/{db}/...` (no linked auth db), no server auth database, or the data-plane listener | No | None — open access |
 
-(**BL-1466, next train**) On the server routes above, authenticating against the server auth database is not enough: the caller needs
+(**BL-1466, 0.13.1**) On the server routes above, authenticating against the server auth database is not enough: the caller needs
 `admin` on the server auth database: the `db_admin` or `db_operator` role assigned globally, to `*` or to the server auth database,
 or a server admin key (`mk_srv_`). Any other credential that database holds gets **403** `AUTHORIZATION_DENIED`, whose `details`
 begins `requiredOperation=Admin, database=_serverauth`: a key from `POST /api/auth/admin/api-keys` with a role on one database, a
@@ -344,6 +344,8 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/admin/roles/{id}` | PATCH/DELETE | Bearer JWT (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET /api/auth/admin/roles` lists every role with its permissions |
 | `/api/auth/admin/users/{id}/roles` | GET/PUT | Bearer JWT (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. A user JWT may assign `db_admin` and a role that carries an `all-partitions` or `all-rows` grant (**BL-1299, 0.9.0**) |
 | `/api/auth/admin/users/{id}/access-grants?database=` | GET | Bearer JWT (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database`, with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, 0.9.0**) |
+| `/api/auth/admin/users/{id}/entitlements` | GET/POST | Bearer JWT (`db_admin`) or `mk_srv_` | A server user's entitlements: list (optional `?dimension=`) / create `{ "dimension", "key", "level"?, "validFrom"?, "validTo"? }` (201), with the same rules, caps and errors as the application route. An entitlement here applies on **every database the server auth database governs** (a database with no auth database of its own). Creating needs a server key or `db_admin` on the server auth database (scoped `*` or to it); a `db_admin` of other databases only is `403 AUTHORIZATION_DENIED`. Audited as `admin_create_entitlement` (**BL-1434, next train**) |
+| `/api/auth/admin/users/{id}/entitlements/{entitlementId}` | DELETE | Bearer JWT (`db_admin`) or `mk_srv_` | Revoke one (204 / 404 `AUTH_GRANT_NOT_FOUND`). Same callers as create. Live subscriptions it admitted end with `PERMISSION_REVOKED`. Audited as `admin_delete_entitlement` (**BL-1434, next train**) |
 | `/api/auth/admin/audit-log` | GET | Bearer JWT (`db_admin`) | The server auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
 | `/api/auth/admin/api-keys` | GET/POST | Bearer JWT (`db_admin`) | List/create server API keys |
 | `/api/auth/admin/api-keys/{id}` | DELETE | Bearer JWT (`db_admin`) | Revoke server API key |
@@ -418,8 +420,11 @@ App auth endpoints live under `/api/databases/{db}/auth/...` and manage end-user
 | `/api/databases/{db}/auth/admin/roles/{id}` | PATCH/DELETE | API key (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET …/auth/admin/roles` lists every role with its permissions |
 | `/api/databases/{db}/auth/admin/users/{id}/roles` | GET/PUT | API key (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. An `mk_adm_` key receives `403 AUTHORIZATION_DENIED` for `db_admin` and for a role that carries an `all-partitions` or `all-rows` grant, at any scope, and the previous assignments stay; a user JWT may assign them (**BL-1299, 0.9.0**) |
 | `/api/databases/{db}/auth/admin/users/{id}/access-grants[?database=]` | GET | API key (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database` (default `{db}`), with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, 0.9.0**) |
+| `/api/databases/{db}/auth/admin/users/{id}/entitlements` | POST | API key (`db_admin`) | (**BL-1418, 0.13.0**) Create an entitlement for the user. Body `{ "dimension", "key", "level", "grantedBy"?, "validFrom"?, "validTo"? }` (`level` is `read`, `write` or `admin`); `201` with `{ "id", "userId", "dimension", "key", "level", "grantedBy", "validFrom", "validTo", "createdAt" }`. A missing or empty `dimension`, a missing or `null` `key`, or an upper-case `dimension` is `400 AUTH_GRANT_INVALID`. See [Data Authorization §19.8](../auth/authorization.md#198-admin-api-entitlements) |
+| `/api/databases/{db}/auth/admin/users/{id}/entitlements[?dimension=]` | GET | API key (`db_admin`) | (**BL-1418, 0.13.0**) List the user's entitlements, optionally for one dimension (exact match): `{ "entitlements": [ { "id", "userId", "dimension", "key", "level", "grantedBy", "validFrom", "validTo", "createdAt" } ] }` |
+| `/api/databases/{db}/auth/admin/users/{id}/entitlements/{entitlementId}` | DELETE | API key (`db_admin`) | (**BL-1418, 0.13.0**) Delete one entitlement; `204`, or `404 AUTH_GRANT_NOT_FOUND` (`Entitlement not found.`) |
 | `/api/databases/{db}/auth/admin/audit-log` | GET | API key (`db_admin`) | The auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
-| `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys; POST accepts an optional `userId` to link the key to a user's `auth-db-pls` grants — see [Auth Reference](../auth/reference.md) |
+| `/api/databases/{db}/auth/admin/api-keys` | GET/POST | API key (`db_admin`) | List/create custom API keys; POST accepts an optional `userId` to link the key to a user's `auth-db-entitlement` grants — see [Auth Reference](../auth/reference.md) |
 | `/api/databases/{db}/auth/admin/api-keys/{id}` | DELETE | API key (`db_admin`) | Revoke custom API key |
 | `/api/databases/{db}/auth/admin/signup-settings` | GET/PUT | API key (`db_admin`) | Read/write `allowSelfSignup` and `selfSignupRole` (null → `db_writer`). The role cannot be `db_admin` or carry an `all-partitions` or `all-rows` grant: `400 INVALID_REQUEST` and the stored settings stay (**BL-1282, 0.9.0**) |
 
@@ -583,9 +588,9 @@ Fields:
 
 ```json
 {
-  "error": "AUTH_PLS_GRANT_NOT_FOUND",
-  "message": "Access denied for query on table 'orders'. The requested partition is not in the user's grant set.",
-  "suggestion": "Request a partition grant for this dimension, or contact an administrator.",
+  "error": "AUTH_ENTITLEMENT_NOT_FOUND",
+  "message": "Access denied for query on table 'orders'. The requested partition is not in the user's entitlements.",
+  "suggestion": "Request an entitlement for this dimension, or contact an administrator.",
   "detail": "dimension=org_id, partitionKey=org-xyz",
   "requestId": "req_abc123"
 }
@@ -643,6 +648,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
 | Materialized query | (**WorkloadCore, 0.3.0**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
+| Materialized value | (**BL-1434, next train**) A token on a read of `_mv_values` (`/query`, `/query/count`, a join side, a named query, subscribe) is judged by the **maintainer's progress**: it is covered once every commit up to the token has been recomputed, and a commit that left the cell unchanged covers it. A lapse is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says; a replica answers `421 MV_TOKEN_REQUIRES_PRIMARY`. The response `X-Aouda-Token` is a token the values just read are covered by; a snapshot's token is such a cover, a change event's token is too (keep the highest), a notice's is not. See [Materialized Values](../guides/materialized-values.md). |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
 
@@ -765,21 +771,21 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_PLS_TENANT_CLAIM_MISSING` | 403 | PLS: required tenant claim missing from the JWT for this table, or empty / white space |
 | `AUTH_PLS_TENANT_CLAIM_MISMATCH` | 403 | PLS: explicit partition filter does not match the token's tenant claim |
 | `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | PLS: write request targets a partition outside the tenant scope |
-| `AUTH_PLS_GRANT_NOT_FOUND` | 403 | PLS (auth-db-pls): requested partition is not in the user's grant set |
-| `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` | 403 | PLS: partition is granted but access level is `read`, which does not allow writes |
-| `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | PLS: `Where.Or` predicate shape is incompatible with safe auth-db-pls partition enforcement |
+| `AUTH_ENTITLEMENT_NOT_FOUND` | 403 | (**BL-1418, 0.13.0**) PLS (auth-db-entitlement): requested partition is not in the user's entitlements |
+| `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` | 403 | PLS: the key has an entitlement but its `level` is `read`, which does not allow writes |
+| `AUTH_PLS_UNSUPPORTED_OR_SHAPE` | 403 | PLS: `Where.Or` predicate shape is incompatible with safe auth-db-entitlement partition enforcement |
 | `AUTH_KEY_LISTENER_MISMATCH` | 401 | `mk_pub_*` presented on the admin listener (or a key used on a listener that does not accept it). (**BL-1422, 0.12.0**) One `message` on HTTP, WebSocket and long-poll alike: `A browser-tier key (mk_pub_) is not valid on the admin listener. Send it to the data-plane listener, or use a service key (mk_svc_) or a server key (mk_srv_) here.` Counted on all three transports (**BL-1428, 0.12.0**) and in `rejectedApiKeysByReason.listener_mismatch` (**BL-1430, 0.12.0**) |
 | `CLIENT_CONSUMER_OVERFLOW` | none (client side) | Never on the wire: `Aouda.Client` ends one subscription consumer that left more than `SubscriptionConsumerQueueCapacity` (default 10 000) events unread, as an `AoudaRequestException` with this `ErrorCode` (**BL-1421, 0.12.0**). Only that consumer ends; there is no resume, subscribe again for a fresh snapshot. The raising options are `AoudaClientOptions.SubscriptionConsumerQueueCapacity` and `SubscribeOptions.ConsumerQueueCapacity`; see the [.NET client](../clients/dotnet.md). `@aouda/client` has the same code in its next release (not yet published) |
 | `IDENTITY_QUOTA_EXCEEDED` | 429 | Data-plane per-identity request quota exceeded. `Retry-After` is set. |
 | `CONNECTION_LIMIT_EXCEEDED` | WS `error` frame before auth / 429 | The server's global connection pool (`Aouda:WebSocket:MaxConnections`) is full. Retry later. |
 | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` | WS `auth_error` / 429 | (**BL-1383, 0.11.0**) The identity already holds `MaxConnectionsPerIdentity` (default 16) connections, WebSocket and long-poll together. Sent inside the handshake, after identity resolution and before `auth_ok`; long-poll `connect` answers 429. A client must not reconnect in a loop. |
 | `SUBSCRIBE_RATE_EXCEEDED` | WS error | (**BL-1383, 0.11.0**) The identity's subscribe token bucket is empty (an attempt refused for another reason still costs a token). The frame carries `retry_after_ms`; a long-poll `/send` also sets `Retry-After`. |
-| `AUTH_GRANT_INVALID` | 400 | A grant in the request is invalid: a partition grant with missing or invalid fields, or a role permission with an unknown `resourceType`, a `resourceName` with a `*` that is not alone (**BL-1415, 0.12.0**), a `named-mutation` / `named-query` row whose `actions` is not exactly `execute` or whose `resourceName` is blank or a pattern (**BL-1417, 0.12.0**), an `all-partitions` / `all-rows` entry without exactly one level (`read`, `write` or `admin`) or without `resourceName`, a null entry, or one on a system role (**BL-1227, 0.9.0**). An `embargo` with a blank or `*` table or a delay that is not whole seconds from 1 to 2678400 (**BL-418, 0.9.0**) |
+| `AUTH_GRANT_INVALID` | 400 | A grant in the request is invalid: an entitlement with missing or invalid fields, or a role permission with an unknown `resourceType`, a `resourceName` with a `*` that is not alone (**BL-1415, 0.12.0**), a `named-mutation` / `named-query` row whose `actions` is not exactly `execute` or whose `resourceName` is blank or a pattern (**BL-1417, 0.12.0**), an `all-partitions` / `all-rows` entry without exactly one level (`read`, `write` or `admin`) or without `resourceName`, a null entry, or one on a system role (**BL-1227, 0.9.0**). An `embargo` with a blank or `*` table or a delay that is not whole seconds from 1 to 2678400 (**BL-418, 0.9.0**) |
 | `AUTH_GRANT_TABLE_NOT_FOUND` | 400 | A table-scope `all-partitions` / `all-rows` role permission, or an `embargo`, names a table that exists in no database the role can apply to. Table names are case-sensitive (**BL-1227, 0.9.0**; embargo **BL-418, 0.9.0**) |
-| `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS (no resolver, or a `jwt-claim` table) (**BL-1227, 0.9.0**). `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records the change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-pls` (**BL-1281, 0.9.0**). An `embargo` on a table with no row time (**BL-418, 0.9.0**) |
+| `AUTH_GRANT_NOT_APPLICABLE` | 400 | A table-scope role permission names a table without the security it lifts: `all-partitions` on a table with no PLS, `all-rows` on a table with no RLS (no resolver, or a `jwt-claim` table) (**BL-1227, 0.9.0**). `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records the change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-entitlement` (**BL-1281, 0.9.0**). An `embargo` on a table with no row time (**BL-418, 0.9.0**) |
 | `AUTH_EMBARGO_UNSUPPORTED` | 403 / WS error | The caller holds an embargo on the table and the surface cannot apply its cutoff: a write (insert, update, delete, upsert, truncate, `rows/batch`, a named mutation, bulk-load `:begin` and every `:append`, a write stream's `stream_rows`), a materialized query (its query endpoint, a `/query` or named query that reads it, a subscription to it), graph traversal, or vector `:nearest`. A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused (**BL-1161, BL-1298, 0.9.0**). A write that names no table (a schema seed, a branch insert) is refused for any embargo holder. Not retryable with the same credential (**BL-418, 0.9.0**) |
-| `AUTH_GRANT_DIMENSION_CAP` | 400 | Creating a partition grant would exceed 1 000 grants on one dimension |
-| `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Creating a partition grant would exceed 5 000 grants for the principal |
+| `AUTH_GRANT_DIMENSION_CAP` | 400 | Creating an entitlement would exceed 1 000 entitlements on one dimension |
+| `AUTH_GRANT_PRINCIPAL_CAP` | 400 | Creating an entitlement would exceed 5 000 entitlements for the principal |
 | `AUTH_RESOLVER_INVALID` | 400 | RLS resolver cannot be persisted (e.g. zero rules — fail-closed) |
 | `AUTH_CLAIM_INVALID` | 400 | Custom user claim key is blank or invalid |
 | `IDENTITY_SOURCE_UNRESOLVABLE` | 400 | Identity derived source could not be resolved from the principal |
@@ -798,8 +804,22 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TOKEN_MALFORMED` | 400 | Consistency token undecodable, empty, or wrong version. Error body/header carry the node's observed token. |
 | `TOKEN_FOREIGN_DATABASE` | 400 | Token issued for a different database. Do not retry the same string. |
 | `TOKEN_EPOCH_SUPERSEDED` | 409 | Failover lost the write, or future term. **Never waited.** Do not retry the same token. |
-| `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. |
+| `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. (**BL-1434, next train**) On a read of `_mv_values` the wait is for the maintainer to recompute every commit up to the token, and it is `TOKEN_UNSATISFIED` whatever `onExceeded` says. |
 | `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
+| `MV_TOKEN_REQUIRES_PRIMARY` | 421 | (**BL-1434, next train**) A consistency token on a read or subscribe of `_mv_values` reached a replica, which runs no maintainer and cannot judge it. Send the read to the primary, or read without a token. |
+| `SYSTEM_TABLE_WRITE_REFUSED` | 403 | (**BL-1434, next train**) An ordinary write or DDL on `_mv_definitions` or `_mv_values`; only the engine writes them. Define through the materialized-value endpoints; set inputs on your own tables. |
+| `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**BL-1434, next train**) A `cellRef` node outside a materialized-value definition. |
+| `EXPR_CELLREF_INVALID` | 400 | (**BL-1434, next train**) A malformed `cellRef`: an empty table, column or key, a key part that is not a non-null literal, or two key columns that differ only in case. |
+| `MV_DEFINITION_INVALID` | 400 | (**BL-1434, next train**) A malformed definition: a bad model or name, a `colRef`, `param` or `conditional`, a result type a cell cannot hold. Nothing was written. |
+| `MV_REFERENCE_INVALID` | 400 | (**BL-1434, next train**) A `cellRef` names a table, column or cell that does not exist or cannot be read, or a key literal of the wrong type. |
+| `MV_REFERENCE_NOT_PRIMARY_KEY` | 400 | (**BL-1434, next train**) A `cellRef`'s key is not exactly the table's strict primary key; the message names the key. |
+| `MV_CYCLE` | 400 | (**BL-1434, next train**) The definitions would form a cycle; the message names its members in order. |
+| `MV_DEPTH_EXCEEDED` | 400 | (**BL-1434, next train**) A chain of cells reading cells would be longer than 16. |
+| `MV_DEFINITION_NOT_FOUND` | 404 | (**BL-1434, next train**) No cell of that model and name. |
+| `MV_DEFINITION_EXISTS` | 409 | (**BL-1434, next train**) A cell of that model and name exists; alter it. |
+| `MV_DEFINITION_IN_USE` | 409 | (**BL-1434, next train**) Other cells read this one and the delete (or an alter of its type) would break them; the message names them. |
+| `MV_TABLE_REFERENCED` | 409 | (**BL-1434, next train**) DDL on a table or column a cell reads (any primary-key change, a drop, rename or type change of a read column, a drop of a materialized query whose result a cell reads); the message names the cells. `TRUNCATE` is allowed. |
+| `MV_NOT_MAINTAINED` | 503 | (**BL-1434, next train**) This node maintains no materialized values and is not a replica (a branch, a server whose replication role is not resolved yet, or a promoted node until BL-1441 is fixed); a replica answers definitions `503 READ_ONLY` and token reads `421 MV_TOKEN_REQUIRES_PRIMARY`. Reads are served; define and wait on the primary. |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
@@ -1171,7 +1191,7 @@ Execute a query against a table.
 | `orderBy` | object[] | No | Sort columns (see below) |
 | `offset` | number | No | Rows to skip (default: 0) |
 | `limit` | number | No | Max rows to return (default: 1000, max: 10000) |
-| `crossPartitionAccess` | boolean | No | When `true`, a query on a partitioned table does not need a partition-key filter. Without it, a query on a partitioned table with no partition filter returns `PARTITION_FILTER_REQUIRED`. Default: `false`. It is a **cost waiver and nothing else**: it waives that scan guard for every credential, and it never widens what the credential sees. A credential with partition grants and the flag sees exactly its grants (a `jwt-claim` user, its tenant); one that holds neither `all-partitions` nor any partition grant on a table with partition-level security is still refused. There is no read of every partition by `db_admin` plus the flag any more: that read is the `all-partitions` grant ([Access grants](#authentication-and-authorization), [partition-filter rule](../guides/partitioning.md#partition-filter-rule-p40)). The same flag is accepted on `…/query/count`, on a named-query call and each batch item (`crossPartitionAccess`), and on a WebSocket or long-poll `subscribe` as `cross_partition_access`; the data-plane listener does not accept it (**BL-1227, 0.9.0**). |
+| `crossPartitionAccess` | boolean | No | When `true`, a query on a partitioned table does not need a partition-key filter. Without it, a query on a partitioned table with no partition filter returns `PARTITION_FILTER_REQUIRED`. Default: `false`. It is a **cost waiver and nothing else**: it waives that scan guard for every credential, and it never widens what the credential sees. A credential with entitlements and the flag sees exactly its grants (a `jwt-claim` user, its tenant); one that holds neither `all-partitions` nor any entitlement on a table with partition-level security is still refused. There is no read of every partition by `db_admin` plus the flag any more: that read is the `all-partitions` grant ([Access grants](#authentication-and-authorization), [partition-filter rule](../guides/partitioning.md#partition-filter-rule-p40)). The same flag is accepted on `…/query/count`, on a named-query call and each batch item (`crossPartitionAccess`), and on a WebSocket or long-poll `subscribe` as `cross_partition_access`; the data-plane listener does not accept it (**BL-1227, 0.9.0**). |
 | `joins` | object[] | No | JOIN clauses to apply in order (see below). |
 | `aggregates` | object[] | No | (**ColumnarRead S16, 0.3.0**) Aggregates to compute — see [Aggregates and GROUP BY](#aggregates-and-group-by). |
 | `groupBy` | object[] | No | (**ColumnarRead S16, 0.3.0**) GROUP BY keys; requires `aggregates`. |
@@ -1689,7 +1709,7 @@ A named-mutation name in `queries`:
 { "code": "NAMED_QUERY_BATCH_MUTATION", "error": "Named query batch must not include a named-mutation name." }
 ```
 
-(**BL-1417, 0.12.0**) The route needs an authenticated caller and nothing else; each slot is authorised separately, and a slot the caller may not execute (no `named-query` `execute` row for its name) is that slot's `NAMED_QUERY_NOT_FOUND` on both listeners, the same as an unknown name. A caller who may execute none gets HTTP 200 with every slot masked, not a 403. An unsigned data-plane caller keeps the **request-level 404** `NAMED_QUERY_NOT_FOUND`, and the admin listener keeps 401 for it. (**BL-1417 review, next train**) When no slot is admitted the response is `{ "results": [ …NAMED_QUERY_NOT_FOUND slots… ], "token": "" }`; a slot naming a mutation is `NAMED_QUERY_BATCH_MUTATION` only for a caller that may execute that mutation, and an unknown slot for anyone else.
+(**BL-1417, 0.12.0**) The route needs an authenticated caller and nothing else; each slot is authorised separately, and a slot the caller may not execute (no `named-query` `execute` row for its name) is that slot's `NAMED_QUERY_NOT_FOUND` on both listeners, the same as an unknown name. A caller who may execute none gets HTTP 200 with every slot masked, not a 403. An unsigned data-plane caller keeps the **request-level 404** `NAMED_QUERY_NOT_FOUND`, and the admin listener keeps 401 for it. (**BL-1417 review, 0.13.0**) When no slot is admitted the response is `{ "results": [ …NAMED_QUERY_NOT_FOUND slots… ], "token": "" }`; a slot naming a mutation is `NAMED_QUERY_BATCH_MUTATION` only for a caller that may execute that mutation, and an unknown slot for anyone else.
 
 `INVALID_FORMAT` when the request names `?format=` at all (**Lead S12, 0.6.0**: every slot is column arrays; it used to choose `columnar` or `rows`).
 
@@ -1823,7 +1843,7 @@ partition-level security off).
 was applied and names the table. That includes `dryRun: true`. Nothing in the document is applied. Dropping the table is not this
 refusal. Dropping every old column and adding one new column is allowed when `allowDestructive` is true.
 
-(**BL-1281, 0.9.0**) A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, stays HTTP `200`: that change is `Failed`, `reason` names `auth-db-rls` and `auth-db-pls`, and the table is not written. A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
+(**BL-1281, 0.9.0**) A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, stays HTTP `200`: that change is `Failed`, `reason` names `auth-db-rls` and `auth-db-entitlement`, and the table is not written. A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
 
 
 #### `POST /api/databases/{db}/schema/diff?access=true`
@@ -1860,7 +1880,7 @@ Empty `{}` is structural-only. `{ "includeAccess": true, "identities"?: … }` a
 
 **Request body:** `identity` (one identity), or `document` (an identities document) with `identityName`; optional `tables` (names), `includeSample` (boolean), `sampleLimit` (default 20, max 100), `vectorProbe` (`table`, `column`, `embedding`) and `traverseStart` (`table`, `startNodeId`, `hops`).
 
-**An identity** is `{ "kind", "userId"?, "email"?, "roles"?, "claims"?, "grants"?, "accessGrants"? }` (**BL-1227, 0.9.0**: `accessGrants`). `kind` is `user` or `service_key`. `accessGrants` lists the access grants a user identity holds, as a role would carry them, so inspection can answer "what would a holder of `all-rows` on `orders` see?" before the role exists:
+**An identity** is `{ "kind", "userId"?, "email"?, "roles"?, "claims"?, "entitlements"?, "accessGrants"? }` (**BL-1227, 0.9.0**: `accessGrants`). `kind` is `user` or `service_key`. `accessGrants` lists the access grants a user identity holds, as a role would carry them, so inspection can answer "what would a holder of `all-rows` on `orders` see?" before the role exists:
 
 ```json
 { "kind": "user", "userId": "6fc78b31-5fe9-4453-9307-bd4233b0330e", "accessGrants": [ { "grant": "all-rows", "table": "orders", "level": "read" } ] }
@@ -1891,6 +1911,51 @@ Insert rows into a table on a branch; they are written to the branch's own segme
 ```
 
 **Response:** `200` `{ "table": "orders", "rowsInserted": 2 }`. A body without `table` or without a row is `400 INVALID_REQUEST`.
+
+---
+
+### Materialized value endpoints
+
+(**BL-1434, next train**) A materialized value is a named, computed cell: a formula over rows of ordinary tables and other cells, kept current by the engine. Guide: [Materialized Values](../guides/materialized-values.md). Base path: `/api/databases/{db}/materialized-values`.
+
+| Method | Path | Success | Description |
+|--------|------|---------|-------------|
+| `POST` | `/api/databases/{db}/materialized-values` | `201` | Define one or many cells, **all or none**. At most 10 000 per request. |
+| `PUT` | `/api/databases/{db}/materialized-values/{model}/{name}` | `200` | Alter one cell's type and formula. |
+| `DELETE` | `/api/databases/{db}/materialized-values/{model}/{name}` | `204` | Delete one cell. |
+| `GET` | `/api/databases/{db}/materialized-values/{model}/{name}` | `200` | One cell's definition. |
+| `GET` | `/api/databases/{db}/materialized-values?model={model}` | `200` | The definitions of a model (all models when `model` is omitted), ordered by `(model, name)`, ordinal. |
+| `GET` | `/api/databases/{db}/materialized-values/{model}/{name}/explain` | `200` | A cell, its formula, the input rows it reads and the cells it reads and is read by. |
+
+**Who may call.** Only a **definer**. On a governed database (one linked to an auth database, or, on a server with a server auth database, one linked to none, which the server auth database governs (BL-1017)): a user holding `db_admin` on the database (a server user, such as the server admin, on a database the server auth database governs) or the database's own `mk_svc_` service key. A `db_operator`, a reader, a scoped key, an anon key and the server key `mk_srv_` get `403 INSUFFICIENT_PERMISSIONS` (a `ProtocolError`, code in `"code"`); a request with no credential is `401`. A database on a server with no auth at all is open, as every admin route is. Path segments are ordinal (case-exact) and percent-decoded once.
+
+**Define**, body:
+
+```json
+{ "definitions": [ { "model": "pnl", "name": "Revenue", "valueType": "Decimal(18,2)", "expression": { "type": "cellRef", "table": "inputs", "key": { "Field": { "type": "literal", "value": "Revenue" }, "Year": { "type": "literal", "value": 2026 } }, "column": "Value" } } ] }
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model`, `name` | string | Yes | The cell's identity; non-empty, at most 200 characters each, no leading or trailing white space, no control characters. |
+| `valueType` | string | Yes | One scalar type in its exact spelling: `Bool`, `Byte`, `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Float32`, `Double`, `String`, `Guid`, `Date`, `Timestamp`, or `Decimal(p,s)` (no spaces; `1 <= p <= 18`, `0 <= s <= p`). |
+| `expression` | object | Yes | An [expression node](#expression-node-format). A definition may hold `literal`, `arithmetic`, `coalesce`, `call` and `cellRef`; not `colRef`, `param` or `conditional` (use the `if` call). |
+
+`PUT` takes `{ "valueType", "expression" }` for the cell in the path. A definition response (`201` as `{ "definitions": [...] }`, `200` for one cell) is `{ model, name, valueType, expression, references: [{ table, key, column }], createdUtc, version }`; `explain` returns `{ cell, expression, inputs, reads, readBy, watermark }`, where `cell`, `reads` and `readBy` carry `{ model, name, version, valueType, computedAt, value, error }`, `inputs` are the cell's **own** table references, and every position is an "at least".
+
+All three mutating routes stamp `X-Aouda-Token` (the node's position after the change), so a client can [wait](#consistency-tokens-and-freshness) for the value its change produces, including an alter of the cell's `valueType`, which rewrites the stored value as the new type's text. Every change writes one audit row per cell to the governing auth database's `_audit_log`: `materialized_value_defined`, `materialized_value_altered`, `materialized_value_deleted`.
+
+**Refusals.** `400 INVALID_REQUEST` for a malformed body; the `MV_*` codes in the [error table](#error-codes); `403 SYSTEM_TABLE_WRITE_REFUSED` for an ordinary write or DDL on `_mv_definitions` or `_mv_values`. A replica refuses the three mutating routes with `503 READ_ONLY` (its write guard). A node that maintains no values and is not a replica (a branch, a server whose role is not resolved, a promoted node until BL-1441 is fixed) refuses them with `503 MV_NOT_MAINTAINED`.
+
+**DDL on a table a cell reads.** Drop or rename of the table, any change to its primary key (a key column, read or not, or a looser uniqueness), a drop, rename or type change of a read column, or a drop of a materialized query whose result a cell reads, on the table routes **and** `schema/apply`, is refused `409 MV_TABLE_REFERENCED` naming the cells (an apply records it as a failed entry in a `200`). `TRUNCATE` is allowed. The prefix `_mv_` is reserved: creating or renaming a table into it (any case) is refused.
+
+**Values are rows.** There is no route that writes or reads a value. An input is an ordinary write on your own table. A value is a row of `_mv_values` with the columns `model`, `name`, `valueType`, `value` (the type's canonical text, null for a null value or an error), `error` (null, or at most 1000 characters), `computedAtPosition` and `computedAtTerm`, read with `POST /api/databases/{db}/query` (also `/query/count`, a named query, a join side) filtered on `model` and `name`.
+
+**`waitFor`.** On a read of `_mv_values`, `at_least` + `waitMs` are judged by the **maintainer's progress**, not the node's position: the answer comes once every commit up to the token has been recomputed, and a commit that left the cell unchanged satisfies it. A wait that runs out is `409 TOKEN_UNSATISFIED` **whatever `onExceeded` says** (`fetchPrimary` is not `421`; `fail` answers at once). A replica answers a presented token `421 MV_TOKEN_REQUIRES_PRIMARY` (for a read preference that lets a replica serve; with the default `Primary` a replica answers `421 MISDIRECTED_REQUEST` first). A value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and a position is "at least".
+
+**Security by default.** On a governed database the first definition creates `_mv_values` and `_mv_definitions` as `auth-db-entitlement` tables on `model` (dimensions `mv_value_model` and `mv_definition_model`, data-plane access off): a definer reads every model, anyone else (the server key `mk_srv_` included) only the models they hold an entitlement for, and a caller with none is `403 AUTH_ENTITLEMENT_NOT_FOUND` in the [auth error shape](#auth-error-responses) (the code is in `"error"`). Grant a model with an entitlement on `mv_value_model` whose key is the model name (and on `mv_definition_model` for its formulas). A later definition never resets it. An open database gets plain tables.
+
+**Subscribing.** A cell is the ordinary `subscribe` on `_mv_values` with `filter` `{model eq, name eq}`, a model with `{model eq}`; see [WebSocket Streaming](#websocket-streaming-protocol).
 
 ---
 
@@ -2587,20 +2652,20 @@ Both are required: `"type": "Decimal"` without them is `400` — *A Decimal colu
 (lowest `clusterOrder`) must be a `Timestamp` or `Date`; it may be nullable. A refused declaration — no such column, a `keep` that is
 not a duration, an edge table, a table with a vector column — is `400` naming its reason. The response's `policy` carries `retention` and `horizon`.
 
-**Authorization fields** (top-level, beside `columns`): `partitionLevelSecurity`, `authMode` (`jwt-claim`, `auth-db-pls`,
+**Authorization fields** (top-level, beside `columns`): `partitionLevelSecurity`, `authMode` (`jwt-claim`, `auth-db-entitlement`,
 `auth-db-rls`), `permissionDimension`, `permissionColumn`, `rlsResolverName`, `plsClaimBinding`. (**BL-1176, 0.7.0; breaking**)
-`authMode: "auth-db-pls"` requires both `permissionDimension` — the grant namespace, a lower-case opaque name matched byte-for-byte against a
-partition grant's `dimension` — and `permissionColumn`, the column the grant keys are compared with, which must name one of the
+`authMode: "auth-db-entitlement"` requires both `permissionDimension` — the entitlement namespace, a lower-case opaque name matched byte-for-byte against a
+entitlement's `dimension` — and `permissionColumn`, the column the entitlement keys are compared with, which must name one of the
 table's columns exactly. Neither is inferred: a dimension spelled like a column does not select it, and the partition key is not a
 fallback. Missing or unmatched, the create is `400 INVALID_REQUEST` naming the field; `permissionColumn` with another `authMode` is
 `400` too. (**BL-430, 0.9.0**) An upper-case letter in `permissionDimension` is the same `400 INVALID_REQUEST`, and the message
-gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. (**BL-1281, 0.9.0**) `rlsResolverName` on `jwt-claim`, including when `authMode` is omitted, is `400 INVALID_REQUEST`. The message names `auth-db-rls` and `auth-db-pls`. A whitespace-only name is no resolver. `PUT …/options` that omits `rlsResolverName` keeps the stored name, so with `authMode: jwt-claim` that is the same `400` and the table is unchanged; an empty `rlsResolverName` clears it and `jwt-claim` is then allowed. A resolver on `auth-db-rls` or `auth-db-pls` is unchanged. `PUT …/options` refuses an upper-case `permissionDimension` with that same `400 INVALID_REQUEST`
+gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. (**BL-1281, 0.9.0**) `rlsResolverName` on `jwt-claim`, including when `authMode` is omitted, is `400 INVALID_REQUEST`. The message names `auth-db-rls` and `auth-db-entitlement`. A whitespace-only name is no resolver. `PUT …/options` that omits `rlsResolverName` keeps the stored name, so with `authMode: jwt-claim` that is the same `400` and the table is unchanged; an empty `rlsResolverName` clears it and `jwt-claim` is then allowed. A resolver on `auth-db-rls` or `auth-db-entitlement` is unchanged. `PUT …/options` refuses an upper-case `permissionDimension` with that same `400 INVALID_REQUEST`
 and leaves the stored dimension unchanged. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
-table stays `auth-db-pls` and dropped when the request moves it to another mode. (**BL-1296, 0.9.0**) On a table that already
+table stays `auth-db-entitlement` and dropped when the request moves it to another mode. (**BL-1296, 0.9.0**) On a table that already
 has PLS or RLS, a request that changes that security is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
 `all-partitions` where PLS applies and `all-rows` where RLS applies. RBAC `alter` is still required and is not enough. A table with
 neither restriction is unchanged, and turning protection on is not this check. The table detail and `…/schema` responses carry
-`permissionColumn`. See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-pls-enhanced-pls).
+`permissionColumn`. See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-entitlement-enhanced-pls).
 
 ```json
 {
@@ -2611,7 +2676,7 @@ neither restriction is unchanged, and turning protection on is not this check. T
     { "name": "Source", "type": "String", "primaryKeyOrder": 2, "partitionKeyOrder": 2 },
     { "name": "Bid", "type": "Double", "isNullable": true }
   ],
-  "authMode": "auth-db-pls",
+  "authMode": "auth-db-entitlement",
   "permissionDimension": "fx_source",
   "permissionColumn": "Source"
 }
@@ -3027,7 +3092,7 @@ Update rows matching a WHERE filter.
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
-| `AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | (**BL-1227, 0.9.0**) On a PLS table, `set` names the partition column (any case) with a partition the caller may not write — held to the insert's rule; or a `setExpr` of that column without `all-partitions` at `write`. Nothing is changed. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement) |
+| `AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | (**BL-1227, 0.9.0**) On a PLS table, `set` names the partition column (any case) with a partition the caller may not write — held to the insert's rule; or a `setExpr` of that column without `all-partitions` at `write`. Nothing is changed. See [Authorization §19.4.4](../auth/authorization.md#1944-write-path-access-level-enforcement) |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
 
@@ -3121,7 +3186,9 @@ The following optional fields extend the standard update request:
 | `setExpr` | `object?` | Expression-based SET values. Keys are column names; values are expression nodes. Evaluated server-side per row. Can be combined with `set` — literal `set` wins on collision. |
 | `returning` | `string[]?` | List of column names (or `["*"]` for all) to return after update. Returns post-update values in columnar format under `rows`. |
 
-**Expression node format** — each value in `setExpr` is an expression node:
+#### Expression node format
+
+Each value in `setExpr` is an expression node:
 
 ```json
 { "type": "arithmetic", "op": "+|-|*|/", "left": <node>, "right": <node> }
@@ -3129,8 +3196,11 @@ The following optional fields extend the standard update request:
 { "type": "literal", "value": <any> }
 { "type": "coalesce", "args": [<node>, ...] }
 { "type": "conditional", "when": <predicate>, "then": <node>, "else": <node> }
+{ "type": "call", "fn": "<name>", "args": [<node>, ...] }
+{ "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> }, ... }, "column": "c" }
 ```
 
+(**BL-1434, next train**) `cellRef` reads one cell: a column of the row of `table` whose full strict primary key is `key` (literal values only, one per key column). It is valid only in a [materialized value](#materialized-value-endpoints) definition; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, and a malformed one is `400 EXPR_CELLREF_INVALID`. (**BL-1434, next train**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Materialized Values](../guides/materialized-values.md#the-thirteen-functions)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
 **Extended response when `returning` is set:**
 
 ```json
@@ -3446,10 +3516,10 @@ Create an edge table: two `Int64` columns, the source and the destination node i
 | `srcColumn` / `dstColumn` | string | Yes | The source and destination columns' names. |
 | `edgeLabel` | string? | No | A label for the table's edges. |
 | `storeCsc` | bool | No | Also keep the reverse (destination → source) index, which lets a shortest path search from both ends. Default `false`. |
-| `authMode` | string? | No | `jwt-claim` (default), `auth-db-pls` or `auth-db-rls`. |
-| `permissionDimension` | string? | With `auth-db-pls` | The grant dimension the caller's grants are matched on. Lower case (**BL-430, 0.9.0**): an upper-case letter is `400 INVALID_REQUEST` (not `500`), and the message gives the lower-case spelling. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
+| `authMode` | string? | No | `jwt-claim` (default), `auth-db-entitlement` (**BL-1418, 0.13.0**) or `auth-db-rls`. Any other value is `400` listing the valid values. |
+| `permissionDimension` | string? | With `auth-db-entitlement` | The entitlement dimension the caller's entitlements are matched on. Lower case (**BL-430, 0.9.0**): an upper-case letter is `400 INVALID_REQUEST` (not `500`), and the message gives the lower-case spelling. An edge traversal is scoped by the grant set — at least one grant in the dimension — and takes no `permissionColumn`. |
 | `srcIsPartitionKey` | bool | No | Make the source column the partition key. |
-| `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. On `jwt-claim`, including when `authMode` is omitted, it is `400 INVALID_REQUEST` and the table is not created — not dropped (**BL-1281, 0.9.0**). A resolver applies on `auth-db-rls` and `auth-db-pls`. |
+| `rlsResolverName` | string? | With `auth-db-rls` | The RLS resolver. On `jwt-claim`, including when `authMode` is omitted, it is `400 INVALID_REQUEST` and the table is not created — not dropped (**BL-1281, 0.9.0**). A resolver applies on `auth-db-rls` and `auth-db-entitlement`. |
 | `rlsColumn` | string? | No | Adds a `String` column for grant-sourced RLS (for example `org`). |
 
 `400 INVALID_REQUEST` for a missing field or an unknown `authMode`; `409 TABLE_EXISTS` when the name is taken.
@@ -3471,7 +3541,7 @@ Insert edges: `srcs[i]` → `dsts[i]`. The two arrays must be non-empty and the 
 { "edgesInserted": 3, "token": "…" }
 ```
 
-On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, 0.9.0**). `all-partitions` at `write` allows the write, including an edge table whose source is not a partition key. One ungranted key writes none of the batch.
+On an `auth-db-entitlement` table the insert answers `403 AUTH_ENTITLEMENT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, 0.9.0**). `all-partitions` at `write` allows the write, including an edge table whose source is not a partition key. One ungranted key writes none of the batch.
 
 #### `POST /api/databases/{db}/tables/{name}/edges:traverse`
 
@@ -3532,7 +3602,7 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 | `ivfCells` | number | No | IVF cells per sealed segment. Default `1`. |
 | `embeddingModel` | string? | No | The embedding model's name. |
 | `authMode`, `permissionDimension`, `rlsResolverName`, `rlsColumn` | | No | As for an edge table. |
-| `permissionColumn` | string? | With `auth-db-pls` | (**BL-1176, 0.7.0**) The column the grant keys are compared with — in practice the `rlsColumn`. The vector table is an ordinary table for its reads, so it declares the column like any `auth-db-pls` table. Sent with no `authMode` or with `jwt-claim` it is `400`, not ignored. |
+| `permissionColumn` | string? | With `auth-db-entitlement` | (**BL-1176, 0.7.0**) The column the entitlement keys are compared with — in practice the `rlsColumn`. The vector table is an ordinary table for its reads, so it declares the column like any `auth-db-entitlement` table. Sent with no `authMode` or with `jwt-claim` it is `400`, not ignored. |
 
 `400 INVALID_REQUEST` for a missing name, `dimensions` ≤ 0, or an unknown `distance`, `quantization` or `authMode`;
 `409 TABLE_EXISTS` when the table exists. (**BL-1281, 0.9.0**) `rlsResolverName` on `jwt-claim`, including an omitted `authMode`, is `400 INVALID_REQUEST` and the table is not created, not dropped. `permissionColumn` with `jwt-claim` stays `400` for that field.
@@ -3541,7 +3611,7 @@ Create the table `{name}` with an `Int64` primary key `RowKey` and one vector co
 
 Insert vectors for row keys. `vectorData` is **row-major**: the vectors one after another, `rowKeys.length × dimensions` numbers.
 `embeddingModelVersion` records which model made them; `partitionKey` places them in a partition of a PLS table (the default
-partition when omitted or null; an empty string names a partition of its own, **BL-1184, 0.9.0**). On an `auth-db-pls` table the insert answers `403 AUTH_PLS_GRANT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, 0.9.0**). `all-partitions` at `write` allows the write, including an omitted `partitionKey`. `partitionKey: ""` is the empty partition, not "omitted". Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
+partition when omitted or null; an empty string names a partition of its own, **BL-1184, 0.9.0**). On an `auth-db-entitlement` table the insert answers `403 AUTH_ENTITLEMENT_NOT_FOUND` when any partition key the write would store is missing or not granted, and `403 AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` when the grant is `read` (**BL-1204, 0.9.0**). `all-partitions` at `write` allows the write, including an omitted `partitionKey`. `partitionKey: ""` is the empty partition, not "omitted". Empty `rowKeys` or `vectorData`, or a length that does not fit the column, is `400 INVALID_REQUEST`.
 
 ```json
 { "rowKeys": [1, 2], "vectorData": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], "embeddingModelVersion": "v1" }
@@ -3866,7 +3936,7 @@ those details with the resource mode.
 
 ### Backup/Restore Endpoints
 
-All endpoints live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, next train**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
+All endpoints live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
 
 #### Summary
 
@@ -4109,7 +4179,7 @@ replica has seen a bulk load committed and not fetched all of its segments (`job
 decoded; `loadsHeld` counts every such load). `bulkLoadHold` is `null` when there is none. A read presenting a token at or past
 the hold waits, then answers `TOKEN_UNSATISFIED` or `TOKEN_FETCH_PRIMARY` as for any lagging replica.
 
-(**BL-1466, next train**) `members` is the topology's member list with what the anonymous topology no longer carries: each
+(**BL-1466, 0.13.1**) `members` is the topology's member list with what the anonymous topology no longer carries: each
 member's `perDatabaseStatus` (`{ "<database>": { "walPosition", "lagBytes" } }`) and, for a connected secondary, its `subscriptions`
 (`[{ "database", "filterMode", "tableNames" }]`; `null` otherwise). On a standalone node it holds the node itself.
 
@@ -4487,7 +4557,7 @@ data: {"timestampUtc":"...","level":"Information","category":"...","message":"..
 
 Get cluster topology: the replica set's name, its members (address, role, temperature profile, hidden, read candidate), the
 read candidates and the primary. No credential is needed — a node joining with `--join` reads it before it has one — so it names no
-database and carries no WAL position or table subscription (**BL-1466, next train**: each member's `perDatabaseStatus` is now `{}`
+database and carries no WAL position or table subscription (**BL-1466, 0.13.1**: each member's `perDatabaseStatus` is now `{}`
 and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replication/status`](#get-adminreplicationstatus) as
 `members`).
 
@@ -4703,6 +4773,19 @@ Default `conflate` holds only **value `update` events** where the row was visibl
   "conflate": { "key": ["ticker"], "interval_ms": 100 }
 }
 ```
+
+(**BL-1434, next train**) **Materialized-value example.** A cell is a subscribe on `_mv_values` filtered on `model` and `name`; a whole model drops the `name` clause:
+
+```json
+{
+  "type": "subscribe",
+  "id": "sub-tax-1",
+  "target": "_mv_values",
+  "filter": { "and": [ {"column": "model", "op": "eq", "value": "pnl"}, {"column": "name", "op": "eq", "value": "Tax"} ] }
+}
+```
+
+A `change` row carries `valueType`, `value` (the canonical text), `error`, `computedAtPosition` and `computedAtTerm`; an update carries `prev`. A settle sends each changed cell once at its final value, an unchanged recompute sends nothing, and events are ordered by `version` within one subscription only. `at_least`, `wait_ms` and `on_exceeded` are judged by the maintainer's progress as on a read. A subscriber with no entitlement on the model is refused with an `error` message, code `AUTH_ENTITLEMENT_NOT_FOUND`; a deleted entitlement ends the subscription with `PERMISSION_REVOKED`. See [Materialized Values](../guides/materialized-values.md#live-subscribe-to-a-cell-or-a-model).
 
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
 
@@ -5411,7 +5494,7 @@ row-level security, unless the caller holds, **at `write`**, the access grant fo
 `all-partitions` where the table has PLS and `all-rows` where it has RLS (**BL-1227, 0.9.0**; up to 0.8.0 only an app
 `service_role` key, `mk_svc_`, was admitted). An app service key and a user assigned `db_admin` on the database hold both
 grants; a user can also hold them through a role. A server API key (`mk_srv_`), a custom key not linked to a holder (even one whose own role is `db_admin`),
-a plain user, a holder of partition grants only, a user whose token only claims `db_admin`, and a service key that presents
+a plain user, a holder of entitlements only, a user whose token only claims `db_admin`, and a service key that presents
 a plain user's `X-User-Token` are refused, including one whose rights would allow an ordinary insert of the same rows. A table
 with neither PLS nor RLS is not affected. The refusal happens before a session exists, and it is asked again at every
 `:append` (a job's id is visible to any holder of the `bulkload` permission). The message names each refused table and what it
@@ -5901,3 +5984,4 @@ Operator abort of an in-flight session. The beginning credential, or a database 
 | 2.16 | 0.9.0 (Grants) | **BL-1227 (breaking on the wire):** what a credential sees on a table with partition- or row-level security is decided by access grants, `all-partitions` and `all-rows` (scope: a table or the database; level `read`, `write`, `admin`), not by key kind. An app service key and a user assigned `db_admin` hold both by implication (a key linked to such a user, or presenting its token, acts as the user); no other credential does. Role permissions take `resourceType` `all-partitions` / `all-rows` (`resourceName` `*` or a table, `actions` one level); new `400` codes `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`, and `AUTH_GRANT_INVALID` widened. New `GET …/auth/admin/users/{id}/access-grants`. `crossPartitionAccess` is a cost waiver only (it waives `PARTITION_FILTER_REQUIRED` and never widens what a credential sees), per call on named-query execute and each batch item, and `cross_partition_access` on a WebSocket / long-poll `subscribe`; the data-plane listener ignores it. The `db_admin`-plus-flag read of every partition is gone, and so are the cross-partition rate limiter, its `429` and the `query_cross_partition` audit row. Every use of a grant is audited as `access_grant_used` (replaces `service_key_pls_bypass`). Bulk load admits a caller that holds, at `write`, the grant for each restriction of a table it locks, at `:begin` and every `:append`. Realtime checks roles as HTTP does (subscribe `read`, `stream_open` `write`, `PERMISSION_REVOKED` on a role change); a server-auth session is checked at the handshake; a join side is scoped as a direct read. Policy inspect identities take `accessGrants`; a sample needs the grants (`sampleReason` `caller_not_granted`). |
 | 2.17 | 0.9.0 (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal and vector search on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused the same way (**BL-1161, BL-1298, 0.9.0**). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/access-grants` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
 | 2.18 | 0.9.0 (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |
+| 2.19 | Next train (BL-1434) | **Materialized values (additive on the wire):** the [materialized value endpoints](#materialized-value-endpoints) (six routes under `/api/databases/{db}/materialized-values`, definer-only); the `cellRef` expression node and thirteen new functions; the tables `_mv_definitions` and `_mv_values` and the write guard `SYSTEM_TABLE_WRITE_REFUSED`; `waitFor` on `_mv_values` judged by the maintainer's progress; new codes: eleven `MV_*` (`MV_TOKEN_REQUIRES_PRIMARY` is 421, `MV_NOT_MAINTAINED` 503), `EXPR_CELLREF_NOT_ALLOWED`, `EXPR_CELLREF_INVALID`. `X-Aouda-Protocol-Version` stays `2`. A server of an earlier train has none of these routes (`404`). |
