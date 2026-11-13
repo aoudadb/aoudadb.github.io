@@ -136,41 +136,106 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6
 
 ⚠️ **`--start-period=60s` is doing real work**: WAL recovery on a large database can legitimately take minutes, and a probe that starts immediately will kill a server that is recovering correctly.
 
-⚠️ **A fresh container is `unhealthy` until it has a first admin.** A server with no admin is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since 0.11.0, BL-1393). That is the probe telling the truth, not a fault, and it ends the moment the admin exists. The image's `HEALTHCHECK` stays strict on purpose, and so does the Helm readiness probe: a pod with no admin stays NotReady. Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for the admin too.
+**Which probe for what** (**BL-1462, next train**; the full table is in the [HTTP API reference](../reference/http-api.md#the-probes-one-meaning-each)):
+
+| Probe | Answers | `200` when |
+|---|---|---|
+| `/health` | Is the process alive? | Always, to every caller, setup mode included |
+| `/startup` | Has the start sequence finished? | Databases open, auth, declared schema files, roles, grants and keys done; setup mode included |
+| `/ready` | Can it serve application traffic? | Started, not in setup mode, nothing missing, not shutting down |
+
+**Compose `depends_on`.** `condition: service_healthy` waits for the healthcheck, and the healthcheck is `/ready`, so a dependent
+service starts once the server can serve it. That is what the repository's `docker-compose.yml` does for Studio. A service that
+must start while the server is still in setup mode (one that creates the first admin) uses `condition: service_started` and polls
+`/startup` itself.
+
+⚠️ **A new container with nothing declared is `unhealthy` until it has a first admin.** A server whose data volume has never been
+set up, with no declared server key or first admin, is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since
+0.11.0, BL-1393). That is the probe telling the truth, not a fault. `/health` and `/startup` answer `200` meanwhile (**BL-1462,
+next train**). Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for setup
+too.
 
 To see why, read the body from outside the container: `curl -s http://localhost:5000/ready` (`/ready` needs no credential). The image's own `wget` does not print the body of a `503`, so `docker exec aouda wget -qO- http://localhost:5000/ready` shows nothing.
 
-Create the admin at start with `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD`, or by hand as in the next section. The repository's `docker-compose.yml` does it for you.
+### Setup mode only when nothing is declared
 
-### Compose and the first admin
+(**BL-1462, next train**) Declare how the server is operated and it starts ready. Setup mode, the interactive first run, exists
+only for a data volume that has **never been set up** (no server auth database) and a server that declares none of these:
 
-(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**) `docker-compose.yml` needs one of two things, and a container that has neither exits at start instead of sitting `unhealthy`:
+| You declare | What happens at start |
+|---|---|
+| A server key: `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`, `AOUDA_AUTH__BOOTSTRAP__SERVERKEYFILE`, the systemd credential `aouda-server-key`, or a `server_admin` entry in the identities file | No setup mode. The server auth database is created with **no user**, and the key operates the server from the first start: create databases, keys and users with it. No human admin is needed |
+| A first admin: `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD` (or the systemd credential `aouda-admin-password`) | The admin is created once; no setup mode. An email with no password is listed by `/ready` as `root_user_unusable` |
+| `AOUDA_DEV_ADMIN=true` | Development and tests only: a throwaway admin and server key, printed once. See [Development admin](../guides/development-admin.md) |
+| none of them, on a new volume | **Setup mode**: `/startup` 200, `/ready` 503 `setup_required`, every other route `503 SETUP_REQUIRED` off the server's host |
+| none of them, on a volume set up before that still has a user or an active server key (minted or once declared) | Starts normally, operated by them. **Never setup mode again**: a set-up server back in setup mode could be claimed by any loopback caller |
+| none of them, on a volume set up before that has no user and no active server key (a restore, every key revoked) | **The start is refused**: `SERVER_HAS_NO_OPERATOR: this data directory has been set up before ...`, naming the ways out (declare a server key, set `RootUser`, or `--dev-admin` for development). Declare one and restart |
+| none of them, on a volume that already holds an admin | Starts normally |
+
+Before this, a declared server key did **not** end setup mode: it was inert until a human created an admin, so a fully
+declarative deployment still needed an admin password, and a compose file gated on `/ready` sat in setup mode after a wipe.
+
+### Compose
+
+(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**; **BL-1462, next train**) `docker-compose.yml` passes three things through from a
+`.env` file next to it (or your environment); none has a default, because port 5000 is published and a known default would be a
+known credential. Set one:
 
 | You set | What happens |
 |---|---|
-| `AOUDA_ROOT_PASSWORD` (and optionally `AOUDA_ROOT_EMAIL`, default `admin@aouda.local`) | The first admin is created at start from `AOUDA_AUTH__ROOTUSER__EMAIL` / `AOUDA_AUTH__ROOTUSER__PASSWORD`. The password has **no default**, because port 5000 is published and a known default would be a known credential. Put both in a `.env` file next to the compose file or export them; remove them afterwards if you like, the admin lives in the data volume |
-| `AOUDA_DEV_ADMIN=true` | Development and tests only. The server makes a random throwaway admin and server key at every start and prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda` for the `AOUDA-DEV-ADMIN` line. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD`. See [Development admin](../guides/development-admin.md) |
-| neither, on a new volume | The container exits with `The server has no admin and was given no way to create one, and Aouda:Auth:RequireFirstAdmin is set (docker-compose.yml sets it).` followed by both ways out |
-| neither, on a volume that already holds an admin | Starts normally |
+| `AOUDA_SERVER_KEY=mk_srv_<64 hex characters>` (make one with `echo "mk_srv_$(openssl rand -hex 32)"`) | Declarative: the key operates the server, no admin is created |
+| `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` | The first admin is created at start. Remove them afterwards if you like: the admin lives in the data volume |
+| `AOUDA_DEV_ADMIN=true` | Development and tests only. The server prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda`. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD` or a server key |
+| none, on a new volume | Setup mode, as above; Studio waits (`service_healthy`) until the first admin exists |
 
-How it works: `docker-compose.yml` sets `AOUDA_AUTH__REQUIREFIRSTADMIN: "true"`, passes the root email and password and `AOUDA_DEV_ADMIN` through, and sets `ASPNETCORE_ENVIRONMENT: ${AOUDA_DEV_ADMIN:+Development}`. Before 0.12.0 the compose file set no admin, so a fresh volume left the container `unhealthy` for ever (`setup_required`). The refusal comes from the server, not from compose's interpolation, so its reason is in `docker compose logs aouda`.
+⚠️ **`Aouda:Auth:RequireFirstAdmin` is gone** (**BL-1462, next train**). It made a server with no admin and no declared admin
+fail the start, which under `restart: unless-stopped` was a restart loop. A server with nothing declared now waits in setup mode
+and `/ready` says so; a server that declares a server key needs no admin at all. A leftover `AOUDA_AUTH__REQUIREFIRSTADMIN` is
+ignored.
 
 ⚠️ **Leave `AOUDA_DEV_ADMIN` unset unless you mean it.** Any non-empty value, `false` included, switches the container to the Development environment (an empty value is treated as Production, where the flag is refused).
-
-To create the admin by hand instead, drop the `AOUDA_AUTH__REQUIREFIRSTADMIN` and `AOUDA_AUTH__ROOTUSER__*` lines from the compose file and use the next section; the container then reports `unhealthy` with the reason `setup_required` until the admin exists, which you read with `curl -s http://localhost:5000/ready` **from the host**. The image's own `wget` health check prints no body for a `503`, so it can never show the reasons.
 
 ---
 
 ## The first admin
 
-⚠️ **Not on the command line.** Bootstrap over standard input, or from a mounted file:
+**On a running server in setup mode**, create it through the setup route. Setup is loopback-only, so call it from inside the
+container:
 
 ```bash
-printf '%s' "$ADMIN_PASSWORD" | docker exec -i aouda \
-  aouda create-admin --email admin@example.com --password-stdin --data /data
+printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
+  docker exec -i aouda wget -qO- --header 'Content-Type: application/json' \
+    --post-file=/dev/stdin http://localhost:5000/api/auth/setup
 ```
 
-The image carries an `aouda` command on `PATH` (a thin wrapper around `dotnet Aouda.Server.dll`) purely for `docker exec` convenience — `dotnet Aouda.Server.dll create-admin ...` still works identically.
+The password goes on standard input, never on a command line (a command line is readable in `/proc/<pid>/cmdline` and kept by
+shell history); `printf` is a shell builtin, so it appears in no process's arguments. Escape a `"` or `\` in the password for
+JSON.
+
+The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
+else missing).
+
+⚠️ **`aouda create-admin` refuses while the server runs** (**BL-1462, next train**). The server holds its data directory (an
+exclusive lock on `/data/Server/aouda.lock`), and `create-admin` opens the directory itself, so next to a running server it exits
+`1` with:
+
+```
+The data directory '/data' is in use by another Aouda process (it holds Server/aouda.lock). Two processes on one data directory are not safe, so nothing was opened. To create the first admin on a running server in setup mode, call POST /api/auth/setup from the server's own host; otherwise stop the server and run this command again.
+```
+
+Before, it succeeded: a second process wrote to the live data directory, and the running server stayed in setup mode until a
+restart. With the server stopped, `create-admin` works as before, over standard input or from a mounted file (never on the
+command line):
+
+```bash
+docker compose stop aouda
+printf '%s' "$ADMIN_PASSWORD" | docker compose run --rm -T --entrypoint aouda aouda \
+  create-admin --email admin@example.com --password-stdin --data /data
+docker compose start aouda
+```
+
+The image carries an `aouda` command on `PATH` (a thin wrapper around `dotnet Aouda.Server.dll`); the image's entrypoint is
+`dotnet Aouda.Server.dll start`, hence `--entrypoint aouda` for a one-off command.
 
 Or with Docker secrets, which is the better answer for anything long-lived:
 

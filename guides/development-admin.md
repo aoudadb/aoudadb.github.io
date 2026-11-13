@@ -71,19 +71,15 @@ docker compose logs aouda | grep AOUDA-DEV-ADMIN
 ```
 
 Any non-empty value, `false` included, switches the container's environment to Development; leave the variable **unset** otherwise. It is
-refused next to `AOUDA_ROOT_PASSWORD`. See [Docker](../deployment/docker.md#compose-and-the-first-admin).
+refused next to `AOUDA_ROOT_PASSWORD`. See [Docker](../deployment/docker.md#compose).
 
-## `Aouda:Auth:RequireFirstAdmin`
+## `Aouda:Auth:RequireFirstAdmin` is gone
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `Aouda:Auth:RequireFirstAdmin` (`AOUDA_AUTH__REQUIREFIRSTADMIN`) | `false` | When `true`, a server that finds no admin and was given no root password or dev admin **fails the start** instead of waiting in setup mode |
-
-The refusal names both ways out: `The server has no admin and was given no way to create one, and Aouda:Auth:RequireFirstAdmin is set
-(docker-compose.yml sets it).` It then says to set a first admin's credentials (`AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` in docker
-compose; `Aouda:Auth:RootUser:Email` and `Password` otherwise) or, for development and tests only, `AOUDA_DEV_ADMIN=true`
-(`Aouda:Auth:DevAdmin:Enabled`), which also needs `ASPNETCORE_ENVIRONMENT=Development`. A data directory that already holds an admin starts
-without either. It is off by default, so a plain server keeps setup mode, `aouda create-admin` and `POST /api/auth/setup` as before.
+(**BL-1462, next train**) It made a server with no admin, no root password and no dev admin **fail the start** instead of waiting in
+setup mode; `docker-compose.yml` set it, so under `restart: unless-stopped` a forgotten password was a restart loop. It is deleted, with
+no replacement: setup mode now exists only for a data directory never set up with nothing declared, so a server that declares a server
+key needs no admin at all, and a new server that declares nothing waits in setup mode with `/ready` answering `503 setup_required` and naming the ways out. A leftover
+`AOUDA_AUTH__REQUIREFIRSTADMIN` is ignored. See [Docker](../deployment/docker.md#setup-mode-only-when-nothing-is-declared).
 
 ## See also
 

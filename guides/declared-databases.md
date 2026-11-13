@@ -202,11 +202,12 @@ declaration cannot say "must not exist".
 | `database_pending` (the database) | A declared database does not exist yet | Step 2 created it |
 | `database_not_open` (the database) | A declared database is registered but failed to open, or is quarantined by something other than an operator | It opens; otherwise it stays, and so does the 503 |
 | `server_starting` | The auth bootstrap has not finished | Step 7 |
-| `setup_required` | No admin exists | `RootUser` or a `create-admin` created it |
+| `setup_required` | Nothing is declared (no server key, no `RootUser`) and no admin exists | `RootUser` created it at start, or `POST /api/auth/setup` did; a declared server key means no setup mode at all (**BL-1462, next train**) |
 | `root_user_unusable` | `RootUser` is set but its password cannot be used | You fix the password |
 | `schema_pending` (the database) | Its `SchemaFile` has not been applied yet | Step 4 applied it |
+| `schema_applying` (the database) | Step 4 is applying its `SchemaFile` now; `progress` is `{ "done": n, "total": m }` over the declared schema files (**BL-1462, next train**) | Step 4 finished it |
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart |
-| `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | A server key waits for the first admin, a scoped key for its auth database and database to be open |
+| `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | Its auth database and database are open. A server key no longer waits for a first admin (**BL-1462, next train**) |
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 

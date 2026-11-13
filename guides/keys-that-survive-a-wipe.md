@@ -79,10 +79,12 @@ unreadable or empty file still does, naming the path and never the content), or 
 Since 0.12.0 every such file is read by one reader with one set of rules, listed in [Secret files](#secret-files); `$NAME` in the
 `ServerKeyFile` path is expanded now, so `ServerKeyFile=$CREDENTIALS_DIRECTORY/server-key` works.
 
-⚠️ **The key's row is made when the server auth database is, and that is when the first admin exists.** Until then the server is in
-setup mode and answers `503` to everything except the first-run setup routes, so a server key alone is not enough: set
-`Aouda:Auth:RootUser` as well. If you set only the key, the server logs a warning that it takes effect after the first admin
-exists. A declared key never widens the first-run setup window: that route is exactly as open, or closed, with or without it.
+**A server key alone is enough** (**BL-1462, next train**). On a data directory with no admin, a declared server key ends setup
+mode: the server auth database is created with no user, the key's row is written with it, and the key operates the server from
+the first start. No `Aouda:Auth:RootUser` is needed. (Before, the key was inert until a first admin existed, and the server logged
+that it would take effect then.) A data directory that has been set up never re-enters setup mode: remove the declaration later
+and the key's row, or any key you minted with it, still operates the server; with no user, no active key and nothing declared, the
+start is refused with `SERVER_HAS_NO_OPERATOR`.
 
 ### Further keys: the identities file
 

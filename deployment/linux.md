@@ -236,6 +236,20 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
 
+⚠️ `create-admin` needs the server **stopped**: a running server holds its data directory, and `create-admin` then exits `1`
+naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, next train**). A server with a
+declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile` or the systemd credential `aouda-server-key`) needs no
+admin and has no setup mode.
+
+**The data-directory lock and its limits** (**BL-1462, next train**). The server holds an exclusive `flock` on
+`<data>/Server/aouda.lock` while it runs; `create-admin`, `aouda table backfill` and a second server on the same directory take the
+same lock and refuse. The kernel releases it when the process exits, `kill -9` included, so there is never a stale lock to delete.
+It protects a directory on a **local filesystem, between processes on one host**. On a mount without `flock` (some NFS, CIFS and
+FUSE mounts answer `ENOLCK` or `EOPNOTSUPP`) .NET treats the failure as success and the lock is silently not held; on NFS mounted
+`nolock`, or a CIFS share used from two hosts, it covers one host only; and `DOTNET_SYSTEM_IO_DISABLEFILELOCKING=1` turns it off.
+Only a held lock is reported as "in use by another Aouda process"; any other error taking it (a read-only mount, a full disk) is
+reported as itself.
+
 Three supported ways, in order of preference:
 
 ```bash
