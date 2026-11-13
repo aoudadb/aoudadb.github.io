@@ -184,9 +184,11 @@ known credential. Set one:
 | You set | What happens |
 |---|---|
 | `AOUDA_SERVER_KEY=mk_srv_<64 hex characters>` (make one with `echo "mk_srv_$(openssl rand -hex 32)"`) | Declarative: the key operates the server, no admin is created |
-| `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` | The first admin is created at start. Remove them afterwards if you like: the admin lives in the data volume |
-| `AOUDA_DEV_ADMIN=true` | Development and tests only. The server prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda`. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD` or a server key |
+| `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` | The first admin is created at start. Neither has a default. Put both in a `.env` file next to the compose file or export them; remove them afterwards if you like: the admin lives in the data volume |
+| `AOUDA_DEV_ADMIN=true` | Development and tests only. The server makes a random throwaway admin and server key at every start and prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda` for the `AOUDA-DEV-ADMIN` line. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD` or a server key. See [Development admin](../guides/development-admin.md) |
 | none, on a new volume | Setup mode, as above; Studio waits (`service_healthy`) until the first admin exists |
+| none, on a volume that was set up but now has no user, no active server key and nothing declared | The start is refused: the line starts `SERVER_HAS_NO_OPERATOR: ` and names the ways out, and the exit status is `78` (**BL-1461**, **BL-1462**, next train) |
+| none, on a volume that holds an admin or an active server key | Starts normally |
 
 ⚠️ **`Aouda:Auth:RequireFirstAdmin` is gone** (**BL-1462, next train**). It made a server with no admin and no declared admin
 fail the start, which under `restart: unless-stopped` was a restart loop. A server with nothing declared now waits in setup mode
@@ -261,9 +263,37 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
 
 ---
 
+## A container that keeps restarting
+
+(**BL-1461, next train**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase` does not exist,
+no first admin under `RequireFirstAdmin`, a data directory in another format) exits with status **78** and prints two lines on
+standard error, the first `<CODE>: <message>` naming the setting. The codes and the exact lines are in
+[the exit status table](linux.md#when-the-start-is-refused).
+
+⚠️ **Docker's `restart:` policies cannot exempt an exit status.** `unless-stopped`, `always` and `on-failure` all restart a container
+that exited 78, so a refused configuration is a restart loop, and the loop itself tells you nothing: **the first line of the
+container's output is what names the setting.** (systemd can stop on it, with `RestartPreventExitStatus=78`; Docker has no equivalent.)
+
+```bash
+docker compose logs --no-log-prefix aouda | grep -E '^[A-Z_]+: ' | tail -1   # e.g. CONFIGURED_KEYS_INVALID: ...
+docker compose ps -a aouda                                                   # STATUS: Restarting (78) ...
+```
+
+Check the key declaration before you deploy, in the container you deploy, with its environment, secrets and mounts:
+
+```bash
+docker compose run --rm --no-deps --entrypoint aouda aouda keys check
+```
+
+It runs the server's own key validation over the configuration the server will read and exits `1` with the same first line the start
+would print. See [Check the file before you deploy](../guides/keys-that-survive-a-wipe.md#check-the-file-before-you-deploy).
+
+---
+
 ## Logs
 
-The container logs to stdout, so `docker logs aouda` is all of it.
+The container logs to stdout, so `docker logs aouda` is all of it. (**BL-1461, next train**) The one exception is a refused start's two
+lines, which go to standard error; `docker logs` shows both streams.
 
 ⚠️ **The default log level is `Warning`** for every category except startup narration. If a line the documentation mentions is not appearing, that is usually why — see [Defaults reference](../guides/defaults-reference.md#logging-defaults).
 
