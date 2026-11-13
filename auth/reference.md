@@ -544,6 +544,8 @@ All endpoints under `/api/databases/{db}/auth/admin/...`. A full admin — a `se
 | `.../admin/users/{userId}/partition-grants` | GET | List grants for user; optional `?dimension=` filter |
 | `.../admin/users/{userId}/partition-grants/{grantId}` | DELETE | Delete a grant (204 / 404) |
 
+**Server users' entitlements** (**BL-1452, next train**) — on a database the server auth database governs (no auth database of its own), the readers are server users, and their entitlements are written on the server auth admin API: `GET`/`POST /api/auth/admin/users/{userId}/entitlements` and `DELETE /api/auth/admin/users/{userId}/entitlements/{entitlementId}`, with the same body, rules, caps and errors as the application route. Such an entitlement applies on every database the server auth database governs. Writing one needs a server key (`mk_srv_`) or a server user with `db_admin` on the server auth database (scoped `*` or to it); a server user whose `db_admin` covers other databases only is `403 AUTHORIZATION_DENIED`. Every create and delete, on either API, writes an audit row (`admin_create_entitlement`, `admin_delete_entitlement`) in the auth database that holds the entitlement.
+
 **RLS Resolvers** — define within-partition row filter rules ([§19.9](authorization.md#199-admin-api-rls-resolvers)):
 
 | Endpoint | Method | Description |

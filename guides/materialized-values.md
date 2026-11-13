@@ -426,7 +426,15 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/users/<userId>
 
 The reader's next query of `_mv_values` filtered on `model = "pnl"` answers `200`. The same call with `"dimension": "mv_definition_model"` lets them read the model's rows of `_mv_definitions`.
 
-**Limit (BL-1452):** on a database the **server** auth database governs (no auth database of its own) there is no entitlement route: `…/auth/admin/users/{id}/entitlements` answers `400 INVALID_REQUEST` ("does not have application auth enabled") and the server admin API has none. There, only definers read values. To give readers models, link the database to an auth database.
+**On a database the server auth database governs** (no auth database of its own, the usual development setup) (**BL-1452, next train**). Its readers are server users, so the grant goes through the server auth admin API, `POST /api/auth/admin/users/{userId}/entitlements`, with the same body; `…/auth/admin/users/{id}/entitlements` under `/api/databases/{db}` answers `400` there ("does not have application auth enabled"). Create the server user, give them a role on the database (such as `db_reader`, scoped to it), then grant the model:
+
+```bash
+curl -X POST http://localhost:5433/api/auth/admin/users/<serverUserId>/entitlements   -H "Authorization: Bearer <server key mk_srv_, or a server user's token with db_admin on the server auth database>"   -H "Content-Type: application/json"   -d '{ "dimension": "mv_value_model", "key": "pnl", "level": "read" }'
+```
+
+- **Who may grant:** a server key (`mk_srv_`), or a server user with `db_admin` scoped `*` (or to the server auth database itself). A server user whose `db_admin` covers only some databases is refused `403 AUTHORIZATION_DENIED`, and nothing is written.
+- **The grant applies on every database the server auth database governs**, not only on the one you were thinking of: the server auth database stores a user's entitlements, like their claims, without a database. A model name used on two such databases is granted on both by one entitlement. Use model names that are unique across them, or link a database to its own auth database to keep its grants apart.
+- `GET /api/auth/admin/users/{userId}/entitlements` lists a user's entitlements; `DELETE /api/auth/admin/users/{userId}/entitlements/{entitlementId}` revokes one. A revoke ends the user's live subscriptions on the model with `PERMISSION_REVOKED`, and their next read is refused.
 
 **What a value reveals.** A formula reads its inputs **as the database**, not as the viewer. A viewer who may see a value may therefore see a number derived from rows they cannot read. Grant a model to the people who may see its numbers.
 
@@ -466,7 +474,6 @@ There is no configuration key for any of this.
 - **BL-1441**: promotion, above.
 - **BL-1449**: in the TypeScript client, two first `subscribe` calls on a fresh client can race the WebSocket opening, and the second fails with a connection error. Wait for the first subscription's snapshot before starting the second.
 - **BL-1405**: a cell reads an input by its full primary key only.
-- **BL-1452**: no entitlement route on a database the server auth database governs; there only definers read values (see [Security](#security)).
 - **BL-1451**: in the C# SDK `GetAsync<T>` with a non-nullable `T` returns `default(T)` for a missing cell.
 - **BL-1447**: in the C# SDK a `waitFor` of nearly the client's own request timeout (30 s by default) can race it: the read times out client-side as `AoudaTimeoutException` (not `MaterializedValueNotCaughtUpException`) and is retried up to 3 times, each counted against the circuit breaker. Keep waits well under `AoudaClientOptions.Timeout`. The TypeScript client raises the request timeout above the wait.
 - **BL-1450**: in the TypeScript client every HTTP request leaves an `abort` listener on the client's lifetime signal, so a long-lived client's memory grows per request and Node warns `MaxListenersExceededWarning` after 11 requests. A dashboard that polls `get` on one client for hours is the case it hurts.
