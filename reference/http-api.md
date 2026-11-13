@@ -2081,7 +2081,7 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Unique materialized query name. |
+| `name` | string | Yes | Unique materialized query name. It is the result table's name, so it follows the [table-name rule](#table-names), and it may not start with `_` or exceed 100 characters. A name that breaks either is `400 INVALID_REQUEST` and nothing is created; a retry answers the same (**BL-1468, next train; breaking**: before, a name such as `a:b` or `x.` left the query registered in `Error` with no result table, and a retry answered that it already existed). |
 | `sourceTable` | string | Yes | Base table name. |
 | `type` | number | Yes | `1` LatestPerKey, `2` FirstPerKey (MIN of `orderBy`, not arrival order), `3` Aggregate, `4` Filter, `5` TopNPerGroup (N rows per group; source must have a PK). |
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
@@ -2344,7 +2344,7 @@ List all tables with statistics.
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables) |
+| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables). A materialized query's build table (`__mqbuild_<query>_<id>`, present while it rebuilds) is never listed, with either value (**BL-1468, next train**) |
 
 **Response:**
 
@@ -2723,9 +2723,25 @@ neither restriction is unchanged, and turning protection on is not this check. T
 
 **Response:** `201 Created` with table detail
 
+<a id="table-names"></a>**Table names** (**BL-1468, next train; breaking**). One rule for every way a table gets a name: this
+create, the rename below, `POST …/edge-tables`, `…:create-vector-column`, the embedded API, every table a schema file declares, and
+every materialized query (over HTTP or in a schema file's `materializedQueries`), whose name is its result table's.
+A table name:
+
+- is not empty and not whitespace only, and is not `.` or `..`;
+- contains none of `/ \ : * ? " < > |`;
+- does not start or end with a period (`.`) or a space;
+- does not start with `__mqbuild_`, which is reserved for the engine's own materialized-query build tables.
+
+Anything else (letters, digits, `_`, `-`, other Unicode) is allowed. Matching is exact (`orders` and `Orders` are two tables). A
+name that breaks the rule is `400 INVALID_REQUEST` and the message names the rule it broke, for example *Table name cannot start or
+end with a period or space (invalid for directory names).* Before, only the embedded create applied this rule; the HTTP create and
+rename, the graph and vector creates and the schema apply accepted any name.
+
 #### `DELETE /api/databases/{db}/tables/{name}`
 
-Delete a table. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
+Delete a table. A `__mqbuild_*` name is `404 TABLE_NOT_FOUND` (**BL-1468, next train**): a materialized query's build table is not
+addressable. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
 table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, 0.9.0**) A table that already has
 PLS or RLS answers `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and `all-rows`
 where RLS applies. RBAC `drop` is still required and is not enough. A table with neither restriction is unchanged.
@@ -2734,7 +2750,8 @@ where RLS applies. RBAC `drop` is still required and is not enough. A table with
 
 #### `PATCH /api/databases/{db}/tables/{name}`
 
-Rename a table.
+Rename a table. `newName` follows the [table-name rule](#table-names): breaking it is `400 INVALID_REQUEST` (**BL-1468, next
+train**). A `__mqbuild_*` `{name}` is `404 TABLE_NOT_FOUND`.
 
 **Request:**
 
