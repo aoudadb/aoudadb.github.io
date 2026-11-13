@@ -905,6 +905,18 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 This section documents every field available in `aouda.schema.json` by type. All fields are optional except `type` on `ColumnDefinition`.
 
+**Only these fields, spelled exactly** (**BL-1460, next train**). A member that is not listed here (a table has no `description`; a
+materialized query has no `authMode`), or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
+`schema check`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
+pointer and the member meant. It used to be dropped without a word. The same holds inside named queries (`where`, `joins`, `orderBy`,
+`selectExpr`, `aggregates`, `groupBy`, `perKey`), named mutations and expressions. `schemas/aouda-schema.v1.json` lists exactly these
+members, for an editor's completion and squiggles.
+
+A rule a table breaks on its own (an authorization mode without its resolver or column, an upper-case `permissionDimension`,
+partition-level security without a partition key, …) refuses the **whole** document at `schema apply` / `diff` with `400
+INVALID_REQUEST`, nothing applied (**BL-1460, next train**); the notes below that say "schema apply records the change `Failed`"
+describe the behaviour before that.
+
 #### SchemaDocument (root)
 
 | Field | JSON key | Type | Required | Notes |
@@ -921,7 +933,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 |---|---|---|---|---|
 | `columns` | `columns` | `object` | None | Map of column name → `ColumnDefinition`. Required when creating a table. |
 | `partitionKey` | `partitionKey` | `PartitionKeyEntry[]` | None | Ordered list of partition key columns. Omit for non-partitioned tables. |
-| `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. |
+| `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. Each must be a column of this table: `Cluster column 'nope' in table 'orders' is not a column of the table.` (**BL-1460, next train**; it was dropped). |
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, 0.6.0**) and replication settings for this table. |
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
