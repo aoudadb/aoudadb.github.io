@@ -137,6 +137,7 @@ If you do nothing beyond starting local dev:
 | `DevServerOptions.DatabaseName` | `default` | Immediate target DB without extra setup |
 | `DevServerOptions.DataPath` | `null` | Ephemeral local run for quick experiments |
 | `DevServerOptions.EnableAuth` | `false` | Auth is opt-in in dev mode unless explicitly enabled |
+| `DevServerOptions.Bind` | `null` (**BL-1473, next train**) | The dev server listens on **loopback only**, on `Port`. To listen on other interfaces set an address in the form `aouda start --bind` takes: `host:port` or `host`, an IP literal, `0.0.0.0` (or `*`) for every interface, e.g. `0.0.0.0:5433`. Like `aouda start`, a server with no admin yet answers only the setup calls, and only from the machine it runs on (`503 SETUP_REQUIRED` otherwise): create the admin at `POST /api/auth/setup`, or start with `AOUDA_DEV_ADMIN=true`. There is no `aouda dev` command; the dev server is `DevServerHost` in `Aouda.Server`, used by `Aouda.Testing`'s `AoudaTestServer` (in-memory, no port) and by hosts that call `DevServerHost.RunAsync` |
 | `TokenOptions.AccessTokenLifetime` | `15m` | Short-lived user access tokens |
 | `TokenOptions.RefreshTokenLifetime` | `30d` | Long-lived sessions for app flows |
 | `TokenOptions.Issuer` | `"aouda"` | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}`, and (**0.4.0**) only that issuer is accepted for them |
