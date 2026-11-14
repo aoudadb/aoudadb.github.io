@@ -129,7 +129,7 @@ In the JSON (`--json`), `target` is `{ "kind": "server", "url", "contacted", "ro
 the **server** planned and `declaration.localPlanHash` the plan's own (they differ when the two machines' settings differ: the server validates under its own).
 
 **The key.** `--server` needs a server key (`mk_srv_`) of that server, from **exactly one** of `--key-file PATH` (read once, one trailing newline removed) or
-`--key-env NAME`. There is no `--key`: a key on the command line stays in the shell's history and the process list, so `--key` is refused (exit `64`) without the value
+`--key-env NAME`, holding one key on one line (a line break, a space or a non-ASCII character is exit `64`, naming the file or the variable). There is no `--key`: a key on the command line stays in the shell's history and the process list, so `--key` is refused (exit `64`) without the value
 being repeated. `--server` is never taken from `AOUDA_SERVER` / `AOUDA_URL`, and the key never from `AOUDA_TOKEN`: an environment left in a CI job must not turn an
 offline plan into a call to a server. The key is sent only as the bearer to the URL you named — **a redirect is not followed** (it would be the easiest way to send a
 server key elsewhere) — and is printed nowhere. The URL is an absolute `http://` or `https://` URL with no user name, query or fragment; there is no `--insecure`.
@@ -156,7 +156,7 @@ the server's own files, which the next start reads too. To apply, change the fil
 | `0` | `clean` | no error, and nothing to change |
 | `1` | `errors` | an `error` finding — from the offline run (the server was not contacted) or from the server (its state, or its own settings) |
 | `2` | `changes` | no error, and a deploy of this declaration would change something (listed under `changes`) |
-| `64` | — | misuse: `--key`, no key source or both, `--key-file` / `--key-env` without `--server`, an unset variable, a missing or empty key file, a URL that is not plain `http(s)` |
+| `64` | — | misuse: `--key`, no key source or both, `--key-file` / `--key-env` without `--server`, an unset variable, a missing or empty key file, a key source that holds more than one key on one line, a URL that is not plain `http(s)` |
 | `69` | `incomplete` | the server could not be planned against: not reachable, a timeout, a TLS failure, a redirect, `404` (a server older than this release), `409` (a reload is running), `429` (one plan per second; `Retry-After` is printed), `503` (still starting), any other answer that is not a plan (`PLAN_TARGET_UNREACHABLE`) |
 | `77` | `incomplete` | the server refused the key (`401` / `403`): `plan --server` needs that server's server key (`PLAN_TARGET_REFUSED`) |
 
