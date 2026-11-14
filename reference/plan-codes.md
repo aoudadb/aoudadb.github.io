@@ -32,6 +32,7 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `SECRET_REFERENCE_INVALID` | error | `read` | offline | 78 | Give the secret as exactly one of { "env": "NAME" }, { "file": "path" } or { "hash": "sha256:<64 hex>" }. |
 | `SECRET_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Set the variable, or make the secret file readable and non-empty where the server runs. |
 | `OVERLAY_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Make the overlay readable and a JSON object (at least { "extends": "<base file name>" }), or remove it. |
+| `SOURCE_NOT_RELOADABLE` | info | `read` | reload | — | Move the setting to a configuration file to change it by reload; environment variables and the command line are read once, at start. |
 | `OVERLAY_ABSENT` | info | `read` | offline | — | Nothing to do if the environment needs no overlay; otherwise create the file named above. |
 | `SECRET_NOT_READ` | info | `read` | offline | — | Run `aouda plan` without --skip-secrets where the secrets are mounted (the deploy host, with the start's own mounts). |
 | `DATA_DIRECTORY_FORMAT_REFUSED` | error | `read` | state | 78 | Point the server at a data directory of this format (start from an empty one and restore a backup, see the upgrade notes). |
@@ -97,6 +98,8 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `KEY_AUTH_DATABASE_NOT_OPEN` | error | `principalRows` | state | 78 | Repair or restore the auth database (or remove its key declarations) and start again. |
 | `KEY_SECRET_HELD_BY_OTHER_ROW` | error | `principalRows` | state | 78 | A secret is one row: revoke and delete the key that holds it, or declare a different secret. |
 | `KEY_REVOKED_BY_OPERATOR` | warning | `principalRows` | state | — | Remove the key from the declaration to make the revocation permanent; a wipe of the data returns it. |
+
+A code whose half is **reload** is emitted only by `aouda reload` (`POST /api/admin/reload`), never by the start (**BL-1427, next train**); a reload runs every other code as the start does and is refused by every `error`.
 
 `SERVER_HAS_NO_OPERATOR` is one rule checked at two moments of the start: before the schema step (stage `bootstrap`) and after the key rows are reconciled (stage `principalRows`).
 

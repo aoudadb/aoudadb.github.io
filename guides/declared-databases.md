@@ -47,7 +47,9 @@ the key that replaces it (`MaxMemoryShareBytes` and `MemoryWeight`, or `Durabili
 
 Configuration owns the **operational fields** of a database it declares: `MaxMemoryShareBytes`, `MemoryWeight`,
 `DefaultTemperature`, `Durability`, `ReplicationMode`, `WriteConcern`, `WriteConcernTimeoutMs` and `OnWriteConcernTimeout`. They are
-re-applied at every start, so a change in the file wins over a change made through the API. The catalog owns **everything else**,
+re-applied at every start, so a change in the file wins over a change made through the API. (**BL-1427, next train**) A reload does
+not re-apply them: a change to an operational field of a database that exists takes a restart (`aouda reload` lists it under
+`restartRequired`). The catalog owns **everything else**,
 including a database's signup settings (which are not declarable: a change made through `signup-settings` survives every
 restart). A declaration creates what is missing, converges what it owns, and refuses what it cannot reconcile; it never
 overwrites a field it does not name.
@@ -197,6 +199,24 @@ Re-running a converged start is a no-op: the schema diff is empty and nothing is
 the API is undone by the next start, which creates it again, empty. A database you remove from the file is left alone; a
 declaration cannot say "must not exist".
 
+### Changing the declaration without a restart (**BL-1427, next train**)
+
+`aouda reload` (or `POST /api/admin/reload`, a server key only) re-reads the declaration of a running server, validates it as a start
+would, and converges it in the order above: steps 2, 4, 5 and 6 (`_serverauth`, the root user and setup mode are the start's). What
+a reload applies:
+
+- a **new** `Aouda:Databases` entry (created, and linked to its auth database);
+- a declared database's `SchemaFile` and `SchemaEnvironment` — the file is read again and applied **non-destructively** whatever
+  `SchemaAllowDestructive` says (a destructive change is the warning `SCHEMA_DESTRUCTIVE_REFUSED`, and `/ready` keeps `schema_drift`);
+- the `Roles` of a declared auth database;
+- the `AuthDatabase` of a database that has **no link yet**.
+
+What it does not: a database's operational fields, `SchemaAllowDestructive`, `Aouda:SkipDatabases` and every other setting are
+`restartRequired` (listed, not applied; the rest proceeds). A `Kind` change and a change of an existing link are **errors** — the next
+start refuses them, so the reload does too, and changes nothing. A database you remove from the file is reported as `orphaned` and
+left alone. `Aouda:Databases` set by environment variables or the command line cannot change by reload (`SOURCE_NOT_RELOADABLE`).
+`POST /api/admin/reload?dryRun=true` answers the same plan and changes nothing.
+
 ### What `/ready` says while it starts
 
 `GET /ready` needs no credential and answers `503` with every reason that still holds, or `200` with `"reasons": []`
@@ -212,7 +232,8 @@ declaration cannot say "must not exist".
 | `setup_required` | No admin exists | `RootUser` or a `create-admin` created it |
 | `root_user_unusable` | `RootUser` is set but its password cannot be used | You fix the password |
 | `schema_pending` (the database) | Its `SchemaFile` has not been applied yet | Step 4 applied it |
-| `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart |
+| `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
+| `reload_failed` (the entry, when one is named) | (**BL-1427, next train**) The last reload stopped part-way; the steps before it are applied | The next reload that completes |
 | `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | A server key waits for the first admin, a scoped key for its auth database and database to be open |
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
