@@ -358,7 +358,7 @@ Before, the merge dropped such a member without a word: an overlay turning parti
 
 ### Member names are exact (**BL-1460, next train**)
 
-Every path reads a schema document with one reader: `schema check`, `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
+Every path reads a schema document with one reader: `aouda plan` (**BL-1463, next train**), `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
 and its overlay before sending anything; `npx @aouda/client` sends the base file as written, so the server refuses an unknown member in
 it, and merges an `--env` overlay itself, refusing the same overlay members), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
 member in another case, is **refused**, never ignored:
@@ -374,7 +374,7 @@ non-nullable column, `"partitionLevelSecurty": true` left partition-level securi
 lost its filter and returned every row. A table has no `description` (a column does) and a materialized query has no `authMode`,
 `permissionDimension` or `permissionColumn`: those are refused too. The materialized-query ones were redundant and never read: a
 materialized query's result is always filtered by its source table's partition- and row-level security, so the source table's security
-always applied. Remove them. Run `schema check` on every file and overlay to list them all.
+always applied. Remove them. Run [`aouda plan`](plan.md) with each file declared (and its overlay, `SchemaEnvironment`) to list them all.
 
 ### Summary
 

@@ -907,7 +907,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 
 **Only these fields, spelled exactly** (**BL-1460, next train**). A member that is not listed here (a table has no `description`; a
 materialized query has no `authMode`), or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
-`schema check`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
+`aouda plan`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
 pointer and the member meant. It used to be dropped without a word. The same holds inside named queries (`where`, `joins`, `orderBy`,
 `selectExpr`, `aggregates`, `groupBy`, `perKey`), named mutations and expressions. `schemas/aouda-schema.v1.json` lists exactly these
 members, for an editor's completion and squiggles.

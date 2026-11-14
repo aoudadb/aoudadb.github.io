@@ -182,7 +182,10 @@ It names entries, kinds and fingerprints, never a key, a hash or a secret file's
   hold a secret is `(changed)`. A changed identities file **path** reloads no key.
 - On a follower, `writes` is `skipped`: it validates and replaces its in-memory declarations and writes nothing.
 - A non-`200` answer that carries a plan also carries `error` (the code), `message` and `requestId`; `409`, `429` and `503` carry only
-  those three.
+  those three. On `207 RELOAD_PARTIAL`, `applied` is the string `"partial"` (the steps in `completedSteps` are applied, `failedStep`
+  is not); it is a boolean in every other answer.
+- `dryRun` without a body is `true` or `false` in any case; any other value, or the parameter twice, is `400 INVALID_REQUEST`. With a
+  body it is exactly `true`, or the answer is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, next train**).
 
 **Planning a posted declaration (**BL-1463, next train**).** `POST /api/admin/reload?dryRun=true` with a JSON body
 (`Content-Type: application/json`) plans that declaration against this server — what `aouda plan --server` does
