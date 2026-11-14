@@ -959,8 +959,15 @@ describe the behaviour before that.
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
 | `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) Required on every `Decimal` column. |
 | `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
+| `drives` | `drives` | `string` | None | (**ADR 0072, next train**) On `"type": "Expression"` only: the column of the same table this formula column drives. See [Formulas](formulas.md#the-column). |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
+
+(**ADR 0072, next train**) And `Expression`, a [formula column](formulas.md#the-column), which names the column it drives in `drives`
+and must say `"nullable": true`: `"formula": { "type": "Expression", "nullable": true, "drives": "value" }`. A document that leaves out
+`nullable` (or says `false`) is refused `400 FORMULA_COLUMN_INVALID` (*Expression column 'pnl.formula' must be nullable*); the other rules of
+the column are on [Formulas](formulas.md#the-column). A seed row gives an Expression column its formula as a JSON object (or a string
+holding one); its driven value must then be null or absent.
 
 (**BL-035, 0.9.0**) And the six [array types](array-columns.md), spelled exactly: `Double[]`, `Float32[]`, `Int32[]`, `Int64[]`, `Byte[]`, `String[]`.
 An array column cannot be a key, an index or a rule, a non-nullable one is allowed at create, and one added to an existing table is
@@ -1028,9 +1035,9 @@ computed output, a `SET` expression and a `selectExpr`:
 | `cast(x, "Decimal(p,s)")` | rounded half away from zero to scale `s` |
 | An integer `SUM / COUNT` in a computed output | 6 places |
 | Any of these with a `Double` or `Float32` operand | `Double` — `round` / `roundTo` of a `Double` stay `Double` |
-| `min`, `max`, `abs` | (**BL-1434, next train**) widen like arithmetic |
-| `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not` | (**BL-1434, next train**) Bool |
-| `if(c, a, b)` | (**BL-1434, next train**) the type of `a` and `b` when they agree; otherwise no type is inferred |
+| `min`, `max`, `abs` | (**ADR 0072, next train**) widen like arithmetic |
+| `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not` | (**ADR 0072, next train**) Bool |
+| `if(c, a, b)` | (**ADR 0072, next train**) the type of `a` and `b` when they agree; otherwise no type is inferred |
 
 A result past 18 digits is an error, never a wrapped value and never a silent `Double`. A computed value stored in a
 `Decimal(p,s)` column is then rounded half away from zero to that column's scale (table above).
