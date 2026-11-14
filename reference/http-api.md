@@ -130,7 +130,7 @@ response. See
 file's content, `Aouda:Databases` (new entries, `SchemaFile` / `SchemaEnvironment`, `Roles`, a first `AuthDatabase` link) — validates
 it as `aouda start` would ([Declaration Finding Codes](plan-codes.md)), and converges it without a restart, in the start's order:
 the key declarations, declared databases, declared schema (never destructive), declared roles, configured key rows. A server key
-(`mk_srv_`) only: any other credential is `403 AUTHORIZATION_DENIED`, the dry run and `GET` included. A body is only a
+(`mk_srv_`) only, the dry run and `GET` included: a key of the server's auth database that is not a server key is `403 AUTHORIZATION_DENIED`, and a credential that auth database does not know (a key of another auth database) is `401`. A body is only a
 **candidate** to plan (below); without `dryRun=true` it is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, next train**). `aouda reload`
 is the CLI ([Cloud Hub](../guides/cloud-hub.md)).
 
