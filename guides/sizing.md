@@ -758,8 +758,8 @@ into the hot tier as any updated row does, and leaves it like any other.
   cells it reads), built when the database opens; an input row has none.
 - **Per write.** A write to a table with an Expression column is checked against the rows it writes (a formula row's value is refused
   there); after it commits, the index is updated for each written row. A write that sets a formula or changes a formula table's key is
-  validated against the whole graph and serialized database-wide; an input edit is not serialized. A bulk load into a formula table holds
-  that serialization for its whole session (BL-1479), and no formula in the database is recomputed meanwhile (BL-1497).
+  validated against the whole graph and serialized database-wide; an input edit is not serialized. A bulk load into a formula table takes
+  it only at its `:commit`.
 - **Per commit.** A commit to a row some formula reads wakes those formulas and everything downstream of them, in one pass, each once; only
   a changed value is written, as an ordinary update of that one column. There is no cost limiter.
 - **A cold row.** A formula reads a value by its row's primary key, from any tier. When the row's copy is cold, or the table holds vectors,
