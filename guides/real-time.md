@@ -144,7 +144,7 @@ If you do nothing:
 | Server `Aouda:WebSocket:EnableCompression` | `true` | Accepts permessage-deflate on WebSocket upgrades |
 | Server `Aouda:WebSocket:EnableMessagePack` | `true` | Allows auth-time `wire_mode=msgpack` negotiation |
 | Server `Aouda:WebSocket:MaxConnections` | `10000` | Global concurrent streaming connection cap |
-| Server `Aouda:WebSocket:HeartbeatInterval` | `20s` | Server heartbeat cadence; also the longest an open session outlives a credential that expired or whose user was disabled (a key revoked on the node ends its sessions there at once; **BL-1001, 0.4.0**, see [Realtime authorization](../reference/http-api.md#realtime-revoked-credential)) |
+| Server `Aouda:WebSocket:HeartbeatInterval` | `20s` | Server heartbeat cadence; also the longest an open session outlives a credential that expired or whose user was disabled (a key revoked on the node ends its sessions there at once; **BL-1001, next train**, see [Realtime authorization](../reference/http-api.md#realtime-revoked-credential)) |
 | Server `Aouda:WebSocket:IdleTimeout` | `5m` | Idle WebSocket auto-close threshold |
 | Server `Aouda:WebSocket:LongPollWaitTimeout` | `25s` | Default long-poll wait horizon |
 | Server `Aouda:WebSocket:LongPollSessionIdleTimeout` | `2m` | Long-poll session expiry window |
@@ -596,7 +596,7 @@ Primary proving tests:
 | `Aouda:WebSocket:MaxConnectionsPerIdentity` (**BL-1383, 0.11.0**) | int | `16` | `>=1` | server config | Live connections (WebSocket and long-poll) per identity; enforced in the handshake, after identity resolution and before `auth_ok`, as an `auth_error` with `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (long-poll `connect`: 429, same code). A public-key identity includes the remote address; a no-auth database has no limit |
 | `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` (**BL-1383, 0.11.0**) | int | `1024` | `>=1` | server config | Live subscriptions for a service key without `user_token` (a key with one is a user and keeps `MaxSubscriptionsPerIdentity`) |
 | `Aouda:WebSocket:SubscribeRate:Burst` / `RefillPerSecond` (**BL-1383, 0.11.0**) | int / number | `512` / `32` | `>=1` / `>=0` | server config | Per-identity token bucket on subscribe attempts (one refused for another reason still costs a token); both listeners and long-poll `/send`; independent of `IdentityQuota:Enabled`. Over it: `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` |
-| `Aouda:WebSocket:HeartbeatInterval` | timespan | `00:00:20` | positive | server config | Server heartbeat emit interval, and the interval at which an open WebSocket or long-poll session re-checks its credential (JWT or API key, **BL-1001, 0.4.0**) |
+| `Aouda:WebSocket:HeartbeatInterval` | timespan | `00:00:20` | positive | server config | Server heartbeat emit interval, and the interval at which an open WebSocket or long-poll session re-checks its credential (JWT or API key, **BL-1001, next train**) |
 | `Aouda:WebSocket:IdleTimeout` | timespan | `00:05:00` | positive | server config | Idle close threshold |
 | `Aouda:WebSocket:LongPollWaitTimeout` | timespan | `00:00:25` | positive | server config | Max long-poll block |
 | `Aouda:WebSocket:LongPollSessionIdleTimeout` | timespan | `00:02:00` | positive | server config | Session expiry threshold |
