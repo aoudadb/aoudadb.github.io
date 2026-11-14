@@ -148,7 +148,7 @@ Aouda__Databases__reports__AuthDatabase=derive_auth
 Aouda__Databases__reports__Durability=os
 ```
 
-(`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies, and `aouda schema check` validates it offline (**BL-1419, 0.12.0**; [Check a schema file offline](schema-check.md)); the start runs the same checks on every file before it changes any database; see
+(`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan` validates it offline (**BL-1463, next train**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
 [Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
 schema file creates, which is why the roles are applied after it.
 
@@ -225,7 +225,7 @@ quarantined, is a decision and is not listed. `aouda status` prints every reason
 ## Related
 
 - [Keys that survive a wipe](keys-that-survive-a-wipe.md): declaring keys in configuration
-- [Check a schema file offline](schema-check.md) and [Upgrading and the data-directory format](upgrading.md)
+- [Plan a declaration](plan.md) and [Upgrading and the data-directory format](upgrading.md)
 - [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start)
 - [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname)
 - [Defaults reference: declared databases](defaults-reference.md#declared-databases)

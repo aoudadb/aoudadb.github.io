@@ -83,7 +83,7 @@ A replica refuses a primary of the other format the same way.
 
 | What | Before | Now | What the old form gets |
 |---|---|---|---|
-| Table `authMode` | `auth-db-pls` | `auth-db-entitlement` (`jwt-claim` and `auth-db-rls` unchanged) | `400 Invalid authMode. Valid values: jwt-claim, auth-db-entitlement, auth-db-rls.`; a schema file fails `aouda schema check`, `schema apply` and a declared-schema start with `Unsupported authMode 'auth-db-pls'. Valid values: jwt-claim, auth-db-entitlement, auth-db-rls.` |
+| Table `authMode` | `auth-db-pls` | `auth-db-entitlement` (`jwt-claim` and `auth-db-rls` unchanged) | `400 Invalid authMode. Valid values: jwt-claim, auth-db-entitlement, auth-db-rls.`; a schema file fails `aouda plan`, `schema apply` and a declared-schema start with `Unsupported authMode 'auth-db-pls'. Valid values: jwt-claim, auth-db-entitlement, auth-db-rls.` |
 | Create | `POST /api/databases/{db}/auth/admin/users/{id}/partition-grants` | `POST …/users/{id}/entitlements` | `404` |
 | List | `GET …/partition-grants[?dimension=]` returning `{ "grants": [...] }` | `GET …/entitlements[?dimension=]` returning `{ "entitlements": [...] }` | `404`; a client reading `grants` from the new route finds nothing |
 | Delete | `DELETE …/partition-grants/{grantId}` | `DELETE …/entitlements/{entitlementId}` | `404` |
