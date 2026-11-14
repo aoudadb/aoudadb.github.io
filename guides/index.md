@@ -76,7 +76,7 @@ Use this mapping as the baseline when planning doc updates:
 | Query execution, indexing, joins, aggregates | P2, P3, P14, P15 | `docs/dev/Functionality-Query-Execution.md` |
 | Hot/cold behavior and memory control | P3, P7 | `docs/dev/Functionality-HotCold-And-Memory.md` |
 | Integration/distribution, backup, replication, partitioning, clustering, materialized queries | P4 (+ sub-epics) | `docs/dev/Functionality-Distribution-And-Licensing.md`, `docs/dev/Functionality-Backup-And-Restore.md`, `docs/dev/Functionality-Replication-And-Clustering.md`, `docs/dev/Functionality-Partitioning-And-Multitenancy.md`, `docs/dev/Functionality-TimeSeries-And-Clustering.md`, `docs/dev/Functionality-Materialized-Queries.md` |
-| Materialized values (computed cells over ordinary tables) (**BL-1434, next train**) | MaterializedValues | [Materialized Values](materialized-values.md) |
+| Formulas: `Expression` columns, computed cells in ordinary tables (**ADR 0072, next train**) | ExpressionColumns | [Formulas](formulas.md), [Build a live financial model](financial-model.md) |
 | Real-time streaming | P10 | `docs/dev/Functionality-RealTime-Streaming.md` |
 | Embedded/document-model and related DX | P11 | `docs/dev/Functionality-AI-Native-Usage.md` |
 | Auth foundation and two-layer auth | P12, P14 | `docs/dev/Functionality-Auth-And-Authorization.md` |
