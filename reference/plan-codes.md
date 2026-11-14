@@ -13,7 +13,7 @@ parent: "Reference"
 ## Exit status of a refused start
 
 - **78** (`EX_CONFIG`): the declaration is refused. Restarting with the same configuration fails the same way; the systemd unit does not restart it (`RestartPreventExitStatus=78`).
-- **1**: every error is a file that could not be read for an I/O reason (`DECLARATION_UNREADABLE`, `SECRET_UNREADABLE`, `SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE` with a missing, denied or unreadable file). The start may succeed once the file can be read (a volume not yet mounted), so a supervisor may restart it. One such error beside any other error is 78.
+- **1**: every error is a file that could not be read for an I/O reason (`DECLARATION_UNREADABLE`, `SECRET_UNREADABLE`, `SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE` with a missing, denied or unreadable file, and `CONFIGURATION_INVALID` for a configuration file that exists and cannot be read). The start may succeed once the file can be read (a volume not yet mounted), so a supervisor may restart it. One such error beside any other error is 78.
 
 ## Stages
 

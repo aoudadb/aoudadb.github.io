@@ -79,10 +79,12 @@ unreadable or empty file still does, naming the path and never the content), or 
 Since 0.12.0 every such file is read by one reader with one set of rules, listed in [Secret files](#secret-files); `$NAME` in the
 `ServerKeyFile` path is expanded now, so `ServerKeyFile=$CREDENTIALS_DIRECTORY/server-key` works.
 
-⚠️ **The key's row is made when the server auth database is, and that is when the first admin exists.** Until then the server is in
-setup mode and answers `503` to everything except the first-run setup routes, so a server key alone is not enough: set
-`Aouda:Auth:RootUser` as well. If you set only the key, the server logs a warning that it takes effect after the first admin
-exists. A declared key never widens the first-run setup window: that route is exactly as open, or closed, with or without it.
+**A server key alone is enough** (**BL-1462, next train**). On a data directory with no admin, a declared server key ends setup
+mode: the server auth database is created with no user, the key's row is written with it, and the key operates the server from
+the first start. No `Aouda:Auth:RootUser` is needed. (Before, the key was inert until a first admin existed, and the server logged
+that it would take effect then.) A data directory that has been set up never re-enters setup mode: remove the declaration later
+and the key's row, or any key you minted with it, still operates the server; with no user, no active key and nothing declared, the
+start is refused with `SERVER_HAS_NO_OPERATOR`.
 
 ### Further keys: the identities file
 
@@ -167,8 +169,8 @@ generate keys with `openssl rand -hex 32` and put the prefix in front.
 not) is refused with an error that names the existing row (its id, name and source, never the secret): revoke and delete that key,
 or declare a different secret. At start the error fails the start (**BL-1463, next train**: `KEY_SECRET_HELD_BY_OTHER_ROW`, before
 any row is written); it also abandons the creation of an auth database. `aouda plan` runs offline and cannot see a database
-(**BL-1463, next train**), so it reports only the clashes it can: the same secret twice in the file, or in the file and in
-`Aouda__Auth__Bootstrap__ServerKey`.
+(**BL-1463, next train**), so it reports only the clashes it can: the same secret twice in the file, or in the file and in the server
+key, wherever the server key comes from.
 
 The declared `kind` must match the prefix wherever the server can see the plaintext (an `env` secret or the server key). For a
 `hash` secret it cannot, and a mismatch there changes only the credential-kind label in the failure log, never the privilege.
@@ -186,15 +188,41 @@ aouda plan --Aouda:Auth:Keys:File=identities.json
 # 1 error, 0 warnings: `aouda start` would refuse this declaration.
 ```
 
-(**BL-1463, next train**; it replaces `aouda keys check`, **BL-1378, 0.11.0**) `aouda plan` takes the arguments `aouda start` takes and
-reads the configuration the start reads, then loads the file with the environment of the process that runs it, exactly as the server
-does. It reports **every** problem at once, each with its code (`KEY_SECRET_SHARED`, `SECRET_UNREADABLE`, ...) and the JSON pointer of
-the entry, and never prints a secret or a hash. It exits `1` when the start would refuse, and warns **once per database** that scoped
-entries name and no `service_role`, `public` or `anon` declaration mentions (`KEY_DATABASE_NOT_LINKED`). If
-`Aouda__Auth__Bootstrap__ServerKey` is set in its environment it is checked with the file, as the start does (the same name or the
-same secret is refused). It needs no server and no data directory, so it runs in CI: where the secrets are not mounted, add
-`--skip-secrets`. See [Plan a declaration](plan.md). It no longer lists the declarations; `GET /api/auth/admin/configured-keys` lists
-those of a running server.
+(**BL-1463, next train**; it replaces `aouda keys check`, **BL-1378, 0.11.0**, and BL-1461's rework of it) `aouda plan` takes the
+arguments `aouda start` takes and reads the configuration the start reads, through the same code, in the directory and environment it
+runs in: `appsettings.json` and `appsettings.<environment>.json` from the working directory, environment variables in both spellings
+(`AOUDA_AUTH__BOOTSTRAP__SERVERKEY` and `Aouda__Auth__Bootstrap__ServerKey`), the start arguments, and the systemd credential
+`aouda-server-key` when `CREDENTIALS_DIRECTORY` is set. Then it loads the file with the environment of the process that runs it, exactly
+as the server does. It reports **every** problem at once, each with its code (`KEY_SECRET_SHARED`, `SECRET_UNREADABLE`, ...) and the
+JSON pointer of the entry, and never prints a secret or a hash: the dev-admin guards, the server key from whichever source sets it
+(`ServerKey`, `ServerKeyFile`, the credential; two at once is an error), the identities file, and the clashes between them (the same
+name, the same secret, a `server_admin` entry next to the dev-admin flag). It exits `1` when the start would refuse, and warns **once
+per database** that scoped entries name and no `service_role`, `public` or `anon` declaration mentions (`KEY_DATABASE_NOT_LINKED`).
+**It checks what it can without the data directory**: a declared secret that is already a row in an auth database, and a role a scoped
+key names that does not exist, are not seen (`aouda plan --server` asks a running server for those). It needs no server and no data
+directory, so it runs in CI: where the secrets are not mounted, add `--skip-secrets`. See [Plan a declaration](plan.md). It no longer
+lists the declarations; `GET /api/auth/admin/configured-keys` lists those of a running server.
+
+Run it where the files are, in the container you deploy:
+
+```bash
+docker compose run --rm --no-deps --entrypoint aouda aouda plan
+```
+
+That runs in the image's working directory with the service's environment, secrets and mounts, so it reads what the server will.
+On a systemd host, run it with what the unit gives the server, which a login shell does not have: the `Environment=` lines, the
+credentials and the start arguments. `systemctl cat aouda` shows them; pass each `Environment=` and `LoadCredential=` line as a `-p`
+option and the arguments after `start` as they are:
+
+```bash
+systemctl cat aouda            # copy the Environment=, LoadCredential= and ExecStart= arguments from here
+sudo systemd-run --pipe --wait -p User=aouda -p WorkingDirectory=/opt/aouda \
+  -p Environment=AOUDA__AUTH__ROOTUSER__EMAIL=admin@example.com \
+  -p LoadCredential=aouda-server-key:/etc/aouda/server-key \
+  /opt/aouda/Aouda.Server plan --data-path /var/lib/aouda --port 5433
+```
+
+On Windows, run it from the install directory with the service's environment: that is the server's working directory.
 
 ## Seeing and managing the keys
 

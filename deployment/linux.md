@@ -162,6 +162,9 @@ Group=aouda
 # hides the message telling you which.
 Restart=on-failure
 RestartSec=10
+# 78 is a start refused for its configuration: a restart fails the same way, so the unit
+# goes straight to `failed` and the first journal line names the setting.
+RestartPreventExitStatus=78
 
 MemoryAccounting=yes
 MemoryMax=80%
@@ -235,6 +238,20 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 ## The first admin
 
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
+
+⚠️ `create-admin` needs the server **stopped**: a running server holds its data directory, and `create-admin` then exits `1`
+naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, next train**). A server with a
+declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile` or the systemd credential `aouda-server-key`) needs no
+admin and has no setup mode.
+
+**The data-directory lock and its limits** (**BL-1462, next train**). The server holds an exclusive `flock` on
+`<data>/Server/aouda.lock` while it runs; `create-admin`, `aouda table backfill` and a second server on the same directory take the
+same lock and refuse. The kernel releases it when the process exits, `kill -9` included, so there is never a stale lock to delete.
+It protects a directory on a **local filesystem, between processes on one host**. On a mount without `flock` (some NFS, CIFS and
+FUSE mounts answer `ENOLCK` or `EOPNOTSUPP`) .NET treats the failure as success and the lock is silently not held; on NFS mounted
+`nolock`, or a CIFS share used from two hosts, it covers one host only; and `DOTNET_SYSTEM_IO_DISABLEFILELOCKING=1` turns it off.
+Only a held lock is reported as "in use by another Aouda process"; any other error taking it (a read-only mount, a full disk) is
+reported as itself.
 
 Three supported ways, in order of preference:
 
@@ -311,9 +328,56 @@ aouda doctor --output json
 | `65` | `doctor` found at least one **failed** check (warnings alone do not fail it) |
 | `69` | `status`: the server is running but not serving (still recovering, or nothing answered `/ready` within the probe's deadline) |
 | `70` | `status`: the server is not running |
+| `71` | The service manager (systemd, the SCM) refused an operation or could not be reached. (**BL-1461, next train**) It was `78` in 0.13.0 and earlier |
 | `77` | Not permitted — `service install` or `service uninstall` without root (an elevated prompt on Windows) |
 | `71` | The service manager (systemd, the SCM) refused an operation or could not be reached |
-| `78` | `aouda start` only: the start was refused for its configuration. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)); the unit does not restart it (`RestartPreventExitStatus=78`), because the same configuration fails the same way. (**BL-1463, next train**) A start whose only problem is a file that could not be read yet exits `1` instead, so it is restarted |
+| `78` | (**BL-1461, BL-1463, next train**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)). See [When the start is refused](#when-the-start-is-refused) |
+
+These are the same on every platform and for every way of running the server (`aouda start`, the unit, the container).
+(**BL-1463, next train**) [`aouda plan`](../guides/plan.md) exits `0` when the start would not refuse the declaration, `1` when it would
+(or when a file it names cannot be read), and `64` for misuse; against a running server (`--server`) also `2` (changes), `69` (the
+server cannot be reached or did not answer with a plan) and `77` (the key was refused). (**BL-1427, next train**)
+[`aouda reload`](../guides/keys-that-survive-a-wipe.md#further-keys-the-identities-file) exits `0` (nothing to change), `2` (applied),
+`1` (refused, or stopped part-way), `69` (unreachable, busy, rate-limited or still starting), `77` (the key was refused) and `64` for misuse.
+
+⚠️ **`78` means the configuration itself is wrong**: what it says (invalid content, a duplicate, a reference to something that does not
+exist, a refused format), not whether the machine could act on it. A start that fails **while doing** what the configuration asks — a
+key file, identities file or schema file that cannot be read (a volume not yet mounted, a permission), a data directory that cannot be
+written, a full disk, an engine fault — is not `78`: it fails as any other start, and the unit restarts it. (**BL-1463, next train**) A
+start whose only errors are files that could not be read yet exits `1`.
+
+### When the start is refused
+
+(**BL-1461, BL-1463, next train**) A start refused for its configuration prints **every** problem it found on **standard error**, each
+with its code, the setting or file (and JSON pointer) it is about, and what to do, and exits with status `78` (`EX_CONFIG` in
+`sysexits.h`). It checks the whole declaration before it opens anything, so a refused start has created no database. The format is the
+one [`aouda plan`](../guides/plan.md) prints, headed `aouda start`, and the last line names the exit status:
+
+```text
+aouda start: settings + /etc/aouda/aouda.identities.json (environment Production), 1 database, 0 schema files
+
+error    KEY_SECRET_SHARED  Aouda:Auth:Bootstrap:ServerKeyFile  (environment variable Aouda__Auth__Bootstrap__ServerKeyFile)
+         Configured keys 'bootstrap-server-key' and 'ops-admin' share one secret.
+         also: /etc/aouda/aouda.identities.json  /identities/0/secrets/0
+         fix:  Declare the server key once: keep Aouda:Auth:Bootstrap:ServerKeyFile and remove the 'ops-admin' entry's secret from the identities file.
+
+stages   read ok, settings ok, principals 1 error, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
+1 error, 0 warnings: the start was refused for its configuration (exit status 78). Restarting with the same configuration fails the same way: fix what is named above, then start again.
+```
+
+Every code, its stage and what fixes it is in [Declaration Finding Codes](../reference/plan-codes.md). Among them:
+`SERVER_HAS_NO_OPERATOR` — the data directory was set up before, and now has no user, no active server key and nothing declared, so
+nobody could operate the server (declare a server key, set `Aouda:Auth:RootUser`, or `--dev-admin` for development; a data directory
+that was never set up starts in setup mode instead, **BL-1462**); `DEV_ADMIN_REFUSED`; `CONFIGURATION_INVALID`; and
+`DATA_DIRECTORY_FORMAT_REFUSED` — the data directory was written in another format, see [Upgrading](../guides/upgrading.md).
+[`aouda plan`](../guides/plan.md) runs the same checks before you deploy.
+
+The unit names `78` in `RestartPreventExitStatus=`, so a refused start goes to `failed` at once instead of being restarted five times;
+`journalctl -u aouda` shows the findings. Fix the setting, then `systemctl reset-failed aouda` and `systemctl start aouda`. Any other
+failed start (a port already bound, a file that cannot be read, a disk error) exits non-zero with something other than `78`, and the
+unit restarts it, up to five times in 300 s. A unit
+written by an earlier `aouda service install` lacks the line: re-run the install, or add `RestartPreventExitStatus=78` under
+`[Service]` and `systemctl daemon-reload`.
 
 ### Upgrading from an install made before `aouda service install`
 

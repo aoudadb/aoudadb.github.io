@@ -66,7 +66,7 @@ error    KEY_SECRET_SHARED  Aouda:Auth:Bootstrap:ServerKeyFile  (environment var
          fix:  Declare the server key once: keep Aouda:Auth:Bootstrap:ServerKeyFile and remove the 'server' entry's secret from the identities file.
 
 stages   read ok, settings ok, principals 1 error, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
-not checked  the data directory and every existing database, table, key row and role (no --server or --data-dir)
+not checked  the data directory and every existing database, table, key row and role (no --server)
              the environment the server will start in (hosting environment here: Production; variables an orchestrator sets at start)
 
 1 error, 0 warnings: `aouda start` would refuse this declaration.
@@ -144,7 +144,7 @@ flag, the hosting environment), which a body cannot set. A key's hash is in ever
 
 **`--skip-secrets` against a server.** A secret the plan did not read goes as *unresolved* (no hash). Such an entry is listed under `changes.keys.unresolved`, is not
 added, and the live rows of its name are neither revoked nor rotated on its account: the plan cannot tell a rotation from an unchanged key, so it changes nothing it
-cannot see. A `hash` secret still resolves. Every other check still runs.
+cannot see: it stands for those rows, so another declaration that declares one of their secrets is `KEY_SECRET_SHARED`, as the reload of the same files would find it (**BL-1463, next train**). A `hash` secret still resolves. Every other check still runs.
 
 **A body is only ever planned.** The server refuses a posted declaration without `dryRun=true` (`400 RELOAD_CANDIDATE_NOT_APPLIED`): what a reload applies is always
 the server's own files, which the next start reads too. To apply, change the files on the server and run `aouda reload`.
@@ -165,7 +165,7 @@ An `incomplete` plan prints the offline plan it has and ends `incomplete: <reaso
 **Before a deploy**, on the deploy host with the start's own mounts:
 
 ```bash
-docker compose run --rm --no-deps aouda plan --server http://aouda:8080 --key-file /run/aouda/secrets/server.key
+docker compose run --rm --no-deps --entrypoint aouda aouda plan --server http://aouda:8080 --key-file /run/aouda/secrets/server.key
 case $? in 0) echo "nothing to change" ;; 2) echo "changes: review the plan above" ;; *) exit 1 ;; esac
 ```
 
@@ -181,7 +181,7 @@ aouda plan --Aouda:Auth:Keys:File=deploy/aouda.identities.json --skip-secrets \
 A green plan is not more than it says. Every offline plan lists what it did not check under `notChecked`, and these are the limits:
 
 1. **Without a target** (offline): anything in the data directory. Which databases exist and with which kind and link, the tables (so no schema diff and no destructive change), the key rows (a secret another row holds, an operator's revocation), roles created through the API, the data-directory format, whether `_serverauth` already has an admin.
-2. **Secrets in another environment.** The plan reads `env` and `file` secrets where it runs. A CI runner with no secrets, or a host path that differs from the container's, makes those checks unknowable (`--skip-secrets`). The reliable gate is the plan run with the same mounts and environment as the start (`docker compose run --rm --no-deps aouda plan`).
+2. **Secrets in another environment.** The plan reads `env` and `file` secrets where it runs. A CI runner with no secrets, or a host path that differs from the container's, makes those checks unknowable (`--skip-secrets`). The reliable gate is the plan run with the same mounts and environment as the start (`docker compose run --rm --no-deps --entrypoint aouda aouda plan`).
 3. **The process environment at start.** Variables an orchestrator injects at start and that are absent where the plan ran.
 4. **Apply failures that depend on row values,** even with a target, unless the engine's dry run checks them (a `NOT NULL` column on a table with rows, a `unique` flag on a column with duplicates, a narrowing type change). With `--server` (**BL-1463, next train**), the engine's dry run checks what needs no rows: a destructive change (reported as `SCHEMA_DESTRUCTIVE_REFUSED`, never applied by a reload), a changed partition key, a table left with no column, an added identity column without `nullable` or a static default, an added server-time or array column that is not nullable, and the apply's own authorization. It does **not** check what depends on the rows or on another executor's rules (a non-nullable column without a default added to a table with rows, a `unique` flag over duplicates, a narrowing type change, and other refusals only the apply makes): a plan can say valid where the apply then refuses (tracked as BL-1494).
 5. **Resources and the host:** free ports, memory, disk, file permissions for the server's user (the plan may run as another user), the clock, whether the email or SMS provider answers.
@@ -222,8 +222,10 @@ aouda plan --Aouda:Auth:Keys:File=deploy/aouda.identities.json \
 **On the deploy host, with the start's own mounts** — the strongest offline gate, because it reads what the start will read:
 
 ```bash
-docker compose run --rm --no-deps aouda plan
+docker compose run --rm --no-deps --entrypoint aouda aouda plan
 ```
+
+(The image's entrypoint is `aouda start`, hence `--entrypoint aouda` for any other command.)
 
 **A schema file that is declared nowhere else** is checked by declaring it to the plan, as above (`Aouda:Databases:<name>:SchemaFile`, and `SchemaEnvironment` to merge its overlay). A schema that is applied through
 the API instead of declared is checked against a server with `aouda schema diff`.
