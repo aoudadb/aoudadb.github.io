@@ -166,9 +166,9 @@ generate keys with `openssl rand -hex 32` and put the prefix in front.
 **A secret is one row.** Declaring the secret of a key that already exists in that auth database (one minted earlier, revoked or
 not) is refused with an error that names the existing row (its id, name and source, never the secret): revoke and delete that key,
 or declare a different secret. At start the error fails the start (**BL-1463, next train**: `KEY_SECRET_HELD_BY_OTHER_ROW`, before
-any row is written); it also abandons the creation of an auth database. `aouda keys
-check` runs offline and cannot see a database, so it reports only the clashes it can: the same secret twice in the file, or in the
-file and in `Aouda__Auth__Bootstrap__ServerKey`.
+any row is written); it also abandons the creation of an auth database. `aouda plan` runs offline and cannot see a database
+(**BL-1463, next train**), so it reports only the clashes it can: the same secret twice in the file, or in the file and in
+`Aouda__Auth__Bootstrap__ServerKey`.
 
 The declared `kind` must match the prefix wherever the server can see the plaintext (an `env` secret or the server key). For a
 `hash` secret it cannot, and a mismatch there changes only the credential-kind label in the failure log, never the privilege.
@@ -176,16 +176,25 @@ The declared `kind` must match the prefix wherever the server can see the plaint
 ### Check the file before you deploy
 
 ```bash
-aouda keys check --file identities.json
-# ok: 3 declaration(s), 4 secret(s)
-#   tullett-feeder  scoped_service  auth/deposit  fingerprint 3a1f9c02 (env), 91c0aa17 (hash)
+aouda plan --Aouda:Auth:Keys:File=identities.json
+# aouda plan: settings + identities.json (environment Production), 0 databases, 0 schema files
+#
+# error    SECRET_UNREADABLE  identities.json  /identities/0/secrets/0/env
+#          identity 'tullett-feeder' names environment variable 'TULLETT_KEY', which is not set or is empty.
+#          fix:  Set the variable, or make the secret file readable and non-empty where the server runs.
+#
+# 1 error, 0 warnings: `aouda start` would refuse this declaration.
 ```
 
-(**BL-1378, 0.11.0**) It loads the file with the environment of the process that runs it, exactly as the server does, prints each
-declaration (name, kind, auth database, database, the fingerprint and source of each secret) and never a secret or a hash. It exits
-`1` naming the entry on the first error, and warns **once per database** that scoped entries name and no `service_role`, `public`
-or `anon` declaration mentions. If `Aouda__Auth__Bootstrap__ServerKey` is set in its environment it is checked with the file, as the
-start does (the same name or the same secret is refused). It needs no server and no data directory, so it runs in CI.
+(**BL-1463, next train**; it replaces `aouda keys check`, **BL-1378, 0.11.0**) `aouda plan` takes the arguments `aouda start` takes and
+reads the configuration the start reads, then loads the file with the environment of the process that runs it, exactly as the server
+does. It reports **every** problem at once, each with its code (`KEY_SECRET_SHARED`, `SECRET_UNREADABLE`, ...) and the JSON pointer of
+the entry, and never prints a secret or a hash. It exits `1` when the start would refuse, and warns **once per database** that scoped
+entries name and no `service_role`, `public` or `anon` declaration mentions (`KEY_DATABASE_NOT_LINKED`). If
+`Aouda__Auth__Bootstrap__ServerKey` is set in its environment it is checked with the file, as the start does (the same name or the
+same secret is refused). It needs no server and no data directory, so it runs in CI: where the secrets are not mounted, add
+`--skip-secrets`. See [Plan a declaration](plan.md). It no longer lists the declarations; `GET /api/auth/admin/configured-keys` lists
+those of a running server.
 
 ## Seeing and managing the keys
 

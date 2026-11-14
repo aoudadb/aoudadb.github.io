@@ -8,6 +8,8 @@ parent: "Reference"
 
 `aouda start` validates the whole declaration — the settings, `Aouda:Databases`, the identities file and every secret and schema file it names — before it opens anything. Every problem is a **finding** with a stable code, the stage that found it, where it is (a setting and the configuration source that supplied it, or a file and a JSON pointer) and what to do. A finding of severity `error` is exactly a refusal of the start; a `warning` is accepted and logged once; `info` is context. A refused start prints every finding at once on standard error and creates nothing.
 
+`aouda plan` runs the **offline** half of every stage without starting anything and reports the same findings with the same codes (see [Plan a declaration](../guides/plan.md)). One code is emitted only by a plan, `SECRET_NOT_READ`: `--skip-secrets` did not read the secrets it counts.
+
 ## Exit status of a refused start
 
 - **78** (`EX_CONFIG`): the declaration is refused. Restarting with the same configuration fails the same way; the systemd unit does not restart it (`RestartPreventExitStatus=78`).
@@ -21,7 +23,7 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 
 | Code | Severity | Stage | Half | Exit status | What to do |
 |---|---|---|---|---|---|
-| `CONFIGURATION_INVALID` | error | `read` | offline | 78 | Fix the configuration file or the AOUDA_ variable named above so that it can be read. |
+| `CONFIGURATION_INVALID` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Fix the configuration file or the AOUDA_ variable named above so that it can be read. |
 | `DECLARATION_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Make Aouda:Auth:Keys:File name a readable file (a volume not yet mounted clears when it is). |
 | `DECLARATION_INVALID_JSON` | error | `read` | offline | 78 | Fix the JSON at the line named above. |
 | `DECLARATION_SHAPE_INVALID` | error | `read` | offline | 78 | Give the identities file the shape { "identities": [ { ... } ] }, each entry an object and each field a string. |
@@ -32,6 +34,7 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `OVERLAY_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Make the overlay readable and a JSON object (at least { "extends": "<base file name>" }), or remove it. |
 | `SOURCE_NOT_RELOADABLE` | info | `read` | reload | — | Move the setting to a configuration file to change it by reload; environment variables and the command line are read once, at start. |
 | `OVERLAY_ABSENT` | info | `read` | offline | — | Nothing to do if the environment needs no overlay; otherwise create the file named above. |
+| `SECRET_NOT_READ` | info | `read` | offline | — | Run `aouda plan` without --skip-secrets where the secrets are mounted (the deploy host, with the start's own mounts). |
 | `DATA_DIRECTORY_FORMAT_REFUSED` | error | `read` | state | 78 | Point the server at a data directory of this format (start from an empty one and restore a backup, see the upgrade notes). |
 | `SETTING_INVALID` | error | `settings` | offline | 78 | Set the setting named above to a value the server accepts. |
 | `SETTING_REMOVED` | error | `settings` | offline | 78 | Remove the setting and use the one the message names instead. |

@@ -53,6 +53,7 @@ The Aouda server binary is a single executable supporting subcommand dispatch.
 | `aouda version` | Print version and exit | — |
 | `aouda databases <subcommand>` | Database administration | `list`, `get`, `create`, `drop` (each with `--server`, `--name`, `--token`) |
 | `aouda schema <subcommand>` | Schema management | `diff`, `apply`, `export`, `validate`, `history` |
+| `aouda plan` | Check what `aouda start` would refuse, offline, every problem at once (**BL-1463, next train**) | the same arguments as `aouda start`, `--skip-secrets`, `--json` |
 | `aouda init` | First-run server admin bootstrap | `--server <url>`, `--admin-email`, `--admin-password-file`/`--admin-password-stdin` |
 | `aouda create-admin` | Create first admin user directly to engine (no HTTP) | `--email`, `--password-file`/`--password-stdin`, `--data`, `--auth-database` |
 | `aouda bulk-load` | Bulk-load rows into multiple tables atomically | `--tables <list>`, `--file <path>`, `--server`, `--database` |

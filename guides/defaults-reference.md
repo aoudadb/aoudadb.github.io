@@ -376,7 +376,7 @@ startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by n
   settings above set, nothing is retracted; an empty identities file retracts every configured row.
 - **A declared `service_role`, `public` or `anon` key takes the place of the one a link or `regenerate-keys` would generate**: only
   the undeclared kinds are generated, and `anonKey` / `serviceRoleKey` / `publicKey` are absent from a response for a declared kind.
-- `aouda keys check --file <path>` validates the file offline; `GET /api/auth/admin/configured-keys` lists the declarations and the
+- `aouda plan --Aouda:Auth:Keys:File=<path>` validates the file offline (**BL-1463, next train**; it replaced `aouda keys check`; [Plan a declaration](plan.md)); `GET /api/auth/admin/configured-keys` lists the declarations and the
   state of their rows; (**BL-1427, next train**) a reload is limited to one per 5 s and a dry run to one per 1 s, with a 120 s
   deadline — fixed, not settings; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind, over HTTP, WebSocket and long-poll, with `rejectedApiKeysByTransport` and `rejectedApiKeysByReason` (**BL-1428, BL-1430, 0.12.0**; [counting refused keys](keys-that-survive-a-wipe.md#counting-refused-keys)).
 
