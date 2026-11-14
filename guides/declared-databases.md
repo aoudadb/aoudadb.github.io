@@ -175,13 +175,20 @@ Delete the data directory and start the server with the configuration above. Wha
 
 ### The order a start follows
 
+(**BL-1463, next train**) **Before any of these steps, the start checks the whole declaration** — the settings, `Aouda:Databases`,
+the identities file and every secret and schema file it names — and **creates nothing when one is refused**. It reports every
+problem at once, each as a finding with a stable code (`KEY_SECRET_SHARED`, `SCHEMA_INVALID`, `ROLE_SYSTEM_NAME`, ...), where it is
+(a setting and the source that set it, or a file and a JSON pointer) and what to do, then exits with status 78 (or 1 when the only
+problem is a file that could not be read yet). Each step below then checks what it needs from the data directory before it changes
+anything. The codes are listed in [Declaration Finding Codes](../reference/plan-codes.md).
+
 After a wipe a plain start does these steps in this order, and a failure in any of them fails the start (the process exits, and
 there is no `/ready` to ask):
 
 1. **Configured keys are listed** (`Aouda:Auth:Bootstrap:ServerKey`, `Keys:File`). A bad declaration fails here, before any database opens. Nothing is authenticated yet.
 2. **Declared databases**: auth databases, then data databases, then the links.
 3. **`_serverauth` and `Aouda:Auth:RootUser`**: the first admin. Without a `RootUser` the server stays in setup mode.
-4. **Declared schema files**: every file is read and validated first (one bad file fails the start before any database is changed), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `SchemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
+4. **Declared schema files**: every file was read and validated before step 1 (**BL-1463, next train**: before any database is created), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `SchemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
 5. **Declared roles**, in their auth databases.
 6. **Configured key rows**, in their auth databases.
 7. The server is marked ready.

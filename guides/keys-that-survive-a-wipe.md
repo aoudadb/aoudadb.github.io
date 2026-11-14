@@ -140,7 +140,9 @@ disturbs the other secrets' rows. A running WebSocket or long-poll session authe
 ("declared in configuration; change the declaration"); a minted scoped key rotates as before.
 
 A change to the file or to the server key takes a **restart**. An invalid file, a missing environment variable or an unreadable
-path **fails the start** with a message naming the entry (never a secret). (**BL-1378, 0.11.0**) So does an auth database that
+path **fails the start** with a message naming the entry (never a secret). (**BL-1378, 0.11.0**) (**BL-1463, next train**) Every
+bad entry is reported at once, each with its code (`KEY_SECRET_SHARED`, `KEY_FIELD_REQUIRED`, `SECRET_UNREADABLE`, ...) and its JSON
+pointer in the file (`/identities/3/secrets/0`), and nothing is created; see [Declaration Finding Codes](../reference/plan-codes.md). So does an auth database that
 exists but cannot be opened (quarantined, or it failed to open) while keys are declared for it: the message names the database and
 the entries, because the server would otherwise start ready and answer `401` to keys you declared. An auth database that does
 not exist yet is not an error; its keys are `pending` until it is created.
@@ -157,7 +159,8 @@ generate keys with `openssl rand -hex 32` and put the prefix in front.
 
 **A secret is one row.** Declaring the secret of a key that already exists in that auth database (one minted earlier, revoked or
 not) is refused with an error that names the existing row (its id, name and source, never the secret): revoke and delete that key,
-or declare a different secret. At start the error fails the start; it also abandons the creation of an auth database. `aouda keys
+or declare a different secret. At start the error fails the start (**BL-1463, next train**: `KEY_SECRET_HELD_BY_OTHER_ROW`, before
+any row is written); it also abandons the creation of an auth database. `aouda keys
 check` runs offline and cannot see a database, so it reports only the clashes it can: the same secret twice in the file, or in the
 file and in `Aouda__Auth__Bootstrap__ServerKey`.
 
