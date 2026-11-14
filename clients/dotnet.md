@@ -827,72 +827,80 @@ realtime transports stop reconnecting — sign in again for that database. See
 
 ---
 
-## 8c) Materialized values (**BL-1434, next train**)
+## 8c) Formula tables (**ADR 0072, next train**)
 
-A [materialized value](../guides/materialized-values.md) is a named, computed cell: a formula over rows of ordinary tables and other cells, kept current by the server. `client.MaterializedValues` (namespace `Aouda.Client.MaterializedValues`; the value types `MvValueType` and `MvScalarType` are in `Aouda.Protocol.MaterializedValues`, `ScalarExprNode` in `Aouda.Protocol`) defines, sets inputs of, reads, waits for, subscribes to and explains them. It is on `AoudaClient`, not on `IAoudaClient`. The definition calls need a **definer**: a `db_admin` user or the database's `mk_svc_` service key; on a database the server auth database governs, a server user with `db_admin` on it. The server key `mk_srv_` is **not** a definer, and reads no values without an entitlement ([Security](../guides/materialized-values.md#security)).
+A table with an `Expression` column is a [formula table](../guides/formulas.md): in a row whose formula is null the value column is an
+**input**, written like any value; in a row with a formula the server computes the value and keeps it current, and a hand-written value
+there is refused. Everything is the table API — create, insert, update, read, subscribe. The SDK adds a formula builder (`FormulaExpr`),
+the value type of an Expression column (`Formula`), `ExplainAsync` and typed errors. A whole model, step by step:
+[Build a live financial model](../guides/financial-model.md).
 
 ```csharp
 using Aouda.Client;
-using Aouda.Client.MaterializedValues;
-using Aouda.Protocol;                      // ScalarExprNode
-using Aouda.Protocol.MaterializedValues;   // MvValueType, MvScalarType
+using Aouda.Client.Formulas;
+using Aouda.Protocol.Schema;   // CreateTableRequest
+using static Aouda.Client.Formulas.FormulaExpr;
 
-// A definer: here the database's service key.
-using var client = new AoudaClient(new AoudaClientOptions
+await client.Schema.CreateTableAsync(new CreateTableRequest
 {
-    ServerUrl = "http://localhost:5433", DatabaseName = "myapp", ApiKey = "mk_svc_...",
+    Database = client.DatabaseName,
+    Name = "pnl",
+    Columns =
+    [
+        new() { Name = "Field", Type = "String", PrimaryKeyOrder = 1 },
+        new() { Name = "Period", Type = "Int64", PrimaryKeyOrder = 2 },
+        new() { Name = "value", Type = "Decimal", Precision = 18, Scale = 2, IsNullable = true },
+        new() { Name = "formula", Type = "Expression", Drives = "value" },
+    ],
 });
-var model = client.MaterializedValues.Model("pnl");
 
-// An input table with the natural composite key a cell read needs.
-await client.MaterializedValues.CreateInputTableAsync(
-    "inputs",
-    [new MvKeyColumn("Field", MvValueType.Of(MvScalarType.String)), new MvKeyColumn("Year", MvValueType.Of(MvScalarType.Int64))],
-    [new MvColumn("Value", MvValueType.Decimal(18, 2)), new MvColumn("Label", MvValueType.Of(MvScalarType.String))]);
+var pnl = client.GetTable("pnl");
+await pnl.InsertAsync(new List<Dictionary<string, object?>>
+{
+    new() { ["Field"] = "Revenue", ["Period"] = 2026L, ["value"] = 1000m },   // input rows
+    new() { ["Field"] = "Cost", ["Period"] = 2026L, ["value"] = 600m },
+    new() { ["Field"] = "Profit", ["Period"] = 2026L,                          // formula rows
+            ["formula"] = Formula.From(Sub(CellHere("value", ("Field", "Revenue")), CellHere("value", ("Field", "Cost")))) },
+    new() { ["Field"] = "Margin", ["Period"] = 2026L,
+            ["formula"] = Formula.From(Round(Div(CellHere("value", ("Field", "Profit")), CellHere("value", ("Field", "Revenue"))), 2)) },
+});
 
-// One request, all or none; each cell declares its type.
-static ScalarExprNode Input(string field, string column) => MvExpr.Cell("inputs", column, ("Field", field), ("Year", 2026L));
-var dec2 = MvValueType.Decimal(18, 2);
-await model.DefineAsync(
-[
-    new("Revenue", dec2, Input("Revenue", "Value")),
-    new("Cost", dec2, Input("Cost", "Value")),
-    new("Profit", dec2, MvExpr.Sub(MvExpr.Ref("pnl", "Revenue"), MvExpr.Ref("pnl", "Cost"))),
-    new("Tax", dec2, MvExpr.If(MvExpr.Gt(MvExpr.Ref("pnl", "Profit"), MvExpr.Lit(0m)),
-                               MvExpr.Round(MvExpr.Mul(MvExpr.Ref("pnl", "Profit"), MvExpr.Lit(0.22m)), 2), MvExpr.Lit(0m))),
-]);
-
-// Set inputs (ordinary writes), then wait for the value they produce.
-await model.SetAsync(MvInputCell.Of("inputs", "Value", ("Field", "Revenue"), ("Year", 2026L)), 1000m);
-var token = (await model.SetAsync(MvInputCell.Of("inputs", "Value", ("Field", "Cost"), ("Year", 2026L)), 400m)).Token!;
-decimal? tax = await model.GetAsync<decimal?>("Tax", new MvGetOptions { WaitFor = MvWaitFor.AtLeast(token, TimeSpan.FromSeconds(10)) });   // 132.00
+var rows = await pnl.Where("Period", "eq", 2026L).ToListAsync();   // Profit 400.00, Margin 0.40
+var profit = Formula.FromValue(rows.Single(r => (string)r["Field"]! == "Profit")["formula"]);   // null for an input row
 ```
 
-- **Members.** `DefineAsync` (one cell or many) / `AlterAsync` / `DeleteAsync` / `GetDefinitionAsync` / `ListAsync`; `SetAsync`; `GetAsync` (an `MvValue`) and `GetAsync<T>`; `SubscribeAsync(cell, options)` / `SubscribeAsync(options)` (an `IAsyncEnumerable<MvValueEvent>`); `ExplainAsync`. The expression builder is `MvExpr`: `Lit`, `Cell`, `Ref`, `Add` `Sub` `Mul` `Div`, `Min` `Max` `Abs`, `Eq` `Ne` `Gt` `Gte` `Lt` `Lte`, `If`, `And` `Or` `Not`, `Round`, `Coalesce`, `Concat`, `Cast`. At most `MaterializedValuesApi.MaxDefinitionsPerRequest` cells per `DefineAsync` call (10 000).
-- **`SetAsync` is two ordinary writes**, not one atomic upsert: an update, and when no row matched an insert. Two concurrent first writes of one new key race; the loser's insert is refused as a duplicate and its update is retried once, so both succeed and the last one wins. It returns the write's consistency token.
-- **`GetAsync` returns `null`** for a cell that has not been computed or is not defined. A cell in a model the caller holds no entitlement for raises `MaterializedValueNotGrantedException`. A cell that could not be computed is an `MvValue` with `IsError` and the text in `Error`. An `MvValue` carries `Value` (decoded by the cell's `valueType`), `Text` (the canonical text), `Error`, `ComputedAtPosition`, `ComputedAtTerm` and `Token`.
-- **`GetAsync<T>` never converts.** `T` must be the decoded type of the cell (`decimal` for `Decimal(p,s)`, `long` for `Int64`, `DateOnly` for `Date`, ...), its `Nullable<T>`, or `object`. An error cell raises `MaterializedValueCellErrorException`; a mismatch, or a null **value** into a non-nullable `T`, raises `MaterializedValueTypeException`. A **missing** cell (not computed, not defined) returns `default(T)` for a non-nullable `T`, so `GetAsync<decimal>` answers `0m` (BL-1451): ask for `decimal?` to tell a missing cell from zero.
-- **`MvWaitFor`.** `MvWaitFor.AtLeast(token, timeout)` waits for a token; `MvWaitFor.Observed(timeout)` waits for the client's own stored token (read-your-writes). The default is `Observed(5 s)`; `0 <= timeout <= 30 s`. A commit that left the cell unchanged satisfies it. A lapse is `MaterializedValueNotCaughtUpException`, never a stale value. The value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and `ComputedAtPosition` is an "at least".
-- **Subscribing** is an ordinary table subscribe on `_mv_values` filtered on `model` (and `name`), case-exact; it resumes after a reconnect from the last version seen. `MvValueEvent.CoverToken` is a snapshot's token and an insert, update or delete's token, and is `null` for a notice (`horizon`, `range_delete`): keep the highest cover seen and pass it to `MvWaitFor.AtLeast`. A revoked entitlement ends the feed with `MaterializedValueGrantRevokedException`.
-- **`ExplainAsync`** returns a cell, its formula, the input rows it reads, the cells it reads and is read by, and the maintainer's watermark. Positions are "at least".
+- **References.** `CellHere(column, key…)` reads a row of the formula's own table; `Cell(table, column, key…)` a row of another table;
+  `Col(column)` a column of the formula row itself. A key is the table's full primary key, but a key column you leave out is taken from the
+  formula row's own key — above, `Period` — so one formula serves every period. The functions are `Add Sub Mul Div`, `Min Max Abs`,
+  `Eq Ne Gt Gte Lt Lte`, `If And Or Not`, `Round Coalesce Concat Cast`, and `Lit` for a constant. A division of two `Decimal(18,2)` values
+  computes six places: `Round(…, 2)` it to put it in a `Decimal(18,2)` column, or the write is refused (`FormulaErrorKind.Invalid`).
+- **A formula in a row** is a `Formula` (`Formula.From(node)`, or the node itself, which converts): it is sent as its JSON object. Write
+  `null` to make the row an input again. Read one back with `Formula.FromValue(row["formula"])`, which takes the formula's text (what a
+  `ToListAsync` row carries: the read uses column-batch frames) or its JSON object (what a subscription row carries). Two formulas compare
+  equal when their JSON trees are, property order aside; numbers compare as written (`1` is not `1.0`).
+- **Reads wait for the values.** The client presents its last write's consistency token, and a token read of a formula table waits for the
+  server's formula maintainer — up to the server's default 250 ms; past that the read is refused `409 TOKEN_UNSATISFIED` (an
+  `AoudaRequestException`, `ErrorCode == ErrorCodes.TokenUnsatisfied`, not retried): read again, in a short bounded loop. There is no
+  per-read wait option.
+- **A cell with no value is null** — a division by zero, an overflow, a value the column cannot hold, a refused value, a broken reference.
+  Map a formula table's value column to a **nullable** property (`decimal?`): the typed read gives a non-nullable property its type's
+  default for a null, so a failed cell would read as `0` (BL-1492). A typed (POCO) table maps the value column and marks the Expression
+  column `[AoudaIgnore]`.
+- **Why a cell has the value it has:** `await pnl.ExplainAsync("value", ("Field", "Margin"), ("Period", 2026L))` (or with a key dictionary,
+  on a typed table too) re-evaluates the cell and returns a `FormulaExplainResponse`: its `Kind`, `Formula`, each of its `References` with
+  its resolved key and current value, the `Value` or the `Reason` it has none, the `StoredValue`, and the cells that read it (`ReadBy`) —
+  only what the caller may read.
+- **Subscribing** is the ordinary `SubscribeAsync` on the table: after an input edit it yields the input's change and then each formula row
+  that changed, once. A subscription row's values are `JsonElement`s.
 
-**Typed errors.** Every refusal is an instance of the exception its status already maps to, with the materialized-value type on top (namespace `Aouda.Client.Exceptions`):
+**Typed errors** (namespace `Aouda.Client`). Each derives from the exception its status already mapped to, so an existing handler keeps
+catching it:
 
 | Code (status) | Exception |
 |---|---|
-| `MV_DEFINITION_INVALID`, `MV_REFERENCE_INVALID`, `MV_REFERENCE_NOT_PRIMARY_KEY`, `MV_CYCLE`, `MV_DEPTH_EXCEEDED` (400); `MV_DEFINITION_EXISTS`, `MV_DEFINITION_IN_USE`, `MV_TABLE_REFERENCED` (409) | `MaterializedValueDefinitionException`, with a `Kind` |
-| `MV_DEFINITION_NOT_FOUND` (404) | `MaterializedValueNotFoundException` |
-| `INSUFFICIENT_PERMISSIONS` (403) on a definition call | `MaterializedValueNotDefinerException` |
-| `AUTH_ENTITLEMENT_NOT_FOUND` (403) on a value read | `MaterializedValueNotGrantedException` |
-| `TOKEN_UNSATISFIED` (409) on a value read | `MaterializedValueNotCaughtUpException` |
-| `MV_TOKEN_REQUIRES_PRIMARY` (421) | `MaterializedValueReplicaException` |
-| `MV_NOT_MAINTAINED` (503) | `MaterializedValueNotMaintainedException`: **not retried** by the client and not counted against its circuit breaker; it is the node's state, not overload |
-| `PERMISSION_REVOKED` on a subscription | `MaterializedValueGrantRevokedException` |
-| (SDK-side) a row the SDK cannot decode; a type mismatch; an error cell asked for as a value | `MaterializedValueDecodeException`, `MaterializedValueTypeException`, `MaterializedValueCellErrorException` |
-
-**Value mapping.** `Bool` is `bool`; `Byte`, `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64` are `byte`, `short`, `int`, `long`, `ushort`, `uint`, `ulong`; `Decimal(p,s)` is `decimal` and keeps its scale (`1.50`); `Float32`, `Double` are `float`, `double`; `String` is `string`; `Guid` is `Guid`; `Date` is `DateOnly`; `Timestamp` is `DateTime` (UTC). The canonical text of each is in [Materialized Values: value types](../guides/materialized-values.md#value-types).
-
-**Known issue (BL-1447).** A `waitFor` of nearly the client's own request timeout (`AoudaClientOptions.Timeout`, 30 s by default) can race it: the read times out client-side as `AoudaTimeoutException` (not `MaterializedValueNotCaughtUpException`) and is retried up to 3 times, each counted against the circuit breaker. Keep waits well under the timeout.
+| `FORMULA_COLUMN_INVALID`, `FORMULA_INVALID`, `FORMULA_REFERENCE_INVALID`, `FORMULA_REFERENCE_NOT_PRIMARY_KEY`, `FORMULA_CYCLE`, `FORMULA_DEPTH_EXCEEDED`, `FORMULA_LIMIT_EXCEEDED` (400); `FORMULA_REFERENCE_NOT_READABLE` (403); `FORMULA_VALUE_WRITE_REFUSED`, `FORMULA_TABLE_REFERENCED` (409) | `AoudaFormulaRefusedException` (an `AoudaRequestException`), with `Kind` a `FormulaErrorKind`: `ColumnInvalid`, `Invalid`, `ReferenceInvalid`, `ReferenceNotPrimaryKey`, `Cycle`, `DepthExceeded`, `LimitExceeded`, `ReferenceNotReadable`, `ValueWriteRefused`, `TableReferenced` |
+| `FORMULA_TOKEN_REQUIRES_PRIMARY` (421) | `AoudaFormulaTokenRequiresPrimaryException` (an `AoudaMisdirectedRequestException`): read from the primary |
+| `FORMULA_NOT_MAINTAINED` (503) | `AoudaFormulaNotMaintainedException` (an `AoudaServiceUnavailableException`): **not retried** and not counted against the circuit breaker; it is the node's state, not overload |
 
 ## 9) Errors
 
