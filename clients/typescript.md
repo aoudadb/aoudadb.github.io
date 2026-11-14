@@ -1730,72 +1730,99 @@ See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#available-now).
 
 ---
 
-## 13a) Materialized Values (**BL-1434, next train**)
+## 13a) Formula tables (**ADR 0072, next train**)
 
-A [materialized value](../guides/materialized-values.md) is a named, computed cell: a formula over rows of ordinary tables and other cells, kept current by the server. `client.materializedValues.model(name)` is a handle on one model. The definition calls need a **definer**: a `db_admin` user or the database's `mk_svc_` service key; on a database the server auth database governs, a server user with `db_admin` on it. The server key `mk_srv_` is **not** a definer, and reads no values without an entitlement ([Security](../guides/materialized-values.md#security)).
+A table may declare an `Expression` column ([Formulas](../guides/formulas.md)): it holds a formula and **drives** one value column of the
+same table. A row whose formula is `null` is an *input*, written like any row; a row with a formula is computed by the server, which keeps
+its value current whenever an input it reads changes and refuses a hand-written value there. There is no model object: creating the table,
+writing inputs and formulas, reading, waiting on a token and subscribing are the table calls. A whole model, step by step:
+[Build a live financial model](../guides/financial-model.md).
 
-```ts
-import { mv } from "@aouda/client";
+```typescript
+import { AoudaConflictError, Formula, FormulaConflictError, fx } from "@aouda/client";
 
-const model = client.materializedValues.model("pnl");
-
-// An input table with the natural composite key a cell read needs.
-await client.materializedValues.createInputTable("inputs", {
-  key: [{ name: "Field", type: "String" }, { name: "Year", type: "Int64" }],
-  columns: [{ name: "Value", type: "Decimal(18,2)" }, { name: "Label", type: "String" }],
+// An ordinary table with one extra column: "formula" is an Expression column that drives "value".
+await client.tables.createTable({
+  database,
+  name: "pnl",
+  columns: [
+    { name: "Field", type: "String", primaryKeyOrder: 1 },
+    { name: "Period", type: "Int64", primaryKeyOrder: 2 },
+    { name: "value", type: "Decimal", precision: 18, scale: 2, isNullable: true },
+    { name: "formula", type: "Expression", drives: "value" },
+  ],
 });
 
-// One request, all or none; each cell declares its type.
-const input = (field: string, column: string) => mv.cell("inputs", { Field: field, Year: 2026 }, column);
-await model.define([
-  { name: "Revenue", valueType: "Decimal(18,2)", expression: input("Revenue", "Value") },
-  { name: "Cost", valueType: "Decimal(18,2)", expression: input("Cost", "Value") },
-  { name: "Profit", valueType: "Decimal(18,2)", expression: mv.sub(mv.ref("pnl", "Revenue"), mv.ref("pnl", "Cost")) },
-  {
-    name: "Tax",
-    valueType: "Decimal(18,2)",
-    expression: mv.if(
-      mv.gt(mv.ref("pnl", "Profit"), mv.lit(0)),
-      mv.round(mv.mul(mv.ref("pnl", "Profit"), mv.lit(0.22)), 2),
-      mv.lit(0)
-    ),
-  },
+// A row with no formula is an input. A key column a reference leaves out (Period) is the formula row's own,
+// so the same formula serves every period.
+const revenue = fx.cellHere("value", { Field: "Revenue" });
+const cost = fx.cellHere("value", { Field: "Cost" });
+const profit = fx.sub(revenue, cost);
+await client.table("pnl").insertMany([
+  { Field: "Revenue", Period: 2026, value: 1000 },
+  { Field: "Cost", Period: 2026, value: 600 },
+  { Field: "Profit", Period: 2026, formula: Formula.from(profit) },
+  { Field: "Margin", Period: 2026, formula: Formula.from(fx.round(fx.div(profit, revenue), 2)) },
 ]);
 
-// Set inputs (ordinary writes), then wait for the value they produce.
-const setCell = (field: string, column: string) => mv.input("inputs", column, { Field: field, Year: 2026 });
-await model.set(setCell("Revenue", "Value"), 1000);
-const { token } = await model.set(setCell("Cost", "Value"), 400);
-const tax = await model.get("Tax", { waitFor: mv.waitFor.atLeast(token!, 10_000) });
-// tax.value === "132.00": a Decimal(18,2) cell is a string, never a JS number
+// A read right after a write waits for the formulas (the client's own token) and answers 409 TOKEN_UNSATISFIED
+// if they are still behind: read again.
+async function readPeriod(): Promise<Record<string, unknown>[]> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return (await client.table("pnl").where("Period", "=", 2026).execute()).rows;
+    } catch (e) {
+      if (!(e instanceof AoudaConflictError && e.code === "TOKEN_UNSATISFIED") || attempt >= 40) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
+// Zero revenue makes Margin a division by zero: its value is null, and explain says why.
+await client.table("pnl").where("Field", "=", "Revenue").update({ value: 0 });
+const why = await client.table("pnl").explain({ Field: "Margin", Period: 2026 }, "value");   // why.reason: "division by zero."
+
+// Only the server writes a formula row's value.
+try {
+  await client.table("pnl").where("Field", "=", "Profit").update({ value: 5 });
+} catch (e) {
+  if (!(e instanceof FormulaConflictError && e.kind === "valueWriteRefused")) throw e;
+}
 ```
 
-- **Members.** `define` / `alter` / `delete` / `getDefinition` / `list`; `set`; `get` (an `MvValue`) and `getTyped(name, kind)`; `subscribe(cell?, options)`; `explain`; `createInputTable`. The expression builder is `mv`: `lit`, `cell`, `ref`, `add` `sub` `mul` `div`, `min` `max` `abs`, `eq` `ne` `gt` `gte` `lt` `lte`, `if`, `and` `or` `not`, `round`, `coalesce`, `concat`, `cast`. At most 10 000 cells per `define`.
-- **`set` is two ordinary writes**, not one atomic upsert (an update, then an insert when no row matched; two concurrent first writes of one key both succeed and the last wins). It writes one column and keeps the row's others, and returns the write's `token`. A `bigint` is sent as its exact digits in a value, a key part or a literal, so an `Int64` past ±(2^53−1) is never rounded; a literal above the `Int64` maximum is read by the server as a `Double`.
-- **`get` returns `null`** for a cell that is not computed or not defined; a cell in a model the caller holds no entitlement for is `MvNotGrantedError`. An error cell is an `MvValue` with `isError` and the text in `error`, not a throw.
-- **`getTyped` is exact and never converts**: kinds `number`, `bigint`, `decimal` (the canonical string), `string`, `boolean`, `date`, `timestamp`, `guid`. A cell of another kind is `MvTypeError`; an error cell is `MvCellError`.
-- **`mv.waitFor.atLeast(token, ms)` / `mv.waitFor.observed(ms)`.** `get` waits for the client's own stored token for up to **5 s** by default (read-your-writes); the range is 0 to 30 000 ms. A commit that left the cell unchanged satisfies it. A lapse is `MvNotCaughtUpError`, never a stale value. The request's own timeout is raised above the wait so the two do not race. The value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and `computedAtPosition` is an "at least".
-- **`subscribe`** is a key-filtered subscription on `_mv_values` through the shared-subscription machinery, each row decoded like `get`'s; filters are case-exact. `MvValueEvent.coverToken` is a snapshot's or a row change's token, and is `undefined` for a notice (`horizon`, `range_delete`). Covers are not monotonic: wait on the **highest** seen (the default `get` does, because the client keeps the highest token any event carried). **Known issue (BL-1449):** two first `subscribe` calls on a fresh client can race the WebSocket opening and the second fails with `AoudaConnectionError`; wait for the first snapshot before the second. **Known issue (BL-1450):** every HTTP request leaves an `abort` listener on the client's lifetime signal, so a long-lived client's memory grows per request and Node warns `MaxListenersExceededWarning` after 11 requests.
-- **`explain`** returns a cell, its formula, the `inputs` it reads, the cells it `reads` and is `readBy`, and the maintainer's `watermark`. Positions are "at least".
+- **`fx` builds the formula as the wire node; nothing is evaluated in the client.** `fx.cell(table, column, key)` reads a value of another
+  table by its full primary key, `fx.cellHere(column, key)` a value of the formula row's own table, `fx.col(column)` a column of the formula
+  row itself. A primary-key column left out of a `key` is the formula row's own. The functions are `fx.add`, `sub`, `mul`, `div`, `min`,
+  `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not`, `round`, `coalesce`, `concat` and `cast`; a constant is
+  `fx.lit(value)`. Arity, a null key part and a bad `cast` type are checked locally; everything else is the server's. A `bigint` is exact at
+  any magnitude in a key or a literal.
+- **`Formula.from(node)` is the value of an Expression column** in an `insert` or `update` row; `null` makes the row an input again. It goes
+  on the wire as its JSON object. A read gives the Expression column back as a `Formula` (`null` for an input row); the type
+  `GET …/schema/typescript` generates for it is `Formula | null`. A live subscription's rows carry the formula's JSON object:
+  `Formula.fromValue(cell)` reads that (or the formula's text, or `null`) to the same `Formula`. `formula.equals(other)` compares two by
+  structure, property order aside (`1` and `1.0` are one number in JavaScript); `formula.toString()` is its JSON text.
+- **The driven column is an ordinary typed column** (a `Decimal` is a `number` in a query read). A formula whose value cannot be computed
+  leaves the cell `null`, not `0`; `client.table(name).explain(key, column)` returns a `FormulaExplanation` — the row's `kind` and `formula`,
+  each reference's resolved key and current value, the `value` computed now or the `reason` it has none, the `storedValue` and the cells
+  that read this one (`readBy`) — showing only what the caller may read. A division is typed `Decimal` with scale 6: `fx.round(x, 2)` it to
+  put it in a `Decimal(18,2)` column, or the write is refused (`FormulaValidationError`, `invalid`).
+- **A read waits for your own writes** (the client's stored token) for the server's default 250 ms. If the formulas are further behind, the
+  read answers `409 TOKEN_UNSATISFIED` (`AoudaConflictError`), which is not retried automatically: read again. There is no per-read wait
+  option. A replica refuses a token read of a formula table (`FormulaTokenRequiresPrimaryError`, 421): read from the primary.
+- **Security is the table's:** a formula may reference only rows its writer may read (`FormulaReferenceNotReadableError`, 403), and a
+  formula table's grants and row conditions are an ordinary table's.
 
-**Typed errors.** Each is an instance of the class the repo already throws for that status:
+**Typed errors.** Each is a subclass of the class the client already throws for its status, so existing handlers keep catching it:
 
-| Code (status) | Class |
+| Code (status) | Error |
 |---|---|
-| `MV_DEFINITION_INVALID`, `MV_REFERENCE_INVALID`, `MV_REFERENCE_NOT_PRIMARY_KEY`, `MV_CYCLE`, `MV_DEPTH_EXCEEDED` (400) | `MvDefinitionValidationError`, with a `kind` |
-| `MV_DEFINITION_EXISTS`, `MV_DEFINITION_IN_USE`, `MV_TABLE_REFERENCED` (409) | `MvDefinitionConflictError`, with a `kind` (`isMvDefinitionError` tests for both) |
-| `MV_DEFINITION_NOT_FOUND` (404) | `MvDefinitionNotFoundError` |
-| `INSUFFICIENT_PERMISSIONS` (403) on a definition call | `MvNotDefinerError` |
-| `AUTH_ENTITLEMENT_NOT_FOUND` (403) on a value read | `MvNotGrantedError` |
-| `TOKEN_UNSATISFIED` (409) on a value read | `MvNotCaughtUpError` |
-| `MV_TOKEN_REQUIRES_PRIMARY` (421) | `MvReplicaError` |
-| `MV_NOT_MAINTAINED` (503) | `MvNotMaintainedError`: **not retried** and not counted toward the circuit breaker |
-| `PERMISSION_REVOKED` on a subscription | `MvGrantRevokedError` |
-| (SDK-side) an undecodable row; a kind mismatch; an error cell asked for as a value | `MvDecodeError`, `MvTypeError`, `MvCellError` |
+| `FORMULA_COLUMN_INVALID`, `FORMULA_INVALID`, `FORMULA_REFERENCE_INVALID`, `FORMULA_REFERENCE_NOT_PRIMARY_KEY`, `FORMULA_CYCLE`, `FORMULA_DEPTH_EXCEEDED`, `FORMULA_LIMIT_EXCEEDED` (400) | `FormulaValidationError` (an `AoudaValidationError`); `kind` is `columnInvalid`, `invalid`, `referenceInvalid`, `referenceNotPrimaryKey`, `cycle`, `depthExceeded` or `limitExceeded`. Nothing was written. |
+| `FORMULA_VALUE_WRITE_REFUSED`, `FORMULA_TABLE_REFERENCED` (409) | `FormulaConflictError` (an `AoudaConflictError`); `kind` is `valueWriteRefused` or `tableReferenced` |
+| `FORMULA_REFERENCE_NOT_READABLE` (403) | `FormulaReferenceNotReadableError`; `kind` is `referenceNotReadable` |
+| `FORMULA_TOKEN_REQUIRES_PRIMARY` (421) | `FormulaTokenRequiresPrimaryError` |
+| `FORMULA_NOT_MAINTAINED` (503) | `FormulaNotMaintainedError`: a node whose formula maintainer is not running; **never retried** and never counted toward the circuit breaker |
 
-**Value mapping.** `Bool` is `boolean`; `Byte`, `Int16`, `Int32`, `UInt16`, `UInt32` and the floats are `number`; `Int64` and `UInt64` are `bigint`; `Decimal(p,s)` is the canonical `string` (never a number); `String` and `Guid` are `string`; `Date` and `Timestamp` are `Date`, with millisecond precision (the value's `text` always holds the exact canonical form). See [Materialized Values: value types](../guides/materialized-values.md#value-types).
-
----
+`isFormulaError(e)` tests for all five, and `FORMULA_CODES` maps each server code to its status. Errors carry `code` and `statusCode`.
 
 ## 14) Columnar Output
 

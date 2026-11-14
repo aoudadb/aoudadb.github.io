@@ -2742,8 +2742,7 @@ A table name:
 - is not empty and not whitespace only, and is not `.` or `..`;
 - contains none of `/ \ : * ? " < > |`;
 - does not start or end with a period (`.`) or a space;
-- does not start with `__mqbuild_`, which is reserved for the engine's own materialized-query build tables;
-- does not start with `_mv_`, which is reserved for the engine's materialized-values tables (ADR 0070).
+- does not start with `__mqbuild_`, which is reserved for the engine's own materialized-query build tables.
 
 Anything else (letters, digits, `_`, `-`, other Unicode) is allowed. Matching is exact (`orders` and `Orders` are two tables). A
 name that breaks the rule is `400 INVALID_REQUEST` and the message names the rule it broke, for example *Table name cannot start or
