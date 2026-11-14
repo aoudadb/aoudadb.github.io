@@ -58,8 +58,10 @@ The start fails, naming the setting and never a secret, when the flag is set and
 | Another server key is declared (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the `aouda-server-key` credential or a `server_admin` identity) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused because a server key is already declared` |
 | The node is configured with `Aouda:Join` or `Aouda:ReplicaSet` | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused on a node that is configured for replication` |
 
-A node that becomes a follower by some other means is not detected. The key is an ordinary `config`-source server-key row, so reloading
-configuration treats it like any other declared key.
+A node that becomes a follower by some other means is not detected. The key is an ordinary `config`-source server-key row. (**BL-1427,
+next train**) It is the process's own server key, so `aouda reload` carries it over unchanged: a reload never retracts it, even one
+that empties the identities file, and `Aouda:Auth:DevAdmin` itself is restart-only (a reload lists a change to it under
+`restartRequired`).
 
 ## Docker compose
 
