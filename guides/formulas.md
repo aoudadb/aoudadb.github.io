@@ -330,8 +330,9 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/explain" -H "Authorizat
 
 `column` names the driven column or its Expression column. `kind` is `formula`, `input` (the row has no formula) or `noRow`. It needs read
 access to the table and shows only what the caller may read: a row the caller may not read answers `noRow`, exactly like a key with no row; a
-reference to a row the caller may not read keeps its address and `readable: false`, with `value`, `isFormulaCell` and `error` null; readers
-the caller may not read are left out. `explain` takes no consistency token: `value` is computed now, and `storedValue` may not yet show a
+reference to a row the caller may not read keeps its address and `readable: false`, with `value`, `isFormulaCell` and `error` null, and the
+`reason` is then `"withheld: the formula reads a row you may not read."` (the reason can print a value it read); readers the caller may
+not read are left out. `explain` takes no consistency token: `value` is computed now, and `storedValue` may not yet show a
 write you just made. The full contract is in the [HTTP reference](../reference/http-api.md#explain-a-formula-cell); the SDKs have `ExplainAsync`
 (C#) and `table.explain(key, column)` (TypeScript). A grid that wants Excel's `#DIV/0!` calls `explain` for a null formula cell.
 
@@ -401,10 +402,17 @@ cells (through the table routes and `schema/apply`, where it is a failed entry):
 - dropping, renaming or changing the type of a column a formula reads — the driven column included, when formulas read it;
 - any change to the primary key of a table a formula reads, or a looser uniqueness; a formula table's own key does not change while it has
   formula cells;
-- changing a driven column's type so a formula in it, or one reading it, would no longer [fit](#types-the-driven-column-decides).
+- changing a driven column's type so a formula in it, or one reading it, would no longer [fit](#types-the-driven-column-decides);
+- adding an Expression column to a source table of a materialized query whose result a formula reads. The table would become a formula
+  table under a query a formula reads, which a formula may [not read](#references); its formulas could then close a loop through the
+  query that no check can see.
+
+A *source table* of a query, in this list, is any table on its chain: the table it reads, and when it reads another query's
+result, that query's source too.
 
 Allowed: `TRUNCATE` (formulas reading the table compute from the empty table; a truncated formula table's formulas are gone), deleting rows,
-dropping an Expression column (its values stay, as inputs), adding columns.
+dropping an Expression column (its values stay, as inputs), adding columns — an Expression column too, on any table that is not a source table of
+a query a formula reads.
 
 ---
 
@@ -490,7 +498,7 @@ grid or UI component; values computed per viewer.
 | `400 FORMULA_LIMIT_EXCEEDED` | More than 100 000 formula cells in the database | Remove formulas, or keep inputs as plain values |
 | `403 FORMULA_REFERENCE_NOT_READABLE` | The formula reads a row its writer may not read | Reference rows the writer can read, or have a writer who can read them write it |
 | `409 FORMULA_VALUE_WRITE_REFUSED` | A hand-written value in a formula row, or a formula and its value in one row | Write the formula as null in the same write to make the row an input |
-| `409 FORMULA_TABLE_REFERENCED` | DDL on a table or column a formula reads | Change those formulas first (`TRUNCATE` is allowed) |
+| `409 FORMULA_TABLE_REFERENCED` | DDL on a table or column a formula reads, or an Expression column added to the source of a materialized query a formula reads | Change those formulas first (`TRUNCATE` is allowed) |
 | `409 TOKEN_UNSATISFIED` on a read | The formulas did not catch up with your token within `waitMs` — or a materialized query a formula reads cannot catch up (BL-1505) | Read again, with a longer wait for a large model; check the queries your formulas read |
 | `421 FORMULA_TOKEN_REQUIRES_PRIMARY` | A token read of a formula table went to a replica | Send it to the primary, or read without a token |
 | `503 FORMULA_NOT_MAINTAINED` | This node's formula maintainer is not running (a branch, a role not resolved yet, a promoted node: BL-1441) | Wait on the primary |

@@ -842,7 +842,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `FORMULA_LIMIT_EXCEEDED` | 400 | (**ADR 0072, next train**) The database would hold more than 100 000 formula cells. Remove formulas, or keep inputs as plain values. |
 | `FORMULA_REFERENCE_NOT_READABLE` | 403 | (**ADR 0072, next train**) A formula reads a row its writer may not read (no read access to the table, a row outside the writer's row or partition conditions, or a row that does not exist and cannot be judged on its key); also a server write that set a formula with no caller to check. The message names the formula row and the reference, never whether the row exists; nothing was written. |
 | `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, next train**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
-| `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, next train**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
+| `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, next train**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells, add an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain, its upstream queries' sources included) — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
@@ -2013,13 +2013,13 @@ too. It needs read access to the table.
 | `formula` | The row's formula as a JSON object; `null` for an input or no row. |
 | `references` | Each cell the formula reads: `table`, the **resolved** `key` (the shorthands filled in from the row), `column`; `readable`; and, when readable, its current `value`, `isFormulaCell` and `error` (why it could not be read, else `null`). |
 | `value` | The value the formula computes now, as the driven column holds it; `null` when it has none. |
-| `reason` | Why there is no value — a division by zero, an overflow, a value the column cannot hold, a value a check refused (the one the last write met), a broken reference — or `null`. |
+| `reason` | Why there is no value — a division by zero, an overflow, a value the column cannot hold, a value a check refused (the one the last write met), a broken reference — or `null`. When any reference is not `readable` and there is a reason, it is `"withheld: the formula reads a row you may not read."` instead: the reason can print a value it read. |
 | `storedValue` | The value the row stores now. |
 | `readBy` | The formula cells that read this one. |
 
 **What the caller sees** is what it may read, by the same rule as a `/query` of each table: a row it may not read answers exactly as a key
 with no row (`kind: "noRow"`); a reference to a row it may not read keeps its `table`, `key` and `column` with `readable: false`, and its
-`value`, `isFormulaCell` and `error` are `null`; readers it may not read are left out. The cell's own value is shown to whoever may read its row.
+`value`, `isFormulaCell` and `error` are `null`, and a `reason` is withheld (above); readers it may not read are left out. The cell's own value is shown to whoever may read its row.
 `explain` takes no consistency token (`at_least` is not read) and stamps none: `value` is computed now, and `storedValue` may not yet show a
 write the caller just made.
 
@@ -2876,7 +2876,11 @@ column cannot be changed to or from `Decimal(p,s)`, or to another precision or s
 (**ADR 0072, next train**) `"type": "Expression"` with `"drives": "<column>"` adds an [Expression column](#post-apidatabasesdbtables), by the
 same rules as on create. No column becomes or stops being an Expression column, and an Expression column does not change what it drives:
 add a new one and drop the old. Dropping an Expression column leaves its driven column's values as inputs; a driven column cannot be
-dropped while it is driven.
+dropped while it is driven. Adding an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain,
+its upstream queries' sources included) is
+`409 FORMULA_TABLE_REFERENCED`, naming those formula cells: a formula may not read a query over a formula table (the dependency cannot be
+followed through the query), so the table may not become one under such a reader. The same holds for a schema document's added Expression
+column (a failed entry) and a branch merge.
 
 **Response:** `201 Created` with column detail
 
