@@ -96,7 +96,7 @@ docker compose up
 # Aouda at http://localhost:5000  •  Studio at http://localhost:3000
 ```
 
-The compose file needs a first admin: `AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). Without either, the server container exits at start with a message naming both. See [Docker](deployment/docker.md#compose-and-the-first-admin).
+The compose file takes one declaration: a server key, `AOUDA_SERVER_KEY=mk_srv_<64 hex> docker compose up` (no human admin needed, **BL-1462, next train**), a first admin, `AOUDA_ROOT_EMAIL=you@example.com AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. See [Docker](deployment/docker.md#compose).
 
 ---
 

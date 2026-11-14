@@ -203,12 +203,23 @@ See [Direct client access](../guides/direct-client-access.md) for configuration,
 | `/api/auth/setup` | No (setup mode only, localhost) | None |
 | `/api/auth/signin`, `/api/auth/refresh` | No | None (these produce credentials) |
 | `/api/auth/signout`, `/api/auth/me`, etc. | Yes | Server JWT |
-| `/api/auth/admin/*` | Yes (`db_admin`) | Server JWT or `mk_srv_` with admin role |
+| `/api/auth/admin/*`, `/admin/*` (except `GET /admin/replication/topology`), `/api/admin/*`, `/api/server/*` | Yes (`admin` on the server auth database; see below) | Server JWT or server key whose role gives `admin` on the server auth database, or `mk_srv_` (**BL-1466, 0.13.1**) |
+| `GET /admin/replication/topology` | No | None — member addresses, roles, read candidates and primary only; no database names (**BL-1466, 0.13.1**) |
 | `/api/databases/{db}/auth/signup\|signin\|refresh\|request-password-reset\|reset-password` | No | None (public POST; bearer ignored) |
 | `/api/databases/{db}/auth/me\|signout\|password` | Yes (Layer 1 + 2) | API key + user JWT in `X-User-Token`, or user JWT directly |
 | `/api/databases/{db}/query\|tables\|rows\|...` | **Only if db has linked auth** | Any valid credential (see below) |
 | `/api/databases/{db}/...` (no linked auth db), **server auth database exists**, admin listener | Yes (Layer 1 + 2) | Server JWT, `mk_srv_`, or a server key with a role on `{db}` — every route, `DELETE /api/databases/{db}`, WebSocket and long-poll included (**BL-1017, 0.4.0**) |
 | `/api/databases/{db}/...` (no linked auth db), no server auth database, or the data-plane listener | No | None — open access |
+
+(**BL-1466, 0.13.1**) On the server routes above, authenticating against the server auth database is not enough: the caller needs
+`admin` on the server auth database: the `db_admin` or `db_operator` role assigned globally, to `*` or to the server auth database,
+or a server admin key (`mk_srv_`). Any other credential that database holds gets **403** `AUTHORIZATION_DENIED`, whose `details`
+begins `requiredOperation=Admin, database=_serverauth`: a key from `POST /api/auth/admin/api-keys` with a role on one database, a
+server user with no role or a read role, and a server user who is `db_admin` of one database only — that user administers that
+database and no other (a global or `*` `db_admin` administers every database, application databases included).
+Creating a server admin key (`POST /api/auth/admin/keys`) needs `db_admin`: a `db_operator` may list and revoke them, and is refused
+with **403** `AUTHORIZATION_DENIED` (`"Creating a server admin key (mk_srv_) needs db_admin on the server auth database."`) when it
+creates one. A request body that fails validation is answered **400** before the authorization check.
 
 #### How Data Endpoint Auth Works
 
@@ -291,6 +302,27 @@ Before BL-1223 a realtime session ignored the user token and kept the service ke
 - **Subscribe.** A `subscribe` needs the role permission the HTTP read it mirrors needs: `read` on the table, and for a named-query subscribe (**BL-1417, 0.12.0**) a `named-query` `execute` row for the name (a table `read` no longer counts, and the named query's tables are not asked). A refusal is an `error` message with HTTP's code: `INSUFFICIENT_PERMISSIONS` (a role without the permission), `AUTHORIZATION_DENIED` (no role on this database) or `AUTH_TOKEN_MISSING` (no credential, where HTTP answers `401`). (**BL-1286, 0.9.0**) A `jwt-claim` partition refusal on that `error` frame — WebSocket and long-poll snapshot — uses the HTTP query's code (`AUTH_PLS_TENANT_CLAIM_MISSING`, `AUTH_PLS_TENANT_CLAIM_MISMATCH`, and the other PLS codes query already returns), not `AUTHORIZATION_DENIED`. A named-query batch slot uses the same code. The call is still refused.
 - **`stream_open`** needs `write` on the table, refused with the same codes.
 - **Revoked rights.** When a role change means the session no longer holds the `read` (or, for a named-query subscribe, the `named-query` `execute` row) a live subscription needs, the server ends that subscription with `PERMISSION_REVOKED`, before the next change is delivered.
+- <a id="realtime-revoked-credential"></a>**Revoked or expired credential** (**BL-1001, next train**). An open WebSocket or long-poll session ends when the credential it authenticated with stops authenticating over HTTP. This holds for a user JWT and for **every** API key: `mk_srv_`, `mk_svc_`, `mk_scp_`, `mk_adm_`, `mk_anon_`, `mk_pub_` and custom `mk_` keys, user-linked or not, minted through the API or declared in the identities file. When a service key carries a `user_token`, the session ends when either of them stops authenticating. Up to 0.13.0 a session opened with an API key was never re-checked: a revoked key's socket kept receiving changes, accepted new subscribes and wrote rows until it closed.
+  - **At once, when a key is retired on the node you are connected to.** This covers `DELETE /api/databases/{db}/auth/admin/api-keys/{id}`, `DELETE /api/auth/admin/keys/{id}`, `POST …/auth/admin/regenerate-keys` and a fleet or scoped key `…/rotate` with `overlapSeconds` omitted or `0`, and a fleet or scoped key revoked by name. From the moment the revoke's response is sent, the session handles no further message: a `subscribe` gets no answer, and a `stream_rows` that arrives after that is not written and gets no `stream_ack`. The WebSocket then receives `auth_error` and is closed. A long-poll whose poll is waiting answers `401` at once. A session on a **replica** ends within one heartbeat interval instead (next item): the replica applies the revoke from replication. A declared key removed from the identities file is retired at the next server start, when no session is open.
+  - **A write in flight may or may not have been written.** Rows with a `stream_ack` are written. A `stream_rows` the server was already writing when the key was revoked may still be committed, and its `stream_ack` may never arrive because the socket closes. Treat a `stream_rows` without a `stream_ack` as **unknown**, not as unwritten: re-send it idempotently with a valid credential — in `upsert` mode, or with rows whose primary key makes a repeat harmless — or read the table before re-sending. Re-sending it in `insert` mode can duplicate rows or fail on duplicate keys.
+  - **Within one heartbeat interval, for everything else.** The interval is `Aouda:WebSocket:HeartbeatInterval`, default 20 s. This covers a key whose `expires_at` passes, including the old key after a rotate or `regenerate-keys` with an overlap; a user-linked key whose user is disabled or deleted; and a JWT that is signed out, ended or revoked (Hybrid and Stateful validation). The WebSocket checks at every heartbeat. A long-poll session checks at its next `poll` or `send`, at most once per interval. If the server cannot complete a check (for example it refuses the read for capacity), it checks again at the next interval; that never ends the session.
+  - **What the client receives.** On the WebSocket, an [`auth_error`](#auth_error) frame, then a close with status `1008` (policy violation) and the code as the close reason. On long-poll, `401` with the same code; the session is removed, so the request after that is `404 SESSION_NOT_FOUND`. Open a new session with a valid credential. The codes and messages:
+
+    | Cause | `code` | `message` (WebSocket) |
+    |---|---|---|
+    | API key revoked, deleted, regenerated or rotated away, or removed from the identities file | `AUTH_TOKEN_REVOKED` | `API key has been revoked` |
+    | User-linked API key whose user is disabled or deleted | `AUTH_TOKEN_REVOKED` | `API key's linked user is disabled or no longer exists` |
+    | API key past its `expires_at` | `AUTH_TOKEN_EXPIRED` | `API key has expired` |
+    | JWT (or the `user_token` beside a key) revoked | `AUTH_TOKEN_REVOKED` | `Token has been revoked` |
+    | JWT (or the `user_token` beside a key) expired | `AUTH_TOKEN_EXPIRED` | `Token has expired` |
+
+    The long-poll `message` is the same text followed by `. Authenticate again and open a new long-poll session.`, for example:
+
+    ```json
+    { "code": "AUTH_TOKEN_REVOKED", "message": "API key has been revoked. Authenticate again and open a new long-poll session." }
+    ```
+
+    A session opened with a service key now reports the key's own expiry in `auth_ok.expires_at` (`null` when the key has none).
 - **Access grants.** What a subscription sees on a PLS or RLS table is the credential's access grants, as for the HTTP read it mirrors: the snapshot equals an HTTP query by the same credential, and every live event follows the same rule. A holder of `all-partitions` also receives events of partitions created later. A change to a user's role assignments or role permissions re-keys the live session on the first event after the change (a narrowing then applies to that event). (**BL-1284, 0.9.0**) One session applies one refresh at a time. An older resolution cannot put a revoked partition back. An event which arrives while a refresh is in progress is delivered only when the winning set still allows it. A **widening is not re-snapshotted**: rows the credential could not see before are not pushed, events from the re-key on are, so resubscribe to get the rows. A fresh `subscribe` reads the permissions again. The `crossPartitionAccess` flag is `cross_partition_access` on the `subscribe` message ([`subscribe`](#subscribe)).
 
 **Example:**
@@ -738,7 +770,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, 0.9.0**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
-| `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked |
+| `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked. On an open WebSocket (`auth_error`) or long-poll session, also an API key revoked, deleted, rotated or regenerated away, removed from the identities file, or whose linked user is disabled (**BL-1001, next train**; see [Realtime authorization](#realtime-revoked-credential)) |
 | `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. The server log names the rejected key by fingerprint (**BL-1377, 0.10.0**): match it with `aouda keys hash --key-stdin`. (**BL-1422, 0.12.0**) The `suggestion` says which kind of key the route takes and, read from the presented key's fixed prefix (never echoed), which kind was sent: `The key presented is a scoped service key (mk_scp_). This route is authenticated by the database's own auth database: use a key issued for this database (service mk_svc_, scoped mk_scp_, or custom mk_), or a server key (mk_srv_) if the server auth database governs it. If the key is of the right kind, it was revoked, has expired, or belongs to another database.` On a server route it reads `... This route is authenticated by the server auth database: use a server key (mk_srv_, or a scoped server key), and check that it has not been revoked or expired.` Counted in `rejectedApiKeys`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
 | `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
@@ -781,6 +813,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `IDENTITY_STAMP_REQUIRED` | 400 | Service role omitted a required identity-stamped column |
 | `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | `plsClaimBinding` / identity source is not a bindable spelling (`subject` or `claim:<name>`) |
 | `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE` | 400 | A named mutation's `values` / `set` / `setExpr` names a server-time column (**NativeClients, 0.4.0**) |
+| `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, next train**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
+| `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, next train**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda schema check --env`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint. Fix: move the member to the base file. Before, it was dropped |
 | `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp) |
 
 #### State Errors (4xx)
@@ -818,8 +852,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable. (**BL-944, 0.4.0**) Also the answer to a refusal no other code names: a request the server refused for capacity with no more specific code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `WRITE_CONFLICT`) is `503 SERVICE_UNAVAILABLE` with `Retry-After: 10`, never a `500` — nothing was applied; retry after `Retry-After` |
-| `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this) |
-| `SETUP_REQUIRED` | 503 | The server has no admin yet and is in setup mode: only setup status and a local `POST /api/auth/setup` are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
+| `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log, then the auth bootstrap, the declared schema files, roles, keys and replication) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this). (**BL-1462, next train**) The port is open for the whole start, and this answers every caller but the health probes, loopback included |
+| `SETUP_REQUIRED` | 503 | The server's data directory has never been set up and nothing is declared (no server key, no `RootUser`), so it is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, next train**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice |
@@ -1832,7 +1866,30 @@ partition-level security off).
 was applied and names the table. That includes `dryRun: true`. Nothing in the document is applied. Dropping the table is not this
 refusal. Dropping every old column and adding one new column is allowed when `allowDestructive` is true.
 
-(**BL-1281, 0.9.0**) A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, stays HTTP `200`: that change is `Failed`, `reason` names `auth-db-rls` and `auth-db-entitlement`, and the table is not written. A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
+(**BL-1281, 0.9.0**) A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
+A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, is refused (below).
+
+**The body is read strictly** (**BL-1460, next train**). The body is `{ "schema": { … }, "options": { "allowDestructive": false,
+"dryRun": false } }` and nothing else; `options` and both flags are optional, and a flag is `true` or `false` (a string is refused).
+In the document, a member the schema format does not have, or a known member in another case, is refused, never ignored:
+`400 SCHEMA_UNKNOWN_MEMBER`, every such member named with its JSON pointer and, when one is close, the member meant:
+
+```json
+{ "error": "Invalid schema: unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?", "code": "SCHEMA_UNKNOWN_MEMBER" }
+```
+
+Before, the member was dropped (`"nulable": true` made a non-nullable column; a misspelt `"dryrun"` applied for real).
+
+**Document-level errors refuse the whole document** (**BL-1460, next train**). The checks that need no catalog run first, with the
+server's named-query ceilings: authorization mode and its resolver or column (the BL-1281 case above), partition-level security without a
+partition key, partition and `pkUniqueness` values, column defaults, the shape and ceilings of named queries and mutations, and the
+document rules (column types, a `partitionKey` or `clusterColumns` entry that is not a column of the table, …). Any of them is
+`400 INVALID_REQUEST` naming each `<JSON pointer>: <reason>`, and **nothing is applied**, `dryRun` or not. Before, the valid tables beside
+the error were created and the bad one came back as a `Failed` entry in a `200`. What needs the catalog (a named query that names a
+missing column, a reference to another table) is still found per change during the apply.
+
+`GET …/schema/export` writes the document as `schema apply` reads it: no `null` members (it used to write `"or": null` in a `where`),
+so an export applies back as no change.
 
 
 #### `POST /api/databases/{db}/schema/diff?access=true`
@@ -1855,7 +1912,11 @@ With `?access=true`:
 
 Posting identities requires **Admin**. `?access=true` without identities is **Read**.
 
-**400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`.
+**400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`. The document and the wrapper are read as
+strictly as by `schema/apply` (**BL-1460, next train**): an unknown or wrong-case member is `SCHEMA_UNKNOWN_MEMBER` (the wrapper's members
+are exactly `schema`, `identities`, `resolvers`, `baseResolvers`), and a document-level error is `INVALID_REQUEST` before any plan is
+computed, so a diff never shows a plan for a document `schema/apply` would refuse whole. (A named query that names a missing column is
+found only by the apply, against the catalog.)
 
 (**BL-1209, 0.9.0**) A branch name is one segment of 1–64 ASCII letters, digits, or hyphens, not `main` and not a Windows device name. `/`, `\`, `..`, a drive, a rooted name, a trailing dot or space, and `_` are refused. Every branch route answers `400 INVALID_REQUEST` and writes nothing.
 
@@ -2031,7 +2092,7 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Unique materialized query name. |
+| `name` | string | Yes | Unique materialized query name. It is the result table's name, so it follows the [table-name rule](#table-names), and it may not start with `_` or exceed 100 characters. A name that breaks either is `400 INVALID_REQUEST` and nothing is created; a retry answers the same (**BL-1468, next train; breaking**: before, a name such as `a:b` or `x.` left the query registered in `Error` with no result table, and a retry answered that it already existed). |
 | `sourceTable` | string | Yes | Base table name. |
 | `type` | number | Yes | `1` LatestPerKey, `2` FirstPerKey (MIN of `orderBy`, not arrival order), `3` Aggregate, `4` Filter, `5` TopNPerGroup (N rows per group; source must have a PK). |
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
@@ -2294,7 +2355,7 @@ List all tables with statistics.
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables) |
+| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables). A materialized query's build table (`__mqbuild_<query>_<id>`, present while it rebuilds) is never listed, with either value (**BL-1468, next train**) |
 
 **Response:**
 
@@ -2673,9 +2734,26 @@ neither restriction is unchanged, and turning protection on is not this check. T
 
 **Response:** `201 Created` with table detail
 
+<a id="table-names"></a>**Table names** (**BL-1468, next train; breaking**). One rule for every way a table gets a name: this
+create, the rename below, `POST …/edge-tables`, `…:create-vector-column`, the embedded API, every table a schema file declares, and
+every materialized query (over HTTP or in a schema file's `materializedQueries`), whose name is its result table's.
+A table name:
+
+- is not empty and not whitespace only, and is not `.` or `..`;
+- contains none of `/ \ : * ? " < > |`;
+- does not start or end with a period (`.`) or a space;
+- does not start with `__mqbuild_`, which is reserved for the engine's own materialized-query build tables;
+- does not start with `_mv_`, which is reserved for the engine's materialized-values tables (ADR 0070).
+
+Anything else (letters, digits, `_`, `-`, other Unicode) is allowed. Matching is exact (`orders` and `Orders` are two tables). A
+name that breaks the rule is `400 INVALID_REQUEST` and the message names the rule it broke, for example *Table name cannot start or
+end with a period or space (invalid for directory names).* Before, only the embedded create applied this rule; the HTTP create and
+rename, the graph and vector creates and the schema apply accepted any name.
+
 #### `DELETE /api/databases/{db}/tables/{name}`
 
-Delete a table. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
+Delete a table. A `__mqbuild_*` name is `404 TABLE_NOT_FOUND` (**BL-1468, next train**): a materialized query's build table is not
+addressable. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
 table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, 0.9.0**) A table that already has
 PLS or RLS answers `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and `all-rows`
 where RLS applies. RBAC `drop` is still required and is not enough. A table with neither restriction is unchanged.
@@ -2684,7 +2762,8 @@ where RLS applies. RBAC `drop` is still required and is not enough. A table with
 
 #### `PATCH /api/databases/{db}/tables/{name}`
 
-Rename a table.
+Rename a table. `newName` follows the [table-name rule](#table-names): breaking it is `400 INVALID_REQUEST` (**BL-1468, next
+train**). A `__mqbuild_*` `{name}` is `404 TABLE_NOT_FOUND`.
 
 **Request:**
 
@@ -3650,9 +3729,47 @@ Service information.
 }
 ```
 
+#### The probes: one meaning each
+
+(**BL-1462, next train**) Three probes, each answering one question, to **every caller** (no credential, loopback or not) in
+every state the process can answer in. None of them is gated by setup mode.
+
+**The port opens before the start sequence runs.** The listener comes up first, and WAL replay, the auth bootstrap, the declared
+schema files, roles, keys and replication run behind it, so the probes can watch the start. Every other request, loopback
+included, is `503 SERVER_STARTING` with `Retry-After: 5` until the start has finished. (Before, the port stayed closed until the
+whole start was over, so a caller saw connection refused and then the final state.)
+
+| Probe | Question | Use it for |
+|---|---|---|
+| `GET /health` | Is the process alive? | Kubernetes `livenessProbe`. Never a deploy gate. |
+| `GET /startup` | Has the start sequence finished? | Kubernetes `startupProbe`. |
+| `GET /ready` | Can the server serve application traffic? | Kubernetes `readinessProbe`, a load balancer, a deploy gate, a Docker `HEALTHCHECK`, and therefore Compose `depends_on: condition: service_healthy`. |
+
+What each answers, by state:
+
+| State | `/health` | `/startup` | `/ready` |
+|---|---|---|---|
+| Opening databases (WAL replay) | `200` `{"status":"healthy"}` | `503` `{"status":"starting","reason":"The engine has not finished opening its databases."}` | `503`, `not_initialized` |
+| Start sequence running (auth, declared schema files, roles, grants, keys) | `200` | `503` `{"status":"starting","reason":"The start sequence has not finished ..."}` | `503`, `server_starting`; during the schema apply also `schema_applying` (with `progress`) and `schema_pending` |
+| Setup mode (a data directory never set up, nothing declared) | `200` | `200` `{"status":"started","reason":null}` | `503`, `setup_required` |
+| Serving | `200` | `200` | `200` `{"ready":true,"reasons":[]}` |
+| Serving, a critical component unhealthy | `200` | `200` | `503`, `component_unhealthy` |
+| Shutting down | The listener closes first: new connections are refused and requests already in flight finish. There is no "draining" answer. | | |
+
+**Docker Compose.** `depends_on: condition: service_healthy` waits for the dependency's healthcheck, so that healthcheck must
+be `/ready`: the dependent service then starts once the server can serve it (started, not in setup mode, declared schemas
+applied). The image's `HEALTHCHECK` and the repository's `docker-compose.yml` use `/ready`. A service that must start while the
+server is still in setup mode (a tool that creates the first admin) uses `condition: service_started` and polls `/startup`.
+
+Before this, `/health` answered `503 SETUP_REQUIRED` to a caller off the server's host while the server was in setup mode, and
+`/startup` answered `503` for as long as setup mode lasted, so a Kubernetes `startupProbe` restarted a server that had finished
+starting, every five minutes, for ever. `/startup` also turned `200` as soon as the databases were open, before the declared
+schema files were applied; it now waits for the whole start sequence.
+
 #### `GET /health`
 
-Liveness probe. **Always 200** if the process is running. Fast. Use as a Kubernetes `livenessProbe`.
+Liveness probe. **Always 200** if the process is running, to every caller, in setup mode too (**BL-1462, next train**). Fast, no
+I/O. Use as a Kubernetes `livenessProbe`.
 
 This is **not** “ready for schema apply or traffic”. A database can be `Dropping` or `Creating` while `/health` returns 200.
 
@@ -3672,27 +3789,41 @@ Readiness probe: 200 when nothing is missing, 503 with **everything** that is st
 {
   "ready": false,
   "reasons": [
-    { "code": "setup_required", "message": "The server is in setup mode: no admin account exists. ..." },
+    { "code": "setup_required", "message": "The server is in setup mode: nothing is declared and no admin account exists. ..." },
     { "code": "database_pending", "message": "Declared database 'ledger' (Aouda:Databases) does not exist yet.", "subject": "ledger" }
   ]
 }
 ```
 
-`reasons` is always present, and empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server.
+During a start-time schema apply (**BL-1462, next train**):
+
+```json
+{
+  "ready": false,
+  "reasons": [
+    { "code": "server_starting", "message": "The server is still starting: the auth bootstrap has not completed." },
+    { "code": "schema_applying", "message": "Applying the schema file of declared database 'orders' (Aouda:Databases): 4 of 11 done.", "subject": "orders", "progress": { "done": 4, "total": 11 } },
+    { "code": "schema_pending", "message": "Declared database 'reports' (Aouda:Databases) has a schema file that has not been applied yet.", "subject": "reports" }
+  ]
+}
+```
+
+`reasons` is always present, and empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server. `progress` (`done`, `total`, integers) is present only on `schema_applying` (**BL-1462, next train**).
 
 | `code` | Meaning | `subject` |
 |---|---|---|
 | `not_initialized` | The engine has not finished opening its databases. | none |
 | `server_starting` | The auth bootstrap has not completed, so the server is not accepting requests yet. | none |
 | `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
-| `setup_required` | No admin exists; the server is in setup mode. | none |
-| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. | none |
+| `setup_required` | The server is in setup mode: its data directory has never been set up (no server auth database), nothing is declared (no server key, no `Aouda:Auth:RootUser`, no dev admin), and no admin exists. A declared server key is not setup mode, and a data directory that has been set up never re-enters it (**BL-1462, next train**). | none |
+| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. Also listed when `Aouda:Auth:RootUser:Email` is set and no password is (neither `Password` nor the systemd credential `aouda-admin-password`) (**BL-1462, next train**). | none |
 | `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
 | `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
 | `database_reconcile_failed` | The reconcile of `Aouda:Databases` after a restore was refused; the server keeps running. | the database, when one is named |
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
+| `schema_applying` | (**BL-1462, next train**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
 | `schema_drift` | The start-time apply of a declared `SchemaFile` refused a change (a destructive one without `SchemaAllowDestructive`, or one the engine does not apply), so the catalog is not what the file says; the start went on. `503` until you allow the change or update the file, and restart. A failed apply fails the start instead, so there is no `/ready` to ask (**BL-1406, 0.11.0**). | the database |
-| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: a server key waits for the first admin, a scoped key for its auth database and database to be open. | the key's name |
+| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: its auth database or database is not open. A server key no longer waits for a first admin: declaring one ends setup mode (**BL-1462, next train**). | the key's name |
 | `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
 
 A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up. `aouda status` prints every reason.
@@ -3710,11 +3841,16 @@ Use as a Kubernetes `readinessProbe`.
 
 #### `GET /startup`
 
-Startup probe. 200 when bootstrap is complete (`DatabaseManager` initialized). 503 while still starting. Use as a Kubernetes `startupProbe`; once it returns 200, switch to liveness + readiness.
+Startup probe. `200` `{"status":"started","reason":null}` once the whole start sequence has finished: databases opened, then
+the auth bootstrap, the declared schema files, roles, grants and keys. **Setup mode included**: a server waiting for its first
+admin has finished starting, and restarting it changes nothing (**BL-1462, next train**; before, it was `200` as soon as the
+databases were open, and `503` for as long as setup mode lasted). `503` `{"status":"starting","reason":"..."}` before that; `GET
+/ready` says which step. Use as a Kubernetes `startupProbe`, with a `failureThreshold` × `periodSeconds` that covers WAL recovery
+plus any start-time schema apply; once it returns 200, switch to liveness + readiness.
 
 #### `GET /health/detailed`
 
-Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane).
+Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane). Answered in setup mode to every caller, like the three probes (**BL-1462, next train**).
 
 The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, 0.3.0** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, 0.3.0**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, or a database holding more than 110 % of its ceiling. (**WorkloadCore S06, 0.3.0**: the budget is never tightened in-process any more, so there is no "tightening" verdict; a database's ceiling is the server's budget unless it has a hard cap.)
 
@@ -3925,7 +4061,7 @@ those details with the resource mode.
 
 ### Backup/Restore Endpoints
 
-All endpoints live under `/admin/backup/`. Auth is enforced by the server auth middleware (same as all `/admin/*` routes) — no `[Authorize]` attributes on the controller.
+All endpoints live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
 
 #### Summary
 
@@ -4167,6 +4303,10 @@ the position a consistency token for that database is covered at here: `walPosit
 replica has seen a bulk load committed and not fetched all of its segments (`jobId` empty when its closing frame could not be
 decoded; `loadsHeld` counts every such load). `bulkLoadHold` is `null` when there is none. A read presenting a token at or past
 the hold waits, then answers `TOKEN_UNSATISFIED` or `TOKEN_FETCH_PRIMARY` as for any lagging replica.
+
+(**BL-1466, 0.13.1**) `members` is the topology's member list with what the anonymous topology no longer carries: each
+member's `perDatabaseStatus` (`{ "<database>": { "walPosition", "lagBytes" } }`) and, for a connected secondary, its `subscriptions`
+(`[{ "database", "filterMode", "tableNames" }]`; `null` otherwise). On a standalone node it holds the node itself.
 
 ---
 
@@ -4529,6 +4669,15 @@ Query parameters:
 
 Server-Sent Events endpoint (`text/event-stream`) that emits `log` events as new entries are written.
 
+(**BL-1001, next train**) A stream opened with an API key ends when the key stops authenticating: at once when the key is revoked on this node, otherwise within one `Aouda:WebSocket:HeartbeatInterval` (default 20 s; an expiry, or a linked user disabled). Its last event is `auth_error`, with the codes of [Realtime authorization](#realtime-revoked-credential), and the response then ends:
+
+```text
+event: auth_error
+data: {"code":"AUTH_TOKEN_REVOKED","message":"API key has been revoked"}
+```
+
+Up to 0.13.0 a revoked key's stream stayed open. A stream opened with a JWT is not re-checked.
+
 **Event shape:**
 
 ```text
@@ -4540,7 +4689,11 @@ data: {"timestampUtc":"...","level":"Information","category":"...","message":"..
 
 #### `GET /admin/replication/topology`
 
-Get cluster topology.
+Get cluster topology: the replica set's name, its members (address, role, temperature profile, hidden, read candidate), the
+read candidates and the primary. No credential is needed — a node joining with `--join` reads it before it has one — so it names no
+database and carries no WAL position or table subscription (**BL-1466, 0.13.1**: each member's `perDatabaseStatus` is now `{}`
+and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replication/status`](#get-adminreplicationstatus) as
+`members`).
 
 **Response:**
 
@@ -4967,7 +5120,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, 0.9.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, 0.9.0**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, 0.9.0**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**0.4.0**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). Also sent to an **open** session whose credential is revoked (`AUTH_TOKEN_REVOKED`) or expires (`AUTH_TOKEN_EXPIRED`), a JWT or any API key, before the server closes it (**BL-1001, next train**: API keys too; see [Realtime authorization](#realtime-revoked-credential)). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, 0.9.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, 0.9.0**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, 0.9.0**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**0.4.0**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**

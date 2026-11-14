@@ -186,7 +186,25 @@ there is no `/ready` to ask):
 6. **Configured key rows**, in their auth databases.
 7. The server is marked ready.
 
-Re-running a converged start is a no-op: the schema diff is empty and nothing is written. Deleting a declared database through
+Re-running a converged start is a no-op: the schema diff is empty and nothing is written. The diff compares the file with the
+database's tables as `aouda schema export` shows them, which never includes the engine's own scratch tables: a materialized
+query's build table, `__mqbuild_<query>_<id>`, which exists while the query rebuilds. A restart rebuilds, in the background and
+while step 4 runs, every materialized query whose result it cannot restore exactly (after an unclean stop, for example), so
+those tables are routinely there; they are not drift, and the apply neither reports nor drops them (**BL-1468, next train**). On
+0.13.0 it did: `/ready` answered `503` `schema_drift` with one `refused: DropTable __mqbuild_…: Destructive change requires
+AllowDestructive: true` per query, and with `SchemaAllowDestructive: true` it dropped them under the running rebuilds, which left
+each of those queries in `Error` (its query answers `400`, not ready) until a `:refresh`. No data was lost either way. Do not set
+`SchemaAllowDestructive` to get past it.
+
+**Table names in a schema file** follow the one [table-name rule](../reference/http-api.md#table-names): no `/ \ : * ? " < > |`,
+no leading or trailing period or space, not empty, `.` or `..`, and no `__mqbuild_` or `_mv_` prefix (**BL-1468, next train; breaking**).
+Before, the schema apply created such a table; now a file that declares one fails `aouda schema check` and **fails the start**,
+naming the database, the file and the rule — also for a table the database already has. A schema file has no rename and HTTP DDL
+on a declared table is refused, so the way out is a clean cut: read the table's rows out (for example with `POST …/query`), give
+the table a legal name in the file, start once with `SchemaAllowDestructive: true` (the apply creates the new table and drops the
+old one) or on a fresh data directory, set `SchemaAllowDestructive` back, and load the rows into the new table.
+
+Deleting a declared database through
 the API is undone by the next start, which creates it again, empty. A database you remove from the file is left alone; a
 declaration cannot say "must not exist".
 
@@ -202,11 +220,12 @@ declaration cannot say "must not exist".
 | `database_pending` (the database) | A declared database does not exist yet | Step 2 created it |
 | `database_not_open` (the database) | A declared database is registered but failed to open, or is quarantined by something other than an operator | It opens; otherwise it stays, and so does the 503 |
 | `server_starting` | The auth bootstrap has not finished | Step 7 |
-| `setup_required` | No admin exists | `RootUser` or a `create-admin` created it |
+| `setup_required` | Nothing is declared (no server key, no `RootUser`) and no admin exists | `RootUser` created it at start, or `POST /api/auth/setup` did; a declared server key means no setup mode at all (**BL-1462, next train**) |
 | `root_user_unusable` | `RootUser` is set but its password cannot be used | You fix the password |
 | `schema_pending` (the database) | Its `SchemaFile` has not been applied yet | Step 4 applied it |
+| `schema_applying` (the database) | Step 4 is applying its `SchemaFile` now; `progress` is `{ "done": n, "total": m }` over the declared schema files (**BL-1462, next train**) | Step 4 finished it |
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart |
-| `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | A server key waits for the first admin, a scoped key for its auth database and database to be open |
+| `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | Its auth database and database are open. A server key no longer waits for a first admin (**BL-1462, next train**) |
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 
