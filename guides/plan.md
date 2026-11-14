@@ -66,7 +66,7 @@ error    KEY_SECRET_SHARED  Aouda:Auth:Bootstrap:ServerKeyFile  (environment var
          fix:  Declare the server key once: keep Aouda:Auth:Bootstrap:ServerKeyFile and remove the 'server' entry's secret from the identities file.
 
 stages   read ok, settings ok, principals 1 error, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
-not checked  the data directory and every existing database, table, key row and role (no --server or --data-dir)
+not checked  the data directory and every existing database, table, key row and role (no --server)
              the environment the server will start in (hosting environment here: Production; variables an orchestrator sets at start)
 
 1 error, 0 warnings: `aouda start` would refuse this declaration.
@@ -144,7 +144,7 @@ flag, the hosting environment), which a body cannot set. A key's hash is in ever
 
 **`--skip-secrets` against a server.** A secret the plan did not read goes as *unresolved* (no hash). Such an entry is listed under `changes.keys.unresolved`, is not
 added, and the live rows of its name are neither revoked nor rotated on its account: the plan cannot tell a rotation from an unchanged key, so it changes nothing it
-cannot see. A `hash` secret still resolves. Every other check still runs.
+cannot see: it stands for those rows, so another declaration that declares one of their secrets is `KEY_SECRET_SHARED`, as the reload of the same files would find it (**BL-1463, next train**). A `hash` secret still resolves. Every other check still runs.
 
 **A body is only ever planned.** The server refuses a posted declaration without `dryRun=true` (`400 RELOAD_CANDIDATE_NOT_APPLIED`): what a reload applies is always
 the server's own files, which the next start reads too. To apply, change the files on the server and run `aouda reload`.
