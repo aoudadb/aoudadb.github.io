@@ -16,7 +16,11 @@ It replaces `aouda keys check` and `aouda schema check`, which are gone ([below]
 aouda plan                                      # the configuration this directory and environment would start with
 aouda plan --Aouda:Auth:Keys:File=/etc/aouda/aouda.identities.json --skip-secrets
 aouda plan --json                               # one JSON object on standard output
+aouda plan --server https://aouda.internal:8080 --key-file server.key   # what a deploy would change on a running server (BL-1463, next train)
 ```
+
+With `--server` it also asks a running server what the declaration would change there, and exits `2` when it would change something
+([Against a running server](#against-a-running-server---server-bl-1463-next-train)).
 
 ## What it checks
 
@@ -84,16 +88,102 @@ read, so its hash differs from a full plan's.
 | `1` | `errors` | at least one `error` finding. When every error is a file that could not be read, the last line says the start "would fail here (a file could not be read) and may succeed once it can be" |
 | `64` | — | misuse: a switch given a value, or `aouda keys check` / `aouda schema check`, which no longer exist |
 
-There is no "could not check" status and no `--strict`: a warning that should block is an error the start should refuse. Other exit codes belong to plans against a running server and a data directory, which an offline plan never exits with.
+There is no "could not check" status and no `--strict`: a warning that should block is an error the start should refuse. Exit codes `2`, `69` and `77` belong to plans against a running server (below), which an offline plan never exits with.
+
+## Against a running server: `--server` (**BL-1463, next train**)
+
+An offline plan cannot see the data directory. `--server` asks a **running** server what this declaration would change, before you deploy it:
+
+```bash
+aouda plan --server https://aouda.internal:8080 --key-file /run/aouda/secrets/server.key
+```
+
+The plan first reads the declaration and runs every offline check exactly as without `--server`. **If that finds an error, the server is not contacted**: the plan
+exits `1` (errors win), says `target.contacted: false`, and sends nothing. Otherwise it sends the server a **candidate** (`POST /api/admin/reload?dryRun=true` with a
+body, see the [HTTP API](../reference/http-api.md)), and the server runs the same validator as a reload's first phase over it — every offline check again under its own
+settings, then every check that needs the data directory against a planned view — writes nothing, and answers with the plan. The plan you see is the local findings
+(with their files and lines), the server's findings the local run could not make (the existing tables, key rows and roles), and any finding the server made that the
+local run did not (a different named-query limit on the server, a version difference) — shown, never hidden. A `changes` block lists what a deploy of this declaration
+would change, before the stages:
+
+```text
+aouda plan: settings + /etc/aouda/identities.json (environment Production), 3 databases, 2 schema files, against https://aouda.internal:8080
+
+changes
+  schema   rates: 1 change (AddColumn SwapQuote.Venue)
+  roles    auditor (appauth): create
+  keys     added feeder-icap (scoped_service, appauth, fingerprint 9f2c41ab, file)
+           revoked feeder-legacy (removed, fingerprint 77d0e1c3; 2 open sessions will end)
+
+warning  SCHEMA_DESTRUCTIVE_REFUSED  /etc/aouda/bond.schema.json
+         Database 'bond': schema file '/etc/aouda/bond.schema.json' differs from the catalog; refused (a reload never applies a destructive change): DropColumn BondQuote.LegacyId
+         fix:  ...
+
+stages   read ok, settings ok, principals ok, databases ok, bootstrap ok, schema 1 warning, roles ok, principalRows ok
+not checked  ...
+
+no problems; 3 changes (see above).
+```
+
+In the JSON (`--json`), `target` is `{ "kind": "server", "url", "contacted", "role", "writes" }`, `changes` is the server's, `declaration.planHash` is the hash of what
+the **server** planned and `declaration.localPlanHash` the plan's own (they differ when the two machines' settings differ: the server validates under its own).
+
+**The key.** `--server` needs a server key (`mk_srv_`) of that server, from **exactly one** of `--key-file PATH` (read once, one trailing newline removed) or
+`--key-env NAME`. There is no `--key`: a key on the command line stays in the shell's history and the process list, so `--key` is refused (exit `64`) without the value
+being repeated. `--server` is never taken from `AOUDA_SERVER` / `AOUDA_URL`, and the key never from `AOUDA_TOKEN`: an environment left in a CI job must not turn an
+offline plan into a call to a server. The key is sent only as the bearer to the URL you named — **a redirect is not followed** (it would be the easiest way to send a
+server key elsewhere) — and is printed nowhere. The URL is an absolute `http://` or `https://` URL with no user name, query or fragment; there is no `--insecure`.
+
+**What is sent, and what is not.** The candidate carries every declared database entry, the identities file's entries with each secret as its **SHA-256 hash** and the
+label of where it came from (`env`, `file`, `hash`), the bootstrap server key's hash, the root user's email (and whether a password is set, never the password), every
+schema file as its **merged document** (the overlay applied where the plan ran), and the paths of the identities and schema files as **labels** for the findings
+(a path that contains a key is `<redacted>`). It never carries a key, a password, a secret file's content or path, or an environment variable's name. The server opens
+no path the body names, re-reads none of its own configuration, and validates under its **own** process settings (named-query limits, `SkipDatabases`, the dev-admin
+flag, the hosting environment), which a body cannot set. A key's hash is in every row of the auth database already; the bearer key is the more sensitive value either way:
+**use `https`** anywhere beyond a private network.
+
+**`--skip-secrets` against a server.** A secret the plan did not read goes as *unresolved* (no hash). Such an entry is listed under `changes.keys.unresolved`, is not
+added, and the live rows of its name are neither revoked nor rotated on its account: the plan cannot tell a rotation from an unchanged key, so it changes nothing it
+cannot see. A `hash` secret still resolves. Every other check still runs.
+
+**A body is only ever planned.** The server refuses a posted declaration without `dryRun=true` (`400 RELOAD_CANDIDATE_NOT_APPLIED`): what a reload applies is always
+the server's own files, which the next start reads too. To apply, change the files on the server and run `aouda reload`.
+
+### Exit status against a server
+
+| Code | Outcome | Meaning |
+|---|---|---|
+| `0` | `clean` | no error, and nothing to change |
+| `1` | `errors` | an `error` finding — from the offline run (the server was not contacted) or from the server (its state, or its own settings) |
+| `2` | `changes` | no error, and a deploy of this declaration would change something (listed under `changes`) |
+| `64` | — | misuse: `--key`, no key source or both, `--key-file` / `--key-env` without `--server`, an unset variable, a missing or empty key file, a URL that is not plain `http(s)` |
+| `69` | `incomplete` | the server could not be planned against: not reachable, a timeout, a TLS failure, a redirect, `404` (a server older than this release), `409` (a reload is running), `429` (one plan per second; `Retry-After` is printed), `503` (still starting), any other answer that is not a plan (`PLAN_TARGET_UNREACHABLE`) |
+| `77` | `incomplete` | the server refused the key (`401` / `403`): `plan --server` needs that server's server key (`PLAN_TARGET_REFUSED`) |
+
+An `incomplete` plan prints the offline plan it has and ends `incomplete: <reason>.`
+
+**Before a deploy**, on the deploy host with the start's own mounts:
+
+```bash
+docker compose run --rm --no-deps aouda plan --server http://aouda:8080 --key-file /run/aouda/secrets/server.key
+case $? in 0) echo "nothing to change" ;; 2) echo "changes: review the plan above" ;; *) exit 1 ;; esac
+```
+
+**In CI** (secrets not on the runner), with the server key as a CI secret in an environment variable:
+
+```bash
+aouda plan --Aouda:Auth:Keys:File=deploy/aouda.identities.json --skip-secrets \
+           --server https://aouda.internal:8080 --key-env AOUDA_PLAN_KEY
+```
 
 ## What `aouda plan` cannot know
 
 A green plan is not more than it says. Every offline plan lists what it did not check under `notChecked`, and these are the limits:
 
-1. **Without a target:** anything in the data directory. Which databases exist and with which kind and link, the tables (so no schema diff and no destructive change), the key rows (a secret another row holds, an operator's revocation), roles created through the API, the data-directory format, whether `_serverauth` already has an admin.
+1. **Without a target** (offline): anything in the data directory. Which databases exist and with which kind and link, the tables (so no schema diff and no destructive change), the key rows (a secret another row holds, an operator's revocation), roles created through the API, the data-directory format, whether `_serverauth` already has an admin.
 2. **Secrets in another environment.** The plan reads `env` and `file` secrets where it runs. A CI runner with no secrets, or a host path that differs from the container's, makes those checks unknowable (`--skip-secrets`). The reliable gate is the plan run with the same mounts and environment as the start (`docker compose run --rm --no-deps aouda plan`).
 3. **The process environment at start.** Variables an orchestrator injects at start and that are absent where the plan ran.
-4. **Apply failures that depend on row values,** even with a target, unless the engine's dry run checks them (a `NOT NULL` column on a table with rows, a `unique` flag on a column with duplicates, a narrowing type change).
+4. **Apply failures that depend on row values,** even with a target, unless the engine's dry run checks them (a `NOT NULL` column on a table with rows, a `unique` flag on a column with duplicates, a narrowing type change). With `--server` (**BL-1463, next train**), the engine's dry run checks what needs no rows: a destructive change (reported as `SCHEMA_DESTRUCTIVE_REFUSED`, never applied by a reload), a changed partition key, a table left with no column, an added identity column without `nullable` or a static default, an added server-time or array column that is not nullable, and the apply's own authorization. It does **not** check what depends on the rows or on another executor's rules (a non-nullable column without a default added to a table with rows, a `unique` flag over duplicates, a narrowing type change, and other refusals only the apply makes): a plan can say valid where the apply then refuses (tracked as BL-1494).
 5. **Resources and the host:** free ports, memory, disk, file permissions for the server's user (the plan may run as another user), the clock, whether the email or SMS provider answers.
 6. **A node's replication role:** whether a follower would write is not planned.
 7. **Races:** anything that changes between the plan and the start or reload. `planHash` shows which declaration was planned; it is not a lock.
