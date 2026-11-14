@@ -8,7 +8,7 @@ parent: "Reference"
 
 `aouda start` validates the whole declaration — the settings, `Aouda:Databases`, the identities file and every secret and schema file it names — before it opens anything. Every problem is a **finding** with a stable code, the stage that found it, where it is (a setting and the configuration source that supplied it, or a file and a JSON pointer) and what to do. A finding of severity `error` is exactly a refusal of the start; a `warning` is accepted and logged once; `info` is context. A refused start prints every finding at once on standard error and creates nothing.
 
-`aouda plan` runs the **offline** half of every stage without starting anything and reports the same findings with the same codes (see [Plan a declaration](../guides/plan.md)). One code is emitted only by a plan, `SECRET_NOT_READ`: `--skip-secrets` did not read the secrets it counts.
+`aouda plan` runs the **offline** half of every stage without starting anything and reports the same findings with the same codes (see [Plan a declaration](../guides/plan.md)). Three codes are emitted only by a plan: `SECRET_NOT_READ` (`--skip-secrets` did not read the secrets it counts) and, with `--server`, `PLAN_TARGET_UNREACHABLE` and `PLAN_TARGET_REFUSED` (**BL-1463, next train**).
 
 ## Exit status of a refused start
 
@@ -98,8 +98,12 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `KEY_AUTH_DATABASE_NOT_OPEN` | error | `principalRows` | state | 78 | Repair or restore the auth database (or remove its key declarations) and start again. |
 | `KEY_SECRET_HELD_BY_OTHER_ROW` | error | `principalRows` | state | 78 | A secret is one row: revoke and delete the key that holds it, or declare a different secret. |
 | `KEY_REVOKED_BY_OPERATOR` | warning | `principalRows` | state | — | Remove the key from the declaration to make the revocation permanent; a wipe of the data returns it. |
+| `PLAN_TARGET_UNREACHABLE` | error | `target` | target | — (`aouda plan` exits 69) | Check that the server is running this release or later, reachable at the URL given, and ready; retry after the delay it named. |
+| `PLAN_TARGET_REFUSED` | error | `target` | target | — (`aouda plan` exits 77) | Give a server key (mk_srv_) of that server with --key-file PATH or --key-env NAME. |
 
 A code whose half is **reload** is emitted only by `aouda reload` (`POST /api/admin/reload`), never by the start (**BL-1427, next train**); a reload runs every other code as the start does and is refused by every `error`.
+
+A code whose half is **target** is emitted only by `aouda plan --server`, about the server it plans against: the server could not be reached or did not answer with a plan (`PLAN_TARGET_UNREACHABLE`, exit 69), or it refused the key (`PLAN_TARGET_REFUSED`, exit 77). Neither is a finding about the declaration, and no start or reload emits them (**BL-1463, next train**). Stage `target` is not a stage of the start.
 
 `SERVER_HAS_NO_OPERATOR` is one rule checked at two moments of the start: before the schema step (stage `bootstrap`) and after the key rows are reconciled (stage `principalRows`).
 
