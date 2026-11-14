@@ -832,7 +832,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `FORMULA_TOKEN_REQUIRES_PRIMARY` | 421 | (**ADR 0072, next train**) A consistency token on a read or subscribe of a table with an `Expression` column reached a replica, which computes no formulas and cannot judge it. Send the read to the primary, or read without a token. |
 | `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, next train**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. |
 | `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**ADR 0072, next train**) A `cellRef` node outside a formula (the value of an `Expression` column): in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output. |
-| `EXPR_CELLREF_INVALID` | 400 | (**ADR 0072, next train**) A malformed `cellRef`: an empty column or key, a key part that is not a non-null literal, or two key columns that differ only in case. |
+| `EXPR_CELLREF_INVALID` | 400 | (**ADR 0072, next train**) Registered, but not answered by the server today (BL-1500): a malformed `cellRef` in a formula — no column, a key part that is not a non-null literal, a key column named twice — is `400 FORMULA_REFERENCE_INVALID`, and any `cellRef` outside a formula is `400 EXPR_CELLREF_NOT_ALLOWED`. |
 | `FORMULA_COLUMN_INVALID` | 400 | (**ADR 0072, next train**) An `Expression` column's declaration, or a later change to its table, breaks a rule of the column type (the Expression column nullable and plain; its driven column a nullable scalar of the same table that nothing else computes or drives; the table with a strict primary key, an ordinary table). The message names the table, the column and the rule; nothing was changed. See [Formulas](../guides/formulas.md#the-column). |
 | `FORMULA_INVALID` | 400 | (**ADR 0072, next train**) A formula is not one valid expression: it does not parse, uses a `param`, an unknown function or operator, a type its driven column cannot hold without loss (the message says what to write, e.g. `round(x, 2)`), is computed by a `setExpr`, or arrives through a transform. The message names the row; nothing was written. |
 | `FORMULA_REFERENCE_INVALID` | 400 | (**ADR 0072, next train**) A formula's `cellRef` names a table that does not exist or a formula may not read (an edge table, an engine table, a materialized query's result over a formula table), a column that does not exist or is an `Expression` column, or a key value no row can hold. |
@@ -1999,7 +1999,10 @@ too. It needs read access to the table.
   "value": null,
   "reason": "division by zero.",
   "storedValue": null,
-  "readBy": [ { "table": "pnl", "key": { "dept": "Online", "line": "Tax", "year": 2028 }, "column": "amount" } ]
+  "readBy": [
+    { "table": "pnl", "key": { "dept": "Online", "line": "MarginGap", "year": 2028 }, "column": "amount" },
+    { "table": "pnl", "key": { "dept": "Online", "line": "Tax", "year": 2028 }, "column": "amount" }
+  ]
 }
 ```
 
@@ -2015,8 +2018,10 @@ too. It needs read access to the table.
 | `readBy` | The formula cells that read this one. |
 
 **What the caller sees** is what it may read, by the same rule as a `/query` of each table: a row it may not read answers exactly as a key
-with no row (`kind: "noRow"`); a reference to a row it may not read keeps its `table`, `key` and `column` with `readable: false` and no
-`value`, `isFormulaCell` or `error`; readers it may not read are left out. The cell's own value is shown to whoever may read its row.
+with no row (`kind: "noRow"`); a reference to a row it may not read keeps its `table`, `key` and `column` with `readable: false`, and its
+`value`, `isFormulaCell` and `error` are `null`; readers it may not read are left out. The cell's own value is shown to whoever may read its row.
+`explain` takes no consistency token (`at_least` is not read) and stamps none: `value` is computed now, and `storedValue` may not yet show a
+write the caller just made.
 
 **Refusals.** `400 INVALID_REQUEST` when `key` or `column` is missing, the key is not the table's full primary key or holds a value its
 column cannot, or `column` is neither an Expression column nor a column one drives; `404 TABLE_NOT_FOUND` / `DATABASE_NOT_FOUND`.
@@ -3297,7 +3302,7 @@ Each value in `setExpr` is an expression node:
 { "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> }, ... }, "column": "c" }
 ```
 
-(**ADR 0072, next train**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, and a malformed one is `400 EXPR_CELLREF_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, next train**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
+(**ADR 0072, next train**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not; in a formula, a malformed one is `400 FORMULA_REFERENCE_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, next train**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
 **Extended response when `returning` is set:**
 
 ```json

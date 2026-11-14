@@ -57,7 +57,7 @@ year before's `RetainedEarnings`. A row condition lets each user see only their 
 development machine:
 
 ```bash
-ASPNETCORE_ENVIRONMENT=Development AOUDA_DEV_ADMIN=true aouda start --data-dir "$TMPDIR/aouda-finance"
+ASPNETCORE_ENVIRONMENT=Development AOUDA_DEV_ADMIN=true aouda start --port 5433 --data-dir "$TMPDIR/aouda-finance"
 # prints one line: AOUDA-DEV-ADMIN email=… password=… server_key=mk_srv_…
 export AOUDA=http://localhost:5433
 export SK=mk_srv_…                 # the server_key from that line

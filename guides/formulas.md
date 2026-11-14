@@ -144,17 +144,20 @@ Every write that changes a formula **validates it before it commits**, and a ref
 | Over HTTP: the writer may read every row the formula reads ([Security](#security)) | `403 FORMULA_REFERENCE_NOT_READABLE` |
 
 **A batch is validated as a whole.** One insert, one bulk load or one seed may add every edge of a cycle at once; it is refused as a whole.
-Formula writes are serialized database-wide, so two concurrent writes cannot each add half of a cycle; a write that changes no formula —
-every input edit — is not serialized.
+Formula writes are serialized database-wide, so two concurrent writes cannot each add half of a cycle. A write that changes no formula —
+an input edit — is not serialized, except an update that changes a formula table's primary-key columns (it moves formulas) and a bulk load
+into a formula table (below).
 
 **A formula is a value, never a computation.** A `setExpr` that names an Expression column is `400 FORMULA_INVALID` (write the formula with
 `set`). A formula is never written through a [transform](insert-transforms.md) — a route or tee hop, a transform backfill, a bulk load's
 transform landing: refused. And a `cellRef` is valid only inside a formula: in a `setExpr`, a derived column, a named query or mutation, a
-`selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`; a malformed one is `400 EXPR_CELLREF_INVALID`.
+`selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not. Inside a formula a malformed one
+(no column, a key part that is not a non-null literal, a key column named twice) is `400 FORMULA_REFERENCE_INVALID`.
 
 **Bulk load.** A bulk load into a formula table loads that table alone (a multi-table load that includes one is refused), holds the
 database's formula lock for its whole session, and checks its formulas as one batch at `:commit`; a load refused there ends `failed` with
-the rule's code. See [Known issues](#known-issues) for BL-1479 and BL-1488.
+the rule's code. ⚠️ While such a load is open, no formula in the database gets a new value and token reads of every formula table answer
+`409 TOKEN_UNSATISFIED`: see [Known issues](#known-issues) for BL-1479, BL-1497 and BL-1488.
 
 ---
 
@@ -300,7 +303,8 @@ settle, and the cell computes again when what it reads changes. There is no erro
 - a value the driven column cannot hold unchanged (too many digits, out of an integer type's range — but see BL-1481 for `Int64`);
 - a check of the table that refuses the value (a check, a unique key or a foreign key);
 - a comparison of two dates, timestamps or Guids;
-- a reference whose table or column is gone.
+- a reference whose table or column is gone;
+- any other error while computing it (a failed `cast`, `abs` of the smallest `Int64`).
 
 A formula reading a null value computes with null (arithmetic over a null is null; `if` takes the `else` branch; `coalesce` skips it).
 
@@ -321,8 +325,9 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/explain" -H "Authorizat
 
 `column` names the driven column or its Expression column. `kind` is `formula`, `input` (the row has no formula) or `noRow`. It needs read
 access to the table and shows only what the caller may read: a row the caller may not read answers `noRow`, exactly like a key with no row; a
-reference to a row the caller may not read keeps its address and `readable: false`, without its value; readers the caller may not read are
-left out. The full contract is in the [HTTP reference](../reference/http-api.md#explain-a-formula-cell); the SDKs have `ExplainAsync`
+reference to a row the caller may not read keeps its address and `readable: false`, with `value`, `isFormulaCell` and `error` null; readers
+the caller may not read are left out. `explain` takes no consistency token: `value` is computed now, and `storedValue` may not yet show a
+write you just made. The full contract is in the [HTTP reference](../reference/http-api.md#explain-a-formula-cell); the SDKs have `ExplainAsync`
 (C#) and `table.explain(key, column)` (TypeScript). A grid that wants Excel's `#DIV/0!` calls `explain` for a null formula cell.
 
 ---
@@ -386,8 +391,8 @@ What follows from security being the table's:
 (**ADR 0072, next train**) A DDL that would break a formula's reference is refused with **`409 FORMULA_TABLE_REFERENCED`**, naming the
 cells (through the table routes and `schema/apply`, where it is a failed entry):
 
-- dropping or renaming a table a formula reads. A formula table that only its own formulas read, each leaving the `table` out, may be
-  renamed: those formulas follow the rename;
+- dropping or renaming a table a formula reads — or a source table of a materialized query whose result a formula reads. A formula
+  table that only its own formulas read, each leaving the `table` out, may be renamed: those formulas follow the rename;
 - dropping, renaming or changing the type of a column a formula reads — the driven column included, when formulas read it;
 - any change to the primary key of a table a formula reads, or a looser uniqueness; a formula table's own key does not change while it has
   formula cells;
@@ -453,7 +458,11 @@ grid or UI component; values computed per viewer.
   before the formulas have caught up.
 - **BL-1482** — a derived-column or server-time DDL on a formula table is not checked for a cycle through the driven value, and does not
   wake the formulas over it.
-- **BL-1479** — a bulk load into a formula table holds the formula lock for its whole session, so other formula writes wait for it.
+- **BL-1479** — a bulk load into a formula table holds the formula lock for its whole session, so other formula writes, and guarded DDL,
+  wait for it.
+- **BL-1497** — while that lock is held, the formula maintainer cannot write either: no formula in the database (in any table) gets a new
+  value until the load commits or is aborted, and token reads of formula tables answer `409 TOKEN_UNSATISFIED`. Keep loads into a formula
+  table short, and do not leave one open.
 - **BL-1488** — a bulk load in the default `coerce` validation that names an existing formula row's key can leave a second formula row for
   the cell.
 - **BL-1492** — in the C# SDK a typed (POCO) read gives a non-nullable property its type's default for a null: map a driven column as
@@ -479,7 +488,7 @@ grid or UI component; values computed per viewer.
 | `403 FORMULA_REFERENCE_NOT_READABLE` | The formula reads a row its writer may not read | Reference rows the writer can read, or have a writer who can read them write it |
 | `409 FORMULA_VALUE_WRITE_REFUSED` | A hand-written value in a formula row, or a formula and its value in one row | Write the formula as null in the same write to make the row an input |
 | `409 FORMULA_TABLE_REFERENCED` | DDL on a table or column a formula reads | Change those formulas first (`TRUNCATE` is allowed) |
-| `409 TOKEN_UNSATISFIED` on a read | The formulas did not catch up with your token within `waitMs` | Read again, with a longer wait for a large model |
+| `409 TOKEN_UNSATISFIED` on a read | The formulas did not catch up with your token within `waitMs` — or a bulk load into a formula table is open (BL-1497) | Read again, with a longer wait for a large model; finish or abort the load |
 | `421 FORMULA_TOKEN_REQUIRES_PRIMARY` | A token read of a formula table went to a replica | Send it to the primary, or read without a token |
 | `503 FORMULA_NOT_MAINTAINED` | This node's formula maintainer is not running (a branch, a role not resolved yet, a promoted node: BL-1441) | Wait on the primary |
 | `400 EXPR_CELLREF_NOT_ALLOWED` | A `cellRef` outside a formula | Move it into a formula |
