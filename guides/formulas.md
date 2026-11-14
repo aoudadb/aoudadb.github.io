@@ -407,8 +407,11 @@ cells (through the table routes and `schema/apply`, where it is a failed entry):
   table under a query a formula reads, which a formula may [not read](#references); its formulas could then close a loop through the
   query that no check can see.
 
+A *source table* of a query, in this list, is any table on its chain: the table it reads, and when it reads another query's
+result, that query's source too.
+
 Allowed: `TRUNCATE` (formulas reading the table compute from the empty table; a truncated formula table's formulas are gone), deleting rows,
-dropping an Expression column (its values stay, as inputs), adding columns — an Expression column too, on any table that is not the source of
+dropping an Expression column (its values stay, as inputs), adding columns — an Expression column too, on any table that is not a source table of
 a query a formula reads.
 
 ---
