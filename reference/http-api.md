@@ -365,8 +365,8 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/admin/roles/{id}` | PATCH/DELETE | Bearer JWT (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET /api/auth/admin/roles` lists every role with its permissions |
 | `/api/auth/admin/users/{id}/roles` | GET/PUT | Bearer JWT (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. A user JWT may assign `db_admin` and a role that carries an `all-partitions` or `all-rows` grant (**BL-1299, 0.9.0**) |
 | `/api/auth/admin/users/{id}/access-grants?database=` | GET | Bearer JWT (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database`, with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, 0.9.0**) |
-| `/api/auth/admin/users/{id}/entitlements` | GET/POST | Bearer JWT (`db_admin`) or `mk_srv_` | A server user's entitlements: list (optional `?dimension=`) / create `{ "dimension", "key", "level"?, "validFrom"?, "validTo"? }` (201), with the same rules, caps and errors as the application route. An entitlement here applies on **every database the server auth database governs** (a database with no auth database of its own). Creating needs a server key or `db_admin` on the server auth database (scoped `*` or to it); a `db_admin` of other databases only is `403 AUTHORIZATION_DENIED`. Audited as `admin_create_entitlement` (**BL-1434, next train**) |
-| `/api/auth/admin/users/{id}/entitlements/{entitlementId}` | DELETE | Bearer JWT (`db_admin`) or `mk_srv_` | Revoke one (204 / 404 `AUTH_GRANT_NOT_FOUND`). Same callers as create. Live subscriptions it admitted end with `PERMISSION_REVOKED`. Audited as `admin_delete_entitlement` (**BL-1434, next train**) |
+| `/api/auth/admin/users/{id}/entitlements` | GET/POST | Bearer JWT (`db_admin`) or `mk_srv_` | A server user's entitlements: list (optional `?dimension=`) / create `{ "dimension", "key", "level"?, "validFrom"?, "validTo"? }` (201), with the same rules, caps and errors as the application route. An entitlement here applies on **every database the server auth database governs** (a database with no auth database of its own). Creating needs a server key or `db_admin` on the server auth database (scoped `*` or to it); a `db_admin` of other databases only is `403 AUTHORIZATION_DENIED`. Audited as `admin_create_entitlement` (**BL-1452, next train**) |
+| `/api/auth/admin/users/{id}/entitlements/{entitlementId}` | DELETE | Bearer JWT (`db_admin`) or `mk_srv_` | Revoke one (204 / 404 `AUTH_GRANT_NOT_FOUND`). Same callers as create. Live subscriptions it admitted end with `PERMISSION_REVOKED`. Audited as `admin_delete_entitlement` (**BL-1452, next train**) |
 | `/api/auth/admin/audit-log` | GET | Bearer JWT (`db_admin`) | The server auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
 | `/api/auth/admin/api-keys` | GET/POST | Bearer JWT (`db_admin`) | List/create server API keys |
 | `/api/auth/admin/api-keys/{id}` | DELETE | Bearer JWT (`db_admin`) | Revoke server API key |
@@ -669,7 +669,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
 | Materialized query | (**WorkloadCore, 0.3.0**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
-| Materialized value | (**BL-1434, next train**) A token on a read of `_mv_values` (`/query`, `/query/count`, a join side, a named query, subscribe) is judged by the **maintainer's progress**: it is covered once every commit up to the token has been recomputed, and a commit that left the cell unchanged covers it. A lapse is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says; a replica answers `421 MV_TOKEN_REQUIRES_PRIMARY`. The response `X-Aouda-Token` is a token the values just read are covered by; a snapshot's token is such a cover, a change event's token is too (keep the highest), a notice's is not. See [Materialized Values](../guides/materialized-values.md). |
+| Formula table | (**ADR 0072, next train**) A token on any read of a table that has an `Expression` column (`/query`, `/query/count`, a join side, a named query, subscribe) — input rows included — is judged by the **formula maintainer's progress**: it is covered once every commit up to the token has been recomputed, and a commit that left a value unchanged covers it. A lapse is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says (`fetchPrimary` does not turn it into a `421`; `fail` answers `409` at once). A replica answers `421 FORMULA_TOKEN_REQUIRES_PRIMARY`; a node whose maintainer is not running, `503 FORMULA_NOT_MAINTAINED`. A read joining a formula table and a materialized query's result is covered as far as both are; a materialized query built over a formula table is not yet judged by the formula maintainer (BL-1486). A snapshot's token and a change event's token are covers (keep the highest), a notice's is not. See [Formulas](../guides/formulas.md#when-values-change-eventual-consistency-and-tokens). |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
 
@@ -827,22 +827,22 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TOKEN_MALFORMED` | 400 | Consistency token undecodable, empty, or wrong version. Error body/header carry the node's observed token. |
 | `TOKEN_FOREIGN_DATABASE` | 400 | Token issued for a different database. Do not retry the same string. |
 | `TOKEN_EPOCH_SUPERSEDED` | 409 | Failover lost the write, or future term. **Never waited.** Do not retry the same token. |
-| `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. (**BL-1434, next train**) On a read of `_mv_values` the wait is for the maintainer to recompute every commit up to the token, and it is `TOKEN_UNSATISFIED` whatever `onExceeded` says. |
+| `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. (**ADR 0072, next train**) On a read of a table with an `Expression` column the wait is for the formula maintainer to recompute every commit up to the token, and it is `TOKEN_UNSATISFIED` whatever `onExceeded` says. |
 | `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
-| `MV_TOKEN_REQUIRES_PRIMARY` | 421 | (**BL-1434, next train**) A consistency token on a read or subscribe of `_mv_values` reached a replica, which runs no maintainer and cannot judge it. Send the read to the primary, or read without a token. |
-| `SYSTEM_TABLE_WRITE_REFUSED` | 403 | (**BL-1434, next train**) An ordinary write or DDL on `_mv_definitions` or `_mv_values`; only the engine writes them. Define through the materialized-value endpoints; set inputs on your own tables. |
-| `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**BL-1434, next train**) A `cellRef` node outside a materialized-value definition. |
-| `EXPR_CELLREF_INVALID` | 400 | (**BL-1434, next train**) A malformed `cellRef`: an empty table, column or key, a key part that is not a non-null literal, or two key columns that differ only in case. |
-| `MV_DEFINITION_INVALID` | 400 | (**BL-1434, next train**) A malformed definition: a bad model or name, a `colRef`, `param` or `conditional`, a result type a cell cannot hold. Nothing was written. |
-| `MV_REFERENCE_INVALID` | 400 | (**BL-1434, next train**) A `cellRef` names a table, column or cell that does not exist or cannot be read, or a key literal of the wrong type. |
-| `MV_REFERENCE_NOT_PRIMARY_KEY` | 400 | (**BL-1434, next train**) A `cellRef`'s key is not exactly the table's strict primary key; the message names the key. |
-| `MV_CYCLE` | 400 | (**BL-1434, next train**) The definitions would form a cycle; the message names its members in order. |
-| `MV_DEPTH_EXCEEDED` | 400 | (**BL-1434, next train**) A chain of cells reading cells would be longer than 16. |
-| `MV_DEFINITION_NOT_FOUND` | 404 | (**BL-1434, next train**) No cell of that model and name. |
-| `MV_DEFINITION_EXISTS` | 409 | (**BL-1434, next train**) A cell of that model and name exists; alter it. |
-| `MV_DEFINITION_IN_USE` | 409 | (**BL-1434, next train**) Other cells read this one and the delete (or an alter of its type) would break them; the message names them. |
-| `MV_TABLE_REFERENCED` | 409 | (**BL-1434, next train**) DDL on a table or column a cell reads (any primary-key change, a drop, rename or type change of a read column, a drop of a materialized query whose result a cell reads); the message names the cells. `TRUNCATE` is allowed. |
-| `MV_NOT_MAINTAINED` | 503 | (**BL-1434, next train**) This node maintains no materialized values and is not a replica (a branch, a server whose replication role is not resolved yet, or a promoted node until BL-1441 is fixed); a replica answers definitions `503 READ_ONLY` and token reads `421 MV_TOKEN_REQUIRES_PRIMARY`. Reads are served; define and wait on the primary. |
+| `FORMULA_TOKEN_REQUIRES_PRIMARY` | 421 | (**ADR 0072, next train**) A consistency token on a read or subscribe of a table with an `Expression` column reached a replica, which computes no formulas and cannot judge it. Send the read to the primary, or read without a token. |
+| `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, next train**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. |
+| `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**ADR 0072, next train**) A `cellRef` node outside a formula (the value of an `Expression` column): in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output. |
+| `EXPR_CELLREF_INVALID` | 400 | (**ADR 0072, next train**) Registered, but not answered by the server today (BL-1500): a malformed `cellRef` in a formula — no column, a key part that is not a non-null literal, a key column named twice — is `400 FORMULA_REFERENCE_INVALID`, and any `cellRef` outside a formula is `400 EXPR_CELLREF_NOT_ALLOWED`. |
+| `FORMULA_COLUMN_INVALID` | 400 | (**ADR 0072, next train**) An `Expression` column's declaration, or a later change to its table, breaks a rule of the column type (the Expression column nullable and plain; its driven column a nullable scalar of the same table that nothing else computes or drives; the table with a strict primary key, an ordinary table). The message names the table, the column and the rule; nothing was changed. See [Formulas](../guides/formulas.md#the-column). |
+| `FORMULA_INVALID` | 400 | (**ADR 0072, next train**) A formula is not one valid expression: it does not parse, uses a `param`, an unknown function or operator, a type its driven column cannot hold without loss (the message says what to write, e.g. `round(x, 2)`), is computed by a `setExpr`, or arrives through a transform. The message names the row; nothing was written. |
+| `FORMULA_REFERENCE_INVALID` | 400 | (**ADR 0072, next train**) A formula's `cellRef` names a table that does not exist or a formula may not read (an edge table, an engine table, a materialized query's result over a formula table), a column that does not exist or is an `Expression` column, or a key value no row can hold. |
+| `FORMULA_REFERENCE_NOT_PRIMARY_KEY` | 400 | (**ADR 0072, next train**) A `cellRef`'s key, after the shorthands are resolved against the formula's own row, is not exactly its table's full strict primary key; the message names the key. |
+| `FORMULA_CYCLE` | 400 | (**ADR 0072, next train**) The formulas would read each other in a cycle; the message names its members in order. |
+| `FORMULA_DEPTH_EXCEEDED` | 400 | (**ADR 0072, next train**) A chain of formulas, each reading the next, would be longer than 16; the message names it. |
+| `FORMULA_LIMIT_EXCEEDED` | 400 | (**ADR 0072, next train**) The database would hold more than 100 000 formula cells. Remove formulas, or keep inputs as plain values. |
+| `FORMULA_REFERENCE_NOT_READABLE` | 403 | (**ADR 0072, next train**) A formula reads a row its writer may not read (no read access to the table, a row outside the writer's row or partition conditions, or a row that does not exist and cannot be judged on its key); also a server write that set a formula with no caller to check. The message names the formula row and the reference, never whether the row exists; nothing was written. |
+| `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, next train**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
+| `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, next train**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
@@ -1964,48 +1964,69 @@ Insert rows into a table on a branch; they are written to the branch's own segme
 
 ---
 
-### Materialized value endpoints
+### Explain a formula cell
 
-(**BL-1434, next train**) A materialized value is a named, computed cell: a formula over rows of ordinary tables and other cells, kept current by the engine. Guide: [Materialized Values](../guides/materialized-values.md). Base path: `/api/databases/{db}/materialized-values`.
-
-| Method | Path | Success | Description |
-|--------|------|---------|-------------|
-| `POST` | `/api/databases/{db}/materialized-values` | `201` | Define one or many cells, **all or none**. At most 10 000 per request. |
-| `PUT` | `/api/databases/{db}/materialized-values/{model}/{name}` | `200` | Alter one cell's type and formula. |
-| `DELETE` | `/api/databases/{db}/materialized-values/{model}/{name}` | `204` | Delete one cell. |
-| `GET` | `/api/databases/{db}/materialized-values/{model}/{name}` | `200` | One cell's definition. |
-| `GET` | `/api/databases/{db}/materialized-values?model={model}` | `200` | The definitions of a model (all models when `model` is omitted), ordered by `(model, name)`, ordinal. |
-| `GET` | `/api/databases/{db}/materialized-values/{model}/{name}/explain` | `200` | A cell, its formula, the input rows it reads and the cells it reads and is read by. |
-
-**Who may call.** Only a **definer**. On a governed database (one linked to an auth database, or, on a server with a server auth database, one linked to none, which the server auth database governs (BL-1017)): a user holding `db_admin` on the database (a server user, such as the server admin, on a database the server auth database governs) or the database's own `mk_svc_` service key. A `db_operator`, a reader, a scoped key, an anon key and the server key `mk_srv_` get `403 INSUFFICIENT_PERMISSIONS` (a `ProtocolError`, code in `"code"`); a request with no credential is `401`. A database on a server with no auth at all is open, as every admin route is. Path segments are ordinal (case-exact) and percent-decoded once.
-
-**Define**, body:
+(**ADR 0072, next train**) `POST /api/databases/{db}/tables/{table}/explain` says why a [formula](../guides/formulas.md) cell has the
+value it has. It evaluates the cell **again now** and answers its formula, every reference with its resolved key and current value, the
+value or the reason it has none, the value the row stores, and the formula cells that read it. It writes nothing, so a replica answers it
+too. It needs read access to the table.
 
 ```json
-{ "definitions": [ { "model": "pnl", "name": "Revenue", "valueType": "Decimal(18,2)", "expression": { "type": "cellRef", "table": "inputs", "key": { "Field": { "type": "literal", "value": "Revenue" }, "Year": { "type": "literal", "value": 2026 } }, "column": "Value" } } ] }
+{ "key": { "dept": "Online", "line": "Margin", "year": 2028 }, "column": "amount" }
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model`, `name` | string | Yes | The cell's identity; non-empty, at most 200 characters each, no leading or trailing white space, no control characters. |
-| `valueType` | string | Yes | One scalar type in its exact spelling: `Bool`, `Byte`, `Int16`, `Int32`, `Int64`, `UInt16`, `UInt32`, `UInt64`, `Float32`, `Double`, `String`, `Guid`, `Date`, `Timestamp`, or `Decimal(p,s)` (no spaces; `1 <= p <= 18`, `0 <= s <= p`). |
-| `expression` | object | Yes | An [expression node](#expression-node-format). A definition may hold `literal`, `arithmetic`, `coalesce`, `call` and `cellRef`; not `colRef`, `param` or `conditional` (use the `if` call). |
+| `key` | object | Yes | The row's **full** primary key, column → value (typed as a `/query` filter value is). |
+| `column` | string | Yes | The driven column, or the `Expression` column that drives it. |
 
-`PUT` takes `{ "valueType", "expression" }` for the cell in the path. A definition response (`201` as `{ "definitions": [...] }`, `200` for one cell) is `{ model, name, valueType, expression, references: [{ table, key, column }], createdUtc, version }`; `explain` returns `{ cell, expression, inputs, reads, readBy, watermark }`, where `cell`, `reads` and `readBy` carry `{ model, name, version, valueType, computedAt, value, error }`, `inputs` are the cell's **own** table references, and every position is an "at least".
+**Response:** `200`
 
-All three mutating routes stamp `X-Aouda-Token` (the node's position after the change), so a client can [wait](#consistency-tokens-and-freshness) for the value its change produces, including an alter of the cell's `valueType`, which rewrites the stored value as the new type's text. Every change writes one audit row per cell to the governing auth database's `_audit_log`: `materialized_value_defined`, `materialized_value_altered`, `materialized_value_deleted`.
+```json
+{
+  "table": "pnl",
+  "key": { "dept": "Online", "line": "Margin", "year": 2028 },
+  "column": "amount",
+  "expressionColumn": "formula",
+  "kind": "formula",
+  "formula": { "type": "call", "fn": "round", "args": [ … ] },
+  "references": [
+    { "table": "pnl", "key": { "dept": "Online", "line": "Revenue", "year": 2028 }, "column": "amount",
+      "readable": true, "value": 0.00, "isFormulaCell": false, "error": null },
+    { "table": "pnl", "key": { "dept": "Online", "line": "EBIT", "year": 2028 }, "column": "amount",
+      "readable": true, "value": -830.00, "isFormulaCell": true, "error": null }
+  ],
+  "value": null,
+  "reason": "division by zero.",
+  "storedValue": null,
+  "readBy": [
+    { "table": "pnl", "key": { "dept": "Online", "line": "MarginGap", "year": 2028 }, "column": "amount" },
+    { "table": "pnl", "key": { "dept": "Online", "line": "Tax", "year": 2028 }, "column": "amount" }
+  ]
+}
+```
 
-**Refusals.** `400 INVALID_REQUEST` for a malformed body; the `MV_*` codes in the [error table](#error-codes); `403 SYSTEM_TABLE_WRITE_REFUSED` for an ordinary write or DDL on `_mv_definitions` or `_mv_values`. A replica refuses the three mutating routes with `503 READ_ONLY` (its write guard). A node that maintains no values and is not a replica (a branch, a server whose role is not resolved, a promoted node until BL-1441 is fixed) refuses them with `503 MV_NOT_MAINTAINED`.
+| Field | Description |
+|-------|-------------|
+| `table`, `key`, `column`, `expressionColumn` | The cell: its row's key, its driven column and the Expression column that drives it. |
+| `kind` | `formula` (the row carries a formula), `input` (its formula is null: `value` is the stored input, `references` is empty) or `noRow`. |
+| `formula` | The row's formula as a JSON object; `null` for an input or no row. |
+| `references` | Each cell the formula reads: `table`, the **resolved** `key` (the shorthands filled in from the row), `column`; `readable`; and, when readable, its current `value`, `isFormulaCell` and `error` (why it could not be read, else `null`). |
+| `value` | The value the formula computes now, as the driven column holds it; `null` when it has none. |
+| `reason` | Why there is no value — a division by zero, an overflow, a value the column cannot hold, a value a check refused (the one the last write met), a broken reference — or `null`. |
+| `storedValue` | The value the row stores now. |
+| `readBy` | The formula cells that read this one. |
 
-**DDL on a table a cell reads.** Drop or rename of the table, any change to its primary key (a key column, read or not, or a looser uniqueness), a drop, rename or type change of a read column, or a drop of a materialized query whose result a cell reads, on the table routes **and** `schema/apply`, is refused `409 MV_TABLE_REFERENCED` naming the cells (an apply records it as a failed entry in a `200`). `TRUNCATE` is allowed. The prefix `_mv_` is reserved: creating or renaming a table into it (any case) is refused.
+**What the caller sees** is what it may read, by the same rule as a `/query` of each table: a row it may not read answers exactly as a key
+with no row (`kind: "noRow"`); a reference to a row it may not read keeps its `table`, `key` and `column` with `readable: false`, and its
+`value`, `isFormulaCell` and `error` are `null`; readers it may not read are left out. The cell's own value is shown to whoever may read its row.
+`explain` takes no consistency token (`at_least` is not read) and stamps none: `value` is computed now, and `storedValue` may not yet show a
+write the caller just made.
 
-**Values are rows.** There is no route that writes or reads a value. An input is an ordinary write on your own table. A value is a row of `_mv_values` with the columns `model`, `name`, `valueType`, `value` (the type's canonical text, null for a null value or an error), `error` (null, or at most 1000 characters), `computedAtPosition` and `computedAtTerm`, read with `POST /api/databases/{db}/query` (also `/query/count`, a named query, a join side) filtered on `model` and `name`.
+**Refusals.** `400 INVALID_REQUEST` when `key` or `column` is missing, the key is not the table's full primary key or holds a value its
+column cannot, or `column` is neither an Expression column nor a column one drives; `404 TABLE_NOT_FOUND` / `DATABASE_NOT_FOUND`.
 
-**`waitFor`.** On a read of `_mv_values`, `at_least` + `waitMs` are judged by the **maintainer's progress**, not the node's position: the answer comes once every commit up to the token has been recomputed, and a commit that left the cell unchanged satisfies it. A wait that runs out is `409 TOKEN_UNSATISFIED` **whatever `onExceeded` says** (`fetchPrimary` is not `421`; `fail` answers at once). A replica answers a presented token `421 MV_TOKEN_REQUIRES_PRIMARY` (for a read preference that lets a replica serve; with the default `Primary` a replica answers `421 MISDIRECTED_REQUEST` first). A value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it, and a position is "at least".
-
-**Security by default.** On a governed database the first definition creates `_mv_values` and `_mv_definitions` as `auth-db-entitlement` tables on `model` (dimensions `mv_value_model` and `mv_definition_model`, data-plane access off): a definer reads every model, anyone else (the server key `mk_srv_` included) only the models they hold an entitlement for, and a caller with none is `403 AUTH_ENTITLEMENT_NOT_FOUND` in the [auth error shape](#auth-error-responses) (the code is in `"error"`). Grant a model with an entitlement on `mv_value_model` whose key is the model name (and on `mv_definition_model` for its formulas). A later definition never resets it. An open database gets plain tables.
-
-**Subscribing.** A cell is the ordinary `subscribe` on `_mv_values` with `filter` `{model eq, name eq}`, a model with `{model eq}`; see [WebSocket Streaming](#websocket-streaming-protocol).
+The SDKs: `ExplainAsync` (C#) and `table.explain(key, column)` (TypeScript).
 
 ---
 
@@ -2696,6 +2717,15 @@ Both are required: `"type": "Decimal"` without them is `400` — *A Decimal colu
 (Decimal(p,s), 1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* — and a precision above 18 is `400`
 *Decimal precision above 18 is not supported (got N).* A `Decimal(p,s)` partition key is refused.
 
+(**ADR 0072, next train**) **An `Expression` column** holds a [formula](../guides/formulas.md) per row and names the column it drives:
+`{ "name": "formula", "type": "Expression", "drives": "amount" }`. It is nullable whether or not `isNullable` says so (a row with no formula
+is an input), and the response, the column listing and `…/schema` show it with `"type": "Expression"` and `drives`. The table must have a
+`Strict` primary key and be an ordinary table; the Expression column is not a key, partition or cluster column and has no default,
+`unique`, reference, check or derivation; the driven column is a nullable scalar of the same table that is not a key, partition or cluster
+column, not derived, identity, server time or auto-increment, not a vector or an array, and driven by no other Expression column. A
+violation is `400 FORMULA_COLUMN_INVALID` naming the rule. A query answers the column's type as `"Expression"` and each row's formula as a
+JSON object (`null` for an input row).
+
 (**Horizon, 0.5.0**) `policy.retention` — `{ "keep": "90d" }`, a whole number of minutes, hours, days or weeks (`m` / `h` /
 `d` / `w`) — declares [retention](../guides/retention.md): rows whose first cluster column is older than the server's clock minus
 `keep` are not returned, not written (counted as `expiredRows`) and dropped by whole segments. The table's first cluster column
@@ -2742,8 +2772,7 @@ A table name:
 - is not empty and not whitespace only, and is not `.` or `..`;
 - contains none of `/ \ : * ? " < > |`;
 - does not start or end with a period (`.`) or a space;
-- does not start with `__mqbuild_`, which is reserved for the engine's own materialized-query build tables;
-- does not start with `_mv_`, which is reserved for the engine's materialized-values tables (ADR 0070).
+- does not start with `__mqbuild_`, which is reserved for the engine's own materialized-query build tables.
 
 Anything else (letters, digits, `_`, `-`, other Unicode) is allowed. Matching is exact (`orders` and `Orders` are two tables). A
 name that breaks the rule is `400 INVALID_REQUEST` and the message names the rule it broke, for example *Table name cannot start or
@@ -2843,6 +2872,11 @@ Add a column to a table.
 `"precision"` / `"scale"` beside `"type": "Decimal"` add a `Decimal(p,s)` column, as on create (**ColumnarCore S13,
 0.2.0**); (**LoadSpeed S13, 0.4.0**) they are required, and a `Decimal` without them is refused `400` as on create. A
 column cannot be changed to or from `Decimal(p,s)`, or to another precision or scale: add a new column and copy.
+
+(**ADR 0072, next train**) `"type": "Expression"` with `"drives": "<column>"` adds an [Expression column](#post-apidatabasesdbtables), by the
+same rules as on create. No column becomes or stops being an Expression column, and an Expression column does not change what it drives:
+add a new one and drop the old. Dropping an Expression column leaves its driven column's values as inputs; a driven column cannot be
+dropped while it is driven.
 
 **Response:** `201 Created` with column detail
 
@@ -3268,7 +3302,7 @@ Each value in `setExpr` is an expression node:
 { "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> }, ... }, "column": "c" }
 ```
 
-(**BL-1434, next train**) `cellRef` reads one cell: a column of the row of `table` whose full strict primary key is `key` (literal values only, one per key column). It is valid only in a [materialized value](#materialized-value-endpoints) definition; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, and a malformed one is `400 EXPR_CELLREF_INVALID`. (**BL-1434, next train**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Materialized Values](../guides/materialized-values.md#the-thirteen-functions)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
+(**ADR 0072, next train**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not; in a formula, a malformed one is `400 FORMULA_REFERENCE_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, next train**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
 **Extended response when `returning` is set:**
 
 ```json
@@ -4743,6 +4777,7 @@ and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replica
 | `Int64[]` (**BL-035, 0.9.0**) | One array of 64-bit integers per row. JSON: an array of integers; `long[]`, `BigInt64Array` |
 | `Byte[]` (**BL-035, 0.9.0**) | One byte string per row. JSON: **one base64 string**, not an array of numbers; `byte[]`, `Uint8Array` |
 | `String[]` (**BL-035, 0.9.0**) | One array of strings per row (an element is never null, and must be valid Unicode). JSON: an array of strings; `string[]`, `string[]` |
+| `Expression` with `drives` (**ADR 0072, next train**) | A [formula](../guides/formulas.md) per row, driving another column of the same table; stored as the formula's text. JSON: the formula's object (`null` for an input row); in a column-batch frame, its canonical text. The SDKs write a `Formula` and read either form (`Formula.FromValue` / `Formula.fromValue`). See [create table](#post-apidatabasesdbtables) |
 
 (**BL-035, 0.9.0**) The six array names are matched exactly (`"double[]"`, `"Double []"`, `"Double[][]"`, `"DoubleArray"` and the
 type's number are refused). An array value holds at most **65,536 elements** and **1,048,576 bytes of elements** (so a `Byte[]` is at
@@ -4908,18 +4943,21 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 }
 ```
 
-(**BL-1434, next train**) **Materialized-value example.** A cell is a subscribe on `_mv_values` filtered on `model` and `name`; a whole model drops the `name` clause:
+(**ADR 0072, next train**) **A formula table** is subscribed to like any table, filtered on its own columns:
 
 ```json
 {
   "type": "subscribe",
-  "id": "sub-tax-1",
-  "target": "_mv_values",
-  "filter": { "and": [ {"column": "model", "op": "eq", "value": "pnl"}, {"column": "name", "op": "eq", "value": "Tax"} ] }
+  "id": "retail-2026",
+  "target": "pnl",
+  "filter": { "and": [ {"column": "dept", "op": "eq", "value": "Retail"}, {"column": "year", "op": "eq", "value": 2026} ] }
 }
 ```
 
-A `change` row carries `valueType`, `value` (the canonical text), `error`, `computedAtPosition` and `computedAtTerm`; an update carries `prev`. A settle sends each changed cell once at its final value, an unchanged recompute sends nothing, and events are ordered by `version` within one subscription only. `at_least`, `wait_ms` and `on_exceeded` are judged by the maintainer's progress as on a read. A subscriber with no entitlement on the model is refused with an `error` message, code `AUTH_ENTITLEMENT_NOT_FOUND`; a deleted entitlement ends the subscription with `PERMISSION_REVOKED`. See [Materialized Values](../guides/materialized-values.md#live-subscribe-to-a-cell-or-a-model).
+After an input edit the subscription receives the input's `change` and then each formula row that changed, once, at its final value; an
+unchanged recompute sends nothing. An `Expression` column's value is the formula's JSON object in a snapshot page's `data` and in a
+change's `row` and `prev` (a map in MessagePack); `column_types` does not name it. `at_least`, `wait_ms` and `on_exceeded` are judged by the
+formula maintainer's progress, as on a read. See [Formulas](../guides/formulas.md#live-subscriptions).
 
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
 
@@ -6118,4 +6156,4 @@ Operator abort of an in-flight session. The beginning credential, or a database 
 | 2.16 | 0.9.0 (Grants) | **BL-1227 (breaking on the wire):** what a credential sees on a table with partition- or row-level security is decided by access grants, `all-partitions` and `all-rows` (scope: a table or the database; level `read`, `write`, `admin`), not by key kind. An app service key and a user assigned `db_admin` hold both by implication (a key linked to such a user, or presenting its token, acts as the user); no other credential does. Role permissions take `resourceType` `all-partitions` / `all-rows` (`resourceName` `*` or a table, `actions` one level); new `400` codes `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`, and `AUTH_GRANT_INVALID` widened. New `GET …/auth/admin/users/{id}/access-grants`. `crossPartitionAccess` is a cost waiver only (it waives `PARTITION_FILTER_REQUIRED` and never widens what a credential sees), per call on named-query execute and each batch item, and `cross_partition_access` on a WebSocket / long-poll `subscribe`; the data-plane listener ignores it. The `db_admin`-plus-flag read of every partition is gone, and so are the cross-partition rate limiter, its `429` and the `query_cross_partition` audit row. Every use of a grant is audited as `access_grant_used` (replaces `service_key_pls_bypass`). Bulk load admits a caller that holds, at `write`, the grant for each restriction of a table it locks, at `:begin` and every `:append`. Realtime checks roles as HTTP does (subscribe `read`, `stream_open` `write`, `PERMISSION_REVOKED` on a role change); a server-auth session is checked at the handshake; a join side is scoped as a direct read. Policy inspect identities take `accessGrants`; a sample needs the grants (`sampleReason` `caller_not_granted`). |
 | 2.17 | 0.9.0 (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal and vector search on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused the same way (**BL-1161, BL-1298, 0.9.0**). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/access-grants` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
 | 2.18 | 0.9.0 (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |
-| 2.19 | Next train (BL-1434) | **Materialized values (additive on the wire):** the [materialized value endpoints](#materialized-value-endpoints) (six routes under `/api/databases/{db}/materialized-values`, definer-only); the `cellRef` expression node and thirteen new functions; the tables `_mv_definitions` and `_mv_values` and the write guard `SYSTEM_TABLE_WRITE_REFUSED`; `waitFor` on `_mv_values` judged by the maintainer's progress; new codes: eleven `MV_*` (`MV_TOKEN_REQUIRES_PRIMARY` is 421, `MV_NOT_MAINTAINED` 503), `EXPR_CELLREF_NOT_ALLOWED`, `EXPR_CELLREF_INVALID`. `X-Aouda-Protocol-Version` stays `2`. A server of an earlier train has none of these routes (`404`). |
+| 2.19 | Next train (ADR 0072) | **Formulas (additive on the wire):** the column type `Expression` with `drives` (create table, add column, the column listing, `…/schema`, schema documents); a formula is the column's value, a JSON object in JSON rows (the canonical text in column-batch frames); the `cellRef` expression node (valid only in a formula, with its shorthands) and thirteen new functions; [`POST …/tables/{table}/explain`](#explain-a-formula-cell); a token read of a table with an `Expression` column judged by the formula maintainer's progress; new codes `FORMULA_COLUMN_INVALID`, `FORMULA_INVALID`, `FORMULA_REFERENCE_INVALID`, `FORMULA_REFERENCE_NOT_PRIMARY_KEY`, `FORMULA_CYCLE`, `FORMULA_DEPTH_EXCEEDED`, `FORMULA_LIMIT_EXCEEDED` (400), `FORMULA_REFERENCE_NOT_READABLE` (403), `FORMULA_VALUE_WRITE_REFUSED`, `FORMULA_TABLE_REFERENCED` (409), `FORMULA_TOKEN_REQUIRES_PRIMARY` (421), `FORMULA_NOT_MAINTAINED` (503), `EXPR_CELLREF_NOT_ALLOWED`, `EXPR_CELLREF_INVALID`. `X-Aouda-Protocol-Version` stays `2`. A server of an earlier train refuses the `Expression` type and has no `explain` route (`404`). |

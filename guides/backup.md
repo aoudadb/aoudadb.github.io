@@ -108,6 +108,12 @@ Zero-config reality:
 - Branches: branch engines open at durability `unlogged` (no WAL) and sit outside backup/PITR.
 - Sub-commit (row-level) PITR — the finest boundary is a transaction commit.
 
+**Known issue (BL-1485, open).** A point-in-time restore whose replay **creates a table** — one that did not exist at the backup — can
+show **both versions** of a row of that table that was updated before the target time. Tables that existed at the backup are not
+affected, nor is an exact restore. (**ADR 0072, next train**) On a [formula table](formulas.md) the duplicate is a second formula for one
+cell, and the database then refuses to open rather than pick one. Until this is fixed, take a backup after creating a table you may need
+to restore to a point in time, or restore exactly.
+
 ## 2.5 Phase coverage matrix
 
 | Phase | Delivered | Evidence |

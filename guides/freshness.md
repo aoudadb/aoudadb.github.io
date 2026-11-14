@@ -70,9 +70,26 @@ Default read preference remains **`Primary`**. Replica reads are *safe when you 
 
 ---
 
-## Materialized values (**BL-1434, next train**)
+## Formula tables (**ADR 0072, next train**) {#formula-tables}
 
-A read of `_mv_values` with a token is judged by the **maintainer's progress**, not by the node's position: it returns once every commit up to the token has been recomputed, and a commit that left the cell unchanged satisfies it. A wait that runs out is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says, and a replica answers `421 MV_TOKEN_REQUIRES_PRIMARY`. A value is eventually consistent with its inputs: there is no atomic read of an input and the value derived from it. See [Materialized Values](materialized-values.md#eventual-consistency-and-waitfor).
+A table with an `Expression` column holds [formulas](formulas.md) whose values the database computes **after** the commit that changed
+what they read. A read or a subscribe of such a table with a token is therefore judged by the **formula maintainer's progress**, not by the
+node's position: it is answered once every commit up to the token has been recomputed, and a commit that left a value unchanged satisfies
+it. This holds for every read of the table, input rows included — a token from an input edit waits until the formulas over it have caught
+up, which is what "read your own write" means for such a table. A wait that runs out is `409 TOKEN_UNSATISFIED`, never an older value.
+
+- A token read of a formula table on a **replica** is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`: a replica computes no formulas and cannot
+  judge the token. A read without a token is served there from the replicated rows.
+- A node whose formula maintainer is not running (a branch; a promoted node until BL-1441 is fixed) refuses the wait
+  `503 FORMULA_NOT_MAINTAINED`.
+- While a bulk load into a formula table is open, no formula in the database is recomputed, so a token read of any formula table there
+  answers `409 TOKEN_UNSATISFIED` until the load commits or is aborted (BL-1497).
+- A token read joining a formula table and a materialized query's result is covered as far as both are, and waits for whichever is behind. A
+  materialized query **built over** a formula table is not yet judged by the formula maintainer (BL-1486).
+- A change event's token on a formula table never claims an input its values do not reflect; tokens are not ordered across events, so keep
+  the highest. A notice's token (`horizon`, `range_delete`) is not a cover.
+
+There is no atomic read of an input and the values computed from it. See [Formulas](formulas.md#when-values-change-eventual-consistency-and-tokens).
 
 ## Managed regional replica
 
