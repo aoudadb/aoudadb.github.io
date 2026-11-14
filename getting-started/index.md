@@ -109,7 +109,7 @@ docker compose up
 - Aouda at `http://localhost:5000`
 - Aouda Studio at `http://localhost:3000`
 
-The compose file needs a first admin: `AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). Without either, the server container exits at start with a message naming both. See [Docker](../deployment/docker.md#compose-and-the-first-admin).
+The compose file takes one declaration: a server key, `AOUDA_SERVER_KEY=mk_srv_<64 hex> docker compose up` (no human admin needed, **BL-1462, next train**), a first admin, `AOUDA_ROOT_EMAIL=you@example.com AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. See [Docker](../deployment/docker.md#compose).
 
 ### 4. Aouda.Setup — interactive installer (Windows + Linux)
 
@@ -599,7 +599,7 @@ docker compose up
 - **Aouda** at `http://localhost:5000`
 - **Aouda Studio** at `http://localhost:3000`
 
-The compose file needs a first admin: `AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). Without either, the server container exits at start with a message naming both. See [Docker](../deployment/docker.md#compose-and-the-first-admin).
+The compose file takes one declaration: a server key, `AOUDA_SERVER_KEY=mk_srv_<64 hex> docker compose up` (no human admin needed, **BL-1462, next train**), a first admin, `AOUDA_ROOT_EMAIL=you@example.com AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. See [Docker](../deployment/docker.md#compose).
 
 Studio connects to Aouda automatically. No additional configuration needed — open `http://localhost:3000` to browse your databases.
 
@@ -1464,9 +1464,18 @@ Auth state is stored in an internal database called `_serverauth`. This database
 
 ### Step 1: Bootstrap the First Admin
 
-When the server starts with no admin accounts, it enters **setup mode**. In setup mode, only the bootstrap endpoint is available, and only from localhost.
+When the server starts with no admin accounts **and nothing declared**, it enters **setup mode**. In setup mode, only the bootstrap endpoint is available, and only from localhost.
 
-Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`.
+(**BL-1462, next train**) Setup mode exists only for a data directory that has **never been set up** (no server auth database)
+and nothing is declared. Once set up, a server never re-enters it: with no user, an active server key (minted or once
+declared) operates it, and with no user, no active key and nothing declared the start is refused (`SERVER_HAS_NO_OPERATOR`,
+naming the ways out). A declared server key
+(`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the systemd credential `aouda-server-key`, or a `server_admin` entry in the
+identities file) means no setup mode: the server auth database is created with no user and the key operates the server from
+the first start, with no human admin. A declared `Aouda:Auth:RootUser` creates the first admin at start (Option B below). Setup
+mode is the interactive first run for a server that declares neither.
+
+Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`. The health probes answer in setup mode too: `/health` and `/startup` are `200`, `/ready` is `503` with `setup_required` (**BL-1462, next train**; see [the probes](../reference/http-api.md#the-probes-one-meaning-each)).
 
 You can inspect first-run state in a machine-readable way:
 
@@ -1485,6 +1494,10 @@ Response while setup is required:
   "nextStep": "POST /api/auth/setup"
 }
 ```
+
+The three flags follow setup mode alone (**BL-1462, next train**): a server with a declared server key and no user answers
+`"setupMode": false`, `"serverAuthConfigured": true`, `"adminBootstrapRequired": false`. Before, "no user" alone made it answer
+`setupMode: true` and point at `POST /api/auth/setup`, which that server refuses with `403 ALREADY_CONFIGURED`.
 
 For server setup, prefer the retryable initializer:
 
@@ -1563,7 +1576,10 @@ printf '%s' "$PASSWORD" | aouda create-admin \
   --data ./data
 ```
 
-This creates the admin directly in the data directory without starting the server. For binary-only or air-gapped installs, the native server artifact also supports the same local bootstrap operation:
+This creates the admin directly in the data directory without starting the server. ⚠️ **Only with the server stopped**
+(**BL-1462, next train**): a running server holds its data directory, and `create-admin` then exits `1` naming the remedy
+(`POST /api/auth/setup` from the server's host, or stop the server). Before, it wrote behind the running server's back and the
+server stayed in setup mode until a restart. For binary-only or air-gapped installs, the native server artifact also supports the same local bootstrap operation:
 
 ```bash
 printf '%s' "$PASSWORD" | ./Aouda.Server create-admin \
@@ -2127,6 +2143,10 @@ world-readable at `/proc/<pid>/cmdline` for the life of the process, and on ever
 kept by shell history, by process-launch audit rules, by CI logs and by an agent's transcript. None
 of that can be un-leaked, which is why the option was removed rather than deprecated — a deprecation
 warning is printed *after* the leak has already happened.
+
+⚠️ `create-admin` runs against a **stopped** server's data directory: next to a running server it exits `1` and names the
+remedy (`POST /api/auth/setup` from the server's host, or stop the server) (**BL-1462, next train**). A service you declare a
+server key for needs no admin at all.
 
 **Three supported paths.**
 

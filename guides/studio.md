@@ -356,6 +356,8 @@ Named queries and named mutations live in `aouda.schema.json`. Identity is the *
 | Catalog | `schema.export()` — name, deprecated, table, projection, cost `1+joinCount` |
 | Test | Name-only `namedQueries.execute` / `batch` (cap 32) / `namedMutations.execute`. Deprecation is a warning, not a failure. Mutations always run as **invoker** (no definer / `runAs`). |
 | Author | Structured wizard (table, projection, AND where, joins ≤ 3, required limit cap). Identifier positions are dropdowns — parameters cannot name tables, columns, or operators. Persist via export → patch map → diff → apply. |
+| Edit | Starts from the stored definition and writes back every member you do not change exactly as stored; saving without edits sends the stored definition unchanged. A member the wizard has no field for (`count`, `aggregates`, `groupBy`, `perKey`, `orderByChoices`, `freshness`, `batchParam`), or cannot show exactly (a where with `or` / `groups` / `ignoreCase` / `whenParamPresent`, a join's `where` or multi-column keys, a nested expression, more than one sort column, a parameter's `serverTime`), is listed under **Kept exactly as stored** with its JSON and is read-only there: change it in the schema file and apply it. (**BL-1470, next train**) |
+| Parameter **required** | Ticked by default, as the server reads an omitted `required` as `true`; unticking writes `"required": false`. (**BL-1470, next train**) |
 | Generate Types | Optional Args/Row types. Execute and subscribe use the schema name as a string. |
 
 SQL-ish authoring (ADR 0040 D-24) is not in Studio. Full contract: [Named queries](named-queries.md).
