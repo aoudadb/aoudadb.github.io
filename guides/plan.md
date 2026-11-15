@@ -206,6 +206,14 @@ read. What cannot be checked is skipped: an unreadable secret, the shape or pref
 
 The plan says what it skipped: one `info` finding, `SECRET_NOT_READ`, carries the **count** of references it did not read (never a variable name or a path), and `notChecked` says so too.
 
+**The server key's file is a path in the container, not on the runner.** A compose file declares `Aouda:Auth:Bootstrap:ServerKeyFile=/run/secrets/aouda_server_key`, and that path does not exist on a CI runner. `aouda plan` takes the same settings as `aouda start` on its command line, so point the setting at a file the runner *has* for the plan only, and the plan sees the same server key the container will:
+
+```bash
+aouda plan --Aouda:Auth:Bootstrap:ServerKeyFile=./ci/server-key.txt --Aouda:Auth:Keys:File=deploy/aouda.identities.json
+```
+
+That is how a conflict such as `KEY_SECRET_SHARED` between the server key and an identities entry is found before the deploy. The file holds one `mk_srv_` key (one trailing newline is removed). Do not export the key as `Aouda__Auth__Bootstrap__ServerKey` to get the same effect: that makes a second source beside `ServerKeyFile` and the plan reports `SERVER_KEY_SOURCES_CONFLICT`. With `--skip-secrets` the file is not read at all.
+
 ## Recipes
 
 **CI, before a deploy** — the identities file and the schema files are in the repository, the secrets are not. One database is one group of arguments; a deployment with several repeats the group, or keeps them in a configuration file ([A CI job](#a-ci-job-aouda-plan-on-every-pull-request) has both):
