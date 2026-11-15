@@ -15,6 +15,7 @@ Aouda runs from **one binary**. `aouda` and `Aouda.Server` are two names for the
 | **Windows Service** | On-premise Windows servers | [Windows Service](windows.md) |
 | **Docker** | Containerised environments, single-node production | [Docker](docker.md) |
 | **Docker Compose** | Server + Studio together, local multi-service setup | [Docker](docker.md#shutdown-grace) |
+| **A declared, multi-service deployment** (databases, keys, roles and schema files as configuration; wipe-and-start; `aouda reload`) | Compose or Kubernetes, many services, no seed script | [Declare a deployment](../guides/declare-a-deployment.md) (**next train**) |
 | **Kubernetes / Helm** | Production clusters, multi-node replication, managed rollouts | [Kubernetes and Helm](kubernetes.md) |
 
 ---
@@ -55,7 +56,7 @@ Worked example and the slow-open / `OpenKilled` recovery command: [Server config
 
 ## Whatever you deploy
 
-- **Configuration:** [Server configuration](../guides/server-configuration.md) — precedence among install bootstrap, environment variables, CLI flags, optional appsettings, the runtime API, and what survives a restart.
+- **Configuration:** [Server configuration](../guides/server-configuration.md) — precedence among install bootstrap, environment variables, CLI flags, optional appsettings, the runtime API, and what survives a restart. In a container, mount the [declaration file](../guides/server-configuration.md#declaration-file) (`/etc/aouda/aouda.json`) so `aouda reload` can change databases, schema and roles without a restart; [what a reload can change](../guides/server-configuration.md#reload-or-restart).
 - **TLS:** Aouda does not terminate it. If an Ingress, a `LoadBalancer` Service or any other reverse proxy sits in front, configure trusted proxies or **per-IP rate limits, lockout attribution and audit-log client IPs will all be wrong** — [Behind a reverse proxy](reverse-proxy.md).
 - **Probes:** use **`/ready`**, never `/health`. `/health` answers `200` whenever the process is running, including while every write is failing.
 - **Ask the server what it is doing:** `aouda status` and `aouda doctor`, both with `--output json`. `doctor` reports findings with a remedy attached, and is meant to be pasted into a support thread.

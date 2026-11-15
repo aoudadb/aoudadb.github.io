@@ -413,6 +413,12 @@ directory and a plain start bring back the same set; only schema and data need r
 | `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, 0.11.0**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
 | `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, 0.11.0**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
+**Where the entries live** (**next train**). The file `/etc/aouda/aouda.json` (on Windows `%ProgramData%\Aouda\aouda.json`) is read when it exists, with no
+setting; `AOUDA_CONFIG_FILE=/path` or `aouda start --config /path` names another. It has the shape of `appsettings.json`, sits above `appsettings*.json` and below environment variables
+and the command line, and is the only place `Aouda:Databases` can be changed by `aouda reload`: entries given by environment variables or the command line are fixed for the life of the process
+(`SOURCE_NOT_RELOADABLE`). Missing (when named), empty, a directory or malformed is `CONFIGURATION_INVALID`, exit `78`; unreadable is exit `1`. An empty file is an error: `{}` declares nothing.
+[Server configuration §4a](server-configuration.md#declaration-file), and the [reload / restart table](server-configuration.md#reload-or-restart).
+
 ```json
 "Databases": {
   "derive_auth": { "Kind": "auth" },

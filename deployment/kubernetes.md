@@ -70,6 +70,55 @@ The password goes on standard input, never on curl's command line.
 
 `kubectl exec ... aouda create-admin` refuses while the server runs in the pod: the server holds the data directory.
 
+## Declaring databases, keys and schema files (**next train**) {#declaring-databases-keys-and-schema-files}
+
+Before this release the chart could declare nothing beyond `auth.serverKeySecret`: it had no way to add an environment variable, a volume or a mount to the Aouda pods, so the
+declarative flow ([Declare a deployment](../guides/declare-a-deployment.md)) did not work on Kubernetes. Six values, all empty by default, change that. They apply to the **data-node
+StatefulSet** only (not the witness, not Studio):
+
+| Value | What it is |
+|---|---|
+| `declaration.config` | An object rendered as JSON into a ConfigMap named `<fullname>-declaration` and mounted **read-only at `/etc/aouda`** as a directory, so the server reads `/etc/aouda/aouda.json` with no setting. Empty = no ConfigMap and no mount. Its shape is `appsettings.json`: a top-level `Aouda` object |
+| `declaration.restartOnChange` | Default `false`. `true` adds a checksum annotation to the pod template, so a changed `declaration.config` **rolls the pods** instead of waiting for a reload |
+| `extraEnv` | Container `env` entries (`name` / `value`, or `valueFrom`: a value from a Secret through `secretKeyRef`) |
+| `extraEnvFrom` | Container `envFrom` entries (a ConfigMap or Secret whose keys become variables) |
+| `extraVolumes`, `extraVolumeMounts` | Pod volumes and container volume mounts: the Secret or ConfigMap that holds the identities file, the schema files and the key files |
+
+```yaml
+declaration:
+  restartOnChange: false
+  config:
+    Aouda:
+      Auth: { Keys: { File: /etc/aouda-files/identities.json } }
+      Databases:
+        orders: { SchemaFile: /etc/aouda-files/orders.schema.json }
+extraVolumes:
+  - name: declaration-files
+    secret: { secretName: aouda-declaration }
+extraVolumeMounts:
+  - name: declaration-files
+    mountPath: /etc/aouda-files
+    readOnly: true
+```
+
+Create the Secret from the files (the key files go in it too, including `server_key`, the server key that `aouda reload` needs; the identities file names them by their mounted path):
+
+```bash
+kubectl create secret generic aouda-declaration -n aouda \
+  --from-file=identities.json --from-file=orders.schema.json \
+  --from-file=orders_service_key --from-file=feeder_key --from-file=server_key
+```
+
+Rules that follow from how the chart mounts things:
+
+- **Mount your other files somewhere other than `/etc/aouda`.** When `declaration.config` is set, that directory is the ConfigMap's; anything else mounted there conflicts. The example uses `/etc/aouda-files`.
+- **Never put a secret in `declaration.config`.** It is a ConfigMap, readable by anything that can read ConfigMaps in the namespace. A key, a password or a hash-less secret goes in a Secret mounted through `extraVolumes`, and the identities file names it as `{ "file": "/etc/aouda-files/feeder_key" }`; or pass a value through `extraEnv` with `valueFrom.secretKeyRef`.
+- **The directory is mounted, not one file (no `subPath`)**, deliberately: a `subPath` mount never sees a ConfigMap update, so a reload could not either.
+- **After `helm upgrade` the ConfigMap reaches the running pods in about a minute** (the kubelet's sync), and nothing watches it: run `aouda reload` once it has arrived (`kubectl exec -n aouda aouda-0 -- aouda reload --server http://localhost:5000 --key-file /etc/aouda-files/server_key`, with the server key in the mounted Secret). With `restartOnChange: true` the pods roll instead; a changed Secret never rolls them by itself.
+- A setting that needs a restart (the port, memory) is reported by the reload as `restartRequired`: [the table](../guides/server-configuration.md#reload-or-restart).
+- Declaring `Aouda:Databases` through `extraEnv` works, but a database declared there is **fixed for the life of the pod**: a reload reports `SOURCE_NOT_RELOADABLE` and `aouda plan` says `SOURCE_FIXED_AT_START` (info). Declare them in `declaration.config`.
+- The server key still comes from `auth.serverKeySecret` (or a `server_admin` entry in the identities file); see the first-start section above.
+
 ## Upgrade
 
 ```bash
