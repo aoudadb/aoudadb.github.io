@@ -234,13 +234,19 @@ One file per key. The shape rule is the prefix of the kind, then at least 32 cha
 is the generator (there is no `aouda keys generate`).
 
 ```bash
-mkdir -p secrets && umask 077
+mkdir -p secrets && chmod 700 secrets && umask 077
 printf 'mk_srv_%s' "$(openssl rand -hex 32)" > secrets/aouda_server_key
 printf 'mk_svc_%s' "$(openssl rand -hex 32)" > secrets/deposit_service_key
 printf 'mk_svc_%s' "$(openssl rand -hex 32)" > secrets/ledger_service_key
 printf 'mk_pub_%s' "$(openssl rand -hex 32)" > secrets/deposit_public_key
 printf 'mk_scp_%s' "$(openssl rand -hex 32)" > secrets/tullett_feeder_key
+chmod 0444 secrets/*        # see below: the container's user is not you
 ```
+
+**The container reads these files as uid 1654, not as you.** Compose bind-mounts a `file:` secret with the host file's owner and mode (tested with
+Compose 2.40: a `0600` file owned by uid 1000 showed up in the container as `-rw------- 1000 1000` and `cat` failed with `Permission denied`). Left at
+`0600`, every secret is `SECRET_UNREADABLE` at start (exit `1`, a restart loop). The `chmod 0444` makes the file readable by the container; the `700`
+directory keeps every other user of the host out.
 
 | Kind | Prefix |
 |---|---|

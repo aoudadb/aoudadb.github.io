@@ -73,7 +73,7 @@ The password goes on standard input, never on curl's command line.
 ## Declaring databases, keys and schema files (**next train**) {#declaring-databases-keys-and-schema-files}
 
 Before this release the chart could declare nothing beyond `auth.serverKeySecret`: it had no way to add an environment variable, a volume or a mount to the Aouda pods, so the
-declarative flow ([Declare a deployment](../guides/declare-a-deployment.md)) did not work on Kubernetes. Five values, all empty by default, change that. They apply to the **data-node
+declarative flow ([Declare a deployment](../guides/declare-a-deployment.md)) did not work on Kubernetes. Six values, all empty by default, change that. They apply to the **data-node
 StatefulSet** only (not the witness, not Studio):
 
 | Value | What it is |
@@ -101,12 +101,12 @@ extraVolumeMounts:
     readOnly: true
 ```
 
-Create the Secret from the files (the key files go in it too, and the identities file names them by their mounted path):
+Create the Secret from the files (the key files go in it too, including `server_key`, the server key that `aouda reload` needs; the identities file names them by their mounted path):
 
 ```bash
 kubectl create secret generic aouda-declaration -n aouda \
   --from-file=identities.json --from-file=orders.schema.json \
-  --from-file=orders_service_key --from-file=feeder_key
+  --from-file=orders_service_key --from-file=feeder_key --from-file=server_key
 ```
 
 Rules that follow from how the chart mounts things:

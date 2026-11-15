@@ -27,7 +27,7 @@ or the file `AOUDA_CONFIG_FILE` or `--config PATH` names (the switch wins). `aou
 would read. A named file that is missing, empty, a directory or not valid JSON is the error `CONFIGURATION_INVALID`; the plan's exit status is `1` (the start's is `78`). The first line of the
 output names it (`(environment Production, config file <path>)`), or says `config file none` when no file was read.
 
-When `Aouda:Databases` or the identities file's path comes from environment variables or the command line, the plan adds the **info** finding `SOURCE_FIXED_AT_START`: a later `aouda reload` will
+(**next train**) When `Aouda:Databases` or the identities file's path comes from environment variables or the command line, the plan adds the **info** finding `SOURCE_FIXED_AT_START`: a later `aouda reload` will
 not see a change to it, only a restart will. It never changes the exit status and is not a warning, because deploying by restart is legitimate; the fix, if you want reloads, is to move the setting into the declaration file.
 
 ## What it checks
