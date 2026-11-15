@@ -791,7 +791,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `Applied` | Change was successfully executed against the catalog. |
 | `Skipped` | Change was skipped — most commonly because `AllowDestructive` is `false` and the change is destructive. Also skipped for `ReplicationFactor`-only durability changes (not yet representable in the engine policy). |
 | `Failed` | Change execution threw an exception. The apply continues to the next change (continue-on-error). The `Reason` field on `ApplyResultEntry` contains the exception message. |
-| `Planned` | Dry-run mode: the change would have been executed but was not. A dry run (`DryRun = true`) gives every entry `Planned`, except a change the apply refuses whatever the table's rows are, which it reports `Failed` with the apply's own reason: an invalid authorization mode, and (**BL-1427, next train**) an added array, server-time or identity column that is not nullable. A refusal that depends on row values (a `NOT NULL` column on a table with rows, a `unique` flag on duplicates) is not checked by a dry run. |
+| `Planned` | Dry-run mode: the change would have been executed but was not. A dry run (`DryRun = true`) gives every entry `Planned`, except a change the apply refuses whatever the table's rows are, which it reports `Failed` with the apply's own reason: an invalid authorization mode, and (**BL-1427, 0.14.0**) an added array, server-time or identity column that is not nullable. A refusal that depends on row values (a `NOT NULL` column on a table with rows, a `unique` flag on duplicates) is not checked by a dry run. |
 
 #### SchemaChangeType
 
@@ -905,7 +905,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 This section documents every field available in `aouda.schema.json` by type. All fields are optional except `type` on `ColumnDefinition`.
 
-**Only these fields, spelled exactly** (**BL-1460, next train**). A member that is not listed here (a table has no `description`; a
+**Only these fields, spelled exactly** (**BL-1460, 0.14.0**). A member that is not listed here (a table has no `description`; a
 materialized query has no `authMode`), or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
 `aouda plan`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
 pointer and the member meant. It used to be dropped without a word. The same holds inside named queries (`where`, `joins`, `orderBy`,
@@ -914,7 +914,7 @@ members, for an editor's completion and squiggles.
 
 A rule a table breaks on its own (an authorization mode without its resolver or column, an upper-case `permissionDimension`,
 partition-level security without a partition key, …) refuses the **whole** document at `schema apply` / `diff` with `400
-INVALID_REQUEST`, nothing applied (**BL-1460, next train**); the notes below that say "schema apply records the change `Failed`"
+INVALID_REQUEST`, nothing applied (**BL-1460, 0.14.0**); the notes below that say "schema apply records the change `Failed`"
 describe the behaviour before that.
 
 #### SchemaDocument (root)
@@ -933,7 +933,7 @@ describe the behaviour before that.
 |---|---|---|---|---|
 | `columns` | `columns` | `object` | None | Map of column name → `ColumnDefinition`. Required when creating a table. |
 | `partitionKey` | `partitionKey` | `PartitionKeyEntry[]` | None | Ordered list of partition key columns. Omit for non-partitioned tables. |
-| `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. Each must be a column of this table: `Cluster column 'nope' in table 'orders' is not a column of the table.` (**BL-1460, next train**; it was dropped). |
+| `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. Each must be a column of this table: `Cluster column 'nope' in table 'orders' is not a column of the table.` (**BL-1460, 0.14.0**; it was dropped). |
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, 0.6.0**) and replication settings for this table. |
 | `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
@@ -959,11 +959,11 @@ describe the behaviour before that.
 | `derived` | `derived` | object | None | Write-time compute: a `ScalarExprNode` **or** `{ "identity": "subject" }` (P43). Identity columns may be PK / partition key / unique. They cannot be named-mutation `values` / `set` targets. User JWT omit stamps; user JWT supply → `TRANSFORM_DERIVED_READONLY`; service omit → `IDENTITY_STAMP_REQUIRED`. |
 | `precision` | `precision` | `int` | None | With `scale`, on `"type": "Decimal"` only: declares `Decimal(p,s)`, stored as a scaled 64-bit integer (1–18). See below (**ColumnarCore S13, 0.2.0**). (**LoadSpeed S13, 0.4.0**) Required on every `Decimal` column. |
 | `scale` | `scale` | `int` | None | Digits after the decimal point of a `Decimal(p,s)` column (0–`precision`). |
-| `drives` | `drives` | `string` | None | (**ADR 0072, next train**) On `"type": "Expression"` only: the column of the same table this formula column drives. See [Formulas](formulas.md#the-column). |
+| `drives` | `drives` | `string` | None | (**ADR 0072, 0.14.0**) On `"type": "Expression"` only: the column of the same table this formula column drives. See [Formulas](formulas.md#the-column). |
 
 Valid `type` values: `Int32`, `Int64`, `Int16`, `UInt16`, `UInt32`, `UInt64`, `Bool`, `Byte`, `Float32`, `Double`, `Decimal`, `String`, `Timestamp`, `Date`, `Guid`.
 
-(**ADR 0072, next train**) And `Expression`, a [formula column](formulas.md#the-column), which names the column it drives in `drives`
+(**ADR 0072, 0.14.0**) And `Expression`, a [formula column](formulas.md#the-column), which names the column it drives in `drives`
 and must say `"nullable": true`: `"formula": { "type": "Expression", "nullable": true, "drives": "value" }`. A document that leaves out
 `nullable` (or says `false`) is refused `400 FORMULA_COLUMN_INVALID` (*Expression column 'pnl.formula' must be nullable*); the other rules of
 the column are on [Formulas](formulas.md#the-column). A seed row gives an Expression column its formula as a JSON object (or a string
@@ -1035,9 +1035,9 @@ computed output, a `SET` expression and a `selectExpr`:
 | `cast(x, "Decimal(p,s)")` | rounded half away from zero to scale `s` |
 | An integer `SUM / COUNT` in a computed output | 6 places |
 | Any of these with a `Double` or `Float32` operand | `Double` — `round` / `roundTo` of a `Double` stay `Double` |
-| `min`, `max`, `abs` | (**ADR 0072, next train**) widen like arithmetic |
-| `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not` | (**ADR 0072, next train**) Bool |
-| `if(c, a, b)` | (**ADR 0072, next train**) the type of `a` and `b` when they agree; otherwise no type is inferred |
+| `min`, `max`, `abs` | (**ADR 0072, 0.14.0**) widen like arithmetic |
+| `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not` | (**ADR 0072, 0.14.0**) Bool |
+| `if(c, a, b)` | (**ADR 0072, 0.14.0**) the type of `a` and `b` when they agree; otherwise no type is inferred |
 
 A result past 18 digits is an error, never a wrapped value and never a silent `Double`. A computed value stored in a
 `Decimal(p,s)` column is then rounded half away from zero to that column's scale (table above).
@@ -1064,7 +1064,7 @@ type](../getting-started/index.md#how-a-c-property-becomes-a-column-type).
 Valid `function` values: `TruncateToDay`, `TruncateToHour`, `TruncateToMinute`, `TruncateToWeek`, `TruncateToMonth`, `TruncateToYear`. Omit the `function` field (or use `"None"`) to use the column value as-is for routing.
 
 **Common mistake:** Using `"Hash"` as a partition function — this is not a valid schema-file `function` value; the reader refuses it
-with the list above (**BL-1460, next train**: the JSON Schema offered it and the reader accepted it until the apply refused it). Partition hashing for storage routing (XxHash64) is applied internally by the storage engine when `partitionStorage = "Shared"` or `"Auto"`. You do not need to, and cannot, configure it via the schema file.
+with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the reader accepted it until the apply refused it). Partition hashing for storage routing (XxHash64) is applied internally by the storage engine when `partitionStorage = "Shared"` or `"Auto"`. You do not need to, and cannot, configure it via the schema file.
 
 **Example — time-partitioned table (partition by day):**
 

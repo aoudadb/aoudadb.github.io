@@ -4,7 +4,7 @@ nav_order: 4.5
 parent: "Guides"
 ---
 
-# Plan a declaration: `aouda plan` (**BL-1463, next train**)
+# Plan a declaration: `aouda plan` (**BL-1463, 0.14.0**)
 
 `aouda plan` answers one question **before** anything starts: *would `aouda start` refuse this declaration, and for which reasons — all at once?*
 It reads the configuration the same way `aouda start` does, runs the same checks, prints every finding and exits `0` or `1`. It needs **no server
@@ -16,11 +16,11 @@ It replaces `aouda keys check` and `aouda schema check`, which are gone ([below]
 aouda plan                                      # the configuration this directory and environment would start with
 aouda plan --Aouda:Auth:Keys:File=/etc/aouda/aouda.identities.json --skip-secrets
 aouda plan --json                               # one JSON object on standard output
-aouda plan --server https://aouda.internal:8080 --key-file server.key   # what a deploy would change on a running server (BL-1463, next train)
+aouda plan --server https://aouda.internal:8080 --key-file server.key   # what a deploy would change on a running server (BL-1463, 0.14.0)
 ```
 
 With `--server` it also asks a running server what the declaration would change there, and exits `2` when it would change something
-([Against a running server](#against-a-running-server---server-bl-1463-next-train)).
+([Against a running server](#against-a-running-server---server-bl-1463-0140)).
 
 ## What it checks
 
@@ -90,7 +90,7 @@ read, so its hash differs from a full plan's.
 
 There is no "could not check" status and no `--strict`: a warning that should block is an error the start should refuse. Exit codes `2`, `69` and `77` belong to plans against a running server (below), which an offline plan never exits with.
 
-## Against a running server: `--server` (**BL-1463, next train**)
+## Against a running server: `--server` (**BL-1463, 0.14.0**)
 
 An offline plan cannot see the data directory. `--server` asks a **running** server what this declaration would change, before you deploy it:
 
@@ -144,7 +144,7 @@ flag, the hosting environment), which a body cannot set. A key's hash is in ever
 
 **`--skip-secrets` against a server.** A secret the plan did not read goes as *unresolved* (no hash). Such an entry is listed under `changes.keys.unresolved`, is not
 added, and the live rows of its name are neither revoked nor rotated on its account: the plan cannot tell a rotation from an unchanged key, so it changes nothing it
-cannot see: it stands for those rows, so another declaration that declares one of their secrets is `KEY_SECRET_SHARED`, as the reload of the same files would find it (**BL-1463, next train**). A `hash` secret still resolves. Every other check still runs.
+cannot see: it stands for those rows, so another declaration that declares one of their secrets is `KEY_SECRET_SHARED`, as the reload of the same files would find it (**BL-1463, 0.14.0**). A `hash` secret still resolves. Every other check still runs.
 
 **A body is only ever planned.** The server refuses a posted declaration without `dryRun=true` (`400 RELOAD_CANDIDATE_NOT_APPLIED`): what a reload applies is always
 the server's own files, which the next start reads too. To apply, change the files on the server and run `aouda reload`.
@@ -183,7 +183,7 @@ A green plan is not more than it says. Every offline plan lists what it did not 
 1. **Without a target** (offline): anything in the data directory. Which databases exist and with which kind and link, the tables (so no schema diff and no destructive change), the key rows (a secret another row holds, an operator's revocation), roles created through the API, the data-directory format, whether `_serverauth` already has an admin.
 2. **Secrets in another environment.** The plan reads `env` and `file` secrets where it runs. A CI runner with no secrets, or a host path that differs from the container's, makes those checks unknowable (`--skip-secrets`). The reliable gate is the plan run with the same mounts and environment as the start (`docker compose run --rm --no-deps --entrypoint aouda aouda plan`).
 3. **The process environment at start.** Variables an orchestrator injects at start and that are absent where the plan ran.
-4. **Apply failures that depend on row values,** even with a target, unless the engine's dry run checks them (a `NOT NULL` column on a table with rows, a `unique` flag on a column with duplicates, a narrowing type change). With `--server` (**BL-1463, next train**), the engine's dry run checks what needs no rows: a destructive change (reported as `SCHEMA_DESTRUCTIVE_REFUSED`, never applied by a reload), a changed partition key, a table left with no column, an added identity column without `nullable` or a static default, an added server-time or array column that is not nullable, and the apply's own authorization. It does **not** check what depends on the rows or on another executor's rules (a non-nullable column without a default added to a table with rows, a `unique` flag over duplicates, a narrowing type change, and other refusals only the apply makes): a plan can say valid where the apply then refuses (tracked as BL-1494).
+4. **Apply failures that depend on row values,** even with a target, unless the engine's dry run checks them (a `NOT NULL` column on a table with rows, a `unique` flag on a column with duplicates, a narrowing type change). With `--server` (**BL-1463, 0.14.0**), the engine's dry run checks what needs no rows: a destructive change (reported as `SCHEMA_DESTRUCTIVE_REFUSED`, never applied by a reload), a changed partition key, a table left with no column, an added identity column without `nullable` or a static default, an added server-time or array column that is not nullable, and the apply's own authorization. It does **not** check what depends on the rows or on another executor's rules (a non-nullable column without a default added to a table with rows, a `unique` flag over duplicates, a narrowing type change, and other refusals only the apply makes): a plan can say valid where the apply then refuses (tracked as BL-1494).
 5. **Resources and the host:** free ports, memory, disk, file permissions for the server's user (the plan may run as another user), the clock, whether the email or SMS provider answers.
 6. **A node's replication role:** whether a follower would write is not planned.
 7. **Races:** anything that changes between the plan and the start or reload. `planHash` shows which declaration was planned; it is not a lock.

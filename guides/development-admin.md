@@ -59,7 +59,7 @@ The start fails, naming the setting and never a secret, when the flag is set and
 | The node is configured with `Aouda:Join` or `Aouda:ReplicaSet` | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused on a node that is configured for replication` |
 
 A node that becomes a follower by some other means is not detected. The key is an ordinary `config`-source server-key row. (**BL-1427,
-next train**) It is the process's own server key, so `aouda reload` carries it over unchanged: a reload never retracts it, even one
+0.14.0**) It is the process's own server key, so `aouda reload` carries it over unchanged: a reload never retracts it, even one
 that empties the identities file, and `Aouda:Auth:DevAdmin` itself is restart-only (a reload lists a change to it under
 `restartRequired`).
 
@@ -77,7 +77,7 @@ refused next to `AOUDA_ROOT_PASSWORD`. See [Docker](../deployment/docker.md#comp
 
 ## `Aouda:Auth:RequireFirstAdmin` is gone
 
-(**BL-1462, next train**) It made a server with no admin, no root password and no dev admin **fail the start** instead of waiting in
+(**BL-1462, 0.14.0**) It made a server with no admin, no root password and no dev admin **fail the start** instead of waiting in
 setup mode; `docker-compose.yml` set it, so under `restart: unless-stopped` a forgotten password was a restart loop. It is deleted, with
 no replacement: setup mode now exists only for a data directory never set up with nothing declared, so a server that declares a server
 key needs no admin at all, and a new server that declares nothing waits in setup mode with `/ready` answering `503 setup_required` and naming the ways out. A leftover

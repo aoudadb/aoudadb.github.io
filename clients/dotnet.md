@@ -827,7 +827,7 @@ realtime transports stop reconnecting — sign in again for that database. See
 
 ---
 
-## 8c) Formula tables (**ADR 0072, next train**)
+## 8c) Formula tables (**ADR 0072, 0.14.0**)
 
 A table with an `Expression` column is a [formula table](../guides/formulas.md): in a row whose formula is null the value column is an
 **input**, written like any value; in a row with a formula the server computes the value and keeps it current, and a hand-written value

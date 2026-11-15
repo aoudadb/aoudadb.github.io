@@ -126,19 +126,19 @@ always `{ "credential": n, "listener_mismatch": n, "route_mismatch": n }`. Both 
 response. See
 [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
 
-**Reload without restart (**BL-1427, next train**).** `POST /api/admin/reload` re-reads the server's declaration — the identities
+**Reload without restart (**BL-1427, 0.14.0**).** `POST /api/admin/reload` re-reads the server's declaration — the identities
 file's content, `Aouda:Databases` (new entries, `SchemaFile` / `SchemaEnvironment`, `Roles`, a first `AuthDatabase` link) — validates
 it as `aouda start` would ([Declaration Finding Codes](plan-codes.md)), and converges it without a restart, in the start's order:
 the key declarations, declared databases, declared schema (never destructive), declared roles, configured key rows. A server key
 (`mk_srv_`) only, the dry run and `GET` included: a key of the server's auth database that is not a server key is `403 AUTHORIZATION_DENIED`, and a credential that auth database does not know (a key of another auth database) is `401`. A body is only a
-**candidate** to plan (below); without `dryRun=true` it is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, next train**). `aouda reload`
+**candidate** to plan (below); without `dryRun=true` it is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, 0.14.0**). `aouda reload`
 is the CLI ([Cloud Hub](../guides/cloud-hub.md)).
 
 | Method | Path | Result |
 |--------|------|--------|
 | POST | `/api/admin/reload` | `200` applied (or nothing to change); `422 RELOAD_REFUSED` the declaration has an `error` finding and nothing was changed; `207 RELOAD_PARTIAL` a step failed part-way (`failedStep`; `/ready` says `reload_failed` until a reload completes) |
 | POST | `/api/admin/reload?dryRun=true` | The same plan, and nothing is written — not a row, not an audit row |
-| POST | `/api/admin/reload?dryRun=true` with a body | (**BL-1463, next train**) The plan of a **posted** declaration (a candidate, as `aouda plan --server` sends it) instead of the server's files; nothing is written. `200`, or `422 RELOAD_REFUSED` with the findings; a malformed body is `400 INVALID_REQUEST`, one above 16 MiB `413 INVALID_REQUEST` |
+| POST | `/api/admin/reload?dryRun=true` with a body | (**BL-1463, 0.14.0**) The plan of a **posted** declaration (a candidate, as `aouda plan --server` sends it) instead of the server's files; nothing is written. `200`, or `422 RELOAD_REFUSED` with the findings; a malformed body is `400 INVALID_REQUEST`, one above 16 MiB `413 INVALID_REQUEST` |
 | GET | `/api/admin/reload` | `{ "last": null }`, or the last reload since the process started: `{ time, outcome, applied, planHash, summary, failedStep, callerKeyId }` |
 
 One reload at a time, never queued (`409 RELOAD_IN_PROGRESS`, also during a restore); one reload per 5 s and one dry run per 1 s
@@ -185,9 +185,9 @@ It names entries, kinds and fingerprints, never a key, a hash or a secret file's
   those three. On `207 RELOAD_PARTIAL`, `applied` is the string `"partial"` (the steps in `completedSteps` are applied, `failedStep`
   is not); it is a boolean in every other answer.
 - `dryRun` without a body is `true` or `false` in any case; any other value, or the parameter twice, is `400 INVALID_REQUEST`. With a
-  body it is exactly `true`, or the answer is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, next train**).
+  body it is exactly `true`, or the answer is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, 0.14.0**).
 
-**Planning a posted declaration (**BL-1463, next train**).** `POST /api/admin/reload?dryRun=true` with a JSON body
+**Planning a posted declaration (**BL-1463, 0.14.0**).** `POST /api/admin/reload?dryRun=true` with a JSON body
 (`Content-Type: application/json`) plans that declaration against this server — what `aouda plan --server` does
 ([Plan a declaration](../guides/plan.md)). The server runs a reload's first phase over the body instead of its own files: every offline
 check under **its own** process settings (named-query limits, `SkipDatabases`, the dev-admin flag, the hosting environment — a body
@@ -403,7 +403,7 @@ Before BL-1223 a realtime session ignored the user token and kept the service ke
 - **Subscribe.** A `subscribe` needs the role permission the HTTP read it mirrors needs: `read` on the table, and for a named-query subscribe (**BL-1417, 0.12.0**) a `named-query` `execute` row for the name (a table `read` no longer counts, and the named query's tables are not asked). A refusal is an `error` message with HTTP's code: `INSUFFICIENT_PERMISSIONS` (a role without the permission), `AUTHORIZATION_DENIED` (no role on this database) or `AUTH_TOKEN_MISSING` (no credential, where HTTP answers `401`). (**BL-1286, 0.9.0**) A `jwt-claim` partition refusal on that `error` frame — WebSocket and long-poll snapshot — uses the HTTP query's code (`AUTH_PLS_TENANT_CLAIM_MISSING`, `AUTH_PLS_TENANT_CLAIM_MISMATCH`, and the other PLS codes query already returns), not `AUTHORIZATION_DENIED`. A named-query batch slot uses the same code. The call is still refused.
 - **`stream_open`** needs `write` on the table, refused with the same codes.
 - **Revoked rights.** When a role change means the session no longer holds the `read` (or, for a named-query subscribe, the `named-query` `execute` row) a live subscription needs, the server ends that subscription with `PERMISSION_REVOKED`, before the next change is delivered.
-- <a id="realtime-revoked-credential"></a>**Revoked or expired credential** (**BL-1001, next train**). An open WebSocket or long-poll session ends when the credential it authenticated with stops authenticating over HTTP. This holds for a user JWT and for **every** API key: `mk_srv_`, `mk_svc_`, `mk_scp_`, `mk_adm_`, `mk_anon_`, `mk_pub_` and custom `mk_` keys, user-linked or not, minted through the API or declared in the identities file. When a service key carries a `user_token`, the session ends when either of them stops authenticating. Up to 0.13.0 a session opened with an API key was never re-checked: a revoked key's socket kept receiving changes, accepted new subscribes and wrote rows until it closed.
+- <a id="realtime-revoked-credential"></a>**Revoked or expired credential** (**BL-1001, 0.14.0**). An open WebSocket or long-poll session ends when the credential it authenticated with stops authenticating over HTTP. This holds for a user JWT and for **every** API key: `mk_srv_`, `mk_svc_`, `mk_scp_`, `mk_adm_`, `mk_anon_`, `mk_pub_` and custom `mk_` keys, user-linked or not, minted through the API or declared in the identities file. When a service key carries a `user_token`, the session ends when either of them stops authenticating. Up to 0.13.0 a session opened with an API key was never re-checked: a revoked key's socket kept receiving changes, accepted new subscribes and wrote rows until it closed.
   - **At once, when a key is retired on the node you are connected to.** This covers `DELETE /api/databases/{db}/auth/admin/api-keys/{id}`, `DELETE /api/auth/admin/keys/{id}`, `POST …/auth/admin/regenerate-keys` and a fleet or scoped key `…/rotate` with `overlapSeconds` omitted or `0`, and a fleet or scoped key revoked by name. From the moment the revoke's response is sent, the session handles no further message: a `subscribe` gets no answer, and a `stream_rows` that arrives after that is not written and gets no `stream_ack`. The WebSocket then receives `auth_error` and is closed. A long-poll whose poll is waiting answers `401` at once. A session on a **replica** ends within one heartbeat interval instead (next item): the replica applies the revoke from replication. A declared key removed from the identities file is retired at the next server start, when no session is open.
   - **A write in flight may or may not have been written.** Rows with a `stream_ack` are written. A `stream_rows` the server was already writing when the key was revoked may still be committed, and its `stream_ack` may never arrive because the socket closes. Treat a `stream_rows` without a `stream_ack` as **unknown**, not as unwritten: re-send it idempotently with a valid credential — in `upsert` mode, or with rows whose primary key makes a repeat harmless — or read the table before re-sending. Re-sending it in `insert` mode can duplicate rows or fail on duplicate keys.
   - **Within one heartbeat interval, for everything else.** The interval is `Aouda:WebSocket:HeartbeatInterval`, default 20 s. This covers a key whose `expires_at` passes, including the old key after a rotate or `regenerate-keys` with an overlap; a user-linked key whose user is disabled or deleted; and a JWT that is signed out, ended or revoked (Hybrid and Stateful validation). The WebSocket checks at every heartbeat. A long-poll session checks at its next `poll` or `send`, at most once per interval. If the server cannot complete a check (for example it refuses the read for capacity), it checks again at the next interval; that never ends the session.
@@ -466,8 +466,8 @@ Server auth endpoints live under `/api/auth/...` and manage server-level identit
 | `/api/auth/admin/roles/{id}` | PATCH/DELETE | Bearer JWT (`db_admin`) | Update/delete role. There is no `GET` for one role: `GET /api/auth/admin/roles` lists every role with its permissions |
 | `/api/auth/admin/users/{id}/roles` | GET/PUT | Bearer JWT (`db_admin`) | View/assign user roles. `PUT` replaces the user's assignments with `{ "roles": [ { "roleName", "scope" } ] }`. A user JWT may assign `db_admin` and a role that carries an `all-partitions` or `all-rows` grant (**BL-1299, 0.9.0**) |
 | `/api/auth/admin/users/{id}/access-grants?database=` | GET | Bearer JWT (`db_admin`) | The `all-partitions` / `all-rows` grants the user holds on `database`, with where each comes from — see [Role permissions and access grants](#role-permissions-and-access-grants) (**BL-1227, 0.9.0**) |
-| `/api/auth/admin/users/{id}/entitlements` | GET/POST | Bearer JWT (`db_admin`) or `mk_srv_` | A server user's entitlements: list (optional `?dimension=`) / create `{ "dimension", "key", "level"?, "validFrom"?, "validTo"? }` (201), with the same rules, caps and errors as the application route. An entitlement here applies on **every database the server auth database governs** (a database with no auth database of its own). Creating needs a server key or `db_admin` on the server auth database (scoped `*` or to it); a `db_admin` of other databases only is `403 AUTHORIZATION_DENIED`. Audited as `admin_create_entitlement` (**BL-1452, next train**) |
-| `/api/auth/admin/users/{id}/entitlements/{entitlementId}` | DELETE | Bearer JWT (`db_admin`) or `mk_srv_` | Revoke one (204 / 404 `AUTH_GRANT_NOT_FOUND`). Same callers as create. Live subscriptions it admitted end with `PERMISSION_REVOKED`. Audited as `admin_delete_entitlement` (**BL-1452, next train**) |
+| `/api/auth/admin/users/{id}/entitlements` | GET/POST | Bearer JWT (`db_admin`) or `mk_srv_` | A server user's entitlements: list (optional `?dimension=`) / create `{ "dimension", "key", "level"?, "validFrom"?, "validTo"? }` (201), with the same rules, caps and errors as the application route. An entitlement here applies on **every database the server auth database governs** (a database with no auth database of its own). Creating needs a server key or `db_admin` on the server auth database (scoped `*` or to it); a `db_admin` of other databases only is `403 AUTHORIZATION_DENIED`. Audited as `admin_create_entitlement` (**BL-1452, 0.14.0**) |
+| `/api/auth/admin/users/{id}/entitlements/{entitlementId}` | DELETE | Bearer JWT (`db_admin`) or `mk_srv_` | Revoke one (204 / 404 `AUTH_GRANT_NOT_FOUND`). Same callers as create. Live subscriptions it admitted end with `PERMISSION_REVOKED`. Audited as `admin_delete_entitlement` (**BL-1452, 0.14.0**) |
 | `/api/auth/admin/audit-log` | GET | Bearer JWT (`db_admin`) | The server auth database's audit log; filters `userId`, `action`, `from`, `to`, `limit`, `offset` — see [Audit](#audit-access_grant_used) |
 | `/api/auth/admin/api-keys` | GET/POST | Bearer JWT (`db_admin`) | List/create server API keys |
 | `/api/auth/admin/api-keys/{id}` | DELETE | Bearer JWT (`db_admin`) | Revoke server API key |
@@ -770,7 +770,7 @@ The token is an opaque sortable **42-character lowercase hex** string. Semantics
 | Action | `onExceeded` / `X-Aouda-On-Exceeded`: `wait` → 409 `TOKEN_UNSATISFIED`; `fetchPrimary` → 421 `TOKEN_FETCH_PRIMARY` (server does **not** proxy); `fail` → 409 immediately. **Omitted default is role-aware** (BL-525): `wait` on `Primary`/`Standalone`, `fetchPrimary` on a secondary. Explicit `fetchPrimary` is still 421 on every role. |
 | Named-query freshness | Declared on the named query, keyed by the path/batch/subscribe **name**. A name with no `freshness` block is fail-safe (primary-only + `readYourWrites`). Loosening is 400 `FRESHNESS_LOOSENED`. |
 | Materialized query | (**WorkloadCore, 0.3.0**) A token-bearing read of a materialized query (`POST .../materialized-queries/{name}/query`, subscribe) is covered only when the query is **current** for that token by the one rule its status reports as `current`: no lost update, nothing queued or in flight for it or for the queries it is built on, no commit to its source still being routed, and its frontier at or past the token. Before, the frontier alone was compared, so a query that had lost an update, or whose bulk load or routed commit was not yet in its result, answered a token its frontier covered. |
-| Formula table | (**ADR 0072, next train**) A token on any read of a table that has an `Expression` column (`/query`, `/query/count`, a join side, a named query, subscribe) — input rows included — is judged by the **formula maintainer's progress**: it is covered once every commit up to the token has been recomputed, and a commit that left a value unchanged covers it. A lapse is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says (`fetchPrimary` does not turn it into a `421`; `fail` answers `409` at once). A replica answers `421 FORMULA_TOKEN_REQUIRES_PRIMARY`; a node whose maintainer is not running, `503 FORMULA_NOT_MAINTAINED`. A read joining a formula table and a materialized query's result is covered as far as both are; a materialized query built over a formula table is not yet judged by the formula maintainer (BL-1486). A snapshot's token and a change event's token are covers (keep the highest), a notice's is not. See [Formulas](../guides/formulas.md#when-values-change-eventual-consistency-and-tokens). |
+| Formula table | (**ADR 0072, 0.14.0**) A token on any read of a table that has an `Expression` column (`/query`, `/query/count`, a join side, a named query, subscribe) — input rows included — is judged by the **formula maintainer's progress**: it is covered once every commit up to the token has been recomputed, and a commit that left a value unchanged covers it. A lapse is `409 TOKEN_UNSATISFIED` whatever `onExceeded` says (`fetchPrimary` does not turn it into a `421`; `fail` answers `409` at once). A replica answers `421 FORMULA_TOKEN_REQUIRES_PRIMARY`; a node whose maintainer is not running, `503 FORMULA_NOT_MAINTAINED`. A read joining a formula table and a materialized query's result is covered as far as both are; a materialized query built over a formula table is not yet judged by the formula maintainer (BL-1486). A snapshot's token and a change event's token are covers (keep the highest), a notice's is not. See [Formulas](../guides/formulas.md#when-values-change-eventual-consistency-and-tokens). |
 | Bulk-load commit | Field is `token`, **not** `walPosition` |
 | Streaming | Optional `token` on `snapshot`, `snapshot_complete`, `change`, `heartbeat` alongside `version`. `resume_from` remains the change-event sequence. Subscribe may send `at_least` / `wait_ms` / `on_exceeded`. Heartbeat `version` is **not** a WAL sequence. |
 
@@ -871,7 +871,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_INVALID` | 401 | Token malformed or signature invalid (also used for invalid `X-User-Token`). (**BL-944, 0.4.0**) Never for a check the server could not finish for capacity — reading the signing keys refused is `503` + `Retry-After`; keep the token and retry |
 | `AUTH_TOKEN_EXPIRED` | 401 | Access token has expired |
 | `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, 0.9.0**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
-| `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked. On an open WebSocket (`auth_error`) or long-poll session, also an API key revoked, deleted, rotated or regenerated away, removed from the identities file, or whose linked user is disabled (**BL-1001, next train**; see [Realtime authorization](#realtime-revoked-credential)) |
+| `AUTH_TOKEN_REVOKED` | 401 | Access token has been revoked. On an open WebSocket (`auth_error`) or long-poll session, also an API key revoked, deleted, rotated or regenerated away, removed from the identities file, or whose linked user is disabled (**BL-1001, 0.14.0**; see [Realtime authorization](#realtime-revoked-credential)) |
 | `AUTH_API_KEY_INVALID` | 401 | API key not recognized, revoked, or expired. Not returned for a live `mk_svc_` / `mk_adm_` on the database catalog — that is `AUTH_KEY_ROUTE_MISMATCH`. The server log names the rejected key by fingerprint (**BL-1377, 0.10.0**): match it with `aouda keys hash --key-stdin`. (**BL-1422, 0.12.0**) The `suggestion` says which kind of key the route takes and, read from the presented key's fixed prefix (never echoed), which kind was sent: `The key presented is a scoped service key (mk_scp_). This route is authenticated by the database's own auth database: use a key issued for this database (service mk_svc_, scoped mk_scp_, or custom mk_), or a server key (mk_srv_) if the server auth database governs it. If the key is of the right kind, it was revoked, has expired, or belongs to another database.` On a server route it reads `... This route is authenticated by the server auth database: use a server key (mk_srv_, or a scoped server key), and check that it has not been revoked or expired.` Counted in `rejectedApiKeys`. |
 | `AUTH_API_KEY_REQUIRED` | 401 | Historical: public app-auth POSTs required an API key. Those routes are now keyless and no longer return this code. |
 | `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
@@ -883,11 +883,11 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
 | `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
-| `RELOAD_REFUSED` | 422 | (**BL-1427, next train**) `POST /api/admin/reload`: the declaration has an `error` finding (what the next start would refuse); nothing was changed. The body is the plan with every finding |
-| `RELOAD_PARTIAL` | 207 | (**BL-1427, next train**) A reload stopped part-way (`failedStep`); the steps before it are applied, `/ready` says `reload_failed`. Reload again |
-| `RELOAD_IN_PROGRESS` | 409 | (**BL-1427, next train**) A reload or a restore is reconciling the declaration; not queued. `Retry-After` is set |
-| `RELOAD_RATE_LIMITED` | 429 | (**BL-1427, next train**) One reload per 5 s, one dry run per 1 s. `Retry-After` is set |
-| `RELOAD_CANDIDATE_NOT_APPLIED` | 400 | (**BL-1463, next train**) `POST /api/admin/reload` with a body and without `dryRun=true`: a posted declaration is only ever planned. The body is not read and nothing changes. Add `dryRun=true` to plan it, or reload without a body to apply the server's own files |
+| `RELOAD_REFUSED` | 422 | (**BL-1427, 0.14.0**) `POST /api/admin/reload`: the declaration has an `error` finding (what the next start would refuse); nothing was changed. The body is the plan with every finding |
+| `RELOAD_PARTIAL` | 207 | (**BL-1427, 0.14.0**) A reload stopped part-way (`failedStep`); the steps before it are applied, `/ready` says `reload_failed`. Reload again |
+| `RELOAD_IN_PROGRESS` | 409 | (**BL-1427, 0.14.0**) A reload or a restore is reconciling the declaration; not queued. `Retry-After` is set |
+| `RELOAD_RATE_LIMITED` | 429 | (**BL-1427, 0.14.0**) One reload per 5 s, one dry run per 1 s. `Retry-After` is set |
+| `RELOAD_CANDIDATE_NOT_APPLIED` | 400 | (**BL-1463, 0.14.0**) `POST /api/admin/reload` with a body and without `dryRun=true`: a posted declaration is only ever planned. The body is not read and nothing changes. Add `dryRun=true` to plan it, or reload without a body to apply the server's own files |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-850, 0.3.0**) Sign-in, sign-up, password set / change / reset and an admin's create-user: the password hash (Argon2id, 64 MiB while it runs) could not get its memory from the server's queue within 10 s. Nothing was changed; `Retry-After` is the queue's estimate. Hashes queue for memory rather than run unbounded, so a burst of sign-ins waits instead of exhausting the heap (it answered `500` before). An admin's user edit, API-key revoke or RLS-resolver create refused for capacity answers this (or `WAL_CAPACITY_EXCEEDED`) too, where it used to read as a 400 or a 409 "email exists" (WorkloadCore group 6 review). A token **refresh** refused for capacity answers this too (**BL-841, 0.3.0**; it was a `500`), and the refresh token stays live: retry with the same token. |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic message to prevent information leakage) |
 | `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is disabled for this database (`allowSelfSignup` is false) |
@@ -919,8 +919,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `IDENTITY_STAMP_REQUIRED` | 400 | Service role omitted a required identity-stamped column |
 | `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | `plsClaimBinding` / identity source is not a bindable spelling (`subject` or `claim:<name>`) |
 | `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE` | 400 | A named mutation's `values` / `set` / `setExpr` names a server-time column (**NativeClients, 0.4.0**) |
-| `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, next train**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
-| `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, next train**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda schema check --env`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint. Fix: move the member to the base file. Before, it was dropped |
+| `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, 0.14.0**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
+| `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, 0.14.0**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda schema check --env`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint. Fix: move the member to the base file. Before, it was dropped |
 | `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp) |
 
 #### State Errors (4xx)
@@ -933,22 +933,22 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TOKEN_MALFORMED` | 400 | Consistency token undecodable, empty, or wrong version. Error body/header carry the node's observed token. |
 | `TOKEN_FOREIGN_DATABASE` | 400 | Token issued for a different database. Do not retry the same string. |
 | `TOKEN_EPOCH_SUPERSEDED` | 409 | Failover lost the write, or future term. **Never waited.** Do not retry the same token. |
-| `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. (**ADR 0072, next train**) On a read of a table with an `Expression` column the wait is for the formula maintainer to recompute every commit up to the token, and it is `TOKEN_UNSATISFIED` whatever `onExceeded` says. |
+| `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. (**ADR 0072, 0.14.0**) On a read of a table with an `Expression` column the wait is for the formula maintainer to recompute every commit up to the token, and it is `TOKEN_UNSATISFIED` whatever `onExceeded` says. |
 | `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
-| `FORMULA_TOKEN_REQUIRES_PRIMARY` | 421 | (**ADR 0072, next train**) A consistency token on a read or subscribe of a table with an `Expression` column reached a replica, which computes no formulas and cannot judge it. Send the read to the primary, or read without a token. |
-| `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, next train**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. |
-| `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**ADR 0072, next train**) A `cellRef` node outside a formula (the value of an `Expression` column): in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output. |
-| `EXPR_CELLREF_INVALID` | 400 | (**ADR 0072, next train**) Registered, but not answered by the server today (BL-1500): a malformed `cellRef` in a formula — no column, a key part that is not a non-null literal, a key column named twice — is `400 FORMULA_REFERENCE_INVALID`, and any `cellRef` outside a formula is `400 EXPR_CELLREF_NOT_ALLOWED`. |
-| `FORMULA_COLUMN_INVALID` | 400 | (**ADR 0072, next train**) An `Expression` column's declaration, or a later change to its table, breaks a rule of the column type (the Expression column nullable and plain; its driven column a nullable scalar of the same table that nothing else computes or drives; the table with a strict primary key, an ordinary table). The message names the table, the column and the rule; nothing was changed. See [Formulas](../guides/formulas.md#the-column). |
-| `FORMULA_INVALID` | 400 | (**ADR 0072, next train**) A formula is not one valid expression: it does not parse, uses a `param`, an unknown function or operator, a type its driven column cannot hold without loss (the message says what to write, e.g. `round(x, 2)`), is computed by a `setExpr`, or arrives through a transform. The message names the row; nothing was written. |
-| `FORMULA_REFERENCE_INVALID` | 400 | (**ADR 0072, next train**) A formula's `cellRef` names a table that does not exist or a formula may not read (an edge table, an engine table, a materialized query's result over a formula table), a column that does not exist or is an `Expression` column, or a key value no row can hold. |
-| `FORMULA_REFERENCE_NOT_PRIMARY_KEY` | 400 | (**ADR 0072, next train**) A `cellRef`'s key, after the shorthands are resolved against the formula's own row, is not exactly its table's full strict primary key; the message names the key. |
-| `FORMULA_CYCLE` | 400 | (**ADR 0072, next train**) The formulas would read each other in a cycle; the message names its members in order. |
-| `FORMULA_DEPTH_EXCEEDED` | 400 | (**ADR 0072, next train**) A chain of formulas, each reading the next, would be longer than 16; the message names it. |
-| `FORMULA_LIMIT_EXCEEDED` | 400 | (**ADR 0072, next train**) The database would hold more than 100 000 formula cells. Remove formulas, or keep inputs as plain values. |
-| `FORMULA_REFERENCE_NOT_READABLE` | 403 | (**ADR 0072, next train**) A formula reads a row its writer may not read (no read access to the table, a row outside the writer's row or partition conditions, or a row that does not exist and cannot be judged on its key); also a server write that set a formula with no caller to check. The message names the formula row and the reference, never whether the row exists; nothing was written. |
-| `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, next train**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
-| `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, next train**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells, add an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain, its upstream queries' sources included) — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
+| `FORMULA_TOKEN_REQUIRES_PRIMARY` | 421 | (**ADR 0072, 0.14.0**) A consistency token on a read or subscribe of a table with an `Expression` column reached a replica, which computes no formulas and cannot judge it. Send the read to the primary, or read without a token. |
+| `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, 0.14.0**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. |
+| `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**ADR 0072, 0.14.0**) A `cellRef` node outside a formula (the value of an `Expression` column): in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output. |
+| `EXPR_CELLREF_INVALID` | 400 | (**ADR 0072, 0.14.0**) Registered, but not answered by the server today (BL-1500): a malformed `cellRef` in a formula — no column, a key part that is not a non-null literal, a key column named twice — is `400 FORMULA_REFERENCE_INVALID`, and any `cellRef` outside a formula is `400 EXPR_CELLREF_NOT_ALLOWED`. |
+| `FORMULA_COLUMN_INVALID` | 400 | (**ADR 0072, 0.14.0**) An `Expression` column's declaration, or a later change to its table, breaks a rule of the column type (the Expression column nullable and plain; its driven column a nullable scalar of the same table that nothing else computes or drives; the table with a strict primary key, an ordinary table). The message names the table, the column and the rule; nothing was changed. See [Formulas](../guides/formulas.md#the-column). |
+| `FORMULA_INVALID` | 400 | (**ADR 0072, 0.14.0**) A formula is not one valid expression: it does not parse, uses a `param`, an unknown function or operator, a type its driven column cannot hold without loss (the message says what to write, e.g. `round(x, 2)`), is computed by a `setExpr`, or arrives through a transform. The message names the row; nothing was written. |
+| `FORMULA_REFERENCE_INVALID` | 400 | (**ADR 0072, 0.14.0**) A formula's `cellRef` names a table that does not exist or a formula may not read (an edge table, an engine table, a materialized query's result over a formula table), a column that does not exist or is an `Expression` column, or a key value no row can hold. |
+| `FORMULA_REFERENCE_NOT_PRIMARY_KEY` | 400 | (**ADR 0072, 0.14.0**) A `cellRef`'s key, after the shorthands are resolved against the formula's own row, is not exactly its table's full strict primary key; the message names the key. |
+| `FORMULA_CYCLE` | 400 | (**ADR 0072, 0.14.0**) The formulas would read each other in a cycle; the message names its members in order. |
+| `FORMULA_DEPTH_EXCEEDED` | 400 | (**ADR 0072, 0.14.0**) A chain of formulas, each reading the next, would be longer than 16; the message names it. |
+| `FORMULA_LIMIT_EXCEEDED` | 400 | (**ADR 0072, 0.14.0**) The database would hold more than 100 000 formula cells. Remove formulas, or keep inputs as plain values. |
+| `FORMULA_REFERENCE_NOT_READABLE` | 403 | (**ADR 0072, 0.14.0**) A formula reads a row its writer may not read (no read access to the table, a row outside the writer's row or partition conditions, or a row that does not exist and cannot be judged on its key); also a server write that set a formula with no caller to check. The message names the formula row and the reference, never whether the row exists; nothing was written. |
+| `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, 0.14.0**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
+| `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, 0.14.0**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells, add an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain, its upstream queries' sources included) — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
@@ -958,8 +958,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
 | `SERVICE_UNAVAILABLE` | 503 | Service is temporarily unavailable. (**BL-944, 0.4.0**) Also the answer to a refusal no other code names: a request the server refused for capacity with no more specific code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `WRITE_CONFLICT`) is `503 SERVICE_UNAVAILABLE` with `Retry-After: 10`, never a `500` — nothing was applied; retry after `Retry-After` |
-| `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log, then the auth bootstrap, the declared schema files, roles, keys and replication) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this). (**BL-1462, next train**) The port is open for the whole start, and this answers every caller but the health probes, loopback included |
-| `SETUP_REQUIRED` | 503 | The server's data directory has never been set up and nothing is declared (no server key, no `RootUser`), so it is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, next train**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
+| `SERVER_STARTING` | 503 | The server is still starting (replaying each database's log, then the auth bootstrap, the declared schema files, roles, keys and replication) and is not serving yet. (**BL-944, 0.4.0**) Carries `Retry-After: 5`; poll again after it (`GET /startup` is the probe for this). (**BL-1462, 0.14.0**) The port is open for the whole start, and this answers every caller but the health probes, loopback included |
+| `SETUP_REQUIRED` | 503 | The server's data directory has never been set up and nothing is declared (no server key, no `RootUser`), so it is in setup mode: only setup status, a local `POST /api/auth/setup` and the health endpoints (**BL-1462, 0.14.0**) are served. **No `Retry-After`**, deliberately — an operator ends setup mode, not time; create the first admin |
 | `SERVER_AUTH_NOT_CONFIGURED` | 503 | Server authentication is not configured (or its database is not open) for a server-admin route. **No `Retry-After`**, deliberately — an operator fixes it (`aouda setup` or `POST /api/auth/setup`) |
 | `INTERNAL_ERROR` | 500 | An internal error occurred |
 | `WRITE_APPLIED_RESPONSE_FAILED` | 500 | (**Lead group 3 review, 0.6.0**) The server **applied** the write — an insert, update, delete or upsert on a table's `rows`, a `rows/batch`, a named mutation, a branch insert — and then failed while answering it: waiting for the write concern, building the answer, or running out of heap on the way out. No `Retry-After`. **Do not re-send the request as-is**: it would apply the write again. Read the data to see its effect, and quote the `requestId` when reporting it. Such a failure used to be answered as a capacity refusal (`503 MEMORY_BUDGET_EXCEEDED` with `Retry-After`, "not applied"), which both SDKs re-send, so an insert could land twice |
@@ -1975,7 +1975,7 @@ refusal. Dropping every old column and adding one new column is allowed when `al
 (**BL-1281, 0.9.0**) A document that sets `authMode` to `jwt-claim` and omits `rlsResolverName` clears a stored resolver and is `Applied`.
 A document that sets `rlsResolverName` on a `jwt-claim` table, including a create that omits `authMode`, is refused (below).
 
-**The body is read strictly** (**BL-1460, next train**). The body is `{ "schema": { … }, "options": { "allowDestructive": false,
+**The body is read strictly** (**BL-1460, 0.14.0**). The body is `{ "schema": { … }, "options": { "allowDestructive": false,
 "dryRun": false } }` and nothing else; `options` and both flags are optional, and a flag is `true` or `false` (a string is refused).
 In the document, a member the schema format does not have, or a known member in another case, is refused, never ignored:
 `400 SCHEMA_UNKNOWN_MEMBER`, every such member named with its JSON pointer and, when one is close, the member meant:
@@ -1986,7 +1986,7 @@ In the document, a member the schema format does not have, or a known member in 
 
 Before, the member was dropped (`"nulable": true` made a non-nullable column; a misspelt `"dryrun"` applied for real).
 
-**Document-level errors refuse the whole document** (**BL-1460, next train**). The checks that need no catalog run first, with the
+**Document-level errors refuse the whole document** (**BL-1460, 0.14.0**). The checks that need no catalog run first, with the
 server's named-query ceilings: authorization mode and its resolver or column (the BL-1281 case above), partition-level security without a
 partition key, partition and `pkUniqueness` values, column defaults, the shape and ceilings of named queries and mutations, and the
 document rules (column types, a `partitionKey` or `clusterColumns` entry that is not a column of the table, …). Any of them is
@@ -2019,7 +2019,7 @@ With `?access=true`:
 Posting identities requires **Admin**. `?access=true` without identities is **Read**.
 
 **400:** `ACCESS_SURFACE_TOO_MANY_IDENTITIES` (more than 32 fixtures), `AUTH_IDENTITY_INVALID`. The document and the wrapper are read as
-strictly as by `schema/apply` (**BL-1460, next train**): an unknown or wrong-case member is `SCHEMA_UNKNOWN_MEMBER` (the wrapper's members
+strictly as by `schema/apply` (**BL-1460, 0.14.0**): an unknown or wrong-case member is `SCHEMA_UNKNOWN_MEMBER` (the wrapper's members
 are exactly `schema`, `identities`, `resolvers`, `baseResolvers`), and a document-level error is `INVALID_REQUEST` before any plan is
 computed, so a diff never shows a plan for a document `schema/apply` would refuse whole. (A named query that names a missing column is
 found only by the apply, against the catalog.)
@@ -2072,7 +2072,7 @@ Insert rows into a table on a branch; they are written to the branch's own segme
 
 ### Explain a formula cell
 
-(**ADR 0072, next train**) `POST /api/databases/{db}/tables/{table}/explain` says why a [formula](../guides/formulas.md) cell has the
+(**ADR 0072, 0.14.0**) `POST /api/databases/{db}/tables/{table}/explain` says why a [formula](../guides/formulas.md) cell has the
 value it has. It evaluates the cell **again now** and answers its formula, every reference with its resolved key and current value, the
 value or the reason it has none, the value the row stores, and the formula cells that read it. It writes nothing, so a replica answers it
 too. It needs read access to the table.
@@ -2219,7 +2219,7 @@ table, so a caller with no grant on it can neither refresh nor enumerate its mat
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Unique materialized query name. It is the result table's name, so it follows the [table-name rule](#table-names), and it may not start with `_` or exceed 100 characters. A name that breaks either is `400 INVALID_REQUEST` and nothing is created; a retry answers the same (**BL-1468, next train; breaking**: before, a name such as `a:b` or `x.` left the query registered in `Error` with no result table, and a retry answered that it already existed). |
+| `name` | string | Yes | Unique materialized query name. It is the result table's name, so it follows the [table-name rule](#table-names), and it may not start with `_` or exceed 100 characters. A name that breaks either is `400 INVALID_REQUEST` and nothing is created; a retry answers the same (**BL-1468, 0.14.0; breaking**: before, a name such as `a:b` or `x.` left the query registered in `Error` with no result table, and a retry answered that it already existed). |
 | `sourceTable` | string | Yes | Base table name. |
 | `type` | number | Yes | `1` LatestPerKey, `2` FirstPerKey (MIN of `orderBy`, not arrival order), `3` Aggregate, `4` Filter, `5` TopNPerGroup (N rows per group; source must have a PK). |
 | `configJson` | string | Yes* | Type-specific config JSON text (same as engine `MaterializedQueryDefinition.ConfigJson`). |
@@ -2482,7 +2482,7 @@ List all tables with statistics.
 
 | Param | Default | Description |
 |-------|---------|-------------|
-| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables). A materialized query's build table (`__mqbuild_<query>_<id>`, present while it rebuilds) is never listed, with either value (**BL-1468, next train**) |
+| `includeSystemTables` | `false` | Include system tables (e.g., materialized query result tables). A materialized query's build table (`__mqbuild_<query>_<id>`, present while it rebuilds) is never listed, with either value (**BL-1468, 0.14.0**) |
 
 **Response:**
 
@@ -2823,7 +2823,7 @@ Both are required: `"type": "Decimal"` without them is `400` — *A Decimal colu
 (Decimal(p,s), 1 ≤ p ≤ 18, 0 ≤ s ≤ p); the undeclared 128-bit Decimal is retired.* — and a precision above 18 is `400`
 *Decimal precision above 18 is not supported (got N).* A `Decimal(p,s)` partition key is refused.
 
-(**ADR 0072, next train**) **An `Expression` column** holds a [formula](../guides/formulas.md) per row and names the column it drives:
+(**ADR 0072, 0.14.0**) **An `Expression` column** holds a [formula](../guides/formulas.md) per row and names the column it drives:
 `{ "name": "formula", "type": "Expression", "drives": "amount" }`. It is nullable whether or not `isNullable` says so (a row with no formula
 is an input), and the response, the column listing and `…/schema` show it with `"type": "Expression"` and `drives`. The table must have a
 `Strict` primary key and be an ordinary table; the Expression column is not a key, partition or cluster column and has no default,
@@ -2870,7 +2870,7 @@ neither restriction is unchanged, and turning protection on is not this check. T
 
 **Response:** `201 Created` with table detail
 
-<a id="table-names"></a>**Table names** (**BL-1468, next train; breaking**). One rule for every way a table gets a name: this
+<a id="table-names"></a>**Table names** (**BL-1468, 0.14.0; breaking**). One rule for every way a table gets a name: this
 create, the rename below, `POST …/edge-tables`, `…:create-vector-column`, the embedded API, every table a schema file declares, and
 every materialized query (over HTTP or in a schema file's `materializedQueries`), whose name is its result table's.
 A table name:
@@ -2887,7 +2887,7 @@ rename, the graph and vector creates and the schema apply accepted any name.
 
 #### `DELETE /api/databases/{db}/tables/{name}`
 
-Delete a table. A `__mqbuild_*` name is `404 TABLE_NOT_FOUND` (**BL-1468, next train**): a materialized query's build table is not
+Delete a table. A `__mqbuild_*` name is `404 TABLE_NOT_FOUND` (**BL-1468, 0.14.0**): a materialized query's build table is not
 addressable. Refused `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN` on a table schema apply created (**BL-1177, 0.7.1**). To drop that
 table, remove it from the schema file and apply with `allowDestructive: true`. (**BL-1296, 0.9.0**) A table that already has
 PLS or RLS answers `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`, `all-partitions` where PLS applies and `all-rows`
@@ -2979,7 +2979,7 @@ Add a column to a table.
 0.2.0**); (**LoadSpeed S13, 0.4.0**) they are required, and a `Decimal` without them is refused `400` as on create. A
 column cannot be changed to or from `Decimal(p,s)`, or to another precision or scale: add a new column and copy.
 
-(**ADR 0072, next train**) `"type": "Expression"` with `"drives": "<column>"` adds an [Expression column](#post-apidatabasesdbtables), by the
+(**ADR 0072, 0.14.0**) `"type": "Expression"` with `"drives": "<column>"` adds an [Expression column](#post-apidatabasesdbtables), by the
 same rules as on create. No column becomes or stops being an Expression column, and an Expression column does not change what it drives:
 add a new one and drop the old. Dropping an Expression column leaves its driven column's values as inputs; a driven column cannot be
 dropped while it is driven. Adding an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain,
@@ -3412,7 +3412,7 @@ Each value in `setExpr` is an expression node:
 { "type": "cellRef", "table": "t", "key": { "col": { "type": "literal", "value": <v> }, ... }, "column": "c" }
 ```
 
-(**ADR 0072, next train**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not; in a formula, a malformed one is `400 FORMULA_REFERENCE_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, next train**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
+(**ADR 0072, 0.14.0**) `cellRef` reads one value: the `column` of the row of `table` whose full strict primary key is `key` (literal values only). It is valid only in a [formula](../guides/formulas.md#references), the value of an `Expression` column; in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output it is `400 EXPR_CELLREF_NOT_ALLOWED`, well-formed or not; in a formula, a malformed one is `400 FORMULA_REFERENCE_INVALID`. In a formula, `table` may be left out (or `""`: the formula's own table), a key column may be left out (the formula row's own primary-key value of that name), and a `colRef` reads a column of the formula's own row. (**ADR 0072, 0.14.0**) `call` also takes `min`, `max`, `abs`, `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `if`, `and`, `or`, `not` (listed in [Formulas](../guides/formulas.md#what-a-formula-may-contain)) beside `upper`, `lower`, `trim`, `concat`, `substring`, `round`, `roundTo`, `cast`. `if`, `and` and `or` evaluate only the operands they need.
 **Extended response when `returning` is set:**
 
 ```json
@@ -3875,7 +3875,7 @@ Service information.
 
 #### The probes: one meaning each
 
-(**BL-1462, next train**) Three probes, each answering one question, to **every caller** (no credential, loopback or not) in
+(**BL-1462, 0.14.0**) Three probes, each answering one question, to **every caller** (no credential, loopback or not) in
 every state the process can answer in. None of them is gated by setup mode.
 
 **The port opens before the start sequence runs.** The listener comes up first, and WAL replay, the auth bootstrap, the declared
@@ -3912,7 +3912,7 @@ schema files were applied; it now waits for the whole start sequence.
 
 #### `GET /health`
 
-Liveness probe. **Always 200** if the process is running, to every caller, in setup mode too (**BL-1462, next train**). Fast, no
+Liveness probe. **Always 200** if the process is running, to every caller, in setup mode too (**BL-1462, 0.14.0**). Fast, no
 I/O. Use as a Kubernetes `livenessProbe`.
 
 This is **not** “ready for schema apply or traffic”. A database can be `Dropping` or `Creating` while `/health` returns 200.
@@ -3939,7 +3939,7 @@ Readiness probe: 200 when nothing is missing, 503 with **everything** that is st
 }
 ```
 
-During a start-time schema apply (**BL-1462, next train**):
+During a start-time schema apply (**BL-1462, 0.14.0**):
 
 ```json
 {
@@ -3952,23 +3952,23 @@ During a start-time schema apply (**BL-1462, next train**):
 }
 ```
 
-`reasons` is always present, and empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server. `progress` (`done`, `total`, integers) is present only on `schema_applying` (**BL-1462, next train**).
+`reasons` is always present, and empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server. `progress` (`done`, `total`, integers) is present only on `schema_applying` (**BL-1462, 0.14.0**).
 
 | `code` | Meaning | `subject` |
 |---|---|---|
 | `not_initialized` | The engine has not finished opening its databases. | none |
 | `server_starting` | The auth bootstrap has not completed, so the server is not accepting requests yet. | none |
 | `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
-| `setup_required` | The server is in setup mode: its data directory has never been set up (no server auth database), nothing is declared (no server key, no `Aouda:Auth:RootUser`, no dev admin), and no admin exists. A declared server key is not setup mode, and a data directory that has been set up never re-enters it (**BL-1462, next train**). | none |
-| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. Also listed when `Aouda:Auth:RootUser:Email` is set and no password is (neither `Password` nor the systemd credential `aouda-admin-password`) (**BL-1462, next train**). | none |
+| `setup_required` | The server is in setup mode: its data directory has never been set up (no server auth database), nothing is declared (no server key, no `Aouda:Auth:RootUser`, no dev admin), and no admin exists. A declared server key is not setup mode, and a data directory that has been set up never re-enters it (**BL-1462, 0.14.0**). | none |
+| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. Also listed when `Aouda:Auth:RootUser:Email` is set and no password is (neither `Password` nor the systemd credential `aouda-admin-password`) (**BL-1462, 0.14.0**). | none |
 | `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
 | `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
 | `database_reconcile_failed` | The reconcile of `Aouda:Databases` after a restore was refused; the server keeps running. | the database, when one is named |
-| `reload_failed` | (**BL-1427, next train**) The last `POST /api/admin/reload` stopped part-way; the steps before it are applied. Cleared by the next reload that completes; a refused reload adds none. | the entry (a database, role or key name), when one is named |
+| `reload_failed` | (**BL-1427, 0.14.0**) The last `POST /api/admin/reload` stopped part-way; the steps before it are applied. Cleared by the next reload that completes; a refused reload adds none. | the entry (a database, role or key name), when one is named |
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
-| `schema_applying` | (**BL-1462, next train**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
+| `schema_applying` | (**BL-1462, 0.14.0**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
 | `schema_drift` | The start-time apply of a declared `SchemaFile` refused a change (a destructive one without `SchemaAllowDestructive`, or one the engine does not apply), so the catalog is not what the file says; the start went on. `503` until you allow the change or update the file, and restart. A failed apply fails the start instead, so there is no `/ready` to ask (**BL-1406, 0.11.0**). | the database |
-| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: its auth database or database is not open. A server key no longer waits for a first admin: declaring one ends setup mode (**BL-1462, next train**). | the key's name |
+| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: its auth database or database is not open. A server key no longer waits for a first admin: declaring one ends setup mode (**BL-1462, 0.14.0**). | the key's name |
 | `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
 
 A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up. `aouda status` prints every reason.
@@ -3988,14 +3988,14 @@ Use as a Kubernetes `readinessProbe`.
 
 Startup probe. `200` `{"status":"started","reason":null}` once the whole start sequence has finished: databases opened, then
 the auth bootstrap, the declared schema files, roles, grants and keys. **Setup mode included**: a server waiting for its first
-admin has finished starting, and restarting it changes nothing (**BL-1462, next train**; before, it was `200` as soon as the
+admin has finished starting, and restarting it changes nothing (**BL-1462, 0.14.0**; before, it was `200` as soon as the
 databases were open, and `503` for as long as setup mode lasted). `503` `{"status":"starting","reason":"..."}` before that; `GET
 /ready` says which step. Use as a Kubernetes `startupProbe`, with a `failureThreshold` × `periodSeconds` that covers WAL recovery
 plus any start-time schema apply; once it returns 200, switch to liveness + readiness.
 
 #### `GET /health/detailed`
 
-Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane). Answered in setup mode to every caller, like the three probes (**BL-1462, next train**).
+Component-by-component status (catalog, WAL, replication, backup, materialized queries, memory, per-database `state`). HTTP 200 for healthy/degraded, 503 for unhealthy (critical failure). Degraded responses include `X-Health-Status: degraded`. Admin listener only (404 on the data-plane). Answered in setup mode to every caller, like the three probes (**BL-1462, 0.14.0**).
 
 The `memory` component's `hotBytesLimit` and `cacheBytesLimit` are the engine's own hot ceiling (`T10`, 0.45 × governed) and page-cache ceiling (`T12`, 0.10 × governed) (**WorkloadCore, 0.3.0** — they were 0.7× and 0.2× of `MaxTotalRamBytes` when unset, so the check could say healthy while hot admission refused). A full hot tier and a full page cache have no verdict (**WorkloadCore S03, 0.3.0**): a hot tier at its ceiling is back-pressure, not a threat to the process, and `hotPercent` reports how full it is. The `memory` component is critical, so `/ready` fails whenever it is **degraded or unhealthy**: the managed heap at 75 % of the GC limit or more, or a database holding more than 110 % of its ceiling. (**WorkloadCore S06, 0.3.0**: the budget is never tightened in-process any more, so there is no "tightening" verdict; a database's ceiling is the server's budget unless it has a hard cap.)
 
@@ -4814,7 +4814,7 @@ Query parameters:
 
 Server-Sent Events endpoint (`text/event-stream`) that emits `log` events as new entries are written.
 
-(**BL-1001, next train**) A stream opened with an API key ends when the key stops authenticating: at once when the key is revoked on this node, otherwise within one `Aouda:WebSocket:HeartbeatInterval` (default 20 s; an expiry, or a linked user disabled). Its last event is `auth_error`, with the codes of [Realtime authorization](#realtime-revoked-credential), and the response then ends:
+(**BL-1001, 0.14.0**) A stream opened with an API key ends when the key stops authenticating: at once when the key is revoked on this node, otherwise within one `Aouda:WebSocket:HeartbeatInterval` (default 20 s; an expiry, or a linked user disabled). Its last event is `auth_error`, with the codes of [Realtime authorization](#realtime-revoked-credential), and the response then ends:
 
 ```text
 event: auth_error
@@ -4888,7 +4888,7 @@ and `subscriptions` `null` here; they are on the admin-only [`GET /admin/replica
 | `Int64[]` (**BL-035, 0.9.0**) | One array of 64-bit integers per row. JSON: an array of integers; `long[]`, `BigInt64Array` |
 | `Byte[]` (**BL-035, 0.9.0**) | One byte string per row. JSON: **one base64 string**, not an array of numbers; `byte[]`, `Uint8Array` |
 | `String[]` (**BL-035, 0.9.0**) | One array of strings per row (an element is never null, and must be valid Unicode). JSON: an array of strings; `string[]`, `string[]` |
-| `Expression` with `drives` (**ADR 0072, next train**) | A [formula](../guides/formulas.md) per row, driving another column of the same table; stored as the formula's text. JSON: the formula's object (`null` for an input row); in a column-batch frame, its canonical text. The SDKs write a `Formula` and read either form (`Formula.FromValue` / `Formula.fromValue`). See [create table](#post-apidatabasesdbtables) |
+| `Expression` with `drives` (**ADR 0072, 0.14.0**) | A [formula](../guides/formulas.md) per row, driving another column of the same table; stored as the formula's text. JSON: the formula's object (`null` for an input row); in a column-batch frame, its canonical text. The SDKs write a `Formula` and read either form (`Formula.FromValue` / `Formula.fromValue`). See [create table](#post-apidatabasesdbtables) |
 
 (**BL-035, 0.9.0**) The six array names are matched exactly (`"double[]"`, `"Double []"`, `"Double[][]"`, `"DoubleArray"` and the
 type's number are refused). An array value holds at most **65,536 elements** and **1,048,576 bytes of elements** (so a `Byte[]` is at
@@ -5054,7 +5054,7 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 }
 ```
 
-(**ADR 0072, next train**) **A formula table** is subscribed to like any table, filtered on its own columns:
+(**ADR 0072, 0.14.0**) **A formula table** is subscribed to like any table, filtered on its own columns:
 
 ```json
 {
@@ -5269,7 +5269,7 @@ Authentication failure. The server closes the connection after sending this mess
 | Field | Type | Description |
 |---|---|---|
 | `type` | string | Always `"auth_error"` |
-| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). Also sent to an **open** session whose credential is revoked (`AUTH_TOKEN_REVOKED`) or expires (`AUTH_TOKEN_EXPIRED`), a JWT or any API key, before the server closes it (**BL-1001, next train**: API keys too; see [Realtime authorization](#realtime-revoked-credential)). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, 0.9.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, 0.9.0**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, 0.9.0**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**0.4.0**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
+| `code` | string | Error code (e.g., `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`). Also sent to an **open** session whose credential is revoked (`AUTH_TOKEN_REVOKED`) or expires (`AUTH_TOKEN_EXPIRED`), a JWT or any API key, before the server closes it (**BL-1001, 0.14.0**: API keys too; see [Realtime authorization](#realtime-revoked-credential)). `AUTH_TOKEN_INVALID` also answers a `user_token` that is invalid, expired or revoked (**BL-1223, 0.9.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` answers a token — or a `user_token` — whose allowance does not include this database, at the handshake or a `re_auth`; it is not retryable (**BL-1018, 0.9.0**). `AUTH_DB_UNAVAILABLE` — the auth database could not be read, or the session's permissions could not be resolved (**BL-1223, 0.9.0**: the handshake is refused rather than left open) — is **retryable**: reconnect after a short wait with the same credentials; the official SDKs do. (**0.4.0**) A check the server refused for capacity — at the handshake or a `re_auth` — is the refusal's own code (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVICE_UNAVAILABLE`): reconnect after a short wait with the same token; it is not invalid. 0.3.0 sent `AUTH_TOKEN_INVALID`. |
 | `message` | string | Human-readable error description. |
 
 **Example:**
@@ -6267,4 +6267,4 @@ Operator abort of an in-flight session. The beginning credential, or a database 
 | 2.16 | 0.9.0 (Grants) | **BL-1227 (breaking on the wire):** what a credential sees on a table with partition- or row-level security is decided by access grants, `all-partitions` and `all-rows` (scope: a table or the database; level `read`, `write`, `admin`), not by key kind. An app service key and a user assigned `db_admin` hold both by implication (a key linked to such a user, or presenting its token, acts as the user); no other credential does. Role permissions take `resourceType` `all-partitions` / `all-rows` (`resourceName` `*` or a table, `actions` one level); new `400` codes `AUTH_GRANT_TABLE_NOT_FOUND`, `AUTH_GRANT_NOT_APPLICABLE`, and `AUTH_GRANT_INVALID` widened. New `GET …/auth/admin/users/{id}/access-grants`. `crossPartitionAccess` is a cost waiver only (it waives `PARTITION_FILTER_REQUIRED` and never widens what a credential sees), per call on named-query execute and each batch item, and `cross_partition_access` on a WebSocket / long-poll `subscribe`; the data-plane listener ignores it. The `db_admin`-plus-flag read of every partition is gone, and so are the cross-partition rate limiter, its `429` and the `query_cross_partition` audit row. Every use of a grant is audited as `access_grant_used` (replaces `service_key_pls_bypass`). Bulk load admits a caller that holds, at `write`, the grant for each restriction of a table it locks, at `:begin` and every `:append`. Realtime checks roles as HTTP does (subscribe `read`, `stream_open` `write`, `PERMISSION_REVOKED` on a role change); a server-auth session is checked at the handshake; a join side is scoped as a direct read. Policy inspect identities take `accessGrants`; a sample needs the grants (`sampleReason` `caller_not_granted`). |
 | 2.17 | 0.9.0 (Hardening, BL-418) | **Embargo (additive on the wire):** role permissions take `resourceType` `embargo` (`resourceName` one table with a row time, `actions` whole seconds 1–2678400). A holder's reads see only rows whose row time is at least that old at the server's clock; its table subscriptions deliver each change when it comes of age; writes, materialized queries, graph traversal and vector search on the table are refused `403 AUTH_EMBARGO_UNSUPPORTED` (new code). A branch query of a base table applies the cutoff; a branch query of a materialized result over an embargoed source is refused the same way (**BL-1161, BL-1298, 0.9.0**). An embargoed subscription can end with the new WebSocket error `SUBSCRIPTION_EMBARGO_RESET`. `GET …/users/{id}/access-grants` gains `embargoes`. New setting `Aouda:Streaming:EmbargoHoldMaxEvents`. `X-Aouda-Protocol-Version` stays `2`. |
 | 2.18 | 0.9.0 (Hardening, BL-1018) | **Token allowance (breaking on the wire):** an application access token's `iss` is its auth database's URL on every linked database, and `aud` is an array — the [allowance](#the-token-allowance), the databases the token may open (it was the auth database's name). Sign-in and password reset give the databases on which the user holds a role (none: `403`); their new optional `databases` field, and native `authorize`'s, narrows it (`400 INVALID_REQUEST` for anything but a non-empty subset). A token, refresh or native code used outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE` (new code). The OIDC discovery document at a linked database names the auth database's issuer. Server-auth tokens are unchanged. `X-Aouda-Protocol-Version` stays `2`. |
-| 2.19 | Next train (ADR 0072) | **Formulas (additive on the wire):** the column type `Expression` with `drives` (create table, add column, the column listing, `…/schema`, schema documents); a formula is the column's value, a JSON object in JSON rows (the canonical text in column-batch frames); the `cellRef` expression node (valid only in a formula, with its shorthands) and thirteen new functions; [`POST …/tables/{table}/explain`](#explain-a-formula-cell); a token read of a table with an `Expression` column judged by the formula maintainer's progress; new codes `FORMULA_COLUMN_INVALID`, `FORMULA_INVALID`, `FORMULA_REFERENCE_INVALID`, `FORMULA_REFERENCE_NOT_PRIMARY_KEY`, `FORMULA_CYCLE`, `FORMULA_DEPTH_EXCEEDED`, `FORMULA_LIMIT_EXCEEDED` (400), `FORMULA_REFERENCE_NOT_READABLE` (403), `FORMULA_VALUE_WRITE_REFUSED`, `FORMULA_TABLE_REFERENCED` (409), `FORMULA_TOKEN_REQUIRES_PRIMARY` (421), `FORMULA_NOT_MAINTAINED` (503), `EXPR_CELLREF_NOT_ALLOWED`, `EXPR_CELLREF_INVALID`. `X-Aouda-Protocol-Version` stays `2`. A server of an earlier train refuses the `Expression` type and has no `explain` route (`404`). |
+| 2.19 | 0.14.0 (ADR 0072) | **Formulas (additive on the wire):** the column type `Expression` with `drives` (create table, add column, the column listing, `…/schema`, schema documents); a formula is the column's value, a JSON object in JSON rows (the canonical text in column-batch frames); the `cellRef` expression node (valid only in a formula, with its shorthands) and thirteen new functions; [`POST …/tables/{table}/explain`](#explain-a-formula-cell); a token read of a table with an `Expression` column judged by the formula maintainer's progress; new codes `FORMULA_COLUMN_INVALID`, `FORMULA_INVALID`, `FORMULA_REFERENCE_INVALID`, `FORMULA_REFERENCE_NOT_PRIMARY_KEY`, `FORMULA_CYCLE`, `FORMULA_DEPTH_EXCEEDED`, `FORMULA_LIMIT_EXCEEDED` (400), `FORMULA_REFERENCE_NOT_READABLE` (403), `FORMULA_VALUE_WRITE_REFUSED`, `FORMULA_TABLE_REFERENCED` (409), `FORMULA_TOKEN_REQUIRES_PRIMARY` (421), `FORMULA_NOT_MAINTAINED` (503), `EXPR_CELLREF_NOT_ALLOWED`, `EXPR_CELLREF_INVALID`. `X-Aouda-Protocol-Version` stays `2`. A server of an earlier train refuses the `Expression` type and has no `explain` route (`404`). |

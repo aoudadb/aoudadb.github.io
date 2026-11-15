@@ -30,7 +30,7 @@ kubectl get pods,svc -n aouda
 
 ## Probes and the first start
 
-(**BL-1462, next train**) The chart's probes follow the [three probe meanings](../reference/http-api.md#the-probes-one-meaning-each):
+(**BL-1462, 0.14.0**) The chart's probes follow the [three probe meanings](../reference/http-api.md#the-probes-one-meaning-each):
 
 | Probe | Path | `200` when |
 |---|---|---|

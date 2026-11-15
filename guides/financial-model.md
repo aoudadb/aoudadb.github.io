@@ -4,9 +4,9 @@ nav_order: 12.6
 parent: "Guides"
 ---
 
-# Build a live financial model (**ADR 0072, next train**)
+# Build a live financial model (**ADR 0072, 0.14.0**)
 
-Document status: written for the next train. Everything on this page is **new** and marked **(ADR 0072, next train)**; none of it is in a
+Document status: written for the 0.14.0. Everything on this page is **new** and marked **(ADR 0072, 0.14.0)**; none of it is in a
 released build.
 
 This guide builds a small but complete live model: a three-year profit-and-loss statement for two departments, a balance-sheet line that
@@ -27,7 +27,7 @@ Related: [Formulas](formulas.md) (the reference for everything used here) · [Re
 
 ## What you build
 
-(**ADR 0072, next train**) One table, `pnl`, keyed `(dept, line, year)`. Each row holds one number in `amount`. A row whose `formula` is
+(**ADR 0072, 0.14.0**) One table, `pnl`, keyed `(dept, line, year)`. Each row holds one number in `amount`. A row whose `formula` is
 null is an **input** you type; a row with a formula is computed by the database:
 
 | `line` | Kind | Formula |
@@ -53,7 +53,7 @@ year before's `RetainedEarnings`. A row condition lets each user see only their 
 
 ## Before you start
 
-(**ADR 0072, next train**) A server with a database `finance` linked to an auth database, and that database's service key. On a
+(**ADR 0072, 0.14.0**) A server with a database `finance` linked to an auth database, and that database's service key. On a
 development machine:
 
 ```bash
@@ -96,7 +96,7 @@ const client = new AoudaClient({ serverUrl, database, apiKey: serviceKey });
 
 ## Step 1: two tables with a formula column
 
-(**ADR 0072, next train**) The row condition is a resolver in the auth database: a row is visible to a user when its `dept` is one of
+(**ADR 0072, 0.14.0**) The row condition is a resolver in the auth database: a row is visible to a user when its `dept` is one of
 the user's entitlements in the dimension `dept`. Create it once, over HTTP (it is an auth-admin call in every client):
 
 ```bash
@@ -182,7 +182,7 @@ declaration are in [Formulas: the column](formulas.md#the-column).
 
 ## Step 2: the inputs
 
-(**ADR 0072, next train**) Inputs are ordinary rows with no formula: an ordinary insert.
+(**ADR 0072, 0.14.0**) Inputs are ordinary rows with no formula: an ordinary insert.
 
 | | Retail 2026 | 2027 | 2028 | Online 2026 | 2027 | 2028 |
 |---|---|---|---|---|---|---|
@@ -251,7 +251,7 @@ await client.table("pnl").insertMany(
 
 ## Step 3: the formulas, one per line
 
-(**ADR 0072, next train**) A formula is the [expression JSON](../reference/http-api.md#expression-node-format) of the value it
+(**ADR 0072, 0.14.0**) A formula is the [expression JSON](../reference/http-api.md#expression-node-format) of the value it
 computes. It reads another row with a `cellRef`: a `key` and a `column`. Here every `cellRef` leaves out the `table` (it reads its own
 table) and gives only `line`; the key columns it leaves out — `dept` and `year` — are taken from the formula's own row. So `GrossProfit`
 on the row `(Online, GrossProfit, 2027)` reads `(Online, Revenue, 2027)` and `(Online, COGS, 2027)`.
@@ -371,7 +371,7 @@ database never rounds for you. See [Types](formulas.md#types-the-driven-column-d
 
 ## Step 4: read the statement
 
-(**ADR 0072, next train**) A formula row's value is computed **after** the commit that wrote it, by the database's formula maintainer, a
+(**ADR 0072, 0.14.0**) A formula row's value is computed **after** the commit that wrote it, by the database's formula maintainer, a
 moment later. Your write never waits for it. To read the values your write produced, read with the write's **consistency token**: a
 token read of a table with a formula column waits until the formulas have caught up with it.
 
@@ -448,7 +448,7 @@ The SDK reads come back in column-batch frames: a C# row's `formula` is the form
 
 ## Step 5: change an input and watch it settle
 
-(**ADR 0072, next train**) Subscribe to Retail's 2026 rows, then raise Retail's 2026 revenue to 1250.00. The subscription receives the
+(**ADR 0072, 0.14.0**) Subscribe to Retail's 2026 rows, then raise Retail's 2026 revenue to 1250.00. The subscription receives the
 input's change and then **each formula row that changed, once**, at its final value — never an intermediate one:
 
 ```
@@ -525,7 +525,7 @@ seen. See [Formulas: live](formulas.md#live-subscriptions).
 
 ## Step 6: a cell that cannot be computed, and why
 
-(**ADR 0072, next train**) Set Online's 2028 revenue to 0. `Margin` divides by revenue, so it has no value: it is **null**. There is no
+(**ADR 0072, 0.14.0**) Set Online's 2028 revenue to 0. `Margin` divides by revenue, so it has no value: it is **null**. There is no
 error column and no failed write; the other cells still settle:
 
 | Online 2028 | before | after |
@@ -611,7 +611,7 @@ A grid that wants to show `#DIV/0!` calls `explain` for a null formula cell. Set
 
 ## Step 7: a second table: the balance sheet
 
-(**ADR 0072, next train**) `balance` has the same shape. Its `RetainedEarnings` reads its own `Opening` row and `pnl`'s `NetIncome` — a
+(**ADR 0072, 0.14.0**) `balance` has the same shape. Its `RetainedEarnings` reads its own `Opening` row and `pnl`'s `NetIncome` — a
 `cellRef` that names a `table` — and each year's `Opening` (but the first) is the year before's `RetainedEarnings`, named with an
 explicit `year`. The `dept` stays relative throughout.
 
@@ -697,7 +697,7 @@ An edit to any input of `pnl` now reaches `balance` too: a formula is woken by a
 
 ## Step 8: what the database refuses
 
-(**ADR 0072, next train**) Each of these is refused whole — nothing of the write is applied — with a code and a message that names the
+(**ADR 0072, 0.14.0**) Each of these is refused whole — nothing of the write is applied — with a code and a message that names the
 row and the rule:
 
 | You try | You get |
@@ -753,7 +753,7 @@ only `"formula": null` keeps the last computed value as the input.
 
 ## Step 9: who may see and write what
 
-(**ADR 0072, next train**) A formula table's security is the table's own, set like any table's. Two people:
+(**ADR 0072, 0.14.0**) A formula table's security is the table's own, set like any table's. Two people:
 
 - a **viewer** who may read both tables, for the Retail department only;
 - a **planner** who may read and write both tables, for Retail only.

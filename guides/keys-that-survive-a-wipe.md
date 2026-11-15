@@ -79,7 +79,7 @@ unreadable or empty file still does, naming the path and never the content), or 
 Since 0.12.0 every such file is read by one reader with one set of rules, listed in [Secret files](#secret-files); `$NAME` in the
 `ServerKeyFile` path is expanded now, so `ServerKeyFile=$CREDENTIALS_DIRECTORY/server-key` works.
 
-**A server key alone is enough** (**BL-1462, next train**). On a data directory with no admin, a declared server key ends setup
+**A server key alone is enough** (**BL-1462, 0.14.0**). On a data directory with no admin, a declared server key ends setup
 mode: the server auth database is created with no user, the key's row is written with it, and the key operates the server from
 the first start. No `Aouda:Auth:RootUser` is needed. (Before, the key was inert until a first admin existed, and the server logged
 that it would take effect then.) A data directory that has been set up never re-enters setup mode: remove the declaration later
@@ -136,19 +136,19 @@ declaration instead and the next link generates that kind again, leaving the oth
 
 **Every listed secret is live, and each is its own row.** To rotate a declared key, add the new secret and run `aouda reload`, move
 the clients, then remove the old secret and run `aouda reload` again (its row is retracted by that reload). Removing a secret or an
-entry never disturbs the other secrets' rows. (**BL-1427, next train**) A running WebSocket or long-poll session authenticated with a
+entry never disturbs the other secrets' rows. (**BL-1427, 0.14.0**) A running WebSocket or long-poll session authenticated with a
 removed secret ends when its row is retracted, before the reload answers (`AUTH_TOKEN_REVOKED`); a reload that rotates a secret in
 place writes the new row before it retires the old one, so the two are never both refused.
 
 **A declared key is revoked, never rotated.** `POST .../scoped-service-keys/{name}/rotate` on a declared key is `409`
 ("declared in configuration; change the declaration"); a minted scoped key rotates as before.
 
-(**BL-1427, next train**) A change to the file's **content** takes `aouda reload` (or `POST /api/admin/reload`), not a restart: the
+(**BL-1427, 0.14.0**) A change to the file's **content** takes `aouda reload` (or `POST /api/admin/reload`), not a restart: the
 server re-reads the file, validates the whole declaration as a start would, and changes nothing if any finding is an error. The
 file's **path** (`Aouda:Auth:Keys:File`), the server key (`Aouda:Auth:Bootstrap:*`, the `aouda-server-key` credential) and the dev
 admin still take a restart: a reload lists them under `restartRequired` and applies the rest. A reload never retracts the server
 key the process started with. An invalid file, a missing environment variable or an unreadable
-path **fails the start** with a message naming the entry (never a secret). (**BL-1378, 0.11.0**) (**BL-1463, next train**) Every
+path **fails the start** with a message naming the entry (never a secret). (**BL-1378, 0.11.0**) (**BL-1463, 0.14.0**) Every
 bad entry is reported at once, each with its code (`KEY_SECRET_SHARED`, `KEY_FIELD_REQUIRED`, `SECRET_UNREADABLE`, ...) and its JSON
 pointer in the file (`/identities/3/secrets/0`), and nothing is created; see [Declaration Finding Codes](../reference/plan-codes.md). So does an auth database that
 exists but cannot be opened (quarantined, or it failed to open) while keys are declared for it: the message names the database and
@@ -167,9 +167,9 @@ generate keys with `openssl rand -hex 32` and put the prefix in front.
 
 **A secret is one row.** Declaring the secret of a key that already exists in that auth database (one minted earlier, revoked or
 not) is refused with an error that names the existing row (its id, name and source, never the secret): revoke and delete that key,
-or declare a different secret. At start the error fails the start (**BL-1463, next train**: `KEY_SECRET_HELD_BY_OTHER_ROW`, before
+or declare a different secret. At start the error fails the start (**BL-1463, 0.14.0**: `KEY_SECRET_HELD_BY_OTHER_ROW`, before
 any row is written); it also abandons the creation of an auth database. `aouda plan` runs offline and cannot see a database
-(**BL-1463, next train**), so it reports only the clashes it can: the same secret twice in the file, or in the file and in the server
+(**BL-1463, 0.14.0**), so it reports only the clashes it can: the same secret twice in the file, or in the file and in the server
 key, wherever the server key comes from.
 
 The declared `kind` must match the prefix wherever the server can see the plaintext (an `env` secret or the server key). For a
@@ -188,7 +188,7 @@ aouda plan --Aouda:Auth:Keys:File=identities.json
 # 1 error, 0 warnings: `aouda start` would refuse this declaration.
 ```
 
-(**BL-1463, next train**; it replaces `aouda keys check`, **BL-1378, 0.11.0**, and BL-1461's rework of it) `aouda plan` takes the
+(**BL-1463, 0.14.0**; it replaces `aouda keys check`, **BL-1378, 0.11.0**, and BL-1461's rework of it) `aouda plan` takes the
 arguments `aouda start` takes and reads the configuration the start reads, through the same code, in the directory and environment it
 runs in: `appsettings.json` and `appsettings.<environment>.json` from the working directory, environment variables in both spellings
 (`AOUDA_AUTH__BOOTSTRAP__SERVERKEY` and `Aouda__Auth__Bootstrap__ServerKey`), the start arguments, and the systemd credential

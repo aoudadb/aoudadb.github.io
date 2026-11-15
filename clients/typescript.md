@@ -1730,7 +1730,7 @@ See also: [Bulk Load: don't hand-refresh](../guides/bulk-load.md#available-now).
 
 ---
 
-## 13a) Formula tables (**ADR 0072, next train**)
+## 13a) Formula tables (**ADR 0072, 0.14.0**)
 
 A table may declare an `Expression` column ([Formulas](../guides/formulas.md)): it holds a formula and **drives** one value column of the
 same table. A row whose formula is `null` is an *input*, written like any row; a row with a formula is computed by the server, which keeps

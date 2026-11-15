@@ -70,7 +70,7 @@ Default read preference remains **`Primary`**. Replica reads are *safe when you 
 
 ---
 
-## Formula tables (**ADR 0072, next train**) {#formula-tables}
+## Formula tables (**ADR 0072, 0.14.0**) {#formula-tables}
 
 A table with an `Expression` column holds [formulas](formulas.md) whose values the database computes **after** the commit that changed
 what they read. A read or a subscribe of such a table with a token is therefore judged by the **formula maintainer's progress**, not by the
