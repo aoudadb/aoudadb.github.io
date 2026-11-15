@@ -4,9 +4,9 @@ nav_order: 12.5
 parent: "Guides"
 ---
 
-# Formulas: computed cells in ordinary tables (**ADR 0072, next train**)
+# Formulas: computed cells in ordinary tables (**ADR 0072, 0.14.0**)
 
-Document status: written for the next train. Everything on this page is **new** and marked **(ADR 0072, next train)**; none of it is in a
+Document status: written for the 0.14.0. Everything on this page is **new** and marked **(ADR 0072, 0.14.0)**; none of it is in a
 released build.
 
 A table may declare an **`Expression` column** that drives another column of the same table. In a row whose formula is null the driven
@@ -24,14 +24,14 @@ any other.
 
 Related: [Build a live financial model](financial-model.md) (a walk-through of everything here) ·
 [HTTP API: explain](../reference/http-api.md#explain-a-formula-cell) · [Expression nodes](../reference/http-api.md#expression-node-format) ·
-[Freshness](freshness.md) · [Real-time streaming](real-time.md) · [Materialized queries](materialized.md) · [.NET client](../clients/dotnet.md#8c-formula-tables-adr-0072-next-train) ·
-[TypeScript client](../clients/typescript.md#13a-formula-tables-adr-0072-next-train).
+[Freshness](freshness.md) · [Real-time streaming](real-time.md) · [Materialized queries](materialized.md) · [.NET client](../clients/dotnet.md#8c-formula-tables-adr-0072-0140) ·
+[TypeScript client](../clients/typescript.md#13a-formula-tables-adr-0072-0140).
 
 ---
 
 ## The model on one screen
 
-(**ADR 0072, next train**)
+(**ADR 0072, 0.14.0**)
 
 ```json
 "pnl": {
@@ -67,7 +67,7 @@ query's result — that is how a `SUM` over many rows becomes a formula's input 
 
 ## The column
 
-(**ADR 0072, next train**) Declare an Expression column with `"type": "Expression"` and the column it drives in `drives`. Over HTTP
+(**ADR 0072, 0.14.0**) Declare an Expression column with `"type": "Expression"` and the column it drives in `drives`. Over HTTP
 (`POST …/tables`, `POST …/tables/{name}/columns`):
 
 ```json
@@ -97,7 +97,7 @@ its driven column keeps its last values, now as inputs.
 
 ## Input rows and formula rows
 
-(**ADR 0072, next train**) Each row is one or the other, by its own Expression value, per Expression column:
+(**ADR 0072, 0.14.0**) Each row is one or the other, by its own Expression value, per Expression column:
 
 - **Formula null — an input row.** The driven column is written like any column, by any write.
 - **Formula set — a formula row.** The database computes the driven column. A write that would set the driven column of a row whose
@@ -115,7 +115,7 @@ its driven column keeps its last values, now as inputs.
 
 ## Writing a formula
 
-(**ADR 0072, next train**) A formula is written by an ordinary write — insert, upsert, update by `where` or by key, a named mutation, a
+(**ADR 0072, 0.14.0**) A formula is written by an ordinary write — insert, upsert, update by `where` or by key, a named mutation, a
 WebSocket write stream, a bulk load, a schema seed — as the value of the Expression column. In a JSON body it is the expression's JSON
 **object**; a string holding that JSON is accepted too.
 
@@ -165,7 +165,7 @@ per database (BL-1505). Keep loads into a formula table short. See [Known issues
 
 ## References
 
-(**ADR 0072, next train**) A formula reads another value with a `cellRef`: a `table`, a `key` of literal values by key column, and a
+(**ADR 0072, 0.14.0**) A formula reads another value with a `cellRef`: a `table`, a `key` of literal values by key column, and a
 `column`.
 
 ```json
@@ -203,7 +203,7 @@ as `"table": ""`); it is resolved again when the row's key changes.
 
 ## What a formula may contain
 
-(**ADR 0072, next train**) The [expression nodes](../reference/http-api.md#expression-node-format) of `setExpr`, with `cellRef`:
+(**ADR 0072, 0.14.0**) The [expression nodes](../reference/http-api.md#expression-node-format) of `setExpr`, with `cellRef`:
 
 | Node | Use |
 |---|---|
@@ -234,14 +234,14 @@ A null operand makes arithmetic and a comparison null. Comparing two `Date`, `Ti
 a literal of the wrong kind in a call (`eq("a", 1)`) is refused when the formula is written.
 
 The SDKs build these: C# `FormulaExpr` (`CellHere`, `Cell`, `Col`, `Add`, `Sub`, …) and TypeScript `fx` (`fx.cellHere`, `fx.cell`,
-`fx.col`, `fx.add`, …); see the [.NET](../clients/dotnet.md#8c-formula-tables-adr-0072-next-train) and
-[TypeScript](../clients/typescript.md#13a-formula-tables-adr-0072-next-train) client pages.
+`fx.col`, `fx.add`, …); see the [.NET](../clients/dotnet.md#8c-formula-tables-adr-0072-0140) and
+[TypeScript](../clients/typescript.md#13a-formula-tables-adr-0072-0140) client pages.
 
 ---
 
 ## Types: the driven column decides
 
-(**ADR 0072, next train**) The driven column's type is the formula's type. **Nothing is ever rounded for you**, and the type is checked
+(**ADR 0072, 0.14.0**) The driven column's type is the formula's type. **Nothing is ever rounded for you**, and the type is checked
 twice:
 
 1. **When the formula is written**, against the type the formula computes. It must fit without loss: no narrower scale, no fraction into an
@@ -262,7 +262,7 @@ One type per driven column: a different type is a different driven column (or ta
 
 ## When values change: eventual consistency and tokens
 
-(**ADR 0072, next train**) **A formula's value is written after the commit that changed what it reads, in a separate step**, by the
+(**ADR 0072, 0.14.0**) **A formula's value is written after the commit that changed what it reads, in a separate step**, by the
 database's formula maintainer. Your commit never waits for it.
 
 > **There is no atomic read of an input and the values computed from it.** A read right after a write can show the old value (or null, for
@@ -301,7 +301,7 @@ See [Freshness](freshness.md#formula-tables).
 
 ## A cell that cannot be computed: null, and `explain`
 
-(**ADR 0072, next train**) A formula that cannot be computed does not fail anything. Its value is **null**, the other formulas still
+(**ADR 0072, 0.14.0**) A formula that cannot be computed does not fail anything. Its value is **null**, the other formulas still
 settle, and the cell computes again when what it reads changes. There is no error column. The reasons:
 
 - a division by zero;
@@ -340,7 +340,7 @@ write you just made. The full contract is in the [HTTP reference](../reference/h
 
 ## Live subscriptions
 
-(**ADR 0072, next train**) A formula table is subscribed to like any table, by its own columns:
+(**ADR 0072, 0.14.0**) A formula table is subscribed to like any table, by its own columns:
 
 ```json
 { "type": "subscribe", "id": "retail-2026", "target": "pnl",
@@ -362,7 +362,7 @@ See [Real-time streaming](real-time.md) for the protocol.
 
 ## Security
 
-(**ADR 0072, next train**) **A formula table's security is the table's own**, set by its owner like any table's: who may read, write and
+(**ADR 0072, 0.14.0**) **A formula table's security is the table's own**, set by its owner like any table's: who may read, write and
 subscribe, which rows (a row condition, partition-level security, entitlements), the data-plane setting. There is no special grant, role
 or default. The [guide](financial-model.md#step-9-who-may-see-and-write-what) puts a department row condition on two formula tables.
 
@@ -394,7 +394,7 @@ What follows from security being the table's:
 
 ## Changing the schema
 
-(**ADR 0072, next train**) A DDL that would break a formula's reference is refused with **`409 FORMULA_TABLE_REFERENCED`**, naming the
+(**ADR 0072, 0.14.0**) A DDL that would break a formula's reference is refused with **`409 FORMULA_TABLE_REFERENCED`**, naming the
 cells (through the table routes and `schema/apply`, where it is a failed entry):
 
 - dropping or renaming a table a formula reads — or a source table of a materialized query whose result a formula reads. A formula
@@ -418,7 +418,7 @@ a query a formula reads.
 
 ## Restart, replicas, branches and backup
 
-(**ADR 0072, next train**)
+(**ADR 0072, 0.14.0**)
 
 - **Every open recomputes every formula**: a restart, a crash recovery, an exact restore. Until that has finished a token read waits (and
   answers `409 TOKEN_UNSATISFIED` if the wait runs out); a read without a token may still show a value from before. At 100 000 formula
@@ -437,7 +437,7 @@ a query a formula reads.
 
 ## Limits, and what is not there
 
-(**ADR 0072, next train**)
+(**ADR 0072, 0.14.0**)
 
 | Limit | Value |
 |---|---|
@@ -457,7 +457,7 @@ grid or UI component; values computed per viewer.
 
 ## Known issues
 
-(**ADR 0072, next train**)
+(**ADR 0072, 0.14.0**)
 
 - **BL-1481** — `Int64` arithmetic in a formula wraps on overflow instead of making the cell null ([Types](#types-the-driven-column-decides)).
   The same is true of `setExpr` and transforms today.
@@ -485,7 +485,7 @@ grid or UI component; values computed per viewer.
 
 ## Troubleshooting
 
-(**ADR 0072, next train**)
+(**ADR 0072, 0.14.0**)
 
 | You see | Why | What to do |
 |---|---|---|

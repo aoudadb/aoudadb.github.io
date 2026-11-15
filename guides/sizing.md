@@ -749,7 +749,7 @@ that arrives in a bucket folds into that bucket's one group.
   is. `stats.windowCompletionRows` says how many source rows the part read. Before the pieces, reading one ticker's minute-candle
   history keyset-paged 10,000 at a time needed 8.5 MB against a 512 MB server's 4 MB read ceiling, and was refused on every retry.
 
-## Formula tables: what they cost (**ADR 0072, next train**) {#formula-tables-what-they-cost}
+## Formula tables: what they cost (**ADR 0072, 0.14.0**) {#formula-tables-what-they-cost}
 
 A [formula](formulas.md) is a value in a row of your own table, so a formula table sits in the tiers like any table: a recomputed row moves
 into the hot tier as any updated row does, and leaves it like any other.

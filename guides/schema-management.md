@@ -110,7 +110,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 - **Diff**: Shows a human-readable plan (add table, add column, etc.). Use it on every PR to review schema changes. Add `--access` to fail the job when the branch **widens** what `mk_pub_*` or `aouda.identities.json` principals can read ([Access-surface diff](access-surface.md)). Named queries live under `namedQueries` in the same file ([Named queries](named-queries.md)); optional `freshness` on the named query is keyed by name ([Freshness](freshness.md)). Omitting a name deletes the definition (there is no `dropNamedQueries`). Materialized queries live under [`materializedQueries`](#materialized-queries-in-the-schema-file).
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
-- **Check**: Use `aouda plan` in CI before anything is running — it validates a *declared* schema file with no server (exit 0 valid, 1 invalid; **BL-1463, next train**; it replaced `aouda schema check`, **BL-1419, 0.12.0**). See [Plan a declaration](plan.md). A schema file that is not declared is checked against a server with `schema diff`.
+- **Check**: Use `aouda plan` in CI before anything is running — it validates a *declared* schema file with no server (exit 0 valid, 1 invalid; **BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**). See [Plan a declaration](plan.md). A schema file that is not declared is checked against a server with `schema diff`.
 - **Validate**: Use `schema validate` in CI — it needs a running server and exits 0 if the server matches the file, 1 if there is drift.
 
 ### Diff warnings vs applyable column changes
@@ -239,12 +239,12 @@ If you declare your databases in configuration (`Aouda:Databases`), the server c
 }
 ```
 
-What happens, in this order: **every `SchemaFile` is read and validated before anything opens** (**BL-1463, next train**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `SchemaFile` is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
+What happens, in this order: **every `SchemaFile` is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `SchemaFile` is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
 
 | You want to know | Answer |
 |---|---|
 | Is it safe to restart? | Yes. A file already in effect gives an empty diff: nothing is written, no history entry. A changed file applies only the difference. |
-| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, next train**), an overlay that adds a table. A change that cannot be applied fails the start too. (**BL-1463, next train**) Every bad file is reported at once, each with its code and a JSON pointer into the file (`SCHEMA_INVALID`, `SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_OVERLAY_INVALID`, `SCHEMA_CHANGE_REFUSED`, ...; see [Declaration Finding Codes](../reference/plan-codes.md)); a file or an overlay that cannot be read (`SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE`) exits with status 1, so a supervisor retries it once the volume is mounted, and an invalid one exits 78. |
+| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, 0.14.0**), an overlay that adds a table. A change that cannot be applied fails the start too. (**BL-1463, 0.14.0**) Every bad file is reported at once, each with its code and a JSON pointer into the file (`SCHEMA_INVALID`, `SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_OVERLAY_INVALID`, `SCHEMA_CHANGE_REFUSED`, ...; see [Declaration Finding Codes](../reference/plan-codes.md)); a file or an overlay that cannot be read (`SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE`) exits with status 1, so a supervisor retries it once the volume is mounted, and an invalid one exits 78. |
 | What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"SchemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
 | Which tables can I still change over HTTP? | None that the file created: a table schema apply creates refuses HTTP DDL in every inference mode, whether the CLI, the API or the start-time apply created it. |
 | Where is the history? | `GET /api/databases/{db}/schema/history`, with the source `DeclaredApply`. |
@@ -252,8 +252,8 @@ What happens, in this order: **every `SchemaFile` is read and validated before a
 
 `SchemaEnvironment` is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
 file: `<file without .json>.<env>.json`, so `aouda.schema.json` → `aouda.schema.prod.json` and `rates.aouda.schema.json` →
-`rates.aouda.schema.prod.json` (**BL-1460, next train**; before, every file in one directory shared `aouda.schema.<env>.json`). An
-overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, next train**; it was skipped). An can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
+`rates.aouda.schema.prod.json` (**BL-1460, 0.14.0**; before, every file in one directory shared `aouda.schema.<env>.json`). An
+overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
 
 Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
 
@@ -337,9 +337,9 @@ Overlays can only change **database-level settings** (`settings.durability`) and
 
 The overlay's name comes from the base file's: `<base without .json>.<env>.json` beside it (`orders.schema.json` with `--env prod` reads
 `orders.schema.prod.json`). An overlay is read as strictly as the base file: an unknown or wrong-case member is refused
-(`SCHEMA_UNKNOWN_MEMBER`), and an overlay that exists but cannot be read, or is empty, is an error naming it (**BL-1460, next train**).
+(`SCHEMA_UNKNOWN_MEMBER`), and an overlay that exists but cannot be read, or is empty, is an error naming it (**BL-1460, 0.14.0**).
 
-**Exactly these members may appear in an overlay** (**BL-1460, next train**):
+**Exactly these members may appear in an overlay** (**BL-1460, 0.14.0**):
 
 | Where | Members |
 |---|---|
@@ -356,9 +356,9 @@ SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED: member 'partitionLevelSecurity' at /tables/or
 
 Before, the merge dropped such a member without a word: an overlay turning partition-level security on applied with it off.
 
-### Member names are exact (**BL-1460, next train**)
+### Member names are exact (**BL-1460, 0.14.0**)
 
-Every path reads a schema document with one reader: `aouda plan` (**BL-1463, next train**), `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
+Every path reads a schema document with one reader: `aouda plan` (**BL-1463, 0.14.0**), `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
 and its overlay before sending anything; `npx @aouda/client` sends the base file as written, so the server refuses an unknown member in
 it, and merges an `--env` overlay itself, refusing the same overlay members), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
 member in another case, is **refused**, never ignored:

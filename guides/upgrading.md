@@ -29,7 +29,7 @@ DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<catalog root file>
   the end of the line).
 - The server also logs the whole message at **critical** level before the start fails, so the code is the first token of that log line, and the
   exception that stops the host starts with the same line.
-- (**BL-1461, BL-1463, next train**) `aouda start` exits with status **78** (`EX_CONFIG`), the status of a start refused for its
+- (**BL-1461, BL-1463, 0.14.0**) `aouda start` exits with status **78** (`EX_CONFIG`), the status of a start refused for its
   configuration ([exit statuses](../deployment/linux.md#when-the-start-is-refused)), and prints the refusal as a finding on standard error
   (`error    DATA_DIRECTORY_FORMAT_REFUSED`, then the line above); the systemd unit does not restart it. Until then there was no distinct
   exit status (the process aborted), so match the code in the output with 0.13.0 and earlier. `aouda doctor` and `aouda status` never

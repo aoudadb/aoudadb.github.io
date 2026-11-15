@@ -136,7 +136,7 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6
 
 ⚠️ **`--start-period=60s` is doing real work**: WAL recovery on a large database can legitimately take minutes, and a probe that starts immediately will kill a server that is recovering correctly.
 
-**Which probe for what** (**BL-1462, next train**; the full table is in the [HTTP API reference](../reference/http-api.md#the-probes-one-meaning-each)):
+**Which probe for what** (**BL-1462, 0.14.0**; the full table is in the [HTTP API reference](../reference/http-api.md#the-probes-one-meaning-each)):
 
 | Probe | Answers | `200` when |
 |---|---|---|
@@ -152,14 +152,14 @@ must start while the server is still in setup mode (one that creates the first a
 ⚠️ **A new container with nothing declared is `unhealthy` until it has a first admin.** A server whose data volume has never been
 set up, with no declared server key or first admin, is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since
 0.11.0, BL-1393). That is the probe telling the truth, not a fault. `/health` and `/startup` answer `200` meanwhile (**BL-1462,
-next train**). Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for setup
+0.14.0**). Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for setup
 too.
 
 To see why, read the body from outside the container: `curl -s http://localhost:5000/ready` (`/ready` needs no credential). The image's own `wget` does not print the body of a `503`, so `docker exec aouda wget -qO- http://localhost:5000/ready` shows nothing.
 
 ### Setup mode only when nothing is declared
 
-(**BL-1462, next train**) Declare how the server is operated and it starts ready. Setup mode, the interactive first run, exists
+(**BL-1462, 0.14.0**) Declare how the server is operated and it starts ready. Setup mode, the interactive first run, exists
 only for a data volume that has **never been set up** (no server auth database) and a server that declares none of these:
 
 | You declare | What happens at start |
@@ -177,7 +177,7 @@ declarative deployment still needed an admin password, and a compose file gated 
 
 ### Compose
 
-(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**; **BL-1462, next train**) `docker-compose.yml` passes three things through from a
+(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**; **BL-1462, 0.14.0**) `docker-compose.yml` passes three things through from a
 `.env` file next to it (or your environment); none has a default, because port 5000 is published and a known default would be a
 known credential. Set one:
 
@@ -187,10 +187,10 @@ known credential. Set one:
 | `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` | The first admin is created at start. Neither has a default. Put both in a `.env` file next to the compose file or export them; remove them afterwards if you like: the admin lives in the data volume |
 | `AOUDA_DEV_ADMIN=true` | Development and tests only. The server makes a random throwaway admin and server key at every start and prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda` for the `AOUDA-DEV-ADMIN` line. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD` or a server key. See [Development admin](../guides/development-admin.md) |
 | none, on a new volume | Setup mode, as above; Studio waits (`service_healthy`) until the first admin exists |
-| none, on a volume that was set up but now has no user, no active server key and nothing declared | The start is refused: the line starts `SERVER_HAS_NO_OPERATOR: ` and names the ways out, and the exit status is `78` (**BL-1461**, **BL-1462**, next train) |
+| none, on a volume that was set up but now has no user, no active server key and nothing declared | The start is refused: the line starts `SERVER_HAS_NO_OPERATOR: ` and names the ways out, and the exit status is `78` (**BL-1461**, **BL-1462**, 0.14.0) |
 | none, on a volume that holds an admin or an active server key | Starts normally |
 
-⚠️ **`Aouda:Auth:RequireFirstAdmin` is gone** (**BL-1462, next train**). It made a server with no admin and no declared admin
+⚠️ **`Aouda:Auth:RequireFirstAdmin` is gone** (**BL-1462, 0.14.0**). It made a server with no admin and no declared admin
 fail the start, which under `restart: unless-stopped` was a restart loop. A server with nothing declared now waits in setup mode
 and `/ready` says so; a server that declares a server key needs no admin at all. A leftover `AOUDA_AUTH__REQUIREFIRSTADMIN` is
 ignored.
@@ -217,7 +217,7 @@ JSON.
 The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
 else missing).
 
-⚠️ **`aouda create-admin` refuses while the server runs** (**BL-1462, next train**). The server holds its data directory (an
+⚠️ **`aouda create-admin` refuses while the server runs** (**BL-1462, 0.14.0**). The server holds its data directory (an
 exclusive lock on `/data/Server/aouda.lock`), and `create-admin` opens the directory itself, so next to a running server it exits
 `1` with:
 
@@ -265,7 +265,7 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
 
 ## A container that keeps restarting
 
-(**BL-1461, BL-1463, next train**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase`
+(**BL-1461, BL-1463, 0.14.0**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase`
 does not exist, a set-up server left with no operator, a data directory in another format) exits with status **78** and prints every
 finding on standard error, each as a line `error    <CODE>  <setting or file>` followed by the message and the fix, then a last line
 naming the exit status. The codes are in [Declaration Finding Codes](../reference/plan-codes.md), the format in
@@ -293,7 +293,7 @@ when the start would refuse. See [Plan a declaration](../guides/plan.md).
 
 ## Logs
 
-The container logs to stdout, so `docker logs aouda` is all of it. (**BL-1461, next train**) The one exception is a refused start's two
+The container logs to stdout, so `docker logs aouda` is all of it. (**BL-1461, 0.14.0**) The one exception is a refused start's two
 lines, which go to standard error; `docker logs` shows both streams.
 
 ⚠️ **The default log level is `Warning`** for every category except startup narration. If a line the documentation mentions is not appearing, that is usually why — see [Defaults reference](../guides/defaults-reference.md#logging-defaults).

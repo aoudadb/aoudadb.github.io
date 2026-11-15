@@ -365,19 +365,19 @@ Full guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
 | `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, 0.11.0**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }`, `{ "file": PATH }` (**BL-1389, 0.11.0**) or `{ "hash": "sha256:<hex>" }` |
 
 A key is the kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`) and at least 32 characters of `A-Z a-z 0-9 _ -`;
-`openssl rand -hex 32` is the generator. A change to the file's content takes `aouda reload` (**BL-1427, next train**; the file's
+`openssl rand -hex 32` is the generator. A change to the file's content takes `aouda reload` (**BL-1427, 0.14.0**; the file's
 path and the server key still take a restart); an invalid declaration fails the start, or refuses the reload, naming the entry. The
 startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by name, kind, auth database, fingerprint and source.
 
 (**BL-1378, 0.11.0**) What is **not** a setting, and what to expect:
 
-- **Removing a declaration revokes its row at the next start** (or at the next `aouda reload`, **BL-1427, next train**; marked `config-removed`, one warning per row); declaring it again
+- **Removing a declaration revokes its row at the next start** (or at the next `aouda reload`, **BL-1427, 0.14.0**; marked `config-removed`, one warning per row); declaring it again
   revives that row. A row an operator revoked stays revoked whatever the file says, and a wipe resets that. With none of the three
   settings above set, nothing is retracted; an empty identities file retracts every configured row.
 - **A declared `service_role`, `public` or `anon` key takes the place of the one a link or `regenerate-keys` would generate**: only
   the undeclared kinds are generated, and `anonKey` / `serviceRoleKey` / `publicKey` are absent from a response for a declared kind.
-- `aouda plan --Aouda:Auth:Keys:File=<path>` validates the file offline (**BL-1463, next train**; it replaced `aouda keys check`; [Plan a declaration](plan.md)); `GET /api/auth/admin/configured-keys` lists the declarations and the
-  state of their rows; (**BL-1427, next train**) a reload is limited to one per 5 s and a dry run to one per 1 s, with a 120 s
+- `aouda plan --Aouda:Auth:Keys:File=<path>` validates the file offline (**BL-1463, 0.14.0**; it replaced `aouda keys check`; [Plan a declaration](plan.md)); `GET /api/auth/admin/configured-keys` lists the declarations and the
+  state of their rows; (**BL-1427, 0.14.0**) a reload is limited to one per 5 s and a dry run to one per 1 s, with a 120 s
   deadline — fixed, not settings; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind, over HTTP, WebSocket and long-poll, with `rejectedApiKeysByTransport` and `rejectedApiKeysByReason` (**BL-1428, BL-1430, 0.12.0**; [counting refused keys](keys-that-survive-a-wipe.md#counting-refused-keys)).
 
 ## First admin (**BL-1423, 0.12.0**)
@@ -389,7 +389,7 @@ startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by n
 
 Full rules and the exact refusals: [Development admin](development-admin.md).
 
-## Formulas (limits, no settings) (**ADR 0072, next train**) {#formula-limits}
+## Formulas (limits, no settings) (**ADR 0072, 0.14.0**) {#formula-limits}
 
 [Formulas](formulas.md) (an `Expression` column's values) add **no configuration key**. The numbers you may meet are limits:
 

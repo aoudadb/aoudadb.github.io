@@ -19,7 +19,7 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Func
 
 > **Declaring MQs in `aouda.schema.json` (new).** Materialized queries can now be declared under a top-level `materializedQueries` map and managed by `schema diff` / `apply` / `export`, instead of only through the .NET helpers or admin HTTP. That is the recommended path for new work — it puts MQ definitions under the same review and CI gate as tables and named queries. Syntax, the five shapes (`latestPerKey`, `firstPerKey`, `aggregate`, `filter`, `topNPerGroup`), and the drop-on-omit semantics are in [Schema management](schema-management.md#materialized-queries-in-the-schema-file). Statements below about MQ lifecycle being .NET-only predate this and are being reworked; the runtime behaviour they describe is unchanged.
 
-> **One cell, not a result set?** (**ADR 0072, next train**) A [formula](formulas.md) — the value of an `Expression` column — maintains one value in one row from other rows' values. A formula may read a row of a materialized query's result, which is how a `SUM` over many rows feeds a formula. The other direction is closed at the formula: a materialized query may be built over a formula table (its driven values are ordinary typed columns), but no formula may read the result of a query whose source chain holds a formula table (`400 FORMULA_REFERENCE_INVALID`), and a token read of such a query is not yet judged by the formula maintainer (BL-1486). Dropping a materialized query whose result a formula reads is `409 FORMULA_TABLE_REFERENCED`.
+> **One cell, not a result set?** (**ADR 0072, 0.14.0**) A [formula](formulas.md) — the value of an `Expression` column — maintains one value in one row from other rows' values. A formula may read a row of a materialized query's result, which is how a `SUM` over many rows feeds a formula. The other direction is closed at the formula: a materialized query may be built over a formula table (its driven values are ordinary typed columns), but no formula may read the result of a query whose source chain holds a formula table (`400 FORMULA_REFERENCE_INVALID`), and a token read of such a query is not yet judged by the formula maintainer (BL-1486). Dropping a materialized query whose result a formula reads is `409 FORMULA_TABLE_REFERENCED`.
 
 If you are new to materialized queries, start with:
 - `2.1 Why this functionality exists` (plain-language explanation)
@@ -77,7 +77,7 @@ What is different in Aouda vs many systems:
 - The result is a regular table, not a special hidden object type.
 - The query name is the table name (unified namespace; no `_mq_` prefix), so it follows the
   [table-name rule](../reference/http-api.md#table-names), and may not start with `_` or exceed 100 characters. `aouda schema
-  check`, the start and `POST …/materialized-queries` refuse a name that breaks it before anything is created (**BL-1468, next train**).
+  check`, the start and `POST …/materialized-queries` refuse a name that breaks it before anything is created (**BL-1468, 0.14.0**).
 - Subscription uses the normal table streaming path (`target = queryName`), not a custom protocol target.
   **A rebuild is announced too (**BL-702, 0.2.0**):** when a change can only be applied by rebuilding the result
   (for example, deleting the source row that held an aggregate's `last`), a subscriber of the result receives the

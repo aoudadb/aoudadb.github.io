@@ -316,7 +316,7 @@ Full examples are also under `examples/github-actions/schema-deploy-typescript.y
   Use `schema validate` in a job that should **fail** if the server has drifted from the schema file (e.g. someone changed the DB by hand). Exit code 0 = in sync, 1 = drift.
 
 - **Check the file before anything is running**  
-  `aouda plan --Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=aouda.schema.json [--Aouda:Databases:app:SchemaEnvironment=prod]` validates the file with no server and no data directory (**BL-1463, next train**; it replaced `aouda schema check`, **BL-1419, 0.12.0**); exit 0 valid, 1 invalid, and each problem names the file and a JSON pointer. It cannot see references between tables and columns, which `schema apply` refuses. See [Plan a declaration](plan.md).
+  `aouda plan --Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=aouda.schema.json [--Aouda:Databases:app:SchemaEnvironment=prod]` validates the file with no server and no data directory (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**); exit 0 valid, 1 invalid, and each problem names the file and a JSON pointer. It cannot see references between tables and columns, which `schema apply` refuses. See [Plan a declaration](plan.md).
 
 - **Letting the server apply the file at start**  
   A declared database can name its schema file (`Aouda:Databases:<name>:SchemaFile`, optional `SchemaEnvironment`, `SchemaAllowDestructive`) and the server applies it at start, before it is ready (**BL-1388, 0.11.0**). That replaces an apply step in a *wipe and restart* flow, not the PR diff or `schema validate` jobs above. See [Schema management](schema-management.md#let-the-server-apply-it-at-start).
@@ -333,7 +333,7 @@ Full examples are also under `examples/github-actions/schema-deploy-typescript.y
 | Preview changes on PR | `schema diff` → post output as PR comment |
 | Apply to staging on merge | `schema apply` (staging server/database) |
 | Apply to prod on release | `schema apply` (prod server/database, optional `--env prod`) |
-| Check the file, no server needed | `aouda plan` (exit 1 if invalid; **BL-1463, next train**) |
+| Check the file, no server needed | `aouda plan` (exit 1 if invalid; **BL-1463, 0.14.0**) |
 | Fail CI if server drifted | `schema validate` (exit 1 if drift) |
 
 Copy and customize the workflows under `examples/github-actions/` and set the required secrets. For a quick start with schema files and local CLI usage, see [Schema Management Guide](schema-management.md).

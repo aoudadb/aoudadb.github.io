@@ -240,11 +240,11 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
 
 ⚠️ `create-admin` needs the server **stopped**: a running server holds its data directory, and `create-admin` then exits `1`
-naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, next train**). A server with a
+naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, 0.14.0**). A server with a
 declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile` or the systemd credential `aouda-server-key`) needs no
 admin and has no setup mode.
 
-**The data-directory lock and its limits** (**BL-1462, next train**). The server holds an exclusive `flock` on
+**The data-directory lock and its limits** (**BL-1462, 0.14.0**). The server holds an exclusive `flock` on
 `<data>/Server/aouda.lock` while it runs; `create-admin`, `aouda table backfill` and a second server on the same directory take the
 same lock and refuse. The kernel releases it when the process exits, `kill -9` included, so there is never a stale lock to delete.
 It protects a directory on a **local filesystem, between processes on one host**. On a mount without `flock` (some NFS, CIFS and
@@ -328,27 +328,27 @@ aouda doctor --output json
 | `65` | `doctor` found at least one **failed** check (warnings alone do not fail it) |
 | `69` | `status`: the server is running but not serving (still recovering, or nothing answered `/ready` within the probe's deadline) |
 | `70` | `status`: the server is not running |
-| `71` | The service manager (systemd, the SCM) refused an operation or could not be reached. (**BL-1461, next train**) It was `78` in 0.13.0 and earlier |
+| `71` | The service manager (systemd, the SCM) refused an operation or could not be reached. (**BL-1461, 0.14.0**) It was `78` in 0.13.0 and earlier |
 | `77` | Not permitted — `service install` or `service uninstall` without root (an elevated prompt on Windows) |
 | `71` | The service manager (systemd, the SCM) refused an operation or could not be reached |
-| `78` | (**BL-1461, BL-1463, next train**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)). See [When the start is refused](#when-the-start-is-refused) |
+| `78` | (**BL-1461, BL-1463, 0.14.0**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)). See [When the start is refused](#when-the-start-is-refused) |
 
 These are the same on every platform and for every way of running the server (`aouda start`, the unit, the container).
-(**BL-1463, next train**) [`aouda plan`](../guides/plan.md) exits `0` when the start would not refuse the declaration, `1` when it would
+(**BL-1463, 0.14.0**) [`aouda plan`](../guides/plan.md) exits `0` when the start would not refuse the declaration, `1` when it would
 (or when a file it names cannot be read), and `64` for misuse; against a running server (`--server`) also `2` (changes), `69` (the
-server cannot be reached or did not answer with a plan) and `77` (the key was refused). (**BL-1427, next train**)
+server cannot be reached or did not answer with a plan) and `77` (the key was refused). (**BL-1427, 0.14.0**)
 [`aouda reload`](../guides/keys-that-survive-a-wipe.md#further-keys-the-identities-file) exits `0` (nothing to change), `2` (applied),
 `1` (refused, or stopped part-way), `69` (unreachable, busy, rate-limited or still starting), `77` (the key was refused) and `64` for misuse.
 
 ⚠️ **`78` means the configuration itself is wrong**: what it says (invalid content, a duplicate, a reference to something that does not
 exist, a refused format), not whether the machine could act on it. A start that fails **while doing** what the configuration asks — a
 key file, identities file or schema file that cannot be read (a volume not yet mounted, a permission), a data directory that cannot be
-written, a full disk, an engine fault — is not `78`: it fails as any other start, and the unit restarts it. (**BL-1463, next train**) A
+written, a full disk, an engine fault — is not `78`: it fails as any other start, and the unit restarts it. (**BL-1463, 0.14.0**) A
 start whose only errors are files that could not be read yet exits `1`.
 
 ### When the start is refused
 
-(**BL-1461, BL-1463, next train**) A start refused for its configuration prints **every** problem it found on **standard error**, each
+(**BL-1461, BL-1463, 0.14.0**) A start refused for its configuration prints **every** problem it found on **standard error**, each
 with its code, the setting or file (and JSON pointer) it is about, and what to do, and exits with status `78` (`EX_CONFIG` in
 `sysexits.h`). It checks the whole declaration before it opens anything, so a refused start has created no database. The format is the
 one [`aouda plan`](../guides/plan.md) prints, headed `aouda start`, and the last line names the exit status:
