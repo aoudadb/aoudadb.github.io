@@ -308,7 +308,7 @@ and `deposit.schema.json`, which creates the table and the named mutation the ro
 }
 ```
 
-The role holds only `execute` on the mutation: running a named mutation needs that row and no table right ([Declared databases](../guides/declared-databases.md#why-roles-is-only-on-an-auth-database)), so a feeder that only calls `insert_quote` needs nothing else. A role that needs direct table writes adds `{ "ResourceType": "table", "ResourceName": "quotes", "Actions": "write" }`, which does not run mutations. Run `aouda plan` on these files before you start: the identities file and the role are cross-checked by it (`KEY_ROLE_UNDECLARED`, `KEY_DATABASE_NOT_LINKED`).
+The role holds only `execute` on the mutation: running a named mutation needs that row and no table right ([Declared databases](../guides/declared-databases.md#why-roles-is-only-on-an-auth-database)), so a feeder that only calls `insert_quote` needs nothing else. A role that needs direct table writes adds `{ "ResourceType": "table", "ResourceName": "quotes", "Actions": "write" }`, which does not run mutations. Run `aouda plan` on these files before you start: the identities file and the role are cross-checked by it (`KEY_ROLE_UNDECLARED`, `KEY_DATABASE_NOT_LINKED`). The same set with two data databases, every key kind, a compose file, a plan step, a wipe-and-start and a reload is on [Declare a deployment](../guides/declare-a-deployment.md).
 
 The file holds the key and nothing else (one trailing newline is ignored). A relative path is read from the identities file's directory, and `$NAME` / `${NAME}` in the path are expanded from the environment (systemd's `$CREDENTIALS_DIRECTORY/feeder` works as written). The file is read at start and again at every `aouda reload` (never between them), as UTF-8 (a UTF-8 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused); a missing, unreadable or empty file stops the server. Docker mounts file-based secrets as `0444` by default, and this source does not refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
 
@@ -325,8 +325,34 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
    ```
 
    `--server` is required (the image listens on port **5000**), and so is exactly one of `--key-file PATH` or `--key-env NAME`: there is no `--key`, because a command line is kept in the process list and in shell history. **The key file must be mounted in the container the command runs in**: here the compose service lists the secret (`secrets: [aouda_server_key]`) so Compose mounts it at `/run/secrets/aouda_server_key`. A key file that exists only on the host is not there inside the container, and the command exits `64`. The command can instead run on the host against the published port (`--server http://127.0.0.1:5000 --key-file ./aouda_server_key`), or in any other container that can reach the server and holds the key. Add `--json` for one JSON object.
-2. **The changed declaration must be in the running container's files.** A bind-mounted identities file or schema file that you edited on the host is what the server re-reads; an image rebuilt or a file copied in at build time is not there until the container is replaced. An identities file's `{ "file": PATH }` secrets are re-read too.
-3. **Settings from environment variables cannot be reloaded.** `Aouda:Databases` given as `Aouda__Databases__<name>__<Key>` variables is reported as the info `SOURCE_NOT_RELOADABLE`, and a secret declared `{ "env": NAME }` keeps the value the process started with (a running process cannot change its own environment). The image ships no `appsettings*.json`: to reload databases, schema and roles, mount a configuration file (for example `/app/appsettings.json`) and put `Aouda:Databases` there. To reload a rotated key, declare it as `file` or `hash`.
+2. **The changed declaration must be in the running container's files.** A bind-mounted identities file or schema file that you edited on the host is what the server re-reads (mount the **directory** that holds them: a single-file bind mount keeps the old inode when the host file is replaced, see below); an image rebuilt or a file copied in at build time is not there until the container is replaced. An identities file's `{ "file": PATH }` secrets are re-read too.
+3. **Settings from environment variables cannot be reloaded.** `Aouda:Databases` given as `Aouda__Databases__<name>__<Key>` variables is reported as the info `SOURCE_NOT_RELOADABLE` by a reload (and `SOURCE_FIXED_AT_START` by `aouda plan`), and a secret declared `{ "env": NAME }` keeps the value the process started with (a running process cannot change its own environment). The image ships no `appsettings*.json`, so declare them in the **declaration file** below. To reload a rotated key, declare it as `file` or `hash`.
+
+### The declaration file: one mounted file makes reload work (**next train**)
+
+Mount **one JSON file** at **`/etc/aouda/aouda.json`**. The server reads it by itself when it exists (nothing to set), and it holds `Aouda:Databases`, `Aouda:Auth:Keys:File` and the other declaration settings in the shape of `appsettings.json`. Another path: `AOUDA_CONFIG_FILE=/path` or `aouda start --config /path` (the switch wins; an empty variable counts as unset). An environment variable or a command-line argument still overrides a scalar the file sets, but `Aouda:Databases` and the identities path set that way are fixed for the life of the process. A reload re-reads the file at its path every time, with no watcher.
+
+```yaml
+services:
+  aouda:
+    image: ghcr.io/aoudadb/aouda-server:<version>
+    volumes:
+      - aouda-data:/data
+      - ./declaration:/etc/aouda:ro        # holds aouda.json, identities.json and the schema files
+    secrets: [aouda_server_key]            # and one per key the identities file names
+```
+
+⚠️ **Mount the directory, not the file.** `./aouda.json:/etc/aouda/aouda.json:ro` binds one file and Docker pins its inode: an editor that saves by renaming a new file over the old one, a `git checkout` or a `mv` leaves the container reading the **old content**, and a reload then changes nothing (tested with Docker 29). A directory mount follows the name. **The host file must exist before `up`**: if it does not, Docker creates a *directory* at that path, and the server refuses to start with `CONFIGURATION_INVALID` (exit `78`, "is a directory, not a file"). Do not mount anything else at `/etc/aouda` on a Kubernetes pod that uses the chart's `declaration.config`; see [Kubernetes and Helm](kubernetes.md#declaring-databases-keys-and-schema-files).
+
+| The file is | The start | A reload |
+|---|---|---|
+| Absent, at the well-known path | Skipped, silently | n/a |
+| Named by `--config` / `AOUDA_CONFIG_FILE` and absent | `CONFIGURATION_INVALID`, exit `78` | `422 RELOAD_REFUSED` (finding `CONFIGURATION_INVALID`); nothing changes |
+| Empty (also at the well-known path), a directory, or not valid JSON | `CONFIGURATION_INVALID`, exit `78`, naming the file and the line and position, never the contents | The same refusal; nothing changes |
+| Unreadable: permissions, an I/O error, a volume not mounted yet | Exit `1` (a supervisor may retry) | Refused |
+| Present and read, then gone at the next reload | n/a | Refused: not read as "no databases" |
+
+**Write `{}` to declare nothing**: an empty file is an error, because a half-written mount must not be taken for "no declaration". A complete working set (two data databases, an auth database, keys, a role, a mutation) is on [Declare a deployment](../guides/declare-a-deployment.md); what a reload can and cannot change is [one table](../guides/server-configuration.md#reload-or-restart).
 
 It exits `0` (nothing to change), `2` (applied), `1` (refused or stopped part-way), `64` (usage), `69` (unreachable, busy or starting) and `77` (the key was refused). `aouda plan --server` is the dry run ([Plan a declaration](../guides/plan.md)). The server key (`Aouda:Auth:Bootstrap:*`), the identities file's **path**, the listener, memory and a database's operational fields still take a restart: a reload lists them under `restartRequired` and applies the rest.
 

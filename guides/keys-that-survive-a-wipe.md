@@ -115,6 +115,12 @@ start is refused with `SERVER_HAS_NO_OPERATOR`.
 A literal plaintext `key` in the file is **refused**: a credential never sits in a file that is committed, copied and attached to
 tickets. `auth_admin` and user-linked keys are not declarable.
 
+**A feeder that must survive a wipe is a declared `scoped_service` key, not a user-linked key.** A user-linked `custom` key (made through the API with a
+`userId`) can carry per-partition entitlements, but it cannot be declared and is lost with the data directory. A declared `scoped_service` key holds **roles only**: pair
+it with a role that holds `execute` on one named mutation and nothing else. Entitlements cannot be declared on a scoped key yet, so the server cannot enforce
+"this feeder writes only its own source's rows" for a declared key (no date is promised). The three declarations that make the pattern, with a request that runs it, are on
+[Declare a deployment](declare-a-deployment.md#the-feeder-pattern-end-to-end).
+
 #### The three system kinds (**BL-1378, 0.11.0**)
 
 | `kind` | Prefix | Holds | Take the place of |

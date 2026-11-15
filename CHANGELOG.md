@@ -13,6 +13,16 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+Documents server behaviour that is on `main` and not yet released (marked **next train** on the pages).
+
+- **New page: [Declare a deployment](guides/declare-a-deployment.md).** One complete, working set for a multi-service deployment, every file run through `aouda plan` and a real `aouda start` / `aouda reload`: `aouda.json` with two data databases and one auth database, a role with a named-mutation `execute` and a table permission, an identities file (`server_admin`, two `service_role`, `public`, one `scoped_service` feeder), a compose file with file secrets, the plan step (on the host and on a CI runner), wipe-and-start, the feeder pattern end to end and `aouda reload`. Linked from getting-started, auth, deployment, the guides index, AI and `llms.txt`.
+- **A declaration file, so `aouda reload` works in a container.** `/etc/aouda/aouda.json` (Windows `%ProgramData%\Aouda\aouda.json`), `AOUDA_CONFIG_FILE` or `--config` ([Server configuration §4a](guides/server-configuration.md#declaration-file), [Docker](deployment/docker.md#the-declaration-file-one-mounted-file-makes-reload-work-next-train)); the exit statuses (78 for a named file that is missing, empty, a directory or malformed; 1 for an unreadable one), the new plan finding `SOURCE_FIXED_AT_START`, and why a compose file must mount the **directory**, not the one file.
+- **One table: what a reload changes and what takes a restart** ([Server configuration](guides/server-configuration.md#reload-or-restart)), collecting what was spread over `restartRequired`, two bullet lists and a sentence of the defaults reference; an `env` secret cannot change in a running process.
+- **Helm: `declaration.config`, `declaration.restartOnChange`, `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts`** ([Kubernetes and Helm](deployment/kubernetes.md#declaring-databases-keys-and-schema-files)).
+- **.NET client: waiting for a starting server and `AddAouda`** ([.NET client §3a, §3b](clients/dotnet.md#waiting-for-the-server-to-start)): `WaitUntilReadyAsync`, `GetReadinessAsync`, `AoudaServerStartingException` (kept out of the circuit breaker and `AuthFailurePolicy`), `ApiKey` trims a trailing newline, and `Aouda.Client.Extensions.DependencyInjection`.
+- **Schema: a table may carry a `description`** (documentation in the file only, not stored, not diffed; [Schema reference](guides/schema.md)), and **the four security members on a materialized query** (`authMode`, `permissionColumn`, `permissionDimension`, `rlsResolverName`) are explained: never read, the result follows its source table's security; delete them ([Materialized queries](guides/materialized.md#232-who-may-read-a-result-the-sources-security), [Upgrading](guides/upgrading.md)).
+- **Feeders:** [Client integration](auth/client-integration.md) and [Keys that survive a wipe](guides/keys-that-survive-a-wipe.md) say what to use instead of a user-linked key (a declared `scoped_service` key with an `execute` role) and what it cannot do yet (no per-source write isolation on a declared key).
+
 ## 0.14.0 — 2026-11-15
 
 Server **0.14.0** / `@aouda/client` **0.14.0** / `Aouda.Client` **0.14.0**. Studio pin follows npm. No data-directory format bump (stays at 18).

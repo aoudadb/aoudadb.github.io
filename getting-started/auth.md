@@ -28,6 +28,7 @@ parent: "Getting Started"
 - **[Use Cases & User Management](../auth/use-cases.md)** — Standalone auth, shared auth (SSO), full-stack auth+data, admin user management, password reset, MFA
 - **[Data Authorization: Three Modes](../auth/authorization.md)** — jwt-claim, auth-db-entitlement (enhanced PLS with fan-out), auth-db-rls (row-level security), combined PLS+RLS (`auth-db-entitlement` + `rlsResolverName`), reference use cases
 - **[Direct client access](../guides/direct-client-access.md)** — `mk_pub_*`, listeners. OAuth authorization-code + PKCE is **not shipped**.
+- **[Declare a deployment](../guides/declare-a-deployment.md)** — the whole auth setup as configuration: auth database, links, roles, keys that survive a wipe, a feeder, plan, reload
 - **[Reference](../auth/reference.md)** — AI agent workflows, API reference tables, error handling, security best practices, JWT validation (5 languages), testing, comparison with other auth services, local developer setup
 
 ---
@@ -259,6 +260,10 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signup \
 > **For teams using Aouda Hub:** Hub provides centralized account management, organization membership, and server registry. Team members authenticate through Hub rather than directly against the Aouda server. See the [Hub documentation](https://github.com/aouda/aouda-hub) for the Hub auth flow.
 
 ### Option C: Production Setup (Full control)
+
+**Deploying with compose, a wipe-and-start or CI? Declare it instead of scripting it** (**next train** for the page; the features it uses ship in 0.11.0 to 0.14.0). The steps below are imperative:
+a wipe loses the admin, the databases, the links and the keys, and each must be created again and the new keys handed to every service. [Declare a deployment](../guides/declare-a-deployment.md) is the
+declarative version of this whole option (auth database, linked data databases, a role, the keys of every service, a feeder, `aouda plan`, wipe-and-start and `aouda reload`) as one working set.
 
 ```bash
 # 1. Bootstrap the server admin

@@ -87,7 +87,7 @@ auth database receive. A `Roles` block on a `Kind: data` entry therefore has no 
 
 - Each role is created when missing and converged to the declared description and permissions when it exists. A role that is not declared is never touched, so roles made through the API stay.
 - A `Permissions` item is `ResourceType` (`table`, the default; or `all-partitions`, `all-rows`, `embargo`; and, **BL-1417, 0.12.0**, `named-mutation` or `named-query`), `ResourceName` (a table name, or `*`; for a named artifact its exact name or `*`) and `Actions` (for a `table` item a comma-separated list, default `read`; for an all-* grant exactly one level; for a named artifact exactly `execute`), the same fields as `POST .../roles`. The same validator runs, so a `ResourceName` with a `*` that is not alone (`quote*`) fails the start (**BL-1415, 0.12.0**), as does an `execute` item with another `Actions`.
-- Running a named query or mutation needs an `execute` item (**BL-1417, 0.12.0**): `{ "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }`. The `quote_writer` role in the example below, which holds only a table `write`, does **not** run named mutations. At start the server logs one Warning per auth database naming the custom roles that hold table `read` / `write` and no execute row. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
+- Running a named query or mutation needs an `execute` item (**BL-1417, 0.12.0**): `{ "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }`. A role that holds only a table `write` does **not** run named mutations, which is why `quote_writer` in the example below holds the `execute` item. At start the server logs one Warning per auth database naming the custom roles that hold table `read` / `write` and no execute row. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
 - A role name is compared without case: declaring one twice is refused. A role with no body is refused; write `{}` for a role with no description and no permissions.
 - Roles are applied **after** the schema, so a permission may name a table the schema file creates.
 - A system role cannot be declared, and the signup role of a database cannot carry an `all-partitions` or `all-rows` grant. Both fail the start.
@@ -112,9 +112,9 @@ Two data databases share one application auth database. `ledger` has a schema fi
         "Kind": "auth",
         "Roles": {
           "quote_writer": {
-            "Description": "Writes quotes, reads nothing else",
+            "Description": "Writes quotes through insert_quote, reads nothing else",
             "Permissions": [
-              { "ResourceType": "table", "ResourceName": "quotes", "Actions": "write" }
+              { "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }
             ]
           },
           "analyst": {
@@ -151,8 +151,8 @@ Aouda__Databases__reports__Durability=os
 ```
 
 (`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan` validates it offline (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
-[Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
-schema file creates, which is why the roles are applied after it.
+[Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the mutation `insert_quote`, which the
+schema file creates, which is why the roles are applied after it. The whole deployment as one working set (keys, a feeder, compose, plan, reload): [Declare a deployment](declare-a-deployment.md).
 
 ---
 
@@ -232,7 +232,9 @@ a reload applies:
 What it does not: a database's operational fields, `SchemaAllowDestructive`, `Aouda:SkipDatabases` and every other setting are
 `restartRequired` (listed, not applied; the rest proceeds). A `Kind` change and a change of an existing link are **errors** — the next
 start refuses them, so the reload does too, and changes nothing. A database you remove from the file is reported as `orphaned` and
-left alone. `Aouda:Databases` set by environment variables or the command line cannot change by reload (`SOURCE_NOT_RELOADABLE`).
+left alone. `Aouda:Databases` set by environment variables or the command line cannot change by reload (`SOURCE_NOT_RELOADABLE`): put it in the
+[declaration file](server-configuration.md#declaration-file) (`/etc/aouda/aouda.json`, or `AOUDA_CONFIG_FILE` / `--config`; **next train**), which a reload re-reads every time.
+[One table](server-configuration.md#reload-or-restart) lists what a reload applies and what takes a restart.
 `POST /api/admin/reload?dryRun=true` answers the same plan and changes nothing.
 
 ### What `/ready` says while it starts
