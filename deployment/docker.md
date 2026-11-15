@@ -265,28 +265,29 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
 
 ## A container that keeps restarting
 
-(**BL-1461, next train**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase` does not exist,
-a set-up server left with no operator, a data directory in another format) exits with status **78** and prints two lines on
-standard error, the first `<CODE>: <message>` naming the setting. The codes and the exact lines are in
+(**BL-1461, BL-1463, next train**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase`
+does not exist, a set-up server left with no operator, a data directory in another format) exits with status **78** and prints every
+finding on standard error, each as a line `error    <CODE>  <setting or file>` followed by the message and the fix, then a last line
+naming the exit status. The codes are in [Declaration Finding Codes](../reference/plan-codes.md), the format in
 [the exit status table](linux.md#when-the-start-is-refused).
 
 ⚠️ **Docker's `restart:` policies cannot exempt an exit status.** `unless-stopped`, `always` and `on-failure` all restart a container
-that exited 78, so a refused configuration is a restart loop, and the loop itself tells you nothing: **the first line of the
-container's output is what names the setting.** (systemd can stop on it, with `RestartPreventExitStatus=78`; Docker has no equivalent.)
+that exited 78, so a refused configuration is a restart loop, and the loop itself tells you nothing: **the container's output is what
+names the setting.** (systemd can stop on it, with `RestartPreventExitStatus=78`; Docker has no equivalent.)
 
 ```bash
-docker compose logs --no-log-prefix aouda | grep -E '^[A-Z_]+: ' | tail -1   # e.g. CONFIGURED_KEYS_INVALID: ...
-docker compose ps -a aouda                                                   # STATUS: Restarting (78) ...
+docker compose logs --no-log-prefix aouda | grep -E '^error +[A-Z_]+' | tail -5   # e.g. error    KEY_SECRET_SHARED  Aouda:Auth:...
+docker compose ps -a aouda                                                        # STATUS: Restarting (78) ...
 ```
 
-Check the key declaration before you deploy, in the container you deploy, with its environment, secrets and mounts:
+Check the declaration before you deploy, in the container you deploy, with its environment, secrets and mounts:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint aouda aouda keys check
+docker compose run --rm --no-deps --entrypoint aouda aouda plan
 ```
 
-It runs the server's own key validation over the configuration the server will read and exits `1` with the same first line the start
-would print. See [Check the file before you deploy](../guides/keys-that-survive-a-wipe.md#check-the-file-before-you-deploy).
+It runs the start's own checks over the configuration the server will read, prints every finding the start would print, and exits `1`
+when the start would refuse. See [Plan a declaration](../guides/plan.md).
 
 ---
 

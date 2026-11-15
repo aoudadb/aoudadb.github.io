@@ -110,7 +110,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 - **Diff**: Shows a human-readable plan (add table, add column, etc.). Use it on every PR to review schema changes. Add `--access` to fail the job when the branch **widens** what `mk_pub_*` or `aouda.identities.json` principals can read ([Access-surface diff](access-surface.md)). Named queries live under `namedQueries` in the same file ([Named queries](named-queries.md)); optional `freshness` on the named query is keyed by name ([Freshness](freshness.md)). Omitting a name deletes the definition (there is no `dropNamedQueries`). Materialized queries live under [`materializedQueries`](#materialized-queries-in-the-schema-file).
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
-- **Check**: Use `schema check --file aouda.schema.json` in CI before anything is running — it validates the file with no server (exit 0 valid, 2 invalid; **BL-1419, 0.12.0**). See [Check a schema file offline](schema-check.md).
+- **Check**: Use `aouda plan` in CI before anything is running — it validates a *declared* schema file with no server (exit 0 valid, 1 invalid; **BL-1463, next train**; it replaced `aouda schema check`, **BL-1419, 0.12.0**). See [Plan a declaration](plan.md). A schema file that is not declared is checked against a server with `schema diff`.
 - **Validate**: Use `schema validate` in CI — it needs a running server and exits 0 if the server matches the file, 1 if there is drift.
 
 ### Diff warnings vs applyable column changes
@@ -239,12 +239,12 @@ If you declare your databases in configuration (`Aouda:Databases`), the server c
 }
 ```
 
-What happens, in this order: the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `SchemaFile` is read and validated (all of them, before any database is changed) and applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
+What happens, in this order: **every `SchemaFile` is read and validated before anything opens** (**BL-1463, next train**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `SchemaFile` is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
 
 | You want to know | Answer |
 |---|---|
 | Is it safe to restart? | Yes. A file already in effect gives an empty diff: nothing is written, no history entry. A changed file applies only the difference. |
-| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, next train**), an overlay that adds a table or cannot be read. A change that cannot be applied fails the start too. |
+| What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, next train**), an overlay that adds a table. A change that cannot be applied fails the start too. (**BL-1463, next train**) Every bad file is reported at once, each with its code and a JSON pointer into the file (`SCHEMA_INVALID`, `SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_OVERLAY_INVALID`, `SCHEMA_CHANGE_REFUSED`, ...; see [Declaration Finding Codes](../reference/plan-codes.md)); a file or an overlay that cannot be read (`SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE`) exits with status 1, so a supervisor retries it once the volume is mounted, and an invalid one exits 78. |
 | What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"SchemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
 | Which tables can I still change over HTTP? | None that the file created: a table schema apply creates refuses HTTP DDL in every inference mode, whether the CLI, the API or the start-time apply created it. |
 | Where is the history? | `GET /api/databases/{db}/schema/history`, with the source `DeclaredApply`. |
@@ -358,7 +358,7 @@ Before, the merge dropped such a member without a word: an overlay turning parti
 
 ### Member names are exact (**BL-1460, next train**)
 
-Every path reads a schema document with one reader: `schema check`, `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
+Every path reads a schema document with one reader: `aouda plan` (**BL-1463, next train**), `schema apply` / `diff` / `validate` (the `aouda` CLI reads the file
 and its overlay before sending anything; `npx @aouda/client` sends the base file as written, so the server refuses an unknown member in
 it, and merges an `--env` overlay itself, refusing the same overlay members), `POST …/schema/apply` and `…/schema/diff`, and the start-time apply. A member the format does not have, or a known
 member in another case, is **refused**, never ignored:
@@ -374,7 +374,7 @@ non-nullable column, `"partitionLevelSecurty": true` left partition-level securi
 lost its filter and returned every row. A table has no `description` (a column does) and a materialized query has no `authMode`,
 `permissionDimension` or `permissionColumn`: those are refused too. The materialized-query ones were redundant and never read: a
 materialized query's result is always filtered by its source table's partition- and row-level security, so the source table's security
-always applied. Remove them. Run `schema check` on every file and overlay to list them all.
+always applied. Remove them. Run [`aouda plan`](plan.md) with each file declared (and its overlay, `SchemaEnvironment`) to list them all.
 
 ### Summary
 

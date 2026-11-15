@@ -49,9 +49,11 @@ The Aouda server binary is a single executable supporting subcommand dispatch.
 |---------|---------|-------------|
 | `aouda start` | Production server with persistent storage | `--data-dir <path>`, `--bind <ip:port>`, `--port <port>`, `--join <primary:port>`, `--role <role>` |
 | `aouda stop` | Gracefully stop a locally-running server | `--server <url>`, `--force` |
+| `aouda reload` | (**BL-1427, next train**) Re-read a running server's declaration (keys, databases, schema, roles) and converge it without a restart; exit `0` nothing to change, `2` applied changes, `1` refused or partial | `--server <url>`, `--key-file <path>` / `--key-env <name>` (a server key; `--key` is refused), `--json` |
 | `aouda version` | Print version and exit | — |
 | `aouda databases <subcommand>` | Database administration | `list`, `get`, `create`, `drop` (each with `--server`, `--name`, `--token`) |
 | `aouda schema <subcommand>` | Schema management | `diff`, `apply`, `export`, `validate`, `history` |
+| `aouda plan` | Check what `aouda start` would refuse, offline, every problem at once (**BL-1463, next train**) | the same arguments as `aouda start`, `--skip-secrets`, `--json` |
 | `aouda init` | First-run server admin bootstrap | `--server <url>`, `--admin-email`, `--admin-password-file`/`--admin-password-stdin` |
 | `aouda create-admin` | Create first admin user directly to engine (no HTTP) | `--email`, `--password-file`/`--password-stdin`, `--data`, `--auth-database` |
 | `aouda bulk-load` | Bulk-load rows into multiple tables atomically | `--tables <list>`, `--file <path>`, `--server`, `--database` |

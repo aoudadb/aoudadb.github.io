@@ -47,7 +47,9 @@ the key that replaces it (`MaxMemoryShareBytes` and `MemoryWeight`, or `Durabili
 
 Configuration owns the **operational fields** of a database it declares: `MaxMemoryShareBytes`, `MemoryWeight`,
 `DefaultTemperature`, `Durability`, `ReplicationMode`, `WriteConcern`, `WriteConcernTimeoutMs` and `OnWriteConcernTimeout`. They are
-re-applied at every start, so a change in the file wins over a change made through the API. The catalog owns **everything else**,
+re-applied at every start, so a change in the file wins over a change made through the API. (**BL-1427, next train**) A reload does
+not re-apply them: a change to an operational field of a database that exists takes a restart (`aouda reload` lists it under
+`restartRequired`). The catalog owns **everything else**,
 including a database's signup settings (which are not declarable: a change made through `signup-settings` survives every
 restart). A declaration creates what is missing, converges what it owns, and refuses what it cannot reconcile; it never
 overwrites a field it does not name.
@@ -148,7 +150,7 @@ Aouda__Databases__reports__AuthDatabase=derive_auth
 Aouda__Databases__reports__Durability=os
 ```
 
-(`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies, and `aouda schema check` validates it offline (**BL-1419, 0.12.0**; [Check a schema file offline](schema-check.md)); the start runs the same checks on every file before it changes any database; see
+(`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan` validates it offline (**BL-1463, next train**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
 [Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
 schema file creates, which is why the roles are applied after it.
 
@@ -175,13 +177,20 @@ Delete the data directory and start the server with the configuration above. Wha
 
 ### The order a start follows
 
+(**BL-1463, next train**) **Before any of these steps, the start checks the whole declaration** — the settings, `Aouda:Databases`,
+the identities file and every secret and schema file it names — and **creates nothing when one is refused**. It reports every
+problem at once, each as a finding with a stable code (`KEY_SECRET_SHARED`, `SCHEMA_INVALID`, `ROLE_SYSTEM_NAME`, ...), where it is
+(a setting and the source that set it, or a file and a JSON pointer) and what to do, then exits with status 78 (or 1 when the only
+problem is a file that could not be read yet). Each step below then checks what it needs from the data directory before it changes
+anything. The codes are listed in [Declaration Finding Codes](../reference/plan-codes.md).
+
 After a wipe a plain start does these steps in this order, and a failure in any of them fails the start (the process exits, and
 there is no `/ready` to ask):
 
 1. **Configured keys are listed** (`Aouda:Auth:Bootstrap:ServerKey`, `Keys:File`). A bad declaration fails here, before any database opens. Nothing is authenticated yet.
 2. **Declared databases**: auth databases, then data databases, then the links.
 3. **`_serverauth` and `Aouda:Auth:RootUser`**: the first admin. Without a `RootUser` the server stays in setup mode.
-4. **Declared schema files**: every file is read and validated first (one bad file fails the start before any database is changed), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `SchemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
+4. **Declared schema files**: every file was read and validated before step 1 (**BL-1463, next train**: before any database is created), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `SchemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
 5. **Declared roles**, in their auth databases.
 6. **Configured key rows**, in their auth databases.
 7. The server is marked ready.
@@ -198,7 +207,7 @@ each of those queries in `Error` (its query answers `400`, not ready) until a `:
 
 **Table names in a schema file** follow the one [table-name rule](../reference/http-api.md#table-names): no `/ \ : * ? " < > |`,
 no leading or trailing period or space, not empty, `.` or `..`, and no `__mqbuild_` prefix (**BL-1468, next train; breaking**).
-Before, the schema apply created such a table; now a file that declares one fails `aouda schema check` and **fails the start**,
+Before, the schema apply created such a table; now a file that declares one fails `aouda plan` and **fails the start**,
 naming the database, the file and the rule — also for a table the database already has. A schema file has no rename and HTTP DDL
 on a declared table is refused, so the way out is a clean cut: read the table's rows out (for example with `POST …/query`), give
 the table a legal name in the file, start once with `SchemaAllowDestructive: true` (the apply creates the new table and drops the
@@ -207,6 +216,24 @@ old one) or on a fresh data directory, set `SchemaAllowDestructive` back, and lo
 Deleting a declared database through
 the API is undone by the next start, which creates it again, empty. A database you remove from the file is left alone; a
 declaration cannot say "must not exist".
+
+### Changing the declaration without a restart (**BL-1427, next train**)
+
+`aouda reload` (or `POST /api/admin/reload`, a server key only) re-reads the declaration of a running server, validates it as a start
+would, and converges it in the order above: steps 2, 4, 5 and 6 (`_serverauth`, the root user and setup mode are the start's). What
+a reload applies:
+
+- a **new** `Aouda:Databases` entry (created, and linked to its auth database);
+- a declared database's `SchemaFile` and `SchemaEnvironment` — the file is read again and applied **non-destructively** whatever
+  `SchemaAllowDestructive` says (a destructive change is the warning `SCHEMA_DESTRUCTIVE_REFUSED`, and `/ready` keeps `schema_drift`);
+- the `Roles` of a declared auth database;
+- the `AuthDatabase` of a database that has **no link yet**.
+
+What it does not: a database's operational fields, `SchemaAllowDestructive`, `Aouda:SkipDatabases` and every other setting are
+`restartRequired` (listed, not applied; the rest proceeds). A `Kind` change and a change of an existing link are **errors** — the next
+start refuses them, so the reload does too, and changes nothing. A database you remove from the file is reported as `orphaned` and
+left alone. `Aouda:Databases` set by environment variables or the command line cannot change by reload (`SOURCE_NOT_RELOADABLE`).
+`POST /api/admin/reload?dryRun=true` answers the same plan and changes nothing.
 
 ### What `/ready` says while it starts
 
@@ -224,7 +251,8 @@ declaration cannot say "must not exist".
 | `root_user_unusable` | `RootUser` is set but its password cannot be used | You fix the password |
 | `schema_pending` (the database) | Its `SchemaFile` has not been applied yet | Step 4 applied it |
 | `schema_applying` (the database) | Step 4 is applying its `SchemaFile` now; `progress` is `{ "done": n, "total": m }` over the declared schema files (**BL-1462, next train**) | Step 4 finished it |
-| `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart |
+| `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
+| `reload_failed` (the entry, when one is named) | (**BL-1427, next train**) The last reload stopped part-way; the steps before it are applied | The next reload that completes |
 | `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | Its auth database and database are open. A server key no longer waits for a first admin (**BL-1462, next train**) |
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
@@ -237,7 +265,7 @@ quarantined, is a decision and is not listed. `aouda status` prints every reason
 ## Related
 
 - [Keys that survive a wipe](keys-that-survive-a-wipe.md): declaring keys in configuration
-- [Check a schema file offline](schema-check.md) and [Upgrading and the data-directory format](upgrading.md)
+- [Plan a declaration](plan.md) and [Upgrading and the data-directory format](upgrading.md)
 - [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start)
 - [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname)
 - [Defaults reference: declared databases](defaults-reference.md#declared-databases)

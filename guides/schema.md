@@ -791,7 +791,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `Applied` | Change was successfully executed against the catalog. |
 | `Skipped` | Change was skipped — most commonly because `AllowDestructive` is `false` and the change is destructive. Also skipped for `ReplicationFactor`-only durability changes (not yet representable in the engine policy). |
 | `Failed` | Change execution threw an exception. The apply continues to the next change (continue-on-error). The `Reason` field on `ApplyResultEntry` contains the exception message. |
-| `Planned` | Dry-run mode: the change would have been executed but was not. `DryRun = true` produces all entries with status `Planned`. |
+| `Planned` | Dry-run mode: the change would have been executed but was not. A dry run (`DryRun = true`) gives every entry `Planned`, except a change the apply refuses whatever the table's rows are, which it reports `Failed` with the apply's own reason: an invalid authorization mode, and (**BL-1427, next train**) an added array, server-time or identity column that is not nullable. A refusal that depends on row values (a `NOT NULL` column on a table with rows, a `unique` flag on duplicates) is not checked by a dry run. |
 
 #### SchemaChangeType
 
@@ -907,7 +907,7 @@ This section documents every field available in `aouda.schema.json` by type. All
 
 **Only these fields, spelled exactly** (**BL-1460, next train**). A member that is not listed here (a table has no `description`; a
 materialized query has no `authMode`), or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
-`schema check`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
+`aouda plan`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
 pointer and the member meant. It used to be dropped without a word. The same holds inside named queries (`where`, `joins`, `orderBy`,
 `selectExpr`, `aggregates`, `groupBy`, `perKey`), named mutations and expressions. `schemas/aouda-schema.v1.json` lists exactly these
 members, for an editor's completion and squiggles.

@@ -126,6 +126,107 @@ always `{ "credential": n, "listener_mismatch": n, "route_mismatch": n }`. Both 
 response. See
 [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
 
+**Reload without restart (**BL-1427, next train**).** `POST /api/admin/reload` re-reads the server's declaration — the identities
+file's content, `Aouda:Databases` (new entries, `SchemaFile` / `SchemaEnvironment`, `Roles`, a first `AuthDatabase` link) — validates
+it as `aouda start` would ([Declaration Finding Codes](plan-codes.md)), and converges it without a restart, in the start's order:
+the key declarations, declared databases, declared schema (never destructive), declared roles, configured key rows. A server key
+(`mk_srv_`) only, the dry run and `GET` included: a key of the server's auth database that is not a server key is `403 AUTHORIZATION_DENIED`, and a credential that auth database does not know (a key of another auth database) is `401`. A body is only a
+**candidate** to plan (below); without `dryRun=true` it is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, next train**). `aouda reload`
+is the CLI ([Cloud Hub](../guides/cloud-hub.md)).
+
+| Method | Path | Result |
+|--------|------|--------|
+| POST | `/api/admin/reload` | `200` applied (or nothing to change); `422 RELOAD_REFUSED` the declaration has an `error` finding and nothing was changed; `207 RELOAD_PARTIAL` a step failed part-way (`failedStep`; `/ready` says `reload_failed` until a reload completes) |
+| POST | `/api/admin/reload?dryRun=true` | The same plan, and nothing is written — not a row, not an audit row |
+| POST | `/api/admin/reload?dryRun=true` with a body | (**BL-1463, next train**) The plan of a **posted** declaration (a candidate, as `aouda plan --server` sends it) instead of the server's files; nothing is written. `200`, or `422 RELOAD_REFUSED` with the findings; a malformed body is `400 INVALID_REQUEST`, one above 16 MiB `413 INVALID_REQUEST` |
+| GET | `/api/admin/reload` | `{ "last": null }`, or the last reload since the process started: `{ time, outcome, applied, planHash, summary, failedStep, callerKeyId }` |
+
+One reload at a time, never queued (`409 RELOAD_IN_PROGRESS`, also during a restore); one reload per 5 s and one dry run per 1 s
+(`429 RELOAD_RATE_LIMITED`); both with `Retry-After`. Before the server is ready, `503 SERVER_STARTING`. The limits and the 120 s
+deadline are fixed, not settings.
+
+The answer is the plan of [`aouda plan`](plan-codes.md) with `target.kind: "self"`, `changes` filled, and the reload's own members.
+It names entries, kinds and fingerprints, never a key, a hash or a secret file's content:
+
+```json
+{
+  "format": "aouda-plan/1",
+  "declaration": { "identitiesFile": "/etc/aouda/keys.json", "planHash": "sha256:…" },
+  "target": { "kind": "self" },
+  "outcome": "changes",
+  "summary": { "errors": 0, "warnings": 0, "info": 0, "changes": 2 },
+  "findings": [],
+  "changes": {
+    "databases": { "created": [], "linked": [], "orphaned": [] },
+    "bootstrap": null,
+    "schema": [],
+    "roles": { "created": [], "converged": [], "unchanged": [] },
+    "keys": {
+      "added": [{ "name": "feeder", "kind": "scoped_service", "authDatabase": "app_auth", "fingerprint": "3a1f9c02", "secretSource": "file" }],
+      "revoked": [{ "name": "old-feeder", "kind": "scoped_service", "authDatabase": "app_auth", "fingerprint": "77e01b4d", "reason": "removed", "openSessions": 1 }],
+      "rotated": [], "updated": [], "revived": [], "unresolved": [], "unchangedSecretSources": []
+    },
+    "restartRequired": [{ "setting": "Aouda:Port", "from": "5433", "to": "5434" }]
+  },
+  "notChecked": ["settings outside the Aouda section and the bound server options (Kestrel, Aouda:WebSocket, …): a change to them needs a restart"],
+  "dryRun": false, "applied": true, "valid": true, "role": "standalone", "writes": "applied",
+  "completedSteps": ["keyStore", "databases", "schema", "roles", "principalRows"], "failedStep": null, "durationMs": 41
+}
+```
+
+- `keys.revoked[].reason` is `removed`, `rotated` (the entry's other secret was added in the same reload: listed under `rotated`
+  with `from` / `to` fingerprints) or `replaced` (a generated system key a declared one replaces). `openSessions` is the WebSocket and
+  long-poll sessions that held the key: they end with `AUTH_TOKEN_REVOKED` when the row is retracted, before the answer.
+- `restartRequired` lists every setting that changed and a reload does not apply (the identities file's path, the server key, the
+  dev admin, the listener, memory, `SkipDatabases`, a database's operational fields, `SchemaAllowDestructive`, …); a value that could
+  hold a secret is `(changed)`. A changed identities file **path** reloads no key.
+- On a follower, `writes` is `skipped`: it validates and replaces its in-memory declarations and writes nothing.
+- A non-`200` answer that carries a plan also carries `error` (the code), `message` and `requestId`; `409`, `429` and `503` carry only
+  those three. On `207 RELOAD_PARTIAL`, `applied` is the string `"partial"` (the steps in `completedSteps` are applied, `failedStep`
+  is not); it is a boolean in every other answer.
+- `dryRun` without a body is `true` or `false` in any case; any other value, or the parameter twice, is `400 INVALID_REQUEST`. With a
+  body it is exactly `true`, or the answer is `400 RELOAD_CANDIDATE_NOT_APPLIED` (**BL-1463, next train**).
+
+**Planning a posted declaration (**BL-1463, next train**).** `POST /api/admin/reload?dryRun=true` with a JSON body
+(`Content-Type: application/json`) plans that declaration against this server — what `aouda plan --server` does
+([Plan a declaration](../guides/plan.md)). The server runs a reload's first phase over the body instead of its own files: every offline
+check under **its own** process settings (named-query limits, `SkipDatabases`, the dev-admin flag, the hosting environment — a body
+cannot set them), then every state check against a planned view; it writes nothing, takes the same reconcile gate and dry-run rate
+limit (`409`, `429`), and **opens no path the body names** — the paths are labels for the findings' locations. The answer is the plan
+above with `dryRun: true`; a key the body declares with a secret the plan did not read is listed under `changes.keys.unresolved` and is
+neither added nor counted against the live row of its name.
+
+```json
+{
+  "format": "aouda-candidate/1",
+  "declaration": {
+    "databases": { "app_auth": { "kind": "auth", "roles": { "auditor": { "description": null, "permissions": [ { "resourceType": "table", "resourceName": "orders", "actions": "read" } ] } } },
+                   "app": { "authDatabase": "app_auth", "schemaFile": "/etc/aouda/app.schema.json", "schemaEnvironment": null } },
+    "identitiesFile": "/etc/aouda/keys.json",
+    "keys": [ { "index": 0, "name": "feeder", "kind": "scoped_service", "authDatabase": "app_auth", "database": "app", "roles": ["db_writer"],
+                "secrets": [ { "hash": "sha256:<64 hex>", "source": "file" } ] },
+              { "index": 1, "name": "ci", "kind": "scoped_service", "authDatabase": "app_auth", "database": "app", "roles": ["db_reader"],
+                "secrets": [ { "unresolved": true, "source": "env" } ] } ],
+    "bootstrapKey": { "hash": "sha256:<64 hex>", "source": "bootstrap" },
+    "rootUser": { "email": "ops@example.com", "passwordSet": true }
+  },
+  "schemaFiles": { "app": { "document": { "tables": { "orders": { "columns": { "id": { "type": "Int64", "primaryKey": 1 } } } } } } }
+}
+```
+
+- A database entry takes the members of an `Aouda:Databases:<name>` section, camelCase; a key entry the members of an identities-file
+  entry plus its position (`index`), each secret as `{ "hash": "sha256:<64 hex>", "source": "env" | "file" | "hash" }` or
+  `{ "unresolved": true, "source": … }`; a declared `schemaFile` has its merged document under `schemaFiles`. Every member is required
+  where shown, **case-sensitive**, and given once; anything else is `400 INVALID_REQUEST` naming the JSON pointer, never the value.
+- Limits (fixed): 16 MiB (counted as the body is read; `413`), JSON nested at most 64 deep, at most 10 000 key entries, 64 secrets per
+  entry, 4096 databases, labels of at most 4096 characters with no control character.
+- A schema document the schema reader refuses is a **finding** at its label (`SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_INVALID`; `422`), not a
+  malformed body.
+- The body carries hashes, never a key: a key's hash is in every row of the auth database already. Send it over `https` beyond a
+  private network all the same — the bearer is a server key.
+- Order: the server key is checked before any byte of the body is read; a body without `dryRun=true` is refused before it is read; the
+  body is read before the gate is taken (a slow body never holds it).
+
 **Named service keys and overlapping rotation (**BL-1032, 0.5.0**).** A server key (`mk_srv_`) mints extra service keys for a database that has a linked auth database:
 
 | Method | Path | Body | Result |
@@ -782,6 +883,11 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
 | `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
+| `RELOAD_REFUSED` | 422 | (**BL-1427, next train**) `POST /api/admin/reload`: the declaration has an `error` finding (what the next start would refuse); nothing was changed. The body is the plan with every finding |
+| `RELOAD_PARTIAL` | 207 | (**BL-1427, next train**) A reload stopped part-way (`failedStep`); the steps before it are applied, `/ready` says `reload_failed`. Reload again |
+| `RELOAD_IN_PROGRESS` | 409 | (**BL-1427, next train**) A reload or a restore is reconciling the declaration; not queued. `Retry-After` is set |
+| `RELOAD_RATE_LIMITED` | 429 | (**BL-1427, next train**) One reload per 5 s, one dry run per 1 s. `Retry-After` is set |
+| `RELOAD_CANDIDATE_NOT_APPLIED` | 400 | (**BL-1463, next train**) `POST /api/admin/reload` with a body and without `dryRun=true`: a posted declaration is only ever planned. The body is not read and nothing changes. Add `dryRun=true` to plan it, or reload without a body to apply the server's own files |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-850, 0.3.0**) Sign-in, sign-up, password set / change / reset and an admin's create-user: the password hash (Argon2id, 64 MiB while it runs) could not get its memory from the server's queue within 10 s. Nothing was changed; `Retry-After` is the queue's estimate. Hashes queue for memory rather than run unbounded, so a burst of sign-ins waits instead of exhausting the heap (it answered `500` before). An admin's user edit, API-key revoke or RLS-resolver create refused for capacity answers this (or `WAL_CAPACITY_EXCEEDED`) too, where it used to read as a 400 or a 409 "email exists" (WorkloadCore group 6 review). A token **refresh** refused for capacity answers this too (**BL-841, 0.3.0**; it was a `500`), and the refresh token stays live: retry with the same token. |
 | `AUTH_SIGNUP_FAILED` | 400 | Signup could not be completed (generic message to prevent information leakage) |
 | `AUTH_SIGNUP_DISABLED` | 403 | Self-service registration is disabled for this database (`allowSelfSignup` is false) |
@@ -3858,6 +3964,7 @@ During a start-time schema apply (**BL-1462, next train**):
 | `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
 | `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
 | `database_reconcile_failed` | The reconcile of `Aouda:Databases` after a restore was refused; the server keeps running. | the database, when one is named |
+| `reload_failed` | (**BL-1427, next train**) The last `POST /api/admin/reload` stopped part-way; the steps before it are applied. Cleared by the next reload that completes; a refused reload adds none. | the entry (a database, role or key name), when one is named |
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
 | `schema_applying` | (**BL-1462, next train**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
 | `schema_drift` | The start-time apply of a declared `SchemaFile` refused a change (a destructive one without `SchemaAllowDestructive`, or one the engine does not apply), so the catalog is not what the file says; the start went on. `503` until you allow the change or update the file, and restart. A failed apply fails the start instead, so there is no `/ready` to ask (**BL-1406, 0.11.0**). | the database |
