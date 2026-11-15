@@ -28,7 +28,7 @@ database names and are compared without case, so declaring `Ledger` and `ledger`
 | `Kind` | `string` | `data` | `data` (an ordinary database) or `auth` (an application auth database). Not case-sensitive; blank means `data`; anything else fails the start |
 | `AuthDatabase` | `string?` | none | Only with `Kind: data`. The application auth database to link this one to |
 | `SchemaFile` | `string?` | none | Only with `Kind: data`. Path of a schema file applied at start. Absolute, or relative to the server's working directory |
-| `SchemaEnvironment` | `string?` | none | Needs `SchemaFile`. The overlay, as the CLI's `--env`: `aouda.schema.<env>.json` next to the file is merged over it when it exists |
+| `SchemaEnvironment` | `string?` | none | Needs `SchemaFile`. The overlay, as the CLI's `--env`: `<file without .json>.<env>.json` next to the file is merged over it when it exists (`aouda.schema.json` with `prod` reads `aouda.schema.prod.json`; `ledger.json` reads `ledger.prod.json`; **BL-1460, 0.14.0**) |
 | `SchemaAllowDestructive` | `bool` | `false` | Needs `SchemaFile`. Lets the start-time apply drop a table or a column. When `false` such a change is refused, logged, and the start goes on |
 | `Roles:<role>` | object | none | Only with `Kind: auth`. A custom role of this auth database: `Description`, and `Permissions` (a list of `ResourceType`, `ResourceName`, `Actions`) |
 | `Durability` | `string?` | `strict` | `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-060)). On `Kind: auth` it must be absent or `strict` |
@@ -165,7 +165,7 @@ Delete the data directory and start the server with the configuration above. Wha
 | The databases `derive_auth`, `ledger`, `reports` | **Recreated**, empty |
 | Their operational fields (memory, durability, replication, write concern) | **Recreated** from the entries |
 | The links `ledger` and `reports` to `derive_auth` | **Recreated** |
-| The first admin | **Recreated** from `Aouda:Auth:RootUser` |
+| The first admin | **Recreated** from `Aouda:Auth:RootUser` when one is set; with a declared server key and no `RootUser` there is no user, and the key operates the server (**BL-1462, 0.14.0**) |
 | The tables of `ledger` | **Recreated** from `SchemaFile`; empty |
 | The roles `quote_writer` and `analyst` | **Recreated** from `Roles` |
 | Keys declared in configuration | **Recreated** as rows, with the same secrets ([keys](keys-that-survive-a-wipe.md)) |
@@ -189,7 +189,7 @@ there is no `/ready` to ask):
 
 1. **Configured keys are listed** (`Aouda:Auth:Bootstrap:ServerKey`, `Keys:File`). A bad declaration fails here, before any database opens. Nothing is authenticated yet.
 2. **Declared databases**: auth databases, then data databases, then the links.
-3. **`_serverauth` and `Aouda:Auth:RootUser`**: the first admin. Without a `RootUser` the server stays in setup mode.
+3. **`_serverauth` and `Aouda:Auth:RootUser`**: the server auth database, and the first admin when a `RootUser` is set. A declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the systemd credential `aouda-server-key`, or a `server_admin` entry in the identities file) creates the server auth database with no user and operates the server from this first start, so no `RootUser` is needed (**BL-1462, 0.14.0**). The server stays in setup mode only when nothing is declared: no server key and no `RootUser`, on a data directory that has never been set up.
 4. **Declared schema files**: every file was read and validated before step 1 (**BL-1463, 0.14.0**: before any database is created), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `SchemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
 5. **Declared roles**, in their auth databases.
 6. **Configured key rows**, in their auth databases.

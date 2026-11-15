@@ -255,11 +255,80 @@ then `--password-file /run/secrets/aouda_admin_password`.
 **API keys from secrets (BL-1389, 0.11.0).** A key declared in the identities file (`Aouda:Auth:Keys:File`) can be read from a secret file, so it never passes through an environment variable:
 
 ```json
-{ "identities": [ { "name": "feeder", "kind": "scoped_service", "database": "deposit",
+{ "identities": [ { "name": "feeder", "kind": "scoped_service",
+    "authDatabase": "derive_auth", "database": "deposit",
     "roles": ["quote_writer"], "secrets": [ { "file": "/run/secrets/feeder_key" } ] } ] }
 ```
 
-The file holds the key and nothing else (one trailing newline is ignored). A relative path is read from the identities file's directory, and `$NAME` / `${NAME}` in the path are expanded from the environment (systemd's `$CREDENTIALS_DIRECTORY/feeder` works as written). The file is read once, at start, as UTF-8 (a UTF-8 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused); a missing, unreadable or empty file stops the server. Docker mounts file-based secrets as `0444` by default, and this source does not refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
+That entry is only valid next to the declarations it names: the auth database `derive_auth` (`authDatabase`: **leave it out and the key targets a database called `auth`**, which here does not exist, so `aouda plan` exits `0` with the warning `KEY_TARGET_PENDING` and every request with the key is `401`), the role `quote_writer` declared on it, and the application database `deposit`, linked to it. A complete set that `aouda plan` accepts, in `appsettings.json` (`Aouda:Auth:Keys:File` points at the identities file above):
+
+```json
+{
+  "Aouda": {
+    "Auth": { "Keys": { "File": "/etc/aouda/aouda.identities.json" } },
+    "Databases": {
+      "derive_auth": {
+        "Kind": "auth",
+        "Roles": {
+          "quote_writer": {
+            "Description": "Runs insert_quote on deposit",
+            "Permissions": [
+              { "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }
+            ]
+          }
+        }
+      },
+      "deposit": { "AuthDatabase": "derive_auth", "SchemaFile": "/etc/aouda/deposit.schema.json" }
+    }
+  }
+}
+```
+
+and `deposit.schema.json`, which creates the table and the named mutation the role names (a role is applied after the schema, so it may name them):
+
+```json
+{
+  "tables": {
+    "quotes": {
+      "columns": {
+        "ticker": { "type": "String", "primaryKey": 1 },
+        "px": { "type": "Double" }
+      }
+    }
+  },
+  "namedMutations": {
+    "insert_quote": {
+      "op": "insert",
+      "table": "quotes",
+      "values": { "ticker": { "param": "ticker" }, "px": { "param": "px" } },
+      "params": { "ticker": { "maxLength": 8 }, "px": {} },
+      "version": "v1"
+    }
+  }
+}
+```
+
+The role holds only `execute` on the mutation: running a named mutation needs that row and no table right ([Declared databases](../guides/declared-databases.md#why-roles-is-only-on-an-auth-database)), so a feeder that only calls `insert_quote` needs nothing else. A role that needs direct table writes adds `{ "ResourceType": "table", "ResourceName": "quotes", "Actions": "write" }`, which does not run mutations. Run `aouda plan` on these files before you start: the identities file and the role are cross-checked by it (`KEY_ROLE_UNDECLARED`, `KEY_DATABASE_NOT_LINKED`).
+
+The file holds the key and nothing else (one trailing newline is ignored). A relative path is read from the identities file's directory, and `$NAME` / `${NAME}` in the path are expanded from the environment (systemd's `$CREDENTIALS_DIRECTORY/feeder` works as written). The file is read at start and again at every `aouda reload` (never between them), as UTF-8 (a UTF-8 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused); a missing, unreadable or empty file stops the server. Docker mounts file-based secrets as `0444` by default, and this source does not refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
+
+---
+
+## Reload without a restart
+
+(**BL-1427, 0.14.0**) `aouda reload` asks the running server to re-read its declaration (the identities file's content, a new `Aouda:Databases` entry, a declared database's schema file and roles, a first auth-database link) and converge it. The CLI only carries a **server key** to `POST /api/admin/reload`; the server re-reads **its own** files. In a container that means three things:
+
+1. **Run the command where it can reach the server and read the key.** From inside the server's container:
+
+   ```bash
+   docker compose exec aouda aouda reload --server http://localhost:5000 --key-file /run/secrets/aouda_server_key
+   ```
+
+   `--server` is required (the image listens on port **5000**), and so is exactly one of `--key-file PATH` or `--key-env NAME`: there is no `--key`, because a command line is kept in the process list and in shell history. **The key file must be mounted in the container the command runs in**: here the compose service lists the secret (`secrets: [aouda_server_key]`) so Compose mounts it at `/run/secrets/aouda_server_key`. A key file that exists only on the host is not there inside the container, and the command exits `64`. The command can instead run on the host against the published port (`--server http://127.0.0.1:5000 --key-file ./aouda_server_key`), or in any other container that can reach the server and holds the key. Add `--json` for one JSON object.
+2. **The changed declaration must be in the running container's files.** A bind-mounted identities file or schema file that you edited on the host is what the server re-reads; an image rebuilt or a file copied in at build time is not there until the container is replaced. An identities file's `{ "file": PATH }` secrets are re-read too.
+3. **Settings from environment variables cannot be reloaded.** `Aouda:Databases` given as `Aouda__Databases__<name>__<Key>` variables is reported as the info `SOURCE_NOT_RELOADABLE`, and a secret declared `{ "env": NAME }` keeps the value the process started with (a running process cannot change its own environment). The image ships no `appsettings*.json`: to reload databases, schema and roles, mount a configuration file (for example `/app/appsettings.json`) and put `Aouda:Databases` there. To reload a rotated key, declare it as `file` or `hash`.
+
+It exits `0` (nothing to change), `2` (applied), `1` (refused or stopped part-way), `64` (usage), `69` (unreachable, busy or starting) and `77` (the key was refused). `aouda plan --server` is the dry run ([Plan a declaration](../guides/plan.md)). The server key (`Aouda:Auth:Bootstrap:*`), the identities file's **path**, the listener, memory and a database's operational fields still take a restart: a reload lists them under `restartRequired` and applies the rest.
 
 ---
 

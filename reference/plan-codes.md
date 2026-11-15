@@ -47,7 +47,7 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `KEY_FIELD_REQUIRED` | error | `principals` | offline | 78 | Add the field the entry's kind requires. |
 | `KEY_ROLE_INVALID` | error | `principals` | offline | 78 | List plain role names (no control characters, at most 128 characters). |
 | `KEY_ROLE_RESERVED` | error | `principals` | offline | 78 | Give the scoped key a custom role: db_admin, db_operator, anonymous and public cannot be given to one. |
-| `KEY_SHAPE_INVALID` | error | `principals` | offline | 78 | Generate a key of the entry's kind (aouda keys generate), with its prefix and length. |
+| `KEY_SHAPE_INVALID` | error | `principals` | offline | 78 | Generate a key of the entry's kind with openssl rand -hex 32 and prefix it with the kind's prefix (mk_srv_, mk_scp_, mk_svc_, mk_pub_ or mk_anon_). The rule: the prefix, then at least 32 characters from A-Z, a-z, 0-9, '_' and '-', not one repeated character and no run of more than 8 equal characters. There is no `aouda keys generate`. |
 | `KEY_SECRET_SHARED` | error | `principals` | offline | 78 | Declare each secret once: remove one of the two declarations named above, or give one of them a different secret. |
 | `KEY_SYSTEM_KIND_DUPLICATE` | error | `principals` | offline | 78 | Declare one service_role, public or anon key per database: remove one of the two entries. |
 | `SERVER_KEY_BLANK` | error | `principals` | offline | 78 | Set the server key setting to a key, or remove it (an empty value counts as not set). |
@@ -75,7 +75,7 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `SCHEMA_FILE_UNREADABLE` | error | `schema` | offline | 1 when the file cannot be read (I/O), else 78 | Make the schema file readable where the server runs (a volume not yet mounted clears when it is), or fix SchemaFile. |
 | `SCHEMA_INVALID` | error | `schema` | offline | 78 | Fix the schema file at the pointer named above. |
 | `SCHEMA_UNKNOWN_MEMBER` | error | `schema` | offline | 78 | Remove the member, or correct its spelling: a schema file takes only the members the schema format defines. |
-| `SCHEMA_OVERLAY_INVALID` | error | `schema` | offline | 78 | Make the overlay extend its base file by name and change only what an overlay may change. |
+| `SCHEMA_OVERLAY_INVALID` | error | `schema` | offline | 78 | Make the overlay extend its base file by name and change only what an overlay may change: `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. A member outside that list is the HTTP-reference error `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` (**BL-1460, 0.14.0**); a plan and a start report it under this code, naming the member and its JSON pointer. Move the member to the base file. |
 | `SCHEMA_LIMIT_EXCEEDED` | error | `schema` | offline | 78 | Simplify the named query, or raise Aouda:NamedQuery:MaxJoins / MaxCost. |
 | `SCHEMA_DATABASE_MISMATCH` | warning | `schema` | offline | — | Make the file's 'database' member name the database that declares it, or remove the member: the start applies the file to the declaring database. |
 | `SCHEMA_DATABASE_NOT_OPEN` | error | `schema` | state | 78 | Open the database (repair it), or list it in Aouda:SkipDatabases to start without it. |

@@ -330,7 +330,6 @@ aouda doctor --output json
 | `70` | `status`: the server is not running |
 | `71` | The service manager (systemd, the SCM) refused an operation or could not be reached. (**BL-1461, 0.14.0**) It was `78` in 0.13.0 and earlier |
 | `77` | Not permitted — `service install` or `service uninstall` without root (an elevated prompt on Windows) |
-| `71` | The service manager (systemd, the SCM) refused an operation or could not be reached |
 | `78` | (**BL-1461, BL-1463, 0.14.0**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)). See [When the start is refused](#when-the-start-is-refused) |
 
 These are the same on every platform and for every way of running the server (`aouda start`, the unit, the container).

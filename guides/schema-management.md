@@ -253,7 +253,7 @@ What happens, in this order: **every `SchemaFile` is read and validated before a
 `SchemaEnvironment` is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
 file: `<file without .json>.<env>.json`, so `aouda.schema.json` → `aouda.schema.prod.json` and `rates.aouda.schema.json` →
 `rates.aouda.schema.prod.json` (**BL-1460, 0.14.0**; before, every file in one directory shared `aouda.schema.<env>.json`). An
-overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
+overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
 
 Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
 

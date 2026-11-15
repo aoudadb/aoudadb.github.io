@@ -97,8 +97,11 @@ This explicit server-then-database flow is intentional: it maps cleanly to produ
 ### 2. Docker
 
 ```bash
-docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
+docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 -v aouda-data:/data \
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
+
+The image is private (`docker login ghcr.io` with a token that has `read:packages` first), `-m` is what makes the server size its memory from the container's limit, and `127.0.0.1:` keeps the admin API off the host's other interfaces. See [Docker](../deployment/docker.md) for why each matters.
 
 ### 3. Docker Compose — server + Studio
 
@@ -566,8 +569,11 @@ This gives you a full Aouda server running inside your own host, alongside your 
 Run the official Docker image:
 
 ```bash
-docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
+docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 -v aouda-data:/data \
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
+
+The image is private: log in first with `docker login ghcr.io` (a token with `read:packages`). `-m` makes the server size its memory from the container's limit and `127.0.0.1:` keeps the admin API off the host's other interfaces ([Docker](../deployment/docker.md) says why).
 
 - Server at `http://localhost:5000`
 - Data persists in the `aouda-data` named volume across container restarts
@@ -582,10 +588,10 @@ Key environment variables:
 For production with custom configuration, pass environment variables:
 
 ```bash
-docker run -p 5000:5000 \
+docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 \
   -v aouda-data:/data \
   -e AOUDA_DATA_PATH=/data \
-  ghcr.io/aoudadb/aouda-server
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
 
 #### Option E: Docker Compose — server + Studio
@@ -613,16 +619,18 @@ docker compose -f docker-compose.cluster.yml up
 
 ### Creating Databases via API
 
-Once the server is running, create databases via HTTP. **List and create** (`GET` / `POST /api/databases`) need a **server** credential (`mk_srv_…` or a scoped server key). A service process with an application `mk_svc_` does not list or create databases — it checks existence with `GET /api/databases/{name}` (that key is enough for a read of its own database).
+Once the server is running, create databases via HTTP. **List and create** (`GET` / `POST /api/databases`) need a **server** credential (`mk_srv_…` or a scoped server key), sent as `Authorization: Bearer <key>`; the examples below read it from `$AOUDA_SERVER_KEY`. A service process with an application `mk_svc_` does not list or create databases — it checks existence with `GET /api/databases/{name}` (that key is enough for a read of its own database).
 
 ```bash
 # Create a database
 curl -X POST http://localhost:5433/api/databases \
+  -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "name": "myapp" }'
 
 # Create a database with a durability level and memory limits
 curl -X POST http://localhost:5433/api/databases \
+  -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "analytics",
@@ -631,13 +639,13 @@ curl -X POST http://localhost:5433/api/databases \
   }'
 
 # List databases
-curl http://localhost:5433/api/databases
+curl -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases
 
 # Get database info
-curl http://localhost:5433/api/databases/myapp
+curl -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases/myapp
 
 # Drop a database
-curl -X DELETE http://localhost:5433/api/databases/myapp
+curl -X DELETE -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases/myapp
 ```
 
 ### Connecting with the .NET Client
