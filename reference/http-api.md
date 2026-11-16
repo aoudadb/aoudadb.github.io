@@ -938,7 +938,6 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `FORMULA_TOKEN_REQUIRES_PRIMARY` | 421 | (**ADR 0072, 0.14.0**) A consistency token on a read or subscribe of a table with an `Expression` column reached a replica, which computes no formulas and cannot judge it. Send the read to the primary, or read without a token. |
 | `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, 0.14.0**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. |
 | `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**ADR 0072, 0.14.0**) A `cellRef` node outside a formula (the value of an `Expression` column): in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output. |
-| `EXPR_CELLREF_INVALID` | 400 | (**ADR 0072, 0.14.0**) Registered, but not answered by the server today (BL-1500): a malformed `cellRef` in a formula — no column, a key part that is not a non-null literal, a key column named twice — is `400 FORMULA_REFERENCE_INVALID`, and any `cellRef` outside a formula is `400 EXPR_CELLREF_NOT_ALLOWED`. |
 | `FORMULA_COLUMN_INVALID` | 400 | (**ADR 0072, 0.14.0**) An `Expression` column's declaration, or a later change to its table, breaks a rule of the column type (the Expression column nullable and plain; its driven column a nullable scalar of the same table that nothing else computes or drives; the table with a strict primary key, an ordinary table). The message names the table, the column and the rule; nothing was changed. See [Formulas](../guides/formulas.md#the-column). |
 | `FORMULA_INVALID` | 400 | (**ADR 0072, 0.14.0**) A formula is not one valid expression: it does not parse, uses a `param`, an unknown function or operator, a type its driven column cannot hold without loss (the message says what to write, e.g. `round(x, 2)`), is computed by a `setExpr`, or arrives through a transform. The message names the row; nothing was written. |
 | `FORMULA_REFERENCE_INVALID` | 400 | (**ADR 0072, 0.14.0**) A formula's `cellRef` names a table that does not exist or a formula may not read (an edge table, an engine table, a materialized query's result over a formula table), a column that does not exist or is an `Expression` column, or a key value no row can hold. |
@@ -2741,7 +2740,10 @@ which the server never served — it answers `401` without a database in the pat
 **Response:** `text/plain` with TypeScript code. (**BL-035, 0.9.0**) An [array column](../guides/array-columns.md) is typed
 `Float64Array` (`Double[]`), `Float32Array`, `Int32Array`, `BigInt64Array` (`Int64[]`), `Uint8Array` (`Byte[]`) or `string[]` in a table
 interface and a named query's row, and a named mutation's argument takes `Float64Array | number[]`, `Float32Array | number[]`,
-`Int32Array | number[]`, `BigInt64Array | bigint[] | number[]`, `Uint8Array` or `string[]`.
+`Int32Array | number[]`, `BigInt64Array | bigint[] | number[]`, `Uint8Array` or `string[]`. (**BL-1496, next train**) A row type is the union of
+what every path that reads or writes a row gives, so no read needs a cast it cannot make: a `Timestamp` column is `string | Date` (ISO text
+in a query result, a `Date` in a subscription row), a `Date` column `number | Date` (its day number in a query result), a decimal
+`string | number` (a number in a query result). A named query's argument keeps the one value it takes: `Date` for a `Timestamp` or a `Date` column.
 
 ```typescript
 /**
@@ -2758,7 +2760,7 @@ export interface Orders {
   /** References customers.id */
   customer_id: number;
   total: number;
-  created_at: Date;
+  created_at: string | Date;
 }
 
 /** customers table */
@@ -2830,7 +2832,12 @@ is an input), and the response, the column listing and `…/schema` show it with
 `unique`, reference, check or derivation; the driven column is a nullable scalar of the same table that is not a key, partition or cluster
 column, not derived, identity, server time or auto-increment, not a vector or an array, and driven by no other Expression column. A
 violation is `400 FORMULA_COLUMN_INVALID` naming the rule. A query answers the column's type as `"Expression"` and each row's formula as a
-JSON object (`null` for an input row).
+JSON object (`null` for an input row). (**BL-1512, next train**) (**BL-1491, next train**) So does every other JSON body that carries rows
+of the table: the `returning` rows of a `PATCH` or `DELETE` of its rows and of a named mutation (insert,
+upsert, update and delete) — which wrote the canonical text as a string of escaped JSON until this train — a named query's body and a
+policy-inspect sample. Two reads keep the stored text, on purpose: a **group-by** whose key is the Expression column answers the key as a
+`String` (`"types": ["String", …]`), as a grouped value and not a table row; and a **materialized query** over the table copies the column
+into its result as a plain `String` column (a result is an ordinary table, never an Expression column), so its body holds the text.
 
 (**Horizon, 0.5.0**) `policy.retention` — `{ "keep": "90d" }`, a whole number of minutes, hours, days or weeks (`m` / `h` /
 `d` / `w`) — declares [retention](../guides/retention.md): rows whose first cluster column is older than the server's clock minus
@@ -5067,7 +5074,8 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 
 After an input edit the subscription receives the input's `change` and then each formula row that changed, once, at its final value; an
 unchanged recompute sends nothing. An `Expression` column's value is the formula's JSON object in a snapshot page's `data` and in a
-change's `row` and `prev` (a map in MessagePack); `column_types` does not name it. `at_least`, `wait_ms` and `on_exceeded` are judged by the
+change's `row` and `prev` (a map in MessagePack); (**BL-1495, next train**) a snapshot's `column_types` names it `"Expression"`, as it
+names a `Timestamp`, so a typed client can read the object as a formula. `at_least`, `wait_ms` and `on_exceeded` are judged by the
 formula maintainer's progress, as on a read. See [Formulas](../guides/formulas.md#live-subscriptions).
 
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
@@ -5345,7 +5353,7 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
-| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. A `change` does not repeat a `Timestamp` or `Date` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
+| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. (**BL-1495, next train**) And each `Expression` column, as `"Expression"` (`{"formula":"Expression"}`): the cell is the formula's JSON object, on every page, a denied subscriber's empty page included. A `change` does not repeat a `Timestamp`, `Date` or `Expression` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
 
 **Example:**
 ```json

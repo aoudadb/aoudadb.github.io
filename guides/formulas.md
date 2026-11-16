@@ -351,6 +351,7 @@ write you just made. The full contract is in the [HTTP reference](../reference/h
 - After an input edit the subscription receives the input's change, then **each formula row that changed, once**, at its final value. A
   recompute that left a value unchanged sends nothing. A value computed before you subscribed is in the snapshot.
 - A row's formula is its JSON object in a snapshot page's `data` and in a change's `row` and `prev` (a map in MessagePack).
+  (**BL-1495, next train**) A snapshot's `column_types` names the column `"Expression"`.
 - A change event's `token` is a valid cover for a later token read: it never claims an input the event's values do not reflect. Tokens are
   not ordered across events: **keep the highest you have seen.** A notice's token (`horizon`, `range_delete`) is not a cover.
 - `at_least` on a subscribe of a formula table waits for the maintainer exactly as a read does, with the same `409 TOKEN_UNSATISFIED` and
