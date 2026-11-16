@@ -2862,7 +2862,11 @@ fallback. Missing or unmatched, the create is `400 INVALID_REQUEST` naming the f
 `400` too. (**BL-430, 0.9.0**) An upper-case letter in `permissionDimension` is the same `400 INVALID_REQUEST`, and the message
 gives the lower-case spelling; schema apply reports that change `Failed` and does not write it. (**BL-1281, 0.9.0**) `rlsResolverName` on `jwt-claim`, including when `authMode` is omitted, is `400 INVALID_REQUEST`. The message names `auth-db-rls` and `auth-db-entitlement`. A whitespace-only name is no resolver. `PUT …/options` that omits `rlsResolverName` keeps the stored name, so with `authMode: jwt-claim` that is the same `400` and the table is unchanged; an empty `rlsResolverName` clears it and `jwt-claim` is then allowed. A resolver on `auth-db-rls` or `auth-db-entitlement` is unchanged. `PUT …/options` refuses an upper-case `permissionDimension` with that same `400 INVALID_REQUEST`
 and leaves the stored dimension unchanged. `PUT /api/databases/{db}/tables/{name}/options` takes the same fields; an omitted `permissionColumn` is kept while the
-table stays `auth-db-entitlement` and dropped when the request moves it to another mode. (**BL-1296, 0.9.0**) On a table that already
+table stays `auth-db-entitlement` and dropped when the request moves it to another mode. (**BL-1296, 0.9.0**) An omitted
+`partitionLevelSecurity` is the stored flag, except that a table with **no partition key** leaving `auth-db-entitlement` (which forced
+the flag on) comes out with it off — send `authMode` alone. A table **with** a partition key keeps the flag on when it leaves the
+mode: send `partitionLevelSecurity: false` to turn it off. Asking for `partitionLevelSecurity: true` on a table with no partition key
+is `400` naming the partition key. (**BL-1444, next train**) On a table that already
 has PLS or RLS, a request that changes that security is `403 AUTHORIZATION_DENIED` unless the caller holds, at `admin`,
 `all-partitions` where PLS applies and `all-rows` where RLS applies. RBAC `alter` is still required and is not enough. A table with
 neither restriction is unchanged, and turning protection on is not this check. The table detail and `…/schema` responses carry
