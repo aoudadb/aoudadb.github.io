@@ -21,6 +21,7 @@ Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Gett
 
 - [Setup & flows](setup.md) — enable auth, API keys, signup/signin
 - [Data authorization](authorization.md) — PLS/RLS modes, and [RBAC as the separate, database-scoped gate](authorization.md#190-rbac-is-a-separate-gate-from-plsrls) in front of them
+- [Declare a deployment](../guides/declare-a-deployment.md) — (**next train**) databases, roles and keys of a multi-service deployment as configuration that survives a wipe; the feeder pattern end to end
 - [Direct client access](../guides/direct-client-access.md) — `mk_pub_*`, data-plane listener. **OAuth code + PKCE is not shipped.**
 - [Email, SMS & notifications](notifications.md) — SendGrid, GatewayAPI, **console provider**, password reset / MFA OTP
 - [Email, SMS & notifications](notifications.md) — SendGrid, GatewayAPI, **console provider**, password reset / MFA OTP

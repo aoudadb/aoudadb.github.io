@@ -16,11 +16,19 @@ It replaces `aouda keys check` and `aouda schema check`, which are gone ([below]
 aouda plan                                      # the configuration this directory and environment would start with
 aouda plan --Aouda:Auth:Keys:File=/etc/aouda/aouda.identities.json --skip-secrets
 aouda plan --json                               # one JSON object on standard output
-aouda plan --server https://aouda.internal:8080 --key-file server.key   # what a deploy would change on a running server (BL-1463, 0.14.0)
+aouda plan --server https://aouda.internal:5000 --key-file server.key   # what a deploy would change on a running server (BL-1463, 0.14.0)
 ```
 
 With `--server` it also asks a running server what the declaration would change there, and exits `2` when it would change something
 ([Against a running server](#against-a-running-server---server-bl-1463-0140)).
+
+**Which configuration file it reads** (**next train**). The plan reads the [declaration file](server-configuration.md#declaration-file) the start reads: `/etc/aouda/aouda.json` when it exists,
+or the file `AOUDA_CONFIG_FILE` or `--config PATH` names (the switch wins). `aouda plan --config deploy/aouda.json` therefore plans exactly what `aouda start --config deploy/aouda.json`
+would read. A named file that is missing, empty, a directory or not valid JSON is the error `CONFIGURATION_INVALID`; the plan's exit status is `1` (the start's is `78`). The first line of the
+output names it (`(environment Production, config file <path>)`), or says `config file none` when no file was read.
+
+(**next train**) When `Aouda:Databases` or the identities file's path comes from environment variables or the command line, the plan adds the **info** finding `SOURCE_FIXED_AT_START`: a later `aouda reload` will
+not see a change to it, only a restart will. It never changes the exit status and is not a warning, because deploying by restart is legitimate; the fix, if you want reloads, is to move the setting into the declaration file.
 
 ## What it checks
 
@@ -97,7 +105,7 @@ There is no "could not check" status and no `--strict`: a warning that should bl
 An offline plan cannot see the data directory. `--server` asks a **running** server what this declaration would change, before you deploy it:
 
 ```bash
-aouda plan --server https://aouda.internal:8080 --key-file /run/aouda/secrets/server.key
+aouda plan --server https://aouda.internal:5000 --key-file /run/secrets/aouda_server_key
 ```
 
 The plan first reads the declaration and runs every offline check exactly as without `--server`. **If that finds an error, the server is not contacted**: the plan
@@ -109,7 +117,7 @@ local run did not (a different named-query limit on the server, a version differ
 would change, before the stages:
 
 ```text
-aouda plan: settings + /etc/aouda/identities.json (environment Production), 3 databases, 2 schema files, against https://aouda.internal:8080
+aouda plan: settings + /etc/aouda/identities.json (environment Production), 3 databases, 2 schema files, against https://aouda.internal:5000
 
 changes
   schema   rates: 1 change (AddColumn SwapQuote.Venue)
@@ -167,16 +175,13 @@ An `incomplete` plan prints the offline plan it has and ends `incomplete: <reaso
 **Before a deploy**, on the deploy host with the start's own mounts:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint aouda aouda plan --server http://aouda:8080 --key-file /run/aouda/secrets/server.key
+docker compose run --rm --no-deps --entrypoint aouda aouda plan --server http://aouda:5000 --key-file /run/secrets/aouda_server_key
 case $? in 0) echo "nothing to change" ;; 2) echo "changes: review the plan above" ;; *) exit 1 ;; esac
 ```
 
-**In CI** (secrets not on the runner), with the server key as a CI secret in an environment variable:
+The image listens on port **5000** (not 8080), and Docker Compose mounts a service's `secrets:` at **`/run/secrets/<secret name>`**, so `aouda_server_key` here is the name of the secret in your compose file. The key file must be mounted in the container that runs the plan, which a service that lists the secret under `secrets:` has. The URL names the service on the compose network (`aouda`); from the host use whatever address you publish, for example `http://127.0.0.1:5000`.
 
-```bash
-aouda plan --Aouda:Auth:Keys:File=deploy/aouda.identities.json --skip-secrets \
-           --server https://aouda.internal:8080 --key-env AOUDA_PLAN_KEY
-```
+**In CI**, see [A CI job](#a-ci-job-aouda-plan-on-every-pull-request) below: the server key goes in as a separate CI secret.
 
 ## What `aouda plan` cannot know
 
@@ -211,9 +216,17 @@ read. What cannot be checked is skipped: an unreadable secret, the shape or pref
 
 The plan says what it skipped: one `info` finding, `SECRET_NOT_READ`, carries the **count** of references it did not read (never a variable name or a path), and `notChecked` says so too.
 
+**The server key's file is a path in the container, not on the runner.** A compose file declares `Aouda:Auth:Bootstrap:ServerKeyFile=/run/secrets/aouda_server_key`, and that path does not exist on a CI runner. `aouda plan` takes the same settings as `aouda start` on its command line, so point the setting at a file the runner *has* for the plan only, and the plan sees the same server key the container will:
+
+```bash
+aouda plan --Aouda:Auth:Bootstrap:ServerKeyFile=./ci/server-key.txt --Aouda:Auth:Keys:File=deploy/aouda.identities.json
+```
+
+That is how a conflict such as `KEY_SECRET_SHARED` between the server key and an identities entry is found before the deploy. The file holds one `mk_srv_` key (one trailing newline is removed). Do not export the key as `Aouda__Auth__Bootstrap__ServerKey` to get the same effect: that makes a second source beside `ServerKeyFile` and the plan reports `SERVER_KEY_SOURCES_CONFLICT`. With `--skip-secrets` the file is not read at all.
+
 ## Recipes
 
-**CI, before a deploy** — the identities file and the schema files are in the repository, the secrets are not:
+**CI, before a deploy** — the identities file and the schema files are in the repository, the secrets are not. One database is one group of arguments; a deployment with several repeats the group, or keeps them in a configuration file ([A CI job](#a-ci-job-aouda-plan-on-every-pull-request) has both):
 
 ```bash
 aouda plan --Aouda:Auth:Keys:File=deploy/aouda.identities.json \
@@ -231,6 +244,70 @@ docker compose run --rm --no-deps --entrypoint aouda aouda plan
 
 **A schema file that is declared nowhere else** is checked by declaring it to the plan, as above (`Aouda:Databases:<name>:SchemaFile`, and `SchemaEnvironment` to merge its overlay). A schema that is applied through
 the API instead of declared is checked against a server with `aouda schema diff`.
+
+## A CI job: `aouda plan` on every pull request
+
+What the job needs, each of which a first attempt gets wrong:
+
+1. **The CLI, at the server's version.** `aouda plan` runs the checks of the version it is, so a CLI older or newer than the server you deploy plans a different declaration (a member one version refuses, the other drops). Install the version you deploy: `dotnet tool install -g Aouda.Cli --version <the server version>`, on a runner with the **.NET 10 SDK** (`Aouda.Cli` 0.2.0 and later). The package comes from the NuGet feed your pipeline already restores `Aouda.*` from (the same one as `Aouda.Client`); add `--add-source <feed>` or a committed `nuget.config` when it is not nuget.org. Without a CLI on the runner, the server image is the same code at the same version: `docker run --rm --entrypoint aouda ghcr.io/aoudadb/aouda-server:<version> plan ...`, which needs a login first (below).
+2. **A private registry login, if you use the image.** The image is private ([Docker](../deployment/docker.md)): `echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin` with a token that has `read:packages`, kept as a CI secret.
+3. **Every database's settings.** `aouda plan` reads what `aouda start` reads. A deployment with twelve databases has two ways to give them: **repeat the argument group** for each (`--Aouda:Databases:<name>:Kind=data --Aouda:Databases:<name>:AuthDatabase=<auth> --Aouda:Databases:<name>:SchemaFile=<path>`, one set per database, as in the recipe above), or **commit an `appsettings.json`** with the `Aouda:Databases` section and run the plan in the directory that holds it, because the working directory's `appsettings*.json` is read exactly as the start reads it. The second is better for more than two databases: it is the file the server reads, so the plan and the start cannot disagree on the list. (`Aouda__Databases__<name>__<Key>` environment variables work too, and are as readable by the plan as by the start, but see [`SOURCE_FIXED_AT_START`](../reference/plan-codes.md): a database declared only in the environment cannot be changed by `aouda reload`; put them in a [declaration file](server-configuration.md#declaration-file) and pass `--config` instead.)
+4. **No secrets on the runner**, so `--skip-secrets`. An offline plan then checks form, names, conflicts and every schema file, not the content of a secret.
+5. **The server key is its own CI secret**, only for `--server`. It is the key of the server you plan against, not a key from your declaration: give it to the step that needs it through `--key-env` (a variable the step sets from the secret), never `--key`. It can be a key of a staging server, and it is a `mk_srv_` key.
+
+```yaml
+name: aouda-plan
+on: [pull_request]
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Install the CLI at the server's version
+        run: dotnet tool install -g Aouda.Cli --version "${{ vars.AOUDA_VERSION }}"
+
+      # deploy/appsettings.json holds Aouda:Databases (all databases), Aouda:Auth:Keys:File
+      # and the schema file paths, relative to deploy/.
+      - name: Plan offline (no secrets, no server)
+        working-directory: deploy
+        run: aouda plan --skip-secrets
+
+      - name: Plan against the running server
+        working-directory: deploy
+        env:
+          AOUDA_PLAN_KEY: ${{ secrets.AOUDA_STAGING_SERVER_KEY }}
+        run: |
+          code=0
+          aouda plan --skip-secrets --server "${{ vars.AOUDA_STAGING_URL }}" --key-env AOUDA_PLAN_KEY || code=$?
+          # 0 nothing to change, 2 changes to review; anything else fails the job (1 errors, 64 misuse, 69 unreachable, 77 key refused)
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
+```
+
+Without a `deploy/appsettings.json`, replace `aouda plan --skip-secrets` with the repeated groups, for example:
+
+```bash
+aouda plan --skip-secrets \
+  --Aouda:Auth:Keys:File=deploy/aouda.identities.json \
+  --Aouda:Databases:derive_auth:Kind=auth \
+  --Aouda:Databases:ledger:AuthDatabase=derive_auth --Aouda:Databases:ledger:SchemaFile=deploy/ledger.schema.json \
+  --Aouda:Databases:reports:AuthDatabase=derive_auth --Aouda:Databases:reports:SchemaFile=deploy/reports.schema.json
+```
+
+The same job with the image, for a runner that has Docker and no .NET:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+docker run --rm --entrypoint aouda -v "$PWD/deploy:/deploy:ro" \
+  ghcr.io/aoudadb/aouda-server:"$AOUDA_VERSION" plan --skip-secrets \
+  --Aouda:Auth:Keys:File=/deploy/aouda.identities.json \
+  --Aouda:Databases:ledger:SchemaFile=/deploy/ledger.schema.json   # one group per database
+```
 
 ## Replacing `aouda keys check` and `aouda schema check`
 

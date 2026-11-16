@@ -57,7 +57,7 @@ Three settings give a fresh server working credentials with no sign-in, mint or 
 
 | Piece | What it gives you |
 |---|---|
-| `Aouda:Auth:RootUser` | The first admin, and with it the server auth database (`_serverauth`) |
+| `Aouda:Auth:RootUser` | The first admin, and with it the server auth database (`_serverauth`). Optional since 0.14.0: a declared server key alone creates the database (**BL-1462**) |
 | `Aouda:Auth:Bootstrap:ServerKey` | A working `mk_srv_` server key, a row of `_serverauth` from the moment it exists |
 | `Aouda:Auth:Keys:File` | The identities file declaring further keys: kind, roles, secrets |
 
@@ -90,12 +90,16 @@ start is refused with `SERVER_HAS_NO_OPERATOR`.
 
 ```json
 { "identities": [
-  { "name": "tullett-feeder", "kind": "scoped_service", "database": "deposit",   // authDatabase defaults to "auth"
+  { "name": "tullett-feeder", "kind": "scoped_service",
+    "authDatabase": "derive_auth", "database": "deposit",
     "roles": ["quote_writer"],
     "secrets": [ { "env": "TULLETT_KEY" }, { "hash": "sha256:<64 hex>" } ] },
-  { "name": "deposit-anon", "kind": "anon", "database": "deposit",
+  { "name": "deposit-anon", "kind": "anon",
+    "authDatabase": "derive_auth", "database": "deposit",
     "secrets": [ { "env": "DEPOSIT_ANON_KEY" } ] } ] }
 ```
+
+⚠️ **Set `authDatabase` to the application auth database you declared** (here `derive_auth`, as in [Declared databases](declared-databases.md)). **An omitted `authDatabase` silently means `auth`.** If no auth database of that name exists, `aouda plan` still exits `0`, with only the warning `KEY_TARGET_PENDING` ("the key has no row and is refused"): the key gets no row and every request with it is `401`. The same file reads `KEY_ROLE_UNDECLARED` (the role is not declared on that auth database) and `KEY_DATABASE_NOT_LINKED` (`database` is not linked to it) as warnings too, so read the warnings of a plan, not only its exit status. The file takes comments and trailing commas (as above) and **no** top-level `$schema` (`DECLARATION_UNKNOWN_MEMBER`); `schemas/aouda-identities.v1.json` describes a different file, the test-identities fixture.
 
 | Field | Meaning |
 |---|---|
@@ -106,10 +110,16 @@ start is refused with `SERVER_HAS_NO_OPERATOR`.
 | `roles` | `scoped_service` only. The roles `db_admin`, `db_operator`, `anonymous` and `public` are refused, as they are for a minted scoped key. A system kind takes **no** `roles` |
 | `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "file": PATH }` (**BL-1389, 0.11.0**) reads the key from a file, see below. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere. A secret is exactly one of `env`, `file` and `hash`; a rotation may mix them across the list |
 
-**A secret from a file (**BL-1389, 0.11.0**).** `{ "file": "/run/secrets/feeder_key" }` reads the key from a file, so a Docker or systemd secret never passes through an environment variable. The file holds the key and nothing else: exactly one trailing newline (`\n`, `\r\n` or `\r`) is ignored and nothing else is trimmed, so a key with a trailing space fails the shape rule instead of being trimmed. A relative path is read from the identities file's directory, not the working directory, and `$NAME` / `${NAME}` in the path are expanded from the environment first, so systemd's `{ "file": "$CREDENTIALS_DIRECTORY/feeder" }` works as written (an unset variable fails the start naming the entry and the variable). The file is read once, at start, as strict UTF-8: a UTF-8 byte-order mark is ignored, and a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused as unreadable. A missing, unreadable, non-UTF-8 or empty file, or content that is not a key of the entry's kind, stops the server, and the message names the entry and the path, never the content. The startup log lists the key with source `file`. No permission check is made on the file, because Docker mounts file-based secrets readable by everyone in the container (`0444`) by default.
+**A secret from a file (**BL-1389, 0.11.0**).** `{ "file": "/run/secrets/feeder_key" }` reads the key from a file, so a Docker or systemd secret never passes through an environment variable. The file holds the key and nothing else: exactly one trailing newline (`\n`, `\r\n` or `\r`) is ignored and nothing else is trimmed, so a key with a trailing space fails the shape rule instead of being trimmed. A relative path is read from the identities file's directory, not the working directory, and `$NAME` / `${NAME}` in the path are expanded from the environment first, so systemd's `{ "file": "$CREDENTIALS_DIRECTORY/feeder" }` works as written (an unset variable fails the start naming the entry and the variable). The file is read at start and again at every `aouda reload` (**BL-1427, 0.14.0**; never between them), as strict UTF-8: a UTF-8 byte-order mark is ignored, and a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused as unreadable. A missing, unreadable, non-UTF-8 or empty file, or content that is not a key of the entry's kind, stops the server, and the message names the entry and the path, never the content. The startup log lists the key with source `file`. No permission check is made on the file, because Docker mounts file-based secrets readable by everyone in the container (`0444`) by default.
 
 A literal plaintext `key` in the file is **refused**: a credential never sits in a file that is committed, copied and attached to
 tickets. `auth_admin` and user-linked keys are not declarable.
+
+**A feeder that must survive a wipe is a declared `scoped_service` key, not a user-linked key.** A user-linked `custom` key (made through the API with a
+`userId`) can carry per-partition entitlements, but it cannot be declared and is lost with the data directory. A declared `scoped_service` key holds **roles only**: pair
+it with a role that holds `execute` on one named mutation and nothing else. Entitlements cannot be declared on a scoped key yet, so the server cannot enforce
+"this feeder writes only its own source's rows" for a declared key (no date is promised). The three declarations that make the pattern, with a request that runs it, are on
+[Declare a deployment](declare-a-deployment.md#the-feeder-pattern-end-to-end).
 
 #### The three system kinds (**BL-1378, 0.11.0**)
 
@@ -139,6 +149,8 @@ the clients, then remove the old secret and run `aouda reload` again (its row is
 entry never disturbs the other secrets' rows. (**BL-1427, 0.14.0**) A running WebSocket or long-poll session authenticated with a
 removed secret ends when its row is retracted, before the reload answers (`AUTH_TOKEN_REVOKED`); a reload that rotates a secret in
 place writes the new row before it retires the old one, so the two are never both refused.
+
+**Which secrets a reload can rotate (**BL-1427, 0.14.0**).** A reload re-reads the identities file and every `{ "file": PATH }` secret, so rotating by reload works for `file` (replace the file's content, or point the entry at a new file) and `hash` (replace the hash). It does **not** work for `{ "env": NAME }`: a running process cannot change its own environment, so a reload reads the value the process started with, and a new value in the container's environment needs a restart. Declare the secrets you rotate without a restart as `file` or `hash`.
 
 **A declared key is revoked, never rotated.** `POST .../scoped-service-keys/{name}/rotate` on a declared key is `409`
 ("declared in configuration; change the declaration"); a minted scoped key rotates as before.
@@ -347,8 +359,8 @@ shape rule exists, and why a key generated by `openssl rand -hex 32` is the only
 
 ## Not in this release
 
-An import API (`PUT` a supplied key into the database), `aouda keys import` and SDK methods; users, entitlements and custom roles
-in the file; reloading it when it changes (a reload is run by hand: `aouda reload`); a runtime API that creates a declared key; expiry in the file; a Prometheus
+An import API (`PUT` a supplied key into the database), `aouda keys import` and SDK methods; users and entitlements in the file (custom
+roles are declared with `Roles` on an auth database, **BL-1392, 0.11.0**; the file's content is reloaded by hand with `aouda reload`, **BL-1427, 0.14.0**, and a change is never picked up on its own); a runtime API that creates a declared key; expiry in the file; a Prometheus
 endpoint (the counter above is in the JSON metrics snapshot).
 
 ## Related

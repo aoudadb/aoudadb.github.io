@@ -905,8 +905,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 This section documents every field available in `aouda.schema.json` by type. All fields are optional except `type` on `ColumnDefinition`.
 
-**Only these fields, spelled exactly** (**BL-1460, 0.14.0**). A member that is not listed here (a table has no `description`; a
-materialized query has no `authMode`), or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
+**Only these fields, spelled exactly** (**BL-1460, 0.14.0**). A member that is not listed here (a materialized query has no `authMode`), or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
 `aouda plan`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
 pointer and the member meant. It used to be dropped without a word. The same holds inside named queries (`where`, `joins`, `orderBy`,
 `selectExpr`, `aggregates`, `groupBy`, `perKey`), named mutations and expressions. `schemas/aouda-schema.v1.json` lists exactly these
@@ -943,6 +942,7 @@ describe the behaviour before that.
 | `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Required with `"auth-db-rls"`, optional with `"auth-db-entitlement"`, refused with `"jwt-claim"` (including when `authMode` is omitted). Create and `PUT …/options` answer `400 INVALID_REQUEST`; schema apply records the change `Failed` and does not write it. The message names `auth-db-rls` and `auth-db-entitlement` (**BL-1281, 0.9.0**). The resolver itself is created via the admin API, not schema apply. |
 | `plsClaimBinding` | `plsClaimBinding` | `string` | `claim:tenant_id` | jwt-claim PLS source. `"subject"` or `"claim:<name>"`. Omit keeps `tenant_id`. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
+| `description` | `description` | `string` | None | (**next train**; **0.14.0 refused it** with `SCHEMA_UNKNOWN_MEMBER`) A note on the table: **documentation in the schema file only**. It is checked for shape and then dropped: not stored in the catalog, not diffed, not exported by `aouda schema export`, and never a change in `aouda plan` or a schema apply. Adding, changing or removing one is not drift and needs no migration. It is a member of a table in a schema file only: an **overlay** file still refuses it. (A *column's* `description` is the opposite: stored, diffed, and a change to it is a schema change.) |
 
 #### ColumnDefinition (entry in `columns`)
 

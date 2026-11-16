@@ -361,13 +361,13 @@ Full guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
 
 | Setting | Default | What it means |
 |---|---|---|
-| `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key declared for the server auth database; its row exists once that database does (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
+| `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key declared for the server auth database; its row exists once that database does. A declared server key ends setup mode: with no admin in the data directory the server auth database is created with no user and the key operates the server from the first start, so no `RootUser` is needed (**BL-1462, 0.14.0**; before, setup mode answered `503` to everything else until a `RootUser` or `POST /api/auth/setup` made an admin). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
 | `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key. No permission check (**BL-1401, 0.11.0**), so a secret mounted `0444` works; a missing, unreadable or empty file fails the start. `$NAME` / `${NAME}` in the path are expanded, a relative path resolves against the working directory, the content is strict UTF-8 with one trailing newline removed (**BL-1425, 0.12.0**; [secret files](keys-that-survive-a-wipe.md#secret-files)). Set at most one of the key, the file and the systemd credential `aouda-server-key` |
 | `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, 0.11.0**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }`, `{ "file": PATH }` (**BL-1389, 0.11.0**) or `{ "hash": "sha256:<hex>" }` |
 
 A key is the kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`) and at least 32 characters of `A-Z a-z 0-9 _ -`;
 `openssl rand -hex 32` is the generator. A change to the file's content takes `aouda reload` (**BL-1427, 0.14.0**; the file's
-path and the server key still take a restart); an invalid declaration fails the start, or refuses the reload, naming the entry. The
+path and the server key still take a restart). Rotating by reload works for `file` and `hash` secrets only: an `{ "env": NAME }` secret cannot change in a running process, so its new value takes a restart; an invalid declaration fails the start, or refuses the reload, naming the entry. The
 startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by name, kind, auth database, fingerprint and source.
 
 (**BL-1378, 0.11.0**) What is **not** a setting, and what to expect:
@@ -414,6 +414,12 @@ directory and a plain start bring back the same set; only schema and data need r
 | `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, 0.11.0**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
 | `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, 0.11.0**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
+**Where the entries live** (**next train**). The file `/etc/aouda/aouda.json` (on Windows `%ProgramData%\Aouda\aouda.json`) is read when it exists, with no
+setting; `AOUDA_CONFIG_FILE=/path` or `aouda start --config /path` names another. It has the shape of `appsettings.json`, sits above `appsettings*.json` and below environment variables
+and the command line, and is the only place `Aouda:Databases` can be changed by `aouda reload`: entries given by environment variables or the command line are fixed for the life of the process
+(`SOURCE_NOT_RELOADABLE`). Missing (when named), empty, a directory or malformed is `CONFIGURATION_INVALID`, exit `78`; unreadable is exit `1`. An empty file is an error: `{}` declares nothing.
+[Server configuration §4a](server-configuration.md#declaration-file), and the [reload / restart table](server-configuration.md#reload-or-restart).
+
 ```json
 "Databases": {
   "derive_auth": { "Kind": "auth" },
@@ -442,12 +448,11 @@ undone by the next start, which creates it again, empty. After a backup restore 
 not stop the server (engines open, memory evaluation resumes): it is logged and returned as `declarationConflict` on the restore
 response, and the next process start fails on it until the declaration or the catalog is changed. A declaration cannot say "must be
 unlinked" or "must not exist", and a database removed from the file is left alone. The names `_serverauth`,
-`_auth` and `_settings` are never declarable (`_serverauth` is created by `Aouda:Auth:RootUser` or setup).
+`_auth` and `_settings` are never declarable (`_serverauth` is created by a declared server key, by `Aouda:Auth:RootUser`, or by setup).
 
 **A declarative link creates no API key.** A key minted at start has no reader, so it would be an orphan `db_admin` credential. After
-a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when a later release declares them in the
-identities file or an operator calls `regenerate-keys` (which returns them once); a `POST /api/databases` that links still returns
-them as before. Startup order after a wipe: declared databases and links, then `_serverauth` / `Aouda:Auth:RootUser`, then each
+a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when the identities file declares them (`service_role`, `public` and `anon` entries, **BL-1378, 0.11.0**) or an operator calls `regenerate-keys` (which returns them once); a `POST /api/databases` that links still returns
+them as before. Startup order after a wipe: declared databases and links, then `_serverauth` (and `Aouda:Auth:RootUser` when set), then each
 declared `SchemaFile` (**BL-1388, 0.11.0**), then declared `Roles` (**BL-1392, 0.11.0**), then the configured keys. `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
 has one line per entry (created, converged or unchanged; linked or already linked).
 

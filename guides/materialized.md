@@ -323,6 +323,17 @@ the resolver allows — and a result over a `jwt-claim` source is read whole by 
 result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
 See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
+**A materialized query declares no security of its own** (**next train** for the message; the refusal is 0.14.0). The members `authMode`, `permissionColumn`,
+`permissionDimension` and `rlsResolverName` that a table carries are **not members of a materialized query**: in a schema file, `schema apply` or `schema diff` they are
+`400 SCHEMA_UNKNOWN_MEMBER` (`aouda plan`: the same finding, with the JSON pointer of the member). They were never read: whatever a query's definition said, its result was filtered by the source
+table's partition-level and row-level security alone, so a file that carried them changed nothing and still changes nothing once they are deleted. From the next train the
+message says so: *"a materialized query has no 'authMode'. The server never read it here: a materialized query's security comes from its source table ... Delete the member; to secure the
+result, set authMode, permissionDimension, permissionColumn, rlsResolverName or partitionLevelSecurity on the source table."*
+
+**Migration:** delete the member from the materialized query; to secure its result, declare the security on the **source table** (`authMode`, `permissionDimension`, `permissionColumn`,
+`rlsResolverName`, `partitionLevelSecurity` there, as for any table). Nothing about who can read the result changes by deleting the member, because it was ignored. A holder is lifted
+past each half by its own `all-partitions` / `all-rows` grant **on the source table**, as above.
+
 (**BL-418, 0.9.0**) **An embargo holder cannot read a result over the embargoed table.** A result is computed once for every
 reader, so it cannot be cut by one caller's delay: its query endpoint, a `/query` or named query that names it, and a subscription to
 it answer `403 AUTH_EMBARGO_UNSUPPORTED` to a credential holding an
