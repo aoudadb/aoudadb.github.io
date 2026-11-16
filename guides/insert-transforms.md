@@ -215,6 +215,10 @@ Named predicates. An empty `WhereClause` is rejected at apply. Failure → typed
 
 Check `op` values are the **row-evaluator** set only: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`. That is smaller than the wire set used by `POST /query` and named-query execute (`in`, `nin`, `like`). Apply refuses `in` / `nin` / `like` on a check (`not supported here`) — encode membership as `or` of `eq`. The operator is `ne`, not `neq`.
 
+A null makes a comparison unknown, as in a query. A check rejects a row only when its predicate is false, so a null passes a
+check such as `amount gt 0`; declare the column `nullable: false` (or add `{ "column": "amount", "op": "ne", "value": null }`)
+to refuse nulls. `eq null` and `ne null` test IS NULL / IS NOT NULL. (**BL-1337, next train**)
+
 ```json
 {
   "checks": {
@@ -275,6 +279,10 @@ The landing is an insert by the caller. PLS and RLS run on the target row after 
 | None | `TRANSFORM_ROUTE_UNMATCHED` |
 
 An unmatched row is an **error**, not a fallback — it does not stay on the ingress table. If you want a catch-all, declare it: a last route whose `when` is a condition that always holds, pointing at a quarantine table. `tee` has no such rule; a `tee` that matches nothing simply produces no copy, because the ingress row was stored anyway.
+
+A `when` selects a row only when its predicate is true: a null compared is not selected, so a route with no other match refuses
+the row (`TRANSFORM_ROUTE_UNMATCHED`) and a tee does not copy it; a `case when` over a null takes its `else` (**BL-1337, next
+train**).
 
 ---
 
