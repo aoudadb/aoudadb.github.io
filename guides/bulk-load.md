@@ -1314,7 +1314,7 @@ its rows are in the result. On the publish line a merged load reports `name:merg
 publish that absorbed it reports `merged=N`. `mqPublishBacklog` still counts loads whose publish has not
 completed, merged or not.
 
-⚠️ **A rising `mqPublishBacklog` and a directory full of spill files are the same symptom.** A queued publish keeps its build spill on disk until it runs, so a backlog looks exactly like a leak from the filesystem. Check this number before concluding anything from a file count.
+⚠️ **`mqPublishBacklog` counts pending load jobs, which hold no spill.** The `.mqspill` files in a query's `_build_runs/` belong to a rebuild in flight, or to a chunked rebuild waiting for memory (**BL-624, next train**); `mqSpillOutstandingBytes` is the figure to read, not a file count.
 
 **(P45)** Six fields are appended after the ones above — `SpillRunsCreated`, `SpillRunsMerged`,
 `SpillWriteMs`, `SpillMergeMs`, `SpillRunBytesWritten`, `SpillBytesWritten` — reporting the job's
