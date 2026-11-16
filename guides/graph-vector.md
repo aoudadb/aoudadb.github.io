@@ -151,6 +151,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 - `VectorHraBuffer` — in-memory hot write area; freeze-and-swap flush per IVF cell
 - `IvfCentroidStore` — persists IVF centroids trained by `KMeansHelper`
 - `VectorSegmentFlusher` — seals vectors per IVF cell; writes raw fp32 pages + `*.rabitq` / `*.pq` companion files
+- A flush's segments reach the catalog in one journal record, all or none (**BL-601, next train**) — the cells of a vector flush, and the segments of an edge flush. Before, each cell was catalogued by its own write; one that failed after the first left the others recording the whole batch's end, and a restart lost the uncatalogued cells' vectors. A failure the catalog provably did not record is undone and the rows are flushed again; one it may have recorded is completed and logged (a failed catalog journal write already stops the table's reads until the database is reopened).
 - Late-arriving vectors are flushed inline; the cell-aware `_delta/` merge is removed (**ColumnarRead, 0.3.0**)
 - `InsertVectorsAsync`, `DeleteVectorAsync` on `AoudaEngine`
 - ANN search operator: `NearestNeighborsAsync` (IVF-pruned brute-force scan, Stage 1)
