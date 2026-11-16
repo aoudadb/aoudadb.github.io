@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
+  "title": "Aouda declaration (aouda.json), version 1",
+  "type": "object",
+  "description": "aouda.json: what exists and who may do what, read by the server named by Aouda:Declaration (--declaration).",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "The JSON schema of this file, for an editor; the server ignores it and never fetches it."
+    },
+    "version": {
+      "type": "integer",
+      "description": "The grammar's version. Required; 1 is the only one.",
+      "const": 1
+    },
+    "databases": {
+      "type": "object",
+      "description": "The declared databases, keyed by database name.",
+      "additionalProperties": {
+        "type": "object",
+        "description": "One declared database: created when missing and converged at every start; its name is the member's name.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "data (an ordinary database) or auth (an application auth database). Required."
+          },
+          "authDatabase": {
+            "type": "string",
+            "description": "data only: the application auth database this database is linked to."
+          },
+          "schema": {
+            "type": "string",
+            "description": "data only: the schema file applied at start, relative to this file's directory (or absolute). Its overlay for Aouda:Environment E is <stem>.E.json beside it."
+          },
+          "schemaAllowDestructive": {
+            "type": "boolean",
+            "description": "With schema: whether the start-time apply may drop tables and columns (default false; never on reload)."
+          },
+          "durability": {
+            "type": "string",
+            "description": "strict (the default), os, unlogged or memory. An auth database is always strict."
+          },
+          "replicationMode": {
+            "type": "string",
+            "description": "Replicate (the default) or DoNotReplicate."
+          },
+          "writeConcern": {
+            "type": "string",
+            "description": "One (the default), Majority or All."
+          },
+          "writeConcernTimeoutMs": {
+            "type": "integer",
+            "description": "Milliseconds to wait for the write concern's acknowledgements; at least 100 (default 5000)."
+          },
+          "onWriteConcernTimeout": {
+            "type": "string",
+            "description": "Fail, Degrade or DegradeAndLog (the default)."
+          },
+          "defaultTemperature": {
+            "type": "string",
+            "description": "Auto (the default), HotOnly or ColdPreferred."
+          },
+          "memoryWeight": {
+            "type": "number",
+            "description": "Relative weight of this database's memory share; positive (default 1)."
+          },
+          "maxMemoryShareBytes": {
+            "type": "integer",
+            "description": "Cap on the computed memory share, in bytes (default: none)."
+          },
+          "roles": {
+            "type": "object",
+            "description": "auth only: custom roles, keyed by role name.",
+            "additionalProperties": {
+              "type": "object",
+              "description": "A custom role of this auth database: created when missing and converged at every start and reload; a role not declared is never touched.",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "The role's description."
+                },
+                "permissions": {
+                  "type": "array",
+                  "description": "The role's permissions.",
+                  "items": {
+                    "type": "object",
+                    "description": "One permission of a declared role, in the shape of the roles API.",
+                    "properties": {
+                      "resourceType": {
+                        "type": "string",
+                        "description": "table (the default), all-partitions, all-rows or embargo."
+                      },
+                      "resourceName": {
+                        "type": "string",
+                        "description": "The table name, or *."
+                      },
+                      "actions": {
+                        "type": "string",
+                        "description": "For a table row a comma-separated action list (default read); for an all-* grant exactly one level."
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "additionalProperties": false
+}

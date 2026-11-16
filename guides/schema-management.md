@@ -224,38 +224,41 @@ The admin HTTP create endpoint still exists and still works; the schema file is 
 
 *(**BL-1388, 0.11.0**)*
 
-If you declare your databases in configuration (`Aouda:Databases`), the server can apply each database's schema file itself, so a wipe of the data directory followed by a plain start gives you the databases, their auth links, their keys **and** their tables, with no per-database script. It is **opt-in**: a database without a `SchemaFile` is not touched, and the server never looks for a file on its own.
+If you declare your databases in the declaration file (`aouda.json`, **BL-1463, next train**; before, in the `Aouda:Databases` settings, which are refused now: [Declare a server in one file](declaration.md)), the server can apply each database's schema file itself, so a wipe of the data directory followed by a plain start gives you the databases, their auth links, their keys **and** their tables, with no per-database script. It is **opt-in**: a database without a `schema` is not touched, and the server never looks for a file on its own.
 
 ```json
-"Aouda": {
-  "Databases": {
-    "derive_auth": { "Kind": "auth" },
+{
+  "version": 1,
+  "databases": {
+    "derive_auth": { "kind": "auth" },
     "ledger": {
-      "AuthDatabase": "derive_auth",
-      "SchemaFile": "/etc/aouda/schemas/ledger.json",
-      "SchemaEnvironment": "prod"
+      "kind": "data",
+      "authDatabase": "derive_auth",
+      "schema": "schemas/ledger.json"
     }
   }
 }
 ```
 
-What happens, in this order: **every `SchemaFile` is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `SchemaFile` is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
+in `/etc/aouda/aouda.json`, started with `Aouda__Declaration=/etc/aouda/aouda.json` and `AOUDA_ENVIRONMENT=prod`. A relative `schema` path is relative to the directory of `aouda.json` (**BL-1463, next train**; before, to the working directory), so the example reads `/etc/aouda/schemas/ledger.json`.
+
+What happens, in this order: **every `schema` file is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `schema` file is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
 
 | You want to know | Answer |
 |---|---|
 | Is it safe to restart? | Yes. A file already in effect gives an empty diff: nothing is written, no history entry. A changed file applies only the difference. |
 | What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, 0.14.0**), an overlay that adds a table. A change that cannot be applied fails the start too. (**BL-1463, 0.14.0**) Every bad file is reported at once, each with its code and a JSON pointer into the file (`SCHEMA_INVALID`, `SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_OVERLAY_INVALID`, `SCHEMA_CHANGE_REFUSED`, ...; see [Declaration Finding Codes](../reference/plan-codes.md)); a file or an overlay that cannot be read (`SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE`) exits with status 1, so a supervisor retries it once the volume is mounted, and an invalid one exits 78. |
-| What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"SchemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
+| What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"schemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
 | Which tables can I still change over HTTP? | None that the file created: a table schema apply creates refuses HTTP DDL in every inference mode, whether the CLI, the API or the start-time apply created it. |
 | Where is the history? | `GET /api/databases/{db}/schema/history`, with the source `DeclaredApply`. |
-| Do the CLI and the API still work? | Yes, unchanged. The catalog is the runtime truth; the next start applies the file again, and does not remove what you added through the API unless the file omits it **and** `SchemaAllowDestructive` is set. |
+| Do the CLI and the API still work? | Yes, unchanged. The catalog is the runtime truth; the next start applies the file again, and does not remove what you added through the API unless the file omits it **and** `schemaAllowDestructive` is set. |
 
-`SchemaEnvironment` is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
+The process setting `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`; **BL-1463, next train**, one per server; it replaces the per-database `SchemaEnvironment`) is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
 file: `<file without .json>.<env>.json`, so `aouda.schema.json` → `aouda.schema.prod.json` and `rates.aouda.schema.json` →
 `rates.aouda.schema.prod.json` (**BL-1460, 0.14.0**; before, every file in one directory shared `aouda.schema.<env>.json`). An
-overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
+overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `schema` is refused on a `"kind": "auth"` database, and `schemaAllowDestructive` without `schema` is refused at start.
 
-Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
+Custom roles can be declared the same way on a `"kind": "auth"` database (`roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-databases-in-aoudajson)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
 
 ---
 
@@ -374,7 +377,7 @@ non-nullable column, `"partitionLevelSecurty": true` left partition-level securi
 lost its filter and returned every row. A table has no `description` (a column does) and a materialized query has no `authMode`,
 `permissionDimension` or `permissionColumn`: those are refused too. The materialized-query ones were redundant and never read: a
 materialized query's result is always filtered by its source table's partition- and row-level security, so the source table's security
-always applied. Remove them. Run [`aouda plan`](plan.md) with each file declared (and its overlay, `SchemaEnvironment`) to list them all.
+always applied. Remove them. Run [`aouda plan`](plan.md) with each file declared (and its overlay, `--env`) to list them all.
 
 ### Summary
 

@@ -284,6 +284,20 @@ The server reads the credential only while it has **no users at all**, so once t
 
 ---
 
+## Declare the databases: `aouda.json` (**BL-1463, next train**)
+
+The databases, their schema files and their roles are one JSON file, `aouda.json`, that you write and **name**: the server reads
+the declaration from the path in the process setting `Aouda:Declaration` and from no other (there is no default path, so
+`/etc/aouda/aouda.json` is read only when something says so). For a unit, add the variable to the service's environment
+(`Environment=Aouda__Declaration=/etc/aouda/aouda.json`, optionally `Environment=AOUDA_ENVIRONMENT=prod` to merge
+`/etc/aouda/aouda.prod.json` over it), or pass `--declaration /etc/aouda/aouda.json` to `aouda start`. A file that is named and not
+there fails the start with exit status `1` (a volume that is not mounted yet clears when it is, so a supervisor retries); a file
+that is there and wrong exits `78`. Check it first with `aouda plan --declaration /etc/aouda/aouda.json`. `Aouda:Databases` is
+**no longer read**: one in `appsettings.json` or the environment refuses the start (`SETTING_REMOVED`) and names the member that
+replaces it. The file: [Declare a server in one file](../guides/declaration.md).
+
+---
+
 ## Exposure
 
 **An install binds `127.0.0.1`.** The admin API creates users and issues keys, and a fresh server has exactly one account on it, so it is not reachable from off the machine until you say so.
@@ -354,7 +368,7 @@ with its code, the setting or file (and JSON pointer) it is about, and what to d
 one [`aouda plan`](../guides/plan.md) prints, headed `aouda start`, and the last line names the exit status:
 
 ```text
-aouda start: settings + /etc/aouda/aouda.identities.json (environment Production), 1 database, 0 schema files
+aouda start: declaration /etc/aouda/aouda.json, identities file /etc/aouda/aouda.identities.json, 1 database, 0 schema files
 
 error    KEY_SECRET_SHARED  Aouda:Auth:Bootstrap:ServerKeyFile  (environment variable Aouda__Auth__Bootstrap__ServerKeyFile)
          Configured keys 'bootstrap-server-key' and 'ops-admin' share one secret.

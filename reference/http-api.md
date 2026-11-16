@@ -3934,7 +3934,7 @@ Readiness probe: 200 when nothing is missing, 503 with **everything** that is st
   "ready": false,
   "reasons": [
     { "code": "setup_required", "message": "The server is in setup mode: nothing is declared and no admin account exists. ..." },
-    { "code": "database_pending", "message": "Declared database 'ledger' (Aouda:Databases) does not exist yet.", "subject": "ledger" }
+    { "code": "database_pending", "message": "Declared database 'ledger' (declaration file) does not exist yet.", "subject": "ledger" }
   ]
 }
 ```
@@ -3946,8 +3946,8 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
   "ready": false,
   "reasons": [
     { "code": "server_starting", "message": "The server is still starting: the auth bootstrap has not completed." },
-    { "code": "schema_applying", "message": "Applying the schema file of declared database 'orders' (Aouda:Databases): 4 of 11 done.", "subject": "orders", "progress": { "done": 4, "total": 11 } },
-    { "code": "schema_pending", "message": "Declared database 'reports' (Aouda:Databases) has a schema file that has not been applied yet.", "subject": "reports" }
+    { "code": "schema_applying", "message": "Applying the schema file of declared database 'orders' (declaration file): 4 of 11 done.", "subject": "orders", "progress": { "done": 4, "total": 11 } },
+    { "code": "schema_pending", "message": "Declared database 'reports' (declaration file) has a schema file that has not been applied yet.", "subject": "reports" }
   ]
 }
 ```
@@ -3961,9 +3961,9 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
 | `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
 | `setup_required` | The server is in setup mode: its data directory has never been set up (no server auth database), nothing is declared (no server key, no `Aouda:Auth:RootUser`, no dev admin), and no admin exists. A declared server key is not setup mode, and a data directory that has been set up never re-enters it (**BL-1462, 0.14.0**). | none |
 | `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. Also listed when `Aouda:Auth:RootUser:Email` is set and no password is (neither `Password` nor the systemd credential `aouda-admin-password`) (**BL-1462, 0.14.0**). | none |
-| `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
-| `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
-| `database_reconcile_failed` | The reconcile of `Aouda:Databases` after a restore was refused; the server keeps running. | the database, when one is named |
+| `database_pending` | A database in the declaration file (`aouda.json`) does not exist yet. | the database |
+| `database_not_open` | A database in the declaration file is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
+| `database_reconcile_failed` | The reconcile of the declared databases after a restore was refused; the server keeps running. | the database, when one is named |
 | `reload_failed` | (**BL-1427, 0.14.0**) The last `POST /api/admin/reload` stopped part-way; the steps before it are applied. Cleared by the next reload that completes; a refused reload adds none. | the entry (a database, role or key name), when one is named |
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
 | `schema_applying` | (**BL-1462, 0.14.0**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
@@ -4360,7 +4360,7 @@ At least one of `backupId` or `targetTime` is required.
 }
 ```
 
-`declarationConflict` (**BL-1379, 0.11.0**) is present only when the restored catalog conflicts with the databases declared in `Aouda:Databases` (for example a declared link that differs from the recorded one): the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
+`declarationConflict` (**BL-1379, 0.11.0**) is present only when the restored catalog conflicts with the databases declared in `aouda.json` (for example a declared link that differs from the recorded one): the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
 
 PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6). `lastAppliedCommitUtc` is that commit, in UTC.
 

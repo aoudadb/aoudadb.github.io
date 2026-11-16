@@ -26,6 +26,9 @@ Aouda settings come from several layers. Think of them as separate concerns:
 | **CLI flags** | `--data-path`, `--port`, `--join`, etc. | Install scripts, manual starts, service `binPath` | Highest precedence at startup |
 | **Data-directory files** | `backup-config.json`, `cluster-state.json` | Runtime / API / Studio | Created under `{DataPath}` when changed |
 | **Runtime API** (`PATCH /admin/config`) | Memory budgets, backup schedule, log level | Studio, automation | See §4 — not all fields persist |
+| **Declaration file** (`aouda.json`; **BL-1463, next train**) | The databases, their schema files and their roles: what exists | Developers, DevOps | **No** — you write it and name it with `Aouda:Declaration` |
+
+**A declaration is not a setting (**BL-1463, next train**).** *What exists* — databases, their kinds, links, schema files and roles — is written in one file, `aouda.json`, and *how the server runs* — the port, the memory budget, the data directory, and the path of that file — stays in settings. Two settings belong to the file: **`Aouda:Declaration`** (`--declaration`, `AOUDA_DECLARATION`) names it, with **no default path**, and **`Aouda:Environment`** (`--env`, `AOUDA_ENVIRONMENT`) selects the overlay `aouda.<env>.json` merged over it. The old `Aouda:Databases` settings are **refused** at start (`SETTING_REMOVED`, naming the member of `aouda.json` that replaces each); they are not read from `appsettings.json`, the environment or a switch. See [Declare a server in one file](declaration.md) and the [reference](../reference/declaration.md).
 
 **Install directory vs data directory:** users may copy binaries to any folder (`C:\Program Files\Aouda`, `D:\Apps\Aouda`, `/opt/aouda`, …). That choice does **not** determine where databases live. The **data directory** (chosen at install) holds all persistent engine state.
 

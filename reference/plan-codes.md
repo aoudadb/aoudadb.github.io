@@ -6,9 +6,9 @@ parent: "Reference"
 
 # Declaration finding codes (**BL-1463, 0.14.0**)
 
-`aouda start` validates the whole declaration — the settings, `Aouda:Databases`, the identities file and every secret and schema file it names — before it opens anything. Every problem is a **finding** with a stable code, the stage that found it, where it is (a setting and the configuration source that supplied it, or a file and a JSON pointer) and what to do. A finding of severity `error` is exactly a refusal of the start; a `warning` is accepted and logged once; `info` is context. A refused start prints every finding at once on standard error and creates nothing.
+`aouda start` validates the whole declaration — the settings, the declaration file (`Aouda:Declaration`, **BL-1463, next train**), the identities file and every secret and schema file it names — before it opens anything. Every problem is a **finding** with a stable code, the stage that found it, where it is (a setting and the configuration source that supplied it, or a file and a JSON pointer) and what to do. A finding of severity `error` is exactly a refusal of the start; a `warning` is accepted and logged once; `info` is context. A refused start prints every finding at once on standard error and creates nothing.
 
-`aouda plan` runs the **offline** half of every stage without starting anything and reports the same findings with the same codes (see [Plan a declaration](../guides/plan.md)). Three codes are emitted only by a plan: `SECRET_NOT_READ` (`--skip-secrets` did not read the secrets it counts) and, with `--server`, `PLAN_TARGET_UNREACHABLE` and `PLAN_TARGET_REFUSED` (**BL-1463, 0.14.0**).
+`aouda plan` runs the **offline** half of every stage without starting anything and reports the same findings with the same codes (see [Plan a declaration](../guides/plan.md)). Six codes are emitted only by a plan: `SOURCE_FIXED_AT_START` (info: `Aouda:Databases` or the identities file's path comes from environment variables or the command line, which a reload never re-reads), `SECRET_NOT_READ` (`--skip-secrets` did not read the secrets it counts), with `--server`, `PLAN_TARGET_UNREACHABLE` and `PLAN_TARGET_REFUSED`, and with `--data-dir`, `PLAN_DATA_DIRECTORY_IN_USE` and `PLAN_DATA_DIRECTORY_NEEDS_RECOVERY` (**BL-1463, next train**).
 
 ## Exit status of a refused start
 
@@ -24,15 +24,18 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | Code | Severity | Stage | Half | Exit status | What to do |
 |---|---|---|---|---|---|
 | `CONFIGURATION_INVALID` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Fix the configuration file or the AOUDA_ variable named above so that it can be read. |
-| `DECLARATION_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Make Aouda:Auth:Keys:File name a readable file (a volume not yet mounted clears when it is). |
+| `DECLARATION_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Make the setting named above (Aouda:Declaration, Aouda:Auth:Keys:File) name a readable file (a volume not yet mounted clears when it is). |
 | `DECLARATION_INVALID_JSON` | error | `read` | offline | 78 | Fix the JSON at the line named above. |
+| `DECLARATION_VERSION_UNSUPPORTED` | error | `read` | offline | 78 | Set "version": 1 at the top of the declaration file: it is the only version this server reads. |
+| `DECLARATION_OVERLAY_INVALID` | error | `read` | offline | 78 | Remove the member from the overlay: the version is the base file's. |
 | `DECLARATION_SHAPE_INVALID` | error | `read` | offline | 78 | Give the identities file the shape { "identities": [ { ... } ] }, each entry an object and each field a string. |
 | `DECLARATION_UNKNOWN_MEMBER` | error | `read` | offline | 78 | Remove the member, or correct its spelling: the identities file takes only the members it documents. |
 | `SECRET_BY_VALUE` | error | `read` | offline | 78 | Remove the plaintext key from the file and give it by reference: { "env": "NAME" }, { "file": "path" } or { "hash": "sha256:<hex>" }. |
 | `SECRET_REFERENCE_INVALID` | error | `read` | offline | 78 | Give the secret as exactly one of { "env": "NAME" }, { "file": "path" } or { "hash": "sha256:<64 hex>" }. |
 | `SECRET_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Set the variable, or make the secret file readable and non-empty where the server runs. |
 | `OVERLAY_UNREADABLE` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Make the overlay readable and a JSON object (at least { "extends": "<base file name>" }), or remove it. |
-| `SOURCE_NOT_RELOADABLE` | info | `read` | reload | — | Move the setting to a configuration file to change it by reload; environment variables and the command line are read once, at start. |
+| `SOURCE_NOT_RELOADABLE` | info | `read` | reload | — | Set it in appsettings.json to change it by reload; environment variables and the command line are read once, at start. |
+| `SOURCE_FIXED_AT_START` | info | `read` | offline | — | Nothing to do if you deploy by restarting. To change it with `aouda reload`, set it in appsettings.json instead. |
 | `OVERLAY_ABSENT` | info | `read` | offline | — | Nothing to do if the environment needs no overlay; otherwise create the file named above. |
 | `SECRET_NOT_READ` | info | `read` | offline | — | Run `aouda plan` without --skip-secrets where the secrets are mounted (the deploy host, with the start's own mounts). |
 | `DATA_DIRECTORY_FORMAT_REFUSED` | error | `read` | state | 78 | Point the server at a data directory of this format (start from an empty one and restore a backup, see the upgrade notes). |
@@ -100,10 +103,12 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `KEY_REVOKED_BY_OPERATOR` | warning | `principalRows` | state | — | Remove the key from the declaration to make the revocation permanent; a wipe of the data returns it. |
 | `PLAN_TARGET_UNREACHABLE` | error | `target` | target | — (`aouda plan` exits 69) | Check that the server is running this release or later, reachable at the URL given, and ready; retry after the delay it named. |
 | `PLAN_TARGET_REFUSED` | error | `target` | target | — (`aouda plan` exits 77) | Give a server key (mk_srv_) of that server with --key-file PATH or --key-env NAME. |
+| `PLAN_DATA_DIRECTORY_IN_USE` | error | `target` | target | — (`aouda plan` exits 69) | Plan the running server with --server URL --key-file PATH, or stop it and plan again: two processes on one data directory are not safe. |
+| `PLAN_DATA_DIRECTORY_NEEDS_RECOVERY` | error | `target` | target | — (`aouda plan` exits 69) | Start the server once on this directory (it removes interrupted creations and drops), then plan again; a plan does not simulate the recovery. |
 
 A code whose half is **reload** is emitted only by `aouda reload` (`POST /api/admin/reload`), never by the start (**BL-1427, 0.14.0**); a reload runs every other code as the start does and is refused by every `error`.
 
-A code whose half is **target** is emitted only by `aouda plan --server`, about the server it plans against: the server could not be reached or did not answer with a plan (`PLAN_TARGET_UNREACHABLE`, exit 69), or it refused the key (`PLAN_TARGET_REFUSED`, exit 77). Neither is a finding about the declaration, and no start or reload emits them (**BL-1463, 0.14.0**). Stage `target` is not a stage of the start.
+A code whose half is **target** is emitted only by `aouda plan --server` or `aouda plan --data-dir`, about the target it plans against: the server could not be reached or did not answer with a plan, or the data directory does not exist or cannot be listed (`PLAN_TARGET_UNREACHABLE`, exit 69); the server refused the key (`PLAN_TARGET_REFUSED`, exit 77); another Aouda process holds the data directory (`PLAN_DATA_DIRECTORY_IN_USE`, exit 69); or a crash left a database half-created or half-dropped and only a start recovers it (`PLAN_DATA_DIRECTORY_NEEDS_RECOVERY`, exit 69). None is a finding about the declaration, and no start or reload emits them (**BL-1463, next train**). Stage `target` is not a stage of the start.
 
 `SERVER_HAS_NO_OPERATOR` is one rule checked at two moments of the start: before the schema step (stage `bootstrap`) and after the key rows are reconciled (stage `principalRows`).
 

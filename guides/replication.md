@@ -424,10 +424,10 @@ Key implementation anchors:
 | `Aouda:Archive:Enabled` | bool | `false` | true/false | appsettings/env | Starts a WAL archive worker when a destination is also set — see [Backup and restore §2.4](backup.md#24-availability-status) |
 | `Aouda:Archive:Destination` | string | `""` | URI/path | appsettings/env | Required when archive enabled |
 | `Aouda:Archive:WalRetentionDays` | int | `7` | `>=1` | appsettings/env | How long archived WAL is kept (not the local PITR window) |
-| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | appsettings/env | Source-side DB replication switch |
-| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`, `Majority`, `All` | appsettings/env | DB write concern default |
-| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | `>=100` | appsettings/env | Used for concern > `One` |
-| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | appsettings/env | Timeout behavior |
+| `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, next train**) | Source-side DB replication switch |
+| `databases.<db>.writeConcern` | string | `One` | `One`, `Majority`, `All` | `aouda.json` (**BL-1463, next train**) | DB write concern default |
+| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | `>=100` | `aouda.json` (**BL-1463, next train**) | Used for concern > `One` |
+| `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | `aouda.json` (**BL-1463, next train**) | Timeout behavior |
 | `Aouda:Health:Thresholds:ReplicationLagDegradedSeconds` | int | `10` | positive | appsettings/env | Health degraded threshold |
 | `Aouda:Health:Thresholds:ReplicationLagUnhealthySeconds` | int | `60` | positive | appsettings/env | Health unhealthy threshold |
 | Query parameter `readPreference` | string | `Primary` behavior | `Primary`, `PrimaryPreferred`, `Secondary`, `SecondaryPreferred`, `Nearest`, `Hidden`, `SecondaryWithMaxLag` (case-insensitive; unknown values silently default to `Primary`) | per request | Overrides header when both set |

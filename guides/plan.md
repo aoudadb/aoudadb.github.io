@@ -13,7 +13,8 @@ and no data directory**, opens no port and writes nothing, so it runs in CI befo
 It replaces `aouda keys check` and `aouda schema check`, which are gone ([below](#replacing-aouda-keys-check-and-aouda-schema-check)).
 
 ```bash
-aouda plan                                      # the configuration this directory and environment would start with
+aouda plan --declaration aouda.json --env prod  # the declaration file, its prod overlay and the settings this directory would start with (BL-1463, next train)
+aouda plan                                      # the settings only: with no `Aouda:Declaration`, nothing is declared (`declaration: none`)
 aouda plan --Aouda:Auth:Keys:File=/etc/aouda/aouda.identities.json --skip-secrets
 aouda plan --json                               # one JSON object on standard output
 aouda plan --server https://aouda.internal:8080 --key-file server.key   # what a deploy would change on a running server (BL-1463, 0.14.0)
@@ -26,11 +27,11 @@ With `--server` it also asks a running server what the declaration would change 
 
 The stages of the start, in the order of the start, each on what it can read without a data directory:
 
-1. **read** — every file the declaration names is read: the identities file, the secret files and environment variables it points at, the server key's file or
+1. **read** — every file the declaration names is read: the declaration file `aouda.json` named by `Aouda:Declaration` and its overlay (**BL-1463, next train**; [the file](declaration.md)), the identities file, the secret files and environment variables it points at, the server key's file or
    credential, every schema file and its overlay. A file that cannot be read is one finding, not a crash.
 2. **settings** — the process settings (`Aouda:Port`, the memory limits, `Aouda:NamedQuery:*`, ...), the removed keys and the dev-admin guards.
 3. **principals** — the identities file's entries, the key shapes, the server key's one source, the dev admin beside a server key, and the conflicts between declared keys.
-4. **databases** — `Aouda:Databases`: names, kinds, links and per-kind fields.
+4. **databases** — the `databases` of `aouda.json` (**BL-1463, next train**; before, `Aouda:Databases`, which is now refused as `SETTING_REMOVED`): names, kinds, links and per-kind fields.
 5. **bootstrap** — the first administrator: a server key, `Aouda:Auth:RootUser`, or a data directory that starts in setup mode.
 6. **schema** — every declared schema file, read with the server's own reader (a misspelt member is refused with its JSON pointer), the overlay merge, and the apply-time rules that need no tables.
 7. **roles** — declared roles: names, the grammar of their permissions, the tables and named artifacts they name.
@@ -42,7 +43,7 @@ a `warning` is accepted and logged once; `info` is context.
 
 ## The command
 
-`aouda plan` takes **the arguments `aouda start` takes**: the same `--Aouda:Section:Key=value` settings, `--port`, `--data-dir`, `--dev-admin`, the same environment variables
+`aouda plan` takes **the arguments `aouda start` takes**: the same `--Aouda:Section:Key=value` settings, `--declaration PATH` and `--env NAME` (**BL-1463, next train**: the two settings that name the declaration file and its environment, [Declare a server in one file](declaration.md)), `--port`, `--data-dir`, `--dev-admin`, the same environment variables
 (`Aouda__Auth__Keys__File` and the `AOUDA_` spelling), the `appsettings*.json` of the working directory, and the systemd credentials in `$CREDENTIALS_DIRECTORY`. There is no separate input to
 learn and no `--` separator. Whatever you give `aouda start`, give `aouda plan`.
 
@@ -58,7 +59,7 @@ Giving either a value (`--json=false`) is a usage error.
 The whole plan goes to **standard output**, in both formats; standard error carries only a usage error.
 
 ```text
-aouda plan: settings + /etc/aouda/aouda.identities.json (environment Production), 13 databases, 11 schema files
+aouda plan: declaration /etc/aouda/aouda.json (environment prod), identities file /etc/aouda/aouda.identities.json, 13 databases, 11 schema files
 
 error    KEY_SECRET_SHARED  Aouda:Auth:Bootstrap:ServerKeyFile  (environment variable Aouda__Auth__Bootstrap__ServerKeyFile)
          Configured keys 'bootstrap-server-key' and 'server' share one secret.
@@ -72,12 +73,12 @@ not checked  the data directory and every existing database, table, key row and 
 1 error, 0 warnings: `aouda start` would refuse this declaration.
 ```
 
-With `--json` the object has `format` (`aouda-plan/1`), `aoudaVersion`, `declaration` (the identities file, the environment, the number of schema files and a `planHash`), `target`
+With `--json` the object has `format` (`aouda-plan/1`), `aoudaVersion`, `declaration` (the declaration file and its overlay, the identities file, the environment — **`Aouda:Environment`, or `null`** since **BL-1463, next train**, not the host's environment —, the number of schema files and a `planHash`), `target`
 (`{ "kind": "offline" }`), `outcome` (`clean` or `errors`), `summary`, `stages` (each `passed`, `warnings`, `failed` or `skipped`, with `skippedBecause` naming the code that blocked it),
 `findings`, `changes` (always `null` offline) and `notChecked`. The same input gives the same bytes. A path that holds a key (a key pasted where a path belongs) is shown as `<redacted>`; a plan
 never contains a key, a hash of one or the content of a secret file.
 
-The `planHash` is the SHA-256 of the declaration with every secret replaced by its fingerprint: two plans of one declaration have one hash. A `--skip-secrets` plan hashes the references it did not
+The `planHash` is the SHA-256 of the declaration with every secret replaced by its fingerprint: two plans of one declaration have one hash, **whichever directory the file is in** (a schema file's path is hashed as written in the declaration, its content as read; **BL-1463, next train**). A `--skip-secrets` plan hashes the references it did not
 read, so its hash differs from a full plan's.
 
 ### Exit status
@@ -107,7 +108,7 @@ local run did not (a different named-query limit on the server, a version differ
 would change, before the stages:
 
 ```text
-aouda plan: settings + /etc/aouda/identities.json (environment Production), 3 databases, 2 schema files, against https://aouda.internal:8080
+aouda plan: declaration /etc/aouda/aouda.json, identities file /etc/aouda/identities.json, 3 databases, 2 schema files, against https://aouda.internal:8080
 
 changes
   schema   rates: 1 change (AddColumn SwapQuote.Venue)
@@ -214,9 +215,8 @@ The plan says what it skipped: one `info` finding, `SECRET_NOT_READ`, carries th
 **CI, before a deploy** — the identities file and the schema files are in the repository, the secrets are not:
 
 ```bash
-aouda plan --Aouda:Auth:Keys:File=deploy/aouda.identities.json \
-           --Aouda:Databases:app:Kind=data \
-           --Aouda:Databases:app:SchemaFile=deploy/aouda.schema.json --skip-secrets
+aouda plan --declaration deploy/aouda.json --env prod \
+           --Aouda:Auth:Keys:File=deploy/aouda.identities.json --skip-secrets
 ```
 
 **On the deploy host, with the start's own mounts** — the strongest offline gate, because it reads what the start will read:
@@ -227,7 +227,7 @@ docker compose run --rm --no-deps --entrypoint aouda aouda plan
 
 (The image's entrypoint is `aouda start`, hence `--entrypoint aouda` for any other command.)
 
-**A schema file that is declared nowhere else** is checked by declaring it to the plan, as above (`Aouda:Databases:<name>:SchemaFile`, and `SchemaEnvironment` to merge its overlay). A schema that is applied through
+**A schema file that is declared nowhere else** is checked by declaring it to the plan, as above (`databases.<name>.schema` in `aouda.json`, and `--env` to merge its overlay; **BL-1463, next train**; before, `Aouda:Databases:<name>:SchemaFile` and `SchemaEnvironment`, which are refused now). A schema that is applied through
 the API instead of declared is checked against a server with `aouda schema diff`.
 
 ## Replacing `aouda keys check` and `aouda schema check`
@@ -239,7 +239,7 @@ Both commands are deleted — no alias, no "did you mean": `aouda keys check` an
 |---|---|
 | `aouda keys check --file X` | `aouda plan --Aouda:Auth:Keys:File=X` (add `--skip-secrets` where the secrets are absent) |
 | `aouda keys check -- --dev-admin` | `aouda plan --dev-admin` (no separator) |
-| `aouda schema check --file F --env E` | `aouda plan --Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=F --Aouda:Databases:app:SchemaEnvironment=E` |
+| `aouda schema check --file F --env E` | a declaration file with `{ "version": 1, "databases": { "app": { "kind": "data", "schema": "F" } } }`, then `aouda plan --declaration aouda.json --env E` (**BL-1463, next train**; in 0.14.0 it was `aouda plan --Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=F --Aouda:Databases:app:SchemaEnvironment=E`, which is refused now) |
 | `aouda schema check` for a schema that is not declared | `aouda schema diff` against a server |
 | exit `2` from either command | exit `1` (or `64` for misuse); `2` no longer means "could not check" |
 | the declaration listing `keys check` printed | not printed; `GET /api/auth/admin/configured-keys` lists a running server's declarations |
