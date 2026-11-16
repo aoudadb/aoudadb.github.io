@@ -260,7 +260,7 @@ then `--password-file /run/secrets/aouda_admin_password`.
     "roles": ["quote_writer"], "secrets": [ { "file": "/run/secrets/feeder_key" } ] } ] }
 ```
 
-That entry is only valid next to the declarations it names: the auth database `derive_auth` (`authDatabase`: **leave it out and the key targets a database called `auth`**, which here does not exist, so `aouda plan` exits `0` with the warning `KEY_TARGET_PENDING` and every request with the key is `401`), the role `quote_writer` declared on it, and the application database `deposit`, linked to it. A complete set that `aouda plan` accepts, as a configuration file in the shape of `appsettings.json` (the image ships none: mount it as the [declaration file](#the-declaration-file-one-mounted-file-makes-reload-work-next-train); `Aouda:Auth:Keys:File` points at the identities file above):
+That entry is only valid next to the declarations it names: the auth database `derive_auth` (`authDatabase`: **leave it out and the key targets a database called `auth`**, which here does not exist, so `aouda plan` exits `0` with the warning `KEY_TARGET_PENDING` and every request with the key is `401`), the role `quote_writer` declared on it, and the application database `deposit`, linked to it. A complete set that `aouda plan` accepts, as a configuration file in the shape of `appsettings.json` (the image ships none: mount it as the [declaration file](#the-declaration-file-one-mounted-file-makes-reload-work-0.15.0); `Aouda:Auth:Keys:File` points at the identities file above):
 
 ```json
 {
@@ -328,7 +328,7 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
 2. **The changed declaration must be in the running container's files.** A bind-mounted identities file or schema file that you edited on the host is what the server re-reads (mount the **directory** that holds them: a single-file bind mount keeps the old inode when the host file is replaced, see below); an image rebuilt or a file copied in at build time is not there until the container is replaced. An identities file's `{ "file": PATH }` secrets are re-read too.
 3. **Settings from environment variables cannot be reloaded.** `Aouda:Databases` given as `Aouda__Databases__<name>__<Key>` variables is reported as the info `SOURCE_NOT_RELOADABLE` by a reload (and `SOURCE_FIXED_AT_START` by `aouda plan`), and a secret declared `{ "env": NAME }` keeps the value the process started with (a running process cannot change its own environment). The image ships no `appsettings*.json`, so declare them in the **declaration file** below. To reload a rotated key, declare it as `file` or `hash`.
 
-### The declaration file: one mounted file makes reload work (**next train**)
+### The declaration file: one mounted file makes reload work (**0.15.0**)
 
 Mount **one JSON file** at **`/etc/aouda/aouda.json`**. The server reads it by itself when it exists (nothing to set), and it holds `Aouda:Databases`, `Aouda:Auth:Keys:File` and the other declaration settings in the shape of `appsettings.json`. Another path: `AOUDA_CONFIG_FILE=/path` or `aouda start --config /path` (the switch wins; an empty variable counts as unset). An environment variable or a command-line argument still overrides a scalar the file sets, but `Aouda:Databases` and the identities path set that way are fixed for the life of the process. A reload re-reads the file at its path every time, with no watcher.
 

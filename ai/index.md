@@ -24,7 +24,7 @@ If your question is "How should an AI agent use Aouda today?", start with:
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
 - [Local CLI testing (agents)](local-cli-testing.md) for a throwaway `aouda start` (unused ports, temp data-dir) and the traps that waste a session (`start -h`, data-plane `/query`, CorsOrigins shape, schema `where` / keys)
-- [Declare a deployment](../guides/declare-a-deployment.md) (**next train**) when the agent must produce a deployment (compose, identities, roles, schema files) that survives a wipe: one working set, with `aouda plan` as the check an agent can run offline
+- [Declare a deployment](../guides/declare-a-deployment.md) (**0.15.0**) when the agent must produce a deployment (compose, identities, roles, schema files) that survives a wipe: one working set, with `aouda plan` as the check an agent can run offline
 - [Named queries](../guides/named-queries.md) for generated browser apps (string names; no ad-hoc `mk_pub_*` queries)
 - [Division of responsibility](../guides/division-of-responsibility.md) before moving logic into the schema
 

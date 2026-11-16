@@ -127,7 +127,7 @@ If you do not configure schema management explicitly:
 | `Aouda:Schema:InferenceMode` | `On` | `Off`, `On`, `Extend` | What an insert into a missing table does: `Off` and `On` answer `404`, `Extend` creates the table. It does not decide the declarative DDL lock |
 | `AOUDA_SCHEMA_INFERENCE_MODE` | unset | `Off`, `On`, `Extend`; or unset (no override) | No override unless explicitly set |
 | Apply option `allowDestructive` | `false` | `true`, `false` | Drop operations are skipped unless explicitly allowed |
-| Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested — and refused where the apply would refuse whatever the rows are (**BL-1494, next train**) |
+| Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested — and refused where the apply would refuse whatever the rows are (**BL-1494, 0.15.0**) |
 | CLI `schema history` pagination | `limit=50`, `offset=0` | Any non-negative integer for `limit` and `offset` | Newest-first history default view |
 | CLI output mode | human-readable | `human-readable` (default), `json` (via `--json` flag) | Use `--json` when machine parsing is needed |
 | C# `AutoReconcileSchema` / `ReconcilePolicy` | `true` / `Safe` | `true`, `false` / `Safe`, `Unsafe` | The first typed insert adds missing columns and drops none. `Unsafe` is opt-in and drops non-key columns the model omits. A typed update does not reconcile. (**BL-1178, 0.9.0**) Set `false` for declarative tables |
@@ -395,7 +395,7 @@ Key anchors:
 | Field | Default | Behavior |
 |---|---|---|
 | `options.allowDestructive` | `false` | skip destructive changes unless true |
-| `options.dryRun` | `false` | plan only when true — and refused where the apply would refuse whatever the rows are (**BL-1494, next train**) |
+| `options.dryRun` | `false` | plan only when true — and refused where the apply would refuse whatever the rows are (**BL-1494, 0.15.0**) |
 
 ---
 
@@ -791,7 +791,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `Applied` | Change was successfully executed against the catalog. |
 | `Skipped` | Change was skipped — most commonly because `AllowDestructive` is `false` and the change is destructive. Also skipped for `ReplicationFactor`-only durability changes (not yet representable in the engine policy). |
 | `Failed` | Change execution threw an exception. The apply continues to the next change (continue-on-error). The `Reason` field on `ApplyResultEntry` contains the exception message. |
-| `Planned` | Dry-run mode: the change would be executed but was not. A dry run reports `Failed`, with the apply's own reason, for a change the apply refuses whatever the rows are — an invalid authorization mode, an added array, server-time or identity column that is not nullable (**BL-1427, 0.14.0**), a named query or mutation over a table or column that does not exist (a table or column the same document adds counts), a default its column's type cannot hold, an unparsable `references`, an existing column made a server-time column (**BL-1494, next train**). A refusal that depends on the rows (a column made non-null over nulls, a type conversion's values, a primary key or unique constraint over duplicates) is not checked: it stays `Planned`. |
+| `Planned` | Dry-run mode: the change would be executed but was not. A dry run reports `Failed`, with the apply's own reason, for a change the apply refuses whatever the rows are — an invalid authorization mode, an added array, server-time or identity column that is not nullable (**BL-1427, 0.14.0**), a named query or mutation over a table or column that does not exist (a table or column the same document adds counts), a default its column's type cannot hold, an unparsable `references`, an existing column made a server-time column (**BL-1494, 0.15.0**). A refusal that depends on the rows (a column made non-null over nulls, a type conversion's values, a primary key or unique constraint over duplicates) is not checked: it stays `Planned`. |
 
 #### SchemaChangeType
 
@@ -942,7 +942,7 @@ describe the behaviour before that.
 | `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Required with `"auth-db-rls"`, optional with `"auth-db-entitlement"`, refused with `"jwt-claim"` (including when `authMode` is omitted). Create and `PUT …/options` answer `400 INVALID_REQUEST`; schema apply records the change `Failed` and does not write it. The message names `auth-db-rls` and `auth-db-entitlement` (**BL-1281, 0.9.0**). The resolver itself is created via the admin API, not schema apply. |
 | `plsClaimBinding` | `plsClaimBinding` | `string` | `claim:tenant_id` | jwt-claim PLS source. `"subject"` or `"claim:<name>"`. Omit keeps `tenant_id`. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
-| `description` | `description` | `string` | None | (**next train**; **0.14.0 refused it** with `SCHEMA_UNKNOWN_MEMBER`) A note on the table: **documentation in the schema file only**. It is checked for shape and then dropped: not stored in the catalog, not diffed, not exported by `aouda schema export`, and never a change in `aouda plan` or a schema apply. Adding, changing or removing one is not drift and needs no migration. It is a member of a table in a schema file only: an **overlay** file still refuses it. (A *column's* `description` is the opposite: stored, diffed, and a change to it is a schema change.) |
+| `description` | `description` | `string` | None | (**0.15.0**; **0.14.0 refused it** with `SCHEMA_UNKNOWN_MEMBER`) A note on the table: **documentation in the schema file only**. It is checked for shape and then dropped: not stored in the catalog, not diffed, not exported by `aouda schema export`, and never a change in `aouda plan` or a schema apply. Adding, changing or removing one is not drift and needs no migration. It is a member of a table in a schema file only: an **overlay** file still refuses it. (A *column's* `description` is the opposite: stored, diffed, and a change to it is a schema change.) |
 
 #### ColumnDefinition (entry in `columns`)
 

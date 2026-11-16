@@ -4,7 +4,7 @@ nav_order: 2.4
 parent: "Guides"
 ---
 
-# Declare a deployment: one complete, working set (**next train**)
+# Declare a deployment: one complete, working set (**0.15.0**)
 
 This page is the end-to-end path for a multi-service deployment that is **declared** instead of scripted: two data databases and
 one auth database, the keys and roles every service needs, a compose file, a plan before the deploy, a wipe-and-start, and a
@@ -47,7 +47,7 @@ secrets/                  one file per key, never committed
 ### `declaration/aouda.json`
 
 The file has the shape of `appsettings.json`: one top-level `Aouda` object. The server reads `/etc/aouda/aouda.json` by itself when
-it exists, with no setting (**next train**; see [The declaration file](server-configuration.md#declaration-file)).
+it exists, with no setting (**0.15.0**; see [The declaration file](server-configuration.md#declaration-file)).
 
 ```json
 {
@@ -175,7 +175,7 @@ Five things about this file that cost a first attempt time:
 }
 ```
 
-The table `description` is documentation in the file only (**next train**; [Schema reference](schema.md#tabledefinition-entry-in-tables)). Schema
+The table `description` is documentation in the file only (**0.15.0**; [Schema reference](schema.md#tabledefinition-entry-in-tables)). Schema
 files are strict: a member that is not in the reference is `SCHEMA_UNKNOWN_MEMBER`, and plan lists every one.
 
 ### `compose.yaml` {#compose-yaml}
@@ -218,7 +218,7 @@ volumes:
 
 (`docker compose config` accepts it. The image is private: log in first, [Docker](../deployment/docker.md).)
 
-**Mount the directory, not the file** (**next train**). A compose line `./aouda.json:/etc/aouda/aouda.json:ro` binds one *file*,
+**Mount the directory, not the file** (**0.15.0**). A compose line `./aouda.json:/etc/aouda/aouda.json:ro` binds one *file*,
 and Docker pins that file's inode: an editor that saves by writing a new file and renaming it over the old one (most do), a
 `git checkout` and `mv` all replace the inode, and the container keeps reading the old content for the life of the container. Tested
 with Docker 29: after a rename-over on the host the container still showed the old text, and even a later in-place write was not
@@ -281,7 +281,7 @@ not checked  the data directory and every existing database, table, key row and 
 0 errors, 0 warnings: `aouda start` would not refuse this declaration (see not checked).
 ```
 
-Exit status `0`. The header names `config file <path>` (or `config file none`): which file was read (**next train**). `1` means the start would
+Exit status `0`. The header names `config file <path>` (or `config file none`): which file was read (**0.15.0**). `1` means the start would
 refuse, `64` is misuse, and `2`, `69` and `77` belong to `--server` below. Read the **warnings** as well as the exit status: `KEY_TARGET_PENDING`,
 `KEY_ROLE_UNDECLARED` and `KEY_DATABASE_NOT_LINKED` are warnings, and each leaves a key that answers `401`.
 
@@ -294,7 +294,7 @@ sed -e 's#/etc/aouda/#declaration/#g' declaration/aouda.json > "$RUNNER_TEMP/aou
 aouda plan --config "$RUNNER_TEMP/aouda.ci.json" --skip-secrets
 ```
 
-`--config PATH` makes the plan read the file the start would read (**next train**); relative paths are resolved from the working directory
+`--config PATH` makes the plan read the file the start would read (**0.15.0**); relative paths are resolved from the working directory
 (run it from the checkout's root) and a relative secret path from the identities file's directory. With `--skip-secrets` the plan
 checks form, names, conflicts and every schema file but reads no key. A fuller CI job, the CLI install and the `--server` key are in
 [Plan a declaration](plan.md#a-ci-job-aouda-plan-on-every-pull-request).
@@ -394,7 +394,7 @@ applied: 2 changes.
 nothing to change, `2` applied, `1` refused or stopped part-way, `64` usage, `69` unreachable, busy, rate-limited (one reload per 5 s) or still starting,
 `77` the key was refused. A second reload with nothing changed answers `nothing to change.` and exits `0`.
 
-**What a reload does and does not re-read** (**next train** for the first row):
+**What a reload does and does not re-read** (**0.15.0** for the first row):
 
 | Edited | A reload |
 |---|---|

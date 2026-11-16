@@ -371,7 +371,7 @@ Invalid schema: unknown member 'nulable' at /tables/orders/columns/status; did y
 Every such member is listed, each with its JSON pointer and, when one is close, the member meant (`… did you mean 'nullable'? Member
 names are case-sensitive.` for a wrong case). Nothing is applied. Before, the server dropped the member: `"nulable": true` made a
 non-nullable column, `"partitionLevelSecurty": true` left partition-level security off, and a named query's `"where": {"adn": […]}`
-lost its filter and returned every row. A table's `description` was refused in 0.14.0 (it is accepted from the next train: documentation in the file only, not stored and not diffed; a
+lost its filter and returned every row. A table's `description` was refused in 0.14.0 (it is accepted from the 0.15.0: documentation in the file only, not stored and not diffed; a
 column's `description` is stored and diffed), and a materialized query has no `authMode`, `permissionDimension`, `permissionColumn` or
 `rlsResolverName`: those are refused too, with a message that says so. They were never read: a materialized query's result is always filtered by its
 **source table's** partition- and row-level security, so the source table's security always applied. Delete them, and set security on the source table

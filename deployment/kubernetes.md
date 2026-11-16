@@ -70,7 +70,7 @@ The password goes on standard input, never on curl's command line.
 
 `kubectl exec ... aouda create-admin` refuses while the server runs in the pod: the server holds the data directory.
 
-## Declaring databases, keys and schema files (**next train**) {#declaring-databases-keys-and-schema-files}
+## Declaring databases, keys and schema files (**0.15.0**) {#declaring-databases-keys-and-schema-files}
 
 Before this release the chart could declare nothing beyond `auth.serverKeySecret`: it had no way to add an environment variable, a volume or a mount to the Aouda pods, so the
 declarative flow ([Declare a deployment](../guides/declare-a-deployment.md)) did not work on Kubernetes. Six values, all empty by default, change that. They apply to the **data-node

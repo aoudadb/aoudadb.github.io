@@ -609,7 +609,7 @@ The compose file takes one declaration: a server key, `AOUDA_SERVER_KEY=mk_srv_<
 
 Studio connects to Aouda automatically. No additional configuration needed — open `http://localhost:3000` to browse your databases.
 
-**For a real deployment**, declare the databases, keys, roles and schema files instead of creating them by hand, so that a wipe and a plain start bring them back: [Declare a deployment](../guides/declare-a-deployment.md) (**next train**) is one complete working set with a compose file, `aouda plan` and `aouda reload`.
+**For a real deployment**, declare the databases, keys, roles and schema files instead of creating them by hand, so that a wipe and a plain start bring them back: [Declare a deployment](../guides/declare-a-deployment.md) (**0.15.0**) is one complete working set with a compose file, `aouda plan` and `aouda reload`.
 
 The compose file sets `stop_grace_period: 130s` on the server so Docker waits longer than the host's 120 s `Aouda:ShutdownTimeout`. If you copy the file, keep those two numbers paired — a shorter grace SIGKILLs the process before shutdown has finished. See [Server configuration §8](../guides/server-configuration.md#8-startup-shutdown-and-slow-opens).
 

@@ -22,7 +22,7 @@ Aouda settings come from several layers. Think of them as separate concerns:
 | **Code defaults** | Safe baseline when nothing else is set (`AoudaServerOptions` in source) | Everyone (implicit) | N/A (compiled in) |
 | **Install bootstrap** | Where data lives and which port to listen on | Setup / install scripts | Written into the **service command line**, not a config file |
 | **Optional operator config** | `appsettings.json`, `appsettings.{Environment}.json` | Developers, Docker/K8s operators | **No** — not included in Windows release publish |
-| **Declaration file** (**next train**) | One JSON file, `/etc/aouda/aouda.json` or the path `AOUDA_CONFIG_FILE` / `--config` names: the declared databases, keys and schema files, re-read by `aouda reload` | Docker / Kubernetes operators | **No** — you mount it ([§4a](#declaration-file)) |
+| **Declaration file** (**0.15.0**) | One JSON file, `/etc/aouda/aouda.json` or the path `AOUDA_CONFIG_FILE` / `--config` names: the declared databases, keys and schema files, re-read by `aouda reload` | Docker / Kubernetes operators | **No** — you mount it ([§4a](#declaration-file)) |
 | **Environment variables** | `AOUDA_*` overrides for containers and CI | DevOps | Set on the service, container, or pod |
 | **CLI flags** | `--data-path`, `--port`, `--join`, etc. | Install scripts, manual starts, service `binPath` | Highest precedence at startup |
 | **Data-directory files** | `backup-config.json`, `cluster-state.json` | Runtime / API / Studio | Created under `{DataPath}` when changed |
@@ -43,7 +43,7 @@ When the server process starts, `AoudaServerOptions` and related host settings a
 2. appsettings.json          (optional; content root — see §3)
 3. appsettings.{Environment}.json   (optional; e.g. Production)
 4. User secrets                (Development only)
-4a. Declaration file            (next train: /etc/aouda/aouda.json, or AOUDA_CONFIG_FILE / --config; see §4a)
+4a. Declaration file            (0.15.0: /etc/aouda/aouda.json, or AOUDA_CONFIG_FILE / --config; see §4a)
 5. Environment variables       (unprefixed ASP.NET / hosting vars)
 6. Command-line arguments      (generic host args from CreateBuilder)
 7. AOUDA_* environment variables   (mapped into Aouda: section — see §2.1)
@@ -111,7 +111,7 @@ Some `AOUDA_*` variables are read by **custom code**, not through the main optio
 | --- | --- | --- |
 | `AOUDA_CORS_ORIGINS` | Replace default CORS origin list | `ServerHostRunner` |
 | `AOUDA_STUDIO_ORIGIN` | Append one CORS origin to defaults | `ServerHostRunner` |
-| `AOUDA_CONFIG_FILE` (**next train**) | Path of the [declaration file](#declaration-file); an empty value counts as unset | `ServerHostRunner` |
+| `AOUDA_CONFIG_FILE` (**0.15.0**) | Path of the [declaration file](#declaration-file); an empty value counts as unset | `ServerHostRunner` |
 | `AOUDA_SCHEMA_INFERENCE_MODE` | Schema inference mode override | `SchemaOptionsEnvOverlay` |
 
 ### Variables for other components (not server config)
@@ -138,7 +138,7 @@ CLI flag mappings include:
 | `--trusted-proxies-enabled` | `Aouda:ForwardedHeaders:Enabled` |
 | `--trusted-proxies` | `Aouda:ForwardedHeaders:KnownProxies` |
 | `--trusted-proxy-networks` | `Aouda:ForwardedHeaders:KnownNetworks` |
-| `--config` (**next train**) | Not a setting: the path of the [declaration file](#declaration-file) (`aouda start`, `aouda plan`) |
+| `--config` (**0.15.0**) | Not a setting: the path of the [declaration file](#declaration-file) (`aouda start`, `aouda plan`) |
 
 `Aouda:ForwardedHeaders:Enabled` (`AOUDA_FORWARDEDHEADERS__ENABLED` or `--trusted-proxies-enabled`) is required in addition to the trust list. Off by default. A CLI-only start is `aouda start --trusted-proxies-enabled --trusted-proxies 10.0.0.1`. See [Behind a reverse proxy](../deployment/reverse-proxy.md) — without it, per-IP rate limits, lockout attribution, and audit-log client IPs are the TCP peer (the proxy, in a typical public deployment).
 
@@ -188,7 +188,7 @@ To change data path or port after install, update the **service command line** (
 | **Auth users, API keys** | Engine (in data dir) | Yes | Yes |
 | **Env vars / CLI on service** | OS service, container, K8s manifest | Yes | Yes until manifest changed |
 | **Optional appsettings.json** | Operator-placed file | Yes (re-read each start) | Yes if file kept outside binary folder |
-| **Declaration file** (**next train**) | Operator-mounted file | Yes (re-read each start) **and by every `aouda reload`** | Yes |
+| **Declaration file** (**0.15.0**) | Operator-mounted file | Yes (re-read each start) **and by every `aouda reload`** | Yes |
 
 {: .note }
 Runtime config from `PATCH /admin/config` is **not** written back to `appsettings.json` or environment variables. Only backup schedule changes that go through `RuntimeBackupConfig` are persisted to disk automatically.
@@ -200,7 +200,7 @@ Runtime config from `PATCH /admin/config` is **not** written back to `appsetting
 A running server cannot change its own environment variables or command line, and the container image ships no `appsettings*.json`. A
 deployment that followed the older advice (declare `Aouda:Databases` in environment variables) therefore **could not use `aouda reload` for
 databases, schema, roles or the identities path**: every change was a restart, and the first `aouda reload` said so with
-`SOURCE_NOT_RELOADABLE`. The declaration file closes that gap (**next train**).
+`SOURCE_NOT_RELOADABLE`. The declaration file closes that gap (**0.15.0**).
 
 **One file, found without a setting.** Mount one JSON file at **`/etc/aouda/aouda.json`** (on Windows `%ProgramData%\Aouda\aouda.json`).
 The server reads it as a configuration source when it exists and skips it without a word when it does not. Its shape is that of
@@ -336,7 +336,7 @@ services:
 ```
 
 When the server is ready it logs `Start timings: …` — each start step's duration, the schema files and the slowest one's database
-(**BL-1467, next train**).
+(**BL-1467, 0.15.0**).
 
 **Slow opens.** A Warning at 30 s means the open is still running — watch `docker logs -f`, do not restart to "unstick" it. Three process deaths *after* the open has chosen a path (`OpenPathDecided`) quarantine the database as `OpenKilled`. Recover with one command:
 

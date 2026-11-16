@@ -534,7 +534,7 @@ message naming the one-time fix (drop `_rls_resolvers.target_table` with the ser
 
 With several keys held in the dimension, `In` and `Eq` match a row whose column equals any of them; `Neq`, `Lt`, `Lte`, `Gt` and
 `Gte` compare with one value, so with several keys they match **no row** (fail closed); with one key they are the plain
-comparison (**BL-1476, next train**).
+comparison (**BL-1476, 0.15.0**).
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers \
@@ -572,7 +572,7 @@ This resolver produces the compound predicate: `owner_id = '<userId>' OR team_id
 The write check binds the written row the same way: each cell of a column the rule names is converted as the insert stores it (a
 `Date` in the table's `Culture`, a `Timestamp` to UTC, a `Decimal(p,s)` at its scale) before it is compared, and a cell that does
 not convert is refused. Before this, a range or `eq` rule on a `Date`, `Timestamp`, `Decimal(p,s)` or integer column compared an
-inserted row's value as text (**BL-1475, next train**).
+inserted row's value as text (**BL-1475, 0.15.0**).
 
 ### 19.5.2 Setup: Create the RLS Table
 

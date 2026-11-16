@@ -22,12 +22,12 @@ aouda plan --server https://aouda.internal:5000 --key-file server.key   # what a
 With `--server` it also asks a running server what the declaration would change there, and exits `2` when it would change something
 ([Against a running server](#against-a-running-server---server-bl-1463-0140)).
 
-**Which configuration file it reads** (**next train**). The plan reads the [declaration file](server-configuration.md#declaration-file) the start reads: `/etc/aouda/aouda.json` when it exists,
+**Which configuration file it reads** (**0.15.0**). The plan reads the [declaration file](server-configuration.md#declaration-file) the start reads: `/etc/aouda/aouda.json` when it exists,
 or the file `AOUDA_CONFIG_FILE` or `--config PATH` names (the switch wins). `aouda plan --config deploy/aouda.json` therefore plans exactly what `aouda start --config deploy/aouda.json`
 would read. A named file that is missing, empty, a directory or not valid JSON is the error `CONFIGURATION_INVALID`; the plan's exit status is `1` (the start's is `78`). The first line of the
 output names it (`(environment Production, config file <path>)`), or says `config file none` when no file was read.
 
-(**next train**) When `Aouda:Databases` or the identities file's path comes from environment variables or the command line, the plan adds the **info** finding `SOURCE_FIXED_AT_START`: a later `aouda reload` will
+(**0.15.0**) When `Aouda:Databases` or the identities file's path comes from environment variables or the command line, the plan adds the **info** finding `SOURCE_FIXED_AT_START`: a later `aouda reload` will
 not see a change to it, only a restart will. It never changes the exit status and is not a warning, because deploying by restart is legitimate; the fix, if you want reloads, is to move the setting into the declaration file.
 
 ## What it checks
@@ -38,7 +38,7 @@ The stages of the start, in the order of the start, each on what it can read wit
    credential, every schema file and its overlay. A file that cannot be read is one finding, not a crash.
 2. **settings** — the process settings (`Aouda:Port`, the memory limits, `Aouda:NamedQuery:*`, ...), the removed keys and the dev-admin guards.
    A value a setting's type cannot hold is a `CONFIGURATION_INVALID` finding in every `Aouda:*` section the server binds, `Aouda:BulkLoad`,
-   `Aouda:Streaming`, `Aouda:Adra:GrantCaps` and `Aouda:WebSocket:StreamingWrites` included (**BL-1504, next train**).
+   `Aouda:Streaming`, `Aouda:Adra:GrantCaps` and `Aouda:WebSocket:StreamingWrites` included (**BL-1504, 0.15.0**).
 3. **principals** — the identities file's entries, the key shapes, the server key's one source, the dev admin beside a server key, and the conflicts between declared keys.
 4. **databases** — `Aouda:Databases`: names, kinds, links and per-kind fields.
 5. **bootstrap** — the first administrator: a server key, `Aouda:Auth:RootUser`, or a data directory that starts in setup mode.
