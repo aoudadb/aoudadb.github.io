@@ -205,6 +205,18 @@ Stops and removes the service. **The data directory is never touched.**
 
 ---
 
+## The `aouda` command on Windows
+
+- **A long command line.** A command line through a `.cmd` shim is limited to 8191 characters by Windows. A full declaration given to
+  `aouda plan` or `aouda start` as `--Aouda:…` arguments can exceed it. Put the arguments in a file, one per line, and pass `@args.txt`
+  (**BL-1586, next train**; see [Plan a declaration](../guides/plan.md#the-command)), or start `Aouda.Server.exe` directly.
+- **Installing the tool with NuGet package source mapping on.** `dotnet tool install -g Aouda.Cli --add-source <feed>` fails when a
+  `packageSourceMapping` section does not map `Aouda.Cli` to that source, because the mapping is applied before `--add-source`. Add a
+  `<package pattern="Aouda.*" />` entry for the feed to your `NuGet.Config`, or use `dotnet tool update -g Aouda.Cli --version <X>`,
+  which works with the mapping on. This is NuGet's behaviour, not Aouda's.
+
+---
+
 ## If .NET 10 is missing
 
 The install script checks first. If you skipped it, the failure comes from the .NET host loader rather than from Aouda:

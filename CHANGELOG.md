@@ -13,6 +13,10 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **`aouda plan` and `aouda reload` no longer report partition-level security as changed on an `auth-db-entitlement` table (BL-1584).** The mode forces the flag on in the catalog, so a declaration that did not repeat `partitionLevelSecurity: true` differed from the stored table on every run (19 changes on Derive's lab, applied and reported again each time). The plan compares the flag as the catalog stores it.
+- **`@file` arguments for every `aouda` command (BL-1586, next train).** See [Plan a declaration](guides/plan.md#the-command) and [Windows](deployment/windows.md#the-aouda-command-on-windows).
+- **`--state-dir` / `AOUDA_STATE_DIR` for `aouda start`, `stop`, `status` and `doctor` (BL-1587, next train).** Two local servers no longer share one state file. See [local CLI testing](ai/local-cli-testing.md#two-local-servers-at-once).
+- **A missing database answers 401, documented; the server log now says when it is the database (BL-1585, next train).** See [the HTTP API reference](reference/http-api.md#a-missing-database-answers-401).
 ## 0.15.0 — 2026-11-16
 
 Server **0.15.0** / `@aouda/client` **0.15.0** / `Aouda.Client` **0.15.0**. Studio pin follows npm. No data-directory format bump (stays at 18).
