@@ -83,7 +83,7 @@ application.
 | `Timeout` | 30 s | Deadline for one request. Bulk load uses its own, `BulkLoadOptions.RequestTimeout` (§7). |
 | `RetryPolicy` | `RetryPolicy.Default` (3 retries, exponential backoff; `Aouda.Client.Resilience`) | Retries of transient failures; see §8 for what a write may and may not repeat. `RetryPolicy.None` turns retries off. |
 | `CircuitBreakerPolicy` | `CircuitBreakerPolicy.Default` (opens after 5 failures in 30 s) | While open, calls fail at once with `CircuitBreakerOpenException`. `CircuitBreakerPolicy.Disabled` turns it off. |
-| `ApiKey` (**BL-1385, 0.11.0**) | none | An Aouda API key of any kind: `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key. Sent as `Authorization: Bearer`; the server resolves the kind. A value without the `mk_` prefix is refused at construction. (**next train**) Surrounding white space is **trimmed**: a key read from a file (`File.ReadAllText`, a Docker secret, `echo key > file`) ends in a newline, and in 0.14.0 and earlier that newline went into the `Authorization` header and **every request threw `FormatException: New-line or NUL characters are not allowed in header values`**. `"mk_svc_...\n"` now works and `ApiKey` reads back without the newline; a value that is only white space is still refused. (`UserToken` is unchanged.) Replaces `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin`, which are removed. `Databases.ListAsync` / `CreateAsync` need a `mk_srv_` key here. |
+| `ApiKey` (**BL-1385, 0.11.0**) | none | An Aouda API key of any kind: `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key. Sent as `Authorization: Bearer`; the server resolves the kind. A value without the `mk_` prefix is refused at construction. (**0.15.0**) Surrounding white space is **trimmed**: a key read from a file (`File.ReadAllText`, a Docker secret, `echo key > file`) ends in a newline, and in 0.14.0 and earlier that newline went into the `Authorization` header and **every request threw `FormatException: New-line or NUL characters are not allowed in header values`**. `"mk_svc_...\n"` now works and `ApiKey` reads back without the newline; a value that is only white space is still refused. (`UserToken` is unchanged.) Replaces `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin`, which are removed. `Databases.ListAsync` / `CreateAsync` need a `mk_srv_` key here. |
 | `UserToken` (**BL-1385, 0.11.0**) | none | A user's JWT sent as `X-User-Token` beside the key; needs a `mk_svc_` or `mk_srv_` `ApiKey`. Moved here from `AppAuthOptions` / `ServerAuthOptions`. |
 | `ServerAuth` / `AppAuth` | none | A signed-in session, not a key: server auth (`ServerAuthOptions`: `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`: `Token` + `RefreshToken`). Mutually exclusive with each other, and with `ApiKey` (a key and a session are two credentials). See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
 | `AuthFailurePolicy` (**BL-1386, 0.11.0**) | nothing happens | Opt-in: `FailFast` throws `AoudaAuthenticationFatalException` for a rejected key instead of a failure a caller may retry later; `OnSustained` is called once after `SustainedAfter` (default 3) failures in a row. See [Getting Started](../getting-started/index.md#a-rejected-key-is-not-a-retry-bl-1386-0110). |
@@ -109,7 +109,7 @@ using var client = new AoudaClient(new AoudaClientOptions
 
 ---
 
-## 3a) Waiting for the server to start (**next train**) {#waiting-for-the-server-to-start}
+## 3a) Waiting for the server to start (**0.15.0**) {#waiting-for-the-server-to-start}
 
 A service that starts together with its server (a compose stack, a Kubernetes rollout, a wipe-and-start) meets a server that is **up and not ready**: the port is open from the
 first moment, and every route except the probes answers `503 SERVER_STARTING` with `Retry-After: 5` until the databases are open, the declared schema files are applied and the keys have
@@ -154,7 +154,7 @@ with `401` (the readiness reason is `configured_key_inactive`), and `FailFast` t
 
 ---
 
-## 3b) `AddAouda`: dependency injection and configuration (**next train**) {#add-aouda}
+## 3b) `AddAouda`: dependency injection and configuration (**0.15.0**) {#add-aouda}
 
 Every service that hand-wrote an options class and the same `Program.cs` block can register the client from configuration:
 
@@ -1059,8 +1059,8 @@ handles (namespace `Aouda.Client` unless noted):
 | `AoudaAuthenticationException` / `AoudaNotFoundException` (`Aouda.Abstractions`) / `AoudaMisdirectedRequestException` | `401` / `404` / `421`. (**BL-1422, 0.12.0**) The `Message` of every HTTP `401` and `403` refusal now carries the server's `suggestion` (which names the key kind and prefix the route takes) and the option to set (`AoudaClientOptions.ApiKey`, `ServerAuth`, `AppAuth` or `ServerUrl`), with the kind of credential this client was sending (for example `a service key (mk_svc_) set as AoudaClientOptions.ApiKey`). The key itself is never in the message. `ErrorCode`, `StatusCode`, `RequestId` and `Details` are unchanged; only `Message` is longer, so match on `ErrorCode`, not on the text. WebSocket and long-poll auth frames carry the server's message only; the option hint is added on HTTP. |
 | `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, 0.11.0**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
-| `AoudaServerStartingException` (**next train**) | `503 SERVER_STARTING` or `503 SETUP_REQUIRED`: the server is up and not ready. A subclass of `AoudaServiceUnavailableException`; `RetryAfter` is the server's wait (`null` for `SETUP_REQUIRED`). Retried first, waiting `Retry-After` (§3a), and never counted by the circuit breaker or `AuthFailurePolicy`. |
-| `AoudaNotReadyException` (**next train**) | `WaitUntilReadyAsync` reached its deadline; `ErrorCode` `CLIENT_SERVER_NOT_READY`, with `Waited`, `Issues`, `LastFailure` (§3a). |
+| `AoudaServerStartingException` (**0.15.0**) | `503 SERVER_STARTING` or `503 SETUP_REQUIRED`: the server is up and not ready. A subclass of `AoudaServiceUnavailableException`; `RetryAfter` is the server's wait (`null` for `SETUP_REQUIRED`). Retried first, waiting `Retry-After` (§3a), and never counted by the circuit breaker or `AuthFailurePolicy`. |
+| `AoudaNotReadyException` (**0.15.0**) | `WaitUntilReadyAsync` reached its deadline; `ErrorCode` `CLIENT_SERVER_NOT_READY`, with `Waited`, `Issues`, `LastFailure` (§3a). |
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |
 | `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY` — with `StatusCode` set. |
 | `CircuitBreakerOpenException` | The circuit breaker is open; the call was not attempted. |

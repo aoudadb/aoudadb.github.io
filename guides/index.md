@@ -88,7 +88,7 @@ Use this mapping as the baseline when planning doc updates:
 | **Declared databases** (`Aouda:Databases`, wipe and start) | BL-1379 / BL-1388 / BL-1392 | `guides/declared-databases.md` |
 | **Development admin** (`AOUDA_DEV_ADMIN`; `RequireFirstAdmin` removed by BL-1462) | BL-1423 | `guides/development-admin.md` |
 | **Plan a declaration** (`aouda plan`; replaced `aouda schema check` and `aouda keys check`) | BL-1463 | `guides/plan.md` |
-| **Declare a deployment** (one complete set: databases, keys, roles, feeder, compose, plan, wipe-and-start, reload; the declaration file; reload-or-restart table) | next train | `guides/declare-a-deployment.md`, `guides/server-configuration.md` |
+| **Declare a deployment** (one complete set: databases, keys, roles, feeder, compose, plan, wipe-and-start, reload; the declaration file; reload-or-restart table) | 0.15.0 | `guides/declare-a-deployment.md`, `guides/server-configuration.md` |
 | **Upgrading and the data-directory format** (`DATA_DIRECTORY_FORMAT_REFUSED`) | BL-1420 | `guides/upgrading.md` |
 | **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `guides/access-surface.md`, `guides/browser-tier-read-limits.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
 | **Freshness and replica consistency** | P38 | `guides/freshness.md` — token, `AtLeast`, alias `freshness`, caveats; wire in `reference/http-api.md` § Consistency tokens. Same user-guide rules as the P37 cluster |

@@ -15,7 +15,7 @@ Aouda runs from **one binary**. `aouda` and `Aouda.Server` are two names for the
 | **Windows Service** | On-premise Windows servers | [Windows Service](windows.md) |
 | **Docker** | Containerised environments, single-node production | [Docker](docker.md) |
 | **Docker Compose** | Server + Studio together, local multi-service setup | [Docker](docker.md#shutdown-grace) |
-| **A declared, multi-service deployment** (databases, keys, roles and schema files as configuration; wipe-and-start; `aouda reload`) | Compose or Kubernetes, many services, no seed script | [Declare a deployment](../guides/declare-a-deployment.md) (**next train**) |
+| **A declared, multi-service deployment** (databases, keys, roles and schema files as configuration; wipe-and-start; `aouda reload`) | Compose or Kubernetes, many services, no seed script | [Declare a deployment](../guides/declare-a-deployment.md) (**0.15.0**) |
 | **Kubernetes / Helm** | Production clusters, multi-node replication, managed rollouts | [Kubernetes and Helm](kubernetes.md) |
 
 ---

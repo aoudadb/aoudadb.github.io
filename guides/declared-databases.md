@@ -233,7 +233,7 @@ What it does not: a database's operational fields, `SchemaAllowDestructive`, `Ao
 `restartRequired` (listed, not applied; the rest proceeds). A `Kind` change and a change of an existing link are **errors** — the next
 start refuses them, so the reload does too, and changes nothing. A database you remove from the file is reported as `orphaned` and
 left alone. `Aouda:Databases` set by environment variables or the command line cannot change by reload (`SOURCE_NOT_RELOADABLE`): put it in the
-[declaration file](server-configuration.md#declaration-file) (`/etc/aouda/aouda.json`, or `AOUDA_CONFIG_FILE` / `--config`; **next train**), which a reload re-reads every time.
+[declaration file](server-configuration.md#declaration-file) (`/etc/aouda/aouda.json`, or `AOUDA_CONFIG_FILE` / `--config`; **0.15.0**), which a reload re-reads every time.
 [One table](server-configuration.md#reload-or-restart) lists what a reload applies and what takes a restart.
 `POST /api/admin/reload?dryRun=true` answers the same plan and changes nothing.
 
@@ -256,7 +256,7 @@ left alone. `Aouda:Databases` set by environment variables or the command line c
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
 | `reload_failed` (the entry, when one is named) | (**BL-1427, 0.14.0**) The last reload stopped part-way; the steps before it are applied | The next reload that completes |
 | `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | Its auth database and database are open. A server key no longer waits for a first admin (**BL-1462, 0.14.0**) |
-| `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. A restore reconciles the declaration the last reload applied, not necessarily the one on disk now (**BL-1490, next train**). The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
+| `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. A restore reconciles the declaration the last reload applied, not necessarily the one on disk now (**BL-1490, 0.15.0**). The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 
 A deploy script waits for `200` and prints `reasons` if it gives up. A database in `Aouda:SkipDatabases`, or one an operator

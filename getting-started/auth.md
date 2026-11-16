@@ -261,7 +261,7 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/signup \
 
 ### Option C: Production Setup (Full control)
 
-**Deploying with compose, a wipe-and-start or CI? Declare it instead of scripting it** (**next train** for the page; the features it uses ship in 0.11.0 to 0.14.0). The steps below are imperative:
+**Deploying with compose, a wipe-and-start or CI? Declare it instead of scripting it** (**0.15.0** for the page; the features it uses ship in 0.11.0 to 0.14.0). The steps below are imperative:
 a wipe loses the admin, the databases, the links and the keys, and each must be created again and the new keys handed to every service. [Declare a deployment](../guides/declare-a-deployment.md) is the
 declarative version of this whole option (auth database, linked data databases, a role, the keys of every service, a feeder, `aouda plan`, wipe-and-start and `aouda reload`) as one working set.
 
