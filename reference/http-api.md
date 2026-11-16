@@ -335,7 +335,7 @@ When a request hits a database-scoped data endpoint (e.g. `/api/databases/{db}/q
          YES → The server auth database governs it (BL-1017, 0.4.0): steps 2–3 with
                server credentials only (server JWT, mk_srv_, a server key), authorized by
                the server auth database's grants; a database that does not exist answers
-               401 too
+               401 too (see "A missing database answers 401" below)
    YES → Continue to step 2
 
 2. Read Authorization header
@@ -719,6 +719,24 @@ Fields:
   "requestId": "req_abc123"
 }
 ```
+
+#### A missing database answers 401
+
+On `/api/databases/{db}/…`, a request whose credential is not one the target accepts is `401` — and **a database that does not exist is
+one of those cases**, for a `mk_svc_` key as for any other credential. This is deliberate: a `404` for a missing database and a `401` for
+a present one would tell anyone holding any key which database names exist. The response is the same for both and says nothing about the
+database (**BL-1585**, documented; the public answer is unchanged).
+
+To tell a bad key from a missing database, use what only the operator can see:
+
+- the server log's `Auth failure` warning for the request now ends with *the database in the path does not exist on this server: not
+  created yet, still starting, or misspelt; see /ready* when it is the database (**BL-1585, next train**); the same line without that
+  note means the key;
+- `GET /ready` lists `database_pending` (declared in `Aouda:Databases`, not created yet) and `database_not_open` (registered, not
+  open) with the database as `subject`, and answers `503` until they are gone;
+- `GET /api/databases` with a server credential lists the databases that exist.
+
+A start-up script should wait for `/ready` to be `200` before it uses a service key, and treat a `401` after that as the key.
 
 ## Read Preferences
 

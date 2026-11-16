@@ -55,6 +55,24 @@ learn and no `--` separator. Whatever you give `aouda start`, give `aouda plan`.
 
 Giving either a value (`--json=false`) is a usage error.
 
+**A declaration too long for a command line (**BL-1586, next train**).** Every `aouda` command replaces an argument `@file` with the lines of that
+file, one argument per line (blank lines and lines starting with `#` are skipped; a line is taken as written, so no quoting; a file's own `@`
+lines are not expanded again; `@@x` is the text `@x`). A Windows command line through a shim is limited to 8191 characters, which a whole
+declaration given as `--Aouda:…` settings exceeds:
+
+```
+# plan.args
+--Aouda:Auth:Keys:File=C:\etc\aouda\aouda.identities.json
+--Aouda:Databases:bond:Kind=data
+--Aouda:Databases:bond:SchemaFile=C:\etc\aouda\bond.schema.json
+```
+
+```powershell
+aouda plan @plan.args --skip-secrets
+```
+
+A file that cannot be read is exit `64` naming it. Settings in `appsettings*.json` and the environment need none of this.
+
 ### Output
 
 The whole plan goes to **standard output**, in both formats; standard error carries only a usage error.
