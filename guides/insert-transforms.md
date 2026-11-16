@@ -201,6 +201,13 @@ Rules worth knowing before you design around it:
 
 - **Null propagates.** If *any* argument evaluates to null, the whole call returns null — it does not throw and does not substitute a default. Wrap in `coalesce` if you want one.
 - **Decimals are exact** (**LoadSpeed S13, 0.4.0**). Arithmetic over a `Decimal(p,s)` column or a fractional literal computes at a fixed scale (`+` / `-` the larger, `*` the sum, `/` at least 6 places), a literal keeps the scale it is written with (`0.05` is scale 2), and a result past 18 digits is an error, never a silent `Double`. The value is then rounded half away from zero to the derived column's scale. Full rules: [`Decimal(p,s)`](schema.md#decimalps-a-decimal-stored-as-a-scaled-integer-columnarcore-s13-020).
+- **Integer arithmetic does not wrap** (**BL-1481, next train**). `+`, `-` and `*` over integer columns compute in 64 bits; a result that
+  does not fit is an error, never a wrapped number. An insert, upsert, update or bulk load whose derived column's expression overflows for
+  a row is refused whole with `EXPRESSION_OVERFLOW` (400; `rowErrors[0].index` names the row; nothing is written), and so is an update whose
+  `setExpr` overflows for any matched row. A `selectExpr` cell or a formula cell that overflows is null. `UInt16`, `UInt32` and `UInt64`
+  operands are numbers (**BL-1424, next train**): `u + 1` is an `Int64`; a `UInt64` above `Int64`'s maximum is an overflow beside integers
+  or decimals and a `Double` beside a floating operand. A result the target column cannot hold (`u - 10` into a `UInt32`) is refused as
+  `INVALID_REQUEST`.
 - `cast` accepts only `Int32`, `Int64`, `Int16`, `Byte`, `UInt16`, `UInt32`, `UInt64`, `Double`, `Float32`, `Decimal(p,s)` (e.g. `"Decimal(18,6)"`; **LoadSpeed S13, 0.4.0** — plain `"Decimal"` is refused), `String`. **`Timestamp`, `Date`, `Guid`, `Bool`, and vector types are not castable.** Float→integer casts truncate toward zero, and a finite value outside the target range is an error rather than a silent wrap.
 - There is **no timestamp truncation function**. Bucketing a timestamp to a day or an hour is a partition-key function (`TruncateToDay` and friends) or a materialized-query `groupBy` term, not a derived column.
 - Unknown `fn`, wrong arity, or a non-literal `cast` type fails **schema apply** with `SCHEMA_EXPR_UNKNOWN_FUNCTION` — not at insert time. The same validation runs on `namedQueries[].selectExpr` and `namedMutations[].setExpr`.
@@ -297,6 +304,7 @@ This is the operational difference between a transform and the application code 
 | Error | Raised when | HTTP |
 |---|---|---|
 | `CONSTRAINT_CHECK_VIOLATION` | A check predicate is false for a row | 400 |
+| `EXPRESSION_OVERFLOW` | (**BL-1481, next train**) A `setExpr`, or a derived column's expression, overflowed 64-bit integer or 18-digit decimal arithmetic for a row; nothing written | 400 |
 | `TRANSFORM_DERIVED_READONLY` | Caller supplied a value for a derived column | 400 |
 | `TRANSFORM_ROUTE_UNMATCHED` | No `route` matched a row | 400 |
 | `TRANSFORM_ROUTE_AMBIGUOUS` | More than one `route` matched a row | 400 |
