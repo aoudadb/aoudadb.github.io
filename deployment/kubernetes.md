@@ -127,6 +127,44 @@ Optional Studio overrides:
 If `studio.env.defaultServerUrl` is empty, the chart defaults it to:
 `http://<release-fullname>:5000`.
 
+### Declare the databases (**BL-1463, next train**)
+
+`declaration.file` is the declaration, `aouda.json`, as a value. The chart renders it as JSON into a ConfigMap, mounts it read-only
+at `/etc/aouda/aouda.json` on the data pods and sets `Aouda__Declaration=/etc/aouda/aouda.json` for you (the server reads no other
+path). With the value empty, which is the default, there is no ConfigMap, no mount and no setting: nothing is declared. The object is
+the file's own grammar with no `Aouda` wrapper, `version` included:
+
+```yaml
+declaration:
+  file:
+    version: 1
+    databases:
+      derive_auth: { kind: auth }
+      orders:
+        kind: data
+        authDatabase: derive_auth
+        schema: /etc/aouda-files/orders.schema.json
+```
+
+renders (`helm template`)
+
+```yaml
+  aouda.json: |
+    {
+      "databases": { "derive_auth": { "kind": "auth" }, "orders": { "authDatabase": "derive_auth", "kind": "data", "schema": "/etc/aouda-files/orders.schema.json" } },
+      "version": 1
+    }
+```
+
+(the chart's output is indented and its members sorted). Mount the schema files it names with `extraVolumes` and
+`extraVolumeMounts`, **not** under `/etc/aouda` (that directory is the ConfigMap's), and name them by absolute path. After
+`helm upgrade` the ConfigMap changes in the running pods within about a minute and `aouda reload` applies it; nothing watches the
+file. `declaration.restartOnChange: true` rolls the pods instead. Never put a secret in `declaration.file`: it is a ConfigMap. The
+chart renders one file and no overlay; use one values file per environment. The value was `declaration.config` (an `appsettings`
+shape with an `Aouda` wrapper) in an unreleased chart and has no alias: [Declare a server in one file](../guides/declaration.md).
+
+`Aouda__Databases__*` through `extraEnv` is **refused** at start (`SETTING_REMOVED`): declare databases in `declaration.file`.
+
 ## Accessing Services
 
 - Aouda API service: `<release-fullname>:5000` (in-cluster)

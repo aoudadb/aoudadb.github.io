@@ -36,7 +36,7 @@ is now honoured.)
 | `MaxTotalRamBytes` (fallback) | `min(0.40 × detected, 0.70 × available)` at this boot, floor 256 MB. No grant: every boot under `BackPressure` logs one warning, and nothing is remembered across boots (**WorkloadCore, 0.3.0**) | same — or a container memory limit, which makes it the cgroup row |
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
-| Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `Aouda:Databases:<name>:MemoryWeight` (default `1.0`) |
+| Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `databases.<name>.memoryWeight` in `aouda.json` (default `1`; **BL-1463, next train**, before `Aouda:Databases:<name>:MemoryWeight`) |
 | Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB, and it follows the share when it is recomputed (**Lead S10, 0.6.0**). **On** (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). A read whose pages are more than the cache holds admits at most half of it (**Lead S10, 0.6.0**) | `Aouda:Memory:MaxPageCacheBytes` (the server's total, scaled to each database's share — **Lead S10, 0.6.0**); `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
 | Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host (**WorkloadCore S17, 0.3.0** — `Abundant` raised the fraction to 0.15) | derived |
@@ -129,7 +129,7 @@ What a write survives is one level per database, optionally narrowed per table. 
 
 | Value | Default | Allowed | Key |
 |---|---|---|---|
-| Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `Aouda:Databases:<db>:Durability`; embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
+| Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `databases.<db>.durability` in `aouda.json` (**BL-1463, next train**); embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
 | Bulk-load durability (**Lead S26c, 0.6.0**) | **inherits** the database's level for a load: `strict`; `os` in a database at `os` (an `unlogged` table still gets `strict`) | `strict`, `os` — `strict` not in an `os` database; `os` not for a multi-table job, a table with vector columns, or an edge or vector table | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
 | Table durability | **inherits** the database's level | `strict` (only in a `strict` database), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
 
@@ -403,26 +403,36 @@ Full rules and the exact refusals: [Development admin](development-admin.md).
 
 The full reference, a worked example and the wipe-and-start walkthrough are on [Declared databases](declared-databases.md).
 
-Databases, application auth databases and the links between them, declared in `Aouda:Databases` so that a wipe of the data
-directory and a plain start bring back the same set; only schema and data need re-applying. Nothing is declared by default.
+Databases, application auth databases and the links between them, declared in the `databases` of `aouda.json` (**BL-1463, next train**; the file is named by the process setting `Aouda:Declaration`, see [Declare a server in one file](declaration.md)) so that a wipe of the data
+directory and a plain start bring back the same set; only schema and data need re-applying. Nothing is declared by default: with no
+`Aouda:Declaration` there is no file and no default path. The old `Aouda:Databases` settings are **no longer read**: one in any
+configuration source refuses the start (`SETTING_REMOVED`, naming the member that replaces it).
 
-| Setting | Default | What it means |
+| Process setting | Default | What it means |
 |---|---|---|
-| `Aouda:Databases:<db>:Kind` (**BL-1379, 0.11.0**) | `data` | `data`, or `auth` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `Durability` on an `auth` entry must be absent or `strict`) |
-| `Aouda:Databases:<db>:SchemaFile`, `:SchemaEnvironment`, `:SchemaAllowDestructive` (**BL-1388, 0.11.0**) | none, none, `false` | With `Kind: data`: a schema file the server applies at start, with an optional overlay and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
-| `Aouda:Databases:<authdb>:Roles:<role>` (**BL-1392, 0.11.0**) | none | With `Kind: auth`: a custom role (`Description`, `Permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-aoudadatabasesname) |
-| `Aouda:Databases:<db>:AuthDatabase` (**BL-1379, 0.11.0**) | none | With `Kind: data`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
+| `Aouda:Declaration` (`--declaration`, `AOUDA_DECLARATION`; **BL-1463, next train**) | none | The path of `aouda.json`. Absolute or relative to the working directory. Unset or empty: nothing is declared. Set to a file that is missing, a directory or empty: the start is refused |
+| `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`; **BL-1463, next train**) | none | The environment whose overlay is read: `aouda.<env>.json` beside the declaration and `<stem>.<env>.json` beside each schema file. A name (letters, digits, `_`, `.`, `-`), not a path |
+
+| Member of `databases.<db>` | Default | What it means |
+|---|---|---|
+| `kind` (**BL-1379, 0.11.0**; required since **BL-1463, next train**) | none | `"data"`, or `"auth"` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `durability` on an `auth` entry must be absent or `"strict"`) |
+| `schema`, `schemaAllowDestructive` (**BL-1388, 0.11.0**) | none, `false` | With `"kind": "data"`: a schema file the server applies at start (relative to the directory of `aouda.json`; its overlay follows `Aouda:Environment`), and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
+| `roles.<role>` on an auth database (**BL-1392, 0.11.0**) | none | With `"kind": "auth"`: a custom role (`description`, `permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-databases-in-aoudajson) |
+| `authDatabase` (**BL-1379, 0.11.0**) | none | With `"kind": "data"`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
 ```json
-"Databases": {
-  "derive_auth": { "Kind": "auth" },
-  "ledger":      { "AuthDatabase": "derive_auth" },
-  "reports":     { "AuthDatabase": "derive_auth", "Durability": "os" }
+{
+  "version": 1,
+  "databases": {
+    "derive_auth": { "kind": "auth" },
+    "ledger":      { "kind": "data", "authDatabase": "derive_auth" },
+    "reports":     { "kind": "data", "authDatabase": "derive_auth", "durability": "os" }
+  }
 }
 ```
 
-**The rule:** configuration owns the operational fields of a database it declares (`MaxMemoryShareBytes`, `MemoryWeight`,
-`DefaultTemperature`, `Durability`, `ReplicationMode`, `WriteConcern`, `WriteConcernTimeoutMs`, `OnWriteConcernTimeout`), and
+**The rule:** the declaration owns the operational fields of a database it declares (`maxMemoryShareBytes`, `memoryWeight`,
+`defaultTemperature`, `durability`, `replicationMode`, `writeConcern`, `writeConcernTimeoutMs`, `onWriteConcernTimeout`), and
 re-applies them at every start; the catalog owns everything else, including the signup settings (`signup-settings` is not
 declarable, and a change made through it survives every restart). A declaration creates what is missing, converges what it owns, and
 refuses what it cannot reconcile; it never overwrites a field it does not name. The passes run in the same order whatever the order
@@ -430,7 +440,7 @@ in the file: auth databases, then data databases, then links. Before **BL-1379, 
 database's whole record, which dropped its auth link, signup settings and auth-database flags.
 
 The start **fails**, naming the entry and changing nothing, when: a declared `auth` entry is a data database in the catalog, or the
-reverse, or an internal database such as `_serverauth`; a declared `AuthDatabase` differs from the link already recorded for that
+reverse, or an internal database such as `_serverauth`; a declared `authDatabase` differs from the link already recorded for that
 database; the auth database it names is neither declared nor existing; a declared database is registered but not open (list it in
 `Aouda:SkipDatabases` to start without it; a link to a skipped database fails the start). The exception is a declared database an
 **operator quarantined** (`aouda databases quarantine`): quarantine is a deliberate isolation, so it is skipped with a warning

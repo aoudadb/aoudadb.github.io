@@ -85,7 +85,8 @@ Use this mapping as the baseline when planning doc updates:
 | Schema lifecycle and evolution patterns | Cross-phase (notably P3/P4/P7/P12/P14) | `docs/dev/Functionality-Schema-Lifecycle.md` |
 | Server CLI, Docker, Kubernetes, cloud, Hub | P16 | `docs/dev/Functionality-Cloud-And-Hub.md` |
 | **Server configuration** (precedence, install bootstrap, restart) | P34 / P4 | `guides/server-configuration.md` |
-| **Declared databases** (`Aouda:Databases`, wipe and start) | BL-1379 / BL-1388 / BL-1392 | `guides/declared-databases.md` |
+| **Declare a server in one file** (`aouda.json`, `Aouda:Declaration`, overlays) | BL-1463 | `guides/declaration.md`, `reference/declaration.md` |
+| **Declared databases** (`databases` in `aouda.json`, wipe and start) | BL-1379 / BL-1388 / BL-1392 | `guides/declared-databases.md` |
 | **Development admin** (`AOUDA_DEV_ADMIN`; `RequireFirstAdmin` removed by BL-1462) | BL-1423 | `guides/development-admin.md` |
 | **Plan a declaration** (`aouda plan`; replaced `aouda schema check` and `aouda keys check`) | BL-1463 | `guides/plan.md` |
 | **Upgrading and the data-directory format** (`DATA_DIRECTORY_FORMAT_REFUSED`) | BL-1420 | `guides/upgrading.md` |

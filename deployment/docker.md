@@ -263,9 +263,36 @@ The file holds the key and nothing else (one trailing newline is ignored). A rel
 
 ---
 
+## Declare the databases: `aouda.json` (**BL-1463, next train**)
+
+The databases, their schema files and their roles are one file, `aouda.json`, that you mount and **name**: the server reads the
+declaration from the path in `Aouda:Declaration` and from no other (there is no default path; with nothing set, nothing is declared).
+Mount the **directory** that holds it, read-only, and set the one variable:
+
+```yaml
+    environment:
+      Aouda__Declaration: /etc/aouda/aouda.json
+      AOUDA_ENVIRONMENT: prod            # optional: also reads /etc/aouda/aouda.prod.json over it
+    volumes:
+      - ./aouda:/etc/aouda:ro            # aouda.json, aouda.prod.json, schema/shop.aouda.schema.json
+```
+
+```json
+{ "version": 1, "databases": { "auth": { "kind": "auth" }, "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" } } }
+```
+
+A relative `schema` path is relative to the directory of `aouda.json`, so the same file works from the container, a unit and a
+shell. A variable that is **set** to a path with no file behind it (a mount that was not made, a bind mount of a file that did not
+exist, which Docker creates as a directory) refuses the start naming the file and exits `1`, so a restart policy retries it; a
+variable that is set to nothing (a compose pass-through of an unset variable) is read as not set. `Aouda__Databases__*` variables
+are **refused** (`SETTING_REMOVED`, naming the member of `aouda.json`). The whole file is in
+[Declare a server in one file](../guides/declaration.md).
+
+---
+
 ## A container that keeps restarting
 
-(**BL-1461, BL-1463, 0.14.0**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase`
+(**BL-1461, BL-1463, 0.14.0**) A start refused for its configuration (a bad key declaration, a declared database whose `authDatabase`
 does not exist, a set-up server left with no operator, a data directory in another format) exits with status **78** and prints every
 finding on standard error, each as a line `error    <CODE>  <setting or file>` followed by the message and the fix, then a last line
 naming the exit status. The codes are in [Declaration Finding Codes](../reference/plan-codes.md), the format in
@@ -286,7 +313,7 @@ Check the declaration before you deploy, in the container you deploy, with its e
 docker compose run --rm --no-deps --entrypoint aouda aouda plan
 ```
 
-It runs the start's own checks over the configuration the server will read, prints every finding the start would print, and exits `1`
+It runs the start's own checks over the configuration the server will read (with `Aouda__Declaration` set in the container's environment it reads the same `aouda.json`, and its overlay for `AOUDA_ENVIRONMENT`), prints every finding the start would print, and exits `1`
 when the start would refuse. See [Plan a declaration](../guides/plan.md).
 
 ---

@@ -758,13 +758,13 @@ Core modules:
 | `PartitionOptions.InitialBucketCount` | int | `16` (engine-level constant; see the row above for the value a new table actually gets) | `>= 1` | catalog policy | Shared mode initial bucket fanout. Resolved to `16` or `128` at table-create time per the rule in `2.7` before this field is ever persisted. |
 | ~~`PartitionOptions.LateArrivalPolicy` / `LateArrivalThreshold`~~ | — | — | — | — | Deleted (**BL-762, 0.3.0**): `Delta` behaved as `Inline` and `Reject` was never enforced. A late row is flushed like any other. |
 | ~~`PartitionOptions.Migration`~~ | — | — | — | — | Removed (**WorkloadCore S17, 0.3.0**) with `MigrationOptions` (its workers were never started by a production path); an old catalog's property is ignored on load |
-| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
-| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default table temperature in DB |
-| `Aouda:Databases:{db}:Durability` | string | `strict` | `strict`, `os`, `unlogged`, `memory` | startup config | Per-db durability level (**Lead S26, 0.6.0**; replaces `EnableWal`) |
-| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | Per-db replication mode |
-| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`, `Majority`, `All` | startup config | Per-db write concern |
-| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | positive | startup config | Per-db write concern timeout |
-| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | startup config | Per-db timeout behavior |
+| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, next train**) | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
+| `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | `aouda.json` (**BL-1463, next train**) | Default table temperature in DB |
+| `databases.<db>.durability` | string | `strict` | `strict`, `os`, `unlogged`, `memory` | `aouda.json` (**BL-1463, next train**) | Per-db durability level (**Lead S26, 0.6.0**; replaces `EnableWal`) |
+| `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, next train**) | Per-db replication mode |
+| `databases.<db>.writeConcern` | string | `One` | `One`, `Majority`, `All` | `aouda.json` (**BL-1463, next train**) | Per-db write concern |
+| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | positive | `aouda.json` (**BL-1463, next train**) | Per-db write concern timeout |
+| `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | `aouda.json` (**BL-1463, next train**) | Per-db timeout behavior |
 | `CreateDatabaseRequest.durability` | string? | `null` (`strict`) | `strict`, `os`, `unlogged`, `memory` | create-db API | DB create-time durability level (**Lead S26, 0.6.0**; replaces `enableWal`, now refused) |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | create-db API | DB create-time operational setting |
 | `CreateDatabaseRequest.maxMemoryShareBytes` | long? | `null` | null or non-negative | create-db API | DB create-time cap on its share of the server budget (**BL-980, 0.4.0:** was `maxMemoryBytes`) |
@@ -777,7 +777,7 @@ Precedence and operational notes:
   - Table-level partition settings override database defaults for table behavior.
   - Request-level `crossPartitionAccess` waives the partition-filter requirement and nothing else: it never widens what the credential is authorized to see (**BL-1227, 0.9.0**).
 - Dynamic vs restart-required:
-  - `Aouda:Databases` is startup-loaded server configuration (treat as restart-required). The `Aouda:PlsCrossPartitionRateLimit` keys no longer exist (**BL-1227, 0.9.0**); a leftover key in a config file is ignored.
+  - The `databases` of `aouda.json` are read at start (**BL-1463, next train**; before, the `Aouda:Databases` settings, now refused): treat a change to an operational field as restart-required, and a new database, a schema file and roles as `aouda reload`able. The `Aouda:PlsCrossPartitionRateLimit` keys no longer exist (**BL-1227, 0.9.0**); a leftover key in a config file is ignored.
   - Table partition options and table auth mode updates are runtime API operations.
 - Safety-gated settings:
   - Database name validation rejects invalid/reserved names.

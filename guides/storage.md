@@ -554,13 +554,13 @@ Primary tests:
 |---|---|---|---|---|---|
 | `Aouda:DataPath` | string | `./data` | non-empty path | startup config | Server root path |
 | `Aouda:Port` | int | `5000` | 1..65535 | startup config | HTTP port |
-| `Aouda:Databases:{db}:Durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | startup config | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which fail startup validation naming `Durability` |
-| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | DB replication participation |
-| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | startup config | Default table policy |
-| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
-| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`,`Majority`,`All` | startup config | ACK semantics |
-| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | >=100 | startup config | Timeout for higher write concerns |
-| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | startup config | Timeout policy |
+| `databases.<db>.durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | `aouda.json` (**BL-1463, next train**) | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which fail startup validation naming `Durability` |
+| `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, next train**) | DB replication participation |
+| `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | `aouda.json` (**BL-1463, next train**) | Default table policy |
+| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, next train**) | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
+| `databases.<db>.writeConcern` | string | `One` | `One`,`Majority`,`All` | `aouda.json` (**BL-1463, next train**) | ACK semantics |
+| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | >=100 | `aouda.json` (**BL-1463, next train**) | Timeout for higher write concerns |
+| `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | `aouda.json` (**BL-1463, next train**) | Timeout policy |
 | `CreateDatabaseRequest.durability` | string? | null -> `strict` | `strict`,`os`,`unlogged`,`memory` | HTTP create-db payload | (**Lead S26, 0.6.0**) `enableWal` / `dataDurability` are refused (400 `INVALID_REQUEST`) |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |

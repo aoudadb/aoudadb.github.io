@@ -540,8 +540,8 @@ Primary proving tests:
 | `Aouda:Memory:MaxTotalRamBytes` | long | `0`: derived from the host (70 % of a cgroup limit, else 40 % of RAM) | `0` or `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
 | `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, 0.6.0**); on (**ColumnarRead, 0.3.0**) |
-| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or positive | startup config | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
-| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | startup config | Default for new tables in that DB |
+| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or positive | `aouda.json` (**BL-1463, next train**) | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
+| `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | `aouda.json` (**BL-1463, next train**) | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
 | `UpdatePolicyRequest.storageTemperature` | string | none (required) | `Auto`, `HotOnly`, `ColdPreferred` | HTTP update-policy body | Per-table policy update |
 | `ResidencyPolicy.PinAllInMemory` | bool | `false` | `true`/`false` | HTTP create-table body, HTTP update-policy body, Catalog/.NET | Settable and readable via HTTP (BL-091-S4). Pins hot segments; never demoted by filter/cap logic. |
@@ -738,7 +738,7 @@ When to use:
 - Shared server with multiple databases where one tenant risks memory starvation.
 
 Steps:
-1. Set per-database `MaxMemoryShareBytes` (and `MemoryWeight`) for key DBs under `Aouda:Databases`.
+1. Set per-database `maxMemoryShareBytes` (and `memoryWeight`) for key DBs in the `databases` of `aouda.json` (**BL-1463, next train**; it was `Aouda:Databases`).
 2. Restart server to apply config.
 3. Drive load on multiple DBs.
 4. Poll `GET /api/server/memory` and observe per-db pressure.

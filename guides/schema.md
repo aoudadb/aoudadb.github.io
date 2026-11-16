@@ -899,7 +899,7 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
 | `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = Extend`). |
 | `BranchMerge` | Change applied by merging a branch into the parent catalog. |
-| `DeclaredApply` | The server applied the `SchemaFile` a declared database names, at start (**BL-1388, 0.11.0**). |
+| `DeclaredApply` | The server applied the schema file a declared database names (`databases.<db>.schema`), at start (**BL-1388, 0.11.0**). |
 
 ### E) Schema JSON field reference (complete)
 
@@ -1133,7 +1133,7 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
 #### SchemaSettingsDurability (value of `settings.durability`)
 
 (**Lead S26, 0.6.0**) No durability level here: a database's level is set where the database is created (`durability` on
-`POST /api/databases`, `Aouda:Databases:<db>:Durability`, the embedded options) and read at every open. A `walEnabled` in
+`POST /api/databases`, `databases.<db>.durability`, the embedded options) and read at every open. A `walEnabled` in
 `settings.durability` is a schema validation error saying so. Export no longer writes `settings`.
 
 | Field | JSON key | Type | Default | Notes |
