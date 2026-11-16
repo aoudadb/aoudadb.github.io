@@ -29,6 +29,8 @@ The stages of the start, in the order of the start, each on what it can read wit
 1. **read** — every file the declaration names is read: the identities file, the secret files and environment variables it points at, the server key's file or
    credential, every schema file and its overlay. A file that cannot be read is one finding, not a crash.
 2. **settings** — the process settings (`Aouda:Port`, the memory limits, `Aouda:NamedQuery:*`, ...), the removed keys and the dev-admin guards.
+   A value a setting's type cannot hold is a `CONFIGURATION_INVALID` finding in every `Aouda:*` section the server binds, `Aouda:BulkLoad`,
+   `Aouda:Streaming`, `Aouda:Adra:GrantCaps` and `Aouda:WebSocket:StreamingWrites` included (**BL-1504, next train**).
 3. **principals** — the identities file's entries, the key shapes, the server key's one source, the dev admin beside a server key, and the conflicts between declared keys.
 4. **databases** — `Aouda:Databases`: names, kinds, links and per-kind fields.
 5. **bootstrap** — the first administrator: a server key, `Aouda:Auth:RootUser`, or a data directory that starts in setup mode.
