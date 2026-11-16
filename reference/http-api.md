@@ -174,6 +174,8 @@ It names entries, kinds and fingerprints, never a key, a hash or a secret file's
 }
 ```
 
+- `notChecked` also always includes apply failures that depend on row values and that the engine's dry run does not check
+  (**BL-1494, next train**).
 - `keys.revoked[].reason` is `removed`, `rotated` (the entry's other secret was added in the same reload: listed under `rotated`
   with `from` / `to` fingerprints) or `replaced` (a generated system key a declared one replaces). `openSessions` is the WebSocket and
   long-poll sessions that held the key: they end with `AUTH_TOKEN_REVOKED` when the row is retracted, before the answer.
