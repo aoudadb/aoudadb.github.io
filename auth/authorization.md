@@ -532,6 +532,10 @@ message naming the one-time fix (drop `_rls_resolvers.target_table` with the ser
 
 `valueConfig` on the wire is a **string**. Value sources are the code names (`UserId`, `Literal`, `Entitlement`). Older docs that said `auth-db-lookup` / `auth-db-grants` / `role-check` named things that were never in the evaluator.
 
+With several keys held in the dimension, `In` and `Eq` match a row whose column equals any of them; `Neq`, `Lt`, `Lte`, `Gt` and
+`Gte` compare with one value, so with several keys they match **no row** (fail closed); with one key they are the plain
+comparison (**BL-1476, next train**).
+
 ```bash
 curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers \
   -H "Authorization: Bearer <admin-token>" \
@@ -564,6 +568,11 @@ curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/rls-resolvers 
 This resolver produces the compound predicate: `owner_id = '<userId>' OR team_id IN ('<team1>', '<team2>', ...)`.
 
 **A literal is bound to its column's type** (**BL-1015, 0.4.0**). `valueConfig` is a string, and the rule's value is read as the column's type wherever the rule is applied — a query, a subscription's change events, a materialized query's rows and the write check alike: `"true"` matches a `Bool` column's `true`, `"05"` an integer 5, `"2026-10-12T21:00:00Z"` a `Timestamp`, `"2026-10-12"` a `Date`, `"10.5"` a `Decimal(p,s)` 10.50, a `Guid` in either case. A literal that does not convert to the column's type (`"yes"` for a `Bool`) denies — the rule matches nothing, for `ne` too. (0.3.0 compared a literal with a row as text outside the query path, so a `Bool` column never matched `"true"` there, and a subscriber could receive events its rule hid from a query; the [write-side fixture](https://github.com/aoudadb/aoudadb.github.io/tree/main/examples/p43-write-side) uses a `String` column, which works either way.)
+
+The write check binds the written row the same way: each cell of a column the rule names is converted as the insert stores it (a
+`Date` in the table's `Culture`, a `Timestamp` to UTC, a `Decimal(p,s)` at its scale) before it is compared, and a cell that does
+not convert is refused. Before this, a range or `eq` rule on a `Date`, `Timestamp`, `Decimal(p,s)` or integer column compared an
+inserted row's value as text (**BL-1475, next train**).
 
 ### 19.5.2 Setup: Create the RLS Table
 

@@ -335,6 +335,9 @@ services:
       AOUDA_SHUTDOWNTIMEOUT: "00:02:00"
 ```
 
+When the server is ready it logs `Start timings: …` — each start step's duration, the schema files and the slowest one's database
+(**BL-1467, next train**).
+
 **Slow opens.** A Warning at 30 s means the open is still running — watch `docker logs -f`, do not restart to "unstick" it. Three process deaths *after* the open has chosen a path (`OpenPathDecided`) quarantine the database as `OpenKilled`. Recover with one command:
 
 ```bash
