@@ -554,7 +554,7 @@ Primary tests:
 |---|---|---|---|---|---|
 | `Aouda:DataPath` | string | `./data` | non-empty path | startup config | Server root path |
 | `Aouda:Port` | int | `5000` | 1..65535 | startup config | HTTP port |
-| `databases.<db>.durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | `aouda.json` (**BL-1463, next train**) | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which fail startup validation naming `Durability` |
+| `databases.<db>.durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | `aouda.json` (**BL-1463, next train**) | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which are refused at start (`SETTING_REMOVED`, naming `databases.<db>.durability`) |
 | `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, next train**) | DB replication participation |
 | `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | `aouda.json` (**BL-1463, next train**) | Default table policy |
 | `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, next train**) | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |

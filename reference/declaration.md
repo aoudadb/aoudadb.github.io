@@ -62,7 +62,7 @@ and `ledger` is refused. `_serverauth`, `_auth` and `_settings` belong to the se
 | `onWriteConcernTimeout` | string | `"DegradeAndLog"` | `"Fail"`, `"Degrade"` or `"DegradeAndLog"` |
 | `defaultTemperature` | string | `"Auto"` | `"Auto"`, `"HotOnly"` or `"ColdPreferred"`, for new tables |
 | `memoryWeight` | number | `1` | Relative weight of this database's memory share; positive |
-| `maxMemoryShareBytes` | integer | none | Cap on the computed memory share, in bytes; not negative |
+| `maxMemoryShareBytes` | integer | none | Cap on the computed memory share, in bytes; not negative. `0` is no cap, as when it is absent |
 | `roles` | object | none | `auth` only: custom roles, keyed by role name (below). On a `data` database it is refused |
 
 The value rules (which `durability` an `auth` database may have, which `authDatabase` is a valid link, which combination of members
@@ -86,7 +86,7 @@ Each permission:
 | Member | JSON type | Default | Meaning |
 |---|---|---|---|
 | `resourceType` | string | `"table"` | `"table"`, `"all-partitions"`, `"all-rows"`, `"embargo"`, `"named-mutation"` or `"named-query"` |
-| `resourceName` | string | none | A table name, or a lone `*`; for a named artifact its exact name or `*`. A `*` anywhere else (`quote*`) is refused |
+| `resourceName` | string | `"*"` for a `table` item | A table name, or a lone `*`; for a named artifact its exact name or `*` (required). **A `table` item without `resourceName` grants its actions on every table**, as `"*"` does: name the table. A `*` anywhere else (`quote*`) is refused |
 | `actions` | string | `"read"` | For a `table` item a comma-separated list; for an `all-*` grant exactly one level; for a named artifact exactly `"execute"` |
 
 ```json
@@ -185,7 +185,8 @@ declares its databases in code.
 | `OVERLAY_UNREADABLE` | error | The overlay exists and cannot be read, is empty or is not a JSON object |
 | `DATABASE_KIND_INVALID` | error | A database has no `kind`, or one other than `data` and `auth` |
 | `SETTING_REMOVED` | error | An `Aouda:Databases` setting; names the member that replaces it |
-| `DATABASE_FIELD_INVALID`, `DATABASE_FIELD_NOT_FOR_KIND`, `DATABASE_NAME_INVALID`, `DATABASE_NAME_DUPLICATE`, `DATABASE_NAME_RESERVED` | error | The value rules of a database entry (a value out of range, a member the kind does not take, a name the server refuses); unchanged by the file |
+| `DATABASE_FIELD_INVALID`, `DATABASE_FIELD_NOT_FOR_KIND`, `DATABASE_NAME_INVALID`, `DATABASE_NAME_DUPLICATE`, `DATABASE_NAME_RESERVED`, `DATABASE_AUTH_NOT_STRICT`, `DATABASE_LINK_INVALID`, `DATABASE_LINK_NOT_AUTH` | error | The value rules of a database entry (a value out of range, a member the kind does not take, a name the server refuses, a durability other than `strict` on an `auth` database, a link that cannot be); unchanged by the file |
+| `DATABASE_LINK_UNDECLARED` | warning | `authDatabase` names a database the file does not declare: the start links to it only if the data directory has it as an application auth database |
 | `SETTING_INVALID` | error | `Aouda:Environment` is not a name |
 | `CONFIGURATION_INVALID` | error | `Aouda:Declaration` is set to only whitespace, or a value that is not a path |
 

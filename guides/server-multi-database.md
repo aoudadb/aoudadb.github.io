@@ -544,7 +544,7 @@ aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durab
 
 | Member of `databases.<name>` | Type | Default | Notes |
 |---|---|---|---|
-| `databases.<db>.durability` | `string` | `strict` | (**Lead S26, 0.6.0**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-060)). It replaces `EnableWal` and `DataDurability`: either key here fails startup validation, naming `Durability`. |
+| `databases.<db>.durability` | `string` | `strict` | (**Lead S26, 0.6.0**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-060)). It replaces `EnableWal` and `DataDurability`: as a setting either is refused at start (`SETTING_REMOVED`, naming `databases.<db>.durability`), and in `aouda.json` either is an unknown member (`DECLARATION_UNKNOWN_MEMBER`). |
 | `databases.<db>.replicationMode` | `string` | `Replicate` | `Replicate` or `DoNotReplicate` |
 | `databases.<db>.maxMemoryShareBytes` | `long?` | `null` | Optional cap on this database's share of the server budget |
 | `databases.<db>.defaultTemperature` | `string` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` |

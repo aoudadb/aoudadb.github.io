@@ -540,7 +540,7 @@ Primary proving tests:
 | `Aouda:Memory:MaxTotalRamBytes` | long | `0`: derived from the host (70 % of a cgroup limit, else 40 % of RAM) | `0` or `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
 | `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
 | `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, 0.6.0**); on (**ColumnarRead, 0.3.0**) |
-| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or positive | `aouda.json` (**BL-1463, next train**) | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
+| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, next train**) | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | `aouda.json` (**BL-1463, next train**) | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
 | `UpdatePolicyRequest.storageTemperature` | string | none (required) | `Auto`, `HotOnly`, `ColdPreferred` | HTTP update-policy body | Per-table policy update |

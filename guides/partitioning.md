@@ -763,7 +763,7 @@ Core modules:
 | `databases.<db>.durability` | string | `strict` | `strict`, `os`, `unlogged`, `memory` | `aouda.json` (**BL-1463, next train**) | Per-db durability level (**Lead S26, 0.6.0**; replaces `EnableWal`) |
 | `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, next train**) | Per-db replication mode |
 | `databases.<db>.writeConcern` | string | `One` | `One`, `Majority`, `All` | `aouda.json` (**BL-1463, next train**) | Per-db write concern |
-| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | positive | `aouda.json` (**BL-1463, next train**) | Per-db write concern timeout |
+| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | `>=100` | `aouda.json` (**BL-1463, next train**) | Per-db write concern timeout |
 | `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` | `aouda.json` (**BL-1463, next train**) | Per-db timeout behavior |
 | `CreateDatabaseRequest.durability` | string? | `null` (`strict`) | `strict`, `os`, `unlogged`, `memory` | create-db API | DB create-time durability level (**Lead S26, 0.6.0**; replaces `enableWal`, now refused) |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | create-db API | DB create-time operational setting |

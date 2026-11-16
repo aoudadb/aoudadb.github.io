@@ -14,3 +14,6 @@ vendor/
 
 # Claude Code local worktrees and settings
 .claude/
+
+# Python bytecode (the scripts/ checks)
+__pycache__/
