@@ -2434,7 +2434,8 @@ query through `POST .../schema/apply`, or set the result table's policy afterwar
 
 #### `POST /api/databases/{db}/schema/seed`
 
-Apply idempotent seed data. Tables must already exist.
+Apply idempotent seed data. Tables must already exist. A row whose primary key already exists in any tier — the write buffer, a
+hot segment or a cold one — is skipped and counted as `skipped` (**BL-1489, next train**).
 
 **Request:** seed document root — the same format as `aouda.seed.json`. Each table's rows are
 [column arrays](#column-arrays-the-write-body) (**Lead S12, 0.6.0; breaking**: they were `"rows": [{…}]`, which is now refused
