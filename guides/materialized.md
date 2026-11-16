@@ -323,6 +323,17 @@ the resolver allows — and a result over a `jwt-claim` source is read whole by 
 result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
 See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
 
+**A materialized query declares no security of its own** (**0.15.0** for the message; the refusal is 0.14.0). The members `authMode`, `permissionColumn`,
+`permissionDimension` and `rlsResolverName` that a table carries are **not members of a materialized query**: in a schema file, `schema apply` or `schema diff` they are
+`400 SCHEMA_UNKNOWN_MEMBER` (`aouda plan`: the same finding, with the JSON pointer of the member). They were never read: whatever a query's definition said, its result was filtered by the source
+table's partition-level and row-level security alone, so a file that carried them changed nothing and still changes nothing once they are deleted. From the 0.15.0 the
+message says so: *"a materialized query has no 'authMode'. The server never read it here: a materialized query's security comes from its source table ... Delete the member; to secure the
+result, set authMode, permissionDimension, permissionColumn, rlsResolverName or partitionLevelSecurity on the source table."*
+
+**Migration:** delete the member from the materialized query; to secure its result, declare the security on the **source table** (`authMode`, `permissionDimension`, `permissionColumn`,
+`rlsResolverName`, `partitionLevelSecurity` there, as for any table). Nothing about who can read the result changes by deleting the member, because it was ignored. A holder is lifted
+past each half by its own `all-partitions` / `all-rows` grant **on the source table**, as above.
+
 (**BL-418, 0.9.0**) **An embargo holder cannot read a result over the embargoed table.** A result is computed once for every
 reader, so it cannot be cut by one caller's delay: its query endpoint, a `/query` or named query that names it, and a subscription to
 it answer `403 AUTH_EMBARGO_UNSUPPORTED` to a credential holding an
@@ -354,8 +365,7 @@ the answer equal.
   `window: { keep }`. Its result keeps only the groups at or after its horizon, maintenance builds nothing below it, a read below it
   is computed from the source, and expiry drops whole segments without writing. See [2.11e](#windows).
 - Planner integration:
-  - Auto-routing from base-table `TableQuery` to matching MQ in `Ready` state — and, since **ColumnarRead S18** (next
-    train), only when it is current, on every read path and over HTTP ([routing](#routing-a-read-to-a-maintained-result)).
+  - Auto-routing from base-table `TableQuery` to matching MQ in `Ready` state — and, since **ColumnarRead S18** (0.15.0), only when it is current, on every read path and over HTTP ([routing](#routing-a-read-to-a-maintained-result)).
   - `WithDirectScan()` bypass and routing decision visibility.
 - Streaming behavior:
   - Subscribe to MQ results through normal table subscription path.
@@ -1402,7 +1412,7 @@ Four things are worth knowing about it, because it is disk you did not ask for:
 - **Only a rebuild spills** (**WorkloadCore S10, 0.3.0**). A bulk load does no materialized-query work while it streams; its rows
   are brought in by the table's pass, and a build that outgrows its memory grant (at most a quarter of the governed budget while
   the budget is enforced; uncapped under `Advisory`) partitions and writes runs to `_build_runs/` until it publishes. A chunked
-  rebuild that is refused memory keeps its run file for its cursor (**BL-624, next train**).
+  rebuild that is refused memory keeps its run file for its cursor (**BL-624, 0.15.0**).
 - **The volume is what the build's groups exceed its grant by** (**WorkloadCore S12, 0.3.0**: no longer an accumulator
   ceiling). It reads all of it back at publish.
 
@@ -1433,7 +1443,7 @@ running now or already dead.
 `Aouda:MaterializedQueries:Rebuild:MaxOutstandingSpillBytes` (`-1`, the default, derives 10 % of the volume's free space with a
 1 GiB floor; `0` is unbounded). Crossing it is logged once and counted; it is a report, not a limit — no rebuild is refused and
 none in flight is interrupted. `mqSpillOutstandingBytes` includes the run file a refused or closed chunked rebuild keeps for its
-cursor, and a file left by a restart until its rebuild resumes or discards it (**BL-624, next train**). `mqPublishBacklog` counts the
+cursor, and a file left by a restart until its rebuild resumes or discards it (**BL-624, 0.15.0**). `mqPublishBacklog` counts the
 database's pending bulk-load jobs: loads whose table's pass has not yet run.
 
 ---

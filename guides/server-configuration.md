@@ -22,6 +22,7 @@ Aouda settings come from several layers. Think of them as separate concerns:
 | **Code defaults** | Safe baseline when nothing else is set (`AoudaServerOptions` in source) | Everyone (implicit) | N/A (compiled in) |
 | **Install bootstrap** | Where data lives and which port to listen on | Setup / install scripts | Written into the **service command line**, not a config file |
 | **Optional operator config** | `appsettings.json`, `appsettings.{Environment}.json` | Developers, Docker/K8s operators | **No** — not included in Windows release publish |
+| **Declaration file** (**0.15.0**) | One JSON file, `/etc/aouda/aouda.json` or the path `AOUDA_CONFIG_FILE` / `--config` names: the declared databases, keys and schema files, re-read by `aouda reload` | Docker / Kubernetes operators | **No** — you mount it ([§4a](#declaration-file)) |
 | **Environment variables** | `AOUDA_*` overrides for containers and CI | DevOps | Set on the service, container, or pod |
 | **CLI flags** | `--data-path`, `--port`, `--join`, etc. | Install scripts, manual starts, service `binPath` | Highest precedence at startup |
 | **Data-directory files** | `backup-config.json`, `cluster-state.json` | Runtime / API / Studio | Created under `{DataPath}` when changed |
@@ -42,6 +43,7 @@ When the server process starts, `AoudaServerOptions` and related host settings a
 2. appsettings.json          (optional; content root — see §3)
 3. appsettings.{Environment}.json   (optional; e.g. Production)
 4. User secrets                (Development only)
+4a. Declaration file            (0.15.0: /etc/aouda/aouda.json, or AOUDA_CONFIG_FILE / --config; see §4a)
 5. Environment variables       (unprefixed ASP.NET / hosting vars)
 6. Command-line arguments      (generic host args from CreateBuilder)
 7. AOUDA_* environment variables   (mapped into Aouda: section — see §2.1)
@@ -109,6 +111,7 @@ Some `AOUDA_*` variables are read by **custom code**, not through the main optio
 | --- | --- | --- |
 | `AOUDA_CORS_ORIGINS` | Replace default CORS origin list | `ServerHostRunner` |
 | `AOUDA_STUDIO_ORIGIN` | Append one CORS origin to defaults | `ServerHostRunner` |
+| `AOUDA_CONFIG_FILE` (**0.15.0**) | Path of the [declaration file](#declaration-file); an empty value counts as unset | `ServerHostRunner` |
 | `AOUDA_SCHEMA_INFERENCE_MODE` | Schema inference mode override | `SchemaOptionsEnvOverlay` |
 
 ### Variables for other components (not server config)
@@ -135,6 +138,7 @@ CLI flag mappings include:
 | `--trusted-proxies-enabled` | `Aouda:ForwardedHeaders:Enabled` |
 | `--trusted-proxies` | `Aouda:ForwardedHeaders:KnownProxies` |
 | `--trusted-proxy-networks` | `Aouda:ForwardedHeaders:KnownNetworks` |
+| `--config` (**0.15.0**) | Not a setting: the path of the [declaration file](#declaration-file) (`aouda start`, `aouda plan`) |
 
 `Aouda:ForwardedHeaders:Enabled` (`AOUDA_FORWARDEDHEADERS__ENABLED` or `--trusted-proxies-enabled`) is required in addition to the trust list. Off by default. A CLI-only start is `aouda start --trusted-proxies-enabled --trusted-proxies 10.0.0.1`. See [Behind a reverse proxy](../deployment/reverse-proxy.md) — without it, per-IP rate limits, lockout attribution, and audit-log client IPs are the TCP peer (the proxy, in a typical public deployment).
 
@@ -184,9 +188,82 @@ To change data path or port after install, update the **service command line** (
 | **Auth users, API keys** | Engine (in data dir) | Yes | Yes |
 | **Env vars / CLI on service** | OS service, container, K8s manifest | Yes | Yes until manifest changed |
 | **Optional appsettings.json** | Operator-placed file | Yes (re-read each start) | Yes if file kept outside binary folder |
+| **Declaration file** (**0.15.0**) | Operator-mounted file | Yes (re-read each start) **and by every `aouda reload`** | Yes |
 
 {: .note }
 Runtime config from `PATCH /admin/config` is **not** written back to `appsettings.json` or environment variables. Only backup schedule changes that go through `RuntimeBackupConfig` are persisted to disk automatically.
+
+---
+
+## 4a) The declaration file, and what a reload can change {#declaration-file}
+
+A running server cannot change its own environment variables or command line, and the container image ships no `appsettings*.json`. A
+deployment that followed the older advice (declare `Aouda:Databases` in environment variables) therefore **could not use `aouda reload` for
+databases, schema, roles or the identities path**: every change was a restart, and the first `aouda reload` said so with
+`SOURCE_NOT_RELOADABLE`. The declaration file closes that gap (**0.15.0**).
+
+**One file, found without a setting.** Mount one JSON file at **`/etc/aouda/aouda.json`** (on Windows `%ProgramData%\Aouda\aouda.json`).
+The server reads it as a configuration source when it exists and skips it without a word when it does not. Its shape is that of
+`appsettings.json`:
+
+```json
+{ "Aouda": { "Databases": { "app": { "SchemaFile": "/etc/aouda/app.schema.json" } }, "Auth": { "Keys": { "File": "/etc/aouda/identities.json" } } } }
+```
+
+| To read another file | |
+|---|---|
+| `AOUDA_CONFIG_FILE=/path/to/file.json` | The variable. An **empty** value counts as unset (a compose pass-through of an unset variable is empty) |
+| `aouda start --config /path/to/file.json` (also `--config=/path`) | The switch. It **wins over** the variable. `aouda plan --config` reads what the start reads |
+
+- **Explicit means required.** A file named by the switch or the variable must exist: missing, empty, a directory or not valid JSON refuses the
+  start with `CONFIGURATION_INVALID` and exit status **78**. The well-known path is optional only when it is **absent**: present and empty, a directory
+  or malformed is also `CONFIGURATION_INVALID` and 78.
+- **An empty file is an error; write `{}` to declare nothing.** A half-written mount must not be taken for "no declaration".
+- **A file that cannot be read** (permissions, an I/O error, a volume not yet mounted) exits **1**, like every other unreadable input, so a supervisor retries it. A
+  file that was read and has vanished by the next reload is also an error, not "no databases".
+- **A directory where the file should be** is 78. That is what `docker run -v ./aouda.json:/etc/aouda/aouda.json` makes of a host file that does not exist:
+  Docker creates a directory. In a compose file the host file must exist before `up`.
+- A parse error names the file, the line and the position, never the contents. A UTF-8 byte-order mark is accepted; comments and trailing commas are accepted as in `appsettings.json`.
+- **Precedence:** the file sits above `appsettings*.json` and user secrets and **below** environment variables and the command line, so an `AOUDA_*` variable still
+  overrides a scalar the file sets. `Aouda:Databases` and the identities path given by environment variables or the command line cannot be reloaded (below).
+- **A reload re-reads the file from its path every time.** Nothing watches it, so there is nothing for an editor's replace-by-rename, a
+  single-file bind mount, a Kubernetes ConfigMap's symlink swap or a `git checkout` to defeat. A file that is now empty, malformed or missing refuses the reload
+  (`422`, the finding `CONFIGURATION_INVALID`) and changes nothing. ⚠️ In Docker, mount the **directory** (`./declaration:/etc/aouda:ro`), not the one file: a
+  single-file bind mount keeps the original inode, so a replaced file is never seen ([Declare a deployment](declare-a-deployment.md#compose-yaml)).
+- `aouda plan`'s first line and the start's one-line declaration source name `config file <path>` or `config file none`: which file was read.
+- `aouda plan` adds the **info** finding `SOURCE_FIXED_AT_START` when `Aouda:Databases` or the identities file's path comes from environment variables or the command
+  line. It never changes the exit status: deploying by restart is legitimate. It tells you a reload will not see a change to it
+  ([codes](../reference/plan-codes.md)).
+
+### Reload or restart: one table {#reload-or-restart}
+
+What `aouda reload` applies, and what takes a restart. A setting a reload cannot apply is listed under `restartRequired` in its answer
+(`setting`, `from`, `to`; a value that could hold a secret is shown as `(changed)`), and the rest of the reload proceeds
+([the answer](../reference/http-api.md), under `POST /api/admin/reload`). Source: [Declared databases](declared-databases.md#changing-the-declaration-without-a-restart-bl-1427-0140),
+[Keys that survive a wipe](keys-that-survive-a-wipe.md), [Defaults reference](defaults-reference.md#configured-api-keys).
+
+| What you change | Where it is set | Takes effect by | Notes |
+|---|---|---|---|
+| A **new** database entry (`Aouda:Databases:<name>`) | The declaration file | **Reload** | Created, and linked to its auth database |
+| An existing database's `SchemaFile`, `SchemaEnvironment` | The file | **Reload** | Applied **non-destructively** whatever `SchemaAllowDestructive` says; a drop is the warning `SCHEMA_DESTRUCTIVE_REFUSED` |
+| `Roles` of a declared auth database | The file | **Reload** | |
+| `AuthDatabase` of a database with **no link yet** | The file | **Reload** | Changing an existing link, or a `Kind`, is an **error**: the start refuses it, so the reload does too |
+| A database's operational fields (`Durability`, `MaxMemoryShareBytes`, `MemoryWeight`, `DefaultTemperature`, `ReplicationMode`, `WriteConcern`, `WriteConcernTimeoutMs`, `OnWriteConcernTimeout`) | The file | **Restart** | Re-applied at every start; a reload lists them under `restartRequired` |
+| `SchemaAllowDestructive` | The file | **Restart** | A reload never applies a destructive change |
+| A database **removed** from the file | The file | Nothing | Reported as `orphaned` and left alone; a declaration cannot say "must not exist" |
+| The identities file's **content**: add, remove, rename, change roles | The identities file | **Reload** | A removed entry's row is revoked, and its open WebSocket and long-poll sessions end first |
+| A `{ "file": PATH }` secret's content, or a `{ "hash": ... }` secret | The identities file or the key file | **Reload** | Files are re-read on every reload. Rotate by adding the new secret, reloading, moving the clients, removing the old one, reloading |
+| A `{ "env": NAME }` secret | An environment variable | **Restart** | A running process cannot change its own environment: the value is the one it started with. Declare the rotated key as `file` or `hash` instead |
+| The identities file's **path** (`Aouda:Auth:Keys:File`) | The file, env or command line | **Restart** | A changed path reloads no key |
+| The server key: `Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the credential `aouda-server-key` | env, file or credential | **Restart** | A reload never touches the key the process started with |
+| `Aouda:Auth:RootUser`, the dev admin, setup mode | Settings | **Restart** | Steps of the start, not of a reload |
+| `Aouda:Databases` (or the identities path) given by **environment variables** `Aouda__Databases__...` or the **command line** | env, command line | **Restart** | Fixed for the life of the process: `SOURCE_NOT_RELOADABLE` on a reload, `SOURCE_FIXED_AT_START` (info) on a plan. Move them into the declaration file to reload them |
+| Port, bind address, listeners, memory budget, `Aouda:SkipDatabases`, every other `Aouda:` setting | Any | **Restart** | Listed under `restartRequired`. Settings outside the `Aouda` section (Kestrel, `Aouda:WebSocket`) are named in `notChecked` |
+| Memory budgets, log level, backup schedule | `PATCH /admin/config` | **Immediately**, not a reload | Memory budgets and log level are in-memory only and revert on restart ([§4](#4-what-survives-a-restart)) |
+
+A reload also refuses as a whole, changing nothing, when any finding is an error (`422 RELOAD_REFUSED`, every finding in the answer): the same validator
+the start runs. One reload at a time, one per 5 s (`429 RELOAD_RATE_LIMITED`); `POST /api/admin/reload?dryRun=true` and `aouda plan --server` answer the same
+plan without writing.
 
 ---
 
@@ -259,7 +336,7 @@ services:
 ```
 
 When the server is ready it logs `Start timings: …` — each start step's duration, the schema files and the slowest one's database
-(**BL-1467, next train**).
+(**BL-1467, 0.15.0**).
 
 **Slow opens.** A Warning at 30 s means the open is still running — watch `docker logs -f`, do not restart to "unstick" it. Three process deaths *after* the open has chosen a path (`OpenPathDecided`) quarantine the database as `OpenKilled`. Recover with one command:
 

@@ -28,7 +28,7 @@ database names and are compared without case, so declaring `Ledger` and `ledger`
 | `Kind` | `string` | `data` | `data` (an ordinary database) or `auth` (an application auth database). Not case-sensitive; blank means `data`; anything else fails the start |
 | `AuthDatabase` | `string?` | none | Only with `Kind: data`. The application auth database to link this one to |
 | `SchemaFile` | `string?` | none | Only with `Kind: data`. Path of a schema file applied at start. Absolute, or relative to the server's working directory |
-| `SchemaEnvironment` | `string?` | none | Needs `SchemaFile`. The overlay, as the CLI's `--env`: `aouda.schema.<env>.json` next to the file is merged over it when it exists |
+| `SchemaEnvironment` | `string?` | none | Needs `SchemaFile`. The overlay, as the CLI's `--env`: `<file without .json>.<env>.json` next to the file is merged over it when it exists (`aouda.schema.json` with `prod` reads `aouda.schema.prod.json`; `ledger.json` reads `ledger.prod.json`; **BL-1460, 0.14.0**) |
 | `SchemaAllowDestructive` | `bool` | `false` | Needs `SchemaFile`. Lets the start-time apply drop a table or a column. When `false` such a change is refused, logged, and the start goes on |
 | `Roles:<role>` | object | none | Only with `Kind: auth`. A custom role of this auth database: `Description`, and `Permissions` (a list of `ResourceType`, `ResourceName`, `Actions`) |
 | `Durability` | `string?` | `strict` | `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-060)). On `Kind: auth` it must be absent or `strict` |
@@ -87,7 +87,7 @@ auth database receive. A `Roles` block on a `Kind: data` entry therefore has no 
 
 - Each role is created when missing and converged to the declared description and permissions when it exists. A role that is not declared is never touched, so roles made through the API stay.
 - A `Permissions` item is `ResourceType` (`table`, the default; or `all-partitions`, `all-rows`, `embargo`; and, **BL-1417, 0.12.0**, `named-mutation` or `named-query`), `ResourceName` (a table name, or `*`; for a named artifact its exact name or `*`) and `Actions` (for a `table` item a comma-separated list, default `read`; for an all-* grant exactly one level; for a named artifact exactly `execute`), the same fields as `POST .../roles`. The same validator runs, so a `ResourceName` with a `*` that is not alone (`quote*`) fails the start (**BL-1415, 0.12.0**), as does an `execute` item with another `Actions`.
-- Running a named query or mutation needs an `execute` item (**BL-1417, 0.12.0**): `{ "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }`. The `quote_writer` role in the example below, which holds only a table `write`, does **not** run named mutations. At start the server logs one Warning per auth database naming the custom roles that hold table `read` / `write` and no execute row. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
+- Running a named query or mutation needs an `execute` item (**BL-1417, 0.12.0**): `{ "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }`. A role that holds only a table `write` does **not** run named mutations, which is why `quote_writer` in the example below holds the `execute` item. At start the server logs one Warning per auth database naming the custom roles that hold table `read` / `write` and no execute row. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
 - A role name is compared without case: declaring one twice is refused. A role with no body is refused; write `{}` for a role with no description and no permissions.
 - Roles are applied **after** the schema, so a permission may name a table the schema file creates.
 - A system role cannot be declared, and the signup role of a database cannot carry an `all-partitions` or `all-rows` grant. Both fail the start.
@@ -112,9 +112,9 @@ Two data databases share one application auth database. `ledger` has a schema fi
         "Kind": "auth",
         "Roles": {
           "quote_writer": {
-            "Description": "Writes quotes, reads nothing else",
+            "Description": "Writes quotes through insert_quote, reads nothing else",
             "Permissions": [
-              { "ResourceType": "table", "ResourceName": "quotes", "Actions": "write" }
+              { "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }
             ]
           },
           "analyst": {
@@ -151,8 +151,8 @@ Aouda__Databases__reports__Durability=os
 ```
 
 (`Roles` are easier to keep in a file than in variables.) The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan` validates it offline (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
-[Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
-schema file creates, which is why the roles are applied after it.
+[Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the mutation `insert_quote`, which the
+schema file creates, which is why the roles are applied after it. The whole deployment as one working set (keys, a feeder, compose, plan, reload): [Declare a deployment](declare-a-deployment.md).
 
 ---
 
@@ -165,7 +165,7 @@ Delete the data directory and start the server with the configuration above. Wha
 | The databases `derive_auth`, `ledger`, `reports` | **Recreated**, empty |
 | Their operational fields (memory, durability, replication, write concern) | **Recreated** from the entries |
 | The links `ledger` and `reports` to `derive_auth` | **Recreated** |
-| The first admin | **Recreated** from `Aouda:Auth:RootUser` |
+| The first admin | **Recreated** from `Aouda:Auth:RootUser` when one is set; with a declared server key and no `RootUser` there is no user, and the key operates the server (**BL-1462, 0.14.0**) |
 | The tables of `ledger` | **Recreated** from `SchemaFile`; empty |
 | The roles `quote_writer` and `analyst` | **Recreated** from `Roles` |
 | Keys declared in configuration | **Recreated** as rows, with the same secrets ([keys](keys-that-survive-a-wipe.md)) |
@@ -189,7 +189,7 @@ there is no `/ready` to ask):
 
 1. **Configured keys are listed** (`Aouda:Auth:Bootstrap:ServerKey`, `Keys:File`). A bad declaration fails here, before any database opens. Nothing is authenticated yet.
 2. **Declared databases**: auth databases, then data databases, then the links.
-3. **`_serverauth` and `Aouda:Auth:RootUser`**: the first admin. Without a `RootUser` the server stays in setup mode.
+3. **`_serverauth` and `Aouda:Auth:RootUser`**: the server auth database, and the first admin when a `RootUser` is set. A declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the systemd credential `aouda-server-key`, or a `server_admin` entry in the identities file) creates the server auth database with no user and operates the server from this first start, so no `RootUser` is needed (**BL-1462, 0.14.0**). The server stays in setup mode only when nothing is declared: no server key and no `RootUser`, on a data directory that has never been set up.
 4. **Declared schema files**: every file was read and validated before step 1 (**BL-1463, 0.14.0**: before any database is created), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `SchemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
 5. **Declared roles**, in their auth databases.
 6. **Configured key rows**, in their auth databases.
@@ -232,7 +232,9 @@ a reload applies:
 What it does not: a database's operational fields, `SchemaAllowDestructive`, `Aouda:SkipDatabases` and every other setting are
 `restartRequired` (listed, not applied; the rest proceeds). A `Kind` change and a change of an existing link are **errors** — the next
 start refuses them, so the reload does too, and changes nothing. A database you remove from the file is reported as `orphaned` and
-left alone. `Aouda:Databases` set by environment variables or the command line cannot change by reload (`SOURCE_NOT_RELOADABLE`).
+left alone. `Aouda:Databases` set by environment variables or the command line cannot change by reload (`SOURCE_NOT_RELOADABLE`): put it in the
+[declaration file](server-configuration.md#declaration-file) (`/etc/aouda/aouda.json`, or `AOUDA_CONFIG_FILE` / `--config`; **0.15.0**), which a reload re-reads every time.
+[One table](server-configuration.md#reload-or-restart) lists what a reload applies and what takes a restart.
 `POST /api/admin/reload?dryRun=true` answers the same plan and changes nothing.
 
 ### What `/ready` says while it starts
@@ -254,7 +256,7 @@ left alone. `Aouda:Databases` set by environment variables or the command line c
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
 | `reload_failed` (the entry, when one is named) | (**BL-1427, 0.14.0**) The last reload stopped part-way; the steps before it are applied | The next reload that completes |
 | `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | Its auth database and database are open. A server key no longer waits for a first admin (**BL-1462, 0.14.0**) |
-| `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. A restore reconciles the declaration the last reload applied, not necessarily the one on disk now (**BL-1490, next train**). The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
+| `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of `Aouda:Databases` was refused. A restore reconciles the declaration the last reload applied, not necessarily the one on disk now (**BL-1490, 0.15.0**). The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 
 A deploy script waits for `200` and prints `reasons` if it gives up. A database in `Aouda:SkipDatabases`, or one an operator

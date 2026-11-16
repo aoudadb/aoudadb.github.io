@@ -480,7 +480,7 @@ NULL column that is not part of the key is stored as the type's default, not ref
 A key is never coerced, nor an [array column](#array-columns) (**BL-035, 0.9.0**), and a column the table does not have is refused at either level. See
 [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
 
-- **A formula table's keys are checked at every level** (**BL-1488, next train**). A load into a table with an Expression column —
+- **A formula table's keys are checked at every level** (**BL-1488, 0.15.0**). A load into a table with an Expression column —
   or whose transforms land rows in one — that holds a key twice, or a key the table already holds, fails at its commit with `409
   BULK_LOAD_DUPLICATE_PK`, at `coerce` too: two rows under one key would give a cell two formulas. Nothing of the job is
   committed; `withinJob` says which case it was. Such a load keeps its keys in memory until its commit, as a `strict` load does,
@@ -734,7 +734,7 @@ A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../re
 
 | Level | A null or absent cell in a NOT NULL column | A primary key the job holds twice, or the table already holds |
 |---|---|---|
-| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, 0.9.0**) | Loaded as a second row (not checked) — **except in a table with an Expression column (a formula table), whose keys are checked at every level, as `strict` checks them** (**BL-1488, next train**) |
+| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, 0.9.0**) | Loaded as a second row (not checked) — **except in a table with an Expression column (a formula table), whose keys are checked at every level, as `strict` checks them** (**BL-1488, 0.15.0**) |
 | `strict` | Refused | The job fails at its commit, nothing committed |
 
 Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value
@@ -1314,7 +1314,7 @@ its rows are in the result. On the publish line a merged load reports `name:merg
 publish that absorbed it reports `merged=N`. `mqPublishBacklog` still counts loads whose publish has not
 completed, merged or not.
 
-⚠️ **`mqPublishBacklog` counts pending load jobs, which hold no spill.** The `.mqspill` files in a query's `_build_runs/` belong to a rebuild in flight, or to a chunked rebuild waiting for memory (**BL-624, next train**); `mqSpillOutstandingBytes` is the figure to read, not a file count.
+⚠️ **`mqPublishBacklog` counts pending load jobs, which hold no spill.** The `.mqspill` files in a query's `_build_runs/` belong to a rebuild in flight, or to a chunked rebuild waiting for memory (**BL-624, 0.15.0**); `mqSpillOutstandingBytes` is the figure to read, not a file count.
 
 **(P45)** Six fields are appended after the ones above — `SpillRunsCreated`, `SpillRunsMerged`,
 `SpillWriteMs`, `SpillMergeMs`, `SpillRunBytesWritten`, `SpillBytesWritten` — reporting the job's

@@ -255,7 +255,7 @@ Where to keep them is the app's choice (Keychain, Android Keystore / SecureStore
 
 ## 12. API Keys and Credential Types
 
-Aouda has **four** API key types. Understanding when to use each is critical.
+Aouda has **six** API key prefixes (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`, `mk_adm_`) and **custom** `mk_` keys. Understanding when to use each is critical. The [HTTP API's credential table](../reference/http-api.md#credential-types) is the full list.
 
 ### The API Key Types
 
@@ -265,6 +265,10 @@ Aouda has **four** API key types. Understanding when to use each is critical.
 | **App `anon` key** | `mk_anon_` | Auto-generated on `auth.enabled` | One database | `_auth` | **Not required for login.** Leftover; denied on data/admin |
 | **App `public` key** | `mk_pub_` | Auto-generated on `auth.enabled` | One database | `_auth` | Browser **data** — named queries, mutations, subscriptions (plus auth) |
 | **App `service_role` key** | `mk_svc_` | Auto-generated on `auth.enabled` | One database | `_auth` | Per-database backend access, admin tools |
+| **Scoped service key** | `mk_scp_` | Server key: `POST /api/databases/{db}/scoped-service-keys` with a name and roles (**BL-1239, 0.9.0**); or **declared** as a `scoped_service` entry of the identities file (**BL-1377, 0.10.0**) | One database | `_auth` (the application auth database it is minted or declared in) | A backend or feeder that must hold **only** the roles it names, not the implied `all-partitions` / `all-rows` pair of `mk_svc_`; never `admin` |
+| **Auth-admin key** | `mk_adm_` | `POST /api/databases/{authDb}/auth-admin-keys` (**BL-1032, 0.5.0**) | One application auth database | `_auth` | User, grant, session, audit and MFA administration; not a data key |
+
+**Declared keys survive a wipe** (**BL-1377, 0.10.0**; **BL-1378, 0.11.0**). `mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_` and `mk_anon_` keys can be declared in configuration (`Aouda:Auth:Bootstrap:ServerKey` and the identities file `Aouda:Auth:Keys:File`), so a wipe or a new machine brings back the same secrets; a declared `mk_scp_` key is the supported durable credential for a feeder. `mk_adm_` and custom keys (including a user-linked one) cannot be declared and are lost with the data directory. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
 
 Additionally, **custom app API keys** (`mk_` prefix) can be created via the admin API for granular access control. A `custom` key can optionally be **linked to a user** (`userId` at creation) — the key then inherits that user's `auth-db-entitlement` entitlements and RBAC roles, giving a non-interactive service a durable credential scoped to exactly the partitions it needs, without the implied grants `mk_svc_` holds on its whole database — unless the linked user is a `db_admin`, whose grants the key then
 holds too (**BL-1227, 0.9.0**). See [Data Authorization §19.4.5](authorization.md#1945-durable-credentials-for-non-interactive-services) and the [`POST .../admin/api-keys` reference](reference.md).
@@ -280,7 +284,7 @@ Enabling auth on a database does **not** open public self-registration. Set `all
 | Frontend reading data directly | App `public` key (`mk_pub_`) | Safe to expose; named artifacts only; PLS/RLS enforced; data-plane only |
 | Frontend that only signs users in (data goes through your backend) | None — `new AoudaClient({ serverUrl, database })` | Signup/signin are public POSTs |
 | Backend accessing one database (app auth enabled) | App `service_role` key (`mk_svc_`) | Holds `all-partitions` and `all-rows` on that database (**BL-1227, 0.9.0**) |
-| Non-interactive service that should see only specific partitions (a feeder job, a scoped integration) | `custom` key linked to a user (`userId`) | Durable like `mk_svc_`, but genuinely scoped via `auth-db-entitlement` entitlements — it holds no access grant unless its user does |
+| Non-interactive service that should see only specific partitions (a feeder job, a scoped integration) | `custom` key linked to a user (`userId`) | Durable like `mk_svc_`, but genuinely scoped via `auth-db-entitlement` entitlements — it holds no access grant unless its user does. A custom key cannot be declared, so it does not survive a wipe; a feeder that must survive one uses a declared `mk_scp_` key (a `scoped_service` entry of the identities file), which holds **roles only**: pair it with a role that has `execute` on one named mutation ([the whole pattern](../guides/declare-a-deployment.md#the-feeder-pattern-end-to-end)). Until entitlements can be declared on a scoped key, there is no per-source write isolation for a declared key: every holder of the role may run the mutation for any source (no date is promised) |
 | Backend accessing multiple databases | Server API key (`mk_srv_`) | Can have roles across multiple databases; from 0.4.0 PLS / RLS apply to it (send `X-User-Token`, or use each database's `mk_svc_`, to read protected tables) |
 | CI/CD pipeline | Server API key (`mk_srv_`) | Scoped to test databases |
 | Admin tooling | Server admin JWT or server API key | Full control |

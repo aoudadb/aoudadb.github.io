@@ -159,7 +159,7 @@ formulas as one batch at `:commit`, under the database's formula lock, which it 
 rule's code. While it streams, the rest of the database's formulas are computed as usual; writes into the table being loaded wait for the
 load, as for any table, and so do the formula cells of that table: one woken meanwhile gets its new value once the load commits or is
 aborted, and until then a token read past the edit that woke it waits — of that table and of the formula tables that read it (**BL-1505,
-next train**: of any formula table before). Keep loads into a formula table short. See [Known issues](#known-issues) for BL-1488.
+0.15.0**: of any formula table before). Keep loads into a formula table short. See [Known issues](#known-issues) for BL-1488.
 
 ---
 
@@ -294,7 +294,7 @@ caught up. A commit that left a value unchanged satisfies it too.
 - A token read of a formula table whose formulas read a materialized query's result waits until the query has applied the write the token
   names and those formulas are recomputed. A token read of a formula table waits only for the formulas its own values depend on — the
   queries and tables they read, directly or through other formula tables: while a query a formula reads cannot catch up (rebuilding,
-  stale, in error), token reads of the formula tables that read it wait, and the others do not (**BL-1505, next train**).
+  stale, in error), token reads of the formula tables that read it wait, and the others do not (**BL-1505, 0.15.0**).
 
 See [Freshness](freshness.md#formula-tables).
 
@@ -352,7 +352,7 @@ write you just made. The full contract is in the [HTTP reference](../reference/h
 - After an input edit the subscription receives the input's change, then **each formula row that changed, once**, at its final value. A
   recompute that left a value unchanged sends nothing. A value computed before you subscribed is in the snapshot.
 - A row's formula is its JSON object in a snapshot page's `data` and in a change's `row` and `prev` (a map in MessagePack).
-  (**BL-1495, next train**) A snapshot's `column_types` names the column `"Expression"`.
+  (**BL-1495, 0.15.0**) A snapshot's `column_types` names the column `"Expression"`.
 - A change event's `token` is a valid cover for a later token read: it never claims an input the event's values do not reflect. Tokens are
   not ordered across events: **keep the highest you have seen.** A notice's token (`horizon`, `range_delete`) is not a cover.
 - `at_least` on a subscribe of a formula table waits for the maintainer exactly as a read does, with the same `409 TOKEN_UNSATISFIED` and
@@ -428,7 +428,7 @@ a query a formula reads.
 - A **replica** applies the primary's computed values as ordinary rows and computes none. It serves reads without a token; a token read of a
   formula table is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`. A replica refuses
   [`explain`](../reference/http-api.md#explain-a-formula-cell) with `503 FORMULA_NOT_MAINTAINED`: it would read the replica's own tables,
-  which do not hold the replicated rows, and an index replication never updates (**BL-1511, next train**). Explain on the primary.
+  which do not hold the replicated rows, and an index replication never updates (**BL-1511, 0.15.0**). Explain on the primary.
 - A node whose formula maintainer is not running refuses a wait for it with **`503 FORMULA_NOT_MAINTAINED`**: a branch, a server in the
   moment before its replication role is resolved, and a promoted node until BL-1441 is fixed. Read there; wait on the primary. The SDKs do
   not retry it: it is the node's state, not overload.
@@ -501,7 +501,7 @@ grid or UI component; values computed per viewer.
 | `403 FORMULA_REFERENCE_NOT_READABLE` | The formula reads a row its writer may not read | Reference rows the writer can read, or have a writer who can read them write it |
 | `409 FORMULA_VALUE_WRITE_REFUSED` | A hand-written value in a formula row, or a formula and its value in one row | Write the formula as null in the same write to make the row an input |
 | `409 FORMULA_TABLE_REFERENCED` | DDL on a table or column a formula reads, or an Expression column added to the source of a materialized query a formula reads | Change those formulas first (`TRUNCATE` is allowed) |
-| `409 TOKEN_UNSATISFIED` on a read | The formulas did not catch up with your token within `waitMs` — or a materialized query a formula **of this table** (or of a formula table it reads) reads cannot catch up (**BL-1505, next train**) | Read again, with a longer wait for a large model; check the queries your formulas read |
+| `409 TOKEN_UNSATISFIED` on a read | The formulas did not catch up with your token within `waitMs` — or a materialized query a formula **of this table** (or of a formula table it reads) reads cannot catch up (**BL-1505, 0.15.0**) | Read again, with a longer wait for a large model; check the queries your formulas read |
 | `421 FORMULA_TOKEN_REQUIRES_PRIMARY` | A token read of a formula table went to a replica | Send it to the primary, or read without a token |
 | `503 FORMULA_NOT_MAINTAINED` | This node's formula maintainer is not running (a branch, a role not resolved yet, a promoted node: BL-1441) | Wait on the primary |
 | `400 EXPR_CELLREF_NOT_ALLOWED` | A `cellRef` outside a formula | Move it into a formula |
