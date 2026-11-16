@@ -939,7 +939,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. (**ADR 0072, 0.14.0**) On a read of a table with an `Expression` column the wait is for the formula maintainer to recompute every commit up to the token, and it is `TOKEN_UNSATISFIED` whatever `onExceeded` says. |
 | `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
 | `FORMULA_TOKEN_REQUIRES_PRIMARY` | 421 | (**ADR 0072, 0.14.0**) A consistency token on a read or subscribe of a table with an `Expression` column reached a replica, which computes no formulas and cannot judge it. Send the read to the primary, or read without a token. |
-| `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, 0.14.0**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. |
+| `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, 0.14.0**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. `explain` is refused too on a node that serves a replica's rows — a replica, or a promoted node until BL-1441 is fixed (**BL-1511, next train**). Explain on the primary. |
 | `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**ADR 0072, 0.14.0**) A `cellRef` node outside a formula (the value of an `Expression` column): in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output. |
 | `FORMULA_COLUMN_INVALID` | 400 | (**ADR 0072, 0.14.0**) An `Expression` column's declaration, or a later change to its table, breaks a rule of the column type (the Expression column nullable and plain; its driven column a nullable scalar of the same table that nothing else computes or drives; the table with a strict primary key, an ordinary table). The message names the table, the column and the rule; nothing was changed. See [Formulas](../guides/formulas.md#the-column). |
 | `FORMULA_INVALID` | 400 | (**ADR 0072, 0.14.0**) A formula is not one valid expression: it does not parse, uses a `param`, an unknown function or operator, a type its driven column cannot hold without loss (the message says what to write, e.g. `round(x, 2)`), is computed by a `setExpr`, or arrives through a transform. The message names the row; nothing was written. |
@@ -2076,8 +2076,10 @@ Insert rows into a table on a branch; they are written to the branch's own segme
 
 (**ADR 0072, 0.14.0**) `POST /api/databases/{db}/tables/{table}/explain` says why a [formula](../guides/formulas.md) cell has the
 value it has. It evaluates the cell **again now** and answers its formula, every reference with its resolved key and current value, the
-value or the reason it has none, the value the row stores, and the formula cells that read it. It writes nothing, so a replica answers it
-too. It needs read access to the table.
+value or the reason it has none, the value the row stores, and the formula cells that read it. It writes nothing, but it reads this
+node's own tables, so a node that serves a replica's rows — a replica, or a promoted node until BL-1441 is fixed — refuses it with
+`503 FORMULA_NOT_MAINTAINED` (**BL-1511, next train**); explain on the primary. A primary, a standalone node and a branch answer it.
+It needs read access to the table.
 
 ```json
 { "key": { "dept": "Online", "line": "Margin", "year": 2028 }, "column": "amount" }
@@ -2132,7 +2134,9 @@ with no row (`kind: "noRow"`); a reference to a row it may not read keeps its `t
 write the caller just made.
 
 **Refusals.** `400 INVALID_REQUEST` when `key` or `column` is missing, the key is not the table's full primary key or holds a value its
-column cannot, or `column` is neither an Expression column nor a column one drives; `404 TABLE_NOT_FOUND` / `DATABASE_NOT_FOUND`.
+column cannot, or `column` is neither an Expression column nor a column one drives; `404 TABLE_NOT_FOUND` / `DATABASE_NOT_FOUND`;
+`503 FORMULA_NOT_MAINTAINED` — on a node that serves a replica's rows (**BL-1511, next train**). Not retried by the SDKs; no
+`Retry-After`.
 
 The SDKs: `ExplainAsync` (C#) and `table.explain(key, column)` (TypeScript).
 

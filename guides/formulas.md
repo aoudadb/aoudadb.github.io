@@ -426,12 +426,15 @@ a query a formula reads.
   answers `409 TOKEN_UNSATISFIED` if the wait runs out); a read without a token may still show a value from before. At 100 000 formula
   cells the open takes several seconds longer — 7 to 21 s measured on 8 vCPUs, plus about 5 s of recompute (see [Sizing](sizing.md#formula-tables-what-they-cost)).
 - A **replica** applies the primary's computed values as ordinary rows and computes none. It serves reads without a token; a token read of a
-  formula table is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`.
+  formula table is refused `421 FORMULA_TOKEN_REQUIRES_PRIMARY`. A replica refuses
+  [`explain`](../reference/http-api.md#explain-a-formula-cell) with `503 FORMULA_NOT_MAINTAINED`: it would read the replica's own tables,
+  which do not hold the replicated rows, and an index replication never updates (**BL-1511, next train**). Explain on the primary.
 - A node whose formula maintainer is not running refuses a wait for it with **`503 FORMULA_NOT_MAINTAINED`**: a branch, a server in the
   moment before its replication role is resolved, and a promoted node until BL-1441 is fixed. Read there; wait on the primary. The SDKs do
   not retry it: it is the node's state, not overload.
 - A **branch** validates formulas written on it like the main database (its index of formulas is built when it opens) but computes none: it
-  shows the values it inherited, and a formula written on the branch has a null value (BL-1436).
+  shows the values it inherited, and a formula written on the branch has a null value (BL-1436). `explain` still works on a branch: it
+  shows what the formula computes now from the branch's rows, beside the null the branch stores.
 - **Point-in-time restore**: see BL-1485 under [Known issues](#known-issues) before restoring a database that has formula tables to a point in
   time.
 
