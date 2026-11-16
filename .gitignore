@@ -14,3 +14,6 @@ vendor/
 
 # Claude Code local worktrees and settings
 .claude/
+
+__pycache__/
+*.pyc
