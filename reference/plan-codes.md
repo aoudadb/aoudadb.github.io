@@ -80,7 +80,7 @@ The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, 
 | `PRINCIPAL_ATTRIBUTE_INVALID` | error | `principals` | offline | 78 | Give the attribute a valid name and values of one type, within the caps (1 000 values per attribute, 5 000 per principal). |
 | `KEY_ROOT_MISSING` | error | `principals` | offline | 78 | Declare "keyRoot": { "env": NAME } or { "file": path } at the top of the file, or remove the derivedKey credentials. |
 | `KEY_ROOT_INVALID` | error | `principals` | offline | 78 | Generate a key root (aouda keys new-root) and give it by reference; a previous root is declared beside a different current one. |
-| `KEY_DECLARATION_INVALID` | error | `principals` | offline | 78 | Declare a stored key as { "id": "aouda_<16>", "sha256": "<64 hex>" } and a derived key's version as a whole number from 1; never the key itself. |
+| `KEY_DECLARATION_INVALID` | error | `principals` | offline and state | 78 | Declare a stored key as { "id": "aouda_<16>", "sha256": "<64 hex>" } and a derived key's version as a whole number from 1; never the key itself. |
 | `KEY_ID_DUPLICATE` | error | `principals` | offline | 78 | Give each principal its own key: a key id is one credential of one principal. |
 | `OIDC_TRUST_INVALID` | error | `principals` | offline | 78 | Give the trust an absolute https issuer, a non-empty audience and subject, and values without surrounding blanks. |
 | `OIDC_TRUST_DUPLICATE` | error | `principals` | offline and state | 78 | Declare the trust on one principal: a token that matches two principals' trusts is refused. |
