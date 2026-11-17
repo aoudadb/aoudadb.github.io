@@ -82,9 +82,7 @@ application.
 | `Timeout` | 30 s | Deadline for one request. Bulk load uses its own, `BulkLoadOptions.RequestTimeout` (§7). |
 | `RetryPolicy` | `RetryPolicy.Default` (3 retries, exponential backoff; `Aouda.Client.Resilience`) | Retries of transient failures; see §8 for what a write may and may not repeat. `RetryPolicy.None` turns retries off. |
 | `CircuitBreakerPolicy` | `CircuitBreakerPolicy.Default` (opens after 5 failures in 30 s) | While open, calls fail at once with `CircuitBreakerOpenException`. `CircuitBreakerPolicy.Disabled` turns it off. |
-| `ApiKey` (**BL-1385, 0.11.0**) | none | An Aouda API key of any kind: `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key. Sent as `Authorization: Bearer`; the server resolves the kind. A value without the `mk_` prefix is refused at construction. Replaces `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin`, which are removed. `Databases.ListAsync` / `CreateAsync` need a `mk_srv_` key here. |
-| `UserToken` (**BL-1385, 0.11.0**) | none | A user's JWT sent as `X-User-Token` beside the key; needs a `mk_svc_` or `mk_srv_` `ApiKey`. Moved here from `AppAuthOptions` / `ServerAuthOptions`. |
-| `ServerAuth` / `AppAuth` | none | A signed-in session, not a key: server auth (`ServerAuthOptions`: `Email` + `Password`, or `Token` + `RefreshToken`) or application auth (`AppAuthOptions`: `Token` + `RefreshToken`). Mutually exclusive with each other, and with `ApiKey` (a key and a session are two credentials). See [Getting Started](../getting-started/index.md#sdk-usage-with-server-auth). |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | `AuthFailurePolicy` (**BL-1386, 0.11.0**) | nothing happens | Opt-in: `FailFast` throws `AoudaAuthenticationFatalException` for a rejected key instead of a failure a caller may retry later; `OnSustained` is called once after `SustainedAfter` (default 3) failures in a row. See [Getting Started](../getting-started/index.md#a-rejected-key-is-not-a-retry-bl-1386-0110). |
 | `SubscriptionConsumerQueueCapacity` (**BL-1421, 0.12.0**) | `10_000` | The unread-event bound of every subscription consumer on this client (table and named-query subscribes, typed tables too). Validated `>= 1` when the client is built (`ArgumentOutOfRangeException`-style refusal at construction). `SubscribeOptions.ConsumerQueueCapacity` overrides it for one subscription. See §8a. |
 | `AutoCreateSchema` | `false` | Typed inserts create a missing table from the type. |
@@ -101,7 +99,7 @@ using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "https://db.example.com",
     DatabaseName = "myapp",
-    ApiKey = "mk_srv_...",
+See [Access](../auth/index.md) (**BL-1464, next train**).
     Timeout = TimeSpan.FromSeconds(30),
 });
 ```
@@ -622,22 +620,21 @@ A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was 
 
 `client.GetTable(name).SubscribeAsync()` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
 `In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, 0.9.0**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
-a query, and the **data-plane listener** (the one browsers and `mk_pub_*` reach) refuses that by design: its callers send a named-query
+See [Access](../auth/index.md) (**BL-1464, next train**).
 name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
 
 | You are | Subscribe with | Listener |
 |---|---|---|
-| A trusted backend with a service key (`mk_svc_`) | `client.GetTable(t).Where(...).SubscribeAsync()`, or a named query | **Admin**, or either with a named query |
-| An application end user (user JWT or `mk_pub_*`) | `client.NamedQueries.SubscribeAsync(name, args)` | **Data-plane** |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 A table subscription sent to the data-plane listener fails with `NAMED_QUERY_SUBSCRIBE_REQUIRED`
 (`AoudaRequestException.ErrorCode`). The fix is not a different filter: subscribe **by name** (see
-[Named queries](../guides/named-queries.md#subscribe-by-name)), or point a trusted backend at the admin listener with its service key.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 The wire contract is in the [HTTP API reference](../reference/http-api.md#websocket-streaming-protocol).
 
 **What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and events follow the same grants as an HTTP query by
 the same credential; `SubscribeAsync` is authorized by the same role check (`read` on the table, and for a named query every table it
-touches), and the server re-reads the credential's permissions on every subscribe. A server API key (`mk_srv_`) that works over HTTP
+See [Access](../auth/index.md) (**BL-1464, next train**).
 on a linked application database opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
 
 ### Timestamp columns in a subscription
@@ -680,11 +677,10 @@ await foreach (var evt in client.GetTable("orders")
 ```
 
 **It is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: the snapshot and every event are what the
-credential's grants allow (a service key, or a user with the `all-partitions` grant, receives every partition, those created later
-too; a user with entitlements receives only its own). The data-plane listener ignores it. An older server ignores the field and
+See [Access](../auth/index.md) (**BL-1464, next train**).
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The flag itself writes nothing to the audit log; a grant that
 decides what a subscription sees is audited once per subscription
-([Authorization](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)).
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ### Named queries and the flag
 
@@ -911,7 +907,7 @@ handles (namespace `Aouda.Client` unless noted):
 | Exception | When |
 |---|---|
 | `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. |
-| `AoudaAuthenticationException` / `AoudaNotFoundException` (`Aouda.Abstractions`) / `AoudaMisdirectedRequestException` | `401` / `404` / `421`. (**BL-1422, 0.12.0**) The `Message` of every HTTP `401` and `403` refusal now carries the server's `suggestion` (which names the key kind and prefix the route takes) and the option to set (`AoudaClientOptions.ApiKey`, `ServerAuth`, `AppAuth` or `ServerUrl`), with the kind of credential this client was sending (for example `a service key (mk_svc_) set as AoudaClientOptions.ApiKey`). The key itself is never in the message. `ErrorCode`, `StatusCode`, `RequestId` and `Details` are unchanged; only `Message` is longer, so match on `ErrorCode`, not on the text. WebSocket and long-poll auth frames carry the server's message only; the option hint is added on HTTP. |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, 0.11.0**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |

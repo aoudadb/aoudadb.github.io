@@ -11,6 +11,7 @@ Low-level reference material for the Aouda wire protocol, type system, and error
 | Document | Contents |
 |---|---|
 | [HTTP API](http-api/) | Full wire protocol — every REST endpoint, request/response shapes, error codes |
+| [CLI](cli.md) | `aouda` commands: `plan`, `keys`, `whoami`, `login --oidc`, `policy explain` (**BL-1464, next train**) |
 | [Timestamp Type](timestamp.md) | Timestamp semantics, storage format, query and comparison behavior |
 | [Declaration Finding Codes](plan-codes.md) | Every code a refused start reports for its configuration: severity, stage, exit status, what to do (**BL-1463, 0.14.0**) |
 

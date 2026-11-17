@@ -59,7 +59,7 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 | `aouda start -h` / `aouda start --help` | Print start help (flags such as `--port`, `--data-dir`) and **do not** bind a port or create `./data`. |
 | `aouda stop` without Bearer | HTTP `stop` is **401**. Kill the recorded PID with `aouda stop -s http://127.0.0.1:<port> --force`. Do not expect unauthenticated HTTP shutdown. |
 | `aouda stop` without `-s http://127.0.0.1:<your-port>` | Can target the wrong process / URL |
-| Reuse another store's `mk_svc_` / admin token against a new `--data-dir` | `AUTH_API_KEY_INVALID` — keys belong to that store |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Sign in / init against someone else's running server | Wrong admin, wrong data; init is for **this** server's setup mode |
 | `POST /api/databases/{db}/query` on the **data-plane** | **404 by design.** Execute `POST /named-queries/{name}/query` (or batch). Ad-hoc query is admin-listener only. |
 | `partitionKey: 1` (or a bare number) on a column | `INVALID_REQUEST`. Table-level: `"partitionKey": [{"column":"Ticker"},{"column":"Source"}]`, `"clusterColumns": ["Time"]` |
@@ -67,8 +67,7 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 | `offsetParam` without a positive `"offset"` cap | Schema apply fails |
 | `Timestamp` as the time column for some `latestPerKey` / `aggregate` paths | `Invalid cast from DateTime to Int64`. Prefer **Int64** epoch milliseconds for that `orderBy` / time-bucket input when you hit this |
 | Treat query `data` as an array of row objects | Default body is **columnar**: `columns` + `data` + `rowCount` |
-| Expect raw `mk_anon_` / `mk_pub_` on `GET` keys list | Full secrets appear on **create** / **regenerate-keys** only. List responses are prefix / metadata, not usable keys |
-| `mk_pub_*` on the **admin** listener | `AUTH_KEY_LISTENER_MISMATCH` (expected — use the data-plane bind) |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Data-plane CORS as an indexed env key (`…CorsOrigins__0=…`) or a JSON **array** | `CorsOrigins` is a **single string** (comma-separated origins). Indexed/`__0` binding can crash Kestrel on 0.1.9 |
 
 ### CORS shape (correct)

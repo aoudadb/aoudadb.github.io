@@ -21,7 +21,7 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 
 ## Codes
 
-The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, `OIDC_TRUST_*`, `PASSWORD_SEED_*`, `ROLE_BUILTIN_NAME`, `STATEMENT_*`, `AUTH_PUBLIC_UNRESTRICTED`, `ROLE_RUNTIME_CONFLICT`, `DECLARED_OBJECT_OVERRIDDEN`, `PUBLIC_REACH_INERT` and `ACCESS_CONVERGE_REFUSED` codes check the declared access section of `aouda.json` (principals and their credentials, roles, `signup`, the key root; see [Declared access](../guides/declared-access.md)) (**BL-1464, next train**). The role codes of the old `permissions` grammar are gone with it, and so are the codes of the identities file, the bootstrap server key and `Aouda:Auth:RootUser`, which are refused as `SETTING_REMOVED` (**BL-1464, next train**).
+The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, `OIDC_TRUST_*`, `PASSWORD_SEED_*`, `ROLE_BUILTIN_NAME`, `STATEMENT_*`, `AUTH_PUBLIC_UNRESTRICTED`, `ROLE_RUNTIME_CONFLICT`, `DECLARED_OBJECT_OVERRIDDEN`, `PUBLIC_REACH_INERT` and `ACCESS_CONVERGE_REFUSED` codes check the declared access section of `aouda.json` (principals and their credentials, roles, `signup`, the key root; see [Declared access](../guides/declared-access.md)) (**BL-1464, next train**). The role codes of the old `permissions` grammar are gone with it, and so are the codes of the identities file and the bootstrap operator settings, which are refused as `SETTING_REMOVED` (**BL-1464, next train**).
 
 | Code | Severity | Stage | Half | Exit status | What to do |
 |---|---|---|---|---|---|
@@ -100,7 +100,7 @@ The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, 
 | `PUBLIC_REACH_INERT` | warning | `principalRows` | state | — | Give the public statement the restricting statement's row condition, or mark it unrestricted: until then it grants nothing on that table. |
 | `ACCESS_CONVERGE_REFUSED` | error | `principalRows` | state | 78 | Change the declaration as the message says; the start and the reload stop at the first write the principal store refuses. |
 | `PLAN_TARGET_UNREACHABLE` | error | `target` | target | — (`aouda plan` exits 69) | Check that the server is running this release or later, reachable at the URL given, and ready; retry after the delay it named. |
-| `PLAN_TARGET_REFUSED` | error | `target` | target | — (`aouda plan` exits 77) | Give a server key (mk_srv_) of that server with --key-file PATH or --key-env NAME. |
+| `PLAN_TARGET_REFUSED` | error | `target` | target | — (`aouda plan` exits 77) | Give an operator key of that server with --key-file PATH or --key-env NAME. |
 | `PLAN_DATA_DIRECTORY_IN_USE` | error | `target` | target | — (`aouda plan` exits 69) | Plan the running server with --server URL --key-file PATH, or stop it and plan again: two processes on one data directory are not safe. |
 | `PLAN_DATA_DIRECTORY_NEEDS_RECOVERY` | error | `target` | target | — (`aouda plan` exits 69) | Start the server once on this directory (it removes interrupted creations and drops), then plan again; a plan does not simulate the recovery. |
 

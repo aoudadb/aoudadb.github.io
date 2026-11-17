@@ -98,7 +98,7 @@ operators in `server.roles` and `server.principals`. What they mean — statemen
 | `statements` | array | `[]` | Statements every signed-up principal holds |
 
 `oidc` is refused (`DECLARATION_UNKNOWN_MEMBER`): external identity providers for end users are reserved and not built yet. The
-old `allowSelfSignup` and `selfSignupRole` members are refused naming `signup`.
+old signup flag and signup-role members are refused naming `signup`.
 
 ### `roles.<role>`
 
@@ -252,9 +252,9 @@ sections (a misspelt member too) and the two systemd credentials when present, b
 
 | Removed | Replacement |
 |---|---|
-| `Aouda:Auth:Keys:File` (the identities file) and anything under `Aouda:Auth:Keys` | each key's principal in `databases.<auth>.principals` or `server.principals`, with its `credentials`: a `derivedKey` from the file's `keyRoot`, or a stored key `{ "id", "sha256" }` |
-| `Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, anything under `Aouda:Auth:Bootstrap`; the systemd credential `aouda-server-key` | a `server.principals` entry holding the role `admin`, with a `derivedKey` or a stored key |
-| `Aouda:Auth:RootUser:Email`, `Password`, anything under `Aouda:Auth:RootUser`; the systemd credential `aouda-admin-password` | a `server.principals` entry named by the email, holding `admin`, with a password seed `{ "file" }` or `{ "env" }` (applied once, at creation, with a forced change) |
+| `Aouda:Auth:Keys` (the identities file) and anything under it | each key's principal in `databases.<auth>.principals` or `server.principals`, with its `credentials`: a `derivedKey` from the file's `keyRoot`, or a stored key `{ "id", "sha256" }` |
+| `Aouda:Auth:Bootstrap` and the systemd credential `aouda-server-key` | a `server.principals` entry holding the role `admin`, with a `derivedKey` or a stored key |
+| The first-operator email and password settings, and the systemd credential `aouda-admin-password` | a `server.principals` entry named by the email, holding `admin`, with a password seed `{ "file" }` or `{ "env" }` (applied once, at creation, with a forced change) |
 
 The embedded engine (`Aouda.Testing`, the dev server's own primary database) is not a configuration source and is not refused: it
 declares its databases in code.
@@ -272,7 +272,7 @@ declares its databases in code.
 | `OVERLAY_ABSENT` | info | No overlay for the environment; the file is read alone |
 | `OVERLAY_UNREADABLE` | error | The overlay exists and cannot be read, is empty or is not a JSON object |
 | `DATABASE_KIND_INVALID` | error | A database has no `kind`, or one other than `data` and `auth` |
-| `SETTING_REMOVED` | error | An `Aouda:Databases` setting, or (**BL-1464, next train**) an `Aouda:Auth:Keys` / `Bootstrap` / `RootUser` setting or the `aouda-server-key` / `aouda-admin-password` credential; names what replaces it |
+| `SETTING_REMOVED` | error | An `Aouda:Databases` setting, or (**BL-1464, next train**) an `Aouda:Auth:Keys` / `Bootstrap` / first-operator setting or the `aouda-server-key` / `aouda-admin-password` credential; names what replaces it |
 | `DATABASE_FIELD_INVALID`, `DATABASE_FIELD_NOT_FOR_KIND`, `DATABASE_NAME_INVALID`, `DATABASE_NAME_DUPLICATE`, `DATABASE_NAME_RESERVED`, `DATABASE_AUTH_NOT_STRICT`, `DATABASE_LINK_INVALID`, `DATABASE_LINK_NOT_AUTH` | error | The value rules of a database entry (a value out of range, a member the kind does not take, a name the server refuses, a durability other than `strict` on an `auth` database, a link that cannot be); unchanged by the file |
 | `DATABASE_LINK_UNDECLARED` | warning | `authDatabase` names a database the file does not declare: the start links to it only if the data directory has it as an application auth database |
 | `SETTING_INVALID` | error | `Aouda:Environment` is not a name |
