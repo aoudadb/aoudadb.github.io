@@ -508,7 +508,7 @@ Last verification date (UTC): `2026-04-01`.
 | Verification scope | Command | Result | Date (UTC) | Notes |
 |---|---|---|---|---|
 See [Access](../auth/index.md) (**BL-1464, next train**).
-| Dev server auth output tests | `dotnet test tests/Aouda.Cli.Tests --no-build --filter "FullyQualifiedName~DevServerIntegrationTests.AuthMode_" --verbosity minimal` | Pass (`2/2`) | 2026-04-01 | Verifies key output and existing-key prefix guidance |
+| Dev server auth output tests | `dotnet test tests/Aouda.Cli.Tests --no-build --filter "FullyQualifiedName~DevServerIntegrationTests" --verbosity minimal` | Pass (`2/2`) | 2026-04-01 | Verifies the dev-admin line |
 See [Access](../auth/index.md) (**BL-1464, next train**).
 | TypeScript auth client/handler/integration | `npm test -- tests/auth-client.test.ts tests/auth-handler.test.ts tests/auth-integration.test.ts` (in `../aouda-client-ts`) | Pass (`72/72`) | 2026-04-01 | Confirms app/server auth client lifecycle and transport behavior |
 

@@ -192,9 +192,7 @@ database opens, and the start exits `78`; the message names the replacement and 
 
 | Removed | Declare instead |
 |---|---|
-| `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`, `AOUDA_AUTH__BOOTSTRAP__SERVERKEYFILE` (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`) and every setting under `Aouda:Auth:Bootstrap` | A key-only operator, as above |
-| `AOUDA_AUTH__ROOTUSER__EMAIL`, `AOUDA_AUTH__ROOTUSER__PASSWORD` (`Aouda:Auth:RootUser`) | A first admin by password seed, as above |
-| `AOUDA_AUTH__KEYS__FILE` (`Aouda:Auth:Keys:File`, the identities file `aouda.identities.json`) and every setting under `Aouda:Auth:Keys` | Each key's principal in `databases.<auth>.principals` or `server.principals`, with its `credentials` ([Declared access](../guides/declared-access.md)) |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | The systemd credentials `aouda-server-key`, `aouda-admin-password` | Remove the `LoadCredential=` line and declare as above |
 
 Before 0.14.0 a declared server key did **not** end setup mode: it was inert until a human created an admin, so a fully
@@ -254,8 +252,7 @@ JSON.
 The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
 else missing).
 
-⚠️ **`aouda create-admin` refuses while the server runs** (**BL-1462, 0.14.0**). The server holds its data directory (an
-exclusive lock on `/data/Server/aouda.lock`), and `create-admin` opens the directory itself, so next to a running server it exits
+See [Access](../auth/index.md) (**BL-1464, next train**).
 `1` with:
 
 ```
@@ -263,13 +260,13 @@ The data directory '/data' is in use by another Aouda process (it holds Server/a
 ```
 
 Before, it succeeded: a second process wrote to the live data directory, and the running server stayed in setup mode until a
-restart. With the server stopped, `create-admin` works as before, over standard input or from a mounted file (never on the
+See [Access](../auth/index.md) (**BL-1464, next train**).
 command line):
 
 ```bash
 docker compose stop aouda
 printf '%s' "$ADMIN_PASSWORD" | docker compose run --rm -T --entrypoint aouda aouda \
-  create-admin --email admin@example.com --password-stdin --data /data
+See [Access](../auth/index.md) (**BL-1464, next train**).
 docker compose start aouda
 ```
 
@@ -296,7 +293,7 @@ file's directory, and `$NAME` / `${NAME}` in the path are expanded from the envi
 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused) with one trailing newline ignored; a
 missing, unreadable or empty file stops the start. Docker mounts file-based secrets as `0444` by default, and this source does not
 refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md#secret-files). The identities file's
-`{ "file" }` secrets (**BL-1389, 0.11.0**) went with the identities file: `Aouda:Auth:Keys:File` is refused (`SETTING_REMOVED`).
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ---
 

@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Guides, deployment and examples no longer describe the 0.14 access model (BL-1464, next train).** Partition security, key kinds and the access-surface page are gone from the guides. `guides/access-surface.md` is deleted. What a removed input now gets is [Moving from 0.14](auth/migrating-from-0-14.md).
+
 - **[HTTP API](reference/http-api.md) and a new [CLI reference](reference/cli.md) (BL-1464, next train).** The access section of the HTTP reference is principals, credentials and policy: `whoami`, the access routes, the key and session calls, and one error body with a `remedy`. `reference/cli.md` is `aouda --help` as of this release: `keys new`, `keys new-root`, `keys derive`, `whoami`, `login --oidc`, `policy explain`, `plan` (including `--data-dir`).
 
 - **The access chapter is rewritten around principals, policy and credentials (BL-1464, next train).** [Access](auth/index.md) states the model in those three words. New pages: [Principals](auth/principals.md), [Policy](auth/authorization.md), [Credentials](auth/credentials.md), [whoami and remedy](auth/whoami.md), and [Moving from 0.14](auth/migrating-from-0-14.md), which is the only page that still names a 0.14 concept, and says what that input now gets. [Setup](auth/setup.md), [Architecture](auth/architecture.md), [Client integration](auth/client-integration.md), [Use cases](auth/use-cases.md), [Auth reference](auth/reference.md) and [Getting started: authentication](getting-started/auth.md) use the same words. A browser holds no key. A key in an example is `aouda_<id>` or a placeholder that fails the checksum.

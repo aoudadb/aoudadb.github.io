@@ -374,7 +374,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  apiKey: "mk_srv_example",
+See [Access](../auth/index.md) (**BL-1464, next train**).
 });
 
 const mem = await client.admin.server.memory();
@@ -452,7 +452,7 @@ Steps:
 
 Expected result checks:
 - `/health` is reachable.
-- `ServiceKey("myapp")` starts with `mk_svc_`.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 - `CreateUserHttpClientAsync(...).GetAsync("/api/databases/myapp/auth/me")` returns `200`.
 
 ### Scenario 2: Developer local workflow (`aouda start` + SDKs)

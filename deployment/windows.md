@@ -126,7 +126,7 @@ The same shape: Aouda sizes scan parallelism from the cores it can see. On a ded
 
 ⚠️ **Aouda does not accept a password on the command line**, on any platform. A command line is recorded by shell history, by process-creation audit events, and by CI logs; none of that can be un-leaked.
 
-⚠️ `create-admin` needs the service **stopped**: a running server holds its data directory, and `create-admin` then exits `1`
+See [Access](../auth/index.md) (**BL-1464, next train**).
 naming the remedy (`POST /api/auth/setup` from this machine, or stop the service first) (**BL-1462, 0.14.0**). A server that
 declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, next train**).
 
@@ -136,12 +136,12 @@ $path = 'C:\ProgramData\Aouda\admin-password'
 Set-Content -Path $path -Value $env:ADMIN_PASSWORD -NoNewline -Encoding utf8
 icacls $path /inheritance:r /grant:r "$env:USERNAME:(R)"
 
-& 'C:\Program Files\Aouda\Aouda.Server.exe' create-admin `
+See [Access](../auth/index.md) (**BL-1464, next train**).
   --email admin@example.com --password-file $path `
   --data 'C:\ProgramData\Aouda\data'
 
 # Or standard input, which touches no filesystem
-$env:ADMIN_PASSWORD | & 'C:\Program Files\Aouda\Aouda.Server.exe' create-admin `
+See [Access](../auth/index.md) (**BL-1464, next train**).
   --email admin@example.com --password-stdin `
   --data 'C:\ProgramData\Aouda\data'
 ```

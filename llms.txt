@@ -51,7 +51,7 @@
 See [Access](auth/index.md) (**BL-1464, next train**).
 - [Division of responsibility](https://aoudadb.github.io/guides/division-of-responsibility/): What belongs in Aouda vs a service; decision test; latency caveat
 - [Insert-time transforms](https://aoudadb.github.io/guides/insert-transforms/): derived columns, checks, route/tee, bulk-load intent, unique/references
-- [Access-surface diff](https://aoudadb.github.io/guides/access-surface/): `aouda schema diff --access` CI gate on widening
+- [Access-surface diff](https://aoudadb.github.io/auth/authorization/#audit): `aouda schema diff --access` CI gate on widening
 - [Query Execution](https://aoudadb.github.io/guides/query/): Runtime model, predicates, joins, aggregations, pagination. 0.3.0 (ColumnarRead): every read runs on one scan that skips row groups by their statistics; embedded `GroupBy(…)` + `GroupAggregateAsync()` (`AggregateAsync()` refuses a grouped query); `SUM` over no value is `null`; strings order by code point, nulls last ascending; `LatestPerKey` / `FirstPerKey` are embedded-only (not over HTTP or the TypeScript client)
 - [Schema Lifecycle](https://aoudadb.github.io/guides/schema/): Schema-on-write, explicit schema, evolution, inference modes. 0.2.0: `Decimal(p,s)` (`precision` / `scale`, p ≤ 18), stored as a scaled 64-bit integer; 0.4.0 (LoadSpeed S13): the only decimal type — `"type": "Decimal"` without `precision` / `scale` is refused, computed outputs and `cast` spell it `"Decimal(18,6)"`, a C# `decimal` property needs `[AoudaDecimal(p, s)]`, and the frame's 128-bit `Decimal` kind (6) is refused
 - [Schema Management](https://aoudadb.github.io/guides/schema-management/): Declarative schema, aouda.schema.json, diff and apply

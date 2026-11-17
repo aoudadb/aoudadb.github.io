@@ -84,7 +84,7 @@ printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
 
 The password goes on standard input, never on curl's command line.
 
-`kubectl exec ... aouda create-admin` refuses while the server runs in the pod: the server holds the data directory.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ## Upgrade
 

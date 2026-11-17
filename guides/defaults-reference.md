@@ -236,7 +236,7 @@ is taken only if nothing of the same or a higher class is waiting — a read's o
 request blocked by its own database's cap holds back only that database (**BL-861, WorkloadCore S18, 0.3.0**; see
 [Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-030)).
 
-(**WorkloadCore S06, 0.3.0**) **Classes no longer have entitlements.** The per-class shares of the transient budget
+See [Access](../auth/index.md) (**BL-1464, next train**).
 (`Interactive` 0.35, `Streaming` 0.05, `Ingest` 0.25, `Background` 0.25, `Maintenance` 0.10, with different fractions in
 the `Abundant` resource mode), borrowing of idle headroom between classes, and `Aouda:Memory:PerClassAdmissionEnabled` are
 removed; a class orders the queue and does not cap what it may hold. The resource modes those fractions differed by are
@@ -308,9 +308,9 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 |---|---|---|
 | Live subscriptions on one WebSocket connection | `32` | `Aouda:WebSocket:MaxSubscriptionsPerConnection` |
 | Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
-| Live subscriptions for one service key without a `user_token`, across every connection (**BL-1383, 0.11.0**) | `1024` | `Aouda:WebSocket:MaxSubscriptionsPerServiceKey` |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Live connections (WebSocket and long-poll) for one identity (**BL-1383, 0.11.0**) | `16` | `Aouda:WebSocket:MaxConnectionsPerIdentity` |
-| Live connections for one service key or server admin key (`mk_srv_`) without a `user_token` (**BL-1383, 0.11.0**) | `64` | `Aouda:WebSocket:MaxConnectionsPerServiceKey` |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Subscribe attempts: bucket size per identity (**BL-1383, 0.11.0**) | `512` | `Aouda:WebSocket:SubscribeRate:Burst` |
 | Subscribe attempts: refill per second (**BL-1383, 0.11.0**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
@@ -328,8 +328,7 @@ A subscribe is bounded by its own **token bucket per identity** (**BL-1383, 0.11
 on both listeners and on long-poll `/send`, and `Aouda:IdentityQuota:Enabled=false` does not switch it off.
 Over the bound the server answers `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` (a `Retry-After` header on a long-poll
 `/send`). The connection limit counts WebSocket and long-poll sessions together and refuses inside the handshake with
-`IDENTITY_CONNECTION_LIMIT_EXCEEDED`. A public (`mk_pub_*`) key's identity is the key **and** the visitor's remote address,
-so anonymous visitors of one app do not share these limits; a service key's is the key alone. **Behind a reverse proxy** the visitor's address
+See [Access](../auth/index.md) (**BL-1464, next train**).
 is known only if `Aouda:ForwardedHeaders` is configured: without it every visitor of a public key shares the proxy's address, so
 one connection budget, one subscription cap and one subscribe bucket. Configure it before relying on per-visitor limits.
 The server refuses to start on a cap below 1, a burst below 1 or a negative refill. `auth_ok.limits` reports `0` for a limit
@@ -362,9 +361,7 @@ not set) counts as not set and is not refused.
 
 | Removed | Replacement |
 |---|---|
-| `Aouda:Auth:Keys:File` (the identities file, `aouda.identities.json`; env `AOUDA_AUTH__KEYS__FILE`) and every setting under `Aouda:Auth:Keys` | Declare each key's principal in the declaration file: `databases.<auth>.principals` or `server.principals`, with its `credentials` (a `derivedKey` from the file's `keyRoot`, or a stored key `{ "id", "sha256" }` under `keys`) |
-| `Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Bootstrap:ServerKeyFile` (env `AOUDA_AUTH__BOOTSTRAP__SERVERKEY` / `AOUDA_AUTH__BOOTSTRAP__SERVERKEYFILE`) and every setting under `Aouda:Auth:Bootstrap` | Declare the operator: a `server.principals` entry holding the role `admin`, with a `derivedKey` (from the file's `keyRoot`) or a stored key `{ "id", "sha256" }` |
-| `Aouda:Auth:RootUser:Email`, `Aouda:Auth:RootUser:Password` (env `AOUDA_AUTH__ROOTUSER__EMAIL` / `AOUDA_AUTH__ROOTUSER__PASSWORD`) | Declare the first admin: a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash": ... }`. The seed is applied only when the principal is created, with a forced password change at the first sign-in, never again |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | The systemd credentials `aouda-server-key` and `aouda-admin-password` (present in `$CREDENTIALS_DIRECTORY`) | Remove the unit's `LoadCredential=` line and declare as above |
 
 A first admin by password seed, and a key-only operator whose key root comes from a secret:
@@ -421,7 +418,7 @@ configuration source refuses the start (`SETTING_REMOVED`, naming the member tha
 |---|---|---|
 | `kind` (**BL-1379, 0.11.0**; required since **BL-1463, next train**) | none | `"data"`, or `"auth"` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `durability` on an `auth` entry must be absent or `"strict"`) |
 | `schema`, `schemaAllowDestructive` (**BL-1388, 0.11.0**) | none, `false` | With `"kind": "data"`: a schema file the server applies at start (relative to the directory of `aouda.json`; its overlay follows `Aouda:Environment`), and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
-| `roles.<role>` on an auth database (**BL-1392, 0.11.0**) | none | With `"kind": "auth"`: a custom role (`description`, `permissions`) created or converged at start; roles not listed are never touched; a system role, or a signup role with an `all-partitions` / `all-rows` grant, fails the start. See [Server and multi-database](server-multi-database.md#per-database-settings-databases-in-aoudajson) |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | `authDatabase` (**BL-1379, 0.11.0**) | none | With `"kind": "data"`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
 ```json
@@ -458,8 +455,7 @@ unlinked" or "must not exist", and a database removed from the file is left alon
 `_auth` and `_settings` are never declarable (`_serverauth` is created by an operator declared in `server.principals`, the dev
 admin, or setup; **BL-1464, next train**).
 
-**A declarative link creates no API key.** A key minted at start has no reader, so it would be an orphan `db_admin` credential. After
-a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when an operator calls `regenerate-keys`
+See [Access](../auth/index.md) (**BL-1464, next train**).
 (which returns them once; a key that must survive a wipe is a declared principal's credential, **BL-1464, next train**); a `POST /api/databases` that links still returns
 them as before. Startup order after a wipe: declared databases and links, then `_serverauth` (its declared operators, or setup), then each
 declared `SchemaFile` (**BL-1388, 0.11.0**), then declared roles (**BL-1392, 0.11.0**) and principals with their credentials

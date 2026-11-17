@@ -151,7 +151,7 @@ They:
 
 1. Copy **binaries only** to the install directory (any path the operator chooses).
 2. Create the **data directory** (default `C:\ProgramData\Aouda\data` on Windows, `/var/lib/aouda` on Linux).
-3. Bootstrap the first admin into the data directory (`create-admin`).
+See [Access](../auth/index.md) (**BL-1464, next train**).
 4. Register the OS service with bootstrap flags embedded in the service definition.
 
 **Windows Service** (`binPath` / `BinaryPathName`):
@@ -291,7 +291,7 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 |---|---|---|
 | `Aouda:Cpu:ConfiguredCores` | unset | Overrides CPU detection. Set it when the process is co-tenanted and no cgroup quota is available — see [Sizing](sizing.md#sizing-cpu). |
 | `Aouda:Cpu:OversubscriptionFactor` | `2.0` | Ceiling on total granted parallelism as a multiple of schedulable cores. |
-| ~~`Aouda:Memory:PerClassAdmissionEnabled`~~ | — | **Removed (WorkloadCore, 0.3.0)**: the per-class ceilings are gone; work asks for memory before it starts and waits in its class's queue. Was: | Per-class entitlements. Off admits against the process ceiling alone, which is the pre-governance behaviour. Always off under `Advisory` enforcement (embedded, `aouda dev`). |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | `Aouda:Memory:ForegroundQuiescenceWindow` | see `MemoryBudgetSection` | How long after the last foreground unit finishes before background work returns to full rate. |
 | `Aouda:Memory:PageCacheEnabled` | unset | Unset: **on**, within its `MaxPageCacheBytes` (`T12`) share (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode every database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). `false` turns it off; `true` is the default said out loud. |
 | ~~`Aouda:Memory:ResourceMode`~~ | — | **Removed (WorkloadCore S17, 0.3.0)** with the resource mode: the engine no longer classifies itself `Constrained` / `Balanced` / `Abundant`, and its buffering thresholds are one formula on every host (see [Sizing](sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-030)). A server still configured with it logs a warning at boot. Was: pinned the resource state instead of measuring it. |
@@ -323,7 +323,7 @@ it is replicating — the deletions reach it through replication, like any other
 configuring for this; the sweep reads the node's role.
 
 ℹ️ **`_api_keys` is deliberately not swept**, though it also has an `expires_at`. That column is
-nullable there (`null` means *never expires*), and an API key row is an administrative record: an
+See [Access](../auth/index.md) (**BL-1464, next train**).
 expired key is *refused* at validation time, but the row stays so it still appears in the admin
 listing as expired rather than vanishing. `_audit_log` is not swept either — it is the one auth
 table left demotable on purpose, so unbounded growth pages to disk instead of exhausting a pin.

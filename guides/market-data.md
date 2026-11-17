@@ -10,7 +10,7 @@ Document status: Approved baseline
 Primary owner: Aouda maintainers  
 Last updated: 2026-10-27
 
-This guide walks through a complete financial market-data workload on Aouda: quote ticks, OHLC candles, a paged screener, and real-time ranking — all from a **browser-tier caller** holding only a `mk_pub_*` key on the data-plane listener. Every recipe in §§2–8 is executable against the published conformance fixture.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 **Related guides:**
 
@@ -27,11 +27,11 @@ This guide walks through a complete financial market-data workload on Aouda: quo
 
 ## 1. Audience and scope
 
-**Browser-tier caller** (this guide's primary audience): a web app or mobile client holding a public `mk_pub_*` key on the data-plane. You can:
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 - Execute named queries (by name) and read columnar results.
 - Subscribe to named queries over WebSocket for real-time updates.
-- See only tables / MQ result tables that have `dataPlaneAccess: true` in the schema.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 You cannot (data-plane restrictions):
 
@@ -64,7 +64,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
       },
       "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
       "clusterColumns": ["time"],
-      "dataPlaneAccess": true
+See [Access](../auth/index.md) (**BL-1464, next train**).
     },
     "trades": {
       "columns": {
@@ -77,7 +77,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
       },
       "partitionKey":   [{ "column": "ticker" }, { "column": "source" }],
       "clusterColumns": ["time"],
-      "dataPlaneAccess": true
+See [Access](../auth/index.md) (**BL-1464, next train**).
     },
     "listings": {
       "columns": {
@@ -87,7 +87,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
         "country":  { "type": "String" },
         "mcap":     { "type": "Int64" }
       },
-      "dataPlaneAccess": true
+See [Access](../auth/index.md) (**BL-1464, next train**).
     }
   },
   "materializedQueries": {
@@ -99,7 +99,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
       "descending":  true,
       "select":      ["ticker", "source", "bid", "ask", "time"],
       "updateMode":  "sync",
-      "dataPlaneAccess": true,
+See [Access](../auth/index.md) (**BL-1464, next train**).
       "storage":     { "storageTemperature": "HotOnly" }
     },
     "candles_bid_1h": {
@@ -116,7 +116,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
         { "function": "last",  "outputName": "close", "sourceColumn": "bid", "orderByColumn": "time" }
       ],
       "updateMode": "sync",
-      "dataPlaneAccess": true,
+See [Access](../auth/index.md) (**BL-1464, next train**).
       "storage":    { "storageTemperature": "ColdPreferred" }
     },
     "bars_with_change": {
@@ -141,7 +141,7 @@ All tables, materialized queries, and named queries for the market-data fixture 
         }
       ],
       "updateMode": "sync",
-      "dataPlaneAccess": true,
+See [Access](../auth/index.md) (**BL-1464, next train**).
       "storage":    { "storageTemperature": "HotOnly" }
     }
   },
@@ -238,7 +238,7 @@ Key design decisions:
 - **This schema is a tick tape, and that is the layout to copy only for a tick tape.** `quotes` and `trades` partition on `(ticker, source)` and cluster on `time`, because one ticker holds a great many ticks and every read names the ticker and the source. `partitionStorage` is left unset, so the table is `Auto`: a pair that reaches 10 million rows or 1 GB is promoted to its own directory, and a chart of that ticker reads that directory. A daily series (one row per security per day, plotted across years) partitions on the security, uses a shared bucket and clusters on the date. A shared bucket is written and merged in key order and then time order, so each security keeps one run (**BL-1180, 0.9.0**). Up to 0.7.1 the merge ordered by `clusterColumns` only, so on those versions such a series lists the security again as the first `clusterColumns` entry, before the date. A tick tape needs neither: a promoted ticker is its own directory, and clustering on `time` alone keeps that directory in time order. A sensor feed whose old rows are irrelevant is a third layout. All three are in [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45). Copying the tick schema onto either of the others is the mistake that page is there to prevent.
 - **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. The partition key is the `(ticker, source)` pair, the same columns the candles group by. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, 0.4.0**). See [schema](schema.md).
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
-- **`dataPlaneAccess: true` on every MQ** — a missing flag means `POST .../named-queries/{name}/query` returns 404 on the data-plane. The schema file is the only place to set it; there is no table-options PATCH on the data-plane.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ---
 
@@ -302,7 +302,7 @@ their maintainer after the commit, so read with the insert's consistency token t
 ```http
 POST /api/databases/finance/named-queries/quotes.watchlist/query
 Content-Type: application/json
-Authorization: Bearer <mk_pub_key>
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 { "args": { "tickers": ["AAPL", "MSFT"], "source": "nasdaq" } }
 ```
@@ -340,7 +340,7 @@ Declare a `latestPerKey` MQ over `quotes`. The MQ maintains one row per `(ticker
   "descending":  true,
   "select":      ["ticker", "source", "bid", "ask", "time"],
   "updateMode":  "sync",
-  "dataPlaneAccess": true
+See [Access](../auth/index.md) (**BL-1464, next train**).
 }
 ```
 
@@ -374,7 +374,7 @@ Query or subscribe to `candles.byTicker` — a named query over the `candles_bid
 ```http
 POST /api/databases/finance/named-queries/candles.byTicker/query
 Content-Type: application/json
-Authorization: Bearer <mk_pub_key>
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 { "args": { "ticker": "AAPL" } }
 ```
@@ -382,7 +382,7 @@ Authorization: Bearer <mk_pub_key>
 Response columns: `["ticker", "time", "open", "high", "low", "close"]`. The `time` column contains the UTC **epoch-millisecond** start of each hour bucket — an Int64, not a formatted string. Candles are ordered ascending by time (as defined in the NQ).
 
 {: .important }
-**Ad-hoc `POST .../query` is 404 on the data-plane.** All browser-tier access goes through named-query names. Both the MQ (`candles_bid_1h`) and the named query (`candles.byTicker`) must be declared in the schema file; `dataPlaneAccess: true` must appear on the MQ entry, not patched in via table-options HTTP.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ### Day and minute intervals
 
@@ -397,7 +397,7 @@ Add separate MQs:
     { "column": "time", "function": "TruncateToDay", "outputName": "time" }
   ],
   "aggregates": [ ... ],
-  "dataPlaneAccess": true,
+See [Access](../auth/index.md) (**BL-1464, next train**).
   "storage": { "storageTemperature": "ColdPreferred" }
 }
 ```
@@ -598,15 +598,15 @@ The `derived` expression (base-table computed column) is a fallback for ranking 
 
 ### Pattern 1 — `jwt-claim` (single ticker per user)
 
-Each user's JWT carries a claim matching the partition key (for example ticker symbol). PLS validates or injects the filter automatically. Ideal for apps where each end user watches one symbol.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 See [Auth — jwt-claim mode](../auth/authorization.md#193-mode-1-jwt-claim-default).
 
-### Pattern 2 — `auth-db-entitlement` (multi-ticker watchlists)
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 When a user may access many tickers (watchlist, portfolio), store grants in the auth database. Fan-out: a named-query subscription automatically merges results from all granted tickers. Revoke access on the next request without re-issuing JWTs.
 
-See [Auth — auth-db-entitlement](../auth/authorization.md#194-mode-2-auth-db-entitlement-enhanced-pls) and [Division of responsibility](division-of-responsibility.md).
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ---
 
@@ -615,7 +615,7 @@ See [Auth — auth-db-entitlement](../auth/authorization.md#194-mode-2-auth-db-e
 | Step | Detail |
 |------|--------|
 | Schema file includes MQs | `materializedQueries` section in `aouda.schema.json` |
-| `dataPlaneAccess: true` on every MQ the browser reads | Set in the schema file, not patched via table-options HTTP |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Named queries select `outputName` columns | `open`, `high`, `low`, `close` — not `_max_bid` / `_first_open_val` |
 | No `crossPartitionAccess` in NQ params | A definition cannot set it, and the data-plane listener ignores it; bind the partition keys in the where clause (**BL-1227, 0.9.0**) |
 | Watchlist: both partition keys required | `ticker in $tickers` + `source eq $source` (not just ticker) |
@@ -683,7 +683,7 @@ await client.table("quotes")
   .execute();
 ```
 
-`.Aggregate(...)` is an admin-listener API, and `crossPartitionAccess` is honoured on the admin listener only: the data-plane listener ignores it. The flag waives the partition-filter guard (a scan cost guard) and nothing else. It never widens what the credential sees, so the credential still needs its entitlements. A named query accepts it per call on the admin listener (`crossPartitionAccess` in the execute body or a batch item); a definition cannot set it. (**BL-1227, 0.9.0**)
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ### Ad-hoc query on a candle table (admin HTTP)
 

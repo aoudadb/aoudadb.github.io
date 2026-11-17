@@ -9,11 +9,11 @@ parent: "Guides"
 Document status: Complete (P40 S09)  
 Last updated: 2026-08-21
 
-A **browser-tier** caller is `mk_pub_*` or an end-user JWT on the **data-plane listener**. It cannot compose an ad-hoc `QueryMessage`. It sends a named-query **name** plus arguments. This page is the list that page should have been: what that surface refuses, why, and what to do instead.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 Enumerable tables below are generated from the validators that enforce them. If a table and the engine disagree, the engine wins and this page is stale — pinned by `BrowserTierReadLimitsDocsTests`.
 
-**Related:** [How to build apps effortlessly with Aouda](build-apps.md) · [Named queries](named-queries.md) · [Direct client access](direct-client-access.md) · [Partitioning](partitioning.md) · [Access-surface diff](access-surface.md)
+**Related:** [How to build apps effortlessly with Aouda](build-apps.md) · [Named queries](named-queries.md) · [Direct client access](direct-client-access.md) · [Partitioning](partitioning.md) · [Access-surface diff](../auth/authorization.md#audit)
 
 ---
 
@@ -91,8 +91,11 @@ Hand-written rationale is in the sections after this block. Do not edit the tabl
 | `POST` | `/api/databases/{db}/named-mutations/{name}/execute` | Named-mutation execute |
 | `*` | `/api/databases/{db}/ws` | WebSocket (subscribe by name); method not checked |
 | `*` | `/api/databases/{db}/stream/longpoll/*` | WebSocket long-poll fallback (connect / send / poll / disconnect); method not checked |
+| `POST` | `/api/auth/oidc/token` | OIDC token exchange (Principals S08a, ADR 0071 D-18): a browser or a workload signs in |
+| `GET` | `/api/auth/whoami` | whoami (Principals S09a, ADR 0071 D-23): who the caller is and what it may do; anonymous without a credential |
 
 <!-- END GENERATED BROWSER-TIER-LIMITS -->
+
 
 `orderBy` takes **catalog column names** of those types. A `selectExpr` alias is not a sort key. `Bool`, `Guid`, and `Float32` are valid column types and are **not** sortable. (**BL-035, 0.9.0**) So are the six [array types](array-columns.md), which are valid column types that cannot be sorted on at all.
 
@@ -106,27 +109,27 @@ Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. (**BL-035, 0.9.0*
 
 **Rule.** On a partitioned table (`RequirePartitionFilter` defaults **on**, including tables created by `schema/apply` with a `partitionKey`), a query must include `eq` or `in` on **every** partition-key column. `in` lowers to OR-of-equality and **does** satisfy the guard.
 
-**Watchlist.** `Ticker in [~30 tickers] AND Source eq 'nasdaq'` is **one** named query / **one** subscription when `Ticker` and `Source` are the partition keys. The 32-per-connection cap is not an entitlement problem for that shape.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 **Does not satisfy the guard:** `nin`, ranges (`gt` / `lt` / `gte` / `lte`), `between` (which is `gte ∧ lte`), and `like` — including a pure prefix pattern such as `Ticker like 'EQN%'`, which looks prunable but is not: the guard is an access gate, and a pattern is not an enumeration of key values. A **prefix** of a composite key on a query that **reads rows** is refused — there is no prefix exception for scans.
 
 **Key-only DISTINCT** (the one exception): projection and predicate on raw partition-key columns only, and at least one partition key constrained by `eq`/`in`. That is the path for "which sources exist for this ticker?" It runs as a scan pruned to the constrained keys, and row groups the filter selects whole are answered from their statistics (**architecture review, 0.3.0**). Before, it was answered from the partition directory without reading row data, so a partition whose rows were deleted or truncated still appeared, and it was refused with `PARTITION_FILTER_REQUIRED` when the directory was incomplete (`data/` residue, a `_shared/` bucket) or over 10 000 tuples. Neither refusal remains.
 
-Pinned by `PartitionFilterRuleTests` (engine, per operator, including the watchlist `in`+`eq` shape) and `PartitionFilterRuleDataPlaneTests` (named query HTTP + subscribe on the data-plane with `mk_pub_*`).
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 **Why.** The guard is an access gate, not a pruner. Segment discovery is not partition-pruned, so a prefix on a row scan is `crossPartitionAccess` by another name.
 
-**Instead of a prefix on a row query:** enumerate the free key with a key-only DISTINCT, then pass it as an `in` parameter; or auth-db-entitlement fan-out; or an MQ keyed the other way.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ---
 
 ### `crossPartitionAccess` on the data-plane listener
 
-**Rule.** `crossPartitionAccess` is a per-call field on the **admin** listener: a named-query execute or batch item takes it, and so does a subscribe message. The **data-plane listener (the browser tier) ignores it**, so the partition-filter guard decides, and the `PARTITION_FILTER_REQUIRED` message says so. A named-query *definition* cannot set it. The browser-tier credentials could not use it anyway: data-plane `/query` and `/query/count` are 404; `mk_pub_*` on the admin listener is 401; ad-hoc WS `target` subscribe is `NAMED_QUERY_SUBSCRIBE_REQUIRED`. (**BL-1227, 0.9.0**)
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 **Why.** A definition that granted an unbounded scan would not be reviewable at persist time (`D-20`). The flag is a **cost guard**, not a confidentiality boundary: it waives the partition-filter guard and nothing else, so it never changes which rows a credential sees. It is unreachable from the browser by design.
 
-**Instead:** bind the partition key in the named query's `where` clause, or configure PLS on the table so the caller's partition is injected (auth-db-entitlement fan-out: the server injects the caller's grants); an aggregate / latest-per-key MQ over the universe with `dataPlaneAccess: true`; or `in` covering every partition key.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess: true` on the **admin** listener. That is not a browser-tier recipe.
 
@@ -224,7 +227,7 @@ A definition using `selectExpr` also cannot be subscribed (table above; **BL-170
 **Instead:**
 
 - Set `collapse_inserts: true` on the same `conflate` object. Matching inserts are held latest-wins per declared key; delivered `op` stays `"insert"`; `values_skipped` counts collapsed inserts. Transitions still flush.
-- Or declare a `latestPerKey` materialized query (no imperative HTTP create) with `dataPlaneAccess: true`, and subscribe to a named query over that result table. Upserts carry `prev`, so a pinned-predicate subscribe conflates without `collapse_inserts`.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 Do not point a 10 Hz last-price grid at an insert-only table plus default `conflate` and expect throttling.
 
@@ -244,7 +247,7 @@ Do not point a 10 Hz last-price grid at an insert-only table plus default `confl
 
 **Why.** The computation lives in the engine. The TypeScript CLI has `diff` / `apply` / `export` without `--access`.
 
-**Instead:** `dotnet tool install --global Aouda.Cli` in CI (any pipeline that already restores `Aouda.*` from the aoudadb feed), or the admin HTTP call. Do not skip the gate because the TS CLI cannot run it. See [Access-surface diff](access-surface.md#ci-gate).
+**Instead:** `dotnet tool install --global Aouda.Cli` in CI (any pipeline that already restores `Aouda.*` from the aoudadb feed), or the admin HTTP call. Do not skip the gate because the TS CLI cannot run it. See [Access-surface diff](../auth/authorization.md#audit).
 
 ---
 
@@ -256,7 +259,7 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 |---|---|
 | Watchlist `in` on a partition key | `Ticker in $tickers AND Source eq $source` — one named query, one subscribe |
 | `latestPerKey` without an imperative create | `materializedQueries` map, `type: "latestPerKey"` |
-| Browser-tier read of an MQ result table | `"dataPlaneAccess": true` on the **MQ entry** (default `false`). No table-options PATCH |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Candle columns named `high` / `open` | Aggregate MQ public shape is `outputName` on every read path (`D-31`) |
 | Distinct source list | `distinct: true` over partition-key columns with one key constrained ([key-only DISTINCT](#partition-filter-rule)). Answered on the scan, which skips row groups from their statistics (**architecture review, 0.3.0**). The partition-directory answer was retired — a directory outlives rows deleted from it — so deleted partitions no longer appear and `stats.distinctServedFromPartitionMetadata` is gone |
 | Paging | `limit` (required cap) + `limitParam` / `offsetParam` (param names; still need a numeric cap). Non-zero offset **disqualifies subscribe** |

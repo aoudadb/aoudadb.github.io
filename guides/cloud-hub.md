@@ -55,7 +55,7 @@ The Aouda server binary is a single executable supporting subcommand dispatch.
 | `aouda schema <subcommand>` | Schema management | `diff`, `apply`, `export`, `validate`, `history` |
 | `aouda plan` | Check what `aouda start` would refuse, offline, every problem at once (**BL-1463, 0.14.0**) | the same arguments as `aouda start`, `--skip-secrets`, `--json` |
 | `aouda init` | First-run server admin bootstrap | `--server <url>`, `--admin-email`, `--admin-password-file`/`--admin-password-stdin` |
-| `aouda create-admin` | Create first admin user directly to engine (no HTTP) | `--email`, `--password-file`/`--password-stdin`, `--data`, `--auth-database` |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | `aouda bulk-load` | Bulk-load rows into multiple tables atomically | `--tables <list>`, `--file <path>`, `--server`, `--database` |
 | `aouda table bulk-load` | Bulk-load rows into a single table | `<table>`, `--file <path>`, `--server`, `--database` |
 
@@ -110,13 +110,13 @@ aouda start --data-dir ./node3 --bind 0.0.0.0:5002 --join 192.168.1.10:5000 --ro
 **When to use:**
 - First-time installation by a developer or end user who doesn't want to work with CLI flags
 - Setting up Windows Service or systemd on a new machine interactively
-- Getting a Start Menu / `.desktop` shortcut and a printed API key
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 **How it works:**
 
 1. Place `Aouda.Setup.exe` (Windows) or `Aouda.Setup` (Linux) alongside `Aouda.Server.exe` / `Aouda.Server` in the release archive.
 2. Double-click or run `sudo ./Aouda.Setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
-3. Setup copies binaries, registers the OS service with `--data-path` and `--port`, bootstraps the admin, creates a shortcut, and prints a completion banner with the server URL and API key.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 See the [Studio guide §12](studio.md#12-aoudasetup-installer) and [Server configuration](server-configuration.md) for the full interactive prompt sequence, service registration details, and configuration precedence.
 
@@ -325,7 +325,7 @@ Server credentials (API keys, passwords) stored encrypted in Hub, accessible onl
 
 Environment variables with `AOUDA_HUB_` prefix:
 - `AOUDA_HUB_AOUDA_URL` — backing Aouda instance URL (**admin listener**, not the data-plane bind). JWKS works on both; Hub data/admin calls 404 on the data-plane. See [Direct client access](direct-client-access.md#studio-and-hub).
-- `AOUDA_HUB_AOUDA_SERVICE_KEY` — service key for backing Aouda
+See [Access](../auth/index.md) (**BL-1464, next train**).
 - `AOUDA_HUB_K8S_ENABLED` — enable K8s provisioner (default: false)
 
 ---
@@ -407,7 +407,7 @@ All management APIs are under the `/admin/` prefix, separated from data APIs und
 
 When a server auth database is configured, all admin endpoints require a bearer token (server auth scope). When no auth database is configured, admin endpoints pass through (same graceful behavior as all other endpoints).
 
-Server admin API keys (`mk_srv_` prefix) can be created, listed, and revoked via `/api/auth/admin/keys`.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ### Cluster API Examples
 
@@ -415,30 +415,30 @@ Server admin API keys (`mk_srv_` prefix) can be created, listed, and revoked via
 # Join a node to a cluster
 curl -s -X POST http://localhost:5000/admin/cluster/join \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"primaryAddress":"192.168.1.10:5000","replicaSetName":"prod-rs"}'
 # → 200 + { "message": "Joined cluster successfully", "replicaSetName": "prod-rs" }
 
 # Get cluster config
 curl -s http://localhost:5000/admin/cluster/config \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + { "mode": "cluster", "replicaSetName": "prod-rs", ... }
 
 # Patch mutable cluster config (heartbeatIntervalMs, electionTimeoutMs)
 curl -s -X PATCH http://localhost:5000/admin/cluster/config \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"heartbeatIntervalMs":3000}'
 # → 200 + updated config
 
 # Trigger failover (primary steps down)
 curl -s -X POST http://localhost:5000/admin/cluster/failover \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + { "message": "Primary stepped down; election triggered" }
 
 # Leave cluster (revert to standalone)
 curl -s -X DELETE http://localhost:5000/admin/cluster/leave \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + { "message": "Left cluster, now running as standalone" }
 ```
 
@@ -448,29 +448,29 @@ curl -s -X DELETE http://localhost:5000/admin/cluster/leave \
 # Trigger an immediate backup
 curl -s -X POST http://localhost:5000/admin/backup/trigger \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"incremental":true}'
 # → 202 + { "backupId": "...", "totalBytes": 1048576, "newBytes": 65536, ... }
 
 # List available backups
 curl -s http://localhost:5000/admin/backup/list \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + { "backups": [ { "backupId": "...", "createdUtc": "...", ... } ] }
 
 # Restore from a backup
 curl -s -X POST http://localhost:5000/admin/backup/restore/<backupId> \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + { "backupId": "...", "filesRestored": 42, "integrityVerified": true, ... }
 
 # Get backup schedule
 curl -s http://localhost:5000/admin/backup/schedule \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + { "cronExpression": null, "incremental": true }
 
 # Set backup schedule (daily at 02:00)
 curl -s -X PUT http://localhost:5000/admin/backup/schedule \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"cronExpression":"0 2 * * *","incremental":true}'
 ```
 
@@ -482,7 +482,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5000",
   database: "appdb",
-  apiKey: "mk_srv_...",   // BL-1385, 0.11.0: one option for a key of any kind
+See [Access](../auth/index.md) (**BL-1464, next train**).
 });
 
 // Cluster management
@@ -510,7 +510,7 @@ await using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5000",
     DatabaseName = "appdb",
-    ApiKey = "mk_srv_..."   // BL-1385, 0.11.0: one setting for a key of any kind
+See [Access](../auth/index.md) (**BL-1464, next train**).
 });
 
 // Backup management

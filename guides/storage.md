@@ -297,11 +297,9 @@ If you run server defaults and do not set per-database overrides:
     start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
     written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
     first with the build that wrote it, then delete the data directory and start fresh. Principals and keys declared in `aouda.json`
-    come back on the fresh start (**BL-1464, next train**); keys and entitlements created through the API do not.
+See [Access](../auth/index.md) (**BL-1464, next train**).
   - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
-    `id`, `user_id`, `dimension`, `entitlement_key`, `level`, `granted_by`, `valid_from`, `valid_to`, `created_at` and `source`, and an RLS resolver
-    rule's value source is stored as `Entitlement`. A format-17 directory makes the server refuse to start with
-    `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>`; there is no migration (see [Upgrading](upgrading.md#upgrading-to-entitlements-bl-1418-0130)).
+See [Access](../auth/index.md) (**BL-1464, next train**).
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
@@ -316,7 +314,7 @@ Invariants:
 
 - Persisted paths are deterministic from layout classes and storage constants.
 - Table directory name validity is enforced (invalid names rejected; no path sanitization tricks).
-- WAL replay never requires table directory guessing; resolver maps `TableId` to table directory.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 - Slot safety boundaries prevent WAL truncation ahead of active consumers.
 
 ### Deleted rows and retired segments (**Horizon, 0.5.0**)
@@ -814,7 +812,7 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
 | Catalog persistence round-trip | `CatalogPersistenceTests.cs`, `CatalogWalTests.cs` | Pass | Strong | Snapshot + catalog WAL paths |
 | Restart + WAL replay correctness | `EndToEndRestartTests.cs`, `WalReplayDriverTests.cs`, `WalCheckpointIntegrationTests.cs` | Pass | Strong | Core durability behavior |
 | WAL retention and lifecycle | `WalRetentionTests.cs`, slot/lifecycle tests from P4/P6 packages | Pass | Medium/Strong | Good functional coverage |
-| Table-name directory storage | P6 Task4 report-linked tests + `TablePathValidatorTests.cs` | Pass | Strong | Path validation and resolver wiring |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Per-table durability control | `TableDurabilityTests.cs`, `TableDurabilityPersistenceTests.cs` | Pass | Strong | Override + inheritance + persistence |
 | Backup engine | `BackupEngineTests.cs`, `BackupEngineParallelTests.cs`, `BackupEngineIntegrationTests.cs`, `BackupEngineSlotTests.cs` | Pass | Strong | Full/incremental/slot semantics |
 | Restore + PITR | `RestoreIntegrationTests.cs`, `Bl186S06PitrRecoveryPathTests.cs`, `Bl186S07PitrHttpTests.cs` | Pass | Strong | Exact restore + recovery-path PITR over HTTP |

@@ -363,7 +363,7 @@ See [Real-time streaming](real-time.md) for the protocol.
 ## Security
 
 (**ADR 0072, 0.14.0**) **A formula table's security is the table's own**, set by its owner like any table's: who may read, write and
-subscribe, which rows (a row condition, partition-level security, entitlements), the data-plane setting. There is no special grant, role
+See [Access](../auth/index.md) (**BL-1464, next train**).
 or default. The [guide](financial-model.md#step-9-who-may-see-and-write-what) puts a department row condition on two formula tables.
 
 One rule is added:

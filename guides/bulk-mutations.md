@@ -63,16 +63,14 @@ authorization scope to prevent accidental use.
 
 ### Authorization
 
-- `UPDATE` and `DELETE` require the standard **write permission** (`db_writer` or above).
-- `TRUNCATE` requires the additional **`Truncate`** scope — `db_admin` or a role with explicit
-  truncate permission. A `db_writer` role without truncate permission receives 403.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
-### Row-Level Security (RLS) and Partition-Level Security (PLS)
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
-- **RLS write validation** runs on every mutation, including expression SET values. If the
+See [Access](../auth/index.md) (**BL-1464, next train**).
   target column is restricted by a write policy for the caller's role, the mutation returns
   403 regardless of the expression type.
-- **PLS** enforces the caller's partition scope on the WHERE clause. Expression SET values
+See [Access](../auth/index.md) (**BL-1464, next train**).
   cannot reference columns outside the caller's authorized partition boundary.
 
 ---
@@ -218,7 +216,7 @@ When both `set` and `setExpr` target the same column, the literal `set` value wi
    snapshot, producing a concrete value.
 3. The concrete values are written to the HRA and WAL — no expression AST is stored in the
    WAL. Crash recovery and replication replay see only resolved values.
-4. RLS write validation runs on the resolved column name, the same as for literal SET values.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ### Limitations
 
@@ -266,9 +264,9 @@ Content-Type: application/json
 
 ### Authorization requirement
 
-`TRUNCATE` requires the `Truncate` authorization scope. A `db_writer` role without explicit
+See [Access](../auth/index.md) (**BL-1464, next train**).
 truncate permission receives `403 AUTHORIZATION_DENIED`. Grant truncate permission explicitly
-or use a `db_admin` credential.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ```bash
 # Attempt with insufficient permissions → 403
@@ -1008,13 +1006,12 @@ await client.branches.delete(`backup-${Date.now()}`);
 | `400 INVALID_REQUEST` on `set` / `setExpr` | `set` is empty, or `setExpr` references an unknown column | Check that SET contains at least one key; verify column names exist in table schema |
 | `400 COLUMN_NOT_FOUND` on expression | A `$col` / `colRef` name in `setExpr` or `selectExpr` does not exist in the schema | Correct the column name; use `GET /api/databases/{db}/tables/{name}` to inspect the schema |
 | `400 INVALID_REQUEST` on `selectExpr` | Alias collides with a physical column name, duplicate alias, empty alias, or more than 20 expressions | Rename the alias; remove duplicates; stay under the 20-expression limit |
-| `403 AUTHORIZATION_DENIED` on TRUNCATE | Caller has `db_writer` but not the `Truncate` scope | Use a `db_admin` credential or a role with explicit truncate permission |
-| `403` on expression SET | RLS write policy restricts the target column | Check column-level write policies; use a role with write permission on that column |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | `hasMore: true` loop never terminates | ORDER BY column is not the same column as the WHERE filter | Ensure `orderBy` targets a column with monotonically increasing or decreasing values relative to the predicate; add a time-based cutoff |
 | RETURNING returns unexpected columns | `["*"]` was used and the schema has more columns than expected | Enumerate explicit column names instead of `"*"` |
 | Computed column value is `null` | Division by zero in the expression for that row | Guard with `$ifNull` or check denominator values before querying; this is intentional behavior |
 | Expression SELECT result type shows `"Unknown"` | Expression is uninferable (mixed coalesce, unbound param, missing col) | Expected for that expression; inferable expressions report a concrete type (P40 S08) |
-| Batch operation fails partway through | One operation in the batch returned an error | A batch is not one transaction: the operations before the failing one were applied and stay applied, and the later ones did not run. Do not re-send the whole batch unless its operations are idempotent; see [HTTP API — `rows/batch`](../reference/http-api.md#post-apidatabasesdbtablesnamerowsbatch) for what each answer means (`503 BATCH_PARTIALLY_APPLIED` names how many were applied, and `403 BATCH_RLS_PREFIX_APPLIED` does the same when a later operation's RLS write check refuses — do not re-send that batch as-is) (**BL-1303, 0.9.0**) |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ---
 

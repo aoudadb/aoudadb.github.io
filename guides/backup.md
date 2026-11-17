@@ -427,7 +427,7 @@ await using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5000",
     DatabaseName = "appdb",
-    ApiKey = "mk_srv_..."   // BL-1385, 0.11.0: one setting for a key of any kind
+See [Access](../auth/index.md) (**BL-1464, next train**).
 });
 
 // Trigger an immediate backup
@@ -463,7 +463,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5000",
   database: "appdb",
-  apiKey: "mk_srv_...",   // BL-1385, 0.11.0: one option for a key of any kind
+See [Access](../auth/index.md) (**BL-1464, next train**).
 });
 
 // Trigger backup
@@ -496,24 +496,24 @@ await client.admin.backup.setSchedule({ ...schedule, cronExpression: "0 2 * * *"
 # Trigger a backup (requires server-auth scope)
 curl -s -X POST http://localhost:5000/admin/backup/trigger \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"incremental":true}'
 # → 202 + TriggerBackupResponse
 
 # List backups
 curl -s http://localhost:5000/admin/backup/list \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + { "backups": [...] }
 
 # Restore backup by id
 curl -s -X POST "http://localhost:5000/admin/backup/restore/<backupId>" \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # → 200 + RestoreBackupResponse
 
 # Set a daily schedule at 02:00
 curl -s -X PUT http://localhost:5000/admin/backup/schedule \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"cronExpression":"0 2 * * *","incremental":true}'
 # → 200 + BackupSchedule
 ```
@@ -556,7 +556,7 @@ When using Aouda in server mode with the admin API:
 # Then trigger a backup via API
 curl -s -X POST http://localhost:5000/admin/backup/trigger \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"incremental":true}'
 # → 202 + { "backupId": "...", "totalBytes": ..., "newBytes": ..., ... }
 ```
@@ -590,11 +590,11 @@ var result = await engine.CreateBackupAsync(new BackupOptions { Incremental = tr
 ```bash
 # List backups to find the ID
 curl -s http://localhost:5000/admin/backup/list \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 # Restore by ID
 curl -s -X POST "http://localhost:5000/admin/backup/restore/<backupId>" \
-     -H "Authorization: Bearer mk_srv_..."
+See [Access](../auth/index.md) (**BL-1464, next train**).
 # Server restarts the engine after a successful restore
 ```
 
@@ -616,7 +616,7 @@ Console.WriteLine($"Restored {result.FilesRestored} files, integrity verified: {
 # Restore to a time (picks newest backup at or before the instant)
 curl -s -X POST http://localhost:5000/admin/backup/restore \
      -H "Content-Type: application/json" \
-     -H "Authorization: Bearer mk_srv_..." \
+See [Access](../auth/index.md) (**BL-1464, next train**).
      -d '{"targetTime":"2026-05-01T12:00:00Z"}'
 ```
 

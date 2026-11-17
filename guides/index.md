@@ -81,7 +81,7 @@ Use this mapping as the baseline when planning doc updates:
 | Embedded/document-model and related DX | P11 | `docs/dev/Functionality-AI-Native-Usage.md` |
 | Auth foundation and two-layer auth | P12, P14 | `docs/dev/Functionality-Auth-And-Authorization.md` |
 | Testing package and developer testing workflows | P13 | `docs/dev/Functionality-Testing-And-DX.md` |
-| ADRA/RLS/PLS and auth deepening | P14 | `docs/dev/Functionality-Auth-And-Authorization.md`, `docs/dev/Functionality-AI-Native-Usage.md` |
+See [Access](../auth/index.md) (**BL-1464, next train**).
 | Schema lifecycle and evolution patterns | Cross-phase (notably P3/P4/P7/P12/P14) | `docs/dev/Functionality-Schema-Lifecycle.md` |
 | Server CLI, Docker, Kubernetes, cloud, Hub | P16 | `docs/dev/Functionality-Cloud-And-Hub.md` |
 | **Server configuration** (precedence, install bootstrap, restart) | P34 / P4 | `guides/server-configuration.md` |
@@ -90,7 +90,7 @@ Use this mapping as the baseline when planning doc updates:
 | **Development admin** (`AOUDA_DEV_ADMIN`; `RequireFirstAdmin` removed by BL-1462) | BL-1423 | `guides/development-admin.md` |
 | **Plan a declaration** (`aouda plan`; replaced `aouda schema check` and `aouda keys check`) | BL-1463 | `guides/plan.md` |
 | **Upgrading and the data-directory format** (`DATA_DIRECTORY_FORMAT_REFUSED`) | BL-1420 | `guides/upgrading.md` |
-| **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `guides/access-surface.md`, `guides/browser-tier-read-limits.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
+| **Named queries, data-plane listener, transforms, access-surface diff** | P37 | `guides/named-queries.md`, `guides/direct-client-access.md`, `guides/division-of-responsibility.md`, `guides/insert-transforms.md`, `auth/authorization.md`, `guides/browser-tier-read-limits.md` — **user guides**; they follow §1 and §4 below, not the engine `Functionality-Document-Template` 2.1–2.18 skeleton |
 | **Freshness and replica consistency** | P38 | `guides/freshness.md` — token, `AtLeast`, alias `freshness`, caveats; wire in `reference/http-api.md` § Consistency tokens. Same user-guide rules as the P37 cluster |
 | **How to build an application on Aouda** (the flagship entry point) | Cross-phase (P37, P40) | `guides/build-apps.md` — canonical build path for new applications; `guides/adoption.md` is its existing-application branch. Same user-guide rules as the P37 cluster |
 | Studio management console | P5, P6, P9, P12, P16 | `docs/dev/Functionality-Studio.md` |

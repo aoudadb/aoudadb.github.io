@@ -86,10 +86,10 @@ falls back to the `AOUDA_TOKEN` environment variable when the flag is omitted, t
 ```bash
 export AOUDA_SERVER=http://localhost:5433
 export AOUDA_DATABASE=myapp
-export AOUDA_TOKEN=mk_srv_...          # server admin key, or a bearer token
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 dotnet aouda schema diff                # no flags needed
-dotnet aouda schema apply --token mk_srv_...   # or pass it explicitly
+See [Access](../auth/index.md) (**BL-1464, next train**).
 ```
 
 Without one, these commands exit `2` with `AUTH_TOKEN_MISSING`. Against a database with auth
@@ -108,7 +108,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 ### 3. Verify
 
-- **Diff**: Shows a human-readable plan (add table, add column, etc.). Use it on every PR to review schema changes. Add `--access` to fail the job when the branch **widens** what `mk_pub_*` or `aouda.identities.json` principals can read ([Access-surface diff](access-surface.md)). Named queries live under `namedQueries` in the same file ([Named queries](named-queries.md)); optional `freshness` on the named query is keyed by name ([Freshness](freshness.md)). Omitting a name deletes the definition (there is no `dropNamedQueries`). Materialized queries live under [`materializedQueries`](#materialized-queries-in-the-schema-file).
+See [Access](../auth/index.md) (**BL-1464, next train**).
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
 - **Check**: Use `aouda plan` in CI before anything is running — it validates a *declared* schema file with no server (exit 0 valid, 1 invalid; **BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**). See [Plan a declaration](plan.md). A schema file that is not declared is checked against a server with `schema diff`.
 - **Validate**: Use `schema validate` in CI — it needs a running server and exits 0 if the server matches the file, 1 if there is drift.
@@ -155,7 +155,7 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
     "latest_quote": {
       "type": "latestPerKey",
       "sourceTable": "EquityQuote",
-      "dataPlaneAccess": true,
+See [Access](../auth/index.md) (**BL-1464, next train**).
       "groupBy": ["ticker"],
       "orderBy": "ts",
       "descending": true,
@@ -164,7 +164,7 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
     "ohlc_1m": {
       "type": "aggregate",
       "sourceTable": "EquityQuote",
-      "dataPlaneAccess": true,
+See [Access](../auth/index.md) (**BL-1464, next train**).
       "groupBy": [
         "ticker",
         { "column": "ts", "function": "TruncateToMinute", "outputName": "bucket" }
@@ -192,7 +192,7 @@ Five shapes, discriminated by `type`:
 | `filter` | `sourceTable`, `predicate` | A maintained subset of a table |
 | `topNPerGroup` | `sourceTable`, `orderBy`, `n` (`groupBy` optional) | At most **N rows per group** (or global top N when `groupBy` is omitted). Result PK is the source PK |
 
-`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All five shapes accept `updateMode` (`async` | `sync`), **`maxCoalesceMs`** (the freshness knob, 0–60000 ms, default 0: how long an `async` query's batches may coalesce before one apply — **ColumnarMerge S10, 0.2.0**; changing it replaces the query), `storage.storageTemperature`, and **`dataPlaneAccess`** (default `false`) — set it on the MQ entry so a `mk_pub_*` named query can read the result table without an imperative table-options PATCH.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 **`window`** (**Horizon, 0.5.0**) — `"window": { "keep": "7d" }` (plus `"column"` where it must be named) on an `aggregate` with a `TruncateToMinute` / `Hour` / `Day` / `Week` bucket, or on a `topNPerGroup` grouped by a time column: the result keeps only its groups at or after the horizon (the server's clock minus `keep`), and a read of anything older is computed from the source, so the answer does not change. Every other declaration is refused at apply with its reason — the full list is in [Materialized queries — what is refused](materialized.md#window-refusals). `schema export` writes it, and changing it replaces the query.
 
@@ -242,7 +242,7 @@ If you declare your databases in the declaration file (`aouda.json`, **BL-1463, 
 
 in `/etc/aouda/aouda.json`, started with `Aouda__Declaration=/etc/aouda/aouda.json` and `AOUDA_ENVIRONMENT=prod`. A relative `schema` path is relative to the directory of `aouda.json` (**BL-1463, next train**; before, to the working directory), so the example reads `/etc/aouda/schemas/ledger.json`.
 
-What happens, in this order: **every `schema` file is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` and its declared operators start, **then each `schema` file is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 
 | You want to know | Answer |
 |---|---|
@@ -350,11 +350,11 @@ The overlay's name comes from the base file's: `<base without .json>.<env>.json`
 | `settings` | `durability` (`replicationFactor`) |
 | `tables.<a table of the base file>` | `policy` (`storageTemperature`, `retention`), `durability` (`level`, `replicationFactor`) |
 
-Any other member, including one the base file may carry (`partitionLevelSecurity`, `authMode`, `plsClaimBinding`, `dataPlaneAccess`,
+See [Access](../auth/index.md) (**BL-1464, next train**).
 `namedQueries`, `database`, `settings.allowTruncatingTimestampToDate`, …), is refused, never ignored:
 
 ```text
-SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED: member 'partitionLevelSecurity' at /tables/orders is not allowed in an overlay: an overlay overrides only settings.durability and an existing table's policy and durability. Move it to the base file.
+See [Access](../auth/index.md) (**BL-1464, next train**).
 ```
 
 Before, the merge dropped such a member without a word: an overlay turning partition-level security on applied with it off.
@@ -374,8 +374,7 @@ Invalid schema: unknown member 'nulable' at /tables/orders/columns/status; did y
 Every such member is listed, each with its JSON pointer and, when one is close, the member meant (`… did you mean 'nullable'? Member
 names are case-sensitive.` for a wrong case). Nothing is applied. Before, the server dropped the member: `"nulable": true` made a
 non-nullable column, `"partitionLevelSecurty": true` left partition-level security off, and a named query's `"where": {"adn": […]}`
-lost its filter and returned every row. A table has no `description` (a column does) and a materialized query has no `authMode`,
-`permissionDimension` or `permissionColumn`: those are refused too. The materialized-query ones were redundant and never read: a
+See [Access](../auth/index.md) (**BL-1464, next train**).
 materialized query's result is always filtered by its source table's partition- and row-level security, so the source table's security
 always applied. Remove them. Run [`aouda plan`](plan.md) with each file declared (and its overlay, `--env`) to list them all.
 
