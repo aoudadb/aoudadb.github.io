@@ -113,7 +113,7 @@ ASP.NET Core nested configuration uses `__` (double underscore):
 | Setting | Environment variable example |
 |---------|------------------------------|
 | Email provider | `Aouda__Auth__Email__Provider=sendgrid` or `=console` |
-| Email API key | `Aouda__Auth__Email__ApiKey=SG.xxx` |
+| Email provider key | `Aouda__Auth__Email__ApiKey=SG.xxx` |
 | From address | `Aouda__Auth__Email__FromAddress=noreply@example.com` |
 | From display name | `Aouda__Auth__Email__FromName=My App` |
 | Invite deep-link URL | `Aouda__Auth__Email__InviteUrl=https://app.example.com/set-password` |
@@ -147,21 +147,16 @@ Restart the server after changing notification configuration.
 | Setting | Type | Default | Valid values | Notes |
 |---------|------|---------|--------------|-------|
 | `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid`, `capture`, `console`, or other → null provider | Server-wide; `capture` is recommended for local Studio / Windows Service |
-| `Aouda:Auth:Email:ApiKey` | string? | `null` | Provider API key (SendGrid Mail Send key when `Provider=sendgrid`) | Bearer token on `https://api.sendgrid.com`; not used when `Provider=console` or `capture` |
+| `Aouda:Auth:Email:ApiKey` | string? | `null` | Provider key (SendGrid Mail Send key when `Provider=sendgrid`) | Bearer token on `https://api.sendgrid.com`; not used when `Provider=console` or `capture` |
 | `Aouda:Auth:Email:FromAddress` | string? | `null` | Verified sender in SendGrid | Required for real delivery |
 | `Aouda:Auth:Email:FromName` | string? | `"Aouda"` | Display name in From header and email body | |
 | `Aouda:Auth:Email:InviteUrl` | string? | `null` | Full URL of your app's set-password page | When set, invite email includes a clickable link; see §3.4 |
 | `Aouda:Auth:Email:PasswordResetUrl` | string? | `null` (falls back to `InviteUrl`) | Full URL of your app's reset-password page | Defaults to `InviteUrl` when not set; see §3.4 |
 | `Aouda:Auth:Sms:Provider` | string? | `null` | `gatewayapi`, `capture`, `console`, or other → null provider | Server-wide; `capture` is recommended for local Studio / Windows Service |
-| `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI API token | Sent as `Authorization: Token <key>`; not used when `Provider=console` or `capture` |
+| `Aouda:Auth:Sms:ApiKey` | string? | `null` | GatewayAPI token | Sent as `Authorization: Token <key>`; not used when `Provider=console` or `capture` |
 | `Aouda:Auth:Sms:Sender` | string? | `"Aouda"` | Alphanumeric sender id shown to recipient | GatewayAPI account must allow sender |
 
-Related server auth bootstrap (unrelated to app-user email/SMS):
-
-| Setting | Purpose |
-|---------|---------|
-| `Aouda:Auth:RootUser:Email` | Optional first server admin email (config bootstrap) |
-| `Aouda:Auth:RootUser:Password` | Optional first server admin password — remove after setup |
+The first operator is a declared `_serverauth` principal or `aouda start --dev-admin`. Notification settings do not create one. See [Authentication](../getting-started/auth.md).
 
 ---
 
@@ -206,7 +201,7 @@ Both flows use the same 6-digit OTP and `POST .../auth/reset-password` to comple
 ### 3.2 SendGrid setup checklist
 
 1. Create a SendGrid account and verify your sender domain or single sender.
-2. Create an API key with **Mail Send** (restricted key is fine) and set `Aouda:Auth:Email:ApiKey`.
+2. Create a SendGrid key with **Mail Send** (a restricted key is fine) and set `Aouda:Auth:Email:ApiKey`.
 3. Set `FromAddress` to a verified sender.
 4. Configure `appsettings.json` or environment variables (§2), including `ApiKey`, `InviteUrl`, and `PasswordResetUrl`.
 5. Restart Aouda (`aouda start`).
@@ -274,14 +269,14 @@ Add to Aouda's server config (both URLs often point to the same page):
 #### What your set-password page must do
 
 1. **Read** `otp` and `email` from the query string on page load and pre-fill the form inputs.
-2. **On submit**: call `POST /api/databases/{db}/auth/reset-password` with the anon key:
+2. **On submit**: call `POST /api/databases/{db}/auth/reset-password` with no credential (the route is public):
    ```json
    { "email": "user@example.com", "otp": "984094", "newPassword": "NewPassword123!" }
    ```
 3. On success, Aouda returns a token pair — `aal2` when the user has no active MFA factor (**BL-795, 0.3.0**), `aal1` when they do. Sign the user in and redirect to your app.
 4. If MFA is enrolled, the token's `aal` claim is `aal1` — redirect to your MFA challenge page.
 
-The page does **not** need a service key or any secret. `reset-password` is a public endpoint authenticated only by the OTP.
+The page does **not** need a credential. `reset-password` is a public endpoint authenticated only by the OTP.
 
 #### Why not magic links?
 
@@ -375,7 +370,7 @@ Local Windows Service installs often run with `ASPNETCORE_ENVIRONMENT=Production
 }
 ```
 
-No API key or from-address is required for capture. `InviteUrl` / `PasswordResetUrl` still populate deep links in captured email bodies.
+No provider key or from-address is required for capture. `InviteUrl` / `PasswordResetUrl` still populate deep links in captured email bodies.
 
 ### 5.3 Outbox API
 
@@ -515,7 +510,7 @@ SMTP → Mailpit for HTML rendering fidelity is tracked as backlog **BL-133** (e
 
 ## 7. End-to-end local test (password reset)
 
-Prerequisites: Aouda CLI, an auth-enabled database with API keys. For OTP delivery use SendGrid (production-like), **`capture`** (Studio outbox), or **`console`** (stdout). Full local server setup is in [Reference §27](reference.md#27-local-developer-setup-for-consumer-applications).
+Prerequisites: Aouda CLI, an auth database, and signup enabled if the curl below creates a principal. For OTP delivery use SendGrid (production-like), **`capture`** (Studio outbox), or **`console`** (stdout). Local setup is [Authentication](../getting-started/auth.md).
 
 ```powershell
 # 1. Server directory with appsettings.json (§2.1)
@@ -523,8 +518,8 @@ Prerequisites: Aouda CLI, an auth-enabled database with API keys. For OTP delive
 cd C:\dev\aouda-derive
 aouda start --port 5433 --data-dir .\data
 
-# 2. Bootstrap server admin (first run only) — see setup.md
-# 3. Create auth-enabled DB and save mk_anon_ / mk_svc_ keys — see setup.md §7
+# 2. First operator: aouda start --dev-admin, or a declared principal. See getting-started/auth.md
+# 3. Declare the auth database and the link. Signup must be enabled for the curl below.
 
 # 4. Sign up or admin-create a user
 curl -X POST http://localhost:5433/api/databases/myapp/auth/signup `
@@ -560,7 +555,7 @@ Your application needs:
 | `AoudaAuth:ServerUrl` | Aouda base URL |
 | `AoudaAuth:DatabaseName` | App database name (auth endpoints are under this name) |
 | `AoudaAuth:Authority` | `http://localhost:5433/api/databases/myapp` for JWT validation |
-| `AoudaAuth:AnonKey` or `ServiceKey` | `mk_anon_...` for public reset endpoints; `mk_svc_...` for admin invite/create |
+| A credential, only for operator calls | The caller's own key or session. Password reset and signup send no credential. |
 
 Example (app repo):
 
@@ -570,14 +565,12 @@ Example (app repo):
     "Authority": "http://localhost:5433/api/databases/myapp",
     "Audience": "_auth",
     "ServerUrl": "http://localhost:5433",
-    "DatabaseName": "myapp",
-    "AnonKey": "mk_anon_...",
-    "ServiceKey": "mk_svc_..."
+    "DatabaseName": "myapp"
   }
 }
 ```
 
-Use the **anon** key for `request-password-reset` and `reset-password` from browser-facing code paths (same as signup/signin). Use the **service** key only on trusted backends (admin user create, invite resend).
+`request-password-reset` and `reset-password` take no credential, same as signup and sign-in. An invite or an operator password set sends the operator's own credential.
 
 ---
 
@@ -601,7 +594,7 @@ Use the **anon** key for `request-password-reset` and `reset-password` from brow
 
 ## See also
 
-- [Setup & User Flows](setup.md) — Enable auth, API keys, signup/signin
+- [Setup and flows](setup.md) — signup, sign-in, password reset
 - [Use Cases](use-cases.md) — Password reset (§20), MFA (§21), onboarding (§19)
 - [Reference](reference.md) — Endpoint tables, errors, local developer setup (§27)
 - [Local developer setup](reference.md#27-local-developer-setup-for-consumer-applications) — `aouda start`, keys, IDE workflows

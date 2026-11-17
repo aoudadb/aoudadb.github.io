@@ -1,334 +1,89 @@
 ---
-title: "Setup and Flows"
-nav_order: 2
+title: "Setup and flows"
+nav_order: 5
 parent: "Auth and Authorization"
 ---
 
-# Auth Setup & User Flows
+# Setup and flows (**BL-1464, next train**)
 
-> Part of the [Application Auth Guide](../getting-started/auth.md). Start there for an overview.
+Sign-up, sign-in, sign-out, password reset and MFA. The model they sit on is [Principals](principals.md) and [Credentials](credentials.md). Creating the auth database and the link is [Declared databases](../guides/declared-databases.md).
 
----
+## Enabling auth on a database
 
-## 7. Enabling Auth on a Database
+An application auth database is a database with `"kind": "auth"` in `aouda.json`. A data database names it with `"authDatabase": "<name>"`. That link is governance: the data database's principals are the auth database's principals. See [Auth databases](principals.md#auth-databases).
 
-Application Auth is enabled **per database**. Aouda supports two approaches depending on your architecture.
+A data database with no link is governed by `_serverauth`. There is no second auth system beside that.
 
-### Creating a Standalone Auth Database
-
-Use `kind: "auth"` to create a dedicated auth database. Auth endpoints are then served directly at `/api/databases/{auth-db}/auth/...` — no separate application database is required.
-
-```bash
-curl -X POST http://localhost:5433/api/databases \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <server-admin-token>" \
-  -d '{ "name": "auth", "kind": "auth" }'
-```
-
-Response:
-
+<!-- declaration-example -->
 ```json
 {
-  "name": "auth",
-  "auth": {
-    "enabled": true,
-    "database": "auth",
-    "keys": {
-      "anonKey": "mk_anon_a1b2c3d4e5f6...",
-      "serviceRoleKey": "mk_svc_x7y8z9e0f1a2..."
-    }
+  "version": 1,
+  "databases": {
+    "auth": { "kind": "auth", "signup": { "enabled": false } },
+    "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" }
   }
 }
 ```
 
-The response includes `anonKey` and `serviceRoleKey` immediately. After regenerate/enable you also receive a **`publicKey`** (`mk_pub_*`) for browser-tier callers on the **data-plane** listener. `mk_anon_*` is auth-endpoints-only (signup/signin/refresh). `mk_pub_*` on the admin listener returns `AUTH_KEY_LISTENER_MISMATCH`. See [Direct client access](../guides/direct-client-access.md).
+## Sign-up
 
-**OAuth authorization-code + PKCE is not shipped** (BL-043). Browser apps use anon/public key + signup/signin/refresh JWT, not a code flow against an IdP.
+`POST /api/databases/{db}/auth/signup` with `{ "email", "password" }`. The governing auth database's `signup` must be enabled (`403 AUTH_SIGNUP_DISABLED` when it is not). The principal is created with `source: signup` and **no role of its own**. Its policy is the `signup` setting, resolved on each request.
 
-**Save the API keys immediately.** They are shown only once. Use the regeneration endpoint if they are lost.
+Closing signup is not revoking. Principals that already exist keep the policy until you change `signup` or disable them.
 
-For .NET applications using Aouda as an OIDC provider:
+## Sign-in and sign-out
 
-```json
-// appsettings.json
-"AoudaAuth": {
-  "Authority":    "http://localhost:5433/api/databases/auth",
-  "Audience":     "auth",
-  "DatabaseName": "auth",
-  "ServiceKey":   "mk_svc_..."
-}
-```
+`POST /api/databases/{db}/auth/signin` with `{ "email", "password" }`. Optional `databases`: a list that limits the session. Omit it and the session has no database limit.
 
-### Linking a Data Database to an Auth Database
+The response is a token pair. When the principal has an active MFA factor the pair is `aal1` and the body includes `mfaRequired: true` and `mfaFactors`. With no active factor the pair is `aal2`. `requiresPasswordChange: true` is included only when it is true.
 
-Once an auth database exists, create data databases and link them to it:
+`POST /api/databases/{db}/auth/signout` revokes the session. `POST …/auth/refresh` remints the access token at the same assurance level the session was minted with. It does not drop `aal2` to `aal1`.
 
-```bash
-# Shorthand — links to the one existing auth database
-curl -X POST http://localhost:5433/api/databases \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <server-admin-token>" \
-  -d '{
-    "name": "myapp",
-    "auth": { "enabled": true, "allowSelfSignup": true }
-  }'
-```
+A session token carries the session. It does not carry a role list or a permission list. The server reads statements on each request.
 
-Self-service signup is **off by default**. Pass `allowSelfSignup: true` at create time (as above, or top-level on `kind: "auth"`) or later:
+`POST /api/auth/signin` is the same call for a `_serverauth` principal (an operator).
 
-```bash
-curl -X PUT http://localhost:5433/api/databases/myapp/auth/admin/signup-settings \
-  -H "Authorization: Bearer <mk_svc_…>" \
-  -H "Content-Type: application/json" \
-  -d '{ "allowSelfSignup": true, "selfSignupRole": "db_writer" }'
-```
+## Password reset
 
-`selfSignupRole` is optional; omit it (or send `null`) to grant `db_writer`. The role must already exist in the auth database.
+`POST /api/databases/{db}/auth/request-password-reset` with `{ "email" }` always returns `{ "ok": true }`. `POST …/auth/reset-password` with `{ "email", "otp", "newPassword" }` sets the password, revokes sessions, and returns a token pair.
 
-Response:
+| Code | When |
+|---|---|
+| `AUTH_RESET_TOKEN_INVALID` | The OTP does not match. |
+| `AUTH_RESET_TOKEN_EXPIRED` | The latest token has expired. |
+| `AUTH_RESET_TOKEN_EXHAUSTED` | Too many attempts (default 5). |
 
-```json
-{
-  "name": "myapp",
-  "auth": {
-    "enabled": true,
-    "database": "auth",
-    "keys": {
-      "anonKey": "mk_anon_...",
-      "serviceRoleKey": "mk_svc_..."
-    }
-  }
-}
-```
+An operator sets a password with `PUT /api/databases/{db}/admin/users/{id}/password` (`{ "password", "forcePasswordChange"? }`), which is `204` and revokes that principal's sessions. `{id}` is the principal's id. `POST …/admin/users/{id}/invite` sends the reset OTP.
 
-Auth endpoints for `myapp` are now available at `/api/databases/myapp/auth/...`.
+## MFA
 
-**Save the API keys immediately.** They are shown only once. If you lose them, use the regeneration endpoint.
+| Method | Path | Who |
+|---|---|---|
+| `POST` | `/api/databases/{db}/auth/mfa/enroll` | The signed-in principal. Requires `aal2`, else `403 AUTH_MFA_STEP_UP_REQUIRED`. |
+| `POST` | `…/mfa/challenge` | Starts a challenge. |
+| `POST` | `…/mfa/verify` | On success, a new token pair at `aal2`. |
+| `GET` | `…/mfa/factors` | The principal's factors. |
+| `DELETE` | `…/mfa/factors/{id}` | Requires `aal2`. |
 
-### How Auth Database Resolution Works
+`aal2` means every second factor the principal has enrolled was completed. A principal with no factor is `aal2` at password sign-in, because there was nothing further to complete.
 
-| Auth DBs on Server | What `"auth": { "enabled": true }` Does |
-|---------------------|------------------------------------------|
-| **0 auth DBs** | **Returns 400** — create one first: `kind: "auth"` |
-| **1 auth DB** | Links to that existing auth DB |
-| **2+ auth DBs** | **Fails** — you must specify which one: `"auth": { "database": "name" }` |
+| Code | When |
+|---|---|
+| `AUTH_MFA_FACTOR_NOT_FOUND` | No such factor. |
+| `AUTH_MFA_STEP_UP_REQUIRED` | Enroll or delete without `aal2`. |
+| `AUTH_MFA_FACTOR_ALREADY_ENROLLED` | A phone factor already exists. |
+| `AUTH_MFA_CHALLENGE_INVALID` | Wrong code. |
+| `AUTH_MFA_CHALLENGE_EXPIRED` | The challenge expired. |
+| `AUTH_MFA_CHALLENGE_EXHAUSTED` | Too many attempts. |
 
-For multiple auth databases (separate user pools for different products):
+An operator enrolls a phone factor with `POST …/admin/users/{id}/mfa/enroll`.
 
-```bash
-curl -X POST http://localhost:5433/api/databases \
-  -H "Content-Type: application/json" \
-  -d '{ "name": "product-a", "auth": { "database": "product_a_auth" } }'
+Delivery of the OTP is [Notifications](notifications.md).
 
-curl -X POST http://localhost:5433/api/databases \
-  -H "Content-Type: application/json" \
-  -d '{ "name": "product-b", "auth": { "database": "product_b_auth" } }'
-```
+## Token lifetime
 
-### Key Regeneration
+Access tokens are short. Refresh tokens rotate. Revocation of the session, the key, or the principal ends open sockets within one heartbeat. The matrix is [Revocation](credentials.md#revocation).
 
-If you lose the API keys:
+## What this page does not do
 
-```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/regenerate-keys \
-  -H "Authorization: Bearer <admin-token>"
-```
-
-This revokes the old auto-generated keys and creates new ones.
-
----
-
-## 8. Email, SMS, and OTP Notifications
-
-Password reset, invite emails, and phone MFA require **server-side** notification providers. Your consumer application does not send these messages itself — it calls Aouda auth endpoints; Aouda delivers OTPs when configured.
-
-| Flow | Channel | Server configuration |
-|------|---------|----------------------|
-| Forgot password (`request-password-reset`) | Email | `Aouda:Auth:Email:Provider = sendgrid` + `ApiKey`, **or** `console` for local testing |
-| Invite / first-time password (`sendInviteEmail`, `POST .../invite`) | Email | Same as above |
-| MFA phone challenge | SMS | `Aouda:Auth:Sms:Provider = gatewayapi` + GatewayAPI token, **or** `console` for local testing |
-| MFA TOTP (authenticator app) | — | No notification provider needed |
-
-Without a configured provider, endpoints still succeed where designed (for example reset request always returns `200`), but **no OTP is delivered** and the code is not logged. For local end-to-end testing without SendGrid/GatewayAPI credentials, set `Provider` to **`console`** — OTPs appear in server stdout (see [notifications.md §5](notifications.md#6-console-provider-cli--event-viewer-interim)).
-
-**Full guide:** [Email, SMS & Notifications](notifications.md) — settings reference, Docker/env examples, SendGrid/GatewayAPI/console providers, troubleshooting.
-
----
-
-## 9. End User Flows: Signup, Signin, Signout
-
-All Application Auth endpoints are scoped by database:
-
-```
-/api/databases/{db}/auth/{action}
-```
-
-**All auth endpoints require at least the `anon` API key** in the `Authorization` header. This is the Layer 1 gate.
-
-### Sign Up (Create Account)
-
-```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "alice@example.com",
-    "password": "SecurePass123!"
-  }'
-```
-
-Response:
-
-```json
-{
-  "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "email": "alice@example.com",
-    "createdAt": "2026-03-18T12:00:00Z"
-  },
-  "accessToken": "eyJhbGciOiJSUzI1NiIs...",
-  "refreshToken": "dGhpcyBpcyBhIHJlZnJl...",
-  "expiresIn": 900
-}
-```
-
-The user is signed in immediately after signup.
-
-### Sign In (Login)
-
-```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/signin \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "alice@example.com",
-    "password": "SecurePass123!"
-  }'
-```
-
-After sign-in, use the `accessToken` (user JWT) as the `Authorization: Bearer` header for all data requests.
-
-### Sign Out (Logout)
-
-```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/signout \
-  -H "Authorization: Bearer <user-access-token>"
-```
-
-Ends **this** session — its refresh token and access token stop working; the user's other devices stay signed in
-(**NativeClients, 0.4.0**). To sign out everywhere, send `-d '{"scope":"global"}'` (and `-H "Content-Type: application/json"`);
-`"others"` signs every other device out and keeps this one. A user lists their devices with `GET .../auth/sessions` and ends one with
-`DELETE .../auth/sessions/{id}` — see [Sessions are devices](reference.md#sessions-are-devices).
-
-### Native apps: sign in through the browser
-
-(**NativeClients, 0.4.0**) A desktop or phone app can sign its user in through the browser, where your web front is already
-signed in — MFA included — and get a session of its own at the same assurance level. Aouda serves no login page: your web front does
-the asking, Aouda issues a single-use code, and the app redeems it with a PKCE verifier. Endpoints, rules and error codes:
-[Native sign-in through the browser](reference.md#native-sign-in-through-the-browser).
-
-**Once: register the app** (an administrator, with the service key):
-
-```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/admin/native-clients \
-  -H "Authorization: Bearer <mk_svc_...>" -H "Content-Type: application/json" \
-  -d '{"name":"MyApp desktop","redirectUris":["http://127.0.0.1/callback","com.example.myapp:/oauth"]}'
-```
-
-**Desktop app — loopback redirect** (RFC 8252 §7.3). The app listens on `127.0.0.1` on any free port; the registered
-`http://127.0.0.1/callback` matches every port.
-
-```typescript
-import { AoudaClient, createPkcePair } from "@aouda/client";
-
-// 1. In the desktop app: a PKCE pair, a loopback listener, and the browser opened on your web front.
-const { codeVerifier, codeChallenge } = await createPkcePair();
-const redirectUri = `http://127.0.0.1:${port}/callback`;
-openBrowser(`https://app.example.com/native-sign-in?challenge=${codeChallenge}&redirect=${encodeURIComponent(redirectUri)}&state=${state}`);
-
-// 2. In the web front (signed in): ask the user first — Aouda shows no consent screen, so this is where they see it — then ask for
-//    the code and send the browser on.
-if (!(await confirmDialog(`Sign in to MyApp on this device as ${user.email}?`))) return;
-const { redirectTo } = await web.auth.createAuthorizationCode({ clientId, redirectUri, codeChallenge, state });
-window.location.assign(redirectTo);   // → http://127.0.0.1:<port>/callback?code=…&state=…
-
-// 3. Back in the desktop app's listener: check `state`, then redeem within 60 seconds.
-const app = new AoudaClient({ serverUrl, database: "myapp" });
-app.auth.onTokensChanged((t) => secureStore.save(t));             // keep the rotated refresh token
-await app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo: "MyApp desktop on Ann's laptop" });
-```
-
-**Phone app — private-use scheme or claimed link** (RFC 8252 §7.1 / §7.2). Register `com.example.myapp:/oauth` (a reverse-DNS
-scheme the app owns) or an `https://` link the OS routes to the app (Universal Links / App Links). The flow is the same; the browser
-lands on the app instead of a loopback port. **A claimed `https` link is the stronger choice:** another app on the phone can register
-the same private-use scheme and receive the code — with its own PKCE pair, it could redeem it (RFC 8252 §8.6) — while a claimed
-link reaches only your app. Either way, the web front must ask the user before it calls `createAuthorizationCode` (step 2). On
-React Native, import `react-native-get-random-values` before `@aouda/client` so `createPkcePair()` has a random source
-([React Native](../clients/typescript.md#react-native-nativeclients-040)).
-
-C#: `Pkce.CreatePair()`, `client.Auth.CreateAuthorizationCodeAsync(...)`, `client.Auth.ExchangeCodeAsync(...)`.
-
-The code is single use, valid for 60 seconds, bound to the client and the redirect URI, and dies with the web session that issued it. A
-second redemption is treated as theft: it is refused and the session the first redemption opened is ended.
-
----
-
-## 10. Token Lifecycle: Access Tokens and Refresh Tokens
-
-### How Tokens Work
-
-| Token | Lifetime | Purpose |
-|-------|----------|---------|
-| **Access Token** (JWT) | 15 minutes (default) | Included in `Authorization: Bearer` on every API request |
-| **Refresh Token** | 30 days (default) | Used to get a new access token when the old one expires |
-
-### Typical Flow
-
-```
-1. User signs in        → receives accessToken + refreshToken
-2. App stores tokens    → in-memory, secure storage, or cookie
-3. App sends accessToken → on every API call (Authorization: Bearer)
-4. Token expires (15 min) → App calls /refresh with refreshToken
-5. Aouda returns         → new accessToken + new refreshToken (rotation)
-6. User signs out       → App calls /signout (this device), discards tokens
-```
-
-### Refreshing the Access Token
-
-```bash
-curl -X POST http://localhost:5433/api/databases/myapp/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{ "refreshToken": "dGhpcyBpcyBhIHJlZnJl..." }'
-```
-
-Each refresh rotates the refresh token. The old one is immediately invalidated. If a revoked refresh token is reused, the entire token family is invalidated (theft detection).
-
-**A refresh refused for capacity does not spend the token (**BL-841, 0.3.0**).** When the server is out of
-memory for the refresh's writes it answers `503` `MEMORY_BUDGET_EXCEEDED` with `Retry-After`, and the refresh token
-you sent is still live: retry **with the same token** after `Retry-After`. (Before, the refusal was a `500` and the
-token was already spent, so the retry read as reuse and signed the user out.)
-
-**Refresh from one place at a time (**BL-841, 0.3.0**).** Two refreshes presenting the same token at once:
-exactly one succeeds. The other is treated as reuse — it answers `401` `AUTH_REFRESH_TOKEN_INVALID` and revokes the
-whole token family, **including the refresh token the winning call just returned**, so both callers end up signed
-out. The C# SDK runs one refresh at a time per client, but two clients sharing one token — two browser tabs, two
-processes — can still race. Give a shared session a single refresher (one tab or worker refreshes and hands the new
-tokens to the others), or give each client its own sign-in.
-
-Sign-in, sign-up and password changes hash the password, and the hash waits for its memory first; under load they
-can answer `503` with `Retry-After` too. Retry them as any capacity refusal (**BL-850, 0.3.0**).
-
-**The SDKs treat such a refusal as retryable (**BL-944, 0.4.0**).** A sign-in, sign-up or refresh refused for capacity is
-`AoudaCapacityException` (with `RetryAfter`) in `Aouda.Client` and `AoudaServerError` (with `retryAfterSeconds`; `AoudaApiError` for
-a `429 SERVER_AT_CAPACITY`) in `@aouda/client` — not an authentication error. A refused refresh keeps the refresh token for the
-retry, and a request that needed it fails with the refusal rather than with its `401`; an early refresh refused while the current
-access token is still valid does not fail the request — the valid token is used and a later call refreshes. (Before, both SDKs
-reported such a refusal as an authentication failure, which an app reads as "sign in again".)
-
-### Session Validation Modes
-
-| Mode | How It Works | Revocation | Best For |
-|------|-------------|------------|----------|
-| **SignatureOnly** | JWT signature check only | Wait for expiry | High-throughput APIs |
-| **Hybrid** (default) | Signature + in-memory revocation check | Near-instant | Most applications |
-| **Stateful** | Every request checked against session store | Instant | Security-critical apps |
-
-All three modes are sub-millisecond because Aouda's in-memory architecture eliminates the need for Redis.
+It does not mint a key. Rotation is [Stored keys](credentials.md#stored-keys): mint a new key, then delete the old one. It does not take a second token beside the bearer.
