@@ -276,7 +276,7 @@ schema file, and per auth database its `signup`, roles and principals with their
 derived key as `{ "derivedKey": { "version" } }`, an OIDC trust as is — the server auth database's as `server`, and the running
 declaration's `keyRoot` by reference (a variable name or a path). `origins` says which object the running declaration already declares.
 **The stored keys' `sha256` are the only secret-class values in the answer** (a SHA-256 of a 256-bit key is no key, and the file needs
-them); each export is recorded as one `declaration_exported` audit row with counts only. Never exported, each named in `notes`: a password,
+them); each export is recorded as one `declaration_exported` audit row with counts only, so a node that does not accept writes (a secondary) answers `503 READ_ONLY`: export from the primary. Never exported, each named in `notes`: a password,
 its hash or a seed reference (`EXPORT_PASSWORDS_OMITTED`), a revoked key (`EXPORT_REVOKED_KEYS_OMITTED`), a limited key
 (`EXPORT_LIMITED_KEYS_OMITTED`), a key with an expiry — the file's keys have none, so it would outlive it (`EXPORT_EXPIRING_KEYS_OMITTED`),
 a principal that signed itself up (`EXPORT_SIGNUP_PRINCIPALS_OMITTED`), a session, and the key root (`EXPORT_KEY_ROOT_NEEDED` when a
@@ -297,7 +297,7 @@ admin routes and in `error` on the `/api/auth/...` routes; there is no `remedy` 
 |---|---|---|
 | A database the file declares | `DELETE /api/databases/{db}`; `POST /api/databases` with its name (in any case) | quarantine, unquarantine, backup, restore; rows |
 | The schema of a database whose declaration names a `schema` | `POST .../schema/apply` (unless `options.dryRun: true`), every table, column, edge-table, vector-column and materialized-query create, change or drop, and `POST .../branches/{name}/merge` with `execute: true` | a dry-run apply, `schema/diff`, `schema/seed`, a merge plan, row writes, truncate, `:refresh` |
-| A declared principal (and `anonymous`, when the file declares it) | any member but `disabled` (statements, roles, attributes, description, a rename), its deletion, a key minted or an OIDC trust added for it, deleting one of its declared credentials | `disabled` on its own (the emergency action), revoking a credential (`POST .../credentials/{id}/revoke`), a limited key it mints, a person's own password change (a declared password is a seed) |
+| A declared principal (and `anonymous`, when the file declares it) | any member but `disabled` (statements, roles, attributes, description, a rename), its deletion, a key minted or an OIDC trust added for it, deleting one of its declared credentials | `disabled` on its own (the emergency action; clearing it is refused when the file itself declares `"disabled": true`), revoking a credential (`POST .../credentials/{id}/revoke`), a limited key it mints, a person's own password change (a declared password is a seed) |
 | A declared role | its change, rename and deletion; creating its name | giving it to a runtime principal |
 | The `signup` setting the file declares | `PUT /api/auth/{authDatabase}/signup` | — |
 
