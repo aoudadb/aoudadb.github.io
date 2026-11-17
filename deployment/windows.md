@@ -127,8 +127,8 @@ The same shape: Aouda sizes scan parallelism from the cores it can see. On a ded
 ⚠️ **Aouda does not accept a password on the command line**, on any platform. A command line is recorded by shell history, by process-creation audit events, and by CI logs; none of that can be un-leaked.
 
 ⚠️ `create-admin` needs the service **stopped**: a running server holds its data directory, and `create-admin` then exits `1`
-naming the remedy (`POST /api/auth/setup` from this machine, or stop the service first) (**BL-1462, 0.14.0**). A server with
-a declared server key needs no admin and has no setup mode.
+naming the remedy (`POST /api/auth/setup` from this machine, or stop the service first) (**BL-1462, 0.14.0**). A server that
+declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, next train**).
 
 ```powershell
 # A file

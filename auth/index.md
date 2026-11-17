@@ -401,8 +401,7 @@ Primary evidence:
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
-| `Aouda:Auth:RootUser:Email` | string? | `null` | valid email | `appsettings.json` / env | Optional root bootstrap user email |
-| `Aouda:Auth:RootUser:Password` | string? | `null` | non-empty string | `appsettings.json` / env | Plaintext bootstrap only; remove after first setup |
+| `Aouda:Auth:RootUser:*`, `Aouda:Auth:Bootstrap:*`, `Aouda:Auth:Keys:*` | — | **removed** | — | — | (**BL-1464, next train**) Refused at start (`SETTING_REMOVED`, exit status `78`; an empty value counts as not set), naming the replacement: declare the first admin, a key-only operator or any key's principal in the declaration file's `server.principals` / `databases.<auth>.principals`, with its `credentials`. See [Defaults reference](../guides/defaults-reference.md#configured-api-keys) |
 | `Aouda:Auth:Email:Provider` | string? | `null` | `sendgrid`, `console`, or other → null (no send) | `appsettings.json` / `Aouda__Auth__Email__*` env | Password reset + invite emails; `console` logs OTP for dev/testing — see [notifications.md](notifications.md) |
 | `Aouda:Auth:Email:ApiKey` | string? | `null` | Provider API key (SendGrid when `Provider=sendgrid`) | same | Bearer token for `api.sendgrid.com` |
 | `Aouda:Auth:Email:FromAddress` | string? | `null` | verified sender email | same | Required for delivery |

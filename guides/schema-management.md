@@ -242,7 +242,7 @@ If you declare your databases in the declaration file (`aouda.json`, **BL-1463, 
 
 in `/etc/aouda/aouda.json`, started with `Aouda__Declaration=/etc/aouda/aouda.json` and `AOUDA_ENVIRONMENT=prod`. A relative `schema` path is relative to the directory of `aouda.json` (**BL-1463, next train**; before, to the working directory), so the example reads `/etc/aouda/schemas/ledger.json`.
 
-What happens, in this order: **every `schema` file is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `schema` file is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
+What happens, in this order: **every `schema` file is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` and its declared operators start, **then each `schema` file is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
 
 | You want to know | Answer |
 |---|---|

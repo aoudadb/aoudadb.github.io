@@ -351,40 +351,44 @@ are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing
 
 The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
-## Configured API keys (**BL-1377, 0.10.0; rows since BL-1378, 0.11.0**) {#configured-api-keys}
+## Configured API keys: refused (**BL-1464, next train**) {#configured-api-keys}
 
-Credentials declared in configuration instead of minted into the data a wipe destroys. Nothing is configured by default. A
-declaration is **intent**: each declared secret becomes a real `_api_keys` row (`source = config`) when its auth database is created,
-at every start and after a restore, and the row is what authenticates (**BL-1378, 0.11.0**; 0.10.0 authenticated from memory).
-Full guide: [Keys that survive a wipe](keys-that-survive-a-wipe.md).
+The settings that declared keys and the first admin (**BL-1377, 0.10.0**; **BL-1378, 0.11.0**) are **removed**. Keys and operators
+are principals of the declaration file (`aouda.json`, named by `Aouda:Declaration`; no default path) with their `credentials`:
+[Declared access](declared-access.md), [Keys that survive a wipe](keys-that-survive-a-wipe.md). Every setting below that is set, from
+any configuration source, is a `SETTING_REMOVED` finding: the start is refused before any database opens (exit status `78`), and
+the message names the replacement and never the value. An **empty** value (a compose `${VAR:-}` pass-through of a variable that is
+not set) counts as not set and is not refused.
 
-| Setting | Default | What it means |
-|---|---|---|
-| `Aouda:Auth:Bootstrap:ServerKey` | none | A `mk_srv_` key declared for the server auth database; its row exists once that database does (set `Aouda:Auth:RootUser` too: setup mode answers `503` to everything else). Prefer the environment, `Aouda__Auth__Bootstrap__ServerKey`, to a config file |
-| `Aouda:Auth:Bootstrap:ServerKeyFile` | none | A file holding that key. No permission check (**BL-1401, 0.11.0**), so a secret mounted `0444` works; a missing, unreadable or empty file fails the start. `$NAME` / `${NAME}` in the path are expanded, a relative path resolves against the working directory, the content is strict UTF-8 with one trailing newline removed (**BL-1425, 0.12.0**; [secret files](keys-that-survive-a-wipe.md#secret-files)). Set at most one of the key, the file and the systemd credential `aouda-server-key` |
-| `Aouda:Auth:Keys:File` | none | Path of the identities file declaring further keys of kind `server_admin`, `scoped_service`, and (**BL-1378, 0.11.0**) `service_role`, `public` and `anon`, with secrets as `{ "env": NAME }`, `{ "file": PATH }` (**BL-1389, 0.11.0**) or `{ "hash": "sha256:<hex>" }` |
+| Removed | Replacement |
+|---|---|
+| `Aouda:Auth:Keys:File` (the identities file, `aouda.identities.json`; env `AOUDA_AUTH__KEYS__FILE`) and every setting under `Aouda:Auth:Keys` | Declare each key's principal in the declaration file: `databases.<auth>.principals` or `server.principals`, with its `credentials` (a `derivedKey` from the file's `keyRoot`, or a stored key `{ "id", "sha256" }` under `keys`) |
+| `Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Bootstrap:ServerKeyFile` (env `AOUDA_AUTH__BOOTSTRAP__SERVERKEY` / `AOUDA_AUTH__BOOTSTRAP__SERVERKEYFILE`) and every setting under `Aouda:Auth:Bootstrap` | Declare the operator: a `server.principals` entry holding the role `admin`, with a `derivedKey` (from the file's `keyRoot`) or a stored key `{ "id", "sha256" }` |
+| `Aouda:Auth:RootUser:Email`, `Aouda:Auth:RootUser:Password` (env `AOUDA_AUTH__ROOTUSER__EMAIL` / `AOUDA_AUTH__ROOTUSER__PASSWORD`) | Declare the first admin: a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash": ... }`. The seed is applied only when the principal is created, with a forced password change at the first sign-in, never again |
+| The systemd credentials `aouda-server-key` and `aouda-admin-password` (present in `$CREDENTIALS_DIRECTORY`) | Remove the unit's `LoadCredential=` line and declare as above |
 
-A key is the kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_`, `mk_anon_`) and at least 32 characters of `A-Z a-z 0-9 _ -`;
-`openssl rand -hex 32` is the generator. A change to the file's content takes `aouda reload` (**BL-1427, 0.14.0**; the file's
-path and the server key still take a restart); an invalid declaration fails the start, or refuses the reload, naming the entry. The
-startup log (`Aouda.Server.Startup`, `Information`) lists each declared key by name, kind, auth database, fingerprint and source.
+A first admin by password seed, and a key-only operator whose key root comes from a secret:
 
-(**BL-1378, 0.11.0**) What is **not** a setting, and what to expect:
+```json
+{ "version": 1, "server": { "principals": { "you@example.com": { "roles": ["admin"],
+    "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
+```
 
-- **Removing a declaration revokes its row at the next start** (or at the next `aouda reload`, **BL-1427, 0.14.0**; marked `config-removed`, one warning per row); declaring it again
-  revives that row. A row an operator revoked stays revoked whatever the file says, and a wipe resets that. With none of the three
-  settings above set, nothing is retracted; an empty identities file retracts every configured row.
-- **A declared `service_role`, `public` or `anon` key takes the place of the one a link or `regenerate-keys` would generate**: only
-  the undeclared kinds are generated, and `anonKey` / `serviceRoleKey` / `publicKey` are absent from a response for a declared kind.
-- `aouda plan --Aouda:Auth:Keys:File=<path>` validates the file offline (**BL-1463, 0.14.0**; it replaced `aouda keys check`; [Plan a declaration](plan.md)); `GET /api/auth/admin/configured-keys` lists the declarations and the
-  state of their rows; (**BL-1427, 0.14.0**) a reload is limited to one per 5 s and a dry run to one per 1 s, with a 120 s
-  deadline — fixed, not settings; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind, over HTTP, WebSocket and long-poll, with `rejectedApiKeysByTransport` and `rejectedApiKeysByReason` (**BL-1428, BL-1430, 0.12.0**; [counting refused keys](keys-that-survive-a-wipe.md#counting-refused-keys)).
+```json
+{ "version": 1, "keyRoot": { "env": "AOUDA_KEY_ROOT" },
+  "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
+```
+
+Not settings, and unchanged: (**BL-1427, 0.14.0**) a reload is limited to one per 5 s and a dry run to one per 1 s, with a 120 s
+deadline; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by kind, over HTTP, WebSocket and long-poll, with
+`rejectedApiKeysByTransport` and `rejectedApiKeysByReason` (**BL-1428, BL-1430, 0.12.0**;
+[counting refused keys](keys-that-survive-a-wipe.md#counting-refused-keys)).
 
 ## First admin (**BL-1423, 0.12.0**)
 
 | Setting | Default | What it means |
 |---|---|---|
-| `Aouda:Auth:DevAdmin:Enabled` (`AOUDA_DEV_ADMIN`, `aouda start --dev-admin`) | `false` | Development and tests only: a random throwaway admin and `mk_srv_` key at every start, printed once on stdout. Refused in Production |
+| `Aouda:Auth:DevAdmin:Enabled` (`AOUDA_DEV_ADMIN`, `aouda start --dev-admin`) | `false` | Development and tests only: a random throwaway admin and its key at every start, printed once on stdout (`AOUDA-DEV-ADMIN email=... password=... key=...`). Refused in Production, and next to a declared server operator's credentials (`SERVER_KEY_DEV_ADMIN_CONFLICT`, **BL-1464, next train**) |
 | `Aouda:Auth:DevAdmin:Email` | `admin@aouda.local` | The throwaway admin's email |
 
 Full rules and the exact refusals: [Development admin](development-admin.md).
@@ -451,18 +455,20 @@ undone by the next start, which creates it again, empty. After a backup restore 
 not stop the server (engines open, memory evaluation resumes): it is logged and returned as `declarationConflict` on the restore
 response, and the next process start fails on it until the declaration or the catalog is changed. A declaration cannot say "must be
 unlinked" or "must not exist", and a database removed from the file is left alone. The names `_serverauth`,
-`_auth` and `_settings` are never declarable (`_serverauth` is created by `Aouda:Auth:RootUser` or setup).
+`_auth` and `_settings` are never declarable (`_serverauth` is created by an operator declared in `server.principals`, the dev
+admin, or setup; **BL-1464, next train**).
 
 **A declarative link creates no API key.** A key minted at start has no reader, so it would be an orphan `db_admin` credential. After
-a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when a later release declares them in the
-identities file or an operator calls `regenerate-keys` (which returns them once); a `POST /api/databases` that links still returns
-them as before. Startup order after a wipe: declared databases and links, then `_serverauth` / `Aouda:Auth:RootUser`, then each
-declared `SchemaFile` (**BL-1388, 0.11.0**), then declared `Roles` (**BL-1392, 0.11.0**), then the configured keys. `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
+a wipe the `anon`, `service_role` and `public` keys of a linked database exist only when an operator calls `regenerate-keys`
+(which returns them once; a key that must survive a wipe is a declared principal's credential, **BL-1464, next train**); a `POST /api/databases` that links still returns
+them as before. Startup order after a wipe: declared databases and links, then `_serverauth` (its declared operators, or setup), then each
+declared `SchemaFile` (**BL-1388, 0.11.0**), then declared roles (**BL-1392, 0.11.0**) and principals with their credentials
+(**BL-1464, next train**; they replace the configured keys that came last). `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
 has one line per entry (created, converged or unchanged; linked or already linked).
 
 ## Related docs
 
-- [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, 0.10.0**) - declaring keys in configuration
+- [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, 0.10.0**) - declared credentials (**BL-1464, next train**: in the declaration file)
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into
 - [Materialized queries](materialized.md#where-a-materialized-querys-result-lives) — where a query's result table lives, and why the default changed
 - [Server configuration](server-configuration.md) — where each of these keys is set (`appsettings.json`, `AOUDA_*` env vars, CLI flags) and what survives a restart

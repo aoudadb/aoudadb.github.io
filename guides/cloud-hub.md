@@ -49,7 +49,7 @@ The Aouda server binary is a single executable supporting subcommand dispatch.
 |---------|---------|-------------|
 | `aouda start` | Production server with persistent storage | `--data-dir <path>`, `--bind <ip:port>`, `--port <port>`, `--join <primary:port>`, `--role <role>` |
 | `aouda stop` | Gracefully stop a locally-running server | `--server <url>`, `--force` |
-| `aouda reload` | (**BL-1427, 0.14.0**) Re-read a running server's declaration (keys, databases, schema, roles) and converge it without a restart; exit `0` nothing to change, `2` applied changes, `1` refused or partial | `--server <url>`, `--key-file <path>` / `--key-env <name>` (a server key; `--key` is refused), `--json` |
+| `aouda reload` | (**BL-1427, 0.14.0**) Re-read a running server's declaration (databases, schema, roles and principals) and converge it without a restart; exit `0` nothing to change, `2` applied changes, `1` refused or partial | `--server <url>`, `--key-file <path>` / `--key-env <name>` (a server key; `--key` is refused), `--json` |
 | `aouda version` | Print version and exit | — |
 | `aouda databases <subcommand>` | Database administration | `list`, `get`, `create`, `drop` (each with `--server`, `--name`, `--token`) |
 | `aouda schema <subcommand>` | Schema management | `diff`, `apply`, `export`, `validate`, `history` |
@@ -167,7 +167,7 @@ docker compose up
 - Aouda at `http://localhost:5000`
 - Studio at `http://localhost:3000`
 
-The compose file takes one declaration: a server key, `AOUDA_SERVER_KEY=mk_srv_<64 hex> docker compose up` (no human admin needed, **BL-1462, 0.14.0**), a first admin, `AOUDA_ROOT_EMAIL=you@example.com AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. See [Docker](../deployment/docker.md#compose).
+The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, next train**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
 - Named volume for persistent data
 
 ### Docker Compose — Cluster

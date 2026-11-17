@@ -43,21 +43,37 @@ start-time schema apply; raise it for a large declared schema. The port is open 
 (`/startup` 503, `/ready` with `not_initialized`, `server_starting`, `schema_applying` and its `progress`). Before this, `/startup` answered `503` for as long as the pod was in
 setup mode, so Kubernetes restarted a pod that had finished starting every five minutes, for ever.
 
-**Declare a server key and there is no setup mode.** The pod starts ready, operated through the key, with no human admin:
+**Declare an operator and there is no setup mode** (**BL-1464, next train**). The pod starts ready, operated by a key-only
+principal of the declaration, with no human admin. Its key is derived from a **key root** that reaches the pod from a Secret, never
+from values or a ConfigMap. Create the Secret, the root on standard input rather than on kubectl's command line:
 
 ```bash
-printf 'mk_srv_%s' "$(openssl rand -hex 32)" |
-  kubectl create secret generic aouda-server-key -n aouda --from-file=server-key=/dev/stdin
-helm upgrade --install aouda ./charts/aouda-cluster --namespace aouda \
-  --set auth.serverKeySecret.name=aouda-server-key
+openssl rand -hex 32 | tr -d '\n' |
+  kubectl create secret generic aouda-key-root -n aouda --from-file=key-root=/dev/stdin
 ```
 
-(`auth.serverKeySecret.key` defaults to `server-key`; the chart passes it as `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`. The key reaches
-kubectl on standard input, not on its command line.) ⚠️ With `replicaCount` above 1 every replica gets the key, and each creates
-its own server auth database at its first start, before replication assigns it a role: that is aouda **BL-1396** (startup writes on
-a replicated node), not handled by this chart yet.
+then pass it through `extraEnv` and declare the operator in `declaration.file`:
 
-With no key declared, a pod whose volume has never been set up is in setup mode: `/startup` is `200`, `/ready` is `503 setup_required`, and the pod stays NotReady.
+```yaml
+extraEnv:
+  - name: AOUDA_KEY_ROOT
+    valueFrom: { secretKeyRef: { name: aouda-key-root, key: key-root } }
+declaration:
+  file:
+    version: 1
+    keyRoot: { env: AOUDA_KEY_ROOT }
+    server:
+      principals:
+        ops: { roles: [admin], credentials: { derivedKey: { version: 1 } } }
+```
+
+The same root derives `ops`'s key for its client: [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md). The chart's
+`auth.serverKeySecret` is **gone**: the setting it passed, `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`, is refused at start (`SETTING_REMOVED`,
+exit status `78`), so a values file that still sets it renders no key, and an `extraEnv` that sets the variable by hand refuses the
+pod. ⚠️ With `replicaCount` above 1 every replica gets the declaration and converges its own server auth database at its first start,
+before replication assigns it a role: that is aouda **BL-1396** (startup writes on a replicated node), not handled by this chart yet.
+
+With no operator declared, a pod whose volume has never been set up is in setup mode: `/startup` is `200`, `/ready` is `503 setup_required`, and the pod stays NotReady.
 Create the first admin over a port-forward, which reaches the pod as loopback:
 
 ```bash
