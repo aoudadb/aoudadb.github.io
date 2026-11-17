@@ -69,39 +69,201 @@
             "type": "integer",
             "description": "Cap on the computed memory share, in bytes (default: none)."
           },
+          "signup": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "statements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "actions": {
+                      "type": "array",
+                      "description": "read, write, delete, execute, manage, set-identity, or *.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "resources": {
+                      "type": "array",
+                      "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "where": {
+                      "type": "object",
+                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                    },
+                    "embargoSeconds": {
+                      "type": "integer",
+                      "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                    },
+                    "unrestricted": {
+                      "type": "boolean",
+                      "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                    }
+                  },
+                  "required": [
+                    "actions",
+                    "resources"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "additionalProperties": false,
+            "description": "Self-signup (ADR 0071 D-5): { \"enabled\", \"roles\"?, \"statements\"? }, what a principal that signs itself up holds."
+          },
           "roles": {
             "type": "object",
-            "description": "auth only: custom roles, keyed by role name.",
+            "description": "The roles of this auth database (auth only), keyed by role name (not admin, writer or reader: built in).",
             "additionalProperties": {
               "type": "object",
-              "description": "A custom role of this auth database: created when missing and converged at every start and reload; a role not declared is never touched.",
+              "description": "A role of this auth database, owned by the declaration: created, converged and removed at every start and reload (source: declared).",
               "properties": {
                 "description": {
                   "type": "string",
                   "description": "The role's description."
                 },
-                "permissions": {
+                "statements": {
                   "type": "array",
-                  "description": "The role's permissions.",
                   "items": {
                     "type": "object",
-                    "description": "One permission of a declared role, in the shape of the roles API.",
                     "properties": {
-                      "resourceType": {
-                        "type": "string",
-                        "description": "table (the default), all-partitions, all-rows or embargo."
-                      },
-                      "resourceName": {
-                        "type": "string",
-                        "description": "The table name, or *."
-                      },
                       "actions": {
-                        "type": "string",
-                        "description": "For a table row a comma-separated action list (default read); for an all-* grant exactly one level."
+                        "type": "array",
+                        "description": "read, write, delete, execute, manage, set-identity, or *.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "resources": {
+                        "type": "array",
+                        "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "where": {
+                        "type": "object",
+                        "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                      },
+                      "embargoSeconds": {
+                        "type": "integer",
+                        "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                      },
+                      "unrestricted": {
+                        "type": "boolean",
+                        "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
                       }
                     },
+                    "required": [
+                      "actions",
+                      "resources"
+                    ],
                     "additionalProperties": false
+                  },
+                  "description": "What the role grants: a non-empty list of statements (ADR 0071 D-6)."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "principals": {
+            "type": "object",
+            "description": "The principals of this auth database (auth only), keyed by name (a slug or an email address); 'anonymous' declares what unauthenticated callers hold.",
+            "additionalProperties": {
+              "type": "object",
+              "description": "A principal of this auth database, owned by the declaration (source: declared); its name is the member's name: a slug or an email address.",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Free text."
+                },
+                "roles": {
+                  "type": "array",
+                  "description": "The roles it holds: declared, built-in (admin, writer, reader) or runtime roles of its auth database.",
+                  "items": {
+                    "type": "string",
+                    "description": "A role name."
                   }
+                },
+                "statements": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "actions": {
+                        "type": "array",
+                        "description": "read, write, delete, execute, manage, set-identity, or *.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "resources": {
+                        "type": "array",
+                        "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "where": {
+                        "type": "object",
+                        "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                      },
+                      "embargoSeconds": {
+                        "type": "integer",
+                        "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                      },
+                      "unrestricted": {
+                        "type": "boolean",
+                        "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                      }
+                    },
+                    "required": [
+                      "actions",
+                      "resources"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Its own statements (ADR 0071 D-6); may be empty."
+                },
+                "attributes": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "description": "Its attributes (ADR 0071 D-12): name → a string, number, boolean or an array of them; a where reads them as principal.<name>."
+                },
+                "disabled": {
+                  "type": "boolean",
+                  "description": "true refuses every credential of it (default false). Not for anonymous."
                 }
               },
               "additionalProperties": false
@@ -113,6 +275,153 @@
         ],
         "additionalProperties": false
       }
+    },
+    "server": {
+      "type": "object",
+      "description": "Who operates the server: the server auth database's roles and principals (ADR 0071 D-22). Its statements may name every database and server.",
+      "properties": {
+        "roles": {
+          "type": "object",
+          "description": "The roles of the server auth database, keyed by role name (not admin, writer or reader: built in).",
+          "additionalProperties": {
+            "type": "object",
+            "description": "A role of this auth database, owned by the declaration: created, converged and removed at every start and reload (source: declared).",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "The role's description."
+              },
+              "statements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "actions": {
+                      "type": "array",
+                      "description": "read, write, delete, execute, manage, set-identity, or *.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "resources": {
+                      "type": "array",
+                      "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "where": {
+                      "type": "object",
+                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                    },
+                    "embargoSeconds": {
+                      "type": "integer",
+                      "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                    },
+                    "unrestricted": {
+                      "type": "boolean",
+                      "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                    }
+                  },
+                  "required": [
+                    "actions",
+                    "resources"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "What the role grants: a non-empty list of statements (ADR 0071 D-6)."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "principals": {
+          "type": "object",
+          "description": "The principals of the server auth database, keyed by name (a slug or an email address); 'anonymous' declares what unauthenticated callers hold.",
+          "additionalProperties": {
+            "type": "object",
+            "description": "A principal of this auth database, owned by the declaration (source: declared); its name is the member's name: a slug or an email address.",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Free text."
+              },
+              "roles": {
+                "type": "array",
+                "description": "The roles it holds: declared, built-in (admin, writer, reader) or runtime roles of its auth database.",
+                "items": {
+                  "type": "string",
+                  "description": "A role name."
+                }
+              },
+              "statements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "actions": {
+                      "type": "array",
+                      "description": "read, write, delete, execute, manage, set-identity, or *.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "resources": {
+                      "type": "array",
+                      "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "where": {
+                      "type": "object",
+                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                    },
+                    "embargoSeconds": {
+                      "type": "integer",
+                      "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                    },
+                    "unrestricted": {
+                      "type": "boolean",
+                      "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                    }
+                  },
+                  "required": [
+                    "actions",
+                    "resources"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Its own statements (ADR 0071 D-6); may be empty."
+              },
+              "attributes": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "description": "Its attributes (ADR 0071 D-12): name → a string, number, boolean or an array of them; a where reads them as principal.<name>."
+              },
+              "disabled": {
+                "type": "boolean",
+                "description": "true refuses every credential of it (default false). Not for anonymous."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

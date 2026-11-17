@@ -21,6 +21,8 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 
 ## Codes
 
+The `PRINCIPAL_*`, `ROLE_BUILTIN_NAME`, `STATEMENT_*`, `AUTH_PUBLIC_UNRESTRICTED`, `ROLE_RUNTIME_CONFLICT`, `DECLARED_OBJECT_OVERRIDDEN`, `PUBLIC_REACH_INERT` and `ACCESS_CONVERGE_REFUSED` codes check the declared access section of `aouda.json` (principals, roles, `signup`; see [Declared access](../guides/declared-access.md)) (**BL-1464, next train**). The role codes of the old `permissions` grammar are gone with it.
+
 | Code | Severity | Stage | Half | Exit status | What to do |
 |---|---|---|---|---|---|
 | `CONFIGURATION_INVALID` | error | `read` | offline | 1 when the file cannot be read (I/O), else 78 | Fix the configuration file or the AOUDA_ variable named above so that it can be read. |
@@ -72,7 +74,11 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `DATABASE_LINK_TARGET_NOT_OPEN` | error | `databases` | state | 78 | Open the auth database (repair it, or remove it from Aouda:SkipDatabases or its operator quarantine), or remove the link. |
 | `DATABASE_LINK_TARGET_NOT_AUTH` | error | `databases` | state | 78 | Link to an application auth database. |
 | `DATABASE_LINK_CONFLICT` | error | `databases` | state | 78 | Make the declaration match the catalog's link, or unlink the database first. |
-| `SETUP_MODE_EXPECTED` | warning | `bootstrap` | offline | — | Nothing to do for an interactive first run; otherwise declare a server key or Aouda:Auth:RootUser. |
+| `PRINCIPAL_NAME_INVALID` | error | `principals` | offline | 78 | Name the principal by a slug (^[a-z][a-z0-9-]{0,62}$) or an email address (ADR 0071 D-2). |
+| `PRINCIPAL_NAME_DUPLICATE` | error | `principals` | offline | 78 | Declare the principal once: names are compared without regard to case. |
+| `PRINCIPAL_BUILTIN` | error | `principals` | offline | 78 | Declare only statements and attributes for anonymous, spelled 'anonymous': it is built in, has no credential and cannot be disabled. |
+| `PRINCIPAL_ATTRIBUTE_INVALID` | error | `principals` | offline | 78 | Give the attribute a valid name and values of one type, within the caps (1 000 values per attribute, 5 000 per principal). |
+| `SETUP_MODE_EXPECTED` | warning | `bootstrap` | offline | — | Nothing to do for an interactive first run; otherwise declare an operator in server.principals (a principal holding manage on server, with a credential), a server key or Aouda:Auth:RootUser. |
 | `SERVER_HAS_NO_OPERATOR` | error | `bootstrap` | state | 78 | Declare an operator: a server key (Aouda:Auth:Bootstrap:ServerKey, ServerKeyFile, the aouda-server-key credential or a server_admin entry), or Aouda:Auth:RootUser. |
 | `ROOT_USER_INVALID` | error | `bootstrap` | state | 78 | Give Aouda:Auth:RootUser a password the password policy accepts. |
 | `SCHEMA_FILE_UNREADABLE` | error | `schema` | offline | 1 when the file cannot be read (I/O), else 78 | Make the schema file readable where the server runs (a volume not yet mounted clears when it is), or fix SchemaFile. |
@@ -86,15 +92,19 @@ The stages run in the order of the start: `read`, `settings`, `principals` (the 
 | `SCHEMA_DESTRUCTIVE_REFUSED` | warning | `schema` | state | — | Set SchemaAllowDestructive for the database to apply the destructive change, or make the file match the catalog. |
 | `ROLE_NAME_INVALID` | error | `roles` | offline | 78 | Give the role a name. |
 | `ROLE_NAME_DUPLICATE` | error | `roles` | offline | 78 | Declare the role once: role names are compared without regard to case. |
-| `ROLE_BODY_EMPTY` | error | `roles` | offline | 78 | Give the role a body, at least {}. |
 | `ROLE_SYSTEM_NAME` | error | `roles` | offline and state | 78 | Declare a custom role and assign it: a system role cannot be declared. |
-| `ROLE_PERMISSION_INVALID` | error | `roles` | offline | 78 | Fix the permission as the message says. |
-| `ROLE_TABLE_NOT_DECLARED` | warning | `roles` | offline | — | Check the table name against the declared schema files, or remove the permission. A table created at runtime is not visible offline. |
-| `ROLE_NAMED_ARTIFACT_NOT_DECLARED` | warning | `roles` | offline | — | Check the name against the declared schema files, or remove the permission. A named query or mutation created at runtime is not visible offline. |
 | `ROLE_AUTH_DATABASE_NOT_OPEN` | error | `roles` | state | 78 | Open the auth database (repair it), or list it in Aouda:SkipDatabases to start without it. |
-| `AUTH_GRANT_TABLE_NOT_FOUND` | error | `roles` | state | 78 | Create the table (declare it in a schema file of a linked database), or remove the permission. |
-| `AUTH_GRANT_NOT_APPLICABLE` | error | `roles` | state | 78 | Change the permission so that it applies to the table as it is (e.g. all-partitions needs a partitioned table). |
-| `ROLE_SIGNUP_ALL_GRANT` | error | `roles` | state | 78 | Use another role for the all-partitions or all-rows grant, or change the database's SelfSignupRole first. |
+| `ROLE_BUILTIN_NAME` | error | `roles` | offline | 78 | Name the role something else, or assign the built-in role to the principal: admin, writer and reader are built in and cannot be declared. |
+| `STATEMENT_NOT_GOVERNED` | error | `roles` | offline and state | 78 | Give the statement to a principal or role of the auth database that governs the resource (the message names it), or link the database to this auth database. |
+| `STATEMENT_RESOURCE_UNKNOWN` | warning | `roles` | offline | — | Check the name against the declared schema files. A table created at runtime is not visible offline; a statement may precede its table. |
+| `STATEMENT_COLUMN_UNKNOWN` | warning | `roles` | offline | — | Check the column against the table's declared schema: a condition on a column the table does not have matches no row (ADR 0071 D-9). |
+| `AUTH_PUBLIC_UNRESTRICTED` | error | `roles` | offline and state | 78 | Give the public statement the same row condition, or mark it "unrestricted": true if every row is meant to be public; manage is never public (ADR 0071 C-11). |
+| `PRINCIPAL_ROLE_UNKNOWN` | error | `principalRows` | state | 78 | Declare the role in the same auth database's roles, or create it before the reload: a principal holds only roles that exist. |
+| `PRINCIPAL_RUNTIME_CONFLICT` | error | `principalRows` | state | 78 | Delete or rename the runtime principal, then start or reload again: a declared principal is owned by the file, whole. |
+| `ROLE_RUNTIME_CONFLICT` | error | `principalRows` | state | 78 | Delete or rename the runtime role, then start or reload again: a declared role is owned by the file, whole. |
+| `DECLARED_OBJECT_OVERRIDDEN` | warning | `principalRows` | state | — | Make the file say what the server does (disabled: true, or a new key version), or undo the runtime action: until then every start and reload warns. |
+| `PUBLIC_REACH_INERT` | warning | `principalRows` | state | — | Give the public statement the restricting statement's row condition, or mark it unrestricted: until then it grants nothing on that table. |
+| `ACCESS_CONVERGE_REFUSED` | error | `principalRows` | state | 78 | Change the declaration as the message says; the start and the reload stop at the first write the principal store refuses. |
 | `KEY_TARGET_PENDING` | warning | `principalRows` | offline | — | Declare the auth database (Kind 'auth'), or make sure it exists: until it does the key has no row and is refused. |
 | `KEY_ROLE_UNDECLARED` | warning | `principalRows` | offline | — | Declare the role in the auth database's Roles, or make sure it exists: a key whose role is missing is denied. |
 | `KEY_DATABASE_NOT_LINKED` | warning | `principalRows` | offline | — | Check that the database exists and is linked to the key's auth database. |

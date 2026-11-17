@@ -30,12 +30,12 @@ The stages of the start, in the order of the start, each on what it can read wit
 1. **read** — every file the declaration names is read: the declaration file `aouda.json` named by `Aouda:Declaration` and its overlay (**BL-1463, next train**; [the file](declaration.md)), the identities file, the secret files and environment variables it points at, the server key's file or
    credential, every schema file and its overlay. A file that cannot be read is one finding, not a crash.
 2. **settings** — the process settings (`Aouda:Port`, the memory limits, `Aouda:NamedQuery:*`, ...), the removed keys and the dev-admin guards.
-3. **principals** — the identities file's entries, the key shapes, the server key's one source, the dev admin beside a server key, and the conflicts between declared keys.
+3. **principals** — the declared principals' names, `anonymous`'s members and the attributes (**BL-1464, next train**; [Declared access](declared-access.md)); the identities file's entries, the key shapes, the server key's one source, the dev admin beside a server key, and the conflicts between declared keys.
 4. **databases** — the `databases` of `aouda.json` (**BL-1463, next train**; before, `Aouda:Databases`, which is now refused as `SETTING_REMOVED`): names, kinds, links and per-kind fields.
-5. **bootstrap** — the first administrator: a server key, `Aouda:Auth:RootUser`, or a data directory that starts in setup mode.
+5. **bootstrap** — the first administrator: an operator in `server.principals` with a credential (**BL-1464, next train**), a server key, `Aouda:Auth:RootUser`, or a data directory that starts in setup mode.
 6. **schema** — every declared schema file, read with the server's own reader (a misspelt member is refused with its JSON pointer), the overlay merge, and the apply-time rules that need no tables.
-7. **roles** — declared roles: names, the grammar of their permissions, the tables and named artifacts they name.
-8. **principalRows** — what the key declarations would write.
+7. **roles** — the declared access section's rules (**BL-1464, next train**): role names, which auth database governs what a statement names (`STATEMENT_NOT_GOVERNED`), public reach (`AUTH_PUBLIC_UNRESTRICTED`), and the tables, named queries and columns no declared schema has (warnings).
+8. **principalRows** — against a running server: what the converge would write (principals, roles, `signup`; ownership conflicts, unknown roles, the emergency actions the file disagrees with), and what the key declarations would write.
 
 Every stage runs on what it can check, so a broken schema file does not hide a duplicate key secret. Every finding has a **severity**, a stable **code** ([Declaration finding codes](../reference/plan-codes.md)),
 a **location** (a file and a JSON pointer, or a setting and the configuration source that supplied it), a message and what to do. `error` is exactly a refusal of the start;
@@ -113,6 +113,8 @@ aouda plan: declaration /etc/aouda/aouda.json, identities file /etc/aouda/identi
 changes
   schema   rates: 1 change (AddColumn SwapQuote.Venue)
   roles    auditor (appauth): create
+  principals checkout (appauth): create
+           feeder (appauth): update [statements, attributes]
   keys     added feeder-icap (scoped_service, appauth, fingerprint 9f2c41ab, file)
            revoked feeder-legacy (removed, fingerprint 77d0e1c3; 2 open sessions will end)
 

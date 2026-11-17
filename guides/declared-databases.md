@@ -31,7 +31,7 @@ member, with its type, is the [reference](../reference/declaration.md#databasesn
 | `authDatabase` | string | none | Only with `"kind": "data"`. The application auth database to link this one to |
 | `schema` | string | none | Only with `"kind": "data"`. Path of a schema file applied at start. Absolute, or relative to the directory of `aouda.json` |
 | `schemaAllowDestructive` | boolean | `false` | Needs `schema`. Lets the start-time apply drop a table or a column. When `false` such a change is refused, logged, and the start goes on |
-| `roles` | object | none | Only with `"kind": "auth"`. Custom roles of this auth database, keyed by role name: `description`, and `permissions` (a list of `resourceType`, `resourceName`, `actions`) |
+| `roles` | object | none | Only with `"kind": "auth"`. The roles of this auth database, keyed by role name: `description` and `statements` (**BL-1464, next train**: the `permissions` list is refused naming `statements`; see [Declared access](declared-access.md)) |
 | `durability` | string | `"strict"` | `"strict"`, `"os"`, `"unlogged"` or `"memory"` ([levels](write-durability.md#durability-levels-lead-s26-060)). On `"kind": "auth"` it must be absent or `"strict"` |
 | `maxMemoryShareBytes` | integer | none | Cap on this database's share of the memory budget; none, or not negative |
 | `memoryWeight` | number | `1` | Relative weight when the budget is divided; positive |
@@ -83,18 +83,15 @@ with a warning, as quarantine is a deliberate isolation; a link to it still fail
 
 ### Why `roles` is only on an auth database
 
-A role is a row of an application auth database: it names permissions that users and keys of every database linked to that
-auth database receive. A `roles` member on a `"kind": "data"` entry therefore has no place to live and fails the start
-(`Roles can only be declared on a Kind 'auth' database`). Declare the roles on the auth database the data databases link to.
+A role belongs to an application auth database: the principals of that auth database hold it, on the databases linked to it. A `roles`
+member on a `"kind": "data"` entry therefore has no place to live and fails the start (`DATABASE_FIELD_NOT_FOR_KIND`). Declare the
+roles on the auth database the data databases link to.
 
-- Each role is created when missing and converged to the declared description and permissions when it exists. A role that is not declared is never touched, so roles made through the API stay.
-- A `permissions` item is `resourceType` (`table`, the default; or `all-partitions`, `all-rows`, `embargo`; and, **BL-1417, 0.12.0**, `named-mutation` or `named-query`), `resourceName` (a table name, or `*`, which is also what a `table` item without `resourceName` grants: every table; for a named artifact its exact name or `*`) and `actions` (for a `table` item a comma-separated list, default `read`; for an all-* grant exactly one level; for a named artifact exactly `execute`), the same fields as `POST .../roles`. The same validator runs, so a `resourceName` with a `*` that is not alone (`quote*`) fails the start (**BL-1415, 0.12.0**), as does an `execute` item with other `actions`.
-- Running a named query or mutation needs an `execute` item (**BL-1417, 0.12.0**): `{ "resourceType": "named-mutation", "resourceName": "insert_quote", "actions": "execute" }`. The `quote_writer` role in the example below, which holds only a table `write`, does **not** run named mutations. At start the server logs one Warning per auth database naming the custom roles that hold table `read` / `write` and no execute row. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
-- A role name is compared without case: declaring one twice is refused. A role with no body is refused; write `{}` for a role with no description and no permissions.
-- Roles are applied **after** the schema, so a permission may name a table the schema file creates.
-- A system role cannot be declared, and the signup role of a database cannot carry an `all-partitions` or `all-rows` grant. Both fail the start.
-
-Users are not declared. After a wipe an operator still creates the first users (the admin comes back from `Aouda:Auth:RootUser`).
+**BL-1464, next train:** a declared role is `{ "description"?, "statements": [ … ] }` — the access model's statements, not the old
+`permissions` list — and it is the file's, whole: created, converged and removed by every start and reload, with `signup` and the
+auth database's principals beside it. A runtime role of the same name is refused rather than taken over. Roles are converged after
+the schema, so a statement may name a table the schema file creates. See [Declared access](declared-access.md) for the rules, the
+ownership and the emergency action, and [The declaration file](../reference/declaration.md) for the exact JSON.
 
 ---
 
@@ -116,13 +113,13 @@ they are not in it).
       "roles": {
         "quote_writer": {
           "description": "Writes quotes, reads nothing else",
-          "permissions": [
-            { "resourceType": "table", "resourceName": "quotes", "actions": "write" }
+          "statements": [
+            { "actions": ["write"], "resources": ["ledger/table/quotes"] }
           ]
         },
         "analyst": {
           "description": "Reads every table",
-          "permissions": [ { "resourceName": "*", "actions": "read" } ]
+          "statements": [ { "actions": ["read"], "resources": ["ledger/table/*", "reports/table/*"] } ]
         }
       }
     },
