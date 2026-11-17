@@ -109,7 +109,7 @@ docker compose up
 - Aouda at `http://localhost:5000`
 - Aouda Studio at `http://localhost:3000`
 
-The compose file takes one declaration: a server key, `AOUDA_SERVER_KEY=mk_srv_<64 hex> docker compose up` (no human admin needed, **BL-1462, 0.14.0**), a first admin, `AOUDA_ROOT_EMAIL=you@example.com AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. See [Docker](../deployment/docker.md#compose).
+The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, next train**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
 
 ### 4. Aouda.Setup — interactive installer (Windows + Linux)
 
@@ -599,7 +599,7 @@ docker compose up
 - **Aouda** at `http://localhost:5000`
 - **Aouda Studio** at `http://localhost:3000`
 
-The compose file takes one declaration: a server key, `AOUDA_SERVER_KEY=mk_srv_<64 hex> docker compose up` (no human admin needed, **BL-1462, 0.14.0**), a first admin, `AOUDA_ROOT_EMAIL=you@example.com AOUDA_ROOT_PASSWORD=<something long> docker compose up`, or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. See [Docker](../deployment/docker.md#compose).
+The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, next train**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
 
 Studio connects to Aouda automatically. No additional configuration needed — open `http://localhost:3000` to browse your databases.
 
@@ -1467,13 +1467,14 @@ Auth state is stored in an internal database called `_serverauth`. This database
 When the server starts with no admin accounts **and nothing declared**, it enters **setup mode**. In setup mode, only the bootstrap endpoint is available, and only from localhost.
 
 (**BL-1462, 0.14.0**) Setup mode exists only for a data directory that has **never been set up** (no server auth database)
-and nothing is declared. Once set up, a server never re-enters it: with no user, an active server key (minted or once
-declared) operates it, and with no user, no active key and nothing declared the start is refused (`SERVER_HAS_NO_OPERATOR`,
-naming the ways out). A declared server key
-(`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the systemd credential `aouda-server-key`, or a `server_admin` entry in the
-identities file) means no setup mode: the server auth database is created with no user and the key operates the server from
-the first start, with no human admin. A declared `Aouda:Auth:RootUser` creates the first admin at start (Option B below). Setup
-mode is the interactive first run for a server that declares neither.
+and nothing is declared. Once set up, a server never re-enters it: an operator it already has (an admin, or a principal holding
+`admin` with an active key) operates it, and with nobody who can manage the server and nothing declared the start is refused
+(`SERVER_HAS_NO_OPERATOR`, naming the ways out). (**BL-1464, next train**) An operator declared in the declaration file's
+`server.principals` means no setup mode: a key-only operator (the role `admin` and a `derivedKey` or stored key) operates the
+server from the first start, with no human admin, and a first admin named by an email with a password seed is created at start
+(Option B below). Setup mode is the interactive first run for a server that declares neither. The old `Aouda:Auth:Bootstrap:*`,
+`Aouda:Auth:RootUser:*` and `Aouda:Auth:Keys:File` settings, and the systemd credentials `aouda-server-key` and
+`aouda-admin-password`, are refused at start (`SETTING_REMOVED`, exit status `78`).
 
 Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`. The health probes answer in setup mode too: `/health` and `/startup` are `200`, `/ready` is `503` with `setup_required` (**BL-1462, 0.14.0**; see [the probes](../reference/http-api.md#the-probes-one-meaning-each)).
 
@@ -1495,7 +1496,7 @@ Response while setup is required:
 }
 ```
 
-The three flags follow setup mode alone (**BL-1462, 0.14.0**): a server with a declared server key and no user answers
+The three flags follow setup mode alone (**BL-1462, 0.14.0**): a server with a declared key-only operator and no user answers
 `"setupMode": false`, `"serverAuthConfigured": true`, `"adminBootstrapRequired": false`. Before, "no user" alone made it answer
 `setupMode: true` and point at `POST /api/auth/setup`, which that server refuses with `403 ALREADY_CONFIGURED`.
 
@@ -1544,28 +1545,22 @@ Response:
 
 Setup mode automatically disables after the first admin is created.
 
-#### Option B: Configuration File (local development / advanced ops)
+#### Option B: Declare the first admin (**BL-1464, next train**)
 
-For local development or advanced operator setups, you may set the root user in an optional `appsettings.json` under `Aouda:Auth:RootUser`. Production installs via Setup use `create-admin` instead. Precedence: see [Server configuration](../guides/server-configuration.md).
+Declare the admin in the declaration file, `aouda.json`: a `server.principals` entry named by the email, holding the role `admin`,
+with a password seed read from a file or an environment variable (or `{ "hash": ... }`), never written into the file:
 
 ```json
-{
-  "Aouda": {
-    "DataPath": "./data",
-    "Port": 5433,
-    "Auth": {
-      "RootUser": {
-        "Email": "admin@example.com",
-        "Password": "ChangeMeNow!"
-      }
-    }
-  }
-}
+{ "version": 1, "server": { "principals": { "admin@example.com": { "roles": ["admin"],
+    "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
 ```
 
-The server creates the admin on first startup if the `_serverauth` database has no users.
+and name the file at start: `aouda start --declaration ./aouda.json` (or `Aouda__Declaration`; there is no default path). The server
+creates the admin when the principal is created, with a forced password change at the first sign-in; the seed is never applied
+again, so a later change of the variable changes nothing. See [Declared access](../guides/declared-access.md).
 
-**Security note:** Remove the plaintext password from configuration after the first admin is created.
+`Aouda:Auth:RootUser` (`Email` / `Password` in `appsettings.json` or `AOUDA_AUTH__ROOTUSER__*`) is **refused** at start
+(`SETTING_REMOVED`, exit status `78`), naming this declaration as its replacement; an empty value counts as not set.
 
 #### Option C: Local Bootstrap Command
 
@@ -2145,8 +2140,8 @@ of that can be un-leaked, which is why the option was removed rather than deprec
 warning is printed *after* the leak has already happened.
 
 ⚠️ `create-admin` runs against a **stopped** server's data directory: next to a running server it exits `1` and names the
-remedy (`POST /api/auth/setup` from the server's host, or stop the server) (**BL-1462, 0.14.0**). A service you declare a
-server key for needs no admin at all.
+remedy (`POST /api/auth/setup` from the server's host, or stop the server) (**BL-1462, 0.14.0**). A service that declares a
+key-only operator in its declaration file needs no admin at all (**BL-1464, next train**).
 
 **Three supported paths.**
 
@@ -2175,20 +2170,19 @@ printf '%s' "$PASSWORD" | aouda create-admin \
 other whitespace, so both work — but a password that silently gains a character is a failure nobody
 diagnoses from the symptom.
 
-*A systemd credential, which is the right answer for a service — the server creates the first admin
-itself on its first start:*
+*A declared first admin, which is the right answer for a service — the server creates the first
+admin itself on its first start* (**BL-1464, next train**). In the declaration file:
 
-```bash
-sudo aouda service install \
-  --admin-email admin@example.com \
-  --admin-password-credential /etc/aouda/admin-password
+```json
+{ "version": 1, "server": { "principals": { "admin@example.com": { "roles": ["admin"],
+    "credentials": { "password": { "file": "/etc/aouda/admin-password" } } } } } }
 ```
 
-The unit gets `LoadCredential=aouda-admin-password:/etc/aouda/admin-password` and the email as
-`AOUDA__AUTH__ROOTUSER__EMAIL`. systemd reads that file as root at unit start and places the value
-at `$CREDENTIALS_DIRECTORY`, mode `0400`, owned by the service account, on a tmpfs unmounted when
-the unit stops. **The unit names the credential; it never contains it.** The server reads it only
-while it has no users at all, so once the first admin exists it is inert. Linux only.
+and start the server with `--declaration <path>` (for the unit, `Environment=Aouda__Declaration=<path>`). The seed is applied only
+when the principal is created, with a forced password change at the first sign-in, and never again. `aouda service install
+--admin-password-credential` / `--admin-email` are removed (a usage error, exit `64`), and a unit that still loads the
+`aouda-admin-password` credential refuses to start (`SETTING_REMOVED`): remove its `LoadCredential=` line. See
+[Linux](../deployment/linux.md#the-first-admin).
 
 *Or, first run only, over loopback:*
 

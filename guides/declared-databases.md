@@ -31,7 +31,7 @@ member, with its type, is the [reference](../reference/declaration.md#databasesn
 | `authDatabase` | string | none | Only with `"kind": "data"`. The application auth database to link this one to |
 | `schema` | string | none | Only with `"kind": "data"`. Path of a schema file applied at start. Absolute, or relative to the directory of `aouda.json` |
 | `schemaAllowDestructive` | boolean | `false` | Needs `schema`. Lets the start-time apply drop a table or a column. When `false` such a change is refused, logged, and the start goes on |
-| `roles` | object | none | Only with `"kind": "auth"`. Custom roles of this auth database, keyed by role name: `description`, and `permissions` (a list of `resourceType`, `resourceName`, `actions`) |
+| `roles` | object | none | Only with `"kind": "auth"`. The roles of this auth database, keyed by role name: `description` and `statements` (**BL-1464, next train**: the `permissions` list is refused naming `statements`; see [Declared access](declared-access.md)) |
 | `durability` | string | `"strict"` | `"strict"`, `"os"`, `"unlogged"` or `"memory"` ([levels](write-durability.md#durability-levels-lead-s26-060)). On `"kind": "auth"` it must be absent or `"strict"` |
 | `maxMemoryShareBytes` | integer | none | Cap on this database's share of the memory budget; none, or not negative |
 | `memoryWeight` | number | `1` | Relative weight when the budget is divided; positive |
@@ -65,8 +65,8 @@ a fixed order whatever the order in the file: auth databases, then data database
 A declarative link sets the link and nothing else: it mints **no API key** and sets no signup field. A key minted at start would
 have no reader, so it would be an orphan `db_admin` credential. The `anon`, `service_role` and `public` keys of a linked
 database therefore do not exist after a wipe until an operator calls `regenerate-keys` (which returns them once); a
-`POST /api/databases` that links still returns them as before. For keys that survive a wipe, declare them in the identities file
-([Keys that survive a wipe](keys-that-survive-a-wipe.md)).
+`POST /api/databases` that links still returns them as before. For keys that survive a wipe, declare their principals with
+`credentials` in the same file (**BL-1464, next train**; [Keys that survive a wipe](keys-that-survive-a-wipe.md)).
 
 The start fails, naming the entry and changing nothing, when:
 
@@ -83,18 +83,15 @@ with a warning, as quarantine is a deliberate isolation; a link to it still fail
 
 ### Why `roles` is only on an auth database
 
-A role is a row of an application auth database: it names permissions that users and keys of every database linked to that
-auth database receive. A `roles` member on a `"kind": "data"` entry therefore has no place to live and fails the start
-(`Roles can only be declared on a Kind 'auth' database`). Declare the roles on the auth database the data databases link to.
+A role belongs to an application auth database: the principals of that auth database hold it, on the databases linked to it. A `roles`
+member on a `"kind": "data"` entry therefore has no place to live and fails the start (`DATABASE_FIELD_NOT_FOR_KIND`). Declare the
+roles on the auth database the data databases link to.
 
-- Each role is created when missing and converged to the declared description and permissions when it exists. A role that is not declared is never touched, so roles made through the API stay.
-- A `permissions` item is `resourceType` (`table`, the default; or `all-partitions`, `all-rows`, `embargo`; and, **BL-1417, 0.12.0**, `named-mutation` or `named-query`), `resourceName` (a table name, or `*`, which is also what a `table` item without `resourceName` grants: every table; for a named artifact its exact name or `*`) and `actions` (for a `table` item a comma-separated list, default `read`; for an all-* grant exactly one level; for a named artifact exactly `execute`), the same fields as `POST .../roles`. The same validator runs, so a `resourceName` with a `*` that is not alone (`quote*`) fails the start (**BL-1415, 0.12.0**), as does an `execute` item with other `actions`.
-- Running a named query or mutation needs an `execute` item (**BL-1417, 0.12.0**): `{ "resourceType": "named-mutation", "resourceName": "insert_quote", "actions": "execute" }`. The `quote_writer` role in the example below, which holds only a table `write`, does **not** run named mutations. At start the server logs one Warning per auth database naming the custom roles that hold table `read` / `write` and no execute row. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls).
-- A role name is compared without case: declaring one twice is refused. A role with no body is refused; write `{}` for a role with no description and no permissions.
-- Roles are applied **after** the schema, so a permission may name a table the schema file creates.
-- A system role cannot be declared, and the signup role of a database cannot carry an `all-partitions` or `all-rows` grant. Both fail the start.
-
-Users are not declared. After a wipe an operator still creates the first users (the admin comes back from `Aouda:Auth:RootUser`).
+**BL-1464, next train:** a declared role is `{ "description"?, "statements": [ … ] }` — the access model's statements, not the old
+`permissions` list — and it is the file's, whole: created, converged and removed by every start and reload, with `signup` and the
+auth database's principals beside it. A runtime role of the same name is refused rather than taken over. Roles are converged after
+the schema, so a statement may name a table the schema file creates. See [Declared access](declared-access.md) for the rules, the
+ownership and the emergency action, and [The declaration file](../reference/declaration.md) for the exact JSON.
 
 ---
 
@@ -116,13 +113,13 @@ they are not in it).
       "roles": {
         "quote_writer": {
           "description": "Writes quotes, reads nothing else",
-          "permissions": [
-            { "resourceType": "table", "resourceName": "quotes", "actions": "write" }
+          "statements": [
+            { "actions": ["write"], "resources": ["ledger/table/quotes"] }
           ]
         },
         "analyst": {
           "description": "Reads every table",
-          "permissions": [ { "resourceName": "*", "actions": "read" } ]
+          "statements": [ { "actions": ["read"], "resources": ["ledger/table/*", "reports/table/*"] } ]
         }
       }
     },
@@ -143,8 +140,9 @@ they are not in it).
 }
 ```
 
-The first admin and the server key are not in this file yet: they are `Aouda:Auth:RootUser` and `Aouda:Auth:Bootstrap:ServerKeyFile`
-in `appsettings.json` or the environment, as before.
+The first admin and the operator's key are in this file too (**BL-1464, next train**): a `server.principals` entry holding the role
+`admin`, with a password seed or a `derivedKey` ([Declared access](declared-access.md)). The old `Aouda:Auth:RootUser` and
+`Aouda:Auth:Bootstrap:ServerKeyFile` settings are refused at start (`SETTING_REMOVED`, naming this replacement).
 
 The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan --declaration /etc/aouda/aouda.json --env prod` validates it offline (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
 [Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
@@ -161,10 +159,10 @@ Delete the data directory and start the server with the declaration above. What 
 | The databases `derive_auth`, `ledger`, `reports` | **Recreated**, empty |
 | Their operational fields (memory, durability, replication, write concern) | **Recreated** from the entries |
 | The links `ledger` and `reports` to `derive_auth` | **Recreated** |
-| The first admin | **Recreated** from `Aouda:Auth:RootUser` |
+| The first admin and the declared operators | **Recreated** from `server.principals` (a password seed is applied again, as to a new principal) |
 | The tables of `ledger` | **Recreated** from `schema`; empty |
 | The roles `quote_writer` and `analyst` | **Recreated** from `roles` |
-| Keys declared in configuration | **Recreated** as rows, with the same secrets ([keys](keys-that-survive-a-wipe.md)) |
+| Declared principals and their credentials | **Recreated**, with the same ids; a derived key is the same key, a stored key the same id and hash ([keys](keys-that-survive-a-wipe.md)) |
 | Every row of data | **Lost** |
 | Users, sessions and refresh tokens of an application auth database | **Lost** |
 | Signup settings of a database | **Lost** (catalog-owned; set them again) |
@@ -174,8 +172,8 @@ Delete the data directory and start the server with the declaration above. What 
 ### The order a start follows
 
 (**BL-1463, 0.14.0**) **Before any of these steps, the start checks the whole declaration** — the settings, the declaration file (**BL-1463, next train**),
-the identities file and every secret and schema file it names — and **creates nothing when one is refused**. It reports every
-problem at once, each as a finding with a stable code (`KEY_SECRET_SHARED`, `SCHEMA_INVALID`, `ROLE_SYSTEM_NAME`, ...), where it is
+every secret and schema file it names — and **creates nothing when one is refused**. It reports every
+problem at once, each as a finding with a stable code (`SETTING_REMOVED`, `KEY_ID_DUPLICATE`, `SCHEMA_INVALID`, ...), where it is
 (a setting and the source that set it, or a file and a JSON pointer) and what to do, then exits with status 78 (or 1 when the only
 problem is a file that could not be read yet). Each step below then checks what it needs from the data directory before it changes
 anything. The codes are listed in [Declaration Finding Codes](../reference/plan-codes.md).
@@ -183,18 +181,16 @@ anything. The codes are listed in [Declaration Finding Codes](../reference/plan-
 After a wipe a plain start does these steps in this order, and a failure in any of them fails the start (the process exits, and
 there is no `/ready` to ask):
 
-1. **Configured keys are listed** (`Aouda:Auth:Bootstrap:ServerKey`, `Keys:File`). A bad declaration fails here, before any database opens. Nothing is authenticated yet.
-2. **Declared databases**: auth databases, then data databases, then the links.
-3. **`_serverauth` and `Aouda:Auth:RootUser`**: the first admin. Without a `RootUser` the server stays in setup mode.
-4. **Declared schema files**: every file was read and validated before step 1 (**BL-1463, 0.14.0**: before any database is created), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `schemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
-5. **Declared roles**, in their auth databases.
-6. **Configured key rows**, in their auth databases.
-7. The server is marked ready.
+1. **Declared databases**: auth databases, then data databases, then the links.
+2. **`_serverauth`**: created for an operator declared in `server.principals` (**BL-1464, next train**). With none declared and no admin, the server stays in setup mode.
+3. **Declared schema files**: every file was read and validated before step 1 (**BL-1463, 0.14.0**: before any database is created), then applied in the server with its own privileges, with no API key. A table it creates refuses HTTP DDL, as one made by `schema apply`. A change the file asks for and the server **refuses** (a drop without `schemaAllowDestructive`) does not fail the start; it is logged, and `/ready` reports `schema_drift`.
+4. **Declared access** (**BL-1464, next train**): roles, `signup`, principals and their credentials, in their auth databases ([Declared access](declared-access.md)). It replaces the configured key rows, which came last.
+5. The server is marked ready.
 
 Re-running a converged start is a no-op: the schema diff is empty and nothing is written. The diff compares the file with the
 database's tables as `aouda schema export` shows them, which never includes the engine's own scratch tables: a materialized
 query's build table, `__mqbuild_<query>_<id>`, which exists while the query rebuilds. A restart rebuilds, in the background and
-while step 4 runs, every materialized query whose result it cannot restore exactly (after an unclean stop, for example), so
+while step 3 runs, every materialized query whose result it cannot restore exactly (after an unclean stop, for example), so
 those tables are routinely there; they are not drift, and the apply neither reports nor drops them (**BL-1468, 0.14.0**). On
 0.13.0 it did: `/ready` answered `503` `schema_drift` with one `refused: DropTable __mqbuild_…: Destructive change requires
 AllowDestructive: true` per query, and with `SchemaAllowDestructive: true` it dropped them under the running rebuilds, which left
@@ -215,8 +211,9 @@ declaration cannot say "must not exist".
 
 ### Changing the declaration without a restart (**BL-1427, 0.14.0**)
 
-`aouda reload` (or `POST /api/admin/reload`, a server key only) re-reads the declaration of a running server, validates it as a start
-would, and converges it in the order above: steps 2, 4, 5 and 6 (`_serverauth`, the root user and setup mode are the start's). What
+`aouda reload` (or `POST /api/admin/reload`, a server operator's key only) re-reads the declaration of a running server, validates it as a start
+would, and converges it in the order above: steps 1, 3 and 4, named `databases`, `schema` and `roles` in its answer (`_serverauth` and
+setup mode are the start's; **BL-1464, next train**: the `keyStore` and `principalRows` steps are gone). What
 a reload applies:
 
 - (**BL-1463, next train**) the declaration file itself and its overlay: they are read again, from the path the running server was
@@ -224,7 +221,8 @@ a reload applies:
 - a **new** `databases` entry (created, and linked to its auth database);
 - a declared database's `schema` (and its overlay) — the file is read again and applied **non-destructively** whatever
   `schemaAllowDestructive` says (a destructive change is the warning `SCHEMA_DESTRUCTIVE_REFUSED`, and `/ready` keeps `schema_drift`);
-- the `roles` of a declared auth database;
+- the `roles` of a declared auth database, and (**BL-1464, next train**) the rest of the access section: `signup`, `principals`
+  and their credentials, `server.roles` and `server.principals` ([Declared access](declared-access.md));
 - the `authDatabase` of a database that has **no link yet**.
 
 What it does not: a database's operational fields, `schemaAllowDestructive`, `Aouda:SkipDatabases` and every other setting are
@@ -244,19 +242,18 @@ nothing (it is not read as an empty declaration that retracts every database).
 |---|---|---|
 | `not_initialized` | The engine is still opening databases | They are open |
 | `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not passed | It has |
-| `database_pending` (the database) | A declared database does not exist yet | Step 2 created it |
+| `database_pending` (the database) | A declared database does not exist yet | Step 1 created it |
 | `database_not_open` (the database) | A declared database is registered but failed to open, or is quarantined by something other than an operator | It opens; otherwise it stays, and so does the 503 |
-| `server_starting` | The auth bootstrap has not finished | Step 7 |
-| `setup_required` | Nothing is declared (no server key, no `RootUser`) and no admin exists | `RootUser` created it at start, or `POST /api/auth/setup` did; a declared server key means no setup mode at all (**BL-1462, 0.14.0**) |
-| `root_user_unusable` | `RootUser` is set but its password cannot be used | You fix the password |
-| `schema_pending` (the database) | Its `schema` file has not been applied yet | Step 4 applied it |
-| `schema_applying` (the database) | Step 4 is applying its `schema` file now; `progress` is `{ "done": n, "total": m }` over the declared schema files (**BL-1462, 0.14.0**) | Step 4 finished it |
+| `server_starting` | The auth bootstrap has not finished | Step 5 |
+| `setup_required` | No operator is declared in `server.principals` and no admin exists | `POST /api/auth/setup` created the first admin; a declared operator means no setup mode at all (**BL-1462, 0.14.0**; **BL-1464, next train**: declared in the declaration file) |
+| `schema_pending` (the database) | Its `schema` file has not been applied yet | Step 3 applied it |
+| `schema_applying` (the database) | Step 3 is applying its `schema` file now; `progress` is `{ "done": n, "total": m }` over the declared schema files (**BL-1462, 0.14.0**) | Step 3 finished it |
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
 | `reload_failed` (the entry, when one is named) | (**BL-1427, 0.14.0**) The last reload stopped part-way; the steps before it are applied | The next reload that completes |
-| `configured_key_inactive` (the key's name) | A configured key cannot authenticate yet | Its auth database and database are open. A server key no longer waits for a first admin (**BL-1462, 0.14.0**) |
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of the declared databases was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 
+(**BL-1464, next train**) `root_user_unusable` and `configured_key_inactive` are gone with the settings they reported on.
 A deploy script waits for `200` and prints `reasons` if it gives up. A database in `Aouda:SkipDatabases`, or one an operator
 quarantined, is a decision and is not listed. `aouda status` prints every reason.
 

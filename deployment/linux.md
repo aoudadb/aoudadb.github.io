@@ -116,8 +116,10 @@ safe.
 | `--memory-max` | `80%` | ⚠️ Read [The memory limit](#the-memory-limit-and-why-it-does-more-than-you-think) first |
 | `--cpu-cores` | unset | Set it when the host is **shared** |
 | `--max-open-files` | `65535` | Rarely |
-| `--admin-password-credential` | unset | A file holding the first admin's password; the unit gets a systemd `LoadCredential=` naming it. Needs `--admin-email` — see [The first admin](#the-first-admin) |
-| `--admin-email` | unset | The first admin's email, used with `--admin-password-credential` |
+
+`--admin-password-credential` and `--admin-email` are **removed** (**BL-1464, next train**): the install refuses them as a usage
+error (exit status `64`), and the unit gets no `LoadCredential=` line. Declare the first admin in the declaration file and name the
+file in the unit (`Environment=Aouda__Declaration=/etc/aouda/aouda.json`) — see [The first admin](#the-first-admin).
 
 ---
 
@@ -240,9 +242,9 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
 
 ⚠️ `create-admin` needs the server **stopped**: a running server holds its data directory, and `create-admin` then exits `1`
-naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, 0.14.0**). A server with a
-declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile` or the systemd credential `aouda-server-key`) needs no
-admin and has no setup mode.
+naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, 0.14.0**). A server that
+declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, next
+train**).
 
 **The data-directory lock and its limits** (**BL-1462, 0.14.0**). The server holds an exclusive `flock` on
 `<data>/Server/aouda.lock` while it runs; `create-admin`, `aouda table backfill` and a second server on the same directory take the
@@ -270,17 +272,27 @@ printf '%s' "$PASSWORD" | sudo /opt/aouda/Aouda.Server create-admin \
 
 ⚠️ A file readable by group or other is **refused**, with the mode it found. `chmod 600` it.
 
-**3. A systemd credential**, which is the right answer for a service: the server creates the first admin itself, on its first start. Point the installer at the file and name the admin:
+**3. Declared in the declaration file** (**BL-1464, next train**), which is the right answer for a service: the server creates
+the first admin itself, on its first start. Declare a `server.principals` entry named by the email, holding the role `admin`, with a
+password seed read from the file (a relative path is read from the declaration file's directory):
 
-```bash
-sudo /opt/aouda/Aouda.Server service install \
-  --admin-email admin@example.com \
-  --admin-password-credential /etc/aouda/admin-password
+```json
+{ "version": 1, "server": { "principals": { "admin@example.com": { "roles": ["admin"],
+    "credentials": { "password": { "file": "/etc/aouda/admin-password" } } } } } }
 ```
 
-The unit gets a `LoadCredential=` naming the file and the email as `AOUDA__AUTH__ROOTUSER__EMAIL`. systemd reads the file as root at unit start and places the value at `$CREDENTIALS_DIRECTORY/aouda-admin-password`, mode `0400`, owned by the service account, on a tmpfs unmounted when the unit stops. **The unit names the credential; it never contains it.**
+Write it to `/etc/aouda/aouda.json` and name it in the unit: `Environment=Aouda__Declaration=/etc/aouda/aouda.json` (`systemctl
+edit aouda`), see [Declare the databases](#declare-the-databases-aoudajson-bl-1463-next-train). The service account must be able to
+read both files (way 1's password file is root's: `sudo chown aouda: /etc/aouda/admin-password`). The seed is applied only when the principal is created, with a forced password change at the first sign-in, and
+never again, so once the admin exists the password file is inert — delete it whenever you like. A seed may also be
+`{ "env": "<NAME>" }` or `{ "hash": ... }`. With no human admin at all, declare a key-only operator instead: an entry such as `ops`
+holding the role `admin` with `"credentials": { "derivedKey": { "version": 1 } }` and the file's `"keyRoot": { "file": ... }`
+([Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md)).
 
-The server reads the credential only while it has **no users at all**, so once the first admin exists the credential is inert — delete the file whenever you like. The log line says which source it used and never the value.
+The old way is **refused** (**BL-1464, next train**): `aouda service install --admin-password-credential` / `--admin-email` is a
+usage error (exit `64`), and a server whose unit still loads the credential `aouda-admin-password` or `aouda-server-key`, or sets
+`AOUDA__AUTH__ROOTUSER__*` or `Aouda:Auth:Bootstrap:*`, refuses to start with `SETTING_REMOVED` (exit `78`): remove the
+`LoadCredential=` or `Environment=` line from the unit and declare as above.
 
 ---
 
@@ -351,12 +363,12 @@ These are the same on every platform and for every way of running the server (`a
 (**BL-1463, 0.14.0**) [`aouda plan`](../guides/plan.md) exits `0` when the start would not refuse the declaration, `1` when it would
 (or when a file it names cannot be read), and `64` for misuse; against a running server (`--server`) also `2` (changes), `69` (the
 server cannot be reached or did not answer with a plan) and `77` (the key was refused). (**BL-1427, 0.14.0**)
-[`aouda reload`](../guides/keys-that-survive-a-wipe.md#further-keys-the-identities-file) exits `0` (nothing to change), `2` (applied),
+[`aouda reload`](../guides/declared-databases.md#changing-the-declaration-without-a-restart-bl-1427-0140) exits `0` (nothing to change), `2` (applied),
 `1` (refused, or stopped part-way), `69` (unreachable, busy, rate-limited or still starting), `77` (the key was refused) and `64` for misuse.
 
 ⚠️ **`78` means the configuration itself is wrong**: what it says (invalid content, a duplicate, a reference to something that does not
 exist, a refused format), not whether the machine could act on it. A start that fails **while doing** what the configuration asks — a
-key file, identities file or schema file that cannot be read (a volume not yet mounted, a permission), a data directory that cannot be
+key file, secret file or schema file that cannot be read (a volume not yet mounted, a permission), a data directory that cannot be
 written, a full disk, an engine fault — is not `78`: it fails as any other start, and the unit restarts it. (**BL-1463, 0.14.0**) A
 start whose only errors are files that could not be read yet exits `1`.
 
@@ -368,21 +380,23 @@ with its code, the setting or file (and JSON pointer) it is about, and what to d
 one [`aouda plan`](../guides/plan.md) prints, headed `aouda start`, and the last line names the exit status:
 
 ```text
-aouda start: declaration /etc/aouda/aouda.json, identities file /etc/aouda/aouda.identities.json, 1 database, 0 schema files
+aouda start: declaration /etc/aouda/aouda.json, 1 database, 0 schema files
 
-error    KEY_SECRET_SHARED  Aouda:Auth:Bootstrap:ServerKeyFile  (environment variable Aouda__Auth__Bootstrap__ServerKeyFile)
-         Configured keys 'bootstrap-server-key' and 'ops-admin' share one secret.
-         also: /etc/aouda/aouda.identities.json  /identities/0/secrets/0
-         fix:  Declare the server key once: keep Aouda:Auth:Bootstrap:ServerKeyFile and remove the 'ops-admin' entry's secret from the identities file.
+error    SETTING_REMOVED  Aouda:Auth:Bootstrap:ServerKeyFile  (environment variable Aouda__Auth__Bootstrap__ServerKeyFile)
+         Aouda:Auth:Bootstrap:ServerKeyFile is no longer read (ADR 0071: principals and their credentials are declared in the declaration file). Remove it and declare the operator in the declaration file (aouda.json): a server.principals entry holding the role admin, with a derivedKey (from the file's keyRoot) or a stored key { "id", "sha256" }.
+         fix:  Remove the setting and use the one the message names instead.
 
-stages   read ok, settings ok, principals 1 error, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
+stages   read ok, settings 1 error, principals ok, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
 1 error, 0 warnings: the start was refused for its configuration (exit status 78). Restarting with the same configuration fails the same way: fix what is named above, then start again.
 ```
 
 Every code, its stage and what fixes it is in [Declaration Finding Codes](../reference/plan-codes.md). Among them:
-`SERVER_HAS_NO_OPERATOR` — the data directory was set up before, and now has no user, no active server key and nothing declared, so
-nobody could operate the server (declare a server key, set `Aouda:Auth:RootUser`, or `--dev-admin` for development; a data directory
-that was never set up starts in setup mode instead, **BL-1462**); `DEV_ADMIN_REFUSED`; `CONFIGURATION_INVALID`; and
+`SETTING_REMOVED` — a setting that is no longer read, such as the old operator settings above (`Aouda:Auth:Bootstrap:*`,
+`Aouda:Auth:RootUser:*`, `Aouda:Auth:Keys:*`, the systemd credentials `aouda-server-key` and `aouda-admin-password`; **BL-1464, next
+train**; an empty value counts as not set), naming its replacement and never its value; `SERVER_HAS_NO_OPERATOR` — the data
+directory was set up before, and now has nobody who can manage the server and nothing declared (declare an operator in the
+declaration file's `server.principals`, or `--dev-admin` for development; a data directory that was never set up starts in setup
+mode instead, **BL-1462**); `DEV_ADMIN_REFUSED`; `CONFIGURATION_INVALID`; and
 `DATA_DIRECTORY_FORMAT_REFUSED` — the data directory was written in another format, see [Upgrading](../guides/upgrading.md).
 [`aouda plan`](../guides/plan.md) runs the same checks before you deploy.
 

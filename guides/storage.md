@@ -296,8 +296,8 @@ If you run server defaults and do not set per-database overrides:
     before any database is opened the registry is read and the first database whose catalog declares another format ends the
     start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
     written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
-    first with the build that wrote it, then delete the data directory and start fresh. A server key and keys declared in
-    configuration come back on the fresh start; keys and entitlements created through the API do not.
+    first with the build that wrote it, then delete the data directory and start fresh. Principals and keys declared in `aouda.json`
+    come back on the fresh start (**BL-1464, next train**); keys and entitlements created through the API do not.
   - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
     `id`, `user_id`, `dimension`, `entitlement_key`, `level`, `granted_by`, `valid_from`, `valid_to`, `created_at` and `source`, and an RLS resolver
     rule's value source is stored as `Entitlement`. A format-17 directory makes the server refuse to start with

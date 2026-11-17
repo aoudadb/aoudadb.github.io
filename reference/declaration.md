@@ -12,7 +12,7 @@ default of every member and the code of every refusal. How to use the file (wher
 [`schemas/aouda-declaration.v1.json`](../schemas/aouda-declaration.v1.json); the codes are in
 [Declaration Finding Codes](plan-codes.md).
 
-The file holds **what exists**: databases, their schema files and their roles. **How the server runs** (ports, memory, paths, the
+The file holds **what exists**: databases, their schema files, and who may do what (roles, principals, `signup`; **BL-1464, next train**). **How the server runs** (ports, memory, paths, the
 `Aouda:Declaration` setting itself) stays in settings: `appsettings.json`, environment variables and command-line switches.
 
 ---
@@ -35,6 +35,9 @@ The file holds **what exists**: databases, their schema files and their roles. *
 | `$schema` | string | no | The JSON schema of the file, for an editor: `"https://aoudadb.github.io/schemas/aouda-declaration.v1.json"`. The server ignores it and never fetches it |
 | `version` | integer | **yes** | `1`. Anything else (absent, `2`, `"1"`, `1.5`) is `DECLARATION_VERSION_UNSUPPORTED` with `found=<value or missing> expected=1`, and nothing else in the file is read |
 | `databases` | object | no | The declared databases, keyed by database name. Absent or `{}`: nothing is declared |
+| `server` | object | no | Who operates the server: the server auth database's `roles` and `principals` (below) (**BL-1464, next train**). It takes no `signup` |
+| `keyRoot` | object | no | The root declared principals' derived keys are computed from: `{ "env": NAME }` or `{ "file": path }` (relative to this file's directory). A literal is `SECRET_BY_VALUE`; a root shorter than 32 bytes or one repeated character is `KEY_ROOT_INVALID` (**BL-1464, next train**) |
+| `previousKeyRoot` | object | no | The root before a rotation, in the same form: its derived keys are still accepted beside `keyRoot`'s until it is removed |
 
 ```json
 {
@@ -63,7 +66,9 @@ and `ledger` is refused. `_serverauth`, `_auth` and `_settings` belong to the se
 | `defaultTemperature` | string | `"Auto"` | `"Auto"`, `"HotOnly"` or `"ColdPreferred"`, for new tables |
 | `memoryWeight` | number | `1` | Relative weight of this database's memory share; positive |
 | `maxMemoryShareBytes` | integer | none | Cap on the computed memory share, in bytes; not negative. `0` is no cap, as when it is absent |
-| `roles` | object | none | `auth` only: custom roles, keyed by role name (below). On a `data` database it is refused |
+| `signup` | object | none | `auth` only: self-signup, `{ "enabled", "roles"?, "statements"? }` (below) (**BL-1464, next train**) |
+| `roles` | object | none | `auth` only: the auth database's roles, keyed by role name (below). On a `data` database it is refused (`DATABASE_FIELD_NOT_FOR_KIND`) |
+| `principals` | object | none | `auth` only: the auth database's principals, keyed by name (below) (**BL-1464, next train**) |
 
 The value rules (which `durability` an `auth` database may have, which `authDatabase` is a valid link, which combination of members
 a kind allows) are those of the `databases` stage and its codes, unchanged; they are listed with the codes in
@@ -71,37 +76,110 @@ a kind allows) are those of the `databases` stage and its codes, unchanged; they
 
 An integer member given a number it cannot hold (`1.5`, or beyond the range) is `DECLARATION_SHAPE_INVALID`.
 
-## `databases.<auth>.roles.<role>`
+## The access section: `signup`, `roles`, `principals` (**BL-1464, next train**)
 
-A custom role of an application auth database. It is created when missing and converged to the declaration when it exists; a role
-that is not declared is never touched. The role name is compared without case.
+An application auth database (`databases.<auth>`) declares who may do what in three members; the server auth database declares its
+operators in `server.roles` and `server.principals`. What they mean — statements, resources, `where`, attributes, the built-in roles,
+`anonymous`, `signup` — is the access model's ([Declared access](../guides/declared-access.md)); this page gives the exact JSON.
+
+- **The file owns what it declares, whole.** Every start and reload converges it: a declared role or principal is created, updated
+  member by member, and removed when the file no longer names it. A role or principal made at runtime (Studio, the API) with the same
+  name is **refused** (`ROLE_RUNTIME_CONFLICT`, `PRINCIPAL_RUNTIME_CONFLICT`): delete or rename it, then start or reload again.
+- For every auth database the file declares access for, the file also owns `anonymous` and `signup`: an `anonymous` that is not
+  declared holds nothing, and a `signup` that is not declared is off. An auth database the file declares nothing for is left as it is.
+- A server with no declaration file converges nothing.
+
+### `databases.<auth>.signup`
+
+| Member | JSON type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | boolean | **required** | Whether a person may sign themselves up on this auth database |
+| `roles` | array of strings | `[]` | The roles a signed-up principal holds: declared, built-in or runtime roles of this auth database |
+| `statements` | array | `[]` | Statements every signed-up principal holds |
+
+`oidc` is refused (`DECLARATION_UNKNOWN_MEMBER`): external identity providers for end users are reserved and not built yet. The
+old `allowSelfSignup` and `selfSignupRole` members are refused naming `signup`.
+
+### `roles.<role>`
 
 | Member | JSON type | Default | Meaning |
 |---|---|---|---|
 | `description` | string | none | The role's description |
-| `permissions` | array | `[]` | The role's permissions, in the shape of `POST .../roles`; each item is below. `{}` declares a role with no description and no permissions |
+| `statements` | array | **required** | What the role grants: a non-empty list of statements |
 
-Each permission:
+A role's name is non-empty, without `/`, `*` or surrounding blanks, compared without case (`ROLE_NAME_DUPLICATE` names both). The
+built-in `admin`, `writer` and `reader` cannot be declared (`ROLE_BUILTIN_NAME`). The old `permissions` member is refused naming
+`statements` (`DECLARATION_UNKNOWN_MEMBER`).
+
+### `principals.<name>`
+
+The member name is the principal's name: a slug (`^[a-z][a-z0-9-]{0,62}$`) or an email address, compared without case. A name that
+carries a key or a key's hash is refused and never shown (`PRINCIPAL_NAME_INVALID`).
 
 | Member | JSON type | Default | Meaning |
 |---|---|---|---|
-| `resourceType` | string | `"table"` | `"table"`, `"all-partitions"`, `"all-rows"`, `"embargo"`, `"named-mutation"` or `"named-query"` |
-| `resourceName` | string | `"*"` for a `table` item | A table name, or a lone `*`; for a named artifact its exact name or `*` (required). **A `table` item without `resourceName` grants its actions on every table**, as `"*"` does: name the table. A `*` anywhere else (`quote*`) is refused |
-| `actions` | string | `"read"` | For a `table` item a comma-separated list; for an `all-*` grant exactly one level; for a named artifact exactly `"execute"` |
+| `description` | string | none | Free text |
+| `roles` | array of strings | `[]` | The roles it holds |
+| `statements` | array | `[]` | Its own statements (an empty list is allowed) |
+| `attributes` | object | `{}` | `name → [values]` (strings, numbers or booleans); a `where` reads them as `principal.<name>`. At most 1 000 values per attribute and 5 000 per principal (`PRINCIPAL_ATTRIBUTE_INVALID`) |
+| `credentials` | object | none | How it authenticates (below); not for `anonymous` |
+| `disabled` | boolean | `false` | `true` refuses every credential of it and ends its open sessions. `false` re-enables only what the file disabled: a principal disabled at runtime stays disabled, and every plan, start and reload warns `DECLARED_OBJECT_OVERRIDDEN` |
+
+`credentials`:
+
+| Member | JSON type | Meaning |
+|---|---|---|
+| `derivedKey` | object | `{ "version": n }` (n ≥ 1): a key derived from `keyRoot` (`KEY_ROOT_MISSING` without one). Bump `version` to rotate it |
+| `keys` | array | `{ "id": "aouda_<16>", "sha256": "<64 hex>" }` each: a stored key, by its public id and hash. A whole key in `id`, a bad hash or an id declared twice is refused without echoing it (`KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`) |
+| `oidc` | array | `{ "issuer", "audience", "subject", "claims"?, "jwks"? }` each. Two principals' trusts that one token could match are `OIDC_TRUST_DUPLICATE` / `OIDC_TRUST_OVERLAP`; two of one principal `OIDC_TRUST_REDUNDANT` (a warning). Nothing is fetched at plan time |
+| `password` | object | `{ "file" }`, `{ "env" }` or `{ "hash": <the server's password-hasher output> }`, on a principal named by an email (`PASSWORD_SEED_NEEDS_EMAIL`): applied only when the principal is created, with a forced change at the first sign-in |
+
+`anonymous` is declared under `principals` with `statements` and `attributes` only, spelled exactly `anonymous`
+(`PRINCIPAL_BUILTIN` otherwise). `authDatabase` and `type` are refused naming what replaces them.
+
+### A statement
+
+| Member | JSON type | Default | Meaning |
+|---|---|---|---|
+| `actions` | array of strings | **required** | `read`, `write`, `delete`, `execute`, `manage`, `set-identity`, or `*` |
+| `resources` | array of strings | **required** | `<db>`, `<db>/table/<t>`, `<db>/query/<q>`, `<db>/mutation/<m>`, `<auth>/principal/<p>`, `<auth>/role/<r>`, `server`; `*` allowed |
+| `where` | object | none | A row condition: `{ "and" \| "or": [ { "column", "op", "value" \| "principal", "ignoreCase"? } ] }`, or `groups` of them |
+| `embargoSeconds` | integer | none | With `actions` `["read"]` or `["execute"]`: rows newer than this are not read |
+| `unrestricted` | boolean | `false` | Lets `anonymous` or `signup` read a row-scoped table without a condition, on purpose |
+
+A statement of an application auth database names only what that auth database governs: itself and the databases linked to it
+(`STATEMENT_NOT_GOVERNED` names the auth database that does). `server.principals` and `server.roles` may name every database and
+`server`.
 
 ```json
 {
   "version": 1,
+  "server": {
+    "principals": { "ops@example.com": { "roles": ["admin"] } }
+  },
   "databases": {
-    "derive_auth": {
+    "auth": {
       "kind": "auth",
+      "signup": { "enabled": true, "roles": ["customer"], "statements": [] },
       "roles": {
-        "analyst": {
-          "description": "Reads every table",
-          "permissions": [ { "resourceName": "*", "actions": "read" } ]
+        "customer": {
+          "statements": [
+            { "actions": ["read", "write"], "resources": ["shop/table/orders"],
+              "where": { "and": [ { "column": "customer_id", "op": "eq", "principal": "id" } ] } }
+          ]
+        }
+      },
+      "principals": {
+        "checkout": {
+          "description": "The checkout service",
+          "statements": [ { "actions": ["read", "write"], "resources": ["shop/table/orders"] } ]
+        },
+        "anonymous": {
+          "statements": [ { "actions": ["execute"], "resources": ["shop/query/products.list"] } ]
         }
       }
-    }
+    },
+    "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" }
   }
 }
 ```
@@ -162,11 +240,21 @@ replaces it and never showing the value. Beyond 50 findings one more says how ma
 | `Aouda:Databases:<db>:DefaultTemperature` | `databases.<db>.defaultTemperature` |
 | `Aouda:Databases:<db>:MemoryWeight` | `databases.<db>.memoryWeight` |
 | `Aouda:Databases:<db>:MaxMemoryShareBytes` | `databases.<db>.maxMemoryShareBytes` |
-| `Aouda:Databases:<auth>:Roles` | `databases.<auth>.roles` |
+| `Aouda:Databases:<auth>:Roles` | `databases.<auth>.roles`, each role `{ "statements": [...] }` |
 | `Aouda:Databases:<db>:MaxMemoryBytes` (refused before this, too) | `databases.<db>.maxMemoryShareBytes` and `databases.<db>.memoryWeight` |
 | `Aouda:Databases:<db>:EnableWal`, `DataDurability` (refused before this, too) | `databases.<db>.durability` |
 
 Setting `Aouda:Declaration` and `Aouda:Databases` together is the same refusal: the two are never merged.
+
+(**BL-1464, next train**) The old ways of declaring operators and keys are refused the same way, every setting under the three
+sections (a misspelt member too) and the two systemd credentials when present, before any database opens. An empty value (a compose
+`${VAR:-}` pass-through of an unset variable) is not set and is not refused:
+
+| Removed | Replacement |
+|---|---|
+| `Aouda:Auth:Keys:File` (the identities file) and anything under `Aouda:Auth:Keys` | each key's principal in `databases.<auth>.principals` or `server.principals`, with its `credentials`: a `derivedKey` from the file's `keyRoot`, or a stored key `{ "id", "sha256" }` |
+| `Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, anything under `Aouda:Auth:Bootstrap`; the systemd credential `aouda-server-key` | a `server.principals` entry holding the role `admin`, with a `derivedKey` or a stored key |
+| `Aouda:Auth:RootUser:Email`, `Password`, anything under `Aouda:Auth:RootUser`; the systemd credential `aouda-admin-password` | a `server.principals` entry named by the email, holding `admin`, with a password seed `{ "file" }` or `{ "env" }` (applied once, at creation, with a forced change) |
 
 The embedded engine (`Aouda.Testing`, the dev server's own primary database) is not a configuration source and is not refused: it
 declares its databases in code.
@@ -184,7 +272,7 @@ declares its databases in code.
 | `OVERLAY_ABSENT` | info | No overlay for the environment; the file is read alone |
 | `OVERLAY_UNREADABLE` | error | The overlay exists and cannot be read, is empty or is not a JSON object |
 | `DATABASE_KIND_INVALID` | error | A database has no `kind`, or one other than `data` and `auth` |
-| `SETTING_REMOVED` | error | An `Aouda:Databases` setting; names the member that replaces it |
+| `SETTING_REMOVED` | error | An `Aouda:Databases` setting, or (**BL-1464, next train**) an `Aouda:Auth:Keys` / `Bootstrap` / `RootUser` setting or the `aouda-server-key` / `aouda-admin-password` credential; names what replaces it |
 | `DATABASE_FIELD_INVALID`, `DATABASE_FIELD_NOT_FOR_KIND`, `DATABASE_NAME_INVALID`, `DATABASE_NAME_DUPLICATE`, `DATABASE_NAME_RESERVED`, `DATABASE_AUTH_NOT_STRICT`, `DATABASE_LINK_INVALID`, `DATABASE_LINK_NOT_AUTH` | error | The value rules of a database entry (a value out of range, a member the kind does not take, a name the server refuses, a durability other than `strict` on an `auth` database, a link that cannot be); unchanged by the file |
 | `DATABASE_LINK_UNDECLARED` | warning | `authDatabase` names a database the file does not declare: the start links to it only if the data directory has it as an application auth database |
 | `SETTING_INVALID` | error | `Aouda:Environment` is not a name |
