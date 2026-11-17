@@ -36,6 +36,8 @@ The file holds **what exists**: databases, their schema files, and who may do wh
 | `version` | integer | **yes** | `1`. Anything else (absent, `2`, `"1"`, `1.5`) is `DECLARATION_VERSION_UNSUPPORTED` with `found=<value or missing> expected=1`, and nothing else in the file is read |
 | `databases` | object | no | The declared databases, keyed by database name. Absent or `{}`: nothing is declared |
 | `server` | object | no | Who operates the server: the server auth database's `roles` and `principals` (below) (**BL-1464, next train**). It takes no `signup` |
+| `keyRoot` | object | no | The root declared principals' derived keys are computed from: `{ "env": NAME }` or `{ "file": path }` (relative to this file's directory). A literal is `SECRET_BY_VALUE`; a root shorter than 32 bytes or one repeated character is `KEY_ROOT_INVALID` (**BL-1464, next train**) |
+| `previousKeyRoot` | object | no | The root before a rotation, in the same form: its derived keys are still accepted beside `keyRoot`'s until it is removed |
 
 ```json
 {
@@ -120,7 +122,17 @@ carries a key or a key's hash is refused and never shown (`PRINCIPAL_NAME_INVALI
 | `roles` | array of strings | `[]` | The roles it holds |
 | `statements` | array | `[]` | Its own statements (an empty list is allowed) |
 | `attributes` | object | `{}` | `name → [values]` (strings, numbers or booleans); a `where` reads them as `principal.<name>`. At most 1 000 values per attribute and 5 000 per principal (`PRINCIPAL_ATTRIBUTE_INVALID`) |
+| `credentials` | object | none | How it authenticates (below); not for `anonymous` |
 | `disabled` | boolean | `false` | `true` refuses every credential of it and ends its open sessions. `false` re-enables only what the file disabled: a principal disabled at runtime stays disabled, and every plan, start and reload warns `DECLARED_OBJECT_OVERRIDDEN` |
+
+`credentials`:
+
+| Member | JSON type | Meaning |
+|---|---|---|
+| `derivedKey` | object | `{ "version": n }` (n ≥ 1): a key derived from `keyRoot` (`KEY_ROOT_MISSING` without one). Bump `version` to rotate it |
+| `keys` | array | `{ "id": "aouda_<16>", "sha256": "<64 hex>" }` each: a stored key, by its public id and hash. A whole key in `id`, a bad hash or an id declared twice is refused without echoing it (`KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`) |
+| `oidc` | array | `{ "issuer", "audience", "subject", "claims"?, "jwks"? }` each. Two principals' trusts that one token could match are `OIDC_TRUST_DUPLICATE` / `OIDC_TRUST_OVERLAP`; two of one principal `OIDC_TRUST_REDUNDANT` (a warning). Nothing is fetched at plan time |
+| `password` | object | `{ "file" }`, `{ "env" }` or `{ "hash": <the server's password-hasher output> }`, on a principal named by an email (`PASSWORD_SEED_NEEDS_EMAIL`): applied only when the principal is created, with a forced change at the first sign-in |
 
 `anonymous` is declared under `principals` with `statements` and `attributes` only, spelled exactly `anonymous`
 (`PRINCIPAL_BUILTIN` otherwise). `authDatabase` and `type` are refused naming what replaces them.

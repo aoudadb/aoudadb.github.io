@@ -261,6 +261,122 @@
                   },
                   "description": "Its attributes (ADR 0071 D-12): name → a string, number, boolean or an array of them; a where reads them as principal.<name>."
                 },
+                "credentials": {
+                  "type": "object",
+                  "description": "How the principal authenticates. Every secret is given by reference; none is a literal.",
+                  "properties": {
+                    "password": {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "description": "An environment variable's name."
+                        },
+                        "file": {
+                          "type": "string",
+                          "description": "A file's path, relative to the declaration file's directory."
+                        },
+                        "hash": {
+                          "type": "string",
+                          "description": "The server's password-hasher output ($argon2id$…)."
+                        }
+                      },
+                      "minProperties": 1,
+                      "maxProperties": 1,
+                      "additionalProperties": false,
+                      "description": "A password seed: { \"file\" }, { \"env\" } or { \"hash\": <the server's password-hasher output> }. Applied only when the principal is created, with forcePasswordChange; the principal must be named by an email."
+                    },
+                    "keys": {
+                      "type": "array",
+                      "description": "Stored keys: { \"id\": \"aouda_<16>\", \"sha256\": \"<64 hex>\" } each — the public id and the hash of the whole key, never the key.",
+                      "items": {
+                        "type": "object",
+                        "description": "A stored key.",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "The key's public id, aouda_ and 16 characters."
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "description": "The SHA-256 of the whole key, 64 hexadecimal characters."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "derivedKey": {
+                      "type": "object",
+                      "description": "A key derived from keyRoot (ADR 0071 D-17): the same key after a wipe. Bump version to rotate it.",
+                      "properties": {
+                        "version": {
+                          "type": "integer",
+                          "description": "The key's version, 1 or more."
+                        }
+                      },
+                      "required": [
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "oidc": {
+                      "type": "array",
+                      "description": "OIDC trusts (ADR 0071 D-18): a token whose issuer, audience, subject and claims match is exchanged for a session.",
+                      "items": {
+                        "type": "object",
+                        "description": "One trust.",
+                        "properties": {
+                          "issuer": {
+                            "type": "string",
+                            "description": "The issuer, an https URL, matched exactly."
+                          },
+                          "audience": {
+                            "type": "string",
+                            "description": "The audience, matched exactly."
+                          },
+                          "subject": {
+                            "type": "string",
+                            "description": "The subject, matched exactly."
+                          },
+                          "claims": {
+                            "type": "object",
+                            "description": "More claims the token must carry, name → exact value.",
+                            "additionalProperties": {
+                              "type": "string",
+                              "description": "The value."
+                            }
+                          },
+                          "jwks": {
+                            "type": "object",
+                            "description": "Where the issuer's keys are read: one of file or url (default: the issuer's discovery).",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "description": "A JWKS file."
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "A JWKS URL (https)."
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "issuer",
+                          "audience",
+                          "subject"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "disabled": {
                   "type": "boolean",
                   "description": "true refuses every credential of it (default false). Not for anonymous."
@@ -412,6 +528,122 @@
                 },
                 "description": "Its attributes (ADR 0071 D-12): name → a string, number, boolean or an array of them; a where reads them as principal.<name>."
               },
+              "credentials": {
+                "type": "object",
+                "description": "How the principal authenticates. Every secret is given by reference; none is a literal.",
+                "properties": {
+                  "password": {
+                    "type": "object",
+                    "properties": {
+                      "env": {
+                        "type": "string",
+                        "description": "An environment variable's name."
+                      },
+                      "file": {
+                        "type": "string",
+                        "description": "A file's path, relative to the declaration file's directory."
+                      },
+                      "hash": {
+                        "type": "string",
+                        "description": "The server's password-hasher output ($argon2id$…)."
+                      }
+                    },
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "additionalProperties": false,
+                    "description": "A password seed: { \"file\" }, { \"env\" } or { \"hash\": <the server's password-hasher output> }. Applied only when the principal is created, with forcePasswordChange; the principal must be named by an email."
+                  },
+                  "keys": {
+                    "type": "array",
+                    "description": "Stored keys: { \"id\": \"aouda_<16>\", \"sha256\": \"<64 hex>\" } each — the public id and the hash of the whole key, never the key.",
+                    "items": {
+                      "type": "object",
+                      "description": "A stored key.",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The key's public id, aouda_ and 16 characters."
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "description": "The SHA-256 of the whole key, 64 hexadecimal characters."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "sha256"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "derivedKey": {
+                    "type": "object",
+                    "description": "A key derived from keyRoot (ADR 0071 D-17): the same key after a wipe. Bump version to rotate it.",
+                    "properties": {
+                      "version": {
+                        "type": "integer",
+                        "description": "The key's version, 1 or more."
+                      }
+                    },
+                    "required": [
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "oidc": {
+                    "type": "array",
+                    "description": "OIDC trusts (ADR 0071 D-18): a token whose issuer, audience, subject and claims match is exchanged for a session.",
+                    "items": {
+                      "type": "object",
+                      "description": "One trust.",
+                      "properties": {
+                        "issuer": {
+                          "type": "string",
+                          "description": "The issuer, an https URL, matched exactly."
+                        },
+                        "audience": {
+                          "type": "string",
+                          "description": "The audience, matched exactly."
+                        },
+                        "subject": {
+                          "type": "string",
+                          "description": "The subject, matched exactly."
+                        },
+                        "claims": {
+                          "type": "object",
+                          "description": "More claims the token must carry, name → exact value.",
+                          "additionalProperties": {
+                            "type": "string",
+                            "description": "The value."
+                          }
+                        },
+                        "jwks": {
+                          "type": "object",
+                          "description": "Where the issuer's keys are read: one of file or url (default: the issuer's discovery).",
+                          "properties": {
+                            "file": {
+                              "type": "string",
+                              "description": "A JWKS file."
+                            },
+                            "url": {
+                              "type": "string",
+                              "description": "A JWKS URL (https)."
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "issuer",
+                        "audience",
+                        "subject"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
               "disabled": {
                 "type": "boolean",
                 "description": "true refuses every credential of it (default false). Not for anonymous."
@@ -422,6 +654,40 @@
         }
       },
       "additionalProperties": false
+    },
+    "keyRoot": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "string",
+          "description": "An environment variable's name."
+        },
+        "file": {
+          "type": "string",
+          "description": "A file's path, relative to the declaration file's directory."
+        }
+      },
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "description": "Principals S11a (ADR 0071 D-17): the root the declared principals' derived keys are computed from: { \"env\": NAME } or { \"file\": path } (relative to this file's directory). Never a literal."
+    },
+    "previousKeyRoot": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "string",
+          "description": "An environment variable's name."
+        },
+        "file": {
+          "type": "string",
+          "description": "A file's path, relative to the declaration file's directory."
+        }
+      },
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "description": "The key root before a rotation: its derived keys are still accepted (and marked as such) until it is removed."
     }
   },
   "required": [
