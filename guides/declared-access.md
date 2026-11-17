@@ -37,9 +37,14 @@ anyway, the start or the reload stops at it (`ACCESS_CONVERGE_REFUSED`) — noth
 
 ## The file owns what it declares
 
-- A declared principal or role is the file's, **whole**: change it in the file, not in Studio or through the API — a change made at
-  runtime is converged back at the next start or reload. A principal removed from the file is deleted with its credentials, and its
-  open sessions end at once.
+- A declared principal or role is the file's, **whole**: change it in the file, not in Studio or through the API. (**BL-1463, next
+  train**) The API refuses such a change with `409 DECLARED_IN_CONFIGURATION`, naming the file and the JSON pointer — a change to its
+  statements, roles, attributes or description, a rename or a deletion, a stored key or an OIDC trust added for it, deleting one of its
+  declared credentials, a change to the `signup` setting or `anonymous` of an auth database the file declares access for — and changes
+  nothing. Two emergency actions stay allowed: setting the principal `disabled` (on its own) and revoking one of its credentials; both
+  are reported `DECLARED_OBJECT_OVERRIDDEN` at every start and reload while the file disagrees. A declared principal may mint a limited
+  key (it only narrows, and is never a declaration), and a runtime principal may hold a declared role. A principal removed from the file
+  is deleted with its credentials, and its open sessions end at once.
 - A principal or role made at runtime with the same name as a declared one is **refused**, not taken over
   (`PRINCIPAL_RUNTIME_CONFLICT`, `ROLE_RUNTIME_CONFLICT`): delete or rename the runtime one, then start or reload again.
 - For every auth database the file declares access for, the file also owns `anonymous` and `signup`: an `anonymous` that is not

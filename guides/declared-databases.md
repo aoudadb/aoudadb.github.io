@@ -201,13 +201,19 @@ each of those queries in `Error` (its query answers `400`, not ready) until a `:
 no leading or trailing period or space, not empty, `.` or `..`, and no `__mqbuild_` prefix (**BL-1468, 0.14.0; breaking**).
 Before, the schema apply created such a table; now a file that declares one fails `aouda plan` and **fails the start**,
 naming the database, the file and the rule — also for a table the database already has. A schema file has no rename and HTTP DDL
-on a declared table is refused, so the way out is a clean cut: read the table's rows out (for example with `POST …/query`), give
+on a declared schema is refused (`409 DECLARED_IN_CONFIGURATION`, **BL-1463, next train**), so the way out is a clean cut: read the table's rows out (for example with `POST …/query`), give
 the table a legal name in the file, start once with `"schemaAllowDestructive": true` (the apply creates the new table and drops the
 old one) or on a fresh data directory, set `schemaAllowDestructive` back, and load the rows into the new table.
 
-Deleting a declared database through
-the API is undone by the next start, which creates it again, empty. A database you remove from the file is left alone; a
-declaration cannot say "must not exist".
+**Declared objects are read-only through the API (**BL-1463, next train**).** What the file declares has one writer, the file:
+deleting a declared database, creating a database with a declared name, and changing the schema of a database whose entry names a
+`schema` — `schema/apply`, every table, column and materialized-query route, a branch merge that applies — are refused `409
+DECLARED_IN_CONFIGURATION`, naming the file and the JSON pointer of the entry; nothing is changed. Change the file, then `aouda reload`.
+A dry-run `schema/apply`, `schema/diff`, `schema/seed`, a merge plan and every row write still work, and a declared database with no
+`schema` keeps every schema route. Declared principals and roles follow the same rule ([Declared access](declared-access.md)); the
+whole list is in the [HTTP API reference](../reference/http-api.md#one-writer-per-declared-object). A database you remove from the
+file is left alone (and the API may drop it from then on); a declaration cannot say "must not exist". Databases an embedding host sets
+in code (an in-process test server) are not declared in a file and keep every route.
 
 ### Changing the declaration without a restart (**BL-1427, 0.14.0**)
 
