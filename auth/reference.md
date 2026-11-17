@@ -63,7 +63,7 @@ Password-reset and MFA codes (`AUTH_RESET_*`, `AUTH_MFA_*`) are [Setup and flows
 
 ## What a session token carries
 
-`iss` (the auth database's issuer), `sub` (the principal id), `name`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` taken from the session's limit. It does not carry roles, a permission list, or attributes. Those are read from the store on each request. Validate a token you received from Aouda against the auth database's JWKS; do not read an authorization decision out of the claims.
+`iss` (the auth database's issuer), `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` taken from the session's limit. The library may also write `nbf`. It does not carry a role list, a permission list, or attributes. Those are read from the store on each request. Validate a token you received from Aouda against the auth database's JWKS; do not read an authorization decision out of the claims.
 
 ## Testing
 

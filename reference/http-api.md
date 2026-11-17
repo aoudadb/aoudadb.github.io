@@ -217,7 +217,7 @@ Open sockets end as [Revocation](../auth/credentials.md#revocation) describes: o
 | `POST` | `…/auth/refresh` | the refresh token | A new pair at the same `aal`. |
 | `POST` | `…/auth/signout` | | Revokes the session. |
 
-A session token carries `iss`, `sub` (the principal id), `name`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` from its limit. It does not carry roles or a permission list.
+A session token carries `iss`, `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` from its limit. The library may also write `nbf`. It does not carry a role list or a permission list.
 
 Password reset and MFA stay on the routes in [Setup and flows](../auth/setup.md). The admin path segment `users/{id}` takes the principal's id.
 
@@ -471,13 +471,13 @@ All errors return a JSON body with this structure:
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
 | `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter. `crossPartitionAccess` waives it and nothing else; on the data-plane listener it is not accepted and the guard decides (**BL-1227, 0.9.0**) |
-| `NAMED_QUERY_NOT_FOUND` | 404 | Named-query name is unknown. On the **data-plane listener**, unsigned or unentitled execute / batch / subscribe of a listed named query also uses this code (same `ProtocolError` envelope as unknown). Admin listener keeps 401/403 for those callers. "Unentitled" means the caller's roles hold no `named-query` `execute` row for the name (an exact name or `*`); a table `read` does not count (**BL-1417, 0.12.0**). A batch slot the caller may not execute is this code in that slot, on both listeners. |
+| `NAMED_QUERY_NOT_FOUND` | 404 | Named-query name is unknown. On the **data-plane listener**, a caller who may not `execute` it (no credential included) also uses this code (same `ProtocolError` envelope as unknown). On the admin listener that refusal is `403 AUTH_POLICY_DENIED`; no credential there is `401 AUTH_CREDENTIAL_MISSING`. A table `read` does not `execute` the artifact (**BL-1464, next train**). A batch slot the caller may not execute is this code in that slot, on both listeners. |
 | `NAMED_QUERY_BIND_FAILED` | 400 | Argument bind failed (type, constraint, or missing required param) |
 | `NAMED_QUERY_PARAM_REQUIRED` | 400 | A required named-query parameter was omitted |
 | `NAMED_QUERY_BATCH_EMPTY` | 400 | `queries` is missing or empty |
 | `NAMED_QUERY_BATCH_TOO_LARGE` | 400 | Batch exceeds 32 elements (`ProtocolConstants.MaxNamedQueryBatchSize`) |
 | `NAMED_QUERY_BATCH_MUTATION` | 400 | Batch included a named-mutation name (read-only envelope) |
-| `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation name is unknown. On the **data-plane listener**, unsigned or unentitled execute also uses this code. Admin listener keeps 401/403. Unentitled means no `named-mutation` `execute` row (an exact name or `*`) on any role of the caller; a table `write` does not count (**BL-1417, 0.12.0**). |
+| `NAMED_MUTATION_NOT_FOUND` | 404 | Named-mutation name is unknown. On the **data-plane listener**, a caller who may not `execute` it also uses this code. On the admin listener that refusal is `403 AUTH_POLICY_DENIED`; no credential there is `401 AUTH_CREDENTIAL_MISSING`. A table `write` does not `execute` the artifact (**BL-1464, next train**). |
 | `NAMED_MUTATION_BIND_FAILED` | 400 | Named-mutation argument bind failed |
 | `NAMED_MUTATION_RETURNING_OVERFLOW` | 400 | `RETURNING` would exceed `MaxReturningRows`; the call fails closed (no `rowsTruncated`) |
 | `ACCESS_SURFACE_TOO_MANY_IDENTITIES` | 400 | Access-surface diff posted more than 32 fixture identities |
@@ -498,18 +498,18 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_TOKEN_MISSING` | 401 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_TOKEN_INVALID` | 401 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_TOKEN_EXPIRED` | 401 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
-| `AUTH_DATABASE_NOT_IN_ALLOWANCE` | 401 | (**BL-1018, 0.9.0**) The application token, refresh token or native code is valid, but its allowance does not include this database. A refused refresh does not spend its refresh token; a refused code is spent. Not retryable: sign in again for this database. See [the token allowance](#the-token-allowance) |
+| `AUTH_DATABASE_NOT_IN_ALLOWANCE` | — | Not produced (**BL-1464, next train**). A session used outside its allowance is `403 AUTH_POLICY_DENIED` with remedy `none` and `reason: credential-limit`. See [the auth error envelope](#auth-error-envelope) |
 | `AUTH_TOKEN_REVOKED` | 401 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_API_KEY_INVALID` | 401 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_API_KEY_REQUIRED` | 401 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
-| `UNAUTHORIZED` | 401 | Deny-by-default: unrecognised path on a server where auth is configured |
+| `UNAUTHORIZED` | 401 | Not produced (**BL-1464, next train**). No credential on the admin listener is `AUTH_CREDENTIAL_MISSING` |
 | `NOT_AUTHENTICATED` | 401 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTHORIZATION_DENIED` | 403 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `INSUFFICIENT_PERMISSIONS` | 403 | Not produced (**BL-1464, next train**). A refused action is `AUTH_POLICY_DENIED`. |
 | `AUTH_KEY_ROUTE_MISMATCH` | 403 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Signin credentials are invalid (wrong password or non-existent email) |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
-| `AUTH_ACCOUNT_DISABLED` | 401 | Account is disabled by an administrator |
+| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh presented for a principal an administrator disabled. The body is the auth payload and includes `suggestion` (not the remedy envelope). That principal's access token is `401 AUTH_CREDENTIAL_REVOKED`. Disabling the principal ends its open sessions |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
 | `RELOAD_REFUSED` | 422 | (**BL-1427, 0.14.0**) `POST /api/admin/reload`: the declaration has an `error` finding (what the next start would refuse); nothing was changed. The body is the plan with every finding |
 | `RELOAD_PARTIAL` | 207 | (**BL-1427, 0.14.0**) A reload stopped part-way (`failedStep`); the steps before it are applied, `/ready` says `reload_failed`. Reload again |
@@ -632,7 +632,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
 | `NAMED_QUERY_TOO_MANY_JOINS` | 400 (schema apply) | Join count exceeds cap (default 3) |
 | `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
-| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"`. By design: the data-plane cannot compose a query (ADR 0040 C-2). Subscribe by name, or, for a trusted backend, send the table subscription (`target` + `filter`) to the **admin** listener with a keys |
+| `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"`. By design: the data-plane cannot compose a query (ADR 0040 C-2). Subscribe by name, or send the table subscription (`target` + `filter`) to the **admin** listener with a credential whose statements allow it |
 | `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-name also sent a client `filter` |
 | `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
 | `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
@@ -640,7 +640,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_SERVER_TIME_NOT_SUBSCRIBABLE` | WS error | Definition has a `serverTime` parameter; only one-shot reads bind the server's clock (**NativeClients, 0.4.0**) |
 | `NAMED_QUERY_SERVER_TIME_INVALID` | 400 | A `serverTime` parameter supplied in `args`, or (schema apply) declared where only a `Timestamp` comparison may use it (**NativeClients, 0.4.0**) |
 | `DATA_PLANE_WRITE_STREAM` | WS error | Data-plane `stream_open` / `stream_rows` / `stream_close` |
-| `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection (32), per-identity (128) or, for a keys without `a second field`, per-service-key (1 024) subscription cap (**BL-1383, 0.11.0**). The message names the cap, the count and the setting. A `subscribe` that re-sends a held `id` replaces it and is never refused by the cap (**BL-1383, 0.11.0**) |
+| `SUBSCRIPTION_LIMIT_EXCEEDED` | WS error | Per-connection 32, per-identity 128, the same cap for every principal (**BL-1464, next train**; the numbers are **BL-1383, 0.11.0**). There is no larger cap for one kind of credential. The message names the cap, the count and the setting. A `subscribe` that re-sends a held `id` replaces it and is never refused by the cap (**BL-1383, 0.11.0**) |
 | `SUBSCRIPTION_EMBARGO_RESET` | WS error | (**BL-418, 0.9.0**) An embargoed subscription ended and was removed: more changes were held back than `Aouda:Streaming:EmbargoHoldMaxEvents` (default 100 000) — at subscribe, the rows still inside the embargo already exceed it (narrow the filter) — or the caller's embargo on the table changed. Subscribe again, fresh (no `resume_from`); `@aouda/client` does this once per snapshot it receives |
 | `DUPLICATE_SUBSCRIPTION_ID` | WS error | *Not emitted since BL-638, 0.1.37* — a `subscribe` for an id the connection holds now **replaces** it. Older servers send this; it is informational (the id is registered and delivering), not a reason to unsubscribe |
 | `SLOW_CONSUMER` | WS close | Buffered-bytes high-water mark; reconnect and subscribe fresh (not a `gap`) |
@@ -664,7 +664,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 
 Lists databases visible to the caller.
 
-**Credentials:** server auth only — a server admin key (a key…`), a scoped server key (a key…` from `/api/auth/admin/api-keys`), or a server-auth user JWT with admin rights. An application keys (a key) or auth-admin key (a key) is refused with **403** `AUTH_KEY_ROUTE_MISMATCH` (the key is live; this route is not for it). Do not treat that as `AUTH_API_KEY_INVALID`.
+**Credentials:** `manage` on `server`. No credential on the admin listener is `401 AUTH_CREDENTIAL_MISSING`. A credential whose statements do not include that `manage` is `403 AUTH_POLICY_DENIED`. `AUTH_KEY_ROUTE_MISMATCH` is not produced.
 
 **Query Parameters:**
 
@@ -710,7 +710,7 @@ Lists databases visible to the caller.
 | `authDatabaseKind` | `"none"` \| `"server"` \| `"application"` | Identifies whether **this** database is an auth store. `"server"` is the server-level admin auth database (`/api/auth/admin/...`). `"application"` is an end-user auth database. `"none"` for regular data databases — this does **not** mean the data DB is unlinked. |
 | `auth.enabled` | `boolean` | `true` when this database is linked to an auth database. Always present on list/get/create. |
 | `auth.database` | `string` \| `null` | Linked auth database name, or `null` when unlinked. |
-| `auth.keys` | object \| omitted | `anonKey` / `serviceRoleKey` / `publicKey` — **create and regenerate only**. GET and list omit `keys` and never re-emit a key*`. (**BL-1378, 0.11.0**) Each field is **omitted** when that kind is declared in configuration (it was not generated); the whole object is omitted when all three are. |
+| `auth.keys` | omitted | Create, get and list omit `keys`. Linking a database mints no key (**BL-1464, next train**). A key is minted on a principal. |
 
 **Internal database definition:**
 
@@ -738,9 +738,9 @@ Default list: include iff isInternal == false
 
 Direct lookup of a specific database by name. Returns the database if it exists and is still serving, regardless of `isInternal`.
 
-**Credentials:** a **read** credential for that database is enough — including the database's own application keys (a key…`). A server credential also works. This is how a service process checks that its database exists; it does **not** need `GET /api/databases` (list).
+**Credentials:** `read` on every table of that database. Listing databases is a different ask (`manage` on `server`). No credential on the admin listener is `401 AUTH_CREDENTIAL_MISSING`.
 
-**Metadata-only.** Capture a key*` keys from `POST /api/databases` (or regenerate). GET never re-emits keys. `auth` is always an object — `auth.enabled: false` means unlinked; do not treat a missing or null `auth` as the signal (older servers omitted it).
+**Metadata-only.** `auth` is always an object — `enabled` and `database`. `keys` is omitted. `auth.enabled: false` means unlinked; do not treat a missing or null `auth` as the signal (older servers omitted it).
 
 **Success (200):**
 
@@ -776,7 +776,7 @@ Direct lookup of a specific database by name. Returns the database if it exists 
 | Status | Code | Condition |
 |--------|------|-----------|
 | `404` | `DATABASE_NOT_FOUND` | Unknown name, already dropped, or `Dropping` (engine already unrouted). You cannot poll `state` on a dropping name — 404 means it is gone from serving. List may still show `Dropping` until background cleanup finishes. |
-| `401` | `UNAUTHORIZED` | Missing or invalid credentials |
+| `401` | `AUTH_CREDENTIAL_MISSING` | No credential on the admin listener. A bad credential is `AUTH_KEY_MALFORMED` or `AUTH_CREDENTIAL_INVALID`. `UNAUTHORIZED` is not produced |
 
 ---
 
@@ -806,7 +806,7 @@ Unknown database → 404 `DATABASE_NOT_FOUND`. Requires read authorization when 
 
 Creates a new operator-facing database. The `isInternal` flag cannot be set by clients — it is always `false` for user-created databases. Internal databases are only created by Aouda bootstrap services.
 
-**Credentials:** server auth only — same as [`GET /api/databases`](#get-apidatabases). A live a key / a key is **403** `AUTH_KEY_ROUTE_MISMATCH`. Schema apply (or an operator with a server key) creates databases for a service process; the keys itself does not.
+**Credentials:** `manage` on `server`, the same ask as [`GET /api/databases`](#get-apidatabases). A credential without it is `403 AUTH_POLICY_DENIED`. `AUTH_KEY_ROUTE_MISMATCH` is not produced. Declaring the database in `aouda.json` is how a process creates one without this call.
 
 **Request body:**
 
@@ -830,16 +830,14 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
 | `maxMemoryShareBytes` | number \| null | No | Cap on this database's share of the server's memory budget, in bytes (null: no cap). (**BL-980, 0.4.0:** renamed from `maxMemoryBytes`, which is now ignored — no cap; responses carry `options.maxMemoryShareBytes`.) |
 | `defaultTemperature` | string | No | `Auto`, `HotOnly`, `ColdPreferred`. |
 | `kind` | string | No | `"auth"` creates a standalone auth database. `"data"` or omit for a data database; both may include `auth`. `kind: "auth"` together with an `auth` object is rejected (400). |
-| ``signup.enabled`` | bool | No | When `kind` is `"auth"`, whether self-service signup is enabled on the new database. Omitted: off. |
-| A table carries no security member (**BL-1464, next train**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
 | `auth.enabled` | bool | No | Shorthand: link to the single existing auth database (400 if none or more than one). |
 | `auth.database` | string | No | Link to (or create) a named auth database. |
-| `auth.`signup.enabled`` | bool | No | Whether self-service signup is enabled on the linked application database. Omitted: off. |
-| A table carries no security member (**BL-1464, next train**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost. | | | |
 
 (**Lead S26, 0.6.0**) `enableWal` and `dataDurability` are gone, with no alias: a body carrying either is **400** `INVALID_REQUEST` naming `durability` (`enableWal: false` is `"unlogged"`, `dataDurability: "MemoryOnly"` is `"memory"`).
 
-**Success (201):** same shape as GET, plus `auth.keys` when keys were generated (`anonKey`, `serviceRoleKey`, `publicKey`). **Save the keys now** — subsequent GET/list omit them. A create that finds the keys already issued returns none: an auth database that already holds the system keys for that application-database name (it was linked before) generates nothing, and the server keeps only a hash. `auth` is then `{ "enabled": true, "database": … }` with no `keys`, which is not a failure. To get a keys afterwards, mint a named one (`POST /api/databases/{db}/service-keys`, with a server key) or issue a new set (`POST /api/databases/{db}/auth/admin/mint a new key`); both are described under *Named keys* above. The CLI says all of this on stderr (**BL-1226, 0.9.0**).
+Sign-up is not a member of this body. Set it with `PUT /api/auth/{authDatabase}/signup`. A body that still sends a retired signup member is **400** `INVALID_REQUEST`, and the message names that route. Create mints no key (**BL-1464, next train**).
+
+**Success (201):** the same shape as GET. `auth` is `{ "enabled", "database" }` and has no `keys` member.
 
 ```json
 {
@@ -847,12 +845,7 @@ Creates a new operator-facing database. The `isInternal` flag cannot be set by c
   "state": "Active",
   "auth": {
     "enabled": true,
-    "database": "auth",
-    "keys": {
-      "anonKey": "a key...",
-      "serviceRoleKey": "a key...",
-      "publicKey": "a key..."
-    }
+    "database": "auth"
   },
   "isInternal": false,
   "isAuthDatabase": false,
@@ -866,9 +859,7 @@ Poll `GET /api/databases/{name}` until `state=Active` before schema apply.
 
 #### `DELETE /api/databases/{db}`
 
-Drops a database. Returns `204 No Content` immediately after the foreground switch. Needs `admin` on the database; for a
-database with no linked auth database, once a server auth database exists, that is a server credential (the server admin,
-a key), and an anonymous drop is `401` on the admin listener (**BL-1017, 0.4.0**; 0.3.0 dropped it).
+Drops a database. Returns `204 No Content` immediately after the foreground switch. Needs `manage` on that database. No credential on the admin listener is `401 AUTH_CREDENTIAL_MISSING`. A credential without that `manage` is `403 AUTH_POLICY_DENIED`.
 
 **How it works (async, crash-safe):**
 
@@ -895,8 +886,8 @@ The endpoint performs a fast foreground switch, then returns `204`. All cleanup 
 | Status | Code | Condition |
 |--------|------|-----------|
 | `404` | `DATABASE_NOT_FOUND` | Database does not exist or is already dropped |
-| `401` | `UNAUTHORIZED` | Missing or invalid credentials |
-| `403` | `FORBIDDEN` | Caller lacks permission to drop databases |
+| `401` | `AUTH_CREDENTIAL_MISSING` | No credential on the admin listener. A bad credential is `AUTH_KEY_MALFORMED` or `AUTH_CREDENTIAL_INVALID`. `UNAUTHORIZED` is not produced |
+| `403` | `AUTH_POLICY_DENIED` | The credential's statements do not `manage` this database. `FORBIDDEN` is not produced |
 
 ---
 
@@ -1314,7 +1305,7 @@ an empty or all-null `Decimal(p,s)` column, or an undeclared `Decimal`, could co
 
 ### Named queries
 
-Named queries are **server-authored `QueryMessage` templates** identified by the unique schema name (`^[A-Za-z][A-Za-z0-9_.]*$`). Browser-tier callers (a key*` and application user JWTs on the data-plane listener) **cannot compose a query** — they send the name plus arguments. Identity is injected from the validated principal; it is never an argument. The closed list of what that surface cannot do is [What a browser-tier read cannot do](../guides/browser-tier-read-limits.md).
+Named queries are **server-authored `QueryMessage` templates** identified by the unique schema name (`^[A-Za-z][A-Za-z0-9_.]*$`). Browser-tier callers on the data-plane listener **cannot compose a query** — they send the name plus arguments. Identity is injected from the validated principal; it is never an argument. The closed list of what that surface cannot do is [What a browser-tier read cannot do](../guides/browser-tier-read-limits.md).
 
 There is **no HTTP route that registers a definition** and **no inventory list** besides `GET …/schema/export` (already name-keyed). Definitions deploy through declarative schema apply (`namedQueries` in `aouda.schema.json`). Clients send the name. Codegen (`npx @aouda/client generate` / `aouda generate`) is **optional** and emits Args/Row types only. See [Named queries](../guides/named-queries.md).
 
@@ -1359,7 +1350,7 @@ Execute one named query by unique name.
 
 `args` may be omitted or `{}` when the definition has no required parameters.
 
-**`crossPartitionAccess`** (boolean, optional, camelCase, omit when `false`; **BL-1227, 0.9.0**). A named query whose definition binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` (the message ends `Named query '<name>' binds no partition key: pass crossPartitionAccess with the call, or bind the partition key in the definition's where clause. The flag waives this guard only — the rows are still the credential's grants.`). Send `"crossPartitionAccess": true` in the body of the call to waive that guard. It is per call: a definition cannot set it. It waives the guard only, so the rows are still the credential's access grants. It is honoured on the **admin listener only**; the data-plane listener (a key*` and application end users) ignores it and the guard decides ([the browser tier's rule](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
+**`crossPartitionAccess`** (boolean, optional, camelCase, omit when `false`; **BL-1227, 0.9.0**). A named query whose definition binds no partition key on a partitioned table is refused `PARTITION_FILTER_REQUIRED` (the message ends `Named query '<name>' binds no partition key: pass crossPartitionAccess with the call, or bind the partition key in the definition's where clause. The flag waives this guard only — the rows are still the credential's grants.`). Send `"crossPartitionAccess": true` in the body of the call to waive that guard. It is per call: a definition cannot set it. It waives the guard only, so the rows are still the credential's access grants. It is honoured on the **admin listener only**; the data-plane listener ignores it and the guard decides ([the browser tier's rule](../guides/browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener)).
 
 ```json
 { "args": { "ticker": "AAPL" }, "crossPartitionAccess": true }
@@ -3449,8 +3440,8 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
 | `not_initialized` | The engine has not finished opening its databases. | none |
 | `server_starting` | The auth bootstrap has not completed, so the server is not accepting requests yet. | none |
 | `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
-| `setup_required` | The server is in setup mode: its data directory has never been set up (no server auth database), nothing is declared (no server key, no `Aouda:Auth:a declared principal`, no dev admin), and no admin exists. A declared server key is not setup mode, and a data directory that has been set up never re-enters it (**BL-1462, 0.14.0**). | none |
-| `root_user_unusable` | `Aouda:Auth:a declared principal` is set but its password could not be used, so setup mode was not left. Also listed when `Aouda:Auth:a declared principal:Email` is set and no password is (neither `Password` nor the systemd credential `aouda-admin-password`) (**BL-1462, 0.14.0**). | none |
+| `setup_required` | The server is in setup mode: nothing is declared and no admin account exists. Create the first admin with `POST /api/auth/setup` from the server's own host, or declare an operator in `server.principals` (the role `admin` and a credential) and restart. A declared operator alone is not setup mode, and a data directory that has been set up never re-enters it (**BL-1462, 0.14.0**). | none |
+| `root_user_unusable` | Not produced (**BL-1464, next train**). The setting it described is refused at start. | none |
 | `database_pending` | A database in the declaration file (`aouda.json`) does not exist yet. | the database |
 | `database_not_open` | A database in the declaration file is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
 | `database_reconcile_failed` | The reconcile of the declared databases after a restore was refused; the server keeps running. | the database, when one is named |
@@ -3458,7 +3449,7 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
 | `schema_applying` | (**BL-1462, 0.14.0**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |
 | `schema_drift` | The start-time apply of a declared `SchemaFile` refused a change (a destructive one without `SchemaAllowDestructive`, or one the engine does not apply), so the catalog is not what the file says; the start went on. `503` until you allow the change or update the file, and restart. A failed apply fails the start instead, so there is no `/ready` to ask (**BL-1406, 0.11.0**). | the database |
-| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:the declaration`) cannot authenticate yet: its auth database or database is not open. A server key no longer waits for a first admin: declaring one ends setup mode (**BL-1462, 0.14.0**). | the key's name |
+| `configured_key_inactive` | Not produced (**BL-1464, next train**). | none |
 | `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is not healthy; every such component is listed. The message is generic (it names the component, never an exception's text); `/health/detailed` and the server log have the detail. | the component |
 
 A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up. `aouda status` prints every reason.
@@ -4462,10 +4453,9 @@ Authenticate the connection and optionally negotiate wire mode.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `type` | string | Yes | Always `"auth"` |
-| `token` | string? | No | Bearer token. Required when server auth is enabled. |
+| `token` | string | Yes | The caller's own credential: one key or one session token. A second credential field is `400 INVALID_REQUEST` and the value is not read. |
 | `database` | string | Yes | Database name this connection is scoped to. |
 | `wire_mode` | string? | No | Requested encoding: `"json"` (default) or `"msgpack"`. |
-| `token` | string | Yes | The caller's own credential. A second credential field is `400 INVALID_REQUEST`. |
 
 **Example:**
 ```json
@@ -4477,12 +4467,9 @@ Authenticate the connection and optionally negotiate wire mode.
 }
 ```
 
-**A backend acting as a user** (**BL-1223, 0.9.0**):
-```json
-{ "type": "auth", "token": "a key...", "a second field": "eyJhbGciOiJSUzI1NiIs...", "database": "my_db" }
-```
+A second credential field is `400 INVALID_REQUEST`. To act as another principal, send that principal's own credential, or a limited key minted from it (`POST /api/auth/keys`).
 
-**Server responds with:** `auth_ok` or `auth_error`. With a `a second field`, `auth_ok.user_id` and `auth_ok.expires_at` are the user's.
+**Server responds with:** `auth_ok` or `auth_error`.
 
 ---
 
@@ -4562,7 +4549,7 @@ formula maintainer's progress, as on a read. See [Formulas](../guides/formulas.m
 
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
 
-**Limits:** per-connection 32 subscriptions, per-identity 128 (a keys without `a second field`: 1 024) (**BL-1383, 0.11.0**). Exceed → `SUBSCRIPTION_LIMIT_EXCEEDED`. A re-sent `id` replaces and never trips the cap. The limits that apply to the connection (`limits`: `max_subscriptions_per_connection`, `max_subscriptions_per_identity`, `max_connections_per_identity`, `subscribe_burst`, `subscribe_refill_per_second`) and the server's `protocol` (`version`, `capabilities`) arrive in `auth_ok` (**BL-1383, 0.11.0**). A subscribe is also bounded per identity by a token bucket: over it, `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`.
+**Limits:** per-connection 32 subscriptions, per-identity 128, the same cap for every principal (**BL-1464, next train**; the numbers are **BL-1383, 0.11.0**). There is no larger cap for one kind of credential. Exceed → `SUBSCRIPTION_LIMIT_EXCEEDED`. A re-sent `id` replaces and never trips the cap. The limits that apply to the connection (`limits`: `max_subscriptions_per_connection`, `max_subscriptions_per_identity`, `max_connections_per_identity`, `subscribe_burst`, `subscribe_refill_per_second`) and the server's `protocol` (`version`, `capabilities`) arrive in `auth_ok` (**BL-1383, 0.11.0**). A subscribe is also bounded per identity by a token bucket: over it, `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`.
 
 **The `id` contract, in full.** An `id` identifies a subscription **on one connection**; it is not
 global, and it is not a resource the client has to garbage-collect.
@@ -5261,28 +5248,13 @@ Content-Type: application/json
 }
 ```
 
-**Authorization (**BL-1031, 0.5.0**).** `:begin` returns `403` `AUTHORIZATION_DENIED` when any table the load will
-write — the tables in the request, plus transform targets when `applyTransforms` is set — has partition-level or
-row-level security, unless the caller holds, **at `write`**, the access grant for each restriction the table has:
-A table carries no security member (**BL-1464, next train**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-`a principal` key, a key, was admitted). An app keys and a user assigned `role `admin`` on the database hold both
-grants; a user can also hold them through a role. A server keys (a key), a custom key not linked to a holder (even one whose own role is `role `admin``),
-a plain user, a holder of attributes only, a user whose token only claims `role `admin``, and a keys that presents
-a plain user's `a second header` are refused, including one whose rights would allow an ordinary insert of the same rows. A table
-with neither row conditions nor row conditions is not affected. The refusal happens before a session exists, and it is asked again at every
-`:append` (a job's id is visible to any holder of the `bulkload` permission). The message names each refused table and what it
-A table carries no security member (**BL-1464, next train**). Access is the caller's statements: a read is filtered, a write outside the `where` is `403 AUTH_ROW_DENIED`. `crossPartitionAccess` only waives the partition-filter cost.
-bulk load is not a per-user write. It needs the grant that lifts each restriction, at write — held by a keys or an admin
-user of the database, or through a role — or load a table with no row conditions or row conditions policy.` A table that is gone is `404`
-`TABLE_NOT_FOUND`. Identity-stamped columns are unchanged: `IDENTITY_STAMP_REQUIRED` is still decided by a keys
-(a key) or a server key (a key). Each grant that lets a job through is audited once per credential
-([Audit](#audit-`unconditional_access`)).
+**Authorization (**BL-1464, next train**).** `:begin`, every `:append` and `:commit` require an unconditional `write` (a statement with no `where`) on every table the load writes — the tables in the request, plus transform targets when `applyTransforms` is set. A statement with a `where` admits none of the load: no row check sees the rows. The refusal is `403 AUTH_POLICY_DENIED`, naming each refused table, with remedy `grant` of that unconditional statement (`none` when a credential limit refused it). `AUTHORIZATION_DENIED` is not produced. A table that is gone is `404 TABLE_NOT_FOUND`. A statement with no `where` on a table another statement restricts is audited as [unconditional access](#audit).
 
 ---
 
 ### `POST {jobId}:append`
 
-Append frames of rows to an in-flight session. The beginning credential only: another credential is `403 AUTHORIZATION_DENIED` and nothing is appended (**BL-1278, BL-1170, 0.9.0**).
+Append frames of rows to an in-flight session. The beginning credential only: another credential is `403 AUTH_POLICY_DENIED` with remedy `none`, and nothing is appended (**BL-1278, BL-1170, 0.9.0**; the code is `AUTH_POLICY_DENIED` since **BL-1464, next train**).
 
 **Each frame is checked against its table before any of it is applied** (**Lead S27a, 0.6.0**). A frame is refused
 `400 INVALID_REQUEST` — none of its rows applied, the frames before it credited (`nextSequence` unchanged past them), the job still

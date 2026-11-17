@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **Review of the principals pages (BL-1464, next train).** A session token's claim is `email`. A refresh of a disabled principal is `423 AUTH_ACCOUNT_DISABLED`; the access token is `401 AUTH_CREDENTIAL_REVOKED`, and the sessions end. A session used outside its database limit is `403 AUTH_POLICY_DENIED` with `reason: credential-limit`. Create, get and list of a database omit `keys`. Omitting `databases` at sign-in is a session with no database limit.
+
 - **Guides, deployment and examples no longer describe the 0.14 access model (BL-1464, next train).** Partition security, key kinds and the access-surface page are gone from the guides. `guides/access-surface.md` is deleted. What a removed input now gets is [Moving from 0.14](auth/migrating-from-0-14.md).
 
 - **[HTTP API](reference/http-api.md) and a new [CLI reference](reference/cli.md) (BL-1464, next train).** The access section of the HTTP reference is principals, credentials and policy: `whoami`, the access routes, the key and session calls, and one error body with a `remedy`. `reference/cli.md` is `aouda --help` as of this release: `keys new`, `keys new-root`, `keys derive`, `whoami`, `login --oidc`, `policy explain`, `plan` (including `--data-dir`).

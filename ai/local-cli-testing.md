@@ -37,7 +37,7 @@ Start-Process aouda -ArgumentList @(
 printf '%s' … | aouda init --server http://127.0.0.1:26133 --admin-email … --admin-password-stdin --json
 # save accessToken; do not print it. Then:
 aouda databases create -n auth --kind auth -s http://127.0.0.1:26133 -t <token> --json
-# capture auth.keys.anonKey / publicKey from that JSON now — GET list is prefix-only.
+# the response has no key. A principal and its key are declared, or minted on the principal.
 
 # 4. Schema: HTTP body { "schema": <doc>, "options": { "allowDestructive": true } }
 #    or `aouda schema apply -s … -d … -f aouda.schema.json`.

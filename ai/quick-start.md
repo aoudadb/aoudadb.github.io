@@ -102,7 +102,7 @@ aouda start --port 5433 --data-dir ./data
 # Bootstrap server admin, then POST /api/databases with auth enabled — see auth/setup.md
 ```
 
-Capture `anonKey` and `serviceRoleKey` from the create-database JSON response, then:
+Create does not return a key. Declare the principal, or mint a key on it. See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ```typescript
 const client = createAoudaClient({

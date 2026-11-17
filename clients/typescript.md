@@ -185,12 +185,11 @@ React Native, `react-native-get-random-values`; see [React Native](#react-native
 `app.auth.exchangeCode({ code, codeVerifier, clientId, redirectUri, deviceInfo })` in the native app — a new session at the web
 session's `aal`. Recipes: [Native apps](../auth/setup.md#native-apps-sign-in-through-the-browser).
 
-**Which databases a sign-in opens** (**BL-1018, 0.9.0**): a token opens only its allowance — the databases of the auth database
-on which the user holds a role. `client.auth.signIn(email, password, { databases: ['orders', 'reports'] })` narrows it (never wider;
-anything but a non-empty subset is `400 INVALID_REQUEST`), and so does `createAuthorizationCode({ …, databases })` for native sign-in.
-A token used elsewhere is `401` with the exported code `AUTH_DATABASE_NOT_IN_ALLOWANCE`. A refresh refused with it ends the session
+**Which databases a sign-in opens** (**BL-1464, next train**): omit `databases` and the session has no database limit. `client.auth.signIn(email, password, { databases: ['orders', 'reports'] })` limits the session to those databases, and so does `createAuthorizationCode({ …, databases })` for native sign-in.
+An empty list, a blank name, or a name the auth database does not govern is `400 INVALID_REQUEST`.
+A token used elsewhere is `403 AUTH_POLICY_DENIED` with remedy `none` and `reason: credential-limit` (**BL-1464, next train**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` is not produced. A refresh refused for that limit ends the session
 like `AUTH_REFRESH_TOKEN_INVALID` — the client clears its tokens, reports `"signedOut"` and does not retry, and the realtime transports
-stop reconnecting. See [the token allowance](../auth/reference.md#the-token-allowance).
+stop reconnecting. See [Sessions](../reference/http-api.md#sessions).
 
 See [Access](../auth/index.md) (**BL-1464, next train**).
 type. Every kind goes out as `Authorization: Bearer <key>` to the same URLs and the server resolves the kind; the client reads the
@@ -232,9 +231,9 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 kind of credential the client was sending. `code`, `statusCode`, `requestId` and `details` are unchanged; a data error (404, 400, ...) keeps the
 server's message exactly. The `/ready` reason codes `schema_pending` and `schema_drift` are documented in the [HTTP API](../reference/http-api.md#get-ready).
 
-**Named queries and mutations need an `execute` row (server 0.12.0, BL-1417).** The client sends named-artifact calls as before. A `403
-INSUFFICIENT_PERMISSIONS` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` on a call that worked before
-means the caller's role lacks the `named-query` / `named-mutation` `execute` row for it; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. See
+**Named queries and mutations need an `execute` statement (**BL-1464, next train**).** The client sends named-artifact calls as before. A `403
+AUTH_POLICY_DENIED` (admin listener) or a data-plane `404 NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` on a call that worked before
+means the caller's statements do not `execute` that artifact; a batch answers `NAMED_QUERY_NOT_FOUND` in the slot. `INSUFFICIENT_PERMISSIONS` is not produced. See
 See [Access](../auth/index.md) (**BL-1464, next train**).
 
 See [Access](../auth/index.md) (**BL-1464, next train**).

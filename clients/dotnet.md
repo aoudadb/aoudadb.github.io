@@ -805,10 +805,8 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
 
 ## 8b) Which databases a sign-in opens (**BL-1018, 0.9.0**)
 
-An application sign-in gives a token that opens only its **allowance**: the databases of the auth database on which the user holds
-a role. `SignInAsync(email, password, deviceInfo, databases)` narrows it to the databases you name — never wider; a name the user
-holds no role on, or an empty list, is refused (`AoudaRequestException`, `400 INVALID_REQUEST`). Native sign-in narrows the same way
-with `AuthorizationCodeRequest.Databases`. The token's `aud` lists the allowance and its `iss` is the auth database's URL.
+Omit `databases` and the session has no database limit (**BL-1464, next train**). `SignInAsync(email, password, deviceInfo, databases)` limits the session to the databases you name. An empty list, a blank name, or a name the auth database does not govern is refused (`AoudaRequestException`, `400 INVALID_REQUEST`). Native sign-in limits the same way
+with `AuthorizationCodeRequest.Databases`. The token's `aud` lists the limit and its `iss` is the auth database's URL.
 
 ```csharp
 // One sign-in for the two apps this front end serves
@@ -816,10 +814,10 @@ await client.Auth.SignInAsync("alice@example.com", password, deviceInfo: "Alice'
     databases: new[] { "orders", "reports" });
 ```
 
-A token used at a database outside its allowance is `401 AUTH_DATABASE_NOT_IN_ALLOWANCE`. A **refresh** refused with that code ends
+A token used at a database outside its allowance is `403 AUTH_POLICY_DENIED` with remedy `none` and `reason: credential-limit` (**BL-1464, next train**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` is not produced. A **refresh** refused for that limit ends
 the client's session like `AUTH_REFRESH_TOKEN_INVALID`: the SDK clears its tokens and raises `TokensChanged` with `SignedOut`, and the
 realtime transports stop reconnecting — sign in again for that database. See
-[the token allowance](../auth/reference.md#the-token-allowance).
+[Sessions](../reference/http-api.md#sessions).
 
 ---
 

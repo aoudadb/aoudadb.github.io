@@ -122,7 +122,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 If you do nothing beyond starting local dev:
 
 - `aouda start` runs the foreground server (CLI flags `--port`, `--data-dir` override optional local `appsettings.json` — see [Server configuration](../guides/server-configuration.md)).
-- App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. Response includes `anonKey` and `serviceRoleKey` (shown once).
+- App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. The response has no key. A principal and its key are declared, or minted on the principal. See [Access](auth/index.md) (**BL-1464, next train**).
 - Password reset and invite emails require a **configured email provider** on the server (`Aouda:Auth:Email` — `console` for local dev, `sendgrid` for production) — see [auth/notifications.md](../auth/notifications.md).
 - HTTP database creation with `{ "auth": { "enabled": true } }`:
   - links to existing single app auth DB, or
