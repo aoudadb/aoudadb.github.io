@@ -231,6 +231,31 @@ docker compose run --rm --no-deps --entrypoint aouda aouda plan
 **A schema file that is declared nowhere else** is checked by declaring it to the plan, as above (`databases.<name>.schema` in `aouda.json`, and `--env` to merge its overlay; **BL-1463, next train**; before, `Aouda:Databases:<name>:SchemaFile` and `SchemaEnvironment`, which are refused now). A schema that is applied through
 the API instead of declared is checked against a server with `aouda schema diff`.
 
+## From a running server to a file: the export (**BL-1463, next train**)
+
+A setup clicked together in Studio, or made through the API, becomes the file a deployment owns without re-typing it:
+`GET /api/admin/declaration/export` (an operator's key) answers `{ "declaration", "schemaFiles", "origins", "notes" }`. Write
+`declaration` as `aouda.json` and each `schemaFiles` entry at its relative path beside it, then plan the files:
+
+```sh
+curl -s -H "Authorization: Bearer $AOUDA_KEY" http://localhost:5000/api/admin/declaration/export > export.json
+jq -r '.declaration' export.json > deploy/aouda.json
+jq -r '.schemaFiles | to_entries[] | "\(.key)\t\(.value)"' export.json | while IFS=$'\t' read -r path text; do
+  mkdir -p "deploy/$(dirname "$path")"; printf '%s' "$text" > "deploy/$path"; done
+aouda plan --declaration deploy/aouda.json
+```
+
+The export is the server's whole state, declared and runtime — databases with their non-default fields, each data database's live
+schema, roles, principals (stored keys as `{ "id", "sha256" }`, derived keys by version, OIDC trusts) — and `origins` says which part
+the running declaration already declares. **It never carries a password or a key root**: `notes` names what was left out (passwords, a
+revoked, limited or expiring key, self-signed-up principals) and what to add (`EXPORT_KEY_ROOT_NEEDED`: a `keyRoot` for derived keys).
+Planned against the **same** server, databases, schemas and declared objects have no changes, but each principal or role made at runtime
+is `PRINCIPAL_RUNTIME_CONFLICT` / `ROLE_RUNTIME_CONFLICT` — a declaration never adopts a runtime object of the same name — so start the
+new deployment from the files (or delete the runtime objects on this server and reload). From then on the file is the one writer of what
+it declares: the API refuses changes to it with `409 DECLARED_IN_CONFIGURATION` ([Declared databases](declared-databases.md)).
+`GET /api/admin/declaration` shows the declaration a server runs on, with the findings of its last start or reload
+([HTTP API](../reference/http-api.md#one-writer-per-declared-object)).
+
 ## Replacing `aouda keys check` and `aouda schema check`
 
 Both commands are deleted — no alias, no "did you mean": `aouda keys check` and `aouda schema check` are unknown subcommands and exit `64`. `aouda keys hash` stays, and so do `aouda schema validate`,

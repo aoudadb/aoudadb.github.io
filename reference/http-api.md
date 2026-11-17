@@ -255,6 +255,57 @@ A key of the wrong kind for a route is refused by the server naming the kind the
 | DELETE | `/api/databases/{db}/scoped-service-keys/{name}` | | `204` |
 | POST | `/api/databases/{db}/scoped-service-keys/{name}/rotate` | `{ "overlapSeconds" }` | `201` with the new secret, the same `roles`, and `validUntil` |
 
+#### The declaration view and its export
+
+(**BL-1463, next train**) Two reads, `manage` on `server` (an operator), on the admin listener,
+answered `Cache-Control: no-store`; neither writes anything, takes the reload's gate or is rate limited:
+
+| Method | Path | Result |
+|--------|------|--------|
+| GET | `/api/admin/declaration` | The declaration the server runs on: `source` (`file`, `code` for databases an embedding host set in code, `none`), `file`, `overlay`, `environment`, `planHash` (the same as `aouda plan` prints for the same files), `declaration` (the canonical document the plan hash is the hash of: a credential by its public id, a password seed only as set, never a key, hash, root or secret), `databases` (`name`, `kind`, `authDatabase`, `declaresSchema`, `pointer`), and `last` — the last start or reload: `origin` (`start` or `reload`), `at`, `outcome`, `applied`, `summary`, and every `finding` in the plan's shape |
+| GET | `/api/admin/declaration/export` | The server's state as declaration text: `{ "declaration": "<aouda.json>", "schemaFiles": { "schema/<db>.aouda.schema.json": "<text>" }, "origins": { "<pointer>": "declared" \| "runtime" }, "notes": [ { "code", "pointer", "message" } ] }` |
+
+`last` moves only when the declaration does: a reload that writes replaces it (and `declaration` and `planHash`); a dry run, a reload
+refused for an error and a reload on a node that does not accept writes leave it as it was. At start it holds the offline plan's
+findings and those of the start's own check of the access section (a runtime override of a declared principal,
+`DECLARED_OBJECT_OVERRIDDEN`, is there).
+
+The export is **everything the server has**, declared and runtime: every database (its `kind`, `authDatabase` and each per-database
+field that differs from its default), each data database's live schema (tables, named queries and mutations, materialized queries) as a
+schema file, and per auth database its `signup`, roles and principals with their credentials — a stored key as `{ "id", "sha256" }`, a
+derived key as `{ "derivedKey": { "version" } }`, an OIDC trust as is — the server auth database's as `server`, and the running
+declaration's `keyRoot` by reference (a variable name or a path). `origins` says which object the running declaration already declares.
+**The stored keys' `sha256` are the only secret-class values in the answer** (a SHA-256 of a 256-bit key is no key, and the file needs
+them); each export is recorded as one `declaration_exported` audit row with counts only, so a node that does not accept writes (a secondary) answers `503 READ_ONLY`: export from the primary. Never exported, each named in `notes`: a password,
+its hash or a seed reference (`EXPORT_PASSWORDS_OMITTED`), a revoked key (`EXPORT_REVOKED_KEYS_OMITTED`), a limited key
+(`EXPORT_LIMITED_KEYS_OMITTED`), a key with an expiry — the file's keys have none, so it would outlive it (`EXPORT_EXPIRING_KEYS_OMITTED`),
+a principal that signed itself up (`EXPORT_SIGNUP_PRINCIPALS_OMITTED`), a session, and the key root (`EXPORT_KEY_ROOT_NEEDED` when a
+derived key needs a `keyRoot` the running declaration does not name). Written to a directory and planned against the same server
+(`aouda plan --server`), the databases, schemas and declared objects have no changes; a principal or role created at runtime is
+`PRINCIPAL_RUNTIME_CONFLICT` / `ROLE_RUNTIME_CONFLICT` there, because a declaration never adopts a runtime object of the same name
+(`EXPORT_RUNTIME_NOT_ADOPTED` says so): start a new server from the files, or delete the runtime objects and reload.
+
+#### One writer per declared object
+
+(**BL-1463, next train**) What the declaration file declares is changed by changing the file and
+running `aouda reload` — not through the API. A call that would change a declared object is refused **`409 DECLARED_IN_CONFIGURATION`**
+before anything is written, with the message *"{Kind} '{name}' is declared in {file} at {pointer}; change the declaration, then run
+`aouda reload`."* (the name as the server spells it, the file and the JSON pointer of the member; the code is in `code` on the data and
+admin routes and in `error` on the `/api/auth/...` routes; there is no `remedy` object):
+
+| Declared object | Refused | Still allowed |
+|---|---|---|
+| A database the file declares | `DELETE /api/databases/{db}`; `POST /api/databases` with its name (in any case) | quarantine, unquarantine, backup, restore; rows |
+| The schema of a database whose declaration names a `schema` | `POST .../schema/apply` (unless `options.dryRun: true`), every table, column, edge-table, vector-column and materialized-query create, change or drop, `POST .../branches/{name}/merge` with `execute: true`, and a row insert into a missing table that `Aouda:Schema:InferenceMode = Extend` would create | a dry-run apply, `schema/diff`, `schema/seed`, a merge plan, row writes, truncate, `:refresh` |
+| A declared principal (and `anonymous`, when the file declares it) | any member but `disabled` (statements, roles, attributes, description, a rename), its deletion, a key minted or an OIDC trust added for it, deleting one of its declared credentials | `disabled` on its own (the emergency action; clearing it is refused when the file itself declares `"disabled": true`), revoking a credential (`POST .../credentials/{id}/revoke`), a limited key it mints, a person's own password change (a declared password is a seed) |
+| A declared role | its change, rename and deletion; creating its name | giving it to a runtime principal |
+| The `signup` setting the file declares | `PUT /api/auth/{authDatabase}/signup` | — |
+
+A caller that may not change the object gets `403` first and never learns that it is declared; on a declared object the `409` comes
+before the body is judged. A database an embedding host declares in code (an in-process test server, the dev server) is not declared in
+a file and keeps every route. The emergency actions are reported as `DECLARED_OBJECT_OVERRIDDEN` at every start and reload while the
+file disagrees.
+
 #### Listeners and profiles
 
 A single Aouda process can expose **two Kestrel listeners**. The profile is a property of the **connection**, not of a request header (headers are forgeable).
@@ -949,6 +1000,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `FORMULA_REFERENCE_NOT_READABLE` | 403 | (**ADR 0072, 0.14.0**) A formula reads a row its writer may not read (no read access to the table, a row outside the writer's row or partition conditions, or a row that does not exist and cannot be judged on its key); also a server write that set a formula with no caller to check. The message names the formula row and the reference, never whether the row exists; nothing was written. |
 | `FORMULA_VALUE_WRITE_REFUSED` | 409 | (**ADR 0072, 0.14.0**) A write sets the driven column of a row whose formula is set after the write (a formula row's value is computed), or gives a formula and a value in one row. The whole statement is refused, naming the row. Write the formula as null in the same write to make the row an input. |
 | `FORMULA_TABLE_REFERENCED` | 409 | (**ADR 0072, 0.14.0**) A DDL would break a formula's reference — drop or rename a table a formula reads, drop, rename or retype a column one reads, change such a table's primary key or loosen its uniqueness, change a formula table's key while it has formula cells, add an Expression column to a source table of a materialized query whose result a formula reads (any table on the query's chain, its upstream queries' sources included) — or change a driven column's type so a formula no longer fits. The message names the cells (through the table routes and `schema/apply`, where it is a failed entry). `TRUNCATE` is allowed. |
+| `DECLARED_IN_CONFIGURATION` | 409 | (**BL-1463, next train**) The call would change an object the declaration file declares — a declared database, the schema of a database that declares one, a declared principal, role, credential or `signup` setting. Nothing was changed; the message names the file and the JSON pointer. Change the declaration, then run `aouda reload`. See [One writer per declared object](#one-writer-per-declared-object) |
 | `MQ_NOT_READY` | 409 | Token-bearing read or subscribe against a materialized query that is not `Ready` (building, rebuilding, or error). Distinct from `TOKEN_*`: retry with backoff; do not discard the token. |
 | `FRESHNESS_CONTRACT_INVALID` | 400 | Unknown `onExceeded` (including `serveStaleAndRevalidate`), `waitMs` negative or above 30 000. |
 | `FRESHNESS_LOOSENED` | 400 | Call site weaker than the named query’s declared budget, or non-`Primary` on fail-safe (name with no `freshness` block). |
