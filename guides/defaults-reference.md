@@ -36,7 +36,7 @@ is now honoured.)
 | `MaxTotalRamBytes` (fallback) | `min(0.40 × detected, 0.70 × available)` at this boot, floor 256 MB. No grant: every boot under `BackPressure` logs one warning, and nothing is remembered across boots (**WorkloadCore, 0.3.0**) | same — or a container memory limit, which makes it the cgroup row |
 | `RuntimeOverheadReserve` | `0.15 × configured`, floor `min(192 MB, 0.40 × configured)`, ceiling 4 GB | derived, not directly settable |
 | Governed budget | `configured − RuntimeOverheadReserve` | derived |
-| Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `databases.<name>.memoryWeight` in `aouda.json` (default `1`; **BL-1463, next train**, before `Aouda:Databases:<name>:MemoryWeight`) |
+| Per-database share (`T19`) | `governed × yourWeight / Σ everyone's weight` | `databases.<name>.memoryWeight` in `aouda.json` (default `1`; **BL-1463, 0.16.0**, before `Aouda:Databases:<name>:MemoryWeight`) |
 | Page cache (`T12`) | `0.10 ×` each database's own share, floor 8 MB, and it follows the share when it is recomputed (**Lead S10, 0.6.0**). **On** (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode a database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). A read whose pages are more than the cache holds admits at most half of it (**Lead S10, 0.6.0**) | `Aouda:Memory:MaxPageCacheBytes` (the server's total, scaled to each database's share — **Lead S10, 0.6.0**); `Aouda:Memory:PageCacheEnabled = false` turns the cache off |
 | L2 hot-key cache ceiling (`T13`) | `0.05 × governed`, floor 4 MB, enforced as one **aggregate** across every keyed table in the database | derived — raise the database's share (above) or its `MemoryWeight` |
 | Transient pool (`T15`) | `clamp(0.04 × governed, 4 MB, T9)`, `T9` being 90 % of the governed budget. One formula on every host (**WorkloadCore S17, 0.3.0** — `Abundant` raised the fraction to 0.15) | derived |
@@ -129,7 +129,7 @@ What a write survives is one level per database, optionally narrowed per table. 
 
 | Value | Default | Allowed | Key |
 |---|---|---|---|
-| Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `databases.<db>.durability` in `aouda.json` (**BL-1463, next train**); embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
+| Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `databases.<db>.durability` in `aouda.json` (**BL-1463, 0.16.0**); embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
 | Bulk-load durability (**Lead S26c, 0.6.0**) | **inherits** the database's level for a load: `strict`; `os` in a database at `os` (an `unlogged` table still gets `strict`) | `strict`, `os` — `strict` not in an `os` database; `os` not for a multi-table job, a table with vector columns, or an edge or vector table | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
 | Table durability | **inherits** the database's level | `strict` (only in a `strict` database), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
 
@@ -237,7 +237,7 @@ is taken only if nothing of the same or a higher class is waiting — a read's o
 request blocked by its own database's cap holds back only that database (**BL-861, WorkloadCore S18, 0.3.0**; see
 [Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-030)).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 (`Interactive` 0.35, `Streaming` 0.05, `Ingest` 0.25, `Background` 0.25, `Maintenance` 0.10, with different fractions in
 the `Abundant` resource mode), borrowing of idle headroom between classes, and `Aouda:Memory:PerClassAdmissionEnabled` are
 removed; a class orders the queue and does not cap what it may hold. The resource modes those fractions differed by are
@@ -327,7 +327,7 @@ A subscribe is bounded by its own **token bucket per identity** (**BL-1383, 0.11
 on both listeners and on long-poll `/send`, and `Aouda:IdentityQuota:Enabled=false` does not switch it off.
 Over the bound the server answers `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` (a `Retry-After` header on a long-poll
 `/send`). The connection limit counts WebSocket and long-poll sessions together and refuses inside the handshake with
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 is known only if `Aouda:ForwardedHeaders` is configured: without it every visitor of a public key shares the proxy's address, so
 one connection budget, one subscription cap and one subscribe bucket. Configure it before relying on per-visitor limits.
 The server refuses to start on a cap below 1, a burst below 1 or a negative refill. `auth_ok.limits` reports `0` for a limit
@@ -349,7 +349,7 @@ are hexadecimal). See [Sizing — garbage collection and the thread pool](sizing
 
 The startup line `Runtime GC configuration: serverGC=…, dynamicAdaptation(DATAS)=…` reports what is in force.
 
-## Configured API keys: refused (**BL-1464, next train**) {#configured-api-keys}
+## Configured API keys: refused (**BL-1464, 0.16.0**) {#configured-api-keys}
 
 The settings that declared keys and the first admin (**BL-1377, 0.10.0**; **BL-1378, 0.11.0**) are **removed**. Keys and operators
 are principals of the declaration file (`aouda.json`, named by `Aouda:Declaration`; no default path) with their `credentials`:
@@ -383,7 +383,7 @@ deadline; `rejectedApiKeys` on `GET /api/server/metrics` counts refused keys by 
 
 | Setting | Default | What it means |
 |---|---|---|
-| `Aouda:Auth:DevAdmin:Enabled` (`AOUDA_DEV_ADMIN`, `aouda start --dev-admin`) | `false` | Development and tests only: a random throwaway admin and its key at every start, printed once on stdout (`AOUDA-DEV-ADMIN email=... password=... key=...`). Refused in Production, and next to a declared server operator's credentials (`SERVER_KEY_DEV_ADMIN_CONFLICT`, **BL-1464, next train**) |
+| `Aouda:Auth:DevAdmin:Enabled` (`AOUDA_DEV_ADMIN`, `aouda start --dev-admin`) | `false` | Development and tests only: a random throwaway admin and its key at every start, printed once on stdout (`AOUDA-DEV-ADMIN email=... password=... key=...`). Refused in Production, and next to a declared server operator's credentials (`SERVER_KEY_DEV_ADMIN_CONFLICT`, **BL-1464, 0.16.0**) |
 | `Aouda:Auth:DevAdmin:Email` | `admin@aouda.local` | The throwaway admin's email |
 
 Full rules and the exact refusals: [Development admin](development-admin.md).
@@ -402,19 +402,19 @@ Full rules and the exact refusals: [Development admin](development-admin.md).
 
 The full reference, a worked example and the wipe-and-start walkthrough are on [Declared databases](declared-databases.md).
 
-Databases, application auth databases and the links between them, declared in the `databases` of `aouda.json` (**BL-1463, next train**; the file is named by the process setting `Aouda:Declaration`, see [Declare a server in one file](declaration.md)) so that a wipe of the data
+Databases, application auth databases and the links between them, declared in the `databases` of `aouda.json` (**BL-1463, 0.16.0**; the file is named by the process setting `Aouda:Declaration`, see [Declare a server in one file](declaration.md)) so that a wipe of the data
 directory and a plain start bring back the same set; only schema and data need re-applying. Nothing is declared by default: with no
 `Aouda:Declaration` there is no file and no default path. The old `Aouda:Databases` settings are **no longer read**: one in any
 configuration source refuses the start (`SETTING_REMOVED`, naming the member that replaces it).
 
 | Process setting | Default | What it means |
 |---|---|---|
-| `Aouda:Declaration` (`--declaration`, `AOUDA_DECLARATION`; **BL-1463, next train**) | none | The path of `aouda.json`. Absolute or relative to the working directory. Unset or empty: nothing is declared. Set to a file that is missing, a directory or empty: the start is refused |
-| `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`; **BL-1463, next train**) | none | The environment whose overlay is read: `aouda.<env>.json` beside the declaration and `<stem>.<env>.json` beside each schema file. A name (letters, digits, `_`, `.`, `-`), not a path |
+| `Aouda:Declaration` (`--declaration`, `AOUDA_DECLARATION`; **BL-1463, 0.16.0**) | none | The path of `aouda.json`. Absolute or relative to the working directory. Unset or empty: nothing is declared. Set to a file that is missing, a directory or empty: the start is refused |
+| `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`; **BL-1463, 0.16.0**) | none | The environment whose overlay is read: `aouda.<env>.json` beside the declaration and `<stem>.<env>.json` beside each schema file. A name (letters, digits, `_`, `.`, `-`), not a path |
 
 | Member of `databases.<db>` | Default | What it means |
 |---|---|---|
-| `kind` (**BL-1379, 0.11.0**; required since **BL-1463, next train**) | none | `"data"`, or `"auth"` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `durability` on an `auth` entry must be absent or `"strict"`) |
+| `kind` (**BL-1379, 0.11.0**; required since **BL-1463, 0.16.0**) | none | `"data"`, or `"auth"` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `durability` on an `auth` entry must be absent or `"strict"`) |
 | `schema`, `schemaAllowDestructive` (**BL-1388, 0.11.0**) | none, `false` | With `"kind": "data"`: a schema file the server applies at start (relative to the directory of `aouda.json`; its overlay follows `Aouda:Environment`), and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
 | `authDatabase` (**BL-1379, 0.11.0**) | none | With `"kind": "data"`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
 
@@ -452,18 +452,18 @@ not stop the server (engines open, memory evaluation resumes): it is logged and 
 response, and the next process start fails on it until the declaration or the catalog is changed. A declaration cannot say "must be
 unlinked" or "must not exist", and a database removed from the file is left alone. The names `_serverauth`,
 `_auth` and `_settings` are never declarable (`_serverauth` is created by an operator declared in `server.principals`, the dev
-admin, or setup; **BL-1464, next train**).
+admin, or setup; **BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
-(which returns them once; a key that must survive a wipe is a declared principal's credential, **BL-1464, next train**); a `POST /api/databases` that links still returns
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+(which returns them once; a key that must survive a wipe is a declared principal's credential, **BL-1464, 0.16.0**); a `POST /api/databases` that links still returns
 them as before. Startup order after a wipe: declared databases and links, then `_serverauth` (its declared operators, or setup), then each
 declared `SchemaFile` (**BL-1388, 0.11.0**), then declared roles (**BL-1392, 0.11.0**) and principals with their credentials
-(**BL-1464, next train**; they replace the configured keys that came last). `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
+(**BL-1464, 0.16.0**; they replace the configured keys that came last). `GET /api/databases` lists each declared database with `auth.database` and `authDatabaseKind`, and the startup log
 has one line per entry (created, converged or unchanged; linked or already linked).
 
 ## Related docs
 
-- [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, 0.10.0**) - declared credentials (**BL-1464, next train**: in the declaration file)
+- [Keys that survive a wipe](keys-that-survive-a-wipe.md) (**BL-1377, 0.10.0**) - declared credentials (**BL-1464, 0.16.0**: in the declaration file)
 - [Sizing memory and WAL](sizing.md) — the mental model this page's numbers plug into
 - [Materialized queries](materialized.md#where-a-materialized-querys-result-lives) — where a query's result table lives, and why the default changed
 - [Server configuration](server-configuration.md) — where each of these keys is set (`appsettings.json`, `AOUDA_*` env vars, CLI flags) and what survives a restart

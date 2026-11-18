@@ -53,7 +53,7 @@ year before's `RetainedEarnings`. A row condition lets each user see only their 
 
 ## Before you start
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 development machine:
 
 ```bash
@@ -71,7 +71,7 @@ A=(-H "Authorization: Bearer $SVC" -H "Content-Type: application/json")
 
 See [Development admin](development-admin.md) and [Auth setup](../auth/setup.md#linking-a-data-database-to-an-auth-database). The HTTP
 steps below use `curl` and [`jq`](https://jqlang.org/). The C# steps use the `Aouda.Client` package and the TypeScript steps
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```csharp
 using Aouda.Abstractions;                  // AoudaRequestException
@@ -95,7 +95,7 @@ const client = new AoudaClient({ serverUrl, database, apiKey: serviceKey });
 
 ## Step 1: two tables with a formula column
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```bash
 # an aouda_ key or a session. GET /api/auth/whoami names the principal.
@@ -752,7 +752,7 @@ only `"formula": null` keeps the last computed value as the input.
 - a **viewer** who may read both tables, for the Retail department only;
 - a **planner** who may read and write both tables, for Retail only.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/roles" "${A[@]}" -d '{ "name": "viewer", "permissions": [
@@ -806,7 +806,7 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" -H "Authorization
 #      a row its writer may not read; …","code":"FORMULA_REFERENCE_NOT_READABLE",…}
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```csharp
 using var asPlanner = new AoudaClient(new AoudaClientOptions
@@ -856,4 +856,4 @@ Two things follow from security being the table's:
 - [Formulas](formulas.md) — every rule this guide used, the functions, the limits and what is deliberately not there.
 - [Freshness](freshness.md) — tokens, and why a token read of a formula table on a replica is refused.
 - [Real-time streaming](real-time.md) — subscriptions, resuming, and the `change` message.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).

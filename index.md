@@ -96,7 +96,7 @@ docker compose up
 # Aouda at http://localhost:5000  •  Studio at http://localhost:3000
 ```
 
-The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, next train**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](deployment/docker.md#compose).
+The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, 0.16.0**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](deployment/docker.md#compose).
 
 ---
 
@@ -131,7 +131,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 → [TypeScript Client](clients/typescript.md) — query builder, typed queries, auth, MCP tools
 
 **Exposing Aouda to a browser or SPA?**
-→ [Direct client access](guides/direct-client-access.md) — no key in the browser. `anonymous`'s statements are what it may run ([Access](auth/index.md), **BL-1464, next train**).
+→ [Direct client access](guides/direct-client-access.md) — no key in the browser. `anonymous`'s statements are what it may run ([Access](auth/index.md), **BL-1464, 0.16.0**).
 
 **Reading from a replica without losing your write?**
 → [Freshness and replica consistency](guides/freshness.md) — token, `AtLeast`, alias budgets, honest caveats.
@@ -140,7 +140,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 → [Adopting Aouda](guides/adoption.md) — target architecture, which hops to delete, migration order, and where the SDKs lag the engine.
 
 **Setting up authentication?**
-→ [Access](auth/index.md) — principals, statements and `aouda_` keys (**BL-1464, next train**). First run: [Authentication](getting-started/auth.md).
+→ [Access](auth/index.md) — principals, statements and `aouda_` keys (**BL-1464, 0.16.0**). First run: [Authentication](getting-started/auth.md).
 
 **Deploying to production?**
 → [Deployment](deployment/index.md) — Kubernetes, Helm, Docker, Windows Service, systemd

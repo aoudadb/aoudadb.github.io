@@ -4,7 +4,7 @@ nav_order: 4
 parent: "Auth and Authorization"
 ---
 
-# whoami and remedy (**BL-1464, next train**)
+# whoami and remedy (**BL-1464, 0.16.0**)
 
 ## whoami
 

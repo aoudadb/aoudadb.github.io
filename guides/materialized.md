@@ -316,9 +316,9 @@ time slice ([2.11e](#window-expiry)).
 ### 2.3.2 Who may read a result: the source's security
 
 (**BL-1227, 0.9.0**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 alone. A grant that names the result table lifts nothing. A holder of one grant is still restricted by the other half — for
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **A materialized query declares no security of its own** (**0.15.0** for the message; the refusal is 0.14.0). The members `authMode`, `permissionColumn`,
 `permissionDimension` and `rlsResolverName` that a table carries are **not members of a materialized query**: in a schema file, `schema apply` or `schema diff` they are

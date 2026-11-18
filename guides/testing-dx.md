@@ -452,7 +452,7 @@ Steps:
 
 Expected result checks:
 - `/health` is reachable.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - `CreateUserHttpClientAsync(...).GetAsync("/api/databases/myapp/auth/me")` returns `200`.
 
 ### Scenario 2: Developer local workflow (`aouda start` + SDKs)

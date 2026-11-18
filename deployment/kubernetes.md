@@ -43,7 +43,7 @@ start-time schema apply; raise it for a large declared schema. The port is open 
 (`/startup` 503, `/ready` with `not_initialized`, `server_starting`, `schema_applying` and its `progress`). Before this, `/startup` answered `503` for as long as the pod was in
 setup mode, so Kubernetes restarted a pod that had finished starting every five minutes, for ever.
 
-**Declare an operator and there is no setup mode** (**BL-1464, next train**). The pod starts ready, operated by a key-only
+**Declare an operator and there is no setup mode** (**BL-1464, 0.16.0**). The pod starts ready, operated by a key-only
 principal of the declaration, with no human admin. Its key is derived from a **key root** that reaches the pod from a Secret, never
 from values or a ConfigMap. Create the Secret, the root on standard input rather than on kubectl's command line:
 
@@ -84,11 +84,11 @@ printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
 
 The password goes on standard input, never on curl's command line.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ## Declaring databases, keys and schema files
 
-The chart value is `declaration.file`: `aouda.json` with no `Aouda` wrapper, mounted read-only and named with `Aouda__Declaration`. `declaration.config` (an `appsettings` shape) is not a value. The worked values, `extraEnv`, `extraEnvFrom`, `extraVolumes` and `extraVolumeMounts` are [below](#declare-the-databases-bl-1463-next-train). A key root is a Secret mounted through `extraVolumes` and named from the file as `{ "file": "/etc/aouda-files/key-root" }`. It is never a ConfigMap entry. `Aouda__Databases__*` in `extraEnv` is refused (`SETTING_REMOVED`).
+The chart value is `declaration.file`: `aouda.json` with no `Aouda` wrapper, mounted read-only and named with `Aouda__Declaration`. `declaration.config` (an `appsettings` shape) is not a value. The worked values, `extraEnv`, `extraEnvFrom`, `extraVolumes` and `extraVolumeMounts` are [below](#declare-the-databases-bl-1463-0160). A key root is a Secret mounted through `extraVolumes` and named from the file as `{ "file": "/etc/aouda-files/key-root" }`. It is never a ConfigMap entry. `Aouda__Databases__*` in `extraEnv` is refused (`SETTING_REMOVED`).
 
 ## Upgrade
 
@@ -147,7 +147,7 @@ Optional Studio overrides:
 If `studio.env.defaultServerUrl` is empty, the chart defaults it to:
 `http://<release-fullname>:5000`.
 
-### Declare the databases (**BL-1463, next train**)
+### Declare the databases (**BL-1463, 0.16.0**)
 
 `declaration.file` is the declaration, `aouda.json`, as a value. The chart renders it as JSON into a ConfigMap, mounts it read-only
 at `/etc/aouda/aouda.json` on the data pods and sets `Aouda__Declaration=/etc/aouda/aouda.json` for you (the server reads no other

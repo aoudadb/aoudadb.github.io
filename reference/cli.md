@@ -4,7 +4,7 @@ nav_order: 3
 parent: "Reference"
 ---
 
-# CLI (**BL-1464, next train**)
+# CLI (**BL-1464, 0.16.0**)
 
 `aouda` is the server and the admin tool. `aouda --help` lists the commands below. An argument `@file` is replaced by the lines of that file. No option takes a secret: a key, a key root or an identity token is a file or an environment variable, never an argument. A refusal names the variable or the path, never the value. Nothing here prints a key root or a hash of a key except `keys new`, which prints the hash you put in the declaration.
 

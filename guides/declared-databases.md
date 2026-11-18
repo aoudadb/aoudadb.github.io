@@ -4,14 +4,14 @@ nav_order: 2.6
 parent: "Guides"
 ---
 
-# Declared databases: `databases` in `aouda.json` (**BL-1379, 0.11.0**; in the declaration file since **BL-1463, next train**)
+# Declared databases: `databases` in `aouda.json` (**BL-1379, 0.11.0**; in the declaration file since **BL-1463, 0.16.0**)
 
 A database created through `POST /api/databases` lives in the data directory, so a wipe of that directory takes it away, and
 whoever wiped it has to create it again, link it to its auth database and re-apply its schema. The `databases` of the
 [declaration file](declaration.md) states the set instead: **a wipe followed by a plain start brings back the same databases, the same links, the same schema and
 the same roles, empty of data.** Nothing is declared by default; a server without `Aouda:Declaration` behaves as it always did.
 
-(**BL-1463, next train**) The set used to be `Aouda:Databases`, a section of `appsettings.json` or of the environment. **That is no longer read**: a server that finds one of its settings refuses to start (`SETTING_REMOVED`) and the message names the member of `aouda.json` that replaces it. The mapping is in [Declare a server in one file](declaration.md#from-aoudadatabases).
+(**BL-1463, 0.16.0**) The set used to be `Aouda:Databases`, a section of `appsettings.json` or of the environment. **That is no longer read**: a server that finds one of its settings refuses to start (`SETTING_REMOVED`) and the message names the member of `aouda.json` that replaces it. The mapping is in [Declare a server in one file](declaration.md#from-aoudadatabases).
 
 This page is the reference for the section and the walkthrough of a wipe. The keys that go with it are in
 [Keys that survive a wipe](keys-that-survive-a-wipe.md); the other startup settings are in
@@ -21,7 +21,7 @@ This page is the reference for the section and the walkthrough of a wipe. The ke
 
 ## One entry, every member
 
-(**BL-1463, next train**) An entry is `databases.<name>` in `aouda.json`; the member name is the database's name. Names follow the
+(**BL-1463, 0.16.0**) An entry is `databases.<name>` in `aouda.json`; the member name is the database's name. Names follow the
 rules of database names and are compared without case, so declaring `Ledger` and `ledger` is refused. The exact JSON of every
 member, with its type, is the [reference](../reference/declaration.md#databasesname); in short:
 
@@ -31,7 +31,7 @@ member, with its type, is the [reference](../reference/declaration.md#databasesn
 | `authDatabase` | string | none | Only with `"kind": "data"`. The application auth database to link this one to |
 | `schema` | string | none | Only with `"kind": "data"`. Path of a schema file applied at start. Absolute, or relative to the directory of `aouda.json` |
 | `schemaAllowDestructive` | boolean | `false` | Needs `schema`. Lets the start-time apply drop a table or a column. When `false` such a change is refused, logged, and the start goes on |
-| `roles` | object | none | Only with `"kind": "auth"`. The roles of this auth database, keyed by role name: `description` and `statements` (**BL-1464, next train**: the `permissions` list is refused naming `statements`; see [Declared access](declared-access.md)) |
+| `roles` | object | none | Only with `"kind": "auth"`. The roles of this auth database, keyed by role name: `description` and `statements` (**BL-1464, 0.16.0**: the `permissions` list is refused naming `statements`; see [Declared access](declared-access.md)) |
 | `durability` | string | `"strict"` | `"strict"`, `"os"`, `"unlogged"` or `"memory"` ([levels](write-durability.md#durability-levels-lead-s26-060)). On `"kind": "auth"` it must be absent or `"strict"` |
 | `maxMemoryShareBytes` | integer | none | Cap on this database's share of the memory budget; none, or not negative |
 | `memoryWeight` | number | `1` | Relative weight when the budget is divided; positive |
@@ -62,9 +62,9 @@ overwrites a field it does not name.
 either declared in the same file with `"kind": "auth"`, or already in the catalog; it is **never created for you**. The passes run in
 a fixed order whatever the order in the file: auth databases, then data databases, then links.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 `POST /api/databases` that links still returns them as before. For keys that survive a wipe, declare their principals with
-`credentials` in the same file (**BL-1464, next train**; [Keys that survive a wipe](keys-that-survive-a-wipe.md)).
+`credentials` in the same file (**BL-1464, 0.16.0**; [Keys that survive a wipe](keys-that-survive-a-wipe.md)).
 
 The start fails, naming the entry and changing nothing, when:
 
@@ -85,7 +85,7 @@ A role belongs to an application auth database: the principals of that auth data
 member on a `"kind": "data"` entry therefore has no place to live and fails the start (`DATABASE_FIELD_NOT_FOR_KIND`). Declare the
 roles on the auth database the data databases link to.
 
-**BL-1464, next train:** a declared role is `{ "description"?, "statements": [ … ] }` — the access model's statements, not the old
+**BL-1464, 0.16.0:** a declared role is `{ "description"?, "statements": [ … ] }` — the access model's statements, not the old
 `permissions` list — and it is the file's, whole: created, converged and removed by every start and reload, with `signup` and the
 auth database's principals beside it. A runtime role of the same name is refused rather than taken over. Roles are converged after
 the schema, so a statement may name a table the schema file creates. See [Declared access](declared-access.md) for the rules, the
@@ -138,8 +138,8 @@ they are not in it).
 }
 ```
 
-The first admin and the operator's key are in this file too (**BL-1464, next train**): a `server.principals` entry holding the role
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+The first admin and the operator's key are in this file too (**BL-1464, 0.16.0**): a `server.principals` entry holding the role
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan --declaration /etc/aouda/aouda.json --env prod` validates it offline (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
 [Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
@@ -167,7 +167,7 @@ Delete the data directory and start the server with the declaration above. What 
 
 ### The order a start follows
 
-(**BL-1463, 0.14.0**) **Before any of these steps, the start checks the whole declaration** — the settings, the declaration file (**BL-1463, next train**),
+(**BL-1463, 0.14.0**) **Before any of these steps, the start checks the whole declaration** — the settings, the declaration file (**BL-1463, 0.16.0**),
 every secret and schema file it names — and **creates nothing when one is refused**. It reports every
 problem at once, each as a finding with a stable code (`SETTING_REMOVED`, `KEY_ID_DUPLICATE`, `SCHEMA_INVALID`, ...), where it is
 (a setting and the source that set it, or a file and a JSON pointer) and what to do, then exits with status 78 (or 1 when the only
@@ -178,9 +178,9 @@ After a wipe a plain start does these steps in this order, and a failure in any 
 there is no `/ready` to ask):
 
 1. **Declared databases**: auth databases, then data databases, then the links.
-2. **`_serverauth`**: created for an operator declared in `server.principals` (**BL-1464, next train**). With none declared and no admin, the server stays in setup mode.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
-4. **Declared access** (**BL-1464, next train**): roles, `signup`, principals and their credentials, in their auth databases ([Declared access](declared-access.md)). It replaces the configured key rows, which came last.
+2. **`_serverauth`**: created for an operator declared in `server.principals` (**BL-1464, 0.16.0**). With none declared and no admin, the server stays in setup mode.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
+4. **Declared access** (**BL-1464, 0.16.0**): roles, `signup`, principals and their credentials, in their auth databases ([Declared access](declared-access.md)). It replaces the configured key rows, which came last.
 5. The server is marked ready.
 
 Re-running a converged start is a no-op: the schema diff is empty and nothing is written. The diff compares the file with the
@@ -197,11 +197,11 @@ each of those queries in `Error` (its query answers `400`, not ready) until a `:
 no leading or trailing period or space, not empty, `.` or `..`, and no `__mqbuild_` prefix (**BL-1468, 0.14.0; breaking**).
 Before, the schema apply created such a table; now a file that declares one fails `aouda plan` and **fails the start**,
 naming the database, the file and the rule — also for a table the database already has. A schema file has no rename and HTTP DDL
-on a declared schema is refused (`409 DECLARED_IN_CONFIGURATION`, **BL-1463, next train**), so the way out is a clean cut: read the table's rows out (for example with `POST …/query`), give
+on a declared schema is refused (`409 DECLARED_IN_CONFIGURATION`, **BL-1463, 0.16.0**), so the way out is a clean cut: read the table's rows out (for example with `POST …/query`), give
 the table a legal name in the file, start once with `"schemaAllowDestructive": true` (the apply creates the new table and drops the
 old one) or on a fresh data directory, set `schemaAllowDestructive` back, and load the rows into the new table.
 
-**Declared objects are read-only through the API (**BL-1463, next train**).** What the file declares has one writer, the file:
+**Declared objects are read-only through the API (**BL-1463, 0.16.0**).** What the file declares has one writer, the file:
 deleting a declared database, creating a database with a declared name, and changing the schema of a database whose entry names a
 `schema` — `schema/apply`, every table, column and materialized-query route, a branch merge that applies — are refused `409
 DECLARED_IN_CONFIGURATION`, naming the file and the JSON pointer of the entry; nothing is changed. Change the file, then `aouda reload`.
@@ -215,15 +215,15 @@ in code (an in-process test server) are not declared in a file and keep every ro
 
 `aouda reload` (or `POST /api/admin/reload`, a server operator's key only) re-reads the declaration of a running server, validates it as a start
 would, and converges it in the order above: steps 1, 3 and 4, named `databases`, `schema` and `roles` in its answer (`_serverauth` and
-setup mode are the start's; **BL-1464, next train**: the `keyStore` and `principalRows` steps are gone). What
+setup mode are the start's; **BL-1464, 0.16.0**: the `keyStore` and `principalRows` steps are gone). What
 a reload applies:
 
-- (**BL-1463, next train**) the declaration file itself and its overlay: they are read again, from the path the running server was
+- (**BL-1463, 0.16.0**) the declaration file itself and its overlay: they are read again, from the path the running server was
   started with, at every reload;
 - a **new** `databases` entry (created, and linked to its auth database);
 - a declared database's `schema` (and its overlay) — the file is read again and applied **non-destructively** whatever
   `schemaAllowDestructive` says (a destructive change is the warning `SCHEMA_DESTRUCTIVE_REFUSED`, and `/ready` keeps `schema_drift`);
-- the `roles` of a declared auth database, and (**BL-1464, next train**) the rest of the access section: `signup`, `principals`
+- the `roles` of a declared auth database, and (**BL-1464, 0.16.0**) the rest of the access section: `signup`, `principals`
   and their credentials, `server.roles` and `server.principals` ([Declared access](declared-access.md));
 - the `authDatabase` of a database that has **no link yet**.
 
@@ -247,7 +247,7 @@ nothing (it is not read as an empty declaration that retracts every database).
 | `database_pending` (the database) | A declared database does not exist yet | Step 1 created it |
 | `database_not_open` (the database) | A declared database is registered but failed to open, or is quarantined by something other than an operator | It opens; otherwise it stays, and so does the 503 |
 | `server_starting` | The auth bootstrap has not finished | Step 5 |
-| `setup_required` | No operator is declared in `server.principals` and no admin exists | `POST /api/auth/setup` created the first admin; a declared operator means no setup mode at all (**BL-1462, 0.14.0**; **BL-1464, next train**: declared in the declaration file) |
+| `setup_required` | No operator is declared in `server.principals` and no admin exists | `POST /api/auth/setup` created the first admin; a declared operator means no setup mode at all (**BL-1462, 0.14.0**; **BL-1464, 0.16.0**: declared in the declaration file) |
 | `schema_pending` (the database) | Its `schema` file has not been applied yet | Step 3 applied it |
 | `schema_applying` (the database) | Step 3 is applying its `schema` file now; `progress` is `{ "done": n, "total": m }` over the declared schema files (**BL-1462, 0.14.0**) | Step 3 finished it |
 | `schema_drift` (the database) | The apply refused a change; the catalog is not what the file says | You allow the change or update the file, and restart (a reload never applies a destructive change) |
@@ -255,7 +255,7 @@ nothing (it is not read as an empty declaration that retracts every database).
 | `database_reconcile_failed` (the database) | Only after a backup restore: the reconcile of the declared databases was refused. The server keeps running | You fix the declaration or the catalog; the next process start fails on it until then |
 | `component_unhealthy` (the component) | A critical component is not healthy | It recovers |
 
-(**BL-1464, next train**) `root_user_unusable` and `configured_key_inactive` are gone with the settings they reported on.
+(**BL-1464, 0.16.0**) `root_user_unusable` and `configured_key_inactive` are gone with the settings they reported on.
 A deploy script waits for `200` and prints `reasons` if it gives up. A database in `Aouda:SkipDatabases`, or one an operator
 quarantined, is a decision and is not listed. `aouda status` prints every reason.
 

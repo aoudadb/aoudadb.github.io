@@ -117,7 +117,7 @@ safe.
 | `--cpu-cores` | unset | Set it when the host is **shared** |
 | `--max-open-files` | `65535` | Rarely |
 
-`--admin-password-credential` and `--admin-email` are **removed** (**BL-1464, next train**): the install refuses them as a usage
+`--admin-password-credential` and `--admin-email` are **removed** (**BL-1464, 0.16.0**): the install refuses them as a usage
 error (exit status `64`), and the unit gets no `LoadCredential=` line. Declare the first admin in the declaration file and name the
 file in the unit (`Environment=Aouda__Declaration=/etc/aouda/aouda.json`) — see [The first admin](#the-first-admin).
 
@@ -241,13 +241,12 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, 0.14.0**). A server that
-declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, next
-train**).
+declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, 0.16.0**).
 
 **The data-directory lock and its limits** (**BL-1462, 0.14.0**). The server holds an exclusive `flock` on
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 same lock and refuse. The kernel releases it when the process exits, `kill -9` included, so there is never a stale lock to delete.
 It protects a directory on a **local filesystem, between processes on one host**. On a mount without `flock` (some NFS, CIFS and
 FUSE mounts answer `ENOLCK` or `EOPNOTSUPP`) .NET treats the failure as success and the lock is silently not held; on NFS mounted
@@ -272,7 +271,7 @@ sudo sh -c 'printf "%s" "$PASSWORD" > /etc/aouda/admin-password'
 
 ⚠️ A file readable by group or other is **refused**, with the mode it found. `chmod 600` it.
 
-**3. Declared in the declaration file** (**BL-1464, next train**), which is the right answer for a service: the server creates
+**3. Declared in the declaration file** (**BL-1464, 0.16.0**), which is the right answer for a service: the server creates
 the first admin itself, on its first start. Declare a `server.principals` entry named by the email, holding the role `admin`, with a
 password seed read from the file (a relative path is read from the declaration file's directory):
 
@@ -282,21 +281,21 @@ password seed read from the file (a relative path is read from the declaration f
 ```
 
 Write it to `/etc/aouda/aouda.json` and name it in the unit: `Environment=Aouda__Declaration=/etc/aouda/aouda.json` (`systemctl
-edit aouda`), see [Declare the databases](#declare-the-databases-aoudajson-bl-1463-next-train). The service account must be able to
+edit aouda`), see [Declare the databases](#declare-the-databases-aoudajson-bl-1463-0160). The service account must be able to
 read both files (way 1's password file is root's: `sudo chown aouda: /etc/aouda/admin-password`). The seed is applied only when the principal is created, with a forced password change at the first sign-in, and
 never again, so once the admin exists the password file is inert — delete it whenever you like. A seed may also be
 `{ "env": "<NAME>" }` or `{ "hash": ... }`. With no human admin at all, declare a key-only operator instead: an entry such as `ops`
 holding the role `admin` with `"credentials": { "derivedKey": { "version": 1 } }` and the file's `"keyRoot": { "file": ... }`
 ([Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md)).
 
-The old way is **refused** (**BL-1464, next train**): `aouda service install --admin-password-credential` / `--admin-email` is a
+The old way is **refused** (**BL-1464, 0.16.0**): `aouda service install --admin-password-credential` / `--admin-email` is a
 usage error (exit `64`), and a server whose unit still loads the credential `aouda-admin-password` or `aouda-server-key`, or sets
 a removed `Aouda:Auth` operator setting or `Aouda:Auth:Bootstrap:*`, refuses to start with `SETTING_REMOVED` (exit `78`): remove the
 `LoadCredential=` or `Environment=` line from the unit and declare as above.
 
 ---
 
-## Declare the databases: `aouda.json` (**BL-1463, next train**)
+## Declare the databases: `aouda.json` (**BL-1463, 0.16.0**)
 
 The databases, their schema files and their roles are one JSON file, `aouda.json`, that you write and **name**: the server reads
 the declaration from the path in the process setting `Aouda:Declaration` and from no other (there is no default path, so
@@ -390,7 +389,7 @@ stages   read ok, settings 1 error, principals ok, databases ok, bootstrap ok, s
 
 Every code, its stage and what fixes it is in [Declaration Finding Codes](../reference/plan-codes.md). Among them:
 `SETTING_REMOVED` — a setting that is no longer read, such as the old operator settings above (`Aouda:Auth:Bootstrap:*`,
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 train**; an empty value counts as not set), naming its replacement and never its value; `SERVER_HAS_NO_OPERATOR` — the data
 directory was set up before, and now has nobody who can manage the server and nothing declared (declare an operator in the
 declaration file's `server.principals`, or `--dev-admin` for development; a data directory that was never set up starts in setup

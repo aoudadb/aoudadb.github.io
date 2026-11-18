@@ -4,7 +4,7 @@ nav_order: 12
 parent: "Auth and Authorization"
 ---
 
-# Moving from 0.14 to the principals release (**BL-1464, next train**)
+# Moving from 0.14 to the principals release (**BL-1464, 0.16.0**)
 
 0.14 is the last release of the old access model. This release refuses that model. It does not read it and it does not convert it. Export what you can with the 0.14 build, wipe the data directory, start this build, and declare principals.
 

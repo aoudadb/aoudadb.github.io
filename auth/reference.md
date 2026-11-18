@@ -4,7 +4,7 @@ nav_order: 9
 parent: "Auth and Authorization"
 ---
 
-# Auth reference (**BL-1464, next train**)
+# Auth reference (**BL-1464, 0.16.0**)
 
 Exact request and response JSON, status codes and defaults are in the [HTTP API](../reference/http-api.md#access-principals-credentials-and-policy). This page is the index of those routes, the error codes, and the habits that keep a key out of a log. It is not a second copy of the bodies.
 

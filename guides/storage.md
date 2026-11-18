@@ -297,9 +297,9 @@ If you run server defaults and do not set per-database overrides:
     start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
     written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
     first with the build that wrote it, then delete the data directory and start fresh. Principals and keys declared in `aouda.json`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
@@ -314,7 +314,7 @@ Invariants:
 
 - Persisted paths are deterministic from layout classes and storage constants.
 - Table directory name validity is enforced (invalid names rejected; no path sanitization tricks).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Slot safety boundaries prevent WAL truncation ahead of active consumers.
 
 ### Deleted rows and retired segments (**Horizon, 0.5.0**)
@@ -552,13 +552,13 @@ Primary tests:
 |---|---|---|---|---|---|
 | `Aouda:DataPath` | string | `./data` | non-empty path | startup config | Server root path |
 | `Aouda:Port` | int | `5000` | 1..65535 | startup config | HTTP port |
-| `databases.<db>.durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | `aouda.json` (**BL-1463, next train**) | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which are refused at start (`SETTING_REMOVED`, naming `databases.<db>.durability`) |
-| `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, next train**) | DB replication participation |
-| `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | `aouda.json` (**BL-1463, next train**) | Default table policy |
-| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, next train**) | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
-| `databases.<db>.writeConcern` | string | `One` | `One`,`Majority`,`All` | `aouda.json` (**BL-1463, next train**) | ACK semantics |
-| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | >=100 | `aouda.json` (**BL-1463, next train**) | Timeout for higher write concerns |
-| `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | `aouda.json` (**BL-1463, next train**) | Timeout policy |
+| `databases.<db>.durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | `aouda.json` (**BL-1463, 0.16.0**) | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which are refused at start (`SETTING_REMOVED`, naming `databases.<db>.durability`) |
+| `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, 0.16.0**) | DB replication participation |
+| `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | `aouda.json` (**BL-1463, 0.16.0**) | Default table policy |
+| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, 0.16.0**) | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
+| `databases.<db>.writeConcern` | string | `One` | `One`,`Majority`,`All` | `aouda.json` (**BL-1463, 0.16.0**) | ACK semantics |
+| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | >=100 | `aouda.json` (**BL-1463, 0.16.0**) | Timeout for higher write concerns |
+| `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | `aouda.json` (**BL-1463, 0.16.0**) | Timeout policy |
 | `CreateDatabaseRequest.durability` | string? | null -> `strict` | `strict`,`os`,`unlogged`,`memory` | HTTP create-db payload | (**Lead S26, 0.6.0**) `enableWal` / `dataDurability` are refused (400 `INVALID_REQUEST`) |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |

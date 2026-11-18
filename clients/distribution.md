@@ -150,7 +150,7 @@ If you do nothing except install artifacts:
 
 ### Reserved / not yet wired
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - No Docker image distribution flow is implemented in this repo snapshot.
 - No first-class HTTP API for artifact publishing/release management exists.
 

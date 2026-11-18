@@ -4,7 +4,7 @@ nav_order: 3.5
 parent: "Reference"
 ---
 
-# The declaration file: `aouda.json` (**BL-1463, next train**)
+# The declaration file: `aouda.json` (**BL-1463, 0.16.0**)
 
 `aouda.json` is the one file that says which databases a server has. This page is the grammar, member by member: the exact JSON, the
 default of every member and the code of every refusal. How to use the file (where it is found, overlays, a deploy) is in
@@ -12,7 +12,7 @@ default of every member and the code of every refusal. How to use the file (wher
 [`schemas/aouda-declaration.v1.json`](../schemas/aouda-declaration.v1.json); the codes are in
 [Declaration Finding Codes](plan-codes.md).
 
-The file holds **what exists**: databases, their schema files, and who may do what (roles, principals, `signup`; **BL-1464, next train**). **How the server runs** (ports, memory, paths, the
+The file holds **what exists**: databases, their schema files, and who may do what (roles, principals, `signup`; **BL-1464, 0.16.0**). **How the server runs** (ports, memory, paths, the
 `Aouda:Declaration` setting itself) stays in settings: `appsettings.json`, environment variables and command-line switches.
 
 ---
@@ -35,8 +35,8 @@ The file holds **what exists**: databases, their schema files, and who may do wh
 | `$schema` | string | no | The JSON schema of the file, for an editor: `"https://aoudadb.github.io/schemas/aouda-declaration.v1.json"`. The server ignores it and never fetches it |
 | `version` | integer | **yes** | `1`. Anything else (absent, `2`, `"1"`, `1.5`) is `DECLARATION_VERSION_UNSUPPORTED` with `found=<value or missing> expected=1`, and nothing else in the file is read |
 | `databases` | object | no | The declared databases, keyed by database name. Absent or `{}`: nothing is declared |
-| `server` | object | no | Who operates the server: the server auth database's `roles` and `principals` (below) (**BL-1464, next train**). It takes no `signup` |
-| `keyRoot` | object | no | The root declared principals' derived keys are computed from: `{ "env": NAME }` or `{ "file": path }` (relative to this file's directory). A literal is `SECRET_BY_VALUE`; a root shorter than 32 bytes or one repeated character is `KEY_ROOT_INVALID` (**BL-1464, next train**) |
+| `server` | object | no | Who operates the server: the server auth database's `roles` and `principals` (below) (**BL-1464, 0.16.0**). It takes no `signup` |
+| `keyRoot` | object | no | The root declared principals' derived keys are computed from: `{ "env": NAME }` or `{ "file": path }` (relative to this file's directory). A literal is `SECRET_BY_VALUE`; a root shorter than 32 bytes or one repeated character is `KEY_ROOT_INVALID` (**BL-1464, 0.16.0**) |
 | `previousKeyRoot` | object | no | The root before a rotation, in the same form: its derived keys are still accepted beside `keyRoot`'s until it is removed |
 
 ```json
@@ -66,9 +66,9 @@ and `ledger` is refused. `_serverauth`, `_auth` and `_settings` belong to the se
 | `defaultTemperature` | string | `"Auto"` | `"Auto"`, `"HotOnly"` or `"ColdPreferred"`, for new tables |
 | `memoryWeight` | number | `1` | Relative weight of this database's memory share; positive |
 | `maxMemoryShareBytes` | integer | none | Cap on the computed memory share, in bytes; not negative. `0` is no cap, as when it is absent |
-| `signup` | object | none | `auth` only: self-signup, `{ "enabled", "roles"?, "statements"? }` (below) (**BL-1464, next train**) |
+| `signup` | object | none | `auth` only: self-signup, `{ "enabled", "roles"?, "statements"? }` (below) (**BL-1464, 0.16.0**) |
 | `roles` | object | none | `auth` only: the auth database's roles, keyed by role name (below). On a `data` database it is refused (`DATABASE_FIELD_NOT_FOR_KIND`) |
-| `principals` | object | none | `auth` only: the auth database's principals, keyed by name (below) (**BL-1464, next train**) |
+| `principals` | object | none | `auth` only: the auth database's principals, keyed by name (below) (**BL-1464, 0.16.0**) |
 
 The value rules (which `durability` an `auth` database may have, which `authDatabase` is a valid link, which combination of members
 a kind allows) are those of the `databases` stage and its codes, unchanged; they are listed with the codes in
@@ -76,7 +76,7 @@ a kind allows) are those of the `databases` stage and its codes, unchanged; they
 
 An integer member given a number it cannot hold (`1.5`, or beyond the range) is `DECLARATION_SHAPE_INVALID`.
 
-## The access section: `signup`, `roles`, `principals` (**BL-1464, next train**)
+## The access section: `signup`, `roles`, `principals` (**BL-1464, 0.16.0**)
 
 An application auth database (`databases.<auth>`) declares who may do what in three members; the server auth database declares its
 operators in `server.roles` and `server.principals`. What they mean — statements, resources, `where`, attributes, the built-in roles,
@@ -246,7 +246,7 @@ replaces it and never showing the value. Beyond 50 findings one more says how ma
 
 Setting `Aouda:Declaration` and `Aouda:Databases` together is the same refusal: the two are never merged.
 
-(**BL-1464, next train**) The old ways of declaring operators and keys are refused the same way, every setting under the three
+(**BL-1464, 0.16.0**) The old ways of declaring operators and keys are refused the same way, every setting under the three
 sections (a misspelt member too) and the two systemd credentials when present, before any database opens. An empty value (a compose
 `${VAR:-}` pass-through of an unset variable) is not set and is not refused:
 
@@ -272,7 +272,7 @@ declares its databases in code.
 | `OVERLAY_ABSENT` | info | No overlay for the environment; the file is read alone |
 | `OVERLAY_UNREADABLE` | error | The overlay exists and cannot be read, is empty or is not a JSON object |
 | `DATABASE_KIND_INVALID` | error | A database has no `kind`, or one other than `data` and `auth` |
-| `SETTING_REMOVED` | error | An `Aouda:Databases` setting, or (**BL-1464, next train**) an `Aouda:Auth:Keys` / `Bootstrap` / first-operator setting or the `aouda-server-key` / `aouda-admin-password` credential; names what replaces it |
+| `SETTING_REMOVED` | error | An `Aouda:Databases` setting, or (**BL-1464, 0.16.0**) an `Aouda:Auth:Keys` / `Bootstrap` / first-operator setting or the `aouda-server-key` / `aouda-admin-password` credential; names what replaces it |
 | `DATABASE_FIELD_INVALID`, `DATABASE_FIELD_NOT_FOR_KIND`, `DATABASE_NAME_INVALID`, `DATABASE_NAME_DUPLICATE`, `DATABASE_NAME_RESERVED`, `DATABASE_AUTH_NOT_STRICT`, `DATABASE_LINK_INVALID`, `DATABASE_LINK_NOT_AUTH` | error | The value rules of a database entry (a value out of range, a member the kind does not take, a name the server refuses, a durability other than `strict` on an `auth` database, a link that cannot be); unchanged by the file |
 | `DATABASE_LINK_UNDECLARED` | warning | `authDatabase` names a database the file does not declare: the start links to it only if the data directory has it as an application auth database |
 | `SETTING_INVALID` | error | `Aouda:Environment` is not a name |

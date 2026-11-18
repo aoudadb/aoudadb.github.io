@@ -56,7 +56,7 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 
 `aouda start`, `stop`, `status` and `doctor` keep one state file per user, so a second local server collides with the first. Give each its
 own directory with `--state-dir <dir>` (or `AOUDA_STATE_DIR`; the flag wins) on **every** command that should see it, e.g.
-`aouda start --state-dir $dd/state ...` and `aouda stop --state-dir $dd/state` (**BL-1587, next train**).
+`aouda start --state-dir $dd/state ...` and `aouda stop --state-dir $dd/state` (**BL-1587, 0.16.0**).
 
 ## Do not (engine / CLI traps)
 

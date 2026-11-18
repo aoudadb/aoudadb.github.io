@@ -4,7 +4,7 @@ nav_order: 6
 parent: "Auth and Authorization"
 ---
 
-# Architecture (**BL-1464, next train**)
+# Architecture (**BL-1464, 0.16.0**)
 
 Every deployment below is the same three concepts. What changes is which principal holds which statements, and which listener the caller uses.
 

@@ -173,7 +173,7 @@ string oidcAuthority = aouda.OidcAuthority("myapp");
 
 ### Using the Service-Role Client
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```csharp
 // WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.

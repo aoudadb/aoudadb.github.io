@@ -164,8 +164,8 @@ only for a data volume that has **never been set up** (no server auth database) 
 
 | You declare | What happens at start |
 |---|---|
-| A key-only operator (**BL-1464, next train**): a `server.principals` entry in the declaration file holding the role `admin`, with a `derivedKey` (from the file's `keyRoot`) or a stored key `{ "id", "sha256" }` under `credentials.keys` | No setup mode. The server auth database is created with the principal and its key, and the key operates the server from the first start: create databases, principals and keys with it. No human admin is needed |
-| A first admin (**BL-1464, next train**): a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash": ... }` | The admin is created once, with a forced password change at the first sign-in; no setup mode. The seed is applied only when the principal is created, never again |
+| A key-only operator (**BL-1464, 0.16.0**): a `server.principals` entry in the declaration file holding the role `admin`, with a `derivedKey` (from the file's `keyRoot`) or a stored key `{ "id", "sha256" }` under `credentials.keys` | No setup mode. The server auth database is created with the principal and its key, and the key operates the server from the first start: create databases, principals and keys with it. No human admin is needed |
+| A first admin (**BL-1464, 0.16.0**): a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash": ... }` | The admin is created once, with a forced password change at the first sign-in; no setup mode. The seed is applied only when the principal is created, never again |
 | `AOUDA_DEV_ADMIN=true` | Development and tests only: a throwaway admin and its key, printed once. Refused next to a declared server operator's credentials (`SERVER_KEY_DEV_ADMIN_CONFLICT`). See [Development admin](../guides/development-admin.md) |
 | none of them, on a new volume | **Setup mode**: `/startup` 200, `/ready` 503 `setup_required`, every other route `503 SETUP_REQUIRED` off the server's host |
 | none of them, on a volume set up before that still has an operator (an admin, or a principal holding `admin` with an active key) | Starts normally, operated by them. **Never setup mode again**: a set-up server back in setup mode could be claimed by any loopback caller |
@@ -186,7 +186,7 @@ and a key-only operator, its key root from a secret:
   "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
 ```
 
-**The old operator settings are refused** (**BL-1464, next train**). Each one set is a `SETTING_REMOVED` finding at start, before any
+**The old operator settings are refused** (**BL-1464, 0.16.0**). Each one set is a `SETTING_REMOVED` finding at start, before any
 database opens, and the start exits `78`; the message names the replacement and never the value. An **empty** value (a compose
 `${VAR:-}` pass-through of a variable that is not set) counts as not set and is not refused.
 
@@ -199,7 +199,7 @@ declarative deployment still needed an admin password, and a compose file gated 
 
 ### Compose
 
-(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**; **BL-1462, 0.14.0**; **BL-1464, next train**) `docker-compose.yml` passes three
+(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**; **BL-1462, 0.14.0**; **BL-1464, 0.16.0**) `docker-compose.yml` passes three
 things through from a `.env` file next to it (or your environment); none has a default, because port 5000 is published and a known
 default would be a known credential:
 
@@ -221,7 +221,7 @@ default would be a known credential:
 | none, on a volume that was set up but now has nobody who can manage the server and nothing declared | The start is refused: the line starts `SERVER_HAS_NO_OPERATOR: ` and names the ways out, and the exit status is `78` (**BL-1461**, **BL-1462**, 0.14.0) |
 | none, on a volume that holds an operator | Starts normally |
 
-The compose file no longer passes `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` or `AOUDA_ROOT_PASSWORD` (**BL-1464, next train**): a `.env`
+The compose file no longer passes `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` or `AOUDA_ROOT_PASSWORD` (**BL-1464, 0.16.0**): a `.env`
 that still sets them sets nothing, and the server would start in setup mode. Move them into the declaration as above.
 
 ⚠️ **`Aouda:Auth:RequireFirstAdmin` is gone** (**BL-1462, 0.14.0**). It made a server with no admin and no declared admin
@@ -251,7 +251,7 @@ JSON.
 The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
 else missing).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 `1` with:
 
 ```
@@ -259,7 +259,7 @@ The data directory '/data' is in use by another Aouda process (it holds Server/a
 ```
 
 Before, it succeeded: a second process wrote to the live data directory, and the running server stayed in setup mode until a
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 command line):
 
 ```bash
@@ -285,18 +285,18 @@ secrets:
 
 then `--password-file /run/secrets/aouda_admin_password`.
 
-**Secrets of the declaration from Docker secrets** (**BL-1464, next train**). The declaration's key root and a password seed can be
+**Secrets of the declaration from Docker secrets** (**BL-1464, 0.16.0**). The declaration's key root and a password seed can be
 read from a secret file, so they never pass through an environment variable: `"keyRoot": { "file": "/run/secrets/aouda_key_root" }`,
 or `"password": { "file": "/run/secrets/aouda_admin_password" }` on the first admin. A relative path is read from the declaration
 file's directory, and `$NAME` / `${NAME}` in the path are expanded from the environment. The file is read as UTF-8 (a UTF-8
 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused) with one trailing newline ignored; a
 missing, unreadable or empty file stops the start. Docker mounts file-based secrets as `0444` by default, and this source does not
 refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md#secret-files). The identities file's
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
-## Declare the databases: `aouda.json` (**BL-1463, next train**)
+## Declare the databases: `aouda.json` (**BL-1463, 0.16.0**)
 
 The databases, their schema files and their roles are one file, `aouda.json`, that you mount and **name**: the server reads the
 declaration from the path in `Aouda:Declaration` and from no other (there is no default path; with nothing set, nothing is declared).
