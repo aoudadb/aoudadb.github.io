@@ -48,7 +48,7 @@ Do not find them by eye. Fetch the sibling checkouts (`git fetch` in `aouda`, `a
 python3 scripts/check-next-train.py        # siblings found next to this repo; --aouda / --client-ts / --studio to point at them
 ```
 
-It reads each sibling's `origin/main` changelog (`--ref` to change it) and fails, with `file:line`, the BL id, the release it shipped in and the replacement `(**BL-NNN, X.Y.Z**)`, for every marker whose id is in a released section. Run it after the tag exists, and again as the last step before the PR. A marker with no BL id (`Lead S12 (next train)`) is not checked; retire those by hand (`grep -rni "next train" --include=*.md --include=*.txt .`). Tests: `python3 -m unittest discover -s scripts -p "test_*.py"`.
+It reads each sibling's `origin/main` changelog (`--ref` to change it) and fails, with `file:line`, the BL id, the release it shipped in and the replacement `(**BL-NNN, X.Y.Z**)`, for every marker whose id is in a released section. BL-1463 and BL-1464 are allow-listed: 0.14.0 names them for Declare's slices, and the rest of those cards is still the next train. Take an id off `_ALLOW` in `scripts/check-next-train.py` in the same commit that replaces its markers. Run it after the tag exists, and again as the last step before the PR. A marker with no BL id (`Lead S12 (next train)`) is not checked; retire those by hand (`grep -rni "next train" --include=*.md --include=*.txt .`). Tests: `python3 -m unittest discover -s scripts -p "test_*.py"`.
 
 Also move `CHANGELOG.md` **Unreleased** bullets into a dated section that names the same versions. Keep Unreleased for not-yet-shipped clarifications only.
 

@@ -108,6 +108,13 @@ class CheckTests(unittest.TestCase):
         self.write("a.md", "(**BL-300, next train**) (**BL-200, next train**) (**BL-999, next train**)\n")
         self.assertEqual(cnt.check(self.root, self.released), [])
 
+    def test_an_allow_listed_phase_card_stays_next_train(self):
+        """0.14.0 names BL-1463 for a Declare slice. A marker for the rest of that card is not stale."""
+        self.assertEqual(cnt._ALLOW, {"BL-1463", "BL-1464"})
+        self.write("a.md", "(**BL-1463, next train**) and (**BL-100, next train**)\n")
+        findings = cnt.check(self.root, self.released)
+        self.assertEqual([f.bl for f in findings], ["BL-100"])
+
     def test_client_only_id_names_the_client(self):
         self.write("clients/ts.md", "(**BL-103, next train**)\n")
         self.assertEqual([(f.repo, f.version) for f in cnt.check(self.root, self.released)], [("@aouda/client", "0.13.0")])
