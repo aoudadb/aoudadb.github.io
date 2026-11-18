@@ -1,3 +1,62 @@
 {
-  "note": "This file is not the 0.14 setup fixture. Principals, roles and statements live in aouda.json. See the migration page in the auth chapter."
+  "database": "chat",
+  "authDatabase": "auth",
+  "principals": [
+    {
+      "name": "alice@test.local",
+      "statements": [
+        {
+          "actions": ["read"],
+          "resources": ["chat/table/rooms"],
+          "where": { "or": [{ "column": "IsPublic", "op": "eq", "value": "true" }] }
+        },
+        {
+          "actions": ["read", "write"],
+          "resources": ["chat/table/messages"],
+          "where": {
+            "and": [
+              { "column": "room_id", "op": "eq", "value": "room-public" },
+              { "column": "SenderId", "op": "eq", "principal": "id" }
+            ]
+          }
+        },
+        {
+          "actions": ["read", "write"],
+          "resources": ["chat/table/notes"],
+          "where": { "and": [{ "column": "UserId", "op": "eq", "principal": "id" }] }
+        }
+      ]
+    },
+    {
+      "name": "bob@test.local",
+      "attributes": { "rooms": ["room-private"] },
+      "statements": [
+        {
+          "actions": ["read"],
+          "resources": ["chat/table/rooms"],
+          "where": {
+            "or": [
+              { "column": "IsPublic", "op": "eq", "value": "true" },
+              { "column": "id", "op": "in", "principal": "attributes.rooms" }
+            ]
+          }
+        },
+        {
+          "actions": ["read", "write"],
+          "resources": ["chat/table/messages"],
+          "where": {
+            "and": [
+              { "column": "room_id", "op": "in", "principal": "attributes.rooms" },
+              { "column": "SenderId", "op": "eq", "principal": "id" }
+            ]
+          }
+        },
+        {
+          "actions": ["read", "write"],
+          "resources": ["chat/table/notes"],
+          "where": { "and": [{ "column": "UserId", "op": "eq", "principal": "id" }] }
+        }
+      ]
+    }
+  ]
 }

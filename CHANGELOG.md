@@ -13,6 +13,8 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **The p43 auth-setup example is principals and statements (BL-1618, next train).** It no longer names `db_writer`, resolvers or entitlements, and it holds no password.
+
 - **Review of the principals pages (BL-1464, next train).** A session token's claim is `email`. A refresh of a disabled principal is `423 AUTH_ACCOUNT_DISABLED`; the access token is `401 AUTH_CREDENTIAL_REVOKED`, and the sessions end. A session used outside its database limit is `403 AUTH_POLICY_DENIED` with `reason: credential-limit`. Create, get and list of a database omit `keys`. Omitting `databases` at sign-in is a session with no database limit.
 
 - **Guides, deployment and examples no longer describe the 0.14 access model (BL-1464, next train).** Partition security, key kinds and the access-surface page are gone from the guides. `guides/access-surface.md` is deleted. What a removed input now gets is [Moving from 0.14](auth/migrating-from-0-14.md).
