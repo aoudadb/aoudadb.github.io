@@ -4,21 +4,21 @@ nav_order: 2.5
 parent: "Guides"
 ---
 
-# Keys that survive a wipe (**BL-1377, 0.10.0; reworked by BL-1378, 0.11.0, and by BL-1464, next train**)
+# Keys that survive a wipe (**BL-1377, 0.10.0; reworked by BL-1378, 0.11.0, and by BL-1464, 0.16.0**)
 
 A key Aouda mints is a random value generated **inside the data a wipe destroys**. Every wipe, fresh machine and CI run therefore
 produces new credentials that must be carried to every client, and a sender nobody updated fails with `AUTH_API_KEY_INVALID`
 until someone notices.
 
 A **declared key** turns that around. You declare the credential in the declaration file, `aouda.json`, the way you declare a SQL
-Server connection string: as a `credentials` member of a declared principal (**BL-1464, next train**). The start converges every
+Server connection string: as a `credentials` member of a declared principal (**BL-1464, 0.16.0**). The start converges every
 declared principal and its credentials into its auth database, at every start, after a wipe and after a restore. After a wipe nothing
 needs to be re-imported, re-linked or re-minted: the declaration is read again and the principals come back with the same ids. Keys
 Aouda mints still work, for throwaway cases and for anything created at runtime.
 
 The databases a declared key belongs to can be declared too, so a wipe brings back the whole set: [Declared databases](declared-databases.md).
 
-## Declared credentials in `aouda.json` (**BL-1464, next train**)
+## Declared credentials in `aouda.json` (**BL-1464, 0.16.0**)
 
 A principal declared in [`aouda.json`](declared-access.md) declares how it authenticates under `credentials`, and every form
 survives a wipe without seeding:
@@ -40,7 +40,7 @@ survives a wipe without seeding:
 derived key names the version to declare next. A wipe loses the revocation — the same root derives the same key again — so the lasting
 fix is to bump the version in the file.
 
-## The old settings are refused (**BL-1464, next train**)
+## The old settings are refused (**BL-1464, 0.16.0**)
 
 The identities file, `Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, `Aouda:Auth:RootUser` and the systemd credentials `aouda-server-key` and `aouda-admin-password` are refused (`SETTING_REMOVED`). `aouda plan` reports each one, and the start exits `78` before any database opens. The message names the replacement and never the value. An empty value (a compose `${VAR:-}` of a variable that is not set) counts as not set.
 

@@ -205,7 +205,7 @@ At a high level:
 
 1. HTTP receives `QueryMessage` in `QueryController.ExecuteQuery`.
 2. `QueryTranslator.Validate` performs request-level checks (database/table presence, `offset`, operators, order-by constraints, recursive `Groups` validation).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. `QueryTranslator.Translate` builds an immutable `TableQuery` chain with:
    - projection,
    - predicate,
@@ -332,7 +332,7 @@ Precedence/override notes:
 - Response format: the JSON answer is always column arrays; `Accept` chooses JSON or column-batch frames (**Lead S12, 0.6.0**: the `format` parameter is gone).
 - Read preference: query parameter overrides header when both are present.
 - Limit handling: request value is normalized by translator (`0` special-case, negative->default, positive->cap).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Operator and query-option glossary
 

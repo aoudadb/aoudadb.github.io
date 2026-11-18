@@ -63,14 +63,14 @@ authorization scope to prevent accidental use.
 
 ### Authorization
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   target column is restricted by a write policy for the caller's role, the mutation returns
   403 regardless of the expression type.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   cannot reference columns outside the caller's authorized partition boundary.
 
 ---
@@ -216,7 +216,7 @@ When both `set` and `setExpr` target the same column, the literal `set` value wi
    snapshot, producing a concrete value.
 3. The concrete values are written to the HRA and WAL — no expression AST is stored in the
    WAL. Crash recovery and replication replay see only resolved values.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Limitations
 
@@ -264,9 +264,9 @@ Content-Type: application/json
 
 ### Authorization requirement
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 truncate permission receives `403 AUTHORIZATION_DENIED`. Grant truncate permission explicitly
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```bash
 # Attempt with insufficient permissions → 403
@@ -1010,7 +1010,7 @@ await client.branches.delete(`backup-${Date.now()}`);
 | RETURNING returns unexpected columns | `["*"]` was used and the schema has more columns than expected | Enumerate explicit column names instead of `"*"` |
 | Computed column value is `null` | Division by zero in the expression for that row | Guard with `$ifNull` or check denominator values before querying; this is intentional behavior |
 | Expression SELECT result type shows `"Unknown"` | Expression is uninferable (mixed coalesce, unbound param, missing col) | Expected for that expression; inferable expressions report a concrete type (P40 S08) |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 

@@ -109,13 +109,13 @@ aouda start --data-dir ./node3 --bind 0.0.0.0:5002 --join 192.168.1.10:5000 --ro
 **When to use:**
 - First-time installation by a developer or end user who doesn't want to work with CLI flags
 - Setting up Windows Service or systemd on a new machine interactively
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **How it works:**
 
 1. Place `Aouda.Setup.exe` (Windows) or `Aouda.Setup` (Linux) alongside `Aouda.Server.exe` / `Aouda.Server` in the release archive.
 2. Double-click or run `sudo ./Aouda.Setup`. Answer five prompts (install mode, port, directories, admin email, admin password — all have defaults).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 See the [Studio guide §12](studio.md#12-aoudasetup-installer) and [Server configuration](server-configuration.md) for the full interactive prompt sequence, service registration details, and configuration precedence.
 
@@ -166,7 +166,7 @@ docker compose up
 - Aouda at `http://localhost:5000`
 - Studio at `http://localhost:3000`
 
-The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, next train**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
+The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, 0.16.0**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
 - Named volume for persistent data
 
 ### Docker Compose — Cluster
@@ -324,7 +324,7 @@ Server credentials (API keys, passwords) stored encrypted in Hub, accessible onl
 
 Environment variables with `AOUDA_HUB_` prefix:
 - `AOUDA_HUB_AOUDA_URL` — backing Aouda instance URL (**admin listener**, not the data-plane bind). JWKS works on both; Hub data/admin calls 404 on the data-plane. See [Direct client access](direct-client-access.md#studio-and-hub).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - `AOUDA_HUB_K8S_ENABLED` — enable K8s provisioner (default: false)
 
 ---
@@ -406,7 +406,7 @@ All management APIs are under the `/admin/` prefix, separated from data APIs und
 
 When a server auth database is configured, all admin endpoints require a bearer token (server auth scope). When no auth database is configured, admin endpoints pass through (same graceful behavior as all other endpoints).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Cluster API Examples
 

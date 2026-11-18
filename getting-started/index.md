@@ -66,7 +66,7 @@ non-ASCII characters belongs in `--admin-password-file` (or in PowerShell 7).
 Required and optional arguments:
 
 - `--server` is optional. If omitted, the CLI uses the locally started server from `aouda start`, then `AOUDA_SERVER` / `AOUDA_URL`, then `http://localhost:5000`. Passing `--server` is recommended for non-default ports such as `5433` or service-managed servers.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - `--token` can be supplied when you already have an admin token and want `aouda init` to verify the server state without signing in.
 
 `aouda init` is state-aware and retryable. It checks setup status, creates the first server admin if needed, and returns JSON describing what changed. It does not create databases.
@@ -81,14 +81,14 @@ aouda databases create --name cache --server http://localhost:5433 --token <admi
 ```
 
 **Keys are shown once.** `aouda databases create` for a database linked to an auth database (`--kind auth`, or `--auth-enabled`) prints
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 generated them. The server keeps a hash, so it cannot show a key again, and a create that finds the keys already issued (the auth
 database already holds that name's system keys) returns none. The CLI says which happened on stderr, also under `--json`, so stdout stays one JSON document: do not merge `2>&1` into a JSON parser (**BL-1226, 0.9.0**). To
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   [Named service keys and overlapping rotation](../reference/http-api.md) (authentication section).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 This explicit server-then-database flow is intentional: it maps cleanly to production behavior and avoids hidden provisioning during startup.
 
@@ -110,7 +110,7 @@ docker compose up
 - Aouda at `http://localhost:5000`
 - Aouda Studio at `http://localhost:3000`
 
-The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, next train**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
+The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, 0.16.0**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
 
 ### 4. Aouda.Setup — interactive installer (Windows + Linux)
 
@@ -119,13 +119,13 @@ No PowerShell or bash knowledge required. Extract the release archive and run:
 - **Windows:** double-click `Aouda.Setup.exe`
 - **Linux:** `sudo ./Aouda.Setup`
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 See [Aouda.Setup guide](../guides/studio.md#12-aoudasetup-installer) for the full interaction and service registration details.
 
 ### 5. Hosted Studio at `studio.aouda.com` (no Studio install needed)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 > **Firefox / Safari:** blocked by mixed-content policy when connecting to HTTP localhost from HTTPS Studio. Use Chrome or Edge. See [Studio guide §10.3](../guides/studio.md#103-browser-compatibility-for-localhost-access).
 
@@ -135,20 +135,20 @@ If you initialize server auth (for example with `aouda init`) and then open Stud
 
 Use one of these Studio modes:
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - **Hub mode** (`NEXT_PUBLIC_HUB_URL` is set) — sign in on `/login` with your Hub account, then select a registered server and provide server credentials when prompted.
 
 For direct mode, use a server auth credential (`/api/auth/...`) such as:
 
 - a short-lived access token from `aouda init --json` or `/api/auth/signin`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```bash
 curl -s http://localhost:5000/api/auth/whoami \
   -H "Authorization: Bearer $AOUDA_KEY"
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
@@ -598,7 +598,7 @@ docker compose up
 - **Aouda** at `http://localhost:5000`
 - **Aouda Studio** at `http://localhost:3000`
 
-The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, next train**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
+The compose file takes one declaration: an operator in a declaration file, `aouda.json` next to the compose file with its volume line uncommented, and `AOUDA_DECLARATION=/etc/aouda/aouda.json` plus, for a first admin seeded from `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`, `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` (**BL-1464, 0.16.0**; a key-only operator needs no human admin), or, for a throwaway, `AOUDA_DEV_ADMIN=true docker compose up` (**BL-1423, 0.12.0**; the line to read is the `AOUDA-DEV-ADMIN` line of `docker compose logs aouda`). With none, the server waits in setup mode and `/ready` answers `503 setup_required`. The old `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` are no longer passed. See [Docker](../deployment/docker.md#compose).
 
 Studio connects to Aouda automatically. No additional configuration needed — open `http://localhost:3000` to browse your databases.
 
@@ -614,7 +614,7 @@ docker compose -f docker-compose.cluster.yml up
 
 ### Creating Databases via API
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```bash
 # Create a database
@@ -717,7 +717,7 @@ var client = new AoudaClient(new AoudaClientOptions
 
 ##### A rejected key is not a retry (**BL-1386, 0.11.0**)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```csharp
 AuthFailurePolicy = new AuthFailurePolicy
@@ -1429,7 +1429,7 @@ a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoam
                                after it, server credentials on the admin listener (BL-1017)
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### When Do You Need Server Authentication?
 
@@ -1447,18 +1447,18 @@ Like MS SQL Server or PostgreSQL, Aouda has a **server-level identity layer** wh
 
 1. An **admin account** is created during initial setup (bootstrap). This is the superuser — equivalent to PostgreSQL's `postgres` role or SQL Server's `sa`.
 2. The admin creates **server users** and **server API keys**, each with database-scoped roles that control which databases they can access and what they can do.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 5. The server validates the token and checks whether the user has the required role for the target database.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Default roles (applied per database):
 
 | Role | Permissions |
 |------|------------|
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Auth state is stored in an internal database called `_serverauth`. This database is managed by Aouda and is not directly accessible as a user database.
 
@@ -1469,11 +1469,11 @@ When the server starts with no admin accounts **and nothing declared**, it enter
 (**BL-1462, 0.14.0**) Setup mode exists only for a data directory that has **never been set up** (no server auth database)
 and nothing is declared. Once set up, a server never re-enters it: an operator it already has (an admin, or a principal holding
 `admin` with an active key) operates it, and with nobody who can manage the server and nothing declared the start is refused
-(`SERVER_HAS_NO_OPERATOR`, naming the ways out). (**BL-1464, next train**) An operator declared in the declaration file's
+(`SERVER_HAS_NO_OPERATOR`, naming the ways out). (**BL-1464, 0.16.0**) An operator declared in the declaration file's
 `server.principals` means no setup mode: a key-only operator (the role `admin` and a `derivedKey` or stored key) operates the
 server from the first start, with no human admin, and a first admin named by an email with a password seed is created at start
 (Option B below). Setup mode is the interactive first run for a server that declares neither. The old `Aouda:Auth:Bootstrap:*`,
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 `aouda-admin-password`, are refused at start (`SETTING_REMOVED`, exit status `78`).
 
 Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`. The health probes answer in setup mode too: `/health` and `/startup` are `200`, `/ready` is `503` with `setup_required` (**BL-1462, 0.14.0**; see [the probes](../reference/http-api.md#the-probes-one-meaning-each)).
@@ -1545,7 +1545,7 @@ Response:
 
 Setup mode automatically disables after the first admin is created.
 
-#### Option B: Declare the first admin (**BL-1464, next train**)
+#### Option B: Declare the first admin (**BL-1464, 0.16.0**)
 
 Declare the admin in the declaration file, `aouda.json`: a `server.principals` entry named by the email, holding the role `admin`,
 with a password seed read from a file or an environment variable (or `{ "hash": ... }`), never written into the file:
@@ -1559,7 +1559,7 @@ and name the file at start: `aouda start --declaration ./aouda.json` (or `Aouda_
 creates the admin when the principal is created, with a forced password change at the first sign-in; the seed is never applied
 again, so a later change of the variable changes nothing. See [Declared access](../guides/declared-access.md).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 (`SETTING_REMOVED`, exit status `78`), naming this declaration as its replacement; an empty value counts as not set.
 
 #### Option C: Local Bootstrap Command
@@ -1572,7 +1572,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ```
 
 This creates the admin directly in the data directory without starting the server. ⚠️ **Only with the server stopped**
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 (`POST /api/auth/setup` from the server's host, or stop the server). Before, it wrote behind the running server's back and the
 server stayed in setup mode until a restart. For binary-only or air-gapped installs, the native server artifact also supports the same local bootstrap operation:
 
@@ -1655,7 +1655,7 @@ All server auth endpoints are under `/api/auth/...` and resolve to the internal 
 | `/api/auth/whoami` | GET | A credential, or `anonymous` on the data plane | Who this credential is and what it may do |
 | `/api/databases/{db}/auth/me` | PATCH | Yes | Update the signed-in profile. `GET …/auth/me` is not a route |
 | `/api/auth/password` | PUT | Yes | Change password |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### SDK usage
 
@@ -1937,7 +1937,7 @@ await client.branches.delete("feature-x");
 ### Authentication & Authorization
 
 - **[Application Auth Service](auth.md)** — Use Aouda as an authentication provider for your app's end users (signup, signin, JWTs, Partition-Level Security, multi-tenancy). Covers the two-layer auth model, architecture patterns A-D, API keys, and AI agent workflows.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### General
 
@@ -2040,9 +2040,9 @@ kept by shell history, by process-launch audit rules, by CI logs and by an agent
 of that can be un-leaked, which is why the option was removed rather than deprecated — a deprecation
 warning is printed *after* the leak has already happened.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 remedy (`POST /api/auth/setup` from the server's host, or stop the server) (**BL-1462, 0.14.0**). A service that declares a
-key-only operator in its declaration file needs no admin at all (**BL-1464, next train**).
+key-only operator in its declaration file needs no admin at all (**BL-1464, 0.16.0**).
 
 **Three supported paths.**
 
@@ -2072,7 +2072,7 @@ other whitespace, so both work — but a password that silently gains a characte
 diagnoses from the symptom.
 
 *A declared first admin, which is the right answer for a service — the server creates the first
-admin itself on its first start* (**BL-1464, next train**). In the declaration file:
+admin itself on its first start* (**BL-1464, 0.16.0**). In the declaration file:
 
 ```json
 { "version": 1, "server": { "principals": { "admin@example.com": { "roles": ["admin"],

@@ -10,9 +10,9 @@ Document status: Approved baseline
 Primary owner: Aouda maintainers
 Last updated: 2026-05-22
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 Primary task folders: `docs/tasks/P10/`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-Schema-Lifecycle.md`
 
 ## Start Here
@@ -176,7 +176,7 @@ If you do nothing:
 - Subscription behavior:
   - Snapshot + incremental delivery.
   - User filter evaluation.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   - Resume semantics with `resume_from` and change-buffer replay/fallback.
 - Write-stream behavior:
   - `stream_open`, `stream_rows`, `stream_ack`, `stream_close`.
@@ -201,7 +201,7 @@ Documented intent that is not currently fully productized:
 - Cross-database subscription surfaces.
 - Exactly-once delivery model and consumer-group semantics.
 - Broker-style stream partition management semantics.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Reserved / not yet wired
 
@@ -293,9 +293,9 @@ A subscription is a read, and it is held to the rules of the HTTP read it mirror
   credential HTTP refused (the anonymous key, a user with no role) could read, and write, a table that has no partition or row
   security over the socket.
 - **The same rows.** A subscription's snapshot returns what an HTTP query by the same credential returns, and its change events
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   and one that does not receives only its own partitions'. Granting a role is described in
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - **Permissions are re-read on every `subscribe`**, a first subscribe included. A subscribe whose permissions cannot be read is
   **refused** (`PERMISSION_REVOKED`), or refused with a retryable capacity code (`SERVICE_UNAVAILABLE`, `MEMORY_BUDGET_EXCEEDED`, …)
   when the read is refused for capacity — never admitted on a stale answer.
@@ -305,10 +305,10 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
   role check, ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
   **not re-snapshotted**: rows that became visible are not pushed, only events from the re-key on. Resubscribe to read the rows
   that were already there.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   (operation `insert`, on the first batch the grant decides, and again if the deciding grants change), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
   event**. The `cross_partition_access` flag alone
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 A subscription on a partitioned table needs the same partition filter as a read, or the `cross_partition_access` flag on the
 `subscribe` message (see the HTTP/protocol examples below, and
@@ -458,7 +458,7 @@ High-level runtime flow:
    resume reads them — the events a subscriber receives are unchanged (**ColumnarCore S09, 0.2.0**; the older
    per-event entry points are removed).
 2. Subscription manager fans out events to per-subscription channels.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. Write stream handler validates mode/sequence/security, writes rows, emits `stream_ack`.
 5. Client transports maintain reconnect behavior and re-subscribe/re-open flows.
 
@@ -492,7 +492,7 @@ Key implementation anchors:
 
 1. Client sends `subscribe` message with `id`, `target`, optional filter.
 2. `SubscriptionHandler.HandleSubscribeAsync(...)` validates table/filter and registers subscription first (gap-safety ordering).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. Server sends `snapshot` message.
 5. Registration snapshot version is set; consumer unblocks and emits live `change` events with higher sequence only.
 
@@ -509,7 +509,7 @@ Primary proving tests:
 ### Walk-through B: Resume from reconnect (`resume_from`)
 
 1. Re-subscribe includes `resume_from`.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 3. Handler compares resume version with current sequence:
    - at-current -> attach to live only,
    - replay available -> deliver buffer events and continue live,
@@ -539,7 +539,7 @@ Primary proving tests:
    - batch limits and payload limits,
    - sequence continuity,
    - backpressure decision (accept/reject/close),
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. Accepted rows are inserted/upserted; server emits `stream_ack` with `through` and optional row errors.
 5. `stream_close` closes and removes state, sending `stream_closed`.
 
@@ -727,12 +727,12 @@ Sec-WebSocket-Key: <key>
 Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `wire_mode` (the negotiated wire mode).
 
 **Which credentials the socket accepts** (**BL-1227, 0.9.0**). The handshake asks the same stores, in the same order, as an HTTP
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 long-poll connect (up to 0.8.0 both were refused with `AUTH_API_KEY_INVALID` / `AUTH_TOKEN_INVALID`). The socket keeps the store
 that accepted the credential, so `re_auth`, sign-out and revocation reach it. A session the server auth database accepted is
 authorized as HTTP authorizes a data call on the database — a database-level `read` by its grants — and is refused with HTTP's
 code (`auth_error` on the socket, `403` with HTTP's code on long-poll connect). A server key opens the socket; it holds
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **Step 1 response — `auth_error` (server → client on failure):**
 
@@ -752,7 +752,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 for a subscription that names no partition: a table `subscribe`, or a named-query `subscribe` (`name`, `args`) whose query binds no
 partition key, on a partitioned table that requires a partition filter. Without it that subscribe is refused
 `PARTITION_FILTER_REQUIRED`. It is a **cost waiver, not a grant**: the snapshot and every later event are still what the
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 own tenant), and one with no grant at all on a table with partition-level security is refused as before.
 The data-plane listener (the browser tier) ignores the flag, so a browser still binds the partition key in a named query. An
 older server ignores the field and answers `PARTITION_FILTER_REQUIRED`.
@@ -762,7 +762,7 @@ older server ignores the field and answers `PARTITION_FILTER_REQUIRED`.
 ```
 
 **A subscription that spans partitions.** A subscription with no partition filter would read every partition of the table, so a
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 and the flag, are in
 [A subscription that spans partitions](partitioning.md#a-subscription-that-spans-partitions).
 
@@ -852,7 +852,7 @@ Content-Type: application/json
 {"token":"<jwt-or-api-key>","wireMode":"json"}
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 (**BL-1223, 0.9.0**). A refused credential answers `401` with `{ "code", "message" }` (`AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`,
 `AUTH_TOKEN_REVOKED`, `AUTH_API_KEY_INVALID`); `500` with `AUTH_DB_UNAVAILABLE` means the auth database could not be read or the
 session's permissions could not be resolved — no session is created, and it is **retryable** (**BL-1223, 0.9.0**).
@@ -1032,7 +1032,7 @@ Last verification context date (UTC): `2026-03-31` (from P10 session reports and
 - ADRs:
   - `docs/decisions/0020-real-time-streaming.md`
   - `docs/decisions/0023-authentication-and-authorization.md`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Tasks/reports:
   - `docs/tasks/P10/P10-RealTimeStreaming-Tasks.md`
   - `docs/tasks/P10/P10-S1-ChangeEventFoundation.md`

@@ -43,10 +43,10 @@ An untrusted caller (a browser, a mobile app) must not compose an arbitrary `Que
 
 1. **Cost** — a five-way join or an unfiltered scan is unbounded.
 2. **Schema coupling** — the UI is welded to physical column names (the PostgREST failure).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. **Review** — a query that can leak a tenant is a schema change, not a string in a SPA.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Performance: what is actually true
 
@@ -186,7 +186,7 @@ Notes:
 
 - `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](../auth/authorization.md#audit).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top. **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still a required param. Write `"required": false` explicitly for optional args (and always when pairing with `whenParamPresent`).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Legal `where` operators
 
@@ -423,9 +423,9 @@ curl -s -X POST \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### TypeScript (`@aouda/client`)
 
@@ -479,7 +479,7 @@ A dashboard of independent panels should not issue N sequential executes. A batc
 }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```json
 {
@@ -527,7 +527,7 @@ Two sequential single executes under a concurrent writer **may disagree**. The b
 
 On the data-plane, WebSocket `subscribe` **requires** `"name"` (and optional `args`). Ad-hoc `target` + `filter` is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -579,7 +579,7 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
   "conflate": { "collapse_inserts": true } }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -847,13 +847,13 @@ This is the recommended path for a bounded, continuous-trickle insert feed (e.g.
 
 ## Authorization (always underneath)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### `crossPartitionAccess` per call
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 There is no catalog field, header, or option that runs a named query as someone else.
 
@@ -882,7 +882,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
@@ -902,7 +902,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 ## Related
 
 - [How to build apps effortlessly with Aouda](build-apps.md) — where named queries fit in the whole build path
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in

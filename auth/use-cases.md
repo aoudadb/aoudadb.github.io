@@ -4,7 +4,7 @@ nav_order: 8
 parent: "Auth and Authorization"
 ---
 
-# Use cases (**BL-1464, next train**)
+# Use cases (**BL-1464, 0.16.0**)
 
 The routes below are the ones the server still has. A person in these flows is a principal; the admin path segment is `users/{id}` and `{id}` is the principal's id.
 

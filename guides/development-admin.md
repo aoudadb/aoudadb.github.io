@@ -45,7 +45,7 @@ ASPNETCORE_ENVIRONMENT=Development AOUDA_DEV_ADMIN=true aouda start --data-dir "
 AOUDA-DEV-ADMIN email=<email> password=<password> key=<aouda_...>
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 A separate warning goes to the log, with no secret in it. The line is on stdout on purpose: `docker logs` and any log collector that captures
 stdout will hold the password and the key. That is acceptable for a throwaway server and is the reason never to use the flag on a shared one.
@@ -57,12 +57,12 @@ The start fails, naming the setting and never a secret, when the flag is set and
 | Condition | First words of the refusal |
 |---|---|
 | The environment is Production, or unset (Production is the default when `ASPNETCORE_ENVIRONMENT` is not set) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused in the Production environment, which is also the default when ASPNETCORE_ENVIRONMENT is not set.` |
-| The declaration file's `server.principals` declares a credential (a password seed, a key, an OIDC trust) — `SERVER_KEY_DEV_ADMIN_CONFLICT` (**BL-1464, next train**) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused because server.principals declares a credential ('<name>', ...).` |
+| The declaration file's `server.principals` declares a credential (a password seed, a key, an OIDC trust) — `SERVER_KEY_DEV_ADMIN_CONFLICT` (**BL-1464, 0.16.0**) | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused because server.principals declares a credential ('<name>', ...).` |
 | The node is configured with `Aouda:Join` or `Aouda:ReplicaSet` | `Aouda:Auth:DevAdmin:Enabled (AOUDA_DEV_ADMIN) is refused on a node that is configured for replication` |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 `Aouda:Auth:Bootstrap:*` settings and their systemd credentials are not a guard any more: they are refused on their own
-(`SETTING_REMOVED`, **BL-1464, next train**). A node that becomes a follower by some other means is not detected. (**BL-1427,
+(`SETTING_REMOVED`, **BL-1464, 0.16.0**). A node that becomes a follower by some other means is not detected. (**BL-1427,
 0.14.0**) `Aouda:Auth:DevAdmin` is restart-only: a reload lists a change to it under `restartRequired`.
 
 ## Docker compose
@@ -82,7 +82,7 @@ refused next to a declared server operator's credentials. See [Docker](../deploy
 (**BL-1462, 0.14.0**) It made a server with no admin, no root password and no dev admin **fail the start** instead of waiting in
 setup mode; `docker-compose.yml` set it, so under `restart: unless-stopped` a forgotten password was a restart loop. It is deleted, with
 no replacement: setup mode now exists only for a data directory never set up with nothing declared, so a server that declares a
-key-only operator (**BL-1464, next train**: in the declaration file's `server.principals`) needs no admin at all, and a new server that declares nothing waits in setup mode with `/ready` answering `503 setup_required` and naming the ways out. A leftover
+key-only operator (**BL-1464, 0.16.0**: in the declaration file's `server.principals`) needs no admin at all, and a new server that declares nothing waits in setup mode with `/ready` answering `503 setup_required` and naming the ways out. A leftover
 `AOUDA_AUTH__REQUIREFIRSTADMIN` is ignored. See [Docker](../deployment/docker.md#setup-mode-only-when-nothing-is-declared).
 
 ## See also

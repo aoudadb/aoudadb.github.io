@@ -764,21 +764,21 @@ A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was 
 
 `client.GetTable(name).SubscribeAsync()` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
 `In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, 0.9.0**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
 
 | You are | Subscribe with | Listener |
 |---|---|---|
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 A table subscription sent to the data-plane listener fails with `NAMED_QUERY_SUBSCRIBE_REQUIRED`
 (`AoudaRequestException.ErrorCode`). The fix is not a different filter: subscribe **by name** (see
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 The wire contract is in the [HTTP API reference](../reference/http-api.md#websocket-streaming-protocol).
 
 **What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and events follow the same grants as an HTTP query by
 the same credential; `SubscribeAsync` is authorized by the same role check (`read` on the table, and for a named query every table it
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 on a linked application database opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
 
 ### Timestamp columns in a subscription
@@ -821,10 +821,10 @@ await foreach (var evt in client.GetTable("orders")
 ```
 
 **It is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: the snapshot and every event are what the
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The flag itself writes nothing to the audit log; a grant that
 decides what a subscription sees is audited once per subscription
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Named queries and the flag
 
@@ -949,7 +949,7 @@ Console.WriteLine($"{client.ActiveConsumers} consumers on {client.ActiveServerSu
 
 ## 8b) Which databases a sign-in opens (**BL-1018, 0.9.0**)
 
-Omit `databases` and the session has no database limit (**BL-1464, next train**). `SignInAsync(email, password, deviceInfo, databases)` limits the session to the databases you name. An empty list, a blank name, or a name the auth database does not govern is refused (`AoudaRequestException`, `400 INVALID_REQUEST`). Native sign-in limits the same way
+Omit `databases` and the session has no database limit (**BL-1464, 0.16.0**). `SignInAsync(email, password, deviceInfo, databases)` limits the session to the databases you name. An empty list, a blank name, or a name the auth database does not govern is refused (`AoudaRequestException`, `400 INVALID_REQUEST`). Native sign-in limits the same way
 with `AuthorizationCodeRequest.Databases`. The token's `aud` lists the limit and its `iss` is the auth database's URL.
 
 ```csharp
@@ -958,7 +958,7 @@ await client.Auth.SignInAsync("alice@example.com", password, deviceInfo: "Alice'
     databases: new[] { "orders", "reports" });
 ```
 
-A token used at a database outside its allowance is `403 AUTH_POLICY_DENIED` with remedy `none` and `reason: credential-limit` (**BL-1464, next train**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` is not produced. A **refresh** refused for that limit ends
+A token used at a database outside its allowance is `403 AUTH_POLICY_DENIED` with remedy `none` and `reason: credential-limit` (**BL-1464, 0.16.0**). `AUTH_DATABASE_NOT_IN_ALLOWANCE` is not produced. A **refresh** refused for that limit ends
 the client's session like `AUTH_REFRESH_TOKEN_INVALID`: the SDK clears its tokens and raises `TokensChanged` with `SignedOut`, and the
 realtime transports stop reconnecting — sign in again for that database. See
 [Sessions](../reference/http-api.md#sessions).

@@ -55,7 +55,7 @@ A database's level is set where the database is created, and is read again at **
 | Surface | How |
 |---|---|
 | HTTP | `POST /api/databases` body field `durability` (omitted → `strict`). See [HTTP API](../reference/http-api.md#post-apidatabases). |
-| Server config | `databases.<db>.durability` in `aouda.json` (**BL-1463, next train**; it was `Aouda:Databases:<db>:Durability`, now refused) |
+| Server config | `databases.<db>.durability` in `aouda.json` (**BL-1463, 0.16.0**; it was `Aouda:Databases:<db>:Durability`, now refused) |
 | Embedded | `AoudaEmbeddedOptions.Durability` (string, default `"strict"`) or config `Aouda:Durability` |
 | CLI | `aouda databases create --durability <level>` |
 | C# SDK | `CreateDatabaseOptions.Durability` (`client.Databases.CreateAsync(name, options)`) |
@@ -142,7 +142,7 @@ There is no alias and no shim; each old name is refused where it would have been
 |---|---|---|
 | `enableWal`, `dataDurability` | `POST /api/databases` body | **400** `INVALID_REQUEST` naming `durability` |
 | An unknown level — including `"Strict"` (capitalised), `"MemoryOnly"`, `"everysec"` | `POST /api/databases` `durability` | **400** naming the four levels |
-| `EnableWal`, `DataDurability` | `Aouda:Databases:<db>` server config | Startup is refused (`SETTING_REMOVED`), naming `databases.<db>.durability` of `aouda.json` (**BL-1463, next train**; before, startup validation failed naming `Durability`) |
+| `EnableWal`, `DataDurability` | `Aouda:Databases:<db>` server config | Startup is refused (`SETTING_REMOVED`), naming `databases.<db>.durability` of `aouda.json` (**BL-1463, 0.16.0**; before, startup validation failed naming `Durability`) |
 | `EnableWal` (in code, or config `Aouda:EnableWal`) | Embedded | The open throws, naming `Durability` |
 | `durability.walEnabled` on a table | Declarative schema | Validation error naming `durability.level` |
 | `durability.walEnabled` in `settings` | Declarative schema | Validation error: the database's level is set where the database is created (`settings.durability` now carries only `replicationFactor`) |

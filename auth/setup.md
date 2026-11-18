@@ -4,7 +4,7 @@ nav_order: 5
 parent: "Auth and Authorization"
 ---
 
-# Setup and flows (**BL-1464, next train**)
+# Setup and flows (**BL-1464, 0.16.0**)
 
 Sign-up, sign-in, sign-out, password reset and MFA. The model they sit on is [Principals](principals.md) and [Credentials](credentials.md). Creating the auth database and the link is [Declared databases](../guides/declared-databases.md).
 

@@ -101,7 +101,7 @@ Apply rejects unknown ops and caller-supplied values for derived columns (`TRANS
 | Caller | Omits the column | Supplies the column |
 |---|---|---|
 | User JWT | Stamped as that user | `TRANSFORM_DERIVED_READONLY` (400) |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Unknown sources (`claim:…` on a derived identity column that is not bindable, or a misspelled source) fail apply or write with `IDENTITY_SOURCE_UNRESOLVABLE` / `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE`. Identity in `update` `set` / `setExpr` is not supported.
 
@@ -132,7 +132,7 @@ time never comes from a device's clock.
 
 - **Every write path stamps it**: insert, named mutations (`insert` / `update` / `upsert`), the row and batch HTTP
   endpoints, the write stream, route / tee targets (each target stamps its own), and bulk load with `applyTransforms`.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   fails with `TRANSFORM_DERIVED_READONLY` (400) and writes nothing; `update` `set` / `setExpr` the same. A named mutation
   whose `values` / `set` / `setExpr` names it fails at apply with `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE`. A
   `preTransformed` bulk load into the table is refused with `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS` — load
@@ -275,7 +275,7 @@ All `transforms` on one table must share one `kind`. `A → B → A` fails at **
 
 Insert a `kind=quote` row into `Ingest`: it is stored on `TradeQuote` only; subscribers to `Ingest` do not see it; subscribers to `TradeQuote` see one insert event. `tee` differs: the ingress row **is** stored, and copies go to every matching target.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 `route` predicates must be both **disjoint** and **exhaustive**:
 
@@ -429,7 +429,7 @@ Duplicates on a unique non-PK column are rejected across HRA, hot, and cold. `re
 
 The worker becomes: parse the file, `InsertAsync` (or write-stream) in 2 000-row batches. Empty tickers fail the check. Other `kind` values stay on `VendorTick` or fail a tighter check — declare that explicitly. Named queries over `EquityQuote` never see ingest leftovers.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```bash
 curl -X POST http://localhost:5433/api/databases/trading/tables/VendorTick/rows \
@@ -447,7 +447,7 @@ The body's rows are column arrays (**Lead S12, 0.6.0**: `"rows": [{…}]` is ref
 
 Assert: `GET`/`query` on `VendorTick` does not contain that row; `EquityQuote` does; one change event on `EquityQuote`.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```csharp
 await client.GetTable("VendorTick").InsertAsync(

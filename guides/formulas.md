@@ -365,7 +365,7 @@ See [Real-time streaming](real-time.md) for the protocol.
 ## Security
 
 (**ADR 0072, 0.14.0**) **A formula table's security is the table's own**, set by its owner like any table's: who may read, write and
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 or default. The [guide](financial-model.md#step-9-who-may-see-and-write-what) puts a department row condition on two formula tables.
 
 One rule is added:

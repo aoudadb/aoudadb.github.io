@@ -14,7 +14,7 @@ repository's `docs/dev/Upgrade-Notes.md`.
 To keep the data across a bump: **export it with the build that wrote it, delete the data directory, start the new build fresh, load the export.**
 
 Status: the refusal code described here is shipped in **0.12.0** (**BL-1420**). The format version is **17** in 0.11.0 and 0.12.0, so a 0.11.0
-directory starts on 0.12.0 unchanged. Server **0.13.0** writes format **18** (**BL-1418, 0.13.0**) and refuses a 17 directory. Server **0.14.0** and **0.15.0** do not bump the format (it stays **18**): a 0.13.x data directory starts on 0.14.0 and on 0.15.0. The declaration and the probes changed in 0.14.0; see [Upgrading from 0.13 to 0.14](#upgrading-from-013-to-014-0140). Access from the principals release is [Moving from 0.14](../auth/migrating-from-0-14.md) (**BL-1464, next train**).
+directory starts on 0.12.0 unchanged. Server **0.13.0** writes format **18** (**BL-1418, 0.13.0**) and refuses a 17 directory. Server **0.14.0** and **0.15.0** do not bump the format (it stays **18**): a 0.13.x data directory starts on 0.14.0 and on 0.15.0. The declaration and the probes changed in 0.14.0; see [Upgrading from 0.13 to 0.14](#upgrading-from-013-to-014-0140). Access from the principals release is [Moving from 0.14](../auth/migrating-from-0-14.md) (**BL-1464, 0.16.0**).
 
 ## Detecting a refusal: `DATA_DIRECTORY_FORMAT_REFUSED`
 
@@ -63,15 +63,15 @@ The last column is the first line a server that **reads that version and carries
 | 15 | development builds only | allowance on `_refresh_tokens` and `_authorization_codes` | `found=14 expected=15` |
 | 16 | 0.9.x and 0.10.0 | bulk-load commit header carries the beginning principal | `found=15 expected=16` |
 | 17 | 0.11.0 (and 0.12.0) | `source` on `_api_keys` and the per-user permission table | `DATA_DIRECTORY_FORMAT_REFUSED: found=16 expected=17 path=<root file>` |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 In the shortened rows the line is the same as in the first two, with `path=<root file>`. Formats 1 to 5 (0.2.x and earlier) are not listed: a build
 with the code refuses a root declaring 2 to 5 under the same line with that `found`, and the format-1 flat catalog and an interrupted format-1
 migration marker are refused by name without a code. Formats 8, 9, 11, 12 and 15 were only ever written by development builds.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 (pre-1.0): **no alias, no migration, no reader of the old shapes.** One wipe, then edit your schema files, scripts and clients.
 
 **What an old data directory gets.** Format 17 (written by 0.11.0 and 0.12.0) is refused whole, every database in the directory, with the first line
@@ -80,7 +80,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 A replica refuses a primary of the other format the same way.
 
 | What | Before | Now | What the old form gets |
@@ -90,7 +90,7 @@ A replica refuses a primary of the other format the same way.
 | Auth database storage | table `_user_partition_grants`, columns `partition_key`, `access_level` | table `_user_entitlements`, columns `entitlement_key`, `level` | refused by the format check above |
 | `Aouda.Client` (.NET) | no typed wrapper | no typed wrapper (the public API names nothing from this list) | none |
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 Roles live in the auth database, so after the wipe declare them again as before.
 
 ## Upgrading from 0.13 to 0.14 (**0.14.0**)
@@ -133,9 +133,9 @@ healthcheck is `/ready`). Full table: [HTTP API: the probes](../reference/http-a
 **After 0.14.0: on `main`, not yet released** (**0.15.0**). Nothing here is breaking.
 
 - **A table's `description` is accepted** in a schema file (documentation in the file only; not stored, not diffed, not exported; a change is never drift and needs no migration). An overlay file still refuses it. A column's `description` is unchanged.
-- **A table carries no security members**, and neither does a materialized query. Access is statements on a principal or a role ([Access](../auth/index.md), **BL-1464, next train**).
+- **A table carries no security members**, and neither does a materialized query. Access is statements on a principal or a role ([Access](../auth/index.md), **BL-1464, 0.16.0**).
 - **The declaration file is `aouda.json`, named by `Aouda:Declaration`.** There is no default path, no `AOUDA_CONFIG_FILE` and no `--config`. `Aouda:Databases` is refused (`SETTING_REMOVED`). [Declare a server in one file](declaration.md).
-- **Helm:** `declaration.file` (not `declaration.config`), `declaration.restartOnChange`, `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` ([Kubernetes and Helm](../deployment/kubernetes.md#declare-the-databases-bl-1463-next-train)).
+- **Helm:** `declaration.file` (not `declaration.config`), `declaration.restartOnChange`, `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` ([Kubernetes and Helm](../deployment/kubernetes.md#declare-the-databases-bl-1463-0160)).
 - **.NET client:** `WaitUntilReadyAsync`, `GetReadinessAsync`, the package `Aouda.Client.Extensions.DependencyInjection` with `AddAouda`, and `AoudaClientOptions.ApiKey` now trims surrounding white space (in 0.14.0 and earlier a key read from a file with a trailing newline made every request throw `FormatException`). A server that is still starting, `503 SERVER_STARTING`, no longer opens the circuit breaker or trips `AuthFailurePolicy.FailFast`: [.NET client](../clients/dotnet.md#waiting-for-the-server-to-start).
 
 **In-process hosts only** (tests, an embedding): `ConfiguredKeyStore` is no longer a DI service; resolve `ConfiguredKeyStoreHolder` and read `Current`. Nothing changes for an HTTP or SDK client.

@@ -4,7 +4,7 @@ nav_order: 2.55
 parent: "Guides"
 ---
 
-# Declare a server in one file: `aouda.json` (**BL-1463, next train**)
+# Declare a server in one file: `aouda.json` (**BL-1463, 0.16.0**)
 
 A server has **one declaration**: a JSON file, `aouda.json`, that says which databases exist, which schema file each one applies and
 which roles an auth database has. A wipe of the data directory followed by a plain start brings the same databases, links, schemas and roles back from it, empty of data. The

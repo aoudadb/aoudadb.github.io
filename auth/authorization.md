@@ -4,7 +4,7 @@ nav_order: 2
 parent: "Auth and Authorization"
 ---
 
-# Policy: statements, actions and row conditions (**BL-1464, next train**)
+# Policy: statements, actions and row conditions (**BL-1464, 0.16.0**)
 
 Nothing grants access except a statement. A credential does not. A role name does not, except as a bundle of statements. A table carries no security of its own.
 

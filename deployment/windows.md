@@ -126,9 +126,9 @@ The same shape: Aouda sizes scan parallelism from the cores it can see. On a ded
 
 ⚠️ **Aouda does not accept a password on the command line**, on any platform. A command line is recorded by shell history, by process-creation audit events, and by CI logs; none of that can be un-leaked.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 naming the remedy (`POST /api/auth/setup` from this machine, or stop the service first) (**BL-1462, 0.14.0**). A server that
-declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, next train**).
+declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, 0.16.0**).
 
 ```powershell
 # A file
@@ -209,7 +209,7 @@ Stops and removes the service. **The data directory is never touched.**
 
 - **A long command line.** A command line through a `.cmd` shim is limited to 8191 characters by Windows. A full declaration given to
   `aouda plan` or `aouda start` as `--Aouda:…` arguments can exceed it. Put the arguments in a file, one per line, and pass `@args.txt`
-  (**BL-1586, next train**; see [Plan a declaration](../guides/plan.md#the-command)), or start `Aouda.Server.exe` directly.
+  (**BL-1586, 0.16.0**; see [Plan a declaration](../guides/plan.md#the-command)), or start `Aouda.Server.exe` directly.
 - **Installing the tool with NuGet package source mapping on.** `dotnet tool install -g Aouda.Cli --add-source <feed>` fails when a
   `packageSourceMapping` section does not map `Aouda.Cli` to that source, because the mapping is applied before `--add-source`. Add a
   `<package pattern="Aouda.*" />` entry for the feed to your `NuGet.Config`, or use `dotnet tool update -g Aouda.Cli --version <X>`,

@@ -21,7 +21,7 @@ A single-node deployment is one where a database's replication mode is set to **
 "databases": { "<name>": { "kind": "data", "replicationMode": "DoNotReplicate" } }
 ```
 
-in `aouda.json` (**BL-1463, next train**; it was the setting `Aouda:Databases:<name>:ReplicationMode`, which is refused now).
+in `aouda.json` (**BL-1463, 0.16.0**; it was the setting `Aouda:Databases:<name>:ReplicationMode`, which is refused now).
 
 The default is `Replicate`. That single key is the entire profile — there is no separate "single-node
 mode" flag, config section, or CLI switch to discover. Set it per database (`PATCH` the database's

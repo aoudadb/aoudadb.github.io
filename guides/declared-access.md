@@ -4,12 +4,12 @@ nav_order: 2.65
 parent: "Guides"
 ---
 
-# Declared access: principals, roles and `signup` in `aouda.json` (**BL-1464, next train**)
+# Declared access: principals, roles and `signup` in `aouda.json` (**BL-1464, 0.16.0**)
 
 The declaration file says **who may do what**, beside what exists. Per application auth database, `databases.<auth>` takes three
 members — `signup`, `roles`, `principals` — and the server auth database's operators are declared once in `server.roles` and
 `server.principals`. A wipe of the data directory followed by a plain start brings every declared principal and role back, with the
-same ids. The exact JSON of each member is in [The declaration file](../reference/declaration.md#the-access-section-signup-roles-principals-bl-1464-next-train).
+same ids. The exact JSON of each member is in [The declaration file](../reference/declaration.md#the-access-section-signup-roles-principals-bl-1464-0160).
 
 ## What a start and a reload do with it
 
@@ -37,8 +37,7 @@ anyway, the start or the reload stops at it (`ACCESS_CONVERGE_REFUSED`) — noth
 
 ## The file owns what it declares
 
-- A declared principal or role is the file's, **whole**: change it in the file, not in Studio or through the API. (**BL-1463, next
-  train**) The API refuses such a change with `409 DECLARED_IN_CONFIGURATION`, naming the file and the JSON pointer — a change to its
+- A declared principal or role is the file's, **whole**: change it in the file, not in Studio or through the API. (**BL-1463, 0.16.0**) The API refuses such a change with `409 DECLARED_IN_CONFIGURATION`, naming the file and the JSON pointer — a change to its
   statements, roles, attributes or description, a rename or a deletion, a stored key or an OIDC trust added for it, deleting one of its
   declared credentials, a change to the `signup` setting or `anonymous` of an auth database the file declares access for — and changes
   nothing. Two emergency actions stay allowed: setting the principal `disabled` (on its own) and revoking one of its credentials; both

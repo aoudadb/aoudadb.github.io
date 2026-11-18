@@ -58,7 +58,7 @@ a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoam
 Four rules hold this together:
 
 1. **The trust boundary is the listener, not a route or a header.** The profile is tagged on the Kestrel connection. There is no request you can send to switch profiles.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 3. **The edge stays thin.** TLS, WAF, CDN, geo-allow — yes. Deserializing the JSON and re-serializing it — no. A hop that only relays bytes is waste; a hop that adds trust has earned its place. Direct internet exposure with **no** edge is not a supported configuration in this release.
 4. **Browsers read through named artifacts only.** They cannot compose a query, cannot name a table, and cannot see that `admin/*` exists.
 
@@ -99,9 +99,9 @@ It is **not** deletable if it resolves an identifier against another system, qua
 
 ### 4. The auth proxy — **delete the user-facing half**
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **Do not delete your JWT validation** in services that still exist. They validate the same Aouda-issued token via OIDC discovery / JWKS, which is published on both listeners.
 
@@ -204,10 +204,10 @@ Named-query cost is `1 + joinCount`, capped at 3 joins / cost 8. A view that nee
 
 Do these in order. Each step is independently shippable and independently revertible.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Materialized queries can now be declared here too, but **export before you hand-edit**: a present `materializedQueries` map is desired state and drops anything not listed. Everything after this step depends on it.
 3. **Turn on the data-plane listener** behind your existing edge, on its own hostname. Prove the isolation before you use it: `POST …/query` and `GET /api/databases` must return **404** on the data-plane and work on admin.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 6. **Author named queries and switch reads over behind a flag.** Old gateway route and new named query both work. Compare results.
 7. **Move ingest normalization** that passes the [decision test](division-of-responsibility.md#the-test-when-it-is-not-obvious) into `checks` / `derived` / `route`. Expect an error-handling change: a failed check **fails the whole batch**, it does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted **before** you apply it. `route` must also be exhaustive — an unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row left behind on the landing table — so declare a catch-all route to a quarantine table. See [failure semantics](insert-transforms.md#failure-semantics-the-batch-fails-the-row-does-not-skip).
 8. **Move streaming** with `namedQueries.subscribe`, subject to [capacity](#capacity-what-changes-when-the-relay-is-gone) — this is where losing the relay's fan-out shows up. Build the direct path behind a flag while the relay still runs.
@@ -223,7 +223,7 @@ Hand this to whoever (or whatever) is writing the plan.
 - [ ] Server is `0.1.8`+ and the four trusted-surface breaks have been checked against current usage
 - [ ] `aouda.schema.json` is in git and `schema validate` is clean against every environment
 - [ ] Admin listener is unreachable from outside the private network — probed, not assumed
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - [ ] `aouda schema diff --access` runs on every PR that touches the schema
 - [ ] Named queries have `select` (never `*`), a capped `limit`, and ≤3 joins
 - [ ] Subscriptions are collection-shaped; measured count per connection is well under 32
@@ -249,7 +249,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | Studio shows a connect error after adding the listener | Studio is pointed at the data-plane | Studio and Hub use the **admin** URL |
 | Ingest throughput fell after adding transforms | Write amplification on small batches | Batch size is the tuning parameter; avoid stacking `tee`s on a hot path |
 | Rows silently vanished after adding `route` | Events follow storage, not the request | Query the target table, or use `tee` if you meant to keep both |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
@@ -272,5 +272,5 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - [Direct client access](direct-client-access.md) — listeners, keys, quotas, topology
 - [Named queries and mutations](named-queries.md) — authoring, execute, batch, subscribe
 - [Insert-time transforms](insert-transforms.md) — `derived`, `checks`, `route`/`tee`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - [Schema CI/CD](schema-cicd.md) · [Compatibility matrix](../clients/compatibility.md) · [HTTP API](../reference/http-api.md)

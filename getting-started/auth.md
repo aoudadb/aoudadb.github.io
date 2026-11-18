@@ -4,7 +4,7 @@ nav_order: 2
 parent: "Getting Started"
 ---
 
-# Authentication (**BL-1464, next train**)
+# Authentication (**BL-1464, 0.16.0**)
 
 One model. A **principal** is who is acting, a **policy** is what they may do, a **credential** proves which principal it is. The chapter is [Access](../auth/index.md). This page is the first run.
 

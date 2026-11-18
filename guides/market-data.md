@@ -10,7 +10,7 @@ Document status: Approved baseline
 Primary owner: Aouda maintainers  
 Last updated: 2026-10-27
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **Related guides:**
 
@@ -27,11 +27,11 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 ## 1. Audience and scope
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 - Execute named queries (by name) and read columnar results.
 - Subscribe to named queries over WebSocket for real-time updates.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 You cannot (data-plane restrictions):
 
@@ -232,7 +232,7 @@ Key design decisions:
 - **This schema is a tick tape, and that is the layout to copy only for a tick tape.** `quotes` and `trades` partition on `(ticker, source)` and cluster on `time`, because one ticker holds a great many ticks and every read names the ticker and the source. `partitionStorage` is left unset, so the table is `Auto`: a pair that reaches 10 million rows or 1 GB is promoted to its own directory, and a chart of that ticker reads that directory. A daily series (one row per security per day, plotted across years) partitions on the security, uses a shared bucket and clusters on the date. A shared bucket is written and merged in key order and then time order, so each security keeps one run (**BL-1180, 0.9.0**). Up to 0.7.1 the merge ordered by `clusterColumns` only, so on those versions such a series lists the security again as the first `clusterColumns` entry, before the date. A tick tape needs neither: a promoted ticker is its own directory, and clustering on `time` alone keeps that directory in time order. A sensor feed whose old rows are irrelevant is a third layout. All three are in [Should this table have a partition key?](partitioning.md#should-this-table-have-a-partition-key-p45). Copying the tick schema onto either of the others is the mistake that page is there to prevent.
 - **`bid`/`ask` as declared `Decimal(18,2)`** — not a `price_type` partition key. The partition key is the `(ticker, source)` pair, the same columns the candles group by. Wire form is `"type": "Decimal"` with sibling `"precision"` and `"scale"` — not a type string `"Decimal(18,2)"`. Both are required: an undeclared `"Decimal"` is refused (**LoadSpeed S13, 0.4.0**). See [schema](schema.md).
 - **`listings` is unpartitioned** — `count: true` + optional facets (`whenParamPresent`) is legal only on tables where every predicate covers the partition key or the table has no partition key. An unpartitioned reference table is the right shape for a screener.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
@@ -375,7 +375,7 @@ Content-Type: application/json
 Response columns: `["ticker", "time", "open", "high", "low", "close"]`. The `time` column contains the UTC **epoch-millisecond** start of each hour bucket — an Int64, not a formatted string. Candles are ordered ascending by time (as defined in the NQ).
 
 {: .important }
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Day and minute intervals
 
@@ -590,15 +590,15 @@ The `derived` expression (base-table computed column) is a fallback for ranking 
 
 ### Pattern 1 — `jwt-claim` (single ticker per user)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 See [Auth — jwt-claim mode](../auth/authorization.md#193-mode-1-jwt-claim-default).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 When a user may access many tickers (watchlist, portfolio), store grants in the auth database. Fan-out: a named-query subscription automatically merges results from all granted tickers. Revoke access on the next request without re-issuing JWTs.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
@@ -674,7 +674,7 @@ await client.table("quotes")
   .execute();
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Ad-hoc query on a candle table (admin HTTP)
 

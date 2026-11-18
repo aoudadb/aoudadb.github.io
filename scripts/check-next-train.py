@@ -61,7 +61,7 @@ _VERSION_HEADING = re.compile(r"^(#{1,6})[ \t]+v?(\d+\.\d+\.\d+)\b")
 _ANY_HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+train|planned|not\s+shipped", re.IGNORECASE)
 # A released mention of these is a slice. The rest of the card may still say `next train`.
-_ALLOW = {"BL-1463", "BL-1464"}
+_ALLOW = set()  # BL-1463 / BL-1464 shipped fully in 0.16.0
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ nav_order: 7
 parent: "Auth and Authorization"
 ---
 
-# Client integration (**BL-1464, next train**)
+# Client integration (**BL-1464, 0.16.0**)
 
 Both SDKs take **one credential**: a key, or a session. There is no second option for "which kind of caller", and no header beside the bearer. The pages with the method names are [.NET](../clients/dotnet.md) and [TypeScript](../clients/typescript.md). This page is the shape.
 

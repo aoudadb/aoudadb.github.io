@@ -68,7 +68,7 @@ AI applications require three data modalities — structured rows, graph relatio
 
 ### Operational outcome
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Scope boundaries (Stage 1)
 
@@ -155,7 +155,7 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 - Late-arriving vectors are flushed inline; the cell-aware `_delta/` merge is removed (**ColumnarRead, 0.3.0**)
 - `InsertVectorsAsync`, `DeleteVectorAsync` on `AoudaEngine`
 - ANN search operator: `NearestNeighborsAsync` (IVF-pruned brute-force scan, Stage 1)
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 **MdVector storage:**
 - `DataType.MdVector` column type with `MdVectorColumnConfig` (`Dimensions`, `MaxTokens`, `Distance`, `Fde`)
@@ -300,19 +300,19 @@ The `IvfCellId` and `QuantizationMethod` fields in `SegmentManifest` identify wh
 
 These fields are serialized by `ManifestSerializer.cs` for every manifest but have no runtime effect until Stage 4. Contributors **must not** repurpose them without a superseding ADR.
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissionContext? permissions` parameter. When non-null:
 - `ResolveEdgeAccess` calls `AdraEdgeAccessFilter` to resolve the set of allowed partition keys.
 - `ResolveVectorAccess` calls `AdraVectorAccessFilter` similarly.
 - An empty allowed-partition set returns an empty result immediately (deny-by-default).
 - `null` permissions means embedded mode, with no auth context: unrestricted on a table no auth database governs, and **empty** on an
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - A credential that holds an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) on the
   table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
   and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, 0.9.0**)
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
@@ -456,7 +456,7 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### NearestNeighborsAsync query parameters
 
@@ -542,7 +542,7 @@ curl -X POST "$AOUDA/api/databases/social/tables/follows/edges:khop" -H "Authori
 ```
 
 The reads (`edges:traverse`, `edges:khop`, `edges:shortest-path`, `:nearest`) take the same freshness parameters as `POST …/query`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### .NET examples
 
@@ -796,7 +796,7 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | Vector cell seal | `VectorSegmentFlusher` | At each HRA freeze-and-swap per column |
 | Compaction floor suppressed | `Perf.CompactionFloorSuppressed` | HRA triggered but below `MinFlushRows` / `MinFlushBytes` |
 | WAL replay edge/vector frames | WAL replay log | On `AoudaEngine.OpenAsync` after crash |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### Recovery expectations
 
@@ -826,7 +826,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | `ShortestPathAsync` is slow or returns a long path | `StoreCsc: false`; using unidirectional BFS | Re-create the edge table with `StoreCsc: true` for bidirectional BFS (requires data reload) |
 | ANN recall is low | Too few IVF cells probed relative to corpus distribution | Increase `IvfCells` (requires recreating column config); or verify `partitionKey` is not too restrictive |
 | Edge traversal returns unexpected nodes | Cross-partition traversal not supported in Stage 1; edges from other partitions not reachable from a cross-partition query | Ensure the start node's partition is accessible and edges are routed to the same partition as their source |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ---
 
@@ -904,7 +904,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - ADR 0014 — time-series clustering (delta-merge model reused for edges/vectors)
 - ADR 0021 — HRA freeze-and-swap (same mechanism for `EdgeHraBuffer` / `VectorHraBuffer`)
 - ADR 0022 — licensing (embedded parity for graph/vector)
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - ADR 0030 — bulk-load replication (covers `BulkLoadAsync` write path)
 - ADR 0032 — cross-modal authorization (`AdraEdgeAccessFilter` / `AdraVectorAccessFilter`)
 

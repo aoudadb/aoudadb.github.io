@@ -4,7 +4,7 @@ nav_order: 2.4
 parent: "Guides"
 ---
 
-# Declare a deployment: one complete, working set (**BL-1463, next train**)
+# Declare a deployment: one complete, working set (**BL-1463, 0.16.0**)
 
 This page is one working set for a multi-service deployment that is **declared** instead of scripted: two data databases and one auth database, the principals and statements every service needs, a compose file, a plan before the deploy, a wipe-and-start, and a reload. Copy the files together.
 
@@ -219,4 +219,4 @@ The declaration comes back: databases, schema, roles, principals, derived keys. 
 
 - [Declared access](declared-access.md) and [Credentials](../auth/credentials.md)
 - [whoami](../auth/whoami.md) and the [CLI](../reference/cli.md)
-- [Kubernetes](../deployment/kubernetes.md#declare-the-databases-bl-1463-next-train)
+- [Kubernetes](../deployment/kubernetes.md#declare-the-databases-bl-1463-0160)

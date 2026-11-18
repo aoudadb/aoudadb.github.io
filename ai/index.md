@@ -12,7 +12,7 @@ Last updated: 2026-04-08
 
 Coverage phases: P12, P14
 Primary task folders: `docs/tasks/P12/`, `docs/tasks/P14/`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Auth-And-Authorization.md`, `docs/dev/Functionality-Schema-Lifecycle.md`
 
 ## Start Here
@@ -24,7 +24,7 @@ If your question is "How should an AI agent use Aouda today?", start with:
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
 - [Local CLI testing (agents)](local-cli-testing.md) for a throwaway `aouda start` (unused ports, temp data-dir) and the traps that waste a session (`start -h`, data-plane `/query`, CorsOrigins shape, schema `where` / keys)
-- [Declare a server in one file](../guides/declaration.md) (**BL-1463, next train**) when the agent must produce a deployment (compose, principals, statements, schema files) that survives a wipe: one `aouda.json`, checked with `aouda plan`
+- [Declare a server in one file](../guides/declaration.md) (**BL-1463, 0.16.0**) when the agent must produce a deployment (compose, principals, statements, schema files) that survives a wipe: one `aouda.json`, checked with `aouda plan`
 - [Named queries](../guides/named-queries.md) for generated browser apps (string names; a browser holds no key — give `anonymous` the statements it may run)
 - [Division of responsibility](../guides/division-of-responsibility.md) before moving logic into the schema
 
@@ -48,7 +48,7 @@ The AI-native usage model exists to make Aouda practical for agent-driven softwa
 
 User outcomes:
 - Fast "first successful request" for local agents (`aouda start`, schema-on-write, simple HTTP/SDK paths).
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Predictable error contracts (`error`, `message`, `suggestion`, `requestId`) suitable for retry/fix loops.
 
 Scope boundaries:
@@ -90,14 +90,14 @@ Scope boundaries:
   - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
   - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
 - Design references:
   - `docs/decisions/0017-ai-native-interface.md` (proposed; intent-level)
   - `docs/decisions/0022-licensing-and-distribution-strategy.md` (draft; supersedes ADR 0017 licensing section)
   - `docs/decisions/0023-authentication-and-authorization.md`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Core runtime/code evidence:
   - `src/Aouda.Server/DevServer/DevServerHost.cs`
   - `src/Aouda.Server/DevServer/DevServerOptions.cs`
@@ -106,7 +106,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
   - `src/Aouda.Server/Auth/AuthErrorResponses.cs`
   - `src/Aouda.Protocol/ErrorCodes.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - SDK evidence:
   - `.NET`: `src/Aouda.Client/Auth/AppAuthOptions.cs`, `src/Aouda.Client/Auth/ServerAuthOptions.cs`
   - TypeScript: `../aouda-client-ts/src/client.ts`, `../aouda-client-ts/src/auth/auth-types.ts`, `../aouda-client-ts/src/auth/auth-client.ts`, `../aouda-client-ts/src/types.ts`
@@ -123,7 +123,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 If you do nothing beyond starting local dev:
 
 - `aouda start` runs the foreground server (CLI flags `--port`, `--data-dir` override optional local `appsettings.json` — see [Server configuration](../guides/server-configuration.md)).
-- App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. The response has no key. A principal and its key are declared, or minted on the principal. See [Access](auth/index.md) (**BL-1464, next train**).
+- App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. The response has no key. A principal and its key are declared, or minted on the principal. See [Access](auth/index.md) (**BL-1464, 0.16.0**).
 - Password reset and invite emails require a **configured email provider** on the server (`Aouda:Auth:Email` — `console` for local dev, `sendgrid` for production) — see [auth/notifications.md](../auth/notifications.md).
 - HTTP database creation with `{ "auth": { "enabled": true } }`:
   - links to existing single app auth DB, or
@@ -142,7 +142,7 @@ If you do nothing beyond starting local dev:
 | `TokenOptions.Issuer` | `"aouda"` | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}`, and (**0.4.0**) only that issuer is accepted for them |
 | `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | Signature + revocation checking by default |
 | `PasswordPolicy` | Min `8`, Max `128` | NIST-aligned baseline policy |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -151,12 +151,12 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 - Agent-friendly local bootstrap:
   - `aouda start` with HTTP database + auth setup; keys from create-database response.
 - Auto-generated connection keys on auth-enabled DB creation:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Two-layer auth runtime:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   - user JWT identity/session flow.
 - Service-key user-context forwarding:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Structured auth errors with machine-usable fields:
   - `error`, `message`, `suggestion`, optional `detail`, optional `requestId`.
 
@@ -164,7 +164,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 - Full MCP server surface described in ADR 0017 (`aouda_create_database`, `aouda_query`, auth tools, schema resources).
 - Natural-language query pipeline and validation/explain flow from ADR 0017.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Cloud ephemeral instance provisioning model in ADR 0017/ADR 0022 distribution direction.
 
 ### Reserved / not yet wired
@@ -198,18 +198,18 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
   - machine-readable errors,
   - predictable schema and policy APIs.
 - Layered auth model for generated apps:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   - Layer 2: user JWT/session identity.
 - Progressive authorization maturity:
   - start with `jwt-claim`,
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Agent-safe failure model:
   - stable error code + suggestion allow deterministic retries/fixes.
 - SDK behavior:
   - auth handler starts with key/token, upgrades to user JWT after sign-in where applicable.
 
 Invariants:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Missing/invalid policy context fails closed.
 
 ## 2.8 How Aouda implements it
@@ -217,11 +217,11 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 High-level runtime path:
 
 1. Bootstrap: `aouda start` (or HTTP DB create) starts DB and optional auth linkage.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 3. Middleware:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 4. Authorization:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 5. Response:
    - structured error payload on failure,
    - standard protocol payloads on success.
@@ -231,7 +231,7 @@ Implementation anchors:
 - Auth DB linking and generated keys: `src/Aouda.Server/Controllers/DatabasesController.cs`
 - Auth scope and validation pipeline: `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
 - Error contract: `src/Aouda.Server/Auth/AuthErrorResponses.cs`, `src/Aouda.Protocol/ErrorCodes.cs`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - TS wrappers and options: `../aouda-client-ts/src/auth/auth-client.ts`, `../aouda-client-ts/src/auth/auth-types.ts`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
@@ -259,27 +259,27 @@ Primary evidence:
 - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
 - `tests/Aouda.Server.Tests/Auth/AppAuthPublicEntryTests.cs`
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 1. Primary bearer validates as service-level key.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 3. On success, middleware replaces principal and sets `EffectiveUserTokenItemKey` for downstream cache isolation.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Primary evidence:
 - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
 - `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 3. Enforcer constrains query to granted partitions and blocks ungranted keys.
 4. Result set contains only rows from authorized partitions.
 
 Primary evidence:
 - `src/Aouda.Protocol/Schema/TableMessages.cs`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
 
 ## 2.9 Why Aouda is different (differentiators)
@@ -306,7 +306,7 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 | `PasswordPolicy.MaxLength` | int | `128` | `>= MinLength` | Auth engine options | Password maximum length |
 | `.NET AppAuthOptions.RefreshThreshold` | timespan | `2m` | positive | Client code | Proactive refresh threshold |
 | `.NET ServerAuthOptions.RefreshThreshold` | timespan | `2m` | positive | Client code | Proactive refresh threshold |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Precedence and operational notes:
 - Host config precedence: code defaults → optional appsettings → env → `AOUDA_*` → CLI (see [Server configuration](../guides/server-configuration.md)).
@@ -315,7 +315,7 @@ Precedence and operational notes:
 - Auth route/admin policy changes are runtime dynamic.
 - Safety-gated behavior:
   - app auth routes reject missing API keys;
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Reserved/deferred:
   - no runtime config surface for MCP server tooling or NL query engine in this repo.
 
@@ -343,7 +343,7 @@ Expected result: client signs in through app auth route and subsequent calls use
 
 Common mistake: setting both `ApiKey` and `Token` in app auth options (validation throws).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ```typescript
 import { createAoudaClient } from "@aouda/client";
@@ -362,9 +362,9 @@ await client.auth.createEntitlement("550e8400-e29b-41d4-a716-446655440000", {
 });
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### HTTP/protocol examples
 
@@ -390,9 +390,9 @@ Content-Type: application/json
 }
 ```
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ### A) API coverage matrix
 
@@ -437,23 +437,23 @@ When to use:
 - backend service performs operations for user while preserving row/partition controls.
 
 Steps:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 Expected checks:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 When to use:
 - user needs access to multiple partition keys and static claim model is insufficient.
 
 Steps:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 3. Run fan-out query without explicit partition filter.
 4. Validate only granted partitions are returned.
 
 Expected checks:
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - fan-out query returns only granted partitions;
 - writes without proper access-level grant fail with specific error code.
 
@@ -468,34 +468,34 @@ Monitor first:
   - `AUTH_TOKEN_REVOKED`.
 - dev bootstrap behavior:
   - key generation vs existing-key prefix branch in startup output.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   - grant-not-found and insufficient-access error patterns,
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - request-level diagnostics:
   - response `requestId`,
   - `X-Auth-Database` on relevant auth failures.
 
 Recovery expectations:
 - restart preserves auth metadata and policy state (auth DB tables persisted under normal server mode);
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - token revocation behavior depends on selected validation mode (`Hybrid`/`Stateful` stronger than `SignatureOnly`).
 
 Recommended tuning sequence:
 1. Keep default `Hybrid` validation in most app flows.
 2. Keep short access tokens and rely on refresh workflow.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 | Question | Practical answer |
 |---|---|
 | What is the safest default for generated apps? | App auth with anon key + sign-in, middleware in `Hybrid` mode |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ## 2.14 Troubleshooting by symptom
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `AUTH_API_KEY_REQUIRED` on app auth route | Pre-BL-355 server, or a non-public `/auth/*` path | Public signup/signin/refresh are keyless. `/me` and `/mfa/*` need a user JWT. |
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 ## 2.15 Verification ledger
 
@@ -529,7 +529,7 @@ Last verification date (UTC): `2026-04-01`.
 - AI-friendly error payload is useful but incomplete relative to P12 Epic E intent:
   - current payload has `error/message/suggestion/detail/requestId`,
   - fields like `mcpTool` and `docs` are not emitted.
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Cloud ephemeral provisioning path is not present in current server:
   - distribution direction exists in ADR 0022, not as shipped endpoint in this workspace.
 
@@ -539,13 +539,13 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
   - `docs/decisions/0017-ai-native-interface.md`
   - `docs/decisions/0022-licensing-and-distribution-strategy.md`
   - `docs/decisions/0023-authentication-and-authorization.md`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 - Tasks/reports:
   - `docs/tasks/P12/P12-TwoLayerAuth-Tasks.md`
   - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
-Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
   - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
   - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
 - Code:

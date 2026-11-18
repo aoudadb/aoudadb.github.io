@@ -4,7 +4,7 @@ nav_order: 1
 parent: "Auth and Authorization"
 ---
 
-# Principals (**BL-1464, next train**)
+# Principals (**BL-1464, 0.16.0**)
 
 ## Principals
 

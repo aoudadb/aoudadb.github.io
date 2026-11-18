@@ -4,7 +4,7 @@ nav_order: 3
 has_children: true
 ---
 
-# Access: principals, policy and credentials (**BL-1464, next train**)
+# Access: principals, policy and credentials (**BL-1464, 0.16.0**)
 
 Three concepts decide every request.
 

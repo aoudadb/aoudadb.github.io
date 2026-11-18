@@ -4,7 +4,7 @@ nav_order: 3
 parent: "Auth and Authorization"
 ---
 
-# Credentials (**BL-1464, next train**)
+# Credentials (**BL-1464, 0.16.0**)
 
 A credential proves which principal is acting. It does not grant. Four kinds: a **stored key**, a **derived key**, an **OIDC trust**, a **limited key**, and a **session** (from a password or from an OIDC exchange). The key format is the same for every key.
 
