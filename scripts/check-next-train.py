@@ -32,7 +32,11 @@ and ids are reused across repos' numbering (0.4.0's `Cards: BL-1001 … BL-1004.
 realtime API-key re-check that is `BL-1001` today, BL-1498). Every other mention counts, as before; a range is not expanded.
 
 A line of a released section that says the work is NOT shipped (`not yet shipped`, `unreleased`, `next train`, `planned`) does
-not count: the 0.13.0 section names BL-1380 that way. Exit status 1 when a marker is stale, 0 otherwise.
+not count: the 0.13.0 section names BL-1380 that way.
+
+`_ALLOW` names a card whose released mention is a slice, not the whole card. BL-1463 and BL-1464 shipped Declare's slices in
+0.14.0; the access-model cut is the rest of those cards and is still `next train`. Remove an id from that set in the same commit
+that replaces its markers with the version. Exit status 1 when a marker is stale, 0 otherwise.
 """
 
 from __future__ import annotations
@@ -56,6 +60,8 @@ _RANGE = re.compile(r"BL-\d+[*`_]*[ \t]*(?:…|\.{2,3}|–|—|-|\bto\b)[ \t]*[*
 _VERSION_HEADING = re.compile(r"^(#{1,6})[ \t]+v?(\d+\.\d+\.\d+)\b")
 _ANY_HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+train|planned|not\s+shipped", re.IGNORECASE)
+# A released mention of these is a slice. The rest of the card may still say `next train`.
+_ALLOW = {"BL-1463", "BL-1464"}
 
 
 @dataclass(frozen=True)
@@ -135,6 +141,8 @@ def check(root: str, released: dict[str, Release]) -> list[Finding]:
     findings: list[Finding] = []
     for rel, line, ids in scan(root):
         for bl in ids:
+            if bl in _ALLOW:
+                continue
             hit = released.get(bl)
             if hit:
                 findings.append(Finding(rel, line, bl, hit.repo, hit.version, hit.line))

@@ -12,7 +12,7 @@ Last updated: 2026-05-22
 
 Coverage phases: P4, P7, P8, P14
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P8/`, `docs/tasks/P14/`
-Primary ADRs: `docs/decisions/0018-alter-add-column-no-backfill.md`, `docs/decisions/0019-declarative-schema-management.md`, `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-RealTime-Streaming.md`
 
 ## Start Here
@@ -22,7 +22,7 @@ If your question is "How do I manage schema safely right now?":
 - `2.10 Configuration and settings reference`
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
-- **P37:** [Named queries](named-queries.md) (`namedQueries` / `namedMutations` in the schema file), [Insert-time transforms](insert-transforms.md) (`derived`, `checks`, `transforms`, `dataPlaneAccess`), [Access-surface diff](access-surface.md) (`aouda schema diff --access`).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 If your question is "What is shipped vs planned?":
 - `2.4 Availability status`
@@ -215,7 +215,7 @@ If you do not configure schema management explicitly:
 | P4 | `P4-EpicA-Task3-SchemaManagementApi-Report.md` | Core imperative table/column/policy HTTP management | Declarative desired-state not yet in this phase | N/A |
 | P7 | `BL025-Fix2-AddColumnColdBackfill-Report.md` | Correct add-column behavior over cold segments with aligned backfill | Further performance tuning can continue | N/A |
 | P8 | `P8-DeclarativeSchemaManagement-Tasks.md`, C.4 report, F.2/F.3/F.4 reports | Declarative schema diff/apply/export/history, migration history, CLI integration, branch isolation/merge/COW sharing | `InferenceMode: Extend` deferred; CLI seed command still stub on .NET tool | `docs/BACKLOG.md` (BL-022) |
-| P14 | `P14-TaskC1-TableSchemaExtension.md` (implemented report included in file body) | Schema model/path now includes table auth metadata options (`authMode`, permission dimension, resolver name) | Wider auth behavior docs still broader than this domain | N/A |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -498,8 +498,6 @@ This is a full, versioned example set you can keep in git and run end-to-end.
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     },
     "orders": {
       "columns": {
@@ -516,8 +514,6 @@ This is a full, versioned example set you can keep in git and run end-to-end.
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     }
   }
 }
@@ -549,8 +545,6 @@ Changes from v1:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     },
     "orders": {
       "columns": {
@@ -569,8 +563,6 @@ Changes from v1:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     },
     "payments": {
       "columns": {
@@ -588,8 +580,6 @@ Changes from v1:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     }
   }
 }
@@ -620,8 +610,6 @@ Changes from v2:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     },
     "orders": {
       "columns": {
@@ -639,8 +627,6 @@ Changes from v2:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     },
     "payments": {
       "columns": {
@@ -658,8 +644,6 @@ Changes from v2:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "ColdPreferred" },
       "durability": { "level": "strict" },
-      "partitionLevelSecurity": false,
-      "authMode": "jwt-claim"
     }
   }
 }
@@ -751,7 +735,6 @@ When you add `Aouda.Schema.Contract` to your project, you get:
 | Type | Namespace | Purpose |
 |---|---|---|
 | `SchemaDocument` | `Aouda.Engine.Schema.Models` | Root type for `aouda.schema.json`: `$schema`, `database`, `tables`, `settings`, `extends` |
-| `TableDefinition` | `Aouda.Engine.Schema.Models` | Per-table structure: `columns`, `partitionKey`, `clusterColumns`, `policy`, `durability`, `partitionLevelSecurity`, `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` |
 | `ColumnDefinition` | `Aouda.Engine.Schema.Models` | Per-column: `type`, `primaryKey`, `autoIncrement`, `nullable`, `references`, `default`, `description` |
 | `PartitionKeyEntry` | `Aouda.Engine.Schema.Models` | Partition key entry: `column`, `function` |
 | `TablePolicyDto` | `Aouda.Engine.Schema.Models` | Table policy: `storageTemperature` |
@@ -803,8 +786,6 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `AddColumn` | No | A column exists in desired table but not in actual. |
 | `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
 | `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies. |
-| `UpdatePartitionLevelSecurity` | No | The `partitionLevelSecurity` flag on the table changed. |
-| `UpdateAuthorizationOptions` | No | One or more of `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` or `plsClaimBinding` changed. |
 | `UpdateSettings` | No | The database-level `settings.durability` (its `replicationFactor`) changed. |
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
@@ -899,19 +880,19 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 | `ManualDdl` | Change applied directly to the catalog outside of schema apply (e.g. via Studio or direct DDL endpoint). |
 | `Inference` | Change applied by inference (auto-create on first insert, `InferenceMode = Extend`). |
 | `BranchMerge` | Change applied by merging a branch into the parent catalog. |
-| `DeclaredApply` | The server applied the `SchemaFile` a declared database names, at start (**BL-1388, 0.11.0**). |
+| `DeclaredApply` | The server applied the schema file a declared database names (`databases.<db>.schema`), at start (**BL-1388, 0.11.0**). |
 
 ### E) Schema JSON field reference (complete)
 
 This section documents every field available in `aouda.schema.json` by type. All fields are optional except `type` on `ColumnDefinition`.
 
-**Only these fields, spelled exactly** (**BL-1460, 0.14.0**). A member that is not listed here (a materialized query has no `authMode`), or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
+**Only these fields, spelled exactly** (**BL-1460, 0.14.0**). A member that is not listed here, or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
 `aouda plan`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
 pointer and the member meant. It used to be dropped without a word. The same holds inside named queries (`where`, `joins`, `orderBy`,
 `selectExpr`, `aggregates`, `groupBy`, `perKey`), named mutations and expressions. `schemas/aouda-schema.v1.json` lists exactly these
 members, for an editor's completion and squiggles.
 
-A rule a table breaks on its own (an authorization mode without its resolver or column, an upper-case `permissionDimension`,
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 partition-level security without a partition key, …) refuses the **whole** document at `schema apply` / `diff` with `400
 INVALID_REQUEST`, nothing applied (**BL-1460, 0.14.0**); the notes below that say "schema apply records the change `Failed`"
 describe the behaviour before that.
@@ -935,12 +916,6 @@ describe the behaviour before that.
 | `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. Each must be a column of this table: `Cluster column 'nope' in table 'orders' is not a column of the table.` (**BL-1460, 0.14.0**; it was dropped). |
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, 0.6.0**) and replication settings for this table. |
-| `partitionLevelSecurity` | `partitionLevelSecurity` | `bool` | `false` | Enable partition-level security (PLS) for this table. Only valid on partitioned tables. Allowed values: `true`, `false`. |
-| `authMode` | `authMode` | `string` | `"jwt-claim"` | Authorization mode. Valid values: `"jwt-claim"`, `"auth-db-entitlement"` (**BL-1418, 0.13.0**), `"auth-db-rls"`. `auth-db-entitlement` implies partition-level security even when `partitionLevelSecurity` is omitted, and requires `permissionDimension` and `permissionColumn`; it does not require a partition key (**BL-1176, 0.7.0** — up to 0.6.0 schema apply required one). |
-| `permissionDimension` | `permissionDimension` | `string` | None | The entitlement namespace for `"auth-db-entitlement"`: a lower-case opaque entitlement name in the auth database (for example `fx_source`). Entitlement `dimension` must match this string **byte-for-byte**. It **selects no column** — `permissionColumn` does (**BL-1176, 0.7.0**). An upper-case letter is refused (**BL-430, 0.9.0**): HTTP create and `PUT …/options` answer `400 INVALID_REQUEST`, and schema apply reports that change `Failed` and does not write it. The message gives the lower-case spelling. See [Data Authorization §19.4](../auth/authorization.md#194-mode-2-auth-db-entitlement-enhanced-pls) and [§19.8](../auth/authorization.md#198-admin-api-entitlements). |
-| `permissionColumn` | `permissionColumn` | `string` | None | (**BL-1176, 0.7.0**) The column the entitlement keys of `permissionDimension` are compared with. **Required** with `"auth-db-entitlement"`, and must name a column of the table exactly; refused with any other `authMode`. Never inferred: a dimension spelled like a column does not select it, and neither does partition-key order. The column cannot be dropped while it is declared; a rename carries it. |
-| `rlsResolverName` | `rlsResolverName` | `string` | None | RLS resolver name. Required with `"auth-db-rls"`, optional with `"auth-db-entitlement"`, refused with `"jwt-claim"` (including when `authMode` is omitted). Create and `PUT …/options` answer `400 INVALID_REQUEST`; schema apply records the change `Failed` and does not write it. The message names `auth-db-rls` and `auth-db-entitlement` (**BL-1281, 0.9.0**). The resolver itself is created via the admin API, not schema apply. |
-| `plsClaimBinding` | `plsClaimBinding` | `string` | `claim:tenant_id` | jwt-claim PLS source. `"subject"` or `"claim:<name>"`. Omit keeps `tenant_id`. |
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
 | `description` | `description` | `string` | None | (**0.15.0**; **0.14.0 refused it** with `SCHEMA_UNKNOWN_MEMBER`) A note on the table: **documentation in the schema file only**. It is checked for shape and then dropped: not stored in the catalog, not diffed, not exported by `aouda schema export`, and never a change in `aouda plan` or a schema apply. Adding, changing or removing one is not drift and needs no migration. It is a member of a table in a schema file only: an **overlay** file still refuses it. (A *column's* `description` is the opposite: stored, diffed, and a change to it is a schema change.) |
 
@@ -1105,8 +1080,6 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
     "clusterColumns": ["created_at"],
     "policy": { "storageTemperature": "Auto" },
     "durability": { "level": "strict" },
-    "partitionLevelSecurity": true,
-    "authMode": "jwt-claim"
   }
 }
 ```
@@ -1133,7 +1106,7 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
 #### SchemaSettingsDurability (value of `settings.durability`)
 
 (**Lead S26, 0.6.0**) No durability level here: a database's level is set where the database is created (`durability` on
-`POST /api/databases`, `Aouda:Databases:<db>:Durability`, the embedded options) and read at every open. A `walEnabled` in
+`POST /api/databases`, `databases.<db>.durability`, the embedded options) and read at every open. A `walEnabled` in
 `settings.durability` is a schema validation error saying so. Export no longer writes `settings`.
 
 | Field | JSON key | Type | Default | Notes |
@@ -1362,7 +1335,7 @@ Expected result:
 
 - `docs/decisions/0018-alter-add-column-no-backfill.md`
 - `docs/decisions/0019-declarative-schema-management.md`
-- `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Task/report evidence
 

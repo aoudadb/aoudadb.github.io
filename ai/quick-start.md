@@ -102,7 +102,7 @@ aouda start --port 5433 --data-dir ./data
 # Bootstrap server admin, then POST /api/databases with auth enabled — see auth/setup.md
 ```
 
-Capture `anonKey` and `serviceRoleKey` from the create-database JSON response, then:
+Create does not return a key. Declare the principal, or mint a key on it. a principal's statements, proved by an `aouda_` key or a session (`GET /api/auth/whoami`) (**BL-1464, next train**)
 
 ```typescript
 const client = createAoudaClient({
@@ -164,9 +164,9 @@ For full capability details see [AI Agents](index.md).
 - [Local CLI testing (agents)](local-cli-testing.md) — throwaway server recipe + CLI/schema/data-plane traps
 - [Full Getting Started guide](../getting-started/index.md) — embedded mode, server mode, schema, auth, identity-insert
 - [Bulk Load](../guides/bulk-load.md) — high-throughput ingest + `options.identityInsert`
-- [Auth for AI agents](index.md#212-scenario-playbooks-minimum-three) — bootstrap, service key, ADRA grant flows
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [HTTP API reference](../reference/http-api.md) — all endpoints
-- [Named queries](../guides/named-queries.md) — execute by name; do not compose ad-hoc queries with `mk_pub_*`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [Direct client access](../guides/direct-client-access.md) — data-plane vs admin. PKCE is not shipped.
 - [.NET client](../clients/dotnet.md) — full `Aouda.Client` reference, including column batches and bulk load
 - [TypeScript client](../clients/typescript.md) — full SDK reference

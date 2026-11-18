@@ -1,62 +1,62 @@
 {
-  "users": [
-    { "email": "alice@test.local", "password": "AlicePass1!", "role": "db_writer" },
-    { "email": "bob@test.local", "password": "BobPass1!", "role": "db_writer" }
-  ],
-  "resolvers": [
+  "database": "chat",
+  "authDatabase": "auth",
+  "principals": [
     {
-      "name": "rooms_visibility",
-      "resolverType": "ColumnMatch",
-      "rules": [
+      "name": "alice@test.local",
+      "statements": [
         {
-          "ruleOrder": 0,
-          "columnName": "id",
-          "operator": "In",
-          "valueSource": "Entitlement",
-          "valueConfig": "{\"dimension\":\"room_membership\"}",
-          "combinator": "Or"
+          "actions": ["read"],
+          "resources": ["chat/table/rooms"],
+          "where": { "or": [{ "column": "IsPublic", "op": "eq", "value": "true" }] }
         },
         {
-          "ruleOrder": 1,
-          "columnName": "IsPublic",
-          "operator": "Eq",
-          "valueSource": "Literal",
-          "valueConfig": "true",
-          "combinator": null
+          "actions": ["read", "write"],
+          "resources": ["chat/table/messages"],
+          "where": {
+            "and": [
+              { "column": "room_id", "op": "eq", "value": "room-public" },
+              { "column": "SenderId", "op": "eq", "principal": "id" }
+            ]
+          }
+        },
+        {
+          "actions": ["read", "write"],
+          "resources": ["chat/table/notes"],
+          "where": { "and": [{ "column": "UserId", "op": "eq", "principal": "id" }] }
         }
       ]
     },
     {
-      "name": "messages_access",
-      "resolverType": "ColumnMatch",
-      "rules": [
+      "name": "bob@test.local",
+      "attributes": { "rooms": ["room-private"] },
+      "statements": [
         {
-          "ruleOrder": 0,
-          "columnName": "room_id",
-          "operator": "In",
-          "valueSource": "Entitlement",
-          "valueConfig": "{\"dimension\":\"room_membership\"}",
-          "combinator": null
-        }
-      ],
-      "writeCheckRules": [
+          "actions": ["read"],
+          "resources": ["chat/table/rooms"],
+          "where": {
+            "or": [
+              { "column": "IsPublic", "op": "eq", "value": "true" },
+              { "column": "id", "op": "in", "principal": "attributes.rooms" }
+            ]
+          }
+        },
         {
-          "ruleOrder": 0,
-          "columnName": "SenderId",
-          "operator": "Eq",
-          "valueSource": "UserId",
-          "valueConfig": "{}",
-          "combinator": null
+          "actions": ["read", "write"],
+          "resources": ["chat/table/messages"],
+          "where": {
+            "and": [
+              { "column": "room_id", "op": "in", "principal": "attributes.rooms" },
+              { "column": "SenderId", "op": "eq", "principal": "id" }
+            ]
+          }
+        },
+        {
+          "actions": ["read", "write"],
+          "resources": ["chat/table/notes"],
+          "where": { "and": [{ "column": "UserId", "op": "eq", "principal": "id" }] }
         }
       ]
-    }
-  ],
-  "entitlements": [
-    {
-      "email": "bob@test.local",
-      "dimension": "room_membership",
-      "key": "room-private",
-      "level": "write"
     }
   ]
 }

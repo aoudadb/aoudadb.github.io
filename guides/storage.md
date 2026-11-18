@@ -296,12 +296,10 @@ If you run server defaults and do not set per-database overrides:
     before any database is opened the registry is read and the first database whose catalog declares another format ends the
     start with one error naming the version found and the version expected. No database is opened or modified, and nothing is
     written into the directory (no quarantine record). There is no migration and no upgrade path before 1.0: export what you need
-    first with the build that wrote it, then delete the data directory and start fresh. A server key and keys declared in
-    configuration come back on the fresh start; keys and entitlements created through the API do not.
+    first with the build that wrote it, then delete the data directory and start fresh. Principals and keys declared in `aouda.json`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   - (**BL-1418, 0.13.0**) The catalog format is **18**: the auth database's per-user permission table is `_user_entitlements` with the columns
-    `id`, `user_id`, `dimension`, `entitlement_key`, `level`, `granted_by`, `valid_from`, `valid_to`, `created_at` and `source`, and an RLS resolver
-    rule's value source is stored as `Entitlement`. A format-17 directory makes the server refuse to start with
-    `DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>`; there is no migration (see [Upgrading](upgrading.md#upgrading-to-entitlements-bl-1418-0130)).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - **Durability layering**
   - Catalog snapshot durability and WAL durability are complementary, not alternatives.
   - WAL allows replay of committed deltas between snapshots/checkpoints.
@@ -316,7 +314,7 @@ Invariants:
 
 - Persisted paths are deterministic from layout classes and storage constants.
 - Table directory name validity is enforced (invalid names rejected; no path sanitization tricks).
-- WAL replay never requires table directory guessing; resolver maps `TableId` to table directory.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Slot safety boundaries prevent WAL truncation ahead of active consumers.
 
 ### Deleted rows and retired segments (**Horizon, 0.5.0**)
@@ -554,13 +552,13 @@ Primary tests:
 |---|---|---|---|---|---|
 | `Aouda:DataPath` | string | `./data` | non-empty path | startup config | Server root path |
 | `Aouda:Port` | int | `5000` | 1..65535 | startup config | HTTP port |
-| `Aouda:Databases:{db}:Durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | startup config | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which fail startup validation naming `Durability` |
-| `Aouda:Databases:{db}:ReplicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | startup config | DB replication participation |
-| `Aouda:Databases:{db}:DefaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | startup config | Default table policy |
-| `Aouda:Databases:{db}:MaxMemoryShareBytes` | long? | `null` | null or non-negative | startup config | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
-| `Aouda:Databases:{db}:WriteConcern` | string | `One` | `One`,`Majority`,`All` | startup config | ACK semantics |
-| `Aouda:Databases:{db}:WriteConcernTimeoutMs` | int | `5000` | >=100 | startup config | Timeout for higher write concerns |
-| `Aouda:Databases:{db}:OnWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | startup config | Timeout policy |
+| `databases.<db>.durability` | string | `strict` | `strict`,`os`,`unlogged`,`memory` | `aouda.json` (**BL-1463, next train**) | (**Lead S26, 0.6.0**) DB durability level; replaces `EnableWal` / `DataDurability`, which are refused at start (`SETTING_REMOVED`, naming `databases.<db>.durability`) |
+| `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, next train**) | DB replication participation |
+| `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`,`HotOnly`,`ColdPreferred` | `aouda.json` (**BL-1463, next train**) | Default table policy |
+| `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, next train**) | Cap on the db's share of the server budget (`MaxMemoryBytes` is refused at startup: "no longer supported") |
+| `databases.<db>.writeConcern` | string | `One` | `One`,`Majority`,`All` | `aouda.json` (**BL-1463, next train**) | ACK semantics |
+| `databases.<db>.writeConcernTimeoutMs` | int | `5000` | >=100 | `aouda.json` (**BL-1463, next train**) | Timeout for higher write concerns |
+| `databases.<db>.onWriteConcernTimeout` | string | `DegradeAndLog` | `Fail`,`Degrade`,`DegradeAndLog` | `aouda.json` (**BL-1463, next train**) | Timeout policy |
 | `CreateDatabaseRequest.durability` | string? | null -> `strict` | `strict`,`os`,`unlogged`,`memory` | HTTP create-db payload | (**Lead S26, 0.6.0**) `enableWal` / `dataDurability` are refused (400 `INVALID_REQUEST`) |
 | `CreateDatabaseRequest.replicationMode` | string | `Replicate` | `Replicate`,`DoNotReplicate` | HTTP create-db payload | API default |
 | `CreateDatabaseRequest.defaultTemperature` | string? | null -> `Auto` | valid temperature enum | HTTP create-db payload | Optional |
@@ -814,7 +812,6 @@ Last verification date (UTC): `2026-03-31` (doc synthesis pass uses task-report 
 | Catalog persistence round-trip | `CatalogPersistenceTests.cs`, `CatalogWalTests.cs` | Pass | Strong | Snapshot + catalog WAL paths |
 | Restart + WAL replay correctness | `EndToEndRestartTests.cs`, `WalReplayDriverTests.cs`, `WalCheckpointIntegrationTests.cs` | Pass | Strong | Core durability behavior |
 | WAL retention and lifecycle | `WalRetentionTests.cs`, slot/lifecycle tests from P4/P6 packages | Pass | Medium/Strong | Good functional coverage |
-| Table-name directory storage | P6 Task4 report-linked tests + `TablePathValidatorTests.cs` | Pass | Strong | Path validation and resolver wiring |
 | Per-table durability control | `TableDurabilityTests.cs`, `TableDurabilityPersistenceTests.cs` | Pass | Strong | Override + inheritance + persistence |
 | Backup engine | `BackupEngineTests.cs`, `BackupEngineParallelTests.cs`, `BackupEngineIntegrationTests.cs`, `BackupEngineSlotTests.cs` | Pass | Strong | Full/incremental/slot semantics |
 | Restore + PITR | `RestoreIntegrationTests.cs`, `Bl186S06PitrRecoveryPathTests.cs`, `Bl186S07PitrHttpTests.cs` | Pass | Strong | Exact restore + recovery-path PITR over HTTP |

@@ -150,7 +150,7 @@ must start while the server is still in setup mode (one that creates the first a
 `/startup` itself.
 
 ⚠️ **A new container with nothing declared is `unhealthy` until it has a first admin.** A server whose data volume has never been
-set up, with no declared server key or first admin, is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since
+set up, with no operator declared in the declaration file, is in setup mode and serves no application traffic, so `/ready` answers `503` and lists the reason `setup_required` (since
 0.11.0, BL-1393). That is the probe telling the truth, not a fault. `/health` and `/startup` answer `200` meanwhile (**BL-1462,
 0.14.0**). Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for setup
 too.
@@ -164,35 +164,69 @@ only for a data volume that has **never been set up** (no server auth database) 
 
 | You declare | What happens at start |
 |---|---|
-| A server key: `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`, `AOUDA_AUTH__BOOTSTRAP__SERVERKEYFILE`, the systemd credential `aouda-server-key`, or a `server_admin` entry in the identities file | No setup mode. The server auth database is created with **no user**, and the key operates the server from the first start: create databases, keys and users with it. No human admin is needed |
-| A first admin: `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD` (or the systemd credential `aouda-admin-password`) | The admin is created once; no setup mode. An email with no password is listed by `/ready` as `root_user_unusable` |
-| `AOUDA_DEV_ADMIN=true` | Development and tests only: a throwaway admin and server key, printed once. See [Development admin](../guides/development-admin.md) |
+| A key-only operator (**BL-1464, next train**): a `server.principals` entry in the declaration file holding the role `admin`, with a `derivedKey` (from the file's `keyRoot`) or a stored key `{ "id", "sha256" }` under `credentials.keys` | No setup mode. The server auth database is created with the principal and its key, and the key operates the server from the first start: create databases, principals and keys with it. No human admin is needed |
+| A first admin (**BL-1464, next train**): a `server.principals` entry named by the email, holding the role `admin`, with a password seed `{ "file": "<path>" }`, `{ "env": "<NAME>" }` or `{ "hash": ... }` | The admin is created once, with a forced password change at the first sign-in; no setup mode. The seed is applied only when the principal is created, never again |
+| `AOUDA_DEV_ADMIN=true` | Development and tests only: a throwaway admin and its key, printed once. Refused next to a declared server operator's credentials (`SERVER_KEY_DEV_ADMIN_CONFLICT`). See [Development admin](../guides/development-admin.md) |
 | none of them, on a new volume | **Setup mode**: `/startup` 200, `/ready` 503 `setup_required`, every other route `503 SETUP_REQUIRED` off the server's host |
-| none of them, on a volume set up before that still has a user or an active server key (minted or once declared) | Starts normally, operated by them. **Never setup mode again**: a set-up server back in setup mode could be claimed by any loopback caller |
-| none of them, on a volume set up before that has no user and no active server key (a restore, every key revoked) | **The start is refused**: `SERVER_HAS_NO_OPERATOR: this data directory has been set up before ...`, naming the ways out (declare a server key, set `RootUser`, or `--dev-admin` for development). Declare one and restart |
-| none of them, on a volume that already holds an admin | Starts normally |
+| none of them, on a volume set up before that still has an operator (an admin, or a principal holding `admin` with an active key) | Starts normally, operated by them. **Never setup mode again**: a set-up server back in setup mode could be claimed by any loopback caller |
+| none of them, on a volume set up before that has nobody who can manage the server (a restore, every key revoked) | **The start is refused**: `SERVER_HAS_NO_OPERATOR: this data directory has been set up before ...`, naming the ways out (declare an operator in the declaration file's `server.principals`, or `--dev-admin` for development). Declare one and restart |
 
-Before this, a declared server key did **not** end setup mode: it was inert until a human created an admin, so a fully
+The declaration file is named by `Aouda__Declaration` (or `aouda start --declaration <path>`); there is no default path. Example, a
+first admin by password seed:
+
+```json
+{ "version": 1, "server": { "principals": { "you@example.com": { "roles": ["admin"],
+    "credentials": { "password": { "env": "AOUDA_ADMIN_PASSWORD" } } } } } }
+```
+
+and a key-only operator, its key root from a secret:
+
+```json
+{ "version": 1, "keyRoot": { "env": "AOUDA_KEY_ROOT" },
+  "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
+```
+
+**The old operator settings are refused** (**BL-1464, next train**). Each one set is a `SETTING_REMOVED` finding at start, before any
+database opens, and the start exits `78`; the message names the replacement and never the value. An **empty** value (a compose
+`${VAR:-}` pass-through of a variable that is not set) counts as not set and is not refused.
+
+| Removed | Declare instead |
+|---|---|
+| The systemd credentials `aouda-server-key`, `aouda-admin-password` | Remove the `LoadCredential=` line and declare as above |
+
+Before 0.14.0 a declared server key did **not** end setup mode: it was inert until a human created an admin, so a fully
 declarative deployment still needed an admin password, and a compose file gated on `/ready` sat in setup mode after a wipe.
 
 ### Compose
 
-(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**; **BL-1462, 0.14.0**) `docker-compose.yml` passes three things through from a
-`.env` file next to it (or your environment); none has a default, because port 5000 is published and a known default would be a
-known credential. Set one:
+(**BL-1407, 0.12.0**; **BL-1423, 0.12.0**; **BL-1462, 0.14.0**; **BL-1464, next train**) `docker-compose.yml` passes three
+things through from a `.env` file next to it (or your environment); none has a default, because port 5000 is published and a known
+default would be a known credential:
+
+```yaml
+    environment:
+      Aouda__Declaration: ${AOUDA_DECLARATION:-}
+      AOUDA_ADMIN_PASSWORD: ${AOUDA_ADMIN_PASSWORD:-}
+      AOUDA_DEV_ADMIN: ${AOUDA_DEV_ADMIN:-}
+    volumes:
+      - aouda_data:/data
+      # - ./aouda.json:/etc/aouda/aouda.json:ro
+```
 
 | You set | What happens |
 |---|---|
-| `AOUDA_SERVER_KEY=mk_srv_<64 hex characters>` (make one with `echo "mk_srv_$(openssl rand -hex 32)"`) | Declarative: the key operates the server, no admin is created |
-| `AOUDA_ROOT_EMAIL` and `AOUDA_ROOT_PASSWORD` | The first admin is created at start. Neither has a default. Put both in a `.env` file next to the compose file or export them; remove them afterwards if you like: the admin lives in the data volume |
-| `AOUDA_DEV_ADMIN=true` | Development and tests only. The server makes a random throwaway admin and server key at every start and prints one line, `AOUDA-DEV-ADMIN email=... password=... server_key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda` for the `AOUDA-DEV-ADMIN` line. Compose runs the container in the Development environment for that. Refused next to `AOUDA_ROOT_PASSWORD` or a server key. See [Development admin](../guides/development-admin.md) |
+| A declared operator: write `aouda.json` next to the compose file (the first-admin example above declares `you@example.com` with `{ "password": { "env": "AOUDA_ADMIN_PASSWORD" } }`), uncomment its volume line, and set `AOUDA_DECLARATION=/etc/aouda/aouda.json` and `AOUDA_ADMIN_PASSWORD=<something long>` in `.env` | The first admin is created at start, with a forced password change at the first sign-in. The password seeds the admin once, when it is created; remove it from `.env` afterwards if you like: the admin lives in the data volume. A key-only operator is declared the same way, its key root passed through instead of the password |
+| `AOUDA_DEV_ADMIN=true` | Development and tests only. The server makes a random throwaway admin and its key at every start and prints one line, `AOUDA-DEV-ADMIN email=... password=... key=...`, to the container's standard output: `AOUDA_DEV_ADMIN=true docker compose up -d`, then read `docker compose logs aouda` for the `AOUDA-DEV-ADMIN` line. Compose runs the container in the Development environment for that. Refused next to a declared server operator's credentials (`SERVER_KEY_DEV_ADMIN_CONFLICT`). See [Development admin](../guides/development-admin.md) |
 | none, on a new volume | Setup mode, as above; Studio waits (`service_healthy`) until the first admin exists |
-| none, on a volume that was set up but now has no user, no active server key and nothing declared | The start is refused: the line starts `SERVER_HAS_NO_OPERATOR: ` and names the ways out, and the exit status is `78` (**BL-1461**, **BL-1462**, 0.14.0) |
-| none, on a volume that holds an admin or an active server key | Starts normally |
+| none, on a volume that was set up but now has nobody who can manage the server and nothing declared | The start is refused: the line starts `SERVER_HAS_NO_OPERATOR: ` and names the ways out, and the exit status is `78` (**BL-1461**, **BL-1462**, 0.14.0) |
+| none, on a volume that holds an operator | Starts normally |
+
+The compose file no longer passes `AOUDA_SERVER_KEY`, `AOUDA_ROOT_EMAIL` or `AOUDA_ROOT_PASSWORD` (**BL-1464, next train**): a `.env`
+that still sets them sets nothing, and the server would start in setup mode. Move them into the declaration as above.
 
 ⚠️ **`Aouda:Auth:RequireFirstAdmin` is gone** (**BL-1462, 0.14.0**). It made a server with no admin and no declared admin
 fail the start, which under `restart: unless-stopped` was a restart loop. A server with nothing declared now waits in setup mode
-and `/ready` says so; a server that declares a server key needs no admin at all. A leftover `AOUDA_AUTH__REQUIREFIRSTADMIN` is
+and `/ready` says so; a server that declares a key-only operator needs no admin at all. A leftover `AOUDA_AUTH__REQUIREFIRSTADMIN` is
 ignored.
 
 ⚠️ **Leave `AOUDA_DEV_ADMIN` unset unless you mean it.** Any non-empty value, `false` included, switches the container to the Development environment (an empty value is treated as Production, where the flag is refused).
@@ -217,8 +251,7 @@ JSON.
 The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
 else missing).
 
-⚠️ **`aouda create-admin` refuses while the server runs** (**BL-1462, 0.14.0**). The server holds its data directory (an
-exclusive lock on `/data/Server/aouda.lock`), and `create-admin` opens the directory itself, so next to a running server it exits
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 `1` with:
 
 ```
@@ -226,13 +259,13 @@ The data directory '/data' is in use by another Aouda process (it holds Server/a
 ```
 
 Before, it succeeded: a second process wrote to the live data directory, and the running server stayed in setup mode until a
-restart. With the server stopped, `create-admin` works as before, over standard input or from a mounted file (never on the
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 command line):
 
 ```bash
 docker compose stop aouda
 printf '%s' "$ADMIN_PASSWORD" | docker compose run --rm -T --entrypoint aouda aouda \
-  create-admin --email admin@example.com --password-stdin --data /data
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 docker compose start aouda
 ```
 
@@ -252,115 +285,47 @@ secrets:
 
 then `--password-file /run/secrets/aouda_admin_password`.
 
-**API keys from secrets (BL-1389, 0.11.0).** A key declared in the identities file (`Aouda:Auth:Keys:File`) can be read from a secret file, so it never passes through an environment variable:
-
-```json
-{ "identities": [ { "name": "feeder", "kind": "scoped_service",
-    "authDatabase": "derive_auth", "database": "deposit",
-    "roles": ["quote_writer"], "secrets": [ { "file": "/run/secrets/feeder_key" } ] } ] }
-```
-
-That entry is only valid next to the declarations it names: the auth database `derive_auth` (`authDatabase`: **leave it out and the key targets a database called `auth`**, which here does not exist, so `aouda plan` exits `0` with the warning `KEY_TARGET_PENDING` and every request with the key is `401`), the role `quote_writer` declared on it, and the application database `deposit`, linked to it. A complete set that `aouda plan` accepts, as a configuration file in the shape of `appsettings.json` (the image ships none: mount it as the [declaration file](#the-declaration-file-one-mounted-file-makes-reload-work-0.15.0); `Aouda:Auth:Keys:File` points at the identities file above):
-
-```json
-{
-  "Aouda": {
-    "Auth": { "Keys": { "File": "/etc/aouda/aouda.identities.json" } },
-    "Databases": {
-      "derive_auth": {
-        "Kind": "auth",
-        "Roles": {
-          "quote_writer": {
-            "Description": "Runs insert_quote on deposit",
-            "Permissions": [
-              { "ResourceType": "named-mutation", "ResourceName": "insert_quote", "Actions": "execute" }
-            ]
-          }
-        }
-      },
-      "deposit": { "AuthDatabase": "derive_auth", "SchemaFile": "/etc/aouda/deposit.schema.json" }
-    }
-  }
-}
-```
-
-and `deposit.schema.json`, which creates the table and the named mutation the role names (a role is applied after the schema, so it may name them):
-
-```json
-{
-  "tables": {
-    "quotes": {
-      "columns": {
-        "ticker": { "type": "String", "primaryKey": 1 },
-        "px": { "type": "Double" }
-      }
-    }
-  },
-  "namedMutations": {
-    "insert_quote": {
-      "op": "insert",
-      "table": "quotes",
-      "values": { "ticker": { "param": "ticker" }, "px": { "param": "px" } },
-      "params": { "ticker": { "maxLength": 8 }, "px": {} },
-      "version": "v1"
-    }
-  }
-}
-```
-
-The role holds only `execute` on the mutation: running a named mutation needs that row and no table right ([Declared databases](../guides/declared-databases.md#why-roles-is-only-on-an-auth-database)), so a feeder that only calls `insert_quote` needs nothing else. A role that needs direct table writes adds `{ "ResourceType": "table", "ResourceName": "quotes", "Actions": "write" }`, which does not run mutations. Run `aouda plan` on these files before you start: the identities file and the role are cross-checked by it (`KEY_ROLE_UNDECLARED`, `KEY_DATABASE_NOT_LINKED`). The same set with two data databases, every key kind, a compose file, a plan step, a wipe-and-start and a reload is on [Declare a deployment](../guides/declare-a-deployment.md).
-
-The file holds the key and nothing else (one trailing newline is ignored). A relative path is read from the identities file's directory, and `$NAME` / `${NAME}` in the path are expanded from the environment (systemd's `$CREDENTIALS_DIRECTORY/feeder` works as written). The file is read at start and again at every `aouda reload` (never between them), as UTF-8 (a UTF-8 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused); a missing, unreadable or empty file stops the server. This source makes no mode check. Compose bind-mounts a `file:` secret with the **host file's** owner and mode, and the image runs as uid 1654, so give the host file mode `0444` (in a directory only you can enter); a `0600` file owned by someone else is unreadable and stops the server (tested with Compose 2.40). See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md).
+**Secrets of the declaration from Docker secrets** (**BL-1464, next train**). The declaration's key root and a password seed can be
+read from a secret file, so they never pass through an environment variable: `"keyRoot": { "file": "/run/secrets/aouda_key_root" }`,
+or `"password": { "file": "/run/secrets/aouda_admin_password" }` on the first admin. A relative path is read from the declaration
+file's directory, and `$NAME` / `${NAME}` in the path are expanded from the environment. The file is read as UTF-8 (a UTF-8
+byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused) with one trailing newline ignored; a
+missing, unreadable or empty file stops the start. Docker mounts file-based secrets as `0444` by default, and this source does not
+refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md#secret-files). The identities file's
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
-## Reload without a restart
+## Declare the databases: `aouda.json` (**BL-1463, next train**)
 
-(**BL-1427, 0.14.0**) `aouda reload` asks the running server to re-read its declaration (the identities file's content, a new `Aouda:Databases` entry, a declared database's schema file and roles, a first auth-database link) and converge it. The CLI only carries a **server key** to `POST /api/admin/reload`; the server re-reads **its own** files. In a container that means three things:
-
-1. **Run the command where it can reach the server and read the key.** From inside the server's container:
-
-   ```bash
-   docker compose exec aouda aouda reload --server http://localhost:5000 --key-file /run/secrets/aouda_server_key
-   ```
-
-   `--server` is required (the image listens on port **5000**), and so is exactly one of `--key-file PATH` or `--key-env NAME`: there is no `--key`, because a command line is kept in the process list and in shell history. **The key file must be mounted in the container the command runs in**: here the compose service lists the secret (`secrets: [aouda_server_key]`) so Compose mounts it at `/run/secrets/aouda_server_key`. A key file that exists only on the host is not there inside the container, and the command exits `64`. The command can instead run on the host against the published port (`--server http://127.0.0.1:5000 --key-file ./aouda_server_key`), or in any other container that can reach the server and holds the key. Add `--json` for one JSON object.
-2. **The changed declaration must be in the running container's files.** A bind-mounted identities file or schema file that you edited on the host is what the server re-reads (mount the **directory** that holds them: a single-file bind mount keeps the old inode when the host file is replaced, see below); an image rebuilt or a file copied in at build time is not there until the container is replaced. An identities file's `{ "file": PATH }` secrets are re-read too.
-3. **Settings from environment variables cannot be reloaded.** `Aouda:Databases` given as `Aouda__Databases__<name>__<Key>` variables is reported as the info `SOURCE_NOT_RELOADABLE` by a reload (and `SOURCE_FIXED_AT_START` by `aouda plan`), and a secret declared `{ "env": NAME }` keeps the value the process started with (a running process cannot change its own environment). The image ships no `appsettings*.json`, so declare them in the **declaration file** below. To reload a rotated key, declare it as `file` or `hash`.
-
-### The declaration file: one mounted file makes reload work (**0.15.0**)
-
-Mount **one JSON file** at **`/etc/aouda/aouda.json`**. The server reads it by itself when it exists (nothing to set), and it holds `Aouda:Databases`, `Aouda:Auth:Keys:File` and the other declaration settings in the shape of `appsettings.json`. Another path: `AOUDA_CONFIG_FILE=/path` or `aouda start --config /path` (the switch wins; an empty variable counts as unset). An environment variable or a command-line argument still overrides a scalar the file sets, but `Aouda:Databases` and the identities path set that way are fixed for the life of the process. A reload re-reads the file at its path every time, with no watcher.
+The databases, their schema files and their roles are one file, `aouda.json`, that you mount and **name**: the server reads the
+declaration from the path in `Aouda:Declaration` and from no other (there is no default path; with nothing set, nothing is declared).
+Mount the **directory** that holds it, read-only, and set the one variable:
 
 ```yaml
-services:
-  aouda:
-    image: ghcr.io/aoudadb/aouda-server:<version>
+    environment:
+      Aouda__Declaration: /etc/aouda/aouda.json
+      AOUDA_ENVIRONMENT: prod            # optional: also reads /etc/aouda/aouda.prod.json over it
     volumes:
-      - aouda-data:/data
-      - ./declaration:/etc/aouda:ro        # holds aouda.json, identities.json and the schema files
-    secrets: [aouda_server_key]            # and one per key the identities file names
+      - ./aouda:/etc/aouda:ro            # aouda.json, aouda.prod.json, schema/shop.aouda.schema.json
 ```
 
-⚠️ **Mount the directory, not the file.** `./aouda.json:/etc/aouda/aouda.json:ro` binds one file and Docker pins its inode: an editor that saves by renaming a new file over the old one, a `git checkout` or a `mv` leaves the container reading the **old content**, and a reload then changes nothing (tested with Docker 29). A directory mount follows the name. **The host file must exist before `up`**: if it does not, Docker creates a *directory* at that path, and the server refuses to start with `CONFIGURATION_INVALID` (exit `78`, "is a directory, not a file"). Do not mount anything else at `/etc/aouda` on a Kubernetes pod that uses the chart's `declaration.config`; see [Kubernetes and Helm](kubernetes.md#declaring-databases-keys-and-schema-files).
+```json
+{ "version": 1, "databases": { "auth": { "kind": "auth" }, "shop": { "kind": "data", "authDatabase": "auth", "schema": "schema/shop.aouda.schema.json" } } }
+```
 
-| The file is | The start | A reload |
-|---|---|---|
-| Absent, at the well-known path | Skipped, silently | n/a |
-| Named by `--config` / `AOUDA_CONFIG_FILE` and absent | `CONFIGURATION_INVALID`, exit `78` | `422 RELOAD_REFUSED` (finding `CONFIGURATION_INVALID`); nothing changes |
-| Empty (also at the well-known path), a directory, or not valid JSON | `CONFIGURATION_INVALID`, exit `78`, naming the file and the line and position, never the contents | The same refusal; nothing changes |
-| Unreadable: permissions, an I/O error, a volume not mounted yet | Exit `1` (a supervisor may retry) | Refused |
-| Present and read, then gone at the next reload | n/a | Refused: not read as "no databases" |
-
-**Write `{}` to declare nothing**: an empty file is an error, because a half-written mount must not be taken for "no declaration". A complete working set (two data databases, an auth database, keys, a role, a mutation) is on [Declare a deployment](../guides/declare-a-deployment.md); what a reload can and cannot change is [one table](../guides/server-configuration.md#reload-or-restart).
-
-It exits `0` (nothing to change), `2` (applied), `1` (refused or stopped part-way), `64` (usage), `69` (unreachable, busy or starting) and `77` (the key was refused). `aouda plan --server` is the dry run ([Plan a declaration](../guides/plan.md)). The server key (`Aouda:Auth:Bootstrap:*`), the identities file's **path**, the listener, memory and a database's operational fields still take a restart: a reload lists them under `restartRequired` and applies the rest.
+A relative `schema` path is relative to the directory of `aouda.json`, so the same file works from the container, a unit and a
+shell. A variable that is **set** to a path with no file behind it (a mount that was not made, a bind mount of a file that did not
+exist, which Docker creates as a directory) refuses the start naming the file and exits `1`, so a restart policy retries it; a
+variable that is set to nothing (a compose pass-through of an unset variable) is read as not set. `Aouda__Databases__*` variables
+are **refused** (`SETTING_REMOVED`, naming the member of `aouda.json`). The whole file is in
+[Declare a server in one file](../guides/declaration.md).
 
 ---
 
 ## A container that keeps restarting
 
-(**BL-1461, BL-1463, 0.14.0**) A start refused for its configuration (a bad key declaration, a declared database whose `AuthDatabase`
+(**BL-1461, BL-1463, 0.14.0**) A start refused for its configuration (a bad key declaration, a declared database whose `authDatabase`
 does not exist, a set-up server left with no operator, a data directory in another format) exits with status **78** and prints every
 finding on standard error, each as a line `error    <CODE>  <setting or file>` followed by the message and the fix, then a last line
 naming the exit status. The codes are in [Declaration Finding Codes](../reference/plan-codes.md), the format in
@@ -381,7 +346,7 @@ Check the declaration before you deploy, in the container you deploy, with its e
 docker compose run --rm --no-deps --entrypoint aouda aouda plan
 ```
 
-It runs the start's own checks over the configuration the server will read, prints every finding the start would print, and exits `1`
+It runs the start's own checks over the configuration the server will read (with `Aouda__Declaration` set in the container's environment it reads the same `aouda.json`, and its overlay for `AOUDA_ENVIRONMENT`), prints every finding the start would print, and exits `1`
 when the start would refuse. See [Plan a declaration](../guides/plan.md).
 
 ---

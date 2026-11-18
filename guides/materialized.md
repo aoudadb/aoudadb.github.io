@@ -316,12 +316,9 @@ time slice ([2.11e](#window-expiry)).
 ### 2.3.2 Who may read a result: the source's security
 
 (**BL-1227, 0.9.0**) A materialized result carries **its source table's** partition-level and row-level security. A caller is
-lifted past each half by its own grant **on the source table**: `all-partitions` lifts the source's PLS and `all-rows` its RLS, each
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 alone. A grant that names the result table lifts nothing. A holder of one grant is still restricted by the other half — for
-example `all-partitions` alone reads every partition of a result over an `auth-db-entitlement` source with an RLS resolver, but only the rows
-the resolver allows — and a result over a `jwt-claim` source is read whole by a holder of `all-partitions`. Each use of a grant on a
-result is audited as `access_grant_used`, naming the source table (`operation` `materialized-query`).
-See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **A materialized query declares no security of its own** (**0.15.0** for the message; the refusal is 0.14.0). The members `authMode`, `permissionColumn`,
 `permissionDimension` and `rlsResolverName` that a table carries are **not members of a materialized query**: in a schema file, `schema apply` or `schema diff` they are
@@ -891,7 +888,6 @@ An aggregate materialized query may declare `computed` columns — physical, alw
       }
     }
   ],
-  "dataPlaneAccess": true
 }
 ```
 

@@ -4,367 +4,84 @@ nav_order: 2.5
 parent: "Guides"
 ---
 
-# Keys that survive a wipe (**BL-1377, 0.10.0; reworked by BL-1378, 0.11.0**)
+# Keys that survive a wipe (**BL-1377, 0.10.0; reworked by BL-1378, 0.11.0, and by BL-1464, next train**)
 
 A key Aouda mints is a random value generated **inside the data a wipe destroys**. Every wipe, fresh machine and CI run therefore
 produces new credentials that must be carried to every client, and a sender nobody updated fails with `AUTH_API_KEY_INVALID`
 until someone notices.
 
-A **declared key** turns that around. You declare the credential in configuration, the way you declare a SQL Server connection
-string. Aouda turns each declared secret into a **real row of the auth database** (`source = config`) when that database is
-created, at every start, and after a restore. After a wipe nothing needs to be re-imported, re-linked or re-minted: the declaration
-is read again and the rows come back with the auth database. Keys Aouda mints still work, for throwaway cases and for anything
-created at runtime.
+A **declared key** turns that around. You declare the credential in the declaration file, `aouda.json`, the way you declare a SQL
+Server connection string: as a `credentials` member of a declared principal (**BL-1464, next train**). The start converges every
+declared principal and its credentials into its auth database, at every start, after a wipe and after a restore. After a wipe nothing
+needs to be re-imported, re-linked or re-minted: the declaration is read again and the principals come back with the same ids. Keys
+Aouda mints still work, for throwaway cases and for anything created at runtime.
 
 The databases a declared key belongs to can be declared too, so a wipe brings back the whole set: [Declared databases](declared-databases.md).
 
-(**BL-1378, 0.11.0**) **0.10.0 authenticated a declared key from memory:** no row, no listing, no revoke. That is gone. A declared
-key is a row, so it is listed, queried, revoked and retracted through the same flows as a minted one. If you relied on a declared
-key being invisible to the key listings, it no longer is.
+## Declared credentials in `aouda.json` (**BL-1464, next train**)
 
-## Declaration is intent, the row is state
+A principal declared in [`aouda.json`](declared-access.md) declares how it authenticates under `credentials`, and every form
+survives a wipe without seeding:
 
-| | Written by | What it covers |
-|---|---|---|
-| The **declaration** (the server key setting and the identities file) | You, in configuration | That the key exists, its `name`, its `roles`, and whether it is still wanted |
-| The **row** in `_api_keys` | Aouda, from the declaration | The key itself: what authenticates. **Authentication reads only the row and never writes it** |
-| **Revocation** | You, through the API | Whether the key is switched off. Configuration never switches it back on |
+- **A derived key**, `"derivedKey": { "version": 1 }`. The key is computed from the file's one **key root** (`"keyRoot": { "file": … }`
+  or `{ "env": … }` at the top of the file, never a literal) and the principal's auth database, name and version: after a wipe, a fresh
+  machine or a CI run the same root gives the same key, and nothing is stored to restore. `aouda keys derive` prints it once for the
+  client's secret store. To rotate one principal's key, bump its `version` and reload: the old key is refused at once and its open
+  sessions end. To rotate the root, declare the new one as `keyRoot` and the old one as `"previousKeyRoot"`: keys of both are accepted
+  until you remove the previous one.
+- **A stored key**, `"keys": [ { "id": "aouda_…", "sha256": "…" } ]`: the public id and the SHA-256 of a key generated elsewhere — never
+  the key. A whole key written into `id` is refused ("this file now contains a secret: rotate the key").
+- **An OIDC trust** (a CI job, a cluster's workload identity): `"oidc": [ { "issuer", "audience", "subject", "claims"? } ]`. One token
+  must never match two principals: two trusts of different principals that one token could match are refused.
+- **A password seed** for a person, `"password": { "file" | "env" | "hash" }` on a principal named by its email: it creates the
+  password when the principal is created (after a wipe, again), with a forced change at the first sign-in, and is never applied again.
 
-Three rules follow, and they are all the operator needs to know:
+**Revoking a declared key** (an incident) works at runtime and stays: every start and reload warns `DECLARED_OBJECT_OVERRIDDEN`, and for a
+derived key names the version to declare next. A wipe loses the revocation — the same root derives the same key again — so the lasting
+fix is to bump the version in the file.
 
-1. **A declared key with no row is `401 Unknown API key`**, like any key the database does not hold. Rows are made when the auth
-   database is created, at start (after the first admin, before the server answers) and after a restore, never on a request. A row
-   that cannot be made fails the start (or abandons the creation of the auth database) rather than leaving a key half there.
-2. **Revoking is the normal flow, and it is sticky.** `DELETE` the key and the next request is `401 API key has been revoked`, also
-   after a restart: the row stays revoked and the declaration does not undo it. The start logs a warning that the key is declared
-   but revoked ("remove it from the declaration to make that permanent"); it does **not** fail the start, so an emergency revoke
-   followed by a restart is not an outage.
-3. **Removing a declaration retracts its row, reversibly.** At start, a configured row that no declaration lists is revoked and
-   marked `config-removed`, with one warning per row (name, kind, auth database, fingerprint). Declare it again and the same row
-   is revived. A row **you** revoked is never revived by a declaration, and a minted row is never touched.
+## The old settings are refused (**BL-1464, next train**)
 
-⚠️ **A wipe resets revocation.** Revocation is state, and a wipe destroys state; the declaration survives. A key you revoked but
-left in the file therefore **returns after a wipe**. To retract a key for good, remove it from the file (and revoke it if the
-server is running).
+The identities file, `Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, `Aouda:Auth:RootUser` and the systemd credentials `aouda-server-key` and `aouda-admin-password` are refused (`SETTING_REMOVED`). `aouda plan` reports each one, and the start exits `78` before any database opens. The message names the replacement and never the value. An empty value (a compose `${VAR:-}` of a variable that is not set) counts as not set.
 
-With **no declaration source configured** (no `ServerKey`, `ServerKeyFile` or `Keys:File`) nothing is retracted and an information
-line says that configured rows were left as they are, so a dropped setting cannot retract every key. An identities file that
-declares nothing is a source: an empty file retracts them all.
-
-## The supported unattended setup
-
-Three settings give a fresh server working credentials with no sign-in, mint or import call:
-
-| Piece | What it gives you |
+| Removed | Replacement |
 |---|---|
-| `Aouda:Auth:RootUser` | The first admin, and with it the server auth database (`_serverauth`). Optional since 0.14.0: a declared server key alone creates the database (**BL-1462**) |
-| `Aouda:Auth:Bootstrap:ServerKey` | A working `mk_srv_` server key, a row of `_serverauth` from the moment it exists |
-| `Aouda:Auth:Keys:File` | The identities file declaring further keys: kind, roles, secrets |
-
-### The server key
-
-```bash
-# generate once, keep it in your secret store
-printf 'mk_srv_%s' "$(openssl rand -hex 32)"
-
-# give it to the server, with the first admin
-Aouda__Auth__Bootstrap__ServerKey=mk_srv_...            # or ServerKeyFile=/run/secrets/aouda-server-key
-Aouda__Auth__RootUser__Email=admin@example.com
-Aouda__Auth__RootUser__Password=...
-```
-
-The key comes from one of: `Aouda:Auth:Bootstrap:ServerKey`, a file named by `Aouda:Auth:Bootstrap:ServerKeyFile` (no permission check, so a Docker or
-Kubernetes secret mounted `0444` works; **BL-1401, 0.11.0**: before, a file readable beyond its owner failed the start; a missing,
-unreadable or empty file still does, naming the path and never the content), or the systemd credential `aouda-server-key` (`LoadCredential=`). Set at most one.
-Since 0.12.0 every such file is read by one reader with one set of rules, listed in [Secret files](#secret-files); `$NAME` in the
-`ServerKeyFile` path is expanded now, so `ServerKeyFile=$CREDENTIALS_DIRECTORY/server-key` works.
-
-**A server key alone is enough** (**BL-1462, 0.14.0**). On a data directory with no admin, a declared server key ends setup
-mode: the server auth database is created with no user, the key's row is written with it, and the key operates the server from
-the first start. No `Aouda:Auth:RootUser` is needed. (Before, the key was inert until a first admin existed, and the server logged
-that it would take effect then.) A data directory that has been set up never re-enters setup mode: remove the declaration later
-and the key's row, or any key you minted with it, still operates the server; with no user, no active key and nothing declared, the
-start is refused with `SERVER_HAS_NO_OPERATOR`.
-
-### Further keys: the identities file
+| Identities file (`Aouda:Auth:Keys:File`) | A principal of that auth database, with statements or a role, and a credential |
+| Bootstrap server key | `server.principals`: a principal with role `admin` and a derived or stored key |
+| `aouda-server-key` and `aouda-admin-password` | Remove the unit's `LoadCredential=` line and declare as above |
 
 ```json
-{ "identities": [
-  { "name": "tullett-feeder", "kind": "scoped_service",
-    "authDatabase": "derive_auth", "database": "deposit",
-    "roles": ["quote_writer"],
-    "secrets": [ { "env": "TULLETT_KEY" }, { "hash": "sha256:<64 hex>" } ] },
-  { "name": "deposit-anon", "kind": "anon",
-    "authDatabase": "derive_auth", "database": "deposit",
-    "secrets": [ { "env": "DEPOSIT_ANON_KEY" } ] } ] }
+{ "version": 1, "keyRoot": { "env": "AOUDA_KEY_ROOT" },
+  "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
 ```
 
-⚠️ **Set `authDatabase` to the application auth database you declared** (here `derive_auth`, as in [Declared databases](declared-databases.md)). **An omitted `authDatabase` silently means `auth`.** If no auth database of that name exists, `aouda plan` still exits `0`, with only the warning `KEY_TARGET_PENDING` ("the key has no row and is refused"): the key gets no row and every request with it is `401`. The same file reads `KEY_ROLE_UNDECLARED` (the role is not declared on that auth database) and `KEY_DATABASE_NOT_LINKED` (`database` is not linked to it) as warnings too, so read the warnings of a plan, not only its exit status. The file takes comments and trailing commas (as above) and **no** top-level `$schema` (`DECLARATION_UNKNOWN_MEMBER`); `schemas/aouda-identities.v1.json` describes a different file, the test-identities fixture.
+There is no converter. A `{ "hash": "sha256:<hex>" }` secret has no counterpart: a stored key is `{ "id": "aouda_…", "sha256": "…" }` from `aouda keys new`, or a derived key from `aouda keys derive`. `aouda reload` applies a changed principal without a restart.
 
-| Field | Meaning |
-|---|---|
-| `name` | Unique within the auth database; 1-64 characters of letters, digits, `.`, `_` and `-`. It is the row's `name`; changing it while keeping the secret renames the row |
-| `kind` | `server_admin` (global `db_admin`, on the server auth database), `scoped_service` (the listed roles, scoped to `database`), or one of the three system kinds below |
-| `authDatabase` | Which auth database the key lives in. Defaults to `auth` for every kind but `server_admin` |
-| `database` | Every kind but `server_admin`: the application database the key's roles are scoped to |
-| `roles` | `scoped_service` only. The roles `db_admin`, `db_operator`, `anonymous` and `public` are refused, as they are for a minted scoped key. A system kind takes **no** `roles` |
-| `secrets` | A list. `{ "env": NAME }` reads the plaintext key from that environment variable when the server starts. `{ "file": PATH }` (**BL-1389, 0.11.0**) reads the key from a file, see below. `{ "hash": "sha256:<hex>" }` is the hash of a key you hold elsewhere. A secret is exactly one of `env`, `file` and `hash`; a rotation may mix them across the list |
+## Seeing which credential is failing
 
-**A secret from a file (**BL-1389, 0.11.0**).** `{ "file": "/run/secrets/feeder_key" }` reads the key from a file, so a Docker or systemd secret never passes through an environment variable. The file holds the key and nothing else: exactly one trailing newline (`\n`, `\r\n` or `\r`) is ignored and nothing else is trimmed, so a key with a trailing space fails the shape rule instead of being trimmed. A relative path is read from the identities file's directory, not the working directory, and `$NAME` / `${NAME}` in the path are expanded from the environment first, so systemd's `{ "file": "$CREDENTIALS_DIRECTORY/feeder" }` works as written (an unset variable fails the start naming the entry and the variable). The file is read at start and again at every `aouda reload` (**BL-1427, 0.14.0**; never between them), as strict UTF-8: a UTF-8 byte-order mark is ignored, and a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused as unreadable. A missing, unreadable, non-UTF-8 or empty file, or content that is not a key of the entry's kind, stops the server, and the message names the entry and the path, never the content. The startup log lists the key with source `file`. No permission check is made on the file, because Docker mounts file-based secrets readable by everyone in the container (`0444`) by default.
-
-A literal plaintext `key` in the file is **refused**: a credential never sits in a file that is committed, copied and attached to
-tickets. `auth_admin` and user-linked keys are not declarable.
-
-**A feeder that must survive a wipe is a declared `scoped_service` key, not a user-linked key.** A user-linked `custom` key (made through the API with a
-`userId`) can carry per-partition entitlements, but it cannot be declared and is lost with the data directory. A declared `scoped_service` key holds **roles only**: pair
-it with a role that holds `execute` on one named mutation and nothing else. Entitlements cannot be declared on a scoped key yet, so the server cannot enforce
-"this feeder writes only its own source's rows" for a declared key (no date is promised). The three declarations that make the pattern, with a request that runs it, are on
-[Declare a deployment](declare-a-deployment.md#the-feeder-pattern-end-to-end).
-
-#### The three system kinds (**BL-1378, 0.11.0**)
-
-| `kind` | Prefix | Holds | Take the place of |
-|---|---|---|---|
-| `service_role` | `mk_svc_` | `db_admin` scoped to `database` | The `service_role` key a link or `regenerate-keys` generates |
-| `public` | `mk_pub_` | `public` scoped to `database` | The `public` key it generates |
-| `anon` | `mk_anon_` | `anonymous` scoped to `database` | The `anon` key it generates |
-
-Their rows are `is_system`, as generated ones are. Declare **exactly one** per (auth database, database, kind) or the start fails
-naming both entries. `database` is compared without regard to case, as the catalog resolves a database name (only a table name is
-ordinal): `Deposit` and `deposit` are one database, so declaring both is the same refusal (**BL-1378, 0.11.0**).
-
-A declared system key is **the** key of its kind. Linking a database generates and returns only the kinds you did **not** declare
-and that are missing (declare all three and nothing is generated or printed), and `regenerate-keys` leaves declared rows live, with
-the same ids, and mints only the others. In the response of a create-with-auth, a link or a regenerate, `anonKey`,
-`serviceRoleKey` and `publicKey` are therefore **absent** for a declared kind. A link never regenerates a kind that is fine: it
-mints the missing kinds only. Revoking a declared system key (by id) retracts it, and nothing replaces it.
-
-**Declaring a kind on a database that is already linked replaces the generated key.** The next start revokes the generated key of
-that kind and database (the same revoke as any other, listed with its own `source: "minted"`), so there is one live key of the kind
-and it is the one you declared. If you revoke the declared key afterwards, the generated one does not come back. Remove the
-declaration instead and the next link generates that kind again, leaving the other kinds' keys alone.
-
-**Every listed secret is live, and each is its own row.** To rotate a declared key, add the new secret and run `aouda reload`, move
-the clients, then remove the old secret and run `aouda reload` again (its row is retracted by that reload). Removing a secret or an
-entry never disturbs the other secrets' rows. (**BL-1427, 0.14.0**) A running WebSocket or long-poll session authenticated with a
-removed secret ends when its row is retracted, before the reload answers (`AUTH_TOKEN_REVOKED`); a reload that rotates a secret in
-place writes the new row before it retires the old one, so the two are never both refused.
-
-**Which secrets a reload can rotate (**BL-1427, 0.14.0**).** A reload re-reads the identities file and every `{ "file": PATH }` secret, so rotating by reload works for `file` (replace the file's content, or point the entry at a new file) and `hash` (replace the hash). It does **not** work for `{ "env": NAME }`: a running process cannot change its own environment, so a reload reads the value the process started with, and a new value in the container's environment needs a restart. Declare the secrets you rotate without a restart as `file` or `hash`.
-
-**A declared key is revoked, never rotated.** `POST .../scoped-service-keys/{name}/rotate` on a declared key is `409`
-("declared in configuration; change the declaration"); a minted scoped key rotates as before.
-
-(**BL-1427, 0.14.0**) A change to the file's **content** takes `aouda reload` (or `POST /api/admin/reload`), not a restart: the
-server re-reads the file, validates the whole declaration as a start would, and changes nothing if any finding is an error. The
-file's **path** (`Aouda:Auth:Keys:File`), the server key (`Aouda:Auth:Bootstrap:*`, the `aouda-server-key` credential) and the dev
-admin still take a restart: a reload lists them under `restartRequired` and applies the rest. A reload never retracts the server
-key the process started with. An invalid file, a missing environment variable or an unreadable
-path **fails the start** with a message naming the entry (never a secret). (**BL-1378, 0.11.0**) (**BL-1463, 0.14.0**) Every
-bad entry is reported at once, each with its code (`KEY_SECRET_SHARED`, `KEY_FIELD_REQUIRED`, `SECRET_UNREADABLE`, ...) and its JSON
-pointer in the file (`/identities/3/secrets/0`), and nothing is created; see [Declaration Finding Codes](../reference/plan-codes.md). So does an auth database that
-exists but cannot be opened (quarantined, or it failed to open) while keys are declared for it: the message names the database and
-the entries, because the server would otherwise start ready and answer `401` to keys you declared. An auth database that does
-not exist yet is not an error; its keys are `pending` until it is created.
-
-(**BL-1378, 0.11.0**) A secret kept while its declared `kind` changes (a `hash` secret re-declared as another kind) keeps its
-row and has its `kind`, system flag and `keyPrefix` updated with the roles at the next start; a declared system key then replaces
-the generated one of that kind.
-
-### What a key must look like
-
-The kind's prefix (`mk_srv_`, `mk_scp_`, `mk_svc_`, `mk_pub_` or `mk_anon_`), then at least **32** characters from
-`A-Z a-z 0-9 _ -`, not one repeated character and no run of more than 8 equal characters. That is a floor, not a proof of entropy:
-generate keys with `openssl rand -hex 32` and put the prefix in front.
-
-**A secret is one row.** Declaring the secret of a key that already exists in that auth database (one minted earlier, revoked or
-not) is refused with an error that names the existing row (its id, name and source, never the secret): revoke and delete that key,
-or declare a different secret. At start the error fails the start (**BL-1463, 0.14.0**: `KEY_SECRET_HELD_BY_OTHER_ROW`, before
-any row is written); it also abandons the creation of an auth database. `aouda plan` runs offline and cannot see a database
-(**BL-1463, 0.14.0**), so it reports only the clashes it can: the same secret twice in the file, or in the file and in the server
-key, wherever the server key comes from.
-
-The declared `kind` must match the prefix wherever the server can see the plaintext (an `env` secret or the server key). For a
-`hash` secret it cannot, and a mismatch there changes only the credential-kind label in the failure log, never the privilege.
-
-### Check the file before you deploy
-
-```bash
-aouda plan --Aouda:Auth:Keys:File=identities.json
-# aouda plan: settings + identities.json (environment Production), 0 databases, 0 schema files
-#
-# error    SECRET_UNREADABLE  identities.json  /identities/0/secrets/0/env
-#          identity 'tullett-feeder' names environment variable 'TULLETT_KEY', which is not set or is empty.
-#          fix:  Set the variable, or make the secret file readable and non-empty where the server runs.
-#
-# 1 error, 0 warnings: `aouda start` would refuse this declaration.
-```
-
-(**BL-1463, 0.14.0**; it replaces `aouda keys check`, **BL-1378, 0.11.0**, and BL-1461's rework of it) `aouda plan` takes the
-arguments `aouda start` takes and reads the configuration the start reads, through the same code, in the directory and environment it
-runs in: `appsettings.json` and `appsettings.<environment>.json` from the working directory, environment variables in both spellings
-(`AOUDA_AUTH__BOOTSTRAP__SERVERKEY` and `Aouda__Auth__Bootstrap__ServerKey`), the start arguments, and the systemd credential
-`aouda-server-key` when `CREDENTIALS_DIRECTORY` is set. Then it loads the file with the environment of the process that runs it, exactly
-as the server does. It reports **every** problem at once, each with its code (`KEY_SECRET_SHARED`, `SECRET_UNREADABLE`, ...) and the
-JSON pointer of the entry, and never prints a secret or a hash: the dev-admin guards, the server key from whichever source sets it
-(`ServerKey`, `ServerKeyFile`, the credential; two at once is an error), the identities file, and the clashes between them (the same
-name, the same secret, a `server_admin` entry next to the dev-admin flag). It exits `1` when the start would refuse, and warns **once
-per database** that scoped entries name and no `service_role`, `public` or `anon` declaration mentions (`KEY_DATABASE_NOT_LINKED`).
-**It checks what it can without the data directory**: a declared secret that is already a row in an auth database, and a role a scoped
-key names that does not exist, are not seen (`aouda plan --server` asks a running server for those). It needs no server and no data
-directory, so it runs in CI: where the secrets are not mounted, add `--skip-secrets`. See [Plan a declaration](plan.md). It no longer
-lists the declarations; `GET /api/auth/admin/configured-keys` lists those of a running server.
-
-Run it where the files are, in the container you deploy:
-
-```bash
-docker compose run --rm --no-deps --entrypoint aouda aouda plan
-```
-
-That runs in the image's working directory with the service's environment, secrets and mounts, so it reads what the server will.
-On a systemd host, run it with what the unit gives the server, which a login shell does not have: the `Environment=` lines, the
-credentials and the start arguments. `systemctl cat aouda` shows them; pass each `Environment=` and `LoadCredential=` line as a `-p`
-option and the arguments after `start` as they are:
-
-```bash
-systemctl cat aouda            # copy the Environment=, LoadCredential= and ExecStart= arguments from here
-sudo systemd-run --pipe --wait -p User=aouda -p WorkingDirectory=/opt/aouda \
-  -p Environment=AOUDA__AUTH__ROOTUSER__EMAIL=admin@example.com \
-  -p LoadCredential=aouda-server-key:/etc/aouda/server-key \
-  /opt/aouda/Aouda.Server plan --data-path /var/lib/aouda --port 5433
-```
-
-On Windows, run it from the install directory with the service's environment: that is the server's working directory.
-
-## Seeing and managing the keys
-
-- Every key listing carries `source`: `minted`, `config`, or `config-removed`. A declared key is listed like any other and is
-  revoked like any other (`DELETE .../api-keys/{id}`, or by name for a scoped key).
-- `GET /api/auth/admin/configured-keys` (a server key) lists every declaration with the state of its row in each auth database:
-  `materialised`, `revoked`, or `pending` (the auth database does not exist yet). It names the entry, kind, auth database,
-  database, fingerprint and where the secret comes from; it never carries a secret or a hash.
-- `GET /api/server/metrics` carries `rejectedApiKeys`: how many API keys were refused since start, by kind only, and two splits of the same total
-  (**BL-1428, BL-1430, 0.12.0**): `rejectedApiKeysByTransport`, `{ "http": n, "websocket": n, "longpoll": n }`, and `rejectedApiKeysByReason`,
-  `{ "credential": n, "listener_mismatch": n, "route_mismatch": n }`. Each always lists all of its keys and sums to `rejectedApiKeys`. See
-  [Counting refused keys](#counting-refused-keys).
-
-### Counting refused keys (**BL-1428, BL-1430, 0.12.0**) {#counting-refused-keys}
-
-`GET /api/server/metrics` answers (the fields this section is about; `databases` and `process` are as before):
-
-```json
-{
-  "rejectedApiKeys": { "server_admin": 0, "scoped_service": 0, "service_role": 0, "auth_admin": 0, "public": 0, "anon": 0, "other": 0 },
-  "rejectedApiKeysByTransport": { "http": 0, "websocket": 0, "longpoll": 0 },
-  "rejectedApiKeysByReason": { "credential": 0, "listener_mismatch": 0, "route_mismatch": 0 }
-}
-```
-
-- **Every transport counts.** 0.11.0 counted HTTP authentication only, so a feeder whose key was revoked or mistyped on its WebSocket `auth`
-  message never moved the counter. Since 0.12.0 a key refused at the WebSocket `auth` or `re_auth` message, or at a long-poll connect, is
-  counted too, once per refusal, in the same per-kind dictionary. A rising `websocket` with a flat `http` is the feeder-lockout signal.
-- **`rejectedApiKeysByReason`** tells a dead key from a misrouted one. `credential` is a key the auth database refused (unknown, revoked,
-  expired, linked user disabled). `listener_mismatch` is a valid `mk_pub_` key sent to the admin listener (`AUTH_KEY_LISTENER_MISMATCH`), and
-  `route_mismatch` is an application key sent to a server catalog route such as `GET /api/databases` (`AUTH_KEY_ROUTE_MISMATCH`). The set is
-  closed at three; the finer credential reasons (revoked, expired, unknown) stay in the log line, because one refusal can carry the text of two
-  auth databases. Before 0.12.0 the two mismatch cases were not counted over HTTP at all (they were counted on WebSocket and long-poll only).
-- **Labels are closed**: the key kinds are those of the known prefixes (an invented prefix is `other`), the transports are the three above,
-  and a key is never in a label. A route mismatch is decided by the key's prefix alone, as the `403` already was, so an invented `mk_svc_` key
-  on `GET /api/databases` counts as one `route_mismatch`.
-- **Not counted**: a JWT (it is not a key), and a session that is already open. An API-key session is not re-checked mid-session (a key's
-  revocation is read at connect and at `re_auth`), so a key revoked while its socket stays open is counted when it next authenticates.
-- The log line for a refused key (caller address and the fingerprints of the keys refused since the last line, never a key) exists on the
-  WebSocket and long-poll paths as well as HTTP.
+`GET /api/auth/whoami` with the credential says which principal it is and which statements it holds. A refusal is logged once, with the code, the principal, the action, the resource and the remedy — never the key. The key commands are `aouda keys new`, `aouda keys new-root` and `aouda keys derive`.
 
 ## Secret files (**BL-1425, 0.12.0**) {#secret-files}
 
-Every secret the server reads from a file goes through **one reader**, so the rules are the same wherever a file is named. Before 0.12.0
-each setting had its own reader and they disagreed on variables, relative paths, encodings and wording.
+Every secret the server reads from a file goes through one reader.
 
 | Setting | A relative path resolves against | Permission check |
 |---|---|---|
-| An identities-file secret `{ "file": PATH }` | the directory of the identities file | none |
-| `Aouda:Auth:Bootstrap:ServerKeyFile` | the process's working directory (a setting is named by no file) | none |
-| The cluster key, `Aouda:ReplicaSet:KeyFile` | the process's working directory | none |
-| The systemd credentials `aouda-server-key` and `aouda-admin-password` (`$CREDENTIALS_DIRECTORY/<name>`) | not applicable: the path is systemd's, no `$NAME` expansion | none |
-| `aouda create-admin --password-file`, `aouda init --admin-password-file` | not applicable: the shell expands the path | **refuses a file readable beyond its owner** (an operator-made file for one command; `--password-stdin` reads no file) |
+| `keyRoot`, `previousKeyRoot` and a password seed `{ "file": PATH }` | the directory of `aouda.json` | none |
+| `Aouda:ReplicaSet:KeyFile` | the process's working directory | none |
 
-The rules, for the first four rows:
-
-- **Path.** `$NAME` and `${NAME}` are expanded from the environment first. An unset or empty variable fails the start naming the variable; a `$` that
-  starts no name is a literal. The expansion is never shown: messages quote the path as written, and a path containing `mk_` is shown as
-  `<redacted>`.
-- **Content.** Read as strict UTF-8. A UTF-8 byte-order mark is removed; a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused,
-  never guessed at. **Exactly one** trailing newline (`\n`, `\r\n` or `\r`) is removed and nothing else is trimmed. Nothing left is an error.
-- **No permission check.** Docker and Kubernetes mount a secret `0444`.
-- **Messages.** `<setting> names secret file '<path>', which cannot be read (<ExceptionType>).` or `<setting> names secret file '<path>', which is empty.`
-  The content is never in a message or a log line.
-
-What changed for an existing deployment (0.11.0 to 0.12.0):
-
-- `ServerKeyFile` now expands `$NAME`/`${NAME}`, and a missing file reads `... which cannot be read (FileNotFoundException).`, where it read `does not exist`.
-- A systemd credential that is not UTF-8 is refused (it used to guess UTF-16/32 from a byte-order mark), and an empty one reads
-  `systemd credential '<name>' names secret file '...', which is empty.`
-- The cluster `KeyFile` no longer trims surrounding whitespace (one trailing newline only), expands `$NAME`, and a missing file is a
-  `SecretFileException`, not `FileNotFoundException`.
-- An identities-file path defect reads `identity '<name>': the file path ...` (it was `has a 'file' secret whose path ...`).
-- Not changed: `Aouda:Auth:RootUser:Password` is a value or the `aouda-admin-password` credential (there is no password-file setting), and
-  `Aouda:Auth:Bootstrap:ServerKey` and an `{ "env": NAME }` secret are not files.
-
-## Roles, wipes and ordering
-
-A declared `scoped_service` key holds the roles its row names. Roles live in the auth database, so a wipe deletes them, and the
-order of recovery does not matter: a key whose role does not exist yet is **denied** (`403`, not `401`) and starts working the
-moment the role is created. Re-create the auth database (its declared rows are made with it), link it, re-create the roles, and
-the key works. No mint, import or link-the-key step exists.
-
-Creating a role that a declaration names **bumps the permission version**, so a cached denial is rebuilt at once. A feeder that
-holds one WebSocket open for hours needs no reconnect: a write stream it opens after the role exists is allowed. A role that arrives
-by a path that does not bump (a restore, a direct insert) is found within about 5 seconds: until then the key's denial is cached for
-that long, so a typo in a role name costs one rebuild per window, not one per request. That window now applies to every scoped key,
-declared or minted.
-
-## Seeing which key is failing
-
-Every rejected API key writes a warning line (throttled to one per window). It carries the caller address and a summary, bounded to
-the 8 most frequent, of the **fingerprints** of the keys rejected since the previous line:
-
-```
-Auth failure: ApiKeyInvalid for credential 'mk_scp_' on POST /api/databases/deposit/tables/Quote/rows (auth database 'auth') from 10.0.4.17: Unknown API key [rejected key fingerprints since the last line: 3a1f9c02 x41, b77e0d11 x2]
-```
-
-When a rejected key is one you declared, its fingerprint is followed by the entry's name and why it was refused:
-`3a1f9c02 x41 (declared as 'tullett-feeder' for auth database 'aut', not 'auth')` when it was presented to a different auth
-database than the one it is declared for (the commonest cause is a typo in `authDatabase`), and
-`3a1f9c02 x3 (declared as 'tullett-feeder'; its row is revoked)` when its row is revoked. Only a key refused as a credential is
-counted; a valid key refused for its route is not a failing sender.
-
-A fingerprint is the first 8 hex characters of the key's SHA-256. It is a log field, and the `GET /api/auth/admin/configured-keys`
-answer for a server key; the `keyPrefix` a key listing shows for a declared key is the kind's prefix, `#` and a fragment of the
-row id, not the fingerprint. Match it to a declared key in the startup
-log, which lists each declared key by name, kind, auth database, fingerprint and source (`env`, `file`, `hash` or `bootstrap`), or hash
-the dead key a legacy sender still holds:
-
-```bash
-printf '%s' "$KEY" | aouda keys hash --key-stdin
-# hash: sha256:<hex>        <- the form the identities file takes
-# fingerprint: 3a1f9c02     <- what the log line names
-```
-
-`aouda keys hash` reads the key from standard input only. There is no `--key` option, because a command line is readable by other
-users on Linux and is kept by shell history and CI logs. There is no `keys generate`: `openssl rand -hex 32` is the generator.
-
-⚠️ Eight hex characters of a hash of a **weak** key let someone who can read the log confirm guesses of it. That is one more reason the
-shape rule exists, and why a key generated by `openssl rand -hex 32` is the only kind to use.
+- **Path.** `$NAME` and `${NAME}` expand from the environment. An unset variable fails the start naming the variable. A path that contains a key is shown as `<redacted>`.
+- **Content.** Strict UTF-8. A UTF-8 byte-order mark is removed. UTF-16 (what PowerShell's `Out-File` writes) is refused. Exactly one trailing newline is removed. Nothing left is an error.
+- **No permission check** on a declaration secret, so a Docker secret mounted `0444` is readable. The file must still be readable by the server's user.
+- **Messages** name the setting and the path, never the content.
 
 ## Not in this release
 
-An import API (`PUT` a supplied key into the database), `aouda keys import` and SDK methods; users and entitlements in the file (custom
-roles are declared with `Roles` on an auth database, **BL-1392, 0.11.0**; the file's content is reloaded by hand with `aouda reload`, **BL-1427, 0.14.0**, and a change is never picked up on its own); a runtime API that creates a declared key; expiry in the file; a Prometheus
-endpoint (the counter above is in the JSON metrics snapshot).
+An import API that accepts a key you supply, and a runtime API that adds a credential to a declared principal (change the file and reload). A limited key is allowed: it only narrows.
 
 ## Related
 
-- [Defaults reference](defaults-reference.md#configured-api-keys) - the configuration keys
+- [Defaults reference](defaults-reference.md#configured-api-keys) - the refused key settings and their replacements
+- [Declared access](declared-access.md) and [The declaration file](../reference/declaration.md) - principals and `credentials`
 - [HTTP API: credential types](../reference/http-api.md#credential-types)
 - [Server configuration](server-configuration.md)
