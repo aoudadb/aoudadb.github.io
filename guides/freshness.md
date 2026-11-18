@@ -83,8 +83,9 @@ up, which is what "read your own write" means for such a table. A wait that runs
 - A node whose formula maintainer is not running (a branch; a promoted node until BL-1441 is fixed) refuses the wait
   `503 FORMULA_NOT_MAINTAINED`.
 - A token read of a formula table whose formulas read a materialized query's result waits until the query has applied the write the token
-  names and those formulas are recomputed. While a query a formula reads cannot catch up (rebuilding, stale, in error), token reads of
-  every formula table in the database wait (BL-1505).
+  names and those formulas are recomputed. A token read of a formula table waits only for the formulas its own values depend on — the
+  queries and tables they read, directly or through other formula tables: while a query a formula reads cannot catch up (rebuilding,
+  stale, in error), token reads of the formula tables that read it wait, and the others do not (**BL-1505, 0.15.0**).
 - A token read joining a formula table and a materialized query's result is covered as far as both are, and waits for whichever is behind. A
   materialized query **built over** a formula table is not yet judged by the formula maintainer (BL-1486).
 - A change event's token on a formula table never claims an input its values do not reflect; tokens are not ordered across events, so keep

@@ -346,6 +346,24 @@ The route table is the action and resource each route asks. A principal is allow
 
 `GET /api/auth/whoami` is `[AuthorizedInHandler]`: it answers for any resolved credential, including one whose policy is empty.
 
+#### A missing database answers 401
+
+On `/api/databases/{db}/…`, a request whose credential is not one the target accepts is `401` — and **a database that does not exist is
+one of those cases**, for a `mk_svc_` key as for any other credential. This is deliberate: a `404` for a missing database and a `401` for
+a present one would tell anyone holding any key which database names exist. The response is the same for both and says nothing about the
+database (**BL-1585**, documented; the public answer is unchanged).
+
+To tell a bad key from a missing database, use what only the operator can see:
+
+- the server log's `Auth failure` warning for the request now ends with *the database in the path does not exist on this server: not
+  created yet, still starting, or misspelt; see /ready* when it is the database (**BL-1585, next train**); the same line without that
+  note means the key;
+- `GET /ready` lists `database_pending` (declared in `Aouda:Databases`, not created yet) and `database_not_open` (registered, not
+  open) with the database as `subject`, and answers `503` until they are gone;
+- `GET /api/databases` with a server credential lists the databases that exist.
+
+A start-up script should wait for `/ready` to be `200` before it uses a service key, and treat a `401` after that as the key.
+
 ## Read Preferences
 
 Read preferences control which replica serves a read request.
@@ -548,7 +566,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SCHEMA_IDENTITY_COLUMN_NOT_BINDABLE` | 400 | Not produced (**BL-1464, next train**). See [the auth error envelope](#auth-error-envelope). |
 | `SCHEMA_SERVER_TIME_COLUMN_NOT_BINDABLE` | 400 | A named mutation's `values` / `set` / `setExpr` names a server-time column (**NativeClients, 0.4.0**) |
 | `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, 0.14.0**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
-| `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, 0.14.0**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda schema check --env`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint. Fix: move the member to the base file. Before, it was dropped |
+| `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, 0.14.0**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda plan`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint; `aouda plan` and the start report it as the finding `SCHEMA_OVERLAY_INVALID` ([Declaration Finding Codes](plan-codes.md)). Fix: move the member to the base file. Before, it was dropped |
+| `EXPRESSION_OVERFLOW` | 400 | (**BL-1481, 0.15.0**) A `setExpr`, or a derived column's expression, overflowed 64-bit integer or 18-digit decimal arithmetic for a row; nothing written |
 | `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp) |
 
 #### State Errors (4xx)
@@ -564,9 +583,8 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `TOKEN_UNSATISFIED` | 409 | Token or lag budget still unmet after `waitMs` (or immediately when `onExceeded=fail`). Never a stale answer. (**ADR 0072, 0.14.0**) On a read of a table with an `Expression` column the wait is for the formula maintainer to recompute every commit up to the token, and it is `TOKEN_UNSATISFIED` whatever `onExceeded` says. |
 | `TOKEN_FETCH_PRIMARY` | 421 | Replica cannot satisfy the freshness contract; retry against the current primary (`GET /admin/replication/topology`). Server does not proxy. |
 | `FORMULA_TOKEN_REQUIRES_PRIMARY` | 421 | (**ADR 0072, 0.14.0**) A consistency token on a read or subscribe of a table with an `Expression` column reached a replica, which computes no formulas and cannot judge it. Send the read to the primary, or read without a token. |
-| `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, 0.14.0**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. |
+| `FORMULA_NOT_MAINTAINED` | 503 | (**ADR 0072, 0.14.0**) This node's formula maintainer is not running (a branch, a server whose replication role is not resolved yet, a promoted node until BL-1441 is fixed), so it cannot wait for the formulas. Read here; wait on the primary. Not a sign of overload: the SDKs do not retry it. `explain` is refused too on a node that serves a replica's rows — a replica, or a promoted node until BL-1441 is fixed (**BL-1511, 0.15.0**). Explain on the primary. |
 | `EXPR_CELLREF_NOT_ALLOWED` | 400 | (**ADR 0072, 0.14.0**) A `cellRef` node outside a formula (the value of an `Expression` column): in a `setExpr`, a derived column, a named query or mutation, a `selectExpr` or a materialized query's output. |
-| `EXPR_CELLREF_INVALID` | 400 | (**ADR 0072, 0.14.0**) Registered, but not answered by the server today (BL-1500): a malformed `cellRef` in a formula — no column, a key part that is not a non-null literal, a key column named twice — is `400 FORMULA_REFERENCE_INVALID`, and any `cellRef` outside a formula is `400 EXPR_CELLREF_NOT_ALLOWED`. |
 | `FORMULA_COLUMN_INVALID` | 400 | (**ADR 0072, 0.14.0**) An `Expression` column's declaration, or a later change to its table, breaks a rule of the column type (the Expression column nullable and plain; its driven column a nullable scalar of the same table that nothing else computes or drives; the table with a strict primary key, an ordinary table). The message names the table, the column and the rule; nothing was changed. See [Formulas](../guides/formulas.md#the-column). |
 | `FORMULA_INVALID` | 400 | (**ADR 0072, 0.14.0**) A formula is not one valid expression: it does not parse, uses a `param`, an unknown function or operator, a type its driven column cannot hold without loss (the message says what to write, e.g. `round(x, 2)`), is computed by a `setExpr`, or arrives through a transform. The message names the row; nothing was written. |
 | `FORMULA_REFERENCE_INVALID` | 400 | (**ADR 0072, 0.14.0**) A formula's `cellRef` names a table that does not exist or a formula may not read (an edge table, an engine table, a materialized query's result over a formula table), a column that does not exist or is an `Expression` column, or a key value no row can hold. |
@@ -1578,8 +1596,10 @@ row, so `rowsInserted + rowsUpdated + expiredRows` can exceed the rows sent.
 
 (**ADR 0072, 0.14.0**) `POST /api/databases/{db}/tables/{table}/explain` says why a [formula](../guides/formulas.md) cell has the
 value it has. It evaluates the cell **again now** and answers its formula, every reference with its resolved key and current value, the
-value or the reason it has none, the value the row stores, and the formula cells that read it. It writes nothing, so a replica answers it
-too. It needs read access to the table.
+value or the reason it has none, the value the row stores, and the formula cells that read it. It writes nothing, but it reads this
+node's own tables, so a node that serves a replica's rows — a replica, or a promoted node until BL-1441 is fixed — refuses it with
+`503 FORMULA_NOT_MAINTAINED` (**BL-1511, 0.15.0**); explain on the primary. A primary, a standalone node and a branch answer it.
+It needs read access to the table.
 
 ```json
 { "key": { "dept": "Online", "line": "Margin", "year": 2028 }, "column": "amount" }
@@ -1634,7 +1654,9 @@ with no row (`kind: "noRow"`); a reference to a row it may not read keeps its `t
 write the caller just made.
 
 **Refusals.** `400 INVALID_REQUEST` when `key` or `column` is missing, the key is not the table's full primary key or holds a value its
-column cannot, or `column` is neither an Expression column nor a column one drives; `404 TABLE_NOT_FOUND` / `DATABASE_NOT_FOUND`.
+column cannot, or `column` is neither an Expression column nor a column one drives; `404 TABLE_NOT_FOUND` / `DATABASE_NOT_FOUND`;
+`503 FORMULA_NOT_MAINTAINED` — on a node that serves a replica's rows (**BL-1511, 0.15.0**). Not retried by the SDKs; no
+`Retry-After`.
 
 The SDKs: `ExplainAsync` (C#) and `table.explain(key, column)` (TypeScript).
 
@@ -1936,7 +1958,8 @@ query through `POST .../schema/apply`, or set the result table's policy afterwar
 
 #### `POST /api/databases/{db}/schema/seed`
 
-Apply idempotent seed data. Tables must already exist.
+Apply idempotent seed data. Tables must already exist. A row whose primary key already exists in any tier — the write buffer, a
+hot segment or a cold one — is skipped and counted as `skipped` (**BL-1489, 0.15.0**).
 
 **Request:** seed document root — the same format as `aouda.seed.json`. Each table's rows are
 [column arrays](#column-arrays-the-write-body) (**Lead S12, 0.6.0; breaking**: they were `"rows": [{…}]`, which is now refused
@@ -2245,7 +2268,10 @@ which the server never served — it answers `401` without a database in the pat
 **Response:** `text/plain` with TypeScript code. (**BL-035, 0.9.0**) An [array column](../guides/array-columns.md) is typed
 `Float64Array` (`Double[]`), `Float32Array`, `Int32Array`, `BigInt64Array` (`Int64[]`), `Uint8Array` (`Byte[]`) or `string[]` in a table
 interface and a named query's row, and a named mutation's argument takes `Float64Array | number[]`, `Float32Array | number[]`,
-`Int32Array | number[]`, `BigInt64Array | bigint[] | number[]`, `Uint8Array` or `string[]`.
+`Int32Array | number[]`, `BigInt64Array | bigint[] | number[]`, `Uint8Array` or `string[]`. (**BL-1496, 0.15.0**) A row type is the union of
+what every path that reads or writes a row gives, so no read needs a cast it cannot make: a `Timestamp` column is `string | Date` (ISO text
+in a query result, a `Date` in a subscription row), a `Date` column `number | Date` (its day number in a query result), a decimal
+`string | number` (a number in a query result). A named query's argument keeps the one value it takes: `Date` for a `Timestamp` or a `Date` column.
 
 ```typescript
 /**
@@ -2262,7 +2288,7 @@ export interface Orders {
   /** References customers.id */
   customer_id: number;
   total: number;
-  created_at: Date;
+  created_at: string | Date;
 }
 
 /** customers table */
@@ -2334,7 +2360,12 @@ is an input), and the response, the column listing and `…/schema` show it with
 `unique`, reference, check or derivation; the driven column is a nullable scalar of the same table that is not a key, partition or cluster
 column, not derived, identity, server time or auto-increment, not a vector or an array, and driven by no other Expression column. A
 violation is `400 FORMULA_COLUMN_INVALID` naming the rule. A query answers the column's type as `"Expression"` and each row's formula as a
-JSON object (`null` for an input row).
+JSON object (`null` for an input row). (**BL-1512, 0.15.0**) (**BL-1491, 0.15.0**) So does every other JSON body that carries rows
+of the table: the `returning` rows of a `PATCH` or `DELETE` of its rows and of a named mutation (insert,
+upsert, update and delete) — which wrote the canonical text as a string of escaped JSON until this train — a named query's body and a
+policy-inspect sample. Two reads keep the stored text, on purpose: a **group-by** whose key is the Expression column answers the key as a
+`String` (`"types": ["String", …]`), as a grouped value and not a table row; and a **materialized query** over the table copies the column
+into its result as a plain `String` column (a result is an ordinary table, never an Expression column), so its body holds the text.
 
 (**Horizon, 0.5.0**) `policy.retention` — `{ "keep": "90d" }`, a whole number of minutes, hours, days or weeks (`m` / `h` /
 `d` / `w`) — declares [retention](../guides/retention.md): rows whose first cluster column is older than the server's clock minus
@@ -2886,6 +2917,10 @@ The following optional fields extend the standard update request:
 |-------|------|-------------|
 | `setExpr` | `object?` | Expression-based SET values. Keys are column names; values are expression nodes. Evaluated server-side per row. Can be combined with `set` — literal `set` wins on collision. |
 | `returning` | `string[]?` | List of column names (or `["*"]` for all) to return after update. Returns post-update values in columnar format under `rows`. |
+
+An expression whose 64-bit integer or 18-digit decimal arithmetic overflows for any matched row refuses the whole update with
+`EXPRESSION_OVERFLOW` (**BL-1481, 0.15.0**); `POST …/rows/batch` answers it, and `TRANSFORM_DERIVED_READONLY`, as a 400 (it
+answered 500).
 
 #### Expression node format
 
@@ -4544,7 +4579,8 @@ Default `conflate` holds only **value `update` events** where the row was visibl
 
 After an input edit the subscription receives the input's `change` and then each formula row that changed, once, at its final value; an
 unchanged recompute sends nothing. An `Expression` column's value is the formula's JSON object in a snapshot page's `data` and in a
-change's `row` and `prev` (a map in MessagePack); `column_types` does not name it. `at_least`, `wait_ms` and `on_exceeded` are judged by the
+change's `row` and `prev` (a map in MessagePack); (**BL-1495, 0.15.0**) a snapshot's `column_types` names it `"Expression"`, as it
+names a `Timestamp`, so a typed client can read the object as a formula. `at_least`, `wait_ms` and `on_exceeded` are judged by the
 formula maintainer's progress, as on a read. See [Formulas](../guides/formulas.md#live-subscriptions).
 
 **Server responds with:** one or more `snapshot` pages (same `version`), then `snapshot_complete`, then `change` messages. Over `MaxSnapshotRows` (default 100 000) the subscribe fails with `SNAPSHOT_TOO_LARGE`. Overflow during paging fails with `SNAPSHOT_OVERFLOW` (not a `gap`).
@@ -4822,7 +4858,7 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `data` | array[] | (**Lead S12, 0.6.0**) The page's rows as column arrays: one array per column, one value per row. May be empty (a page of no rows may also name no columns). |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
-| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. A `change` does not repeat a `Timestamp` or `Date` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
+| `column_types` | object? | (**BL-035, 0.9.0**) A map from column name to type name (`{"Rates":"Double[]"}`) for each [array column](../guides/array-columns.md) of the snapshot, the same on every page (a page with no rows may name array columns it does not hold). (**IR quote report, 0.10.0**) It also names each `Timestamp` column, as `"Timestamp"` (`{"DateTime":"Timestamp"}`): the cells are .NET ticks, see [Timestamp semantics](#timestamp-semantics). (**BL-1391, 0.11.0**) And each `Date` column, as `"Date"` (`{"day":"Date"}`): the cells are a number of days since the Unix epoch. On **every** page, an empty snapshot's and a subscriber denied by an embargo included. **Omitted when the snapshot has none of them.** A column named with an array type holds an array of that type; a column named `Timestamp` holds ticks; a column named `Date` holds days; a column that is not named holds another scalar. (**BL-1495, 0.15.0**) And each `Expression` column, as `"Expression"` (`{"formula":"Expression"}`): the cell is the formula's JSON object, on every page, a denied subscriber's empty page included. A `change` does not repeat a `Timestamp`, `Date` or `Expression` column's name — a client keeps the snapshot's. `Aouda.Client` and `@aouda/client` convert it (a `Date` becomes a UTC `DateTime` at midnight in C#, a JavaScript `Date` at 00:00:00 UTC in TypeScript; see [Timestamp semantics](#timestamp-semantics)). |
 
 **Example:**
 ```json
@@ -5163,7 +5199,8 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 |---|---|---|---|---|
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
-| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness. (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+| `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness — except a formula table's (a table with an Expression column), whose keys are checked at
+every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
 | `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
@@ -5268,7 +5305,8 @@ open — when it carries:
   default (`0`, `""`).
 
 The message names the column, the frame and the row (`details`: `frame=…, row=…, table=…, column=…`). A JSON column-array body is
-checked the same way. Key uniqueness is checked at the commit, and only at `"strict"` (`409 BULK_LOAD_DUPLICATE_PK`).
+checked the same way. Key uniqueness is checked at the commit, and only at `"strict"` — and, at every level, in a formula table
+(**BL-1488, 0.15.0**) (`409 BULK_LOAD_DUPLICATE_PK`).
 
 #### A job's frames are numbered (**Lead S21a, 0.6.0**)
 
@@ -5604,7 +5642,7 @@ queries current, read with the commit's `token` (which waits for them, as for an
 
 | Code | Status | When |
 |---|---|---|
-| `BULK_LOAD_DUPLICATE_PK` | 409 | (**Lead S27a, 0.6.0**) A job at `validation: "strict"` holds a primary key twice, or one the table already holds. Nothing of it was committed; the message names the table and the key, and `details` is `{"table", "sampleKeys", "totalDuplicateCount", "withinJob"}` (the check stops at the first key). Deduplicate the source and load it again, load at `"coerce"`, or upsert the rows. The check waits for the writes that were in flight on the table when the job began to commit, so an insert racing the load and the load never both write one key. |
+| `BULK_LOAD_DUPLICATE_PK` | 409 | (**Lead S27a, 0.6.0**) A job at `validation: "strict"` — or any job, in a table with an Expression column (**BL-1488, 0.15.0**) — holds a primary key twice, or one the table already holds. Nothing of it was committed; the message names the table and the key, and `details` is `{"table", "sampleKeys", "totalDuplicateCount", "withinJob"}` (the check stops at the first key). Deduplicate the source and load it again, load at `"coerce"`, or upsert the rows. The check waits for the writes that were in flight on the table when the job began to commit, so an insert racing the load and the load never both write one key. |
 | `INVALID_REQUEST` | 400 | (**Lead S27a, 0.6.0**) A row the engine refused (a column the table does not have, a missing key): the same rule as `:append`'s frame check, for a row that reached the engine another way. Nothing committed. |
 | `IDENTITY_STAMP_REQUIRED` and the other insert-transform codes | 400 | (**BL-1277, 0.9.0**) `:commit` of a row the insert transform refuses. The code is the one a REST insert already returns for that row (`IDENTITY_STAMP_REQUIRED`, `TRANSFORM_DERIVED_READONLY`, `CONSTRAINT_CHECK_VIOLATION`, `TRANSFORM_ROUTE_UNMATCHED`, `TRANSFORM_ROUTE_AMBIGUOUS`, and the other codes the exception carries), with `rowErrors`. `GET {jobId}` shows `state: "failed"` and that `errorCode`. Nothing was committed. Fix the row and run the load again from `:begin`. A failure after the commit point is still the 500 below and must not be sent again. |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The engine refused memory for the load's commit; or (**WorkloadCore S07, 0.3.0**) the load waited its lock-acquisition timeout for its memory before it started — a load asks for its memory before it takes its tables' locks, so a load waiting for memory no longer holds up inserts into them; or the commit's segment write hit the managed heap's hard limit — (**BL-831 / BL-928, 0.3.0**) the spill merge included: a merge that runs out of memory is refused and nothing is applied, never published as a misaligned segment (it answered `500`). `Retry-After` is set. |

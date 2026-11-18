@@ -46,7 +46,7 @@ It is the **existing-application branch** of [How to build apps effortlessly wit
                   │  workflow,       │    │ named mutation · ws      │
                   │  vendor I/O)     │    │ everything else → 404    │
                   └────────┬─────────┘    └────────────┬─────────────┘
-See [Access](../auth/index.md) (**BL-1464, next train**).
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
                            ▼                           ▼
                   ┌────────────────────────────────────────────────┐
                   │            Aouda ADMIN :5433                    │
@@ -58,7 +58,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 Four rules hold this together:
 
 1. **The trust boundary is the listener, not a route or a header.** The profile is tagged on the Kestrel connection. There is no request you can send to switch profiles.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 3. **The edge stays thin.** TLS, WAF, CDN, geo-allow — yes. Deserializing the JSON and re-serializing it — no. A hop that only relays bytes is waste; a hop that adds trust has earned its place. Direct internet exposure with **no** edge is not a supported configuration in this release.
 4. **Browsers read through named artifacts only.** They cannot compose a query, cannot name a table, and cannot see that `admin/*` exists.
 
@@ -66,7 +66,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 | Credential | Held by | Listener | Ships in a browser bundle? |
 |---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | End-user JWT | The signed-in browser | Data-plane | Held in memory, refreshed |
 | Operator JWT | Studio / Hub users | Admin | n/a |
 
@@ -100,9 +99,9 @@ It is **not** deletable if it resolves an identifier against another system, qua
 
 ### 4. The auth proxy — **delete the user-facing half**
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **Do not delete your JWT validation** in services that still exist. They validate the same Aouda-issued token via OIDC discovery / JWKS, which is published on both listeners.
 
@@ -177,7 +176,6 @@ A relay typically holds **one** Aouda subscription per data partition and fans i
 |---|---|---|
 | Subscriptions per WebSocket connection | **32** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
 | Subscriptions per identity | **128** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Connections per identity, WebSocket and long-poll (**BL-1383, 0.11.0**) | **16** | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` |
 | Subscribe attempts per identity (**BL-1383, 0.11.0**) | burst **512**, **32** per second | `SUBSCRIBE_RATE_EXCEEDED` |
 | Send-buffer high-water mark | 1 MiB | close with `SLOW_CONSUMER` |
@@ -206,10 +204,10 @@ Named-query cost is `1 + joinCount`, capped at 3 joins / cost 8. A view that nee
 
 Do these in order. Each step is independently shippable and independently revertible.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Materialized queries can now be declared here too, but **export before you hand-edit**: a present `materializedQueries` map is desired state and drops anything not listed. Everything after this step depends on it.
 3. **Turn on the data-plane listener** behind your existing edge, on its own hostname. Prove the isolation before you use it: `POST …/query` and `GET /api/databases` must return **404** on the data-plane and work on admin.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 6. **Author named queries and switch reads over behind a flag.** Old gateway route and new named query both work. Compare results.
 7. **Move ingest normalization** that passes the [decision test](division-of-responsibility.md#the-test-when-it-is-not-obvious) into `checks` / `derived` / `route`. Expect an error-handling change: a failed check **fails the whole batch**, it does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted **before** you apply it. `route` must also be exhaustive — an unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row left behind on the landing table — so declare a catch-all route to a quarantine table. See [failure semantics](insert-transforms.md#failure-semantics-the-batch-fails-the-row-does-not-skip).
 8. **Move streaming** with `namedQueries.subscribe`, subject to [capacity](#capacity-what-changes-when-the-relay-is-gone) — this is where losing the relay's fan-out shows up. Build the direct path behind a flag while the relay still runs.
@@ -225,7 +223,7 @@ Hand this to whoever (or whatever) is writing the plan.
 - [ ] Server is `0.1.8`+ and the four trusted-surface breaks have been checked against current usage
 - [ ] `aouda.schema.json` is in git and `schema validate` is clean against every environment
 - [ ] Admin listener is unreachable from outside the private network — probed, not assumed
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [ ] `aouda schema diff --access` runs on every PR that touches the schema
 - [ ] Named queries have `select` (never `*`), a capped `limit`, and ≤3 joins
 - [ ] Subscriptions are collection-shaped; measured count per connection is well under 32
@@ -248,11 +246,10 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | `429 IDENTITY_QUOTA_EXCEEDED` on page load | N independent executes | Use the batch envelope; then size `PermitLimit` from measurement |
 | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | One identity holds 16 sockets (tabs, devices, a reconnect loop) | Close what is not needed; do not retry in a loop; raise `MaxConnectionsPerIdentity` only from measurement |
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | A resubscribe loop, or a mass reconnect replay | Wait `retry_after_ms` (frame) or `Retry-After` (long-poll `/send`); pace the replay |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Studio shows a connect error after adding the listener | Studio is pointed at the data-plane | Studio and Hub use the **admin** URL |
 | Ingest throughput fell after adding transforms | Write amplification on small batches | Batch size is the tuning parameter; avoid stacking `tee`s on a hot path |
 | Rows silently vanished after adding `route` | Events follow storage, not the request | Query the target table, or use `tee` if you meant to keep both |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -275,5 +272,5 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 - [Direct client access](direct-client-access.md) — listeners, keys, quotas, topology
 - [Named queries and mutations](named-queries.md) — authoring, execute, batch, subscribe
 - [Insert-time transforms](insert-transforms.md) — `derived`, `checks`, `route`/`tee`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [Schema CI/CD](schema-cicd.md) · [Compatibility matrix](../clients/compatibility.md) · [HTTP API](../reference/http-api.md)

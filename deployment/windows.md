@@ -126,7 +126,7 @@ The same shape: Aouda sizes scan parallelism from the cores it can see. On a ded
 
 ⚠️ **Aouda does not accept a password on the command line**, on any platform. A command line is recorded by shell history, by process-creation audit events, and by CI logs; none of that can be un-leaked.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 naming the remedy (`POST /api/auth/setup` from this machine, or stop the service first) (**BL-1462, 0.14.0**). A server that
 declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, next train**).
 
@@ -136,12 +136,12 @@ $path = 'C:\ProgramData\Aouda\admin-password'
 Set-Content -Path $path -Value $env:ADMIN_PASSWORD -NoNewline -Encoding utf8
 icacls $path /inheritance:r /grant:r "$env:USERNAME:(R)"
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# $env:AOUDA_TOKEN is an aouda_ key. aouda whoami --server http://localhost:5000
   --email admin@example.com --password-file $path `
   --data 'C:\ProgramData\Aouda\data'
 
 # Or standard input, which touches no filesystem
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# $env:AOUDA_TOKEN is an aouda_ key. aouda whoami --server http://localhost:5000
   --email admin@example.com --password-stdin `
   --data 'C:\ProgramData\Aouda\data'
 ```
@@ -202,6 +202,18 @@ Aouda logs to the console; under the SCM that goes to the service's stdout. ⚠�
 ```
 
 Stops and removes the service. **The data directory is never touched.**
+
+---
+
+## The `aouda` command on Windows
+
+- **A long command line.** A command line through a `.cmd` shim is limited to 8191 characters by Windows. A full declaration given to
+  `aouda plan` or `aouda start` as `--Aouda:…` arguments can exceed it. Put the arguments in a file, one per line, and pass `@args.txt`
+  (**BL-1586, next train**; see [Plan a declaration](../guides/plan.md#the-command)), or start `Aouda.Server.exe` directly.
+- **Installing the tool with NuGet package source mapping on.** `dotnet tool install -g Aouda.Cli --add-source <feed>` fails when a
+  `packageSourceMapping` section does not map `Aouda.Cli` to that source, because the mapping is applied before `--add-source`. Add a
+  `<package pattern="Aouda.*" />` entry for the feed to your `NuGet.Config`, or use `dotnet tool update -g Aouda.Cli --version <X>`,
+  which works with the mapping on. This is NuGet's behaviour, not Aouda's.
 
 ---
 

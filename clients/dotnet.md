@@ -34,6 +34,7 @@ For the same API in-process, without a server, use `Aouda.Embedded` (see
 | I want to... | Go to |
 |---|---|
 | Install and connect | §3 Install and connect |
+| Wait for the server to start; register the client with `AddAouda` | §3a, §3b |
 | Query data | §4 Queries |
 | Insert rows or objects | §5 Inserts |
 | Insert data I already hold as columns | §5 Inserts, §6 Building column batches |
@@ -82,7 +83,6 @@ application.
 | `Timeout` | 30 s | Deadline for one request. Bulk load uses its own, `BulkLoadOptions.RequestTimeout` (§7). |
 | `RetryPolicy` | `RetryPolicy.Default` (3 retries, exponential backoff; `Aouda.Client.Resilience`) | Retries of transient failures; see §8 for what a write may and may not repeat. `RetryPolicy.None` turns retries off. |
 | `CircuitBreakerPolicy` | `CircuitBreakerPolicy.Default` (opens after 5 failures in 30 s) | While open, calls fail at once with `CircuitBreakerOpenException`. `CircuitBreakerPolicy.Disabled` turns it off. |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `AuthFailurePolicy` (**BL-1386, 0.11.0**) | nothing happens | Opt-in: `FailFast` throws `AoudaAuthenticationFatalException` for a rejected key instead of a failure a caller may retry later; `OnSustained` is called once after `SustainedAfter` (default 3) failures in a row. See [Getting Started](../getting-started/index.md#a-rejected-key-is-not-a-retry-bl-1386-0110). |
 | `SubscriptionConsumerQueueCapacity` (**BL-1421, 0.12.0**) | `10_000` | The unread-event bound of every subscription consumer on this client (table and named-query subscribes, typed tables too). Validated `>= 1` when the client is built (`ArgumentOutOfRangeException`-style refusal at construction). `SubscribeOptions.ConsumerQueueCapacity` overrides it for one subscription. See §8a. |
 | `AutoCreateSchema` | `false` | Typed inserts create a missing table from the type. |
@@ -99,10 +99,154 @@ using var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "https://db.example.com",
     DatabaseName = "myapp",
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
     Timeout = TimeSpan.FromSeconds(30),
 });
 ```
+
+---
+
+## 3a) Waiting for the server to start (**0.15.0**) {#waiting-for-the-server-to-start}
+
+A service that starts together with its server (a compose stack, a Kubernetes rollout, a wipe-and-start) meets a server that is **up and not ready**: the port is open from the
+first moment, and every route except the probes answers `503 SERVER_STARTING` with `Retry-After: 5` until the databases are open, the declared schema files are applied and the keys have
+rows. Three things are new for the client.
+
+**What a call does in the start window.** A `503 SERVER_STARTING` (and `503 SETUP_REQUIRED`, a server with nothing declared waiting for its first admin) is now its own exception,
+`AoudaServerStartingException` (an `AoudaServiceUnavailableException`; `ErrorCode`, `StatusCode` 503, and `RetryAfter`, which is `null` for `SETUP_REQUIRED`: it sends none). The call waits
+the server's `Retry-After` before it tries again (never less than the retry backoff, capped at `RetryPolicy.MaxDelay`, 30 s by default), within `RetryPolicy.MaxRetries` (3 by default). These
+answers are **kept out of the circuit breaker and the health counters**, as a capacity refusal already was, and **cannot trip `AuthFailurePolicy.FailFast`**. A write is re-sent after one, because
+the middleware answers before any handler ran, so nothing was applied. In 0.14.0 and earlier each such answer was retried on the client's own 100 ms delays and counted toward the breaker (5 in 30 s), so
+a start window of a few seconds used up the three retries in under a second and could open the circuit for every other call of the client (`CircuitBreakerOpenException`).
+
+**Three retries are not a wait.** About 15 s of `Retry-After` is all a call spends; a start longer than that ends in `AoudaServerStartingException` for the caller. Wait for the server first:
+
+```csharp
+await client.WaitUntilReadyAsync();                              // up to AoudaClient.DefaultReadyTimeout, 60 s
+await client.WaitUntilReadyAsync(TimeSpan.FromMinutes(3));       // longer, for a big declared schema
+```
+
+| Member | What it is |
+|---|---|
+| `AoudaClient.DefaultReadyTimeout` | `60 s`: the deadline `WaitUntilReadyAsync` uses when it is given none |
+| `Task WaitUntilReadyAsync(TimeSpan? timeout = null, CancellationToken ct = default)` | Polls `GET /ready` until it answers `200` |
+| `Task<ReadinessStatus> GetReadinessAsync(CancellationToken ct = default)` | One request to `GET /ready`: the answer whether it is `200` or a `503` with a body. The counterpart of the TypeScript client's `admin.health.ready()` |
+| `record ReadinessStatus(bool Ready, IReadOnlyList<ReadinessIssue> Issues)` | |
+| `record ReadinessIssue(string Code, string Message, string? Subject, int? Done, int? Total)` | One reason the server is not ready: `Code` (`schema_applying`, `database_pending`, `server_starting`, `configured_key_inactive`, ...: [the list](../reference/http-api.md#get-ready)), `Subject` (the database), `Done` / `Total` (progress) |
+| `AoudaNotReadyException : AoudaException` | `ErrorCode` `CLIENT_SERVER_NOT_READY`; `Waited`, `Issues`, `LastFailure`; `InnerException` is the last connection error |
+
+How the wait behaves:
+
+- **It is always bounded.** A zero, negative or `Timeout.InfiniteTimeSpan` deadline is `ArgumentOutOfRangeException`; there is no way to wait without one.
+- **"Not yet"** is: connection refused, a DNS failure, an attempt that times out (each attempt is bounded by `AoudaClientOptions.Timeout`), `502` / `503` / `504` / `429` / `408` and any other `5xx`, and a `503` with the list of what is missing.
+- **It fails at once** with `AoudaException` (not `AoudaNotReadyException`) on `404`, `401`, `403` and any other `4xx`: that is a wrong URL or a proxy in the way, and waiting cannot change it.
+- **Backoff** is 250 ms, doubling to 2 s, raised to a `Retry-After` the server sent, and no sleep passes the deadline.
+- **The probe sends no credential** and never touches the circuit breaker, the health counters or `AuthFailurePolicy`: waiting for a server to start is not an authentication failure.
+- **When the deadline passes**, the exception message names the server's last step: `The Aouda server http://aouda:5000 was not ready after 60 s (GET /ready); still missing: schema_applying (deposit): Applying the schema file ...: 1 of 2 done.`, or `...; last answer: connection failed: Connection refused.` when the server never answered. `Issues` carries the same, as data.
+
+⚠️ **Gate on `/ready`, never on `/health`.** `/health` answers `200` in every state, including while the server is still starting (**BL-1462, 0.14.0**), so a loop that waits for `/health` passes at once. `WaitUntilReadyAsync` waits for `/ready`.
+
+⚠️ **`AuthFailurePolicy.FailFast` can still trip in one short gap.** `503 SERVER_STARTING` cannot trip it (above). But after the server starts answering requests and **before `/ready` is `200`**, a declared key whose row is not written yet is refused
+with `401` (the readiness reason is `configured_key_inactive`), and `FailFast` turns a `401` into `AoudaAuthenticationFatalException`. Call `WaitUntilReadyAsync` before the first authenticated request.
+
+---
+
+## 3b) `AddAouda`: dependency injection and configuration (**0.15.0**) {#add-aouda}
+
+Every service that hand-wrote an options class and the same `Program.cs` block can register the client from configuration:
+
+```bash
+dotnet add package Aouda.Client.Extensions.DependencyInjection
+```
+
+The package is released with `Aouda.Client` (same version train) and adds two extension methods on `IServiceCollection`, namespace `Microsoft.Extensions.DependencyInjection`:
+
+```csharp
+AddAouda(this IServiceCollection services, IConfiguration section,
+         Action<AoudaClientOptions>? configure = null, Action<AoudaStartupOptions>? startup = null)
+AddAouda(this IServiceCollection services, Action<AoudaClientOptions> configure,
+         Action<AoudaStartupOptions>? startup = null)
+```
+
+**`appsettings.json`** (the section name is yours; here `Aouda`):
+
+```json
+{
+  "Aouda": {
+    "ServerUrl": "http://aouda:5000",
+    "DatabaseName": "deposit",
+    "ApiKeyFile": "/run/secrets/deposit_service_key",
+    "ApplicationName": "quote-service",
+    "Timeout": "00:00:15",
+    "AutoReconcileSchema": false,
+    "FailFastOnAuthFailure": true,
+    "WaitUntilReadyOnStart": true,
+    "ReadyTimeout": "00:02:00"
+  }
+}
+```
+
+**`Program.cs`** (this exact file compiles against the client and the package, and its `ReadyTimeout` and `ApiKeyFile` were exercised against an unreachable server):
+
+```csharp
+using Aouda.Abstractions;
+using Aouda.Client;
+using Aouda.Protocol;
+using Microsoft.Extensions.DependencyInjection;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddAouda(
+    builder.Configuration.GetSection("Aouda"),
+    configure: options => options.DefaultReadPreference = ReadPreference.Primary);
+
+builder.Services.AddSingleton<QuoteReader>();
+
+var app = builder.Build();
+app.MapGet("/quotes/{ticker}", async (string ticker, QuoteReader reader) => await reader.LastAsync(ticker));
+app.Run();
+
+public sealed class QuoteReader(IAoudaClient aouda)
+{
+    public async Task<object?> LastAsync(string ticker)
+    {
+        var rows = await aouda.GetTable("quotes").Where("ticker", "eq", ticker).Limit(1).ToListAsync();
+        return rows.FirstOrDefault();
+    }
+}
+```
+
+**The section binds `AoudaClientSettings`:**
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `ServerUrl` | string | none | The server's base URL (required unless `HttpClientFactory` supplies an `HttpClient` with a base address) |
+| `DatabaseName` | string | none | The database this client is scoped to (required) |
+| `ApiKey` | string | none | An API key of any kind; surrounding white space is removed. Not together with `ApiKeyFile` |
+| `ApiKeyFile` | string | none | A file holding the key (a Docker or Kubernetes secret). Read **when the client is first resolved**, not when `AddAouda` runs, so a secret mounted late is found; leading and trailing white space (a trailing newline above all) is removed. A missing, unreadable or empty file is an `InvalidOperationException` that names the path and never the content |
+| `Timeout` | `hh:mm:ss` | the client's 30 s | `AoudaClientOptions.Timeout` |
+| `ApplicationName` | string | none | Sent in the `User-Agent`, so the server's log names this service |
+| `AutoCreateSchema` | bool | the client's `false` | `AoudaClientOptions.AutoCreateSchema` |
+| `TreatMissingAsEmpty` | bool | the client's `false` | `AoudaClientOptions.TreatMissingAsEmpty` |
+| `AutoReconcileSchema` | bool | the client's `true` | Set `false` for a service that writes to tables a schema file declares |
+| `ReconcilePolicy` | `Safe` or `Unsafe` | the client's `Safe` | `AoudaClientOptions.ReconcilePolicy` |
+| `FailFastOnAuthFailure` | bool | `false` | `true` sets `AuthFailurePolicy.FailFast` (see §3a for the one gap in which it can trip during a start) |
+
+And `AoudaStartupOptions` (set from the same section, or in the `startup` callback, which runs after the section):
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `WaitUntilReadyOnStart` | bool | `false` | Registers a hosted service that calls `WaitUntilReadyAsync` when the host starts. A server that is not ready within `ReadyTimeout` **fails the host start** with `AoudaNotReadyException`, whose message names what the server was still missing. Hosted services start in registration order: call `AddAouda` **before** the services that use the client |
+| `ReadyTimeout` | `hh:mm:ss` | 60 s (`AoudaClient.DefaultReadyTimeout`) | The deadline of that wait; must be positive |
+| `HttpClientFactory` | `Func<IServiceProvider, HttpClient>` (code only) | none | Supplies the `HttpClient` the client sends on, for example from `IHttpClientFactory`. Default: the client builds and owns its own, the only mode that signs in and refreshes a session on a `401` |
+
+What it registers and what it refuses:
+
+- **One client.** `AoudaClient` and `IAoudaClient` resolve to **the same singleton**, built when first resolved and disposed with the container.
+- **What a file cannot carry** (retry and circuit-breaker policies, callbacks, `DefaultReadPreference`, a token store) goes in the `configure` callback, which runs after the section is bound.
+- **A second `AddAouda` on one container throws** `InvalidOperationException`: a client is scoped to one database, so a service that needs two databases creates the second client by hand.
+- **Environment variables** use `__` for a level: `Aouda__ServerUrl`, `Aouda__ApiKeyFile`, `Aouda__ReadyTimeout`. They override `appsettings.json` (checked).
+- A `ReadyTimeout` of zero or less is refused when `AddAouda` runs (`ArgumentOutOfRangeException`).
 
 ---
 
@@ -620,21 +764,21 @@ A `CreateBatchWriter` writer inherits the insert rule: a batch whose answer was 
 
 `client.GetTable(name).SubscribeAsync()` sends a **table subscription**: a `target` table and an optional filter (`Where(...)`, including
 `In` / `Nin`; a server up to 0.8.0 refuses those two on a subscription with `INVALID_SUBSCRIPTION_FILTER`, **BL-1226, 0.9.0**). The server accepts it on the **admin listener** only. A client that builds the query on the caller's behalf is composing
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 name and arguments, nothing else ([Direct client access](../guides/direct-client-access.md); ADR 0040 C-2).
 
 | You are | Subscribe with | Listener |
 |---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 A table subscription sent to the data-plane listener fails with `NAMED_QUERY_SUBSCRIBE_REQUIRED`
 (`AoudaRequestException.ErrorCode`). The fix is not a different filter: subscribe **by name** (see
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 The wire contract is in the [HTTP API reference](../reference/http-api.md#websocket-streaming-protocol).
 
 **What a subscription sees** (**BL-1227, 0.9.0**). A subscription's snapshot and events follow the same grants as an HTTP query by
 the same credential; `SubscribeAsync` is authorized by the same role check (`read` on the table, and for a named query every table it
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 on a linked application database opens its socket too. Details: [Real-time Streaming](../guides/real-time.md#who-may-subscribe-and-what-a-subscription-sees).
 
 ### Timestamp columns in a subscription
@@ -677,10 +821,10 @@ await foreach (var evt in client.GetTable("orders")
 ```
 
 **It is a cost waiver, not a grant.** It waives `PARTITION_FILTER_REQUIRED` and nothing else: the snapshot and every event are what the
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 answers `PARTITION_FILTER_REQUIRED` ([compatibility](compatibility.md)). The flag itself writes nothing to the audit log; a grant that
 decides what a subscription sees is audited once per subscription
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Named queries and the flag
 
@@ -905,9 +1049,10 @@ handles (namespace `Aouda.Client` unless noted):
 | Exception | When |
 |---|---|
 | `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, 0.11.0**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
+| `AoudaServerStartingException` (**0.15.0**) | `503 SERVER_STARTING` or `503 SETUP_REQUIRED`: the server is up and not ready. A subclass of `AoudaServiceUnavailableException`; `RetryAfter` is the server's wait (`null` for `SETUP_REQUIRED`). Retried first, waiting `Retry-After` (§3a), and never counted by the circuit breaker or `AuthFailurePolicy`. |
+| `AoudaNotReadyException` (**0.15.0**) | `WaitUntilReadyAsync` reached its deadline; `ErrorCode` `CLIENT_SERVER_NOT_READY`, with `Waited`, `Issues`, `LastFailure` (§3a). |
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |
 | `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY` — with `StatusCode` set. |
 | `CircuitBreakerOpenException` | The circuit breaker is open; the call was not attempted. |

@@ -52,6 +52,12 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 
 ---
 
+## Two local servers at once
+
+`aouda start`, `stop`, `status` and `doctor` keep one state file per user, so a second local server collides with the first. Give each its
+own directory with `--state-dir <dir>` (or `AOUDA_STATE_DIR`; the flag wins) on **every** command that should see it, e.g.
+`aouda start --state-dir $dd/state ...` and `aouda stop --state-dir $dd/state` (**BL-1587, next train**).
+
 ## Do not (engine / CLI traps)
 
 | Action | What happens |
@@ -59,7 +65,6 @@ On bash/zsh the same flags apply (`aouda start --port … --data-dir … --data-
 | `aouda start -h` / `aouda start --help` | Print start help (flags such as `--port`, `--data-dir`) and **do not** bind a port or create `./data`. |
 | `aouda stop` without Bearer | HTTP `stop` is **401**. Kill the recorded PID with `aouda stop -s http://127.0.0.1:<port> --force`. Do not expect unauthenticated HTTP shutdown. |
 | `aouda stop` without `-s http://127.0.0.1:<your-port>` | Can target the wrong process / URL |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Sign in / init against someone else's running server | Wrong admin, wrong data; init is for **this** server's setup mode |
 | `POST /api/databases/{db}/query` on the **data-plane** | **404 by design.** Execute `POST /named-queries/{name}/query` (or batch). Ad-hoc query is admin-listener only. |
 | `partitionKey: 1` (or a bare number) on a column | `INVALID_REQUEST`. Table-level: `"partitionKey": [{"column":"Ticker"},{"column":"Source"}]`, `"clusterColumns": ["Time"]` |
@@ -67,7 +72,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | `offsetParam` without a positive `"offset"` cap | Schema apply fails |
 | `Timestamp` as the time column for some `latestPerKey` / `aggregate` paths | `Invalid cast from DateTime to Int64`. Prefer **Int64** epoch milliseconds for that `orderBy` / time-bucket input when you hit this |
 | Treat query `data` as an array of row objects | Default body is **columnar**: `columns` + `data` + `rowCount` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Data-plane CORS as an indexed env key (`…CorsOrigins__0=…`) or a JSON **array** | `CorsOrigins` is a **single string** (comma-separated origins). Indexed/`__0` binding can crash Kestrel on 0.1.9 |
 
 ### CORS shape (correct)

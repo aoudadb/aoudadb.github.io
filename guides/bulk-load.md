@@ -58,7 +58,7 @@ Operationally, this gives Aouda one ingest primitive that can be used by:
 
 Scope boundaries:
 - Bulk load optimizes the ingest path; it is not a replacement for normal row-level write APIs.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - It guarantees atomic commit at the job boundary (`BulkLoadCommitted`), not partial "progressively visible" reads.
 - It currently does not provide persistent server session reconstruction across restarts (see `2.18`, `BL-067`).
 
@@ -373,9 +373,9 @@ difference is *when* the work is paid — per load, or once for many — not how
    where it committed in the log, and crash recovery re-applies a `Strict` table's delete (logged by key) only to the bulk segments
    loaded before it; on `Recent` / `BestEffort` tables a delete is replayed onto exactly the copies it matched. Before, deleting a
    key, bulk loading it again and crashing before the next checkpoint removed the loaded row.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
    refusal names each refused table and the grant it lacks, and starts no session. A job over such a table writes its
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
    credential that appends to the job; never per `:append` after that. (**BL-1031, 0.5.0; BL-1227, 0.9.0**)
 
 ### What a frame carries is what JSON carries
@@ -476,6 +476,13 @@ var handle = await client.BulkLoadAsync("trades", batches,          // IAsyncEnu
 NULL column that is not part of the key is stored as the type's default, not refused — what an insert through `/rows` would refuse.
 A key is never coerced, nor an [array column](#array-columns) (**BL-035, 0.9.0**), and a column the table does not have is refused at either level. See
 [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
+
+- **A formula table's keys are checked at every level** (**BL-1488, 0.15.0**). A load into a table with an Expression column —
+  or whose transforms land rows in one — that holds a key twice, or a key the table already holds, fails at its commit with `409
+  BULK_LOAD_DUPLICATE_PK`, at `coerce` too: two rows under one key would give a cell two formulas. Nothing of the job is
+  committed; `withinJob` says which case it was. Such a load keeps its keys in memory until its commit, as a `strict` load does,
+  and waits at its commit for the writes already in flight on the table (bounded by `lockAcquisitionTimeout`) (**BL-1488, next
+  train**).
 
 The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatch.Validate()` are described on the
 [.NET Client page](../clients/dotnet.md#6-building-column-batches-lead-s13-060). A multi-table load
@@ -724,7 +731,7 @@ A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../re
 
 | Level | A null or absent cell in a NOT NULL column | A primary key the job holds twice, or the table already holds |
 |---|---|---|
-| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, 0.9.0**) | Loaded as a second row (not checked) |
+| `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, 0.9.0**) | Loaded as a second row (not checked) — **except in a table with an Expression column (a formula table), whose keys are checked at every level, as `strict` checks them** (**BL-1488, 0.15.0**) |
 | `strict` | Refused | The job fails at its commit, nothing committed |
 
 Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value
@@ -1304,7 +1311,7 @@ its rows are in the result. On the publish line a merged load reports `name:merg
 publish that absorbed it reports `merged=N`. `mqPublishBacklog` still counts loads whose publish has not
 completed, merged or not.
 
-⚠️ **A rising `mqPublishBacklog` and a directory full of spill files are the same symptom.** A queued publish keeps its build spill on disk until it runs, so a backlog looks exactly like a leak from the filesystem. Check this number before concluding anything from a file count.
+⚠️ **`mqPublishBacklog` counts pending load jobs, which hold no spill.** The `.mqspill` files in a query's `_build_runs/` belong to a rebuild in flight, or to a chunked rebuild waiting for memory (**BL-624, 0.15.0**); `mqSpillOutstandingBytes` is the figure to read, not a file count.
 
 **(P45)** Six fields are appended after the ones above — `SpillRunsCreated`, `SpillRunsMerged`,
 `SpillWriteMs`, `SpillMergeMs`, `SpillRunBytesWritten`, `SpillBytesWritten` — reporting the job's
@@ -1327,7 +1334,6 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, 0.6.0**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
 | `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, 0.6.0**) | The level is not `strict` or `os` (lower case); `strict` in a database at `os`; or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into a table with vector columns or an edge or vector table, has no level it may use in an `os` database. |
 | `GET {jobId}` answers `lost` with `durability: "os"` (**Lead S26c, 0.6.0**) | The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was dropped whole | Load it again with the same idempotency key: it no longer names a commit. |

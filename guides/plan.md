@@ -17,25 +17,23 @@ aouda plan --declaration aouda.json --env prod  # the declaration file, its prod
 aouda plan                                      # the settings only: with no `Aouda:Declaration`, nothing is declared (`declaration: none`)
 aouda plan --declaration /etc/aouda/aouda.json --skip-secrets   # where the key root and the password seeds are not mounted
 aouda plan --json                               # one JSON object on standard output
-aouda plan --server https://aouda.internal:8080 --key-file server.key   # what a deploy would change on a running server (BL-1463, 0.14.0)
+aouda plan --server https://aouda.internal:5000 --key-file server.key   # what a deploy would change on a running server (BL-1463, 0.14.0)
 ```
 
 With `--server` it also asks a running server what the declaration would change there, and exits `2` when it would change something
 ([Against a running server](#against-a-running-server---server-bl-1463-0140)).
 
+**Which file it reads.** The plan reads the declaration the start reads: the file `Aouda:Declaration` names (`--declaration`, `AOUDA_DECLARATION`). There is no default path. With the setting unset, nothing is declared (`declaration: none`). A path that is set and cannot be read is `DECLARATION_UNREADABLE`. `Aouda:Databases`, `AOUDA_CONFIG_FILE` and `--config` are not how this server finds the file ([Declare a server in one file](declaration.md)).
+
 ## What it checks
 
 The stages of the start, in the order of the start, each on what it can read without a data directory:
 
-1. **read** — every file the declaration names is read: the declaration file `aouda.json` named by `Aouda:Declaration` and its overlay (**BL-1463, next train**; [the file](declaration.md)), the secret files and environment variables it points at (`keyRoot`, `previousKeyRoot`, the
-   password seeds; **BL-1464, next train**), every schema file and its overlay. A file that cannot be read is one finding, not a crash.
-2. **settings** — the process settings (`Aouda:Port`, the memory limits, `Aouda:NamedQuery:*`, ...), the removed keys and the dev-admin guards. A removed
-   setting is `SETTING_REMOVED`, naming its replacement: `Aouda:Databases`, and (**BL-1464, next train**) `Aouda:Auth:Keys:*` (the identities file),
-See [Access](../auth/index.md) (**BL-1464, next train**).
-   when present. An empty value counts as not set.
+1. **read** — every file the declaration names is read: the declaration file `aouda.json` named by `Aouda:Declaration` and its overlay (**BL-1463, next train**; [the file](declaration.md)), the secret files and environment variables it points at (`keyRoot`, `previousKeyRoot`, the password seeds; **BL-1464, next train**), every schema file and its overlay. A file that cannot be read is one finding, not a crash.
+2. **settings** — the process settings (`Aouda:Port`, the memory limits, `Aouda:NamedQuery:*`, ...), the removed keys and the dev-admin guards. A removed setting is `SETTING_REMOVED`, naming its replacement: `Aouda:Databases` (a `databases` entry in `aouda.json`), and (**BL-1464, next train**) `Aouda:Auth:Keys:*`, `Aouda:Auth:RootUser`, `Aouda:Auth:Bootstrap` and the identities file (a principal and its credential in the declaration). A value a setting's type cannot hold is a `CONFIGURATION_INVALID` finding in every `Aouda:*` section the server binds, `Aouda:BulkLoad`, `Aouda:Streaming`, `Aouda:Adra:GrantCaps` and `Aouda:WebSocket:StreamingWrites` included (**BL-1504, 0.15.0**). An empty value counts as not set.
 3. **principals** — the declared principals' names, `anonymous`'s members and the attributes (**BL-1464, next train**; [Declared access](declared-access.md)); the credentials' forms, the dev admin beside a credential declared in `server.principals` (`SERVER_KEY_DEV_ADMIN_CONFLICT`), and the conflicts between declared credentials (`KEY_ID_DUPLICATE`, the OIDC trusts).
 4. **databases** — the `databases` of `aouda.json` (**BL-1463, next train**; before, `Aouda:Databases`, which is now refused as `SETTING_REMOVED`): names, kinds, links and per-kind fields.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+5. **bootstrap** — an operator in `server.principals` (a principal holding `manage` on `server`, with a credential), or a data directory that starts in setup mode (`SETUP_MODE_EXPECTED` offline, `SERVER_HAS_NO_OPERATOR` against the data directory).
 6. **schema** — every declared schema file, read with the server's own reader (a misspelt member is refused with its JSON pointer), the overlay merge, and the apply-time rules that need no tables.
 7. **roles** — the declared access section's rules (**BL-1464, next train**): role names, which auth database governs what a statement names (`STATEMENT_NOT_GOVERNED`), public reach (`AUTH_PUBLIC_UNRESTRICTED`), and the tables, named queries and columns no declared schema has (warnings).
 8. **principalRows** — against a running server: what the converge would write (principals, roles, `signup`; ownership conflicts, unknown roles, the emergency actions the file disagrees with) and their credentials.
@@ -56,6 +54,24 @@ learn and no `--` separator. Whatever you give `aouda start`, give `aouda plan`.
 | `--json` | Print one JSON object instead of text. `--output json` does the same. |
 
 Giving either a value (`--json=false`) is a usage error.
+
+**A declaration too long for a command line (**BL-1586, next train**).** Every `aouda` command replaces an argument `@file` with the lines of that
+file, one argument per line (blank lines and lines starting with `#` are skipped; a line is taken as written, so no quoting; a file's own `@`
+lines are not expanded again; `@@x` is the text `@x`). A Windows command line through a shim is limited to 8191 characters, which a whole
+declaration given as `--Aouda:…` settings exceeds:
+
+```
+# plan.args
+--declaration C:\etc\aouda\aouda.json
+--env prod
+--skip-secrets
+```
+
+```powershell
+aouda plan @plan.args --skip-secrets
+```
+
+A file that cannot be read is exit `64` naming it. Settings in `appsettings*.json` and the environment need none of this.
 
 ### Output
 
@@ -99,7 +115,7 @@ There is no "could not check" status and no `--strict`: a warning that should bl
 An offline plan cannot see the data directory. `--server` asks a **running** server what this declaration would change, before you deploy it:
 
 ```bash
-aouda plan --server https://aouda.internal:8080 --key-file /run/aouda/secrets/server.key
+aouda plan --server https://aouda.internal:5000 --key-file /run/secrets/aouda_server_key
 ```
 
 The plan first reads the declaration and runs every offline check exactly as without `--server`. **If that finds an error, the server is not contacted**: the plan
@@ -111,11 +127,11 @@ local run did not (a different named-query limit on the server, a version differ
 would change, before the stages:
 
 ```text
-aouda plan: declaration /etc/aouda/aouda.json, 3 databases, 2 schema files, against https://aouda.internal:8080
+aouda plan: declaration /etc/aouda/aouda.json, 3 databases, 2 schema files, against https://aouda.internal:5000
 
 changes
   schema   rates: 1 change (AddColumn SwapQuote.Venue)
-See [Access](../auth/index.md) (**BL-1464, next train**).
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
 
 warning  SCHEMA_DESTRUCTIVE_REFUSED  /etc/aouda/bond.schema.json
          Database 'bond': schema file '/etc/aouda/bond.schema.json' differs from the catalog; refused (a reload never applies a destructive change): DropColumn BondQuote.LegacyId
@@ -130,7 +146,7 @@ no problems; 3 changes (see above).
 In the JSON (`--json`), `target` is `{ "kind": "server", "url", "contacted", "role", "writes" }`, `changes` is the server's, `declaration.planHash` is the hash of what
 the **server** planned and `declaration.localPlanHash` the plan's own (they differ when the two machines' settings differ: the server validates under its own).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 `--key-env NAME`, holding one key on one line (a line break, a space or a non-ASCII character is exit `64`, naming the file or the variable). There is no `--key`: a key on the command line stays in the shell's history and the process list, so `--key` is refused (exit `64`) without the value
 being repeated. `--server` is never taken from `AOUDA_SERVER` / `AOUDA_URL`, and the key never from `AOUDA_TOKEN`: an environment left in a CI job must not turn an
 offline plan into a call to a server. The key is sent only as the bearer to the URL you named — **a redirect is not followed** (it would be the easiest way to send a
@@ -139,7 +155,7 @@ server key elsewhere) — and is printed nowhere. The URL is an absolute `http:/
 **What is sent, and what is not.** The candidate carries every declared database entry, the access section as written (`server` and each auth database's
 `signup`, `roles` and `principals`, a stored key as the id and SHA-256 the file declares, a password seed's reference left out; **BL-1464, next train**), every
 schema file as its **merged document** (the overlay applied where the plan ran), and the paths of the declaration and schema files as **labels** for the findings
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 is `400` (an unknown member). It never carries a key, a password, a secret file's content or path, or an environment variable's name. The server opens
 no path the body names, re-reads none of its own configuration, and validates under its **own** process settings (named-query limits, `SkipDatabases`, the dev-admin
 flag, the hosting environment), which a body cannot set. A key's hash is in every row of the auth database already; the bearer key is the more sensitive value either way:
@@ -168,16 +184,18 @@ An `incomplete` plan prints the offline plan it has and ends `incomplete: <reaso
 **Before a deploy**, on the deploy host with the start's own mounts:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint aouda aouda plan --server http://aouda:8080 --key-file /run/aouda/secrets/server.key
+docker compose run --rm --no-deps --entrypoint aouda aouda plan --server http://aouda:5000 --key-file /run/secrets/aouda_server_key
 case $? in 0) echo "nothing to change" ;; 2) echo "changes: review the plan above" ;; *) exit 1 ;; esac
 ```
 
-**In CI** (secrets not on the runner), with the server key as a CI secret in an environment variable:
+The image listens on port **5000** (not 8080), and Docker Compose mounts a service's `secrets:` at **`/run/secrets/<secret name>`**, so `aouda_server_key` here is the name of the secret in your compose file. The key file must be mounted in the container that runs the plan, which a service that lists the secret under `secrets:` has. The URL names the service on the compose network (`aouda`); from the host use whatever address you publish, for example `http://127.0.0.1:5000`.
 
 ```bash
 aouda plan --declaration deploy/aouda.json --skip-secrets \
-           --server https://aouda.internal:8080 --key-env AOUDA_PLAN_KEY
+           --server https://aouda.internal:5000 --key-env AOUDA_PLAN_KEY
 ```
+
+**In CI**, see [A CI job](#a-ci-job-aouda-plan-on-every-pull-request) below: the operator key goes in as a separate CI secret.
 
 ## What `aouda plan` cannot know
 
@@ -210,6 +228,8 @@ that does not touch a secret. What cannot be checked is skipped: an unreadable s
 
 The plan says what it skipped: one `info` finding, `SECRET_NOT_READ`, per reference it did not read, at its JSON pointer (`/keyRoot`, a principal's `credentials/password`; never a value), and
 `notChecked` gives their count (`the contents of 2 secret references (--skip-secrets)`).
+
+**A `keyRoot` `{ "file" }` path is the path inside the container, not on the runner.** `--skip-secrets` is how CI checks the declaration without that file. The root is never an argument.
 
 ## Recipes
 
@@ -255,19 +275,66 @@ it declares: the API refuses changes to it with `409 DECLARED_IN_CONFIGURATION` 
 `GET /api/admin/declaration` shows the declaration a server runs on, with the findings of its last start or reload
 ([HTTP API](../reference/http-api.md#one-writer-per-declared-object)).
 
+## A CI job: `aouda plan` on every pull request
+
+What the job needs, each of which a first attempt gets wrong:
+
+1. **The CLI, at the server's version.** `aouda plan` runs the checks of the version it is, so a CLI older or newer than the server you deploy plans a different declaration (a member one version refuses, the other drops). Install the version you deploy: `dotnet tool install -g Aouda.Cli --version <the server version>`, on a runner with the **.NET 10 SDK** (`Aouda.Cli` 0.2.0 and later). The package comes from the NuGet feed your pipeline already restores `Aouda.*` from (the same one as `Aouda.Client`); add `--add-source <feed>` or a committed `nuget.config` when it is not nuget.org. Without a CLI on the runner, the server image is the same code at the same version: `docker run --rm --entrypoint aouda ghcr.io/aoudadb/aouda-server:<version> plan ...`, which needs a login first (below).
+2. **A private registry login, if you use the image.** The image is private ([Docker](../deployment/docker.md)): `echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin` with a token that has `read:packages`, kept as a CI secret.
+3. **The declaration file.** `aouda plan` reads the file `--declaration` names (`Aouda:Declaration`). Commit `deploy/aouda.json` — the databases, the schema paths, the roles and the principals — and plan that file. `Aouda:Databases` and an identities file are refused (`SETTING_REMOVED`).
+4. **No secrets on the runner**, so `--skip-secrets`. An offline plan then checks form, names, conflicts and every schema file, not the content of a `keyRoot` or a password seed.
+5. **The operator key is its own CI secret**, only for `--server`. It is a key of the server you plan against (a principal with `manage` on `server`), not a key from your declaration: give it through `--key-env` (a variable the step sets from the secret), never as an argument.
+
+```yaml
+name: aouda-plan
+on: [pull_request]
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      - name: Install the CLI at the server's version
+        run: dotnet tool install -g Aouda.Cli --version "${{ vars.AOUDA_VERSION }}"
+
+      - name: Plan offline (no secrets, no server)
+        run: aouda plan --declaration deploy/aouda.json --skip-secrets
+
+      - name: Plan against the running server
+        env:
+          AOUDA_PLAN_KEY: ${{ secrets.AOUDA_STAGING_KEY }}
+        run: |
+          code=0
+          aouda plan --declaration deploy/aouda.json --skip-secrets --server "${{ vars.AOUDA_STAGING_URL }}" --key-env AOUDA_PLAN_KEY || code=$?
+          # 0 nothing to change, 2 changes to review; anything else fails the job (1 errors, 64 misuse, 69 unreachable, 77 key refused)
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then exit "$code"; fi
+```
+
+The same job with the image, for a runner that has Docker and no .NET:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+docker run --rm --entrypoint aouda -v "$PWD/deploy:/deploy:ro" \
+  ghcr.io/aoudadb/aouda-server:"$AOUDA_VERSION" plan --skip-secrets \
+  --declaration /deploy/aouda.json
+```
+
 ## Replacing `aouda keys check` and `aouda schema check`
 
-Both commands are deleted — no alias, no "did you mean": `aouda keys check` and `aouda schema check` are unknown subcommands and exit `64`. `aouda keys hash` stays, and so do `aouda schema validate`,
-`diff`, `apply` and `export`.
+`aouda keys check` and `aouda schema check` are deleted — no alias, no "did you mean": they are unknown subcommands and exit `64`. The key commands are `aouda keys new`, `aouda keys new-root` and `aouda keys derive` ([CLI](../reference/cli.md)). `aouda schema validate`, `diff`, `apply` and `export` stay.
 
 | Before | Now |
 |---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `aouda keys check -- --dev-admin` | `aouda plan --dev-admin` (no separator) |
 | `aouda schema check --file F --env E` | a declaration file with `{ "version": 1, "databases": { "app": { "kind": "data", "schema": "F" } } }`, then `aouda plan --declaration aouda.json --env E` (**BL-1463, next train**; in 0.14.0 it was `aouda plan --Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=F --Aouda:Databases:app:SchemaEnvironment=E`, which is refused now) |
 | `aouda schema check` for a schema that is not declared | `aouda schema diff` against a server |
 | exit `2` from either command | exit `1` (or `64` for misuse); `2` no longer means "could not check" |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 The `schema check` page's two lessons still hold. **`plan` and `schema validate` are different:** `plan` asks whether the declaration is acceptable on its own, with no server; `schema validate` asks whether
 a live database matches a file (drift), and needs one. And **the start runs the same checks:** a declared database's schema file is checked before the start changes any database, with that server's own

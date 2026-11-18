@@ -84,7 +84,11 @@ printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
 
 The password goes on standard input, never on curl's command line.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
+
+## Declaring databases, keys and schema files
+
+The chart value is `declaration.file`: `aouda.json` with no `Aouda` wrapper, mounted read-only and named with `Aouda__Declaration`. `declaration.config` (an `appsettings` shape) is not a value. The worked values, `extraEnv`, `extraEnvFrom`, `extraVolumes` and `extraVolumeMounts` are [below](#declare-the-databases-bl-1463-next-train). A key root is a Secret mounted through `extraVolumes` and named from the file as `{ "file": "/etc/aouda-files/key-root" }`. It is never a ConfigMap entry. `Aouda__Databases__*` in `extraEnv` is refused (`SETTING_REMOVED`).
 
 ## Upgrade
 

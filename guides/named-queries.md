@@ -43,10 +43,10 @@ An untrusted caller (a browser, a mobile app) must not compose an arbitrary `Que
 
 1. **Cost** — a five-way join or an unfiltered scan is unbounded.
 2. **Schema coupling** — the UI is welded to physical column names (the PostgREST failure).
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. **Review** — a query that can leak a tenant is a schema change, not a string in a SPA.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Performance: what is actually true
 
@@ -109,7 +109,6 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
   "database": "trading",
   "tables": {
     "EquityQuote": {
-See [Access](../auth/index.md) (**BL-1464, next train**).
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1 },
         "ticker": { "type": "String" },
@@ -120,7 +119,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
       }
     },
     "Position": {
-See [Access](../auth/index.md) (**BL-1464, next train**).
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1 },
         "accountId": { "type": "Int64" },
@@ -188,7 +186,7 @@ Notes:
 
 - `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](../auth/authorization.md#audit).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top. **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still a required param. Write `"required": false` explicitly for optional args (and always when pairing with `whenParamPresent`).
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Legal `where` operators
 
@@ -416,18 +414,18 @@ Body is `{ "args": { … } }` only. No `database` field (the path already has it
 ### HTTP
 
 ```bash
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 # with AUTH_KEY_LISTENER_MISMATCH.
 curl -s -X POST \
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   -H "Content-Type: application/json" \
   http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### TypeScript (`@aouda/client`)
 
@@ -437,7 +435,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "https://data.example.com", // data-plane listener
   database: "trading",
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
 await client.connect();
 // after user sign-in, attach the user JWT — do not put identity in args
@@ -452,7 +450,7 @@ const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
 ```csharp
 var client = new AoudaClient("https://data.example.com", "trading")
 {
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 };
 
 var result = await client.NamedQueries.ExecuteAsync(
@@ -481,7 +479,7 @@ A dashboard of independent panels should not issue N sequential executes. A batc
 }
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```json
 {
@@ -529,7 +527,7 @@ Two sequential single executes under a concurrent writer **may disagree**. The b
 
 On the data-plane, WebSocket `subscribe` **requires** `"name"` (and optional `args`). Ad-hoc `target` + `filter` is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -581,7 +579,7 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
   "conflate": { "collapse_inserts": true } }
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -849,13 +847,13 @@ This is the recommended path for a bounded, continuous-trickle insert feed (e.g.
 
 ## Authorization (always underneath)
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### `crossPartitionAccess` per call
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 There is no catalog field, header, or option that runs a named query as someone else.
 
@@ -866,7 +864,6 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Symptom | Cause | Action |
 |---|---|---|
 | `404 NAMED_QUERY_NOT_FOUND` | Name not deployed or typo | Apply schema; use the schema key as a string literal |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `400 NAMED_QUERY_BIND_FAILED` | Arg type/constraint | Check `params` (`maxLength`, `min`/`max`, `enum`, `maxItems`) |
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |
 | Schema apply `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` | Set a numeric cap (or a constrained `limitParam`) |
@@ -885,7 +882,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -905,7 +902,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 ## Related
 
 - [How to build apps effortlessly with Aouda](build-apps.md) — where named queries fit in the whole build path
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in

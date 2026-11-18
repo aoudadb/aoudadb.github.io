@@ -131,7 +131,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 → [TypeScript Client](clients/typescript.md) — query builder, typed queries, auth, MCP tools
 
 **Exposing Aouda to a browser or SPA?**
-See [Access](auth/index.md) (**BL-1464, next train**).
+→ [Direct client access](guides/direct-client-access.md) — no key in the browser. `anonymous`'s statements are what it may run ([Access](auth/index.md), **BL-1464, next train**).
 
 **Reading from a replica without losing your write?**
 → [Freshness and replica consistency](guides/freshness.md) — token, `AtLeast`, alias budgets, honest caveats.
@@ -140,7 +140,7 @@ See [Access](auth/index.md) (**BL-1464, next train**).
 → [Adopting Aouda](guides/adoption.md) — target architecture, which hops to delete, migration order, and where the SDKs lag the engine.
 
 **Setting up authentication?**
-See [Access](auth/index.md) (**BL-1464, next train**).
+→ [Access](auth/index.md) — principals, statements and `aouda_` keys (**BL-1464, next train**). First run: [Authentication](getting-started/auth.md).
 
 **Deploying to production?**
 → [Deployment](deployment/index.md) — Kubernetes, Helm, Docker, Windows Service, systemd

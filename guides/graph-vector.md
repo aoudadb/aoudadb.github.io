@@ -68,7 +68,7 @@ AI applications require three data modalities — structured rows, graph relatio
 
 ### Operational outcome
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Scope boundaries (Stage 1)
 
@@ -151,10 +151,11 @@ Stage 1 (P20) delivers storage primitives and method-level query operators. It d
 - `VectorHraBuffer` — in-memory hot write area; freeze-and-swap flush per IVF cell
 - `IvfCentroidStore` — persists IVF centroids trained by `KMeansHelper`
 - `VectorSegmentFlusher` — seals vectors per IVF cell; writes raw fp32 pages + `*.rabitq` / `*.pq` companion files
+- A flush's segments reach the catalog in one journal record, all or none (**BL-601, 0.15.0**) — the cells of a vector flush, and the segments of an edge flush. Before, each cell was catalogued by its own write; one that failed after the first left the others recording the whole batch's end, and a restart lost the uncatalogued cells' vectors. A failure the catalog provably did not record is undone and the rows are flushed again; one it may have recorded is completed and logged (a failed catalog journal write already stops the table's reads until the database is reopened).
 - Late-arriving vectors are flushed inline; the cell-aware `_delta/` merge is removed (**ColumnarRead, 0.3.0**)
 - `InsertVectorsAsync`, `DeleteVectorAsync` on `AoudaEngine`
 - ANN search operator: `NearestNeighborsAsync` (IVF-pruned brute-force scan, Stage 1)
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **MdVector storage:**
 - `DataType.MdVector` column type with `MdVectorColumnConfig` (`Dimensions`, `MaxTokens`, `Distance`, `Fde`)
@@ -244,7 +245,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | Filtered ANN layer 1 (partition pruning) | Yes | — | — | `src/Aouda.Engine.Api/AoudaEngine.cs` `NearestNeighborsAsync` `partitionKey` param; ADR 0027 (columnar) §Filtered-ANN | Free; uses ADR 0009 partition machinery |
 | Filtered ANN layer 2 (pre-filter + brute-force) | — | — | Yes | ADR 0027 (columnar) §Stage-2 | Stage 2 |
 | Filtered ANN layer 3 (ACORN-1 + HNSW) | — | — | Yes | ADR 0027 (columnar) §Stage-3 | Stage 3 |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Stage-4 manifest reservation fields | Yes | — | — | `src/Aouda.Engine.Storage/Manifest/SegmentManifest.cs` lines 71–83; ADR 0031 | Schema only; no Stage-4 runtime |
 | Embedding model versioning per segment | Yes | — | — | `SegmentManifest.EmbeddingModelVersion`; `InsertVectorsAsync` `embeddingModelVersion` param | Enables multi-model coexistence and future Drift-Adapter |
 | Matryoshka dims metadata | Yes | — | — | `VectorColumnConfig.MatryoshkaDims`; `src/Aouda.Engine.Core/Schema/VectorConfig.cs` | Stored in catalog; tiered retrieval not yet implemented |
@@ -300,19 +300,19 @@ The `IvfCellId` and `QuantizationMethod` fields in `SegmentManifest` identify wh
 
 These fields are serialized by `ManifestSerializer.cs` for every manifest but have no runtime effect until Stage 4. Contributors **must not** repurpose them without a superseding ADR.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Starting P24 (ADR 0032), edge traversal and ANN search accept an `IQueryPermissionContext? permissions` parameter. When non-null:
 - `ResolveEdgeAccess` calls `AdraEdgeAccessFilter` to resolve the set of allowed partition keys.
 - `ResolveVectorAccess` calls `AdraVectorAccessFilter` similarly.
 - An empty allowed-partition set returns an empty result immediately (deny-by-default).
 - `null` permissions means embedded mode, with no auth context: unrestricted on a table no auth database governs, and **empty** on an
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - A credential that holds an [embargo](../auth/authorization.md#198b-embargo-a-delayed-view-of-a-table-bl-418-090) on the
   table is refused `403 AUTH_EMBARGO_UNSUPPORTED`: traversal (`edges:traverse`, `edges:khop`, `edges:shortest-path`) on an embargoed edge table,
   and `:nearest` on an embargoed vector table. These reads have no row time to cut by. (**BL-418, 0.9.0**)
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -338,12 +338,12 @@ InsertEdgesAsync / InsertVectorsAsync
 TraverseAsync / KHopNeighborhoodAsync / ShortestPathAsync
     └─ TraverseOperator / KHopNeighborhoodOperator / ShortestPathOperator
            └─ Scans CSR sealed segments; optional CSC for bidirectional BFS
-See [Access](../auth/index.md) (**BL-1464, next train**).
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
 
 NearestNeighborsAsync
     └─ NearestNeighborsOperator
            └─ IVF cell pruning → brute-force distance over fp32 / decoded RaBitQ pages
-See [Access](../auth/index.md) (**BL-1464, next train**).
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
            └─ Multi-partition fan-out merge (ADR 0032 M2 fix)
 ```
 
@@ -410,7 +410,6 @@ Relevant test: `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTes
 | Capability question | Typical systems | Aouda approach | User impact |
 |---|---|---|---|
 | Store graphs, vectors, and rows together | Requires Postgres + Neo4j + Pinecone (3 systems) | All three in one engine; same WAL, same tiering, same auth | Zero ETL between modalities; one on-call rotation |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | IVF cells as columnar partitions | Most vector DBs maintain a parallel index subsystem | Aouda reuses ADR 0009 partition machinery for IVF cell routing | No separate index management; tiering policies apply to vector cells the same as to row partitions |
 | Quantization in cold tier, raw fp32 hot | Typical: quantize globally or not at all | Aouda stores raw fp32 in hot segments; cold sealing applies RaBitQ/PQ automatically | Precision for re-ranking hot results; cost efficiency for cold recall |
 | Embedding model version per segment | Most systems assume one model per table | `EmbeddingModelVersion` recorded per segment; multiple versions coexist | Zero-downtime model upgrades (old + new segments query simultaneously); Stage-2 Drift-Adapter uses this metadata |
@@ -457,14 +456,13 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `embeddingModelVersion` | `string?` | `null` | Written to WAL frame and propagated to `SegmentManifest.EmbeddingModelVersion` at seal |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### NearestNeighborsAsync query parameters
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `partitionKey` | `string?` | `null` | Filtered ANN layer 1: restricts scan to one partition. Pass `null` to scan all partitions. Any other value, the empty string included, names one partition (**BL-1184, 0.9.0**). |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `k` | `int` | — (required) | Maximum results to return; engine returns ≤ k results ordered by ascending distance |
 
 ### Stage-4 manifest reservation fields (ADR 0031 Decision-6)
@@ -544,7 +542,7 @@ curl -X POST "$AOUDA/api/databases/social/tables/follows/edges:khop" -H "Authori
 ```
 
 The reads (`edges:traverse`, `edges:khop`, `edges:shortest-path`, `:nearest`) take the same freshness parameters as `POST …/query`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### .NET examples
 
@@ -798,7 +796,7 @@ await engine.InsertVectorsAsync("docs", "embedding", newRowKeys, newEmbeddings,
 | Vector cell seal | `VectorSegmentFlusher` | At each HRA freeze-and-swap per column |
 | Compaction floor suppressed | `Perf.CompactionFloorSuppressed` | HRA triggered but below `MinFlushRows` / `MinFlushBytes` |
 | WAL replay edge/vector frames | WAL replay log | On `AoudaEngine.OpenAsync` after crash |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Recovery expectations
 
@@ -828,7 +826,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | `ShortestPathAsync` is slow or returns a long path | `StoreCsc: false`; using unidirectional BFS | Re-create the edge table with `StoreCsc: true` for bidirectional BFS (requires data reload) |
 | ANN recall is low | Too few IVF cells probed relative to corpus distribution | Increase `IvfCells` (requires recreating column config); or verify `partitionKey` is not too restrictive |
 | Edge traversal returns unexpected nodes | Cross-partition traversal not supported in Stage 1; edges from other partitions not reachable from a cross-partition query | Ensure the start node's partition is accessible and edges are routed to the same partition as their source |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -861,7 +859,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | `ShortestPathAsync` bidirectional BFS | `tests/Aouda.Engine.Query.Tests/Operators/ShortestPathOperatorTests.cs` | Pass | Strong | Both CSC and non-CSC paths covered |
 | `NearestNeighborsAsync` IVF-pruned brute-force | `tests/Aouda.Engine.Query.Tests/Operators/NearestNeighborsOperatorTests.cs` | Pass | Strong | — |
 | `InsertEdgesAsync` engine API (round-trip) | `tests/Aouda.Engine.Api.Tests/InsertEdgesApiTests.cs` | Pass | Medium | Insert + traverse; CSC path not directly tested at API level |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Stage-4 manifest reservation field round-trip | No dedicated test | Not run | Weak | Fields confirmed in `ManifestSerializer.cs` by code inspection; propose test below |
 
 ---
@@ -870,9 +867,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Stage-4 manifest field serialization round-trip | Ensures reserved fields survive `ManifestSerializer` write→read without data loss | `tests/Aouda.Engine.Storage.Tests/Manifest/SegmentManifestStage4ReservationTests.cs`: write manifest with non-default field values (once P23 populates them); verify round-trip | Medium |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | MdVector FDE companion column slot (Stage 2 readiness) | Ensure catalog correctly stores `Fde: true` and column slot is reserved | `tests/Aouda.Engine.Api.Tests/MdVectorFdeSlotTests.cs`: create table with `MdVectorColumnConfig`; confirm `Fde` value persists in catalog | Low |
 | Bidirectional BFS path correctness with CSC | `ShortestPathAsync` correctness for asymmetric graphs (directed edges) | Add directed-graph test case in `ShortestPathOperatorTests.cs` where CSR-only path would differ from bidirectional BFS | Medium |
 
@@ -909,7 +904,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 - ADR 0014 — time-series clustering (delta-merge model reused for edges/vectors)
 - ADR 0021 — HRA freeze-and-swap (same mechanism for `EdgeHraBuffer` / `VectorHraBuffer`)
 - ADR 0022 — licensing (embedded parity for graph/vector)
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - ADR 0030 — bulk-load replication (covers `BulkLoadAsync` write path)
 - ADR 0032 — cross-modal authorization (`AdraEdgeAccessFilter` / `AdraVectorAccessFilter`)
 

@@ -9,7 +9,7 @@ parent: "Guides"
 Document status: Complete (P40 S09)  
 Last updated: 2026-08-21
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Enumerable tables below are generated from the validators that enforce them. If a table and the engine disagree, the engine wins and this page is stale — pinned by `BrowserTierReadLimitsDocsTests`.
 
@@ -109,27 +109,27 @@ Subscribe refusals return `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED`. (**BL-035, 0.9.0*
 
 **Rule.** On a partitioned table (`RequirePartitionFilter` defaults **on**, including tables created by `schema/apply` with a `partitionKey`), a query must include `eq` or `in` on **every** partition-key column. `in` lowers to OR-of-equality and **does** satisfy the guard.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **Does not satisfy the guard:** `nin`, ranges (`gt` / `lt` / `gte` / `lte`), `between` (which is `gte ∧ lte`), and `like` — including a pure prefix pattern such as `Ticker like 'EQN%'`, which looks prunable but is not: the guard is an access gate, and a pattern is not an enumeration of key values. A **prefix** of a composite key on a query that **reads rows** is refused — there is no prefix exception for scans.
 
 **Key-only DISTINCT** (the one exception): projection and predicate on raw partition-key columns only, and at least one partition key constrained by `eq`/`in`. That is the path for "which sources exist for this ticker?" It runs as a scan pruned to the constrained keys, and row groups the filter selects whole are answered from their statistics (**architecture review, 0.3.0**). Before, it was answered from the partition directory without reading row data, so a partition whose rows were deleted or truncated still appeared, and it was refused with `PARTITION_FILTER_REQUIRED` when the directory was incomplete (`data/` residue, a `_shared/` bucket) or over 10 000 tuples. Neither refusal remains.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **Why.** The guard is an access gate, not a pruner. Segment discovery is not partition-pruned, so a prefix on a row scan is `crossPartitionAccess` by another name.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
 ### `crossPartitionAccess` on the data-plane listener
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **Why.** A definition that granted an unbounded scan would not be reviewable at persist time (`D-20`). The flag is a **cost guard**, not a confidentiality boundary: it waives the partition-filter guard and nothing else, so it never changes which rows a credential sees. It is unreachable from the browser by design.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Admin analytics still use `.WithCrossPartitionAccess()` / `crossPartitionAccess: true` on the **admin** listener. That is not a browser-tier recipe.
 
@@ -227,7 +227,7 @@ A definition using `selectExpr` also cannot be subscribed (table above; **BL-170
 **Instead:**
 
 - Set `collapse_inserts: true` on the same `conflate` object. Matching inserts are held latest-wins per declared key; delivered `op` stays `"insert"`; `values_skipped` counts collapsed inserts. Transitions still flush.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Do not point a 10 Hz last-price grid at an insert-only table plus default `conflate` and expect throttling.
 
@@ -259,7 +259,6 @@ These are true on the current train (P40 S01–S09). They were missing from docs
 |---|---|
 | Watchlist `in` on a partition key | `Ticker in $tickers AND Source eq $source` — one named query, one subscribe |
 | `latestPerKey` without an imperative create | `materializedQueries` map, `type: "latestPerKey"` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Candle columns named `high` / `open` | Aggregate MQ public shape is `outputName` on every read path (`D-31`) |
 | Distinct source list | `distinct: true` over partition-key columns with one key constrained ([key-only DISTINCT](#partition-filter-rule)). Answered on the scan, which skips row groups from their statistics (**architecture review, 0.3.0**). The partition-directory answer was retired — a directory outlives rows deleted from it — so deleted partitions no longer appear and `stats.distinctServedFromPartitionMetadata` is gone |
 | Paging | `limit` (required cap) + `limitParam` / `offsetParam` (param names; still need a numeric cap). Non-zero offset **disqualifies subscribe** |

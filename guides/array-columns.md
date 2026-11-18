@@ -372,7 +372,6 @@ ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot
 | `/query` and `/query/count`: `where` (**`IS NULL` included**), `orderBy`, `groupBy`, an aggregate, `distinct`, a join key, a `perKey` key (**BL-035, 0.9.0**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED` |
 | an ad-hoc `PATCH …/rows` with a `setExpr` on one; a `DELETE …/rows` or a `POST …/rows/batch` delete with an `orderBy` on one (**BL-035, 0.9.0**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing deleted |
 | a subscription `filter`, or a `conflate.key` (**BL-035, 0.9.0**) | `subscribe` | an `error` message with code `ARRAY_COLUMN_UNSUPPORTED` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | a route or tee under `applyTransforms` that copies an array column into a column of another type, or a scalar into an array column (**BL-035, 0.9.0**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
 | a column of an **edge table** (an edge table stores only its source, destination and label) (**BL-035, 0.9.0**) | `POST …/tables/{name}/columns` on an edge table (and the engine's `CreateEdgeTableAsync`) | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing added |
 | a `filter` materialized query over a table **without a primary key**, selecting an array column (**BL-035, 0.9.0**) | `schema apply` | that entry is `Failed` |

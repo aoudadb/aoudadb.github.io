@@ -44,7 +44,7 @@ Two data databases share one application auth database. `shop` applies a schema 
       "roles": {
         "analyst": {
           "description": "Reads every table",
-          "permissions": [ { "resourceName": "*", "actions": "read" } ],
+          "statements": [ { "actions": ["read"], "resources": ["shop/table/*", "reports/table/*"] } ],
         },
       },
     },
@@ -167,7 +167,7 @@ declares it in `aouda.json` (and sets `AOUDA_ENVIRONMENT=prod`):
 | `:SchemaEnvironment` | the process setting `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`), one for the whole server |
 | `:SchemaAllowDestructive` | `databases.<db>.schemaAllowDestructive` |
 | `:Durability`, `:ReplicationMode`, `:WriteConcern`, `:WriteConcernTimeoutMs`, `:OnWriteConcernTimeout`, `:DefaultTemperature`, `:MemoryWeight`, `:MaxMemoryShareBytes` | the same name in camelCase: `databases.<db>.durability`, … |
-| `:Roles:<role>` (`Description`, `Permissions`) | `databases.<auth>.roles.<role>` (`description`, `permissions`) |
+| `:Roles:<role>` (`Description`, `Permissions`) | `databases.<auth>.roles.<role>` (`description`, `statements`). A `permissions` list is refused |
 
 The member names are **case-sensitive**: `"Kind"` is refused, and the message names `kind`.
 

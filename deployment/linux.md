@@ -241,13 +241,13 @@ Where a quota is impossible, set `AOUDA__CPU__CONFIGUREDCORES` instead.
 
 ⚠️ **Aouda does not accept a password on the command line.** On Linux a command line is world-readable at `/proc/<pid>/cmdline` for the life of the process, and it is also kept by shell history, by process-launch audit rules and by CI logs. None of that can be un-leaked.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 naming the remedy (`POST /api/auth/setup` from this host, or stop the service first) (**BL-1462, 0.14.0**). A server that
 declares a key-only operator in the declaration file's `server.principals` needs no admin and has no setup mode (**BL-1464, next
 train**).
 
 **The data-directory lock and its limits** (**BL-1462, 0.14.0**). The server holds an exclusive `flock` on
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 same lock and refuse. The kernel releases it when the process exits, `kill -9` included, so there is never a stale lock to delete.
 It protects a directory on a **local filesystem, between processes on one host**. On a mount without `flock` (some NFS, CIFS and
 FUSE mounts answer `ENOLCK` or `EOPNOTSUPP`) .NET treats the failure as success and the lock is silently not held; on NFS mounted
@@ -261,12 +261,12 @@ Three supported ways, in order of preference:
 # 1. A file only you can read
 sudo install -m 600 /dev/null /etc/aouda/admin-password
 sudo sh -c 'printf "%s" "$PASSWORD" > /etc/aouda/admin-password'
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   --email admin@example.com --password-file /etc/aouda/admin-password \
   --data /var/lib/aouda
 
 # 2. Standard input — touches no filesystem
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   --email admin@example.com --password-stdin --data /var/lib/aouda
 ```
 
@@ -356,7 +356,6 @@ aouda doctor --output json
 | `70` | `status`: the server is not running |
 | `71` | The service manager (systemd, the SCM) refused an operation or could not be reached. (**BL-1461, 0.14.0**) It was `78` in 0.13.0 and earlier |
 | `77` | Not permitted — `service install` or `service uninstall` without root (an elevated prompt on Windows) |
-| `71` | The service manager (systemd, the SCM) refused an operation or could not be reached |
 | `78` | (**BL-1461, BL-1463, 0.14.0**) `start`: the start was **refused for its configuration**, and restarting with the same configuration fails the same way. Standard error lists every finding with its code ([Declaration Finding Codes](../reference/plan-codes.md)). See [When the start is refused](#when-the-start-is-refused) |
 
 These are the same on every platform and for every way of running the server (`aouda start`, the unit, the container).
@@ -382,7 +381,7 @@ one [`aouda plan`](../guides/plan.md) prints, headed `aouda start`, and the last
 ```text
 aouda start: declaration /etc/aouda/aouda.json, 1 database, 0 schema files
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
          fix:  Remove the setting and use the one the message names instead.
 
 stages   read ok, settings 1 error, principals ok, databases ok, bootstrap ok, schema ok, roles ok, principalRows ok
@@ -391,7 +390,7 @@ stages   read ok, settings 1 error, principals ok, databases ok, bootstrap ok, s
 
 Every code, its stage and what fixes it is in [Declaration Finding Codes](../reference/plan-codes.md). Among them:
 `SETTING_REMOVED` — a setting that is no longer read, such as the old operator settings above (`Aouda:Auth:Bootstrap:*`,
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 train**; an empty value counts as not set), naming its replacement and never its value; `SERVER_HAS_NO_OPERATOR` — the data
 directory was set up before, and now has nobody who can manage the server and nothing declared (declare an operator in the
 declaration file's `server.principals`, or `--dev-admin` for development; a data directory that was never set up starts in setup

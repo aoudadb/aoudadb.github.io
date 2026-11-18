@@ -42,136 +42,42 @@ fix is to bump the version in the file.
 
 ## The old settings are refused (**BL-1464, next train**)
 
-The identities file and the bootstrap server key of 0.10.0 to 0.14.0 (**BL-1377**, **BL-1378**, **BL-1389**, **BL-1462**) are
-See [Access](../auth/index.md) (**BL-1464, next train**).
-finding: `aouda plan` reports it, and the start is refused before any database opens (exit status `78`). The message names the
-replacement and never the value. An **empty** value (a compose `${VAR:-}` pass-through of a variable that is not set) counts as not
-set and is not refused.
+The identities file, `Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, `Aouda:Auth:RootUser` and the systemd credentials `aouda-server-key` and `aouda-admin-password` are refused (`SETTING_REMOVED`). `aouda plan` reports each one, and the start exits `78` before any database opens. The message names the replacement and never the value. An empty value (a compose `${VAR:-}` of a variable that is not set) counts as not set.
 
 | Removed | Replacement |
 |---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
-| The systemd credentials `aouda-server-key` and `aouda-admin-password` (present in `$CREDENTIALS_DIRECTORY`) | Remove the unit's `LoadCredential=` line and declare as above |
-
-A key-only operator, its key root from a secret, so a fresh server is operated from its first start with no human admin:
+| Identities file (`Aouda:Auth:Keys:File`) | A principal of that auth database, with statements or a role, and a credential |
+| Bootstrap server key | `server.principals`: a principal with role `admin` and a derived or stored key |
+| `aouda-server-key` and `aouda-admin-password` | Remove the unit's `LoadCredential=` line and declare as above |
 
 ```json
 { "version": 1, "keyRoot": { "env": "AOUDA_KEY_ROOT" },
   "server": { "principals": { "ops": { "roles": ["admin"], "credentials": { "derivedKey": { "version": 1 } } } } } }
 ```
 
-There is no converter: move each identities-file entry to a principal of its auth database, with the statements or roles it needs
-and a credential. A `{ "hash": "sha256:<hex>" }` secret has no direct counterpart, because a stored key is declared by its public
-`aouda_` id and its hash; mint or derive a new key and move the client to it. `aouda reload` changes a declared principal or credential
-without a restart ([Declared databases](declared-databases.md#changing-the-declaration-without-a-restart-bl-1427-0140)), and
-`aouda plan` checks the file first ([Plan a declaration](plan.md)).
+There is no converter. A `{ "hash": "sha256:<hex>" }` secret has no counterpart: a stored key is `{ "id": "aouda_…", "sha256": "…" }` from `aouda keys new`, or a derived key from `aouda keys derive`. `aouda reload` applies a changed principal without a restart.
 
-## Seeing and managing the keys
+## Seeing which credential is failing
 
-- A declared credential is revoked like any other, and the revocation stays (`DECLARED_OBJECT_OVERRIDDEN`, above). The identities
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  (**BL-1464, next train**); `GET /api/auth/whoami` says which principal and credential a caller presented.
-- `GET /api/server/metrics` carries `rejectedApiKeys`: how many API keys were refused since start, by kind only, and two splits of the same total
-  (**BL-1428, BL-1430, 0.12.0**): `rejectedApiKeysByTransport`, `{ "http": n, "websocket": n, "longpoll": n }`, and `rejectedApiKeysByReason`,
-  `{ "credential": n, "listener_mismatch": n, "route_mismatch": n }`. Each always lists all of its keys and sums to `rejectedApiKeys`. See
-  [Counting refused keys](#counting-refused-keys).
-
-### Counting refused keys (**BL-1428, BL-1430, 0.12.0**) {#counting-refused-keys}
-
-`GET /api/server/metrics` answers (the fields this section is about; `databases` and `process` are as before):
-
-```json
-{
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  "rejectedApiKeysByTransport": { "http": 0, "websocket": 0, "longpoll": 0 },
-  "rejectedApiKeysByReason": { "credential": 0, "listener_mismatch": 0, "route_mismatch": 0 }
-}
-```
-
-- **Every transport counts.** 0.11.0 counted HTTP authentication only, so a feeder whose key was revoked or mistyped on its WebSocket `auth`
-  message never moved the counter. Since 0.12.0 a key refused at the WebSocket `auth` or `re_auth` message, or at a long-poll connect, is
-  counted too, once per refusal, in the same per-kind dictionary. A rising `websocket` with a flat `http` is the feeder-lockout signal.
-- **`rejectedApiKeysByReason`** tells a dead key from a misrouted one. `credential` is a key the auth database refused (unknown, revoked,
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  `route_mismatch` is an application key sent to a server catalog route such as `GET /api/databases` (`AUTH_KEY_ROUTE_MISMATCH`). The set is
-  closed at three; the finer credential reasons (revoked, expired, unknown) stay in the log line, because one refusal can carry the text of two
-  auth databases. Before 0.12.0 the two mismatch cases were not counted over HTTP at all (they were counted on WebSocket and long-poll only).
-- **Labels are closed**: the key kinds are those of the known prefixes (an invented prefix is `other`), the transports are the three above,
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  on `GET /api/databases` counts as one `route_mismatch`.
-- **Not counted**: a JWT (it is not a key), and a session that is already open. An API-key session is not re-checked mid-session (a key's
-  revocation is read at connect and at `re_auth`), so a key revoked while its socket stays open is counted when it next authenticates.
-- The log line for a refused key (caller address and the fingerprints of the keys refused since the last line, never a key) exists on the
-  WebSocket and long-poll paths as well as HTTP.
+`GET /api/auth/whoami` with the credential says which principal it is and which statements it holds. A refusal is logged once, with the code, the principal, the action, the resource and the remedy — never the key. The key commands are `aouda keys new`, `aouda keys new-root` and `aouda keys derive`.
 
 ## Secret files (**BL-1425, 0.12.0**) {#secret-files}
 
-Every secret the server reads from a file goes through **one reader**, so the rules are the same wherever a file is named. Before 0.12.0
-each setting had its own reader and they disagreed on variables, relative paths, encodings and wording.
+Every secret the server reads from a file goes through one reader.
 
 | Setting | A relative path resolves against | Permission check |
 |---|---|---|
-| The declaration's `keyRoot` / `previousKeyRoot` `{ "file": PATH }` and a password seed `{ "file": PATH }` (**BL-1464, next train**) | the directory of the declaration file | none |
-| The cluster key, `Aouda:ReplicaSet:KeyFile` | the process's working directory | none |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+| `keyRoot`, `previousKeyRoot` and a password seed `{ "file": PATH }` | the directory of `aouda.json` | none |
+| `Aouda:ReplicaSet:KeyFile` | the process's working directory | none |
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
-`aouda-server-key` / `aouda-admin-password` were rows of this table; they are refused now ([above](#the-old-settings-are-refused-bl-1464-next-train)).
-
-The rules, for the first two rows:
-
-- **Path.** `$NAME` and `${NAME}` are expanded from the environment first. An unset or empty variable fails the start naming the variable; a `$` that
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  `<redacted>`.
-- **Content.** Read as strict UTF-8. A UTF-8 byte-order mark is removed; a UTF-16 or UTF-32 file (what PowerShell's `Out-File` writes) is refused,
-  never guessed at. **Exactly one** trailing newline (`\n`, `\r\n` or `\r`) is removed and nothing else is trimmed. Nothing left is an error.
-- **No permission check.** Docker and Kubernetes mount a secret `0444`.
-- **Messages.** `<setting> names secret file '<path>', which cannot be read (<ExceptionType>).` or `<setting> names secret file '<path>', which is empty.`
-  The content is never in a message or a log line.
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-- A systemd credential that is not UTF-8 is refused (it used to guess UTF-16/32 from a byte-order mark), and an empty one reads
-  `systemd credential '<name>' names secret file '...', which is empty.`
-- The cluster `KeyFile` no longer trims surrounding whitespace (one trailing newline only), expands `$NAME`, and a missing file is a
-  `SecretFileException`, not `FileNotFoundException`.
-- An identities-file path defect reads `identity '<name>': the file path ...` (it was `has a 'file' secret whose path ...`).
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  `Aouda:Auth:Bootstrap:ServerKey` and an `{ "env": NAME }` secret are not files.
-
-## Seeing which key is failing
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-the 8 most frequent, of the **fingerprints** of the keys rejected since the previous line:
-
-```
-See [Access](../auth/index.md) (**BL-1464, next train**).
-```
-
-Only a key refused as a credential is counted; a valid key refused for its route is not a failing sender. (The identities file's
-`declared as '<entry>'` annotation on a fingerprint is gone with the file, **BL-1464, next train**.)
-
-A fingerprint is the first 8 hex characters of the key's SHA-256. It is a log field. Hash the dead key a legacy sender still holds
-to match it:
-
-```bash
-printf '%s' "$KEY" | aouda keys hash --key-stdin
-# hash: sha256:<hex>
-# fingerprint: 3a1f9c02     <- what the log line names
-```
-
-`aouda keys hash` reads the key from standard input only. There is no `--key` option, because a command line is readable by other
-users on Linux and is kept by shell history and CI logs. There is no `keys generate`: `openssl rand -hex 32` is the generator.
-
-⚠️ Eight hex characters of a hash of a **weak** key let someone who can read the log confirm guesses of it. That is why a key
-generated by `openssl rand -hex 32` (or derived from a key root) is the only kind to use.
+- **Path.** `$NAME` and `${NAME}` expand from the environment. An unset variable fails the start naming the variable. A path that contains a key is shown as `<redacted>`.
+- **Content.** Strict UTF-8. A UTF-8 byte-order mark is removed. UTF-16 (what PowerShell's `Out-File` writes) is refused. Exactly one trailing newline is removed. Nothing left is an error.
+- **No permission check** on a declaration secret, so a Docker secret mounted `0444` is readable. The file must still be readable by the server's user.
+- **Messages** name the setting and the path, never the content.
 
 ## Not in this release
 
-An import API (`PUT` a supplied key into the database), `aouda keys import` and SDK methods; reloading the declaration when it
-changes (a reload is run by hand: `aouda reload`); a runtime API that creates a declared key; a Prometheus endpoint (the counter
-above is in the JSON metrics snapshot).
+An import API that accepts a key you supply, and a runtime API that adds a credential to a declared principal (change the file and reload). A limited key is allowed: it only narrows.
 
 ## Related
 

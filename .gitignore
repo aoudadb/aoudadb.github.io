@@ -17,3 +17,4 @@ vendor/
 
 # Python bytecode (the scripts/ checks)
 __pycache__/
+*.pyc

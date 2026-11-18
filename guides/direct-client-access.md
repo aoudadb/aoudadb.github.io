@@ -26,7 +26,6 @@ Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#
 |---|---|
 | See a complete end-to-end example | [Market-data guide](market-data.md) and `examples/p40-browser-tier/` |
 | Turn on the data-plane listener | [Configure dual-listen](#configure-dual-listen) |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Connect Studio or Hub | [Studio and Hub](#studio-and-hub) |
 | Put TLS/WAF in front | [Topology](#topology-a-thin-edge) · [Behind a reverse proxy](../deployment/reverse-proxy.md) |
 | Sign users in from a browser | [Authentication that exists](#authentication-that-exists) |
@@ -56,7 +55,7 @@ Keep today's `Aouda:Bind` / `Aouda:Port` (or `--port`) as the **admin** listener
 
 Environment: `Aouda__Listeners__DataPlane__Bind=0.0.0.0:5434` and `Aouda__Listeners__DataPlane__CorsOrigins=https://app.example.com`.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **CORS is per listener.** Admin defaults include Studio / Hub origins (`https://studio.aouda.com`, `https://hub.aouda.dev`, plus `Aouda:StudioOrigin`) unless `Aouda:CorsOrigins` replaces them. Data-plane origins come **only** from `Aouda:Listeners:DataPlane:CorsOrigins` (empty = no browser origins). The setting accepts `*` — that lets **any** website's JavaScript call public auth POSTs and, after login, any data-plane route the JWT can reach. Prefer an explicit origin list. Do not put the Studio origin on the data-plane.
 
@@ -70,20 +69,19 @@ Allowed: `/health` `/ready` `/startup`, app-auth except `/auth/admin/*`, OIDC/JW
 
 The data-plane listener **ignores `crossPartitionAccess`** (**BL-1227, 0.9.0**): the partition-filter guard decides, and the error says the flag is not accepted there. The flag only waives that guard on the admin listener and never widens what a credential sees — [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 | Prefix | May call | Listener |
 |---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | User JWT (Studio operator) | Ad-hoc + admin | Admin |
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -93,22 +91,20 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 {
   "tables": {
     "EquityQuote": {
-See [Access](../auth/index.md) (**BL-1464, next train**).
       "columns": { }
     }
   }
 }
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```json
 "materializedQueries": {
   "latest_quote": {
     "type": "latestPerKey",
-See [Access](../auth/index.md) (**BL-1464, next train**).
     ...
   }
 }
@@ -116,7 +112,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 Service keys on the data-plane may execute named artifacts over non-opted-in tables. The admin listener ignores the flag.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -130,7 +126,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not the device, so a user on a browser, a desktop
 agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
 minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (**NativeClients, 0.4.0**).
 
 **Server clock.** Every response carries a `Date` header that a browser can read cross-origin (**NativeClients, next
@@ -173,7 +169,7 @@ Hub     ──────────────────►  Aouda admin  
 
 Application end users today:
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. `POST …/auth/refresh` when the access token expires (also keyless).
 5. WebSocket: first message `auth` with the JWT; later `re_auth` with the refreshed token so subscriptions survive. Failed `re_auth` closes the session.
 
@@ -186,7 +182,7 @@ and the app redeems it for its own session (**NativeClients, 0.4.0**) — [Nativ
 
 OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. That is not a federated login.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 The **application** holds the consistency token (cookie or header **you** name). The SDK captures `X-Aouda-Token` in memory and **never** `Set-Cookie`. Recreating the client without a shared store loses read-your-writes. See [Freshness](freshness.md).
 
@@ -203,7 +199,7 @@ const dataPlane = "https://data.example.com"; // :5434 behind TLS
 const client = new AoudaClient({
   serverUrl: dataPlane,
   database: "trading",
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
 await client.connect();
 
@@ -235,14 +231,12 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | Symptom | Cause | Action |
 |---|---|---|
 | Studio connect 404 | URL is the data-plane | Point Studio at the **admin** port |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
 | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | 16 connections per identity (public key: per remote address) | Close unused sockets; terminal for the handshake |
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | Subscribe bucket empty | Wait `retry_after_ms` / `Retry-After` |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `name` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -252,7 +246,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 - A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
   browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 

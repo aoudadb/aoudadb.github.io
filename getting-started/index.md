@@ -66,7 +66,7 @@ non-ASCII characters belongs in `--admin-password-file` (or in PowerShell 7).
 Required and optional arguments:
 
 - `--server` is optional. If omitted, the CLI uses the locally started server from `aouda start`, then `AOUDA_SERVER` / `AOUDA_URL`, then `http://localhost:5000`. Passing `--server` is recommended for non-default ports such as `5433` or service-managed servers.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - `--token` can be supplied when you already have an admin token and want `aouda init` to verify the server state without signing in.
 
 `aouda init` is state-aware and retryable. It checks setup status, creates the first server admin if needed, and returns JSON describing what changed. It does not create databases.
@@ -81,22 +81,25 @@ aouda databases create --name cache --server http://localhost:5433 --token <admi
 ```
 
 **Keys are shown once.** `aouda databases create` for a database linked to an auth database (`--kind auth`, or `--auth-enabled`) prints
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 generated them. The server keeps a hash, so it cannot show a key again, and a create that finds the keys already issued (the auth
 database already holds that name's system keys) returns none. The CLI says which happened on stderr, also under `--json`, so stdout stays one JSON document: do not merge `2>&1` into a JSON parser (**BL-1226, 0.9.0**). To
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   [Named service keys and overlapping rotation](../reference/http-api.md) (authentication section).
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 This explicit server-then-database flow is intentional: it maps cleanly to production behavior and avoids hidden provisioning during startup.
 
 ### 2. Docker
 
 ```bash
-docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
+docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 -v aouda-data:/data \
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
+
+The image is private (`docker login ghcr.io` with a token that has `read:packages` first), `-m` is what makes the server size its memory from the container's limit, and `127.0.0.1:` keeps the admin API off the host's other interfaces. See [Docker](../deployment/docker.md) for why each matters.
 
 ### 3. Docker Compose — server + Studio
 
@@ -116,13 +119,13 @@ No PowerShell or bash knowledge required. Extract the release archive and run:
 - **Windows:** double-click `Aouda.Setup.exe`
 - **Linux:** `sudo ./Aouda.Setup`
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 See [Aouda.Setup guide](../guides/studio.md#12-aoudasetup-installer) for the full interaction and service registration details.
 
 ### 5. Hosted Studio at `studio.aouda.com` (no Studio install needed)
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 > **Firefox / Safari:** blocked by mixed-content policy when connecting to HTTP localhost from HTTPS Studio. Use Chrome or Edge. See [Studio guide §10.3](../guides/studio.md#103-browser-compatibility-for-localhost-access).
 
@@ -132,24 +135,20 @@ If you initialize server auth (for example with `aouda init`) and then open Stud
 
 Use one of these Studio modes:
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - **Hub mode** (`NEXT_PUBLIC_HUB_URL` is set) — sign in on `/login` with your Hub account, then select a registered server and provide server credentials when prompted.
 
 For direct mode, use a server auth credential (`/api/auth/...`) such as:
 
 - a short-lived access token from `aouda init --json` or `/api/auth/signin`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```bash
-curl -X POST http://localhost:5433/api/auth/admin/keys \
-  -H "Authorization: Bearer <admin-token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "studio-local"
-  }'
+curl -s http://localhost:5000/api/auth/whoami \
+  -H "Authorization: Bearer $AOUDA_KEY"
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -563,8 +562,11 @@ This gives you a full Aouda server running inside your own host, alongside your 
 Run the official Docker image:
 
 ```bash
-docker run -p 5000:5000 -v aouda-data:/data ghcr.io/aoudadb/aouda-server
+docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 -v aouda-data:/data \
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
+
+The image is private: log in first with `docker login ghcr.io` (a token with `read:packages`). `-m` makes the server size its memory from the container's limit and `127.0.0.1:` keeps the admin API off the host's other interfaces ([Docker](../deployment/docker.md) says why).
 
 - Server at `http://localhost:5000`
 - Data persists in the `aouda-data` named volume across container restarts
@@ -579,10 +581,10 @@ Key environment variables:
 For production with custom configuration, pass environment variables:
 
 ```bash
-docker run -p 5000:5000 \
+docker run -d --name aouda -m 2g --cpus 4 -p 127.0.0.1:5000:5000 \
   -v aouda-data:/data \
   -e AOUDA_DATA_PATH=/data \
-  ghcr.io/aoudadb/aouda-server
+  ghcr.io/aoudadb/aouda-server:<version>
 ```
 
 #### Option E: Docker Compose — server + Studio
@@ -600,6 +602,8 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 
 Studio connects to Aouda automatically. No additional configuration needed — open `http://localhost:3000` to browse your databases.
 
+**For a real deployment**, declare the databases, keys, roles and schema files instead of creating them by hand, so that a wipe and a plain start bring them back: [Declare a deployment](../guides/declare-a-deployment.md) (**0.15.0**) is one complete working set with a compose file, `aouda plan` and `aouda reload`.
+
 The compose file sets `stop_grace_period: 130s` on the server so Docker waits longer than the host's 120 s `Aouda:ShutdownTimeout`. If you copy the file, keep those two numbers paired — a shorter grace SIGKILLs the process before shutdown has finished. See [Server configuration §8](../guides/server-configuration.md#8-startup-shutdown-and-slow-opens).
 
 For a 3-node cluster with replication and a witness node:
@@ -610,16 +614,18 @@ docker compose -f docker-compose.cluster.yml up
 
 ### Creating Databases via API
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```bash
 # Create a database
 curl -X POST http://localhost:5433/api/databases \
+  -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "name": "myapp" }'
 
 # Create a database with a durability level and memory limits
 curl -X POST http://localhost:5433/api/databases \
+  -H "Authorization: Bearer $AOUDA_SERVER_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "analytics",
@@ -628,13 +634,13 @@ curl -X POST http://localhost:5433/api/databases \
   }'
 
 # List databases
-curl http://localhost:5433/api/databases
+curl -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases
 
 # Get database info
-curl http://localhost:5433/api/databases/myapp
+curl -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases/myapp
 
 # Drop a database
-curl -X DELETE http://localhost:5433/api/databases/myapp
+curl -X DELETE -H "Authorization: Bearer $AOUDA_SERVER_KEY" http://localhost:5433/api/databases/myapp
 ```
 
 ### Connecting with the .NET Client
@@ -711,7 +717,7 @@ var client = new AoudaClient(new AoudaClientOptions
 
 ##### A rejected key is not a retry (**BL-1386, 0.11.0**)
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```csharp
 AuthFailurePolicy = new AuthFailurePolicy
@@ -1410,11 +1416,11 @@ Aouda Server Instance
 │   └─ Analogy: PostgreSQL's `postgres`, SQL Server's `sa`
 │
 ├── Server Users (database-scoped)
-See [Access](../auth/index.md) (**BL-1464, next train**).
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
 │   └─ Analogy: PostgreSQL roles with per-database GRANT
 │
 ├── Server API Keys (database-scoped)
-See [Access](../auth/index.md) (**BL-1464, next train**).
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
 │   └─ Analogy: Service accounts / connection strings
 │
 ├── Database: "myapp"     ← server users/keys need db_* role to access
@@ -1423,7 +1429,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
                                after it, server credentials on the admin listener (BL-1017)
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### When Do You Need Server Authentication?
 
@@ -1441,18 +1447,18 @@ Like MS SQL Server or PostgreSQL, Aouda has a **server-level identity layer** wh
 
 1. An **admin account** is created during initial setup (bootstrap). This is the superuser — equivalent to PostgreSQL's `postgres` role or SQL Server's `sa`.
 2. The admin creates **server users** and **server API keys**, each with database-scoped roles that control which databases they can access and what they can do.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 5. The server validates the token and checks whether the user has the required role for the target database.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Default roles (applied per database):
 
 | Role | Permissions |
 |------|------------|
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Auth state is stored in an internal database called `_serverauth`. This database is managed by Aouda and is not directly accessible as a user database.
 
@@ -1467,7 +1473,7 @@ and nothing is declared. Once set up, a server never re-enters it: an operator i
 `server.principals` means no setup mode: a key-only operator (the role `admin` and a `derivedKey` or stored key) operates the
 server from the first start, with no human admin, and a first admin named by an email with a password seed is created at start
 (Option B below). Setup mode is the interactive first run for a server that declares neither. The old `Aouda:Auth:Bootstrap:*`,
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 `aouda-admin-password`, are refused at start (`SETTING_REMOVED`, exit status `78`).
 
 Every other request gets `503 SETUP_REQUIRED` with **no `Retry-After`**: setup mode ends when you create the first admin, not after a wait. While the server is still starting (before setup mode or normal service), requests get `503 SERVER_STARTING`, which (**BL-944, 0.4.0**) carries `Retry-After: 5`. The health probes answer in setup mode too: `/health` and `/startup` are `200`, `/ready` is `503` with `setup_required` (**BL-1462, 0.14.0**; see [the probes](../reference/http-api.md#the-probes-one-meaning-each)).
@@ -1553,25 +1559,25 @@ and name the file at start: `aouda start --declaration ./aouda.json` (or `Aouda_
 creates the admin when the principal is created, with a forced password change at the first sign-in; the seed is never applied
 again, so a later change of the variable changes nothing. See [Declared access](../guides/declared-access.md).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (`SETTING_REMOVED`, exit status `78`), naming this declaration as its replacement; an empty value counts as not set.
 
 #### Option C: Local Bootstrap Command
 
 ```bash
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   --email admin@example.com \
   --password-stdin \
   --data ./data
 ```
 
 This creates the admin directly in the data directory without starting the server. ⚠️ **Only with the server stopped**
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (`POST /api/auth/setup` from the server's host, or stop the server). Before, it wrote behind the running server's back and the
 server stayed in setup mode until a restart. For binary-only or air-gapped installs, the native server artifact also supports the same local bootstrap operation:
 
 ```bash
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   --email admin@example.com \
   --password-stdin \
   --data ./data
@@ -1646,161 +1652,76 @@ All server auth endpoints are under `/api/auth/...` and resolve to the internal 
 | `/api/auth/signin` | POST | No | Sign in, get JWT |
 | `/api/auth/refresh` | POST | No | Refresh access token |
 | `/api/auth/signout` | POST | Yes | End this session (`scope`: `others`, `global` for more) |
-| `/api/auth/me` | GET | Yes | Current user profile |
-| `/api/auth/me` | PATCH | Yes | Update profile metadata |
+| `/api/auth/whoami` | GET | A credential, or `anonymous` on the data plane | Who this credential is and what it may do |
+| `/api/databases/{db}/auth/me` | PATCH | Yes | Update the signed-in profile. `GET …/auth/me` is not a route |
 | `/api/auth/password` | PUT | Yes | Change password |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-### SDK Usage with Server Auth
+### SDK usage
 
-> **Server Auth vs Application Auth use separate options types.**
-See [Access](../auth/index.md) (**BL-1464, next train**).
+One credential: a key or a session. [Client integration](../auth/client-integration.md).
 
 #### .NET Client
 
 ```csharp
 using Aouda.Client;
-using Aouda.Client.Auth;
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
 var client = new AoudaClient(new AoudaClientOptions
 {
-    ServerUrl = "http://localhost:5433",
+    ServerUrl = "http://localhost:5000",
     DatabaseName = "myapp",
-See [Access](../auth/index.md) (**BL-1464, next train**).
+    Credential = AoudaCredential.Key(key),
 });
 
+var who = await client.WhoAmIAsync();
 var rows = await client.GetTable("orders").Limit(10).ToListAsync();
 ```
 
-Other credential modes:
-
-```csharp
-// Email/password — for development and interactive tools
-See [Access](../auth/index.md) (**BL-1464, next train**).
-{
-    Email = "admin@example.com",
-    Password = "ChangeMeNow!"
-}
-
-// Pre-obtained token
-See [Access](../auth/index.md) (**BL-1464, next train**).
-{
-    Token = "eyJhbG...",
-    RefreshToken = "dGhpcyBp..."  // Optional — enables auto-refresh
-}
-```
-
 #### TypeScript Client
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ```typescript
 import { createAoudaClient } from "@aouda/client";
 
 const client = createAoudaClient({
-  serverUrl: "http://localhost:5433",
+  serverUrl: "http://localhost:5000",
   database: "myapp",
-See [Access](../auth/index.md) (**BL-1464, next train**).
+  apiKey: key,
 });
 
-await client.connect();
+const who = await client.whoami();
 const rows = await client.table("orders").limit(10).execute();
 ```
 
-For a pre-obtained server JWT (a session, not a key):
+`apiKey` or `session`, never both.
 
-```typescript
-See [Access](../auth/index.md) (**BL-1464, next train**).
-```
+### A key for a service
 
-### API Keys for Machine-to-Machine Access
-
-For CI/CD pipelines, background jobs, and service-to-service communication, use API keys instead of email/password. **Server API keys are database-scoped** — specify which databases the key can access and with what roles.
+A service is a principal with a key (`aouda_<id>_<secret>`). Mint a stored key on that principal. The body is `{ "name"?, "expiresAt"? }`. The answer shows the key once. A declared principal uses `aouda keys derive` instead, and the key is the same after a wipe. What the key may do is the principal's statements. `GET /api/auth/whoami` says which principal the caller is.
 
 ```bash
-See [Access](../auth/index.md) (**BL-1464, next train**).
-curl -X POST http://localhost:5433/api/auth/admin/api-keys \
-  -H "Authorization: Bearer <admin-token>" \
+curl -s -X POST http://localhost:5000/api/auth/_serverauth/principals/ops/keys \
+  -H "Authorization: Bearer $AOUDA_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "myapp-backend",
-    "roles": [
-See [Access](../auth/index.md) (**BL-1464, next train**).
-    ]
-  }'
+  -d '{ "name": "orders-api" }'
 ```
-
-Response includes the key (shown only once):
 
 ```json
-{
-  "id": "...",
-  "name": "myapp-backend",
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  "roles": [
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  ],
-  "kind": "custom",
-  "createdAt": "..."
-}
+{ "key": "aouda_<id>_<secret>", "id": "aouda_<id>", "principal": "ops", "name": "orders-api" }
 ```
-
-This key can read/write `myapp` data and read `analytics` data. It cannot access any other database.
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-
-```bash
-See [Access](../auth/index.md) (**BL-1464, next train**).
-curl http://localhost:5433/api/databases/myapp/query \
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  -H "Content-Type: application/json" \
-  -d '{ "database": "myapp", "table": "orders", "limit": 10 }'
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-curl http://localhost:5433/api/databases/analytics/query \
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  -H "Content-Type: application/json" \
-  -d '{ "database": "analytics", "table": "events", "limit": 10 }'
-
-# Access cache — DENIED (no role for this database)
-curl http://localhost:5433/api/databases/cache/query \
-See [Access](../auth/index.md) (**BL-1464, next train**).
-  -H "Content-Type: application/json" \
-  -d '{ "database": "cache", "table": "data", "limit": 10 }'
-# → 403 AUTHORIZATION_DENIED
-```
-
-### Server Auth vs Application Auth API Keys
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
-|---|---|---|
-| **Created by** | Server admin | Auto-generated when app auth is enabled |
-| **Stored in** | `_serverauth` | `_auth` (app auth database) |
-| **Scope** | One or more databases (each role's `scope`) | One specific database |
-| **Use case** | Backend services, CI/CD, cross-database access | Frontend clients, per-database backend access |
-See [Access](../auth/index.md) (**BL-1464, next train**).
-
-See [Access](../auth/index.md) (**BL-1464, next train**).
 
 ### Common Auth Error Codes
 
 | Code | HTTP | Meaning |
-|------|------|---------|
-| `AUTH_TOKEN_MISSING` | 401 | No Authorization header |
-| `AUTH_TOKEN_INVALID` | 401 | Malformed or tampered JWT |
-| `AUTH_TOKEN_EXPIRED` | 401 | JWT has expired — refresh it |
-| `AUTH_TOKEN_REVOKED` | 401 | Session was signed out |
-See [Access](../auth/index.md) (**BL-1464, next train**).
-| `AUTH_INVALID_CREDENTIALS` | 401 | Wrong email or password |
-| `AUTHORIZATION_DENIED` | 403 | Valid token, insufficient permissions |
-See [Access](../auth/index.md) (**BL-1464, next train**).
-| `AUTH_ACCOUNT_LOCKED` | 423 | Too many failed attempts |
-| `AUTH_RATE_LIMITED` | 429 | Rate limit exceeded |
+|---|---|---|
+| `AUTH_CREDENTIAL_MISSING` | 401 | No credential on the admin listener. Remedy `sign-in` |
+| `AUTH_KEY_MALFORMED` | 401 | Bad shape or checksum, or a retired `mk_` key. Remedy `fix-key` |
+| `AUTH_CREDENTIAL_INVALID` | 401 | Unknown id, wrong secret, or a bad session. Remedy `fix-key` |
+| `AUTH_CREDENTIAL_EXPIRED` | 401 | The key or session has expired. Remedy `renew` |
+| `AUTH_CREDENTIAL_REVOKED` | 401 | Revoked, or the principal is disabled. Remedy `none` |
+| `AUTH_POLICY_DENIED` | 403 | The statements do not allow it. Remedy `grant` |
+| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh of a disabled principal |
+
+The list, including `remedy`, is [whoami and remedy](../auth/whoami.md). `AUTH_TOKEN_MISSING`, `AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`, `AUTH_TOKEN_REVOKED`, `AUTHORIZATION_DENIED` and `INSUFFICIENT_PERMISSIONS` are not produced.
 
 ### Security Best Practices
 
@@ -1849,10 +1770,8 @@ const client = createAoudaClient({
 the server has no server auth database — a fresh server before [server authentication](#8-server-authentication--securing-database-access) is set up. Once the server admin exists (`/api/auth/setup`,
 or a configured root user), every request to such a database on the **admin listener** needs server credentials, exactly as
 `/api/databases` itself does: reads, writes, DDL, `DELETE /api/databases/{db}`, quarantine, `inspect`, WebSocket and long-poll. A
-See [Access](../auth/index.md) (**BL-1464, next train**).
-key from `POST /api/auth/admin/api-keys` with a role scoped to the database; it is authorized by the server auth database's grants,
-See [Access](../auth/index.md) (**BL-1464, next train**).
-gets `401`, and so does a request naming a database that does not exist. An application's own keys and tokens are not server
+An operator's key (a principal with `manage` on `server`) is the credential. Any other credential
+gets `401` or `403`, and so does a request naming a database that does not exist. An application's own keys and tokens are not server
 credentials. On the **data-plane** listener nothing changes: such a database stays open to the routes that listener serves
 (named queries and mutations, WebSocket, long-poll). In 0.3.0 and earlier the admin listener served it to anyone, drop included.
 
@@ -2018,7 +1937,7 @@ await client.branches.delete("feature-x");
 ### Authentication & Authorization
 
 - **[Application Auth Service](auth.md)** — Use Aouda as an authentication provider for your app's end users (signup, signin, JWTs, Partition-Level Security, multi-tenancy). Covers the two-layer auth model, architecture patterns A-D, API keys, and AI agent workflows.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### General
 
@@ -2121,7 +2040,7 @@ kept by shell history, by process-launch audit rules, by CI logs and by an agent
 of that can be un-leaked, which is why the option was removed rather than deprecated — a deprecation
 warning is printed *after* the leak has already happened.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 remedy (`POST /api/auth/setup` from the server's host, or stop the server) (**BL-1462, 0.14.0**). A service that declares a
 key-only operator in its declaration file needs no admin at all (**BL-1464, next train**).
 
@@ -2133,7 +2052,7 @@ key-only operator in its declaration file needs no admin at all (**BL-1464, next
 sudo install -m 600 /dev/null /etc/aouda/admin-password
 sudo sh -c 'printf "%s" "$PASSWORD" > /etc/aouda/admin-password'
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   --password-file /etc/aouda/admin-password --data /var/lib/aouda
 ```
 
@@ -2144,7 +2063,7 @@ found and the `chmod 600` to fix it); on Windows, by DACL (naming `icacls` if `E
 *Standard input, which touches no filesystem — the right answer in a pipeline or for an agent:*
 
 ```bash
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   --email admin@example.com --password-stdin --data /var/lib/aouda
 ```
 
@@ -2176,24 +2095,18 @@ curl -X POST http://localhost:5433/api/auth/setup \
 JSON
 ```
 
-### 16.5 API keys for applications
+### 16.5 A key for an application
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Mint a stored key on the operator's principal, or derive one (`aouda keys derive`) for a principal the declaration owns. The key is shown once.
 
 ```bash
-curl -X POST http://localhost:5433/api/auth/admin/api-keys \
-  -H "Authorization: Bearer <admin-token>" \
+curl -s -X POST http://localhost:5000/api/auth/_serverauth/principals/ops/keys \
+  -H "Authorization: Bearer $AOUDA_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "orders-api",
-    "roles": [
-See [Access](../auth/index.md) (**BL-1464, next train**).
-    ]
-  }'
+  -d '{ "name": "orders-api" }'
 ```
 
-Store the returned key in a secret manager immediately — it is shown once. Do not keep it in source
-control or in a plaintext install script.
+Store the returned key in a secret manager immediately. Do not keep it in source control or in a plaintext install script.
 
 ### 16.6 Installing the service
 

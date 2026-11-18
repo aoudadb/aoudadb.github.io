@@ -192,7 +192,6 @@ database opens, and the start exits `78`; the message names the replacement and 
 
 | Removed | Declare instead |
 |---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | The systemd credentials `aouda-server-key`, `aouda-admin-password` | Remove the `LoadCredential=` line and declare as above |
 
 Before 0.14.0 a declared server key did **not** end setup mode: it was inert until a human created an admin, so a fully
@@ -252,7 +251,7 @@ JSON.
 The answer carries an access and a refresh token, and the server leaves setup mode at once (`/ready` turns `200` with nothing
 else missing).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 `1` with:
 
 ```
@@ -260,13 +259,13 @@ The data directory '/data' is in use by another Aouda process (it holds Server/a
 ```
 
 Before, it succeeded: a second process wrote to the live data directory, and the running server stayed in setup mode until a
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 command line):
 
 ```bash
 docker compose stop aouda
 printf '%s' "$ADMIN_PASSWORD" | docker compose run --rm -T --entrypoint aouda aouda \
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 docker compose start aouda
 ```
 
@@ -293,7 +292,7 @@ file's directory, and `$NAME` / `${NAME}` in the path are expanded from the envi
 byte-order mark is ignored, a UTF-16 file such as PowerShell's `Out-File` writes is refused) with one trailing newline ignored; a
 missing, unreadable or empty file stops the start. Docker mounts file-based secrets as `0444` by default, and this source does not
 refuse that. See [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md#secret-files). The identities file's
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 

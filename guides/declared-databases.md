@@ -62,7 +62,7 @@ overwrites a field it does not name.
 either declared in the same file with `"kind": "auth"`, or already in the catalog; it is **never created for you**. The passes run in
 a fixed order whatever the order in the file: auth databases, then data databases, then links.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 `POST /api/databases` that links still returns them as before. For keys that survive a wipe, declare their principals with
 `credentials` in the same file (**BL-1464, next train**; [Keys that survive a wipe](keys-that-survive-a-wipe.md)).
 
@@ -139,7 +139,7 @@ they are not in it).
 ```
 
 The first admin and the operator's key are in this file too (**BL-1464, next train**): a `server.principals` entry holding the role
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 The schema file is the same `aouda.schema.json` the CLI applies, and `aouda plan --declaration /etc/aouda/aouda.json --env prod` validates it offline (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**; [Plan a declaration](plan.md)); the start runs the same checks on every file before it changes any database; see
 [Schema management](schema-management.md#let-the-server-apply-it-at-start). `quote_writer` names the table `quotes`, which the
@@ -163,7 +163,6 @@ Delete the data directory and start the server with the declaration above. What 
 | Every row of data | **Lost** |
 | Users, sessions and refresh tokens of an application auth database | **Lost** |
 | Signup settings of a database | **Lost** (catalog-owned; set them again) |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Tables, roles and settings made only through the API | **Lost** |
 
 ### The order a start follows
@@ -180,7 +179,7 @@ there is no `/ready` to ask):
 
 1. **Declared databases**: auth databases, then data databases, then the links.
 2. **`_serverauth`**: created for an operator declared in `server.principals` (**BL-1464, next train**). With none declared and no admin, the server stays in setup mode.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. **Declared access** (**BL-1464, next train**): roles, `signup`, principals and their credentials, in their auth databases ([Declared access](declared-access.md)). It replaces the configured key rows, which came last.
 5. The server is marked ready.
 

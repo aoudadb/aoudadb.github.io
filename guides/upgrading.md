@@ -14,7 +14,7 @@ repository's `docs/dev/Upgrade-Notes.md`.
 To keep the data across a bump: **export it with the build that wrote it, delete the data directory, start the new build fresh, load the export.**
 
 Status: the refusal code described here is shipped in **0.12.0** (**BL-1420**). The format version is **17** in 0.11.0 and 0.12.0, so a 0.11.0
-See [Access](../auth/index.md) (**BL-1464, next train**).
+directory starts on 0.12.0 unchanged. Server **0.13.0** writes format **18** (**BL-1418, 0.13.0**) and refuses a 17 directory. Server **0.14.0** and **0.15.0** do not bump the format (it stays **18**): a 0.13.x data directory starts on 0.14.0 and on 0.15.0. The declaration and the probes changed in 0.14.0; see [Upgrading from 0.13 to 0.14](#upgrading-from-013-to-014-0140). Access from the principals release is [Moving from 0.14](../auth/migrating-from-0-14.md) (**BL-1464, next train**).
 
 ## Detecting a refusal: `DATA_DIRECTORY_FORMAT_REFUSED`
 
@@ -63,15 +63,15 @@ The last column is the first line a server that **reads that version and carries
 | 15 | development builds only | allowance on `_refresh_tokens` and `_authorization_codes` | `found=14 expected=15` |
 | 16 | 0.9.x and 0.10.0 | bulk-load commit header carries the beginning principal | `found=15 expected=16` |
 | 17 | 0.11.0 (and 0.12.0) | `source` on `_api_keys` and the per-user permission table | `DATA_DIRECTORY_FORMAT_REFUSED: found=16 expected=17 path=<root file>` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 In the shortened rows the line is the same as in the first two, with `path=<root file>`. Formats 1 to 5 (0.2.x and earlier) are not listed: a build
 with the code refuses a root declaring 2 to 5 under the same line with that `found`, and the format-1 flat catalog and an interrupted format-1
 migration marker are refused by name without a code. Formats 8, 9, 11, 12 and 15 were only ever written by development builds.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (pre-1.0): **no alias, no migration, no reader of the old shapes.** One wipe, then edit your schema files, scripts and clients.
 
 **What an old data directory gets.** Format 17 (written by 0.11.0 and 0.12.0) is refused whole, every database in the directory, with the first line
@@ -80,21 +80,71 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 DATA_DIRECTORY_FORMAT_REFUSED: found=17 expected=18 path=<catalog root file>
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 A replica refuses a primary of the other format the same way.
 
 | What | Before | Now | What the old form gets |
 |---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Body and item fields | `partitionKey`, `accessLevel` | `key`, `level` (`dimension`, `grantedBy`, `validFrom`, `validTo`, `id`, `userId`, `createdAt` unchanged) | the old names are not read: `key` missing is `400 AUTH_GRANT_INVALID` |
 | Error codes | `AUTH_PLS_GRANT_NOT_FOUND`, `AUTH_PLS_GRANT_INSUFFICIENT_ACCESS` | `AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS` (both `403`) | code that matches the old strings never fires. The `AUTH_PLS_TENANT_*`, `AUTH_PLS_WRITE_SCOPE_VIOLATION`, `AUTH_PLS_UNSUPPORTED_OR_SHAPE` and `AUTH_GRANT_*` codes are unchanged |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Auth database storage | table `_user_partition_grants`, columns `partition_key`, `access_level` | table `_user_entitlements`, columns `entitlement_key`, `level` | refused by the format check above |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `Aouda.Client` (.NET) | no typed wrapper | no typed wrapper (the public API names nothing from this list) | none |
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 Roles live in the auth database, so after the wipe declare them again as before.
+
+## Upgrading from 0.13 to 0.14 (**0.14.0**)
+
+No data-directory format change (the format stays **18**), so no export and no wipe. The breaking items are in what a start accepts, what it answers while it starts, and
+the commands and codes around it. Each row says what the old form gets now. Source: the server changelog, section 0.14.0.
+
+**Read this first if you deploy with a health check.** (**BL-1462**) **`GET /health` answers `200` to every caller in every state**, setup mode included. In 0.13.x it answered
+`503 SETUP_REQUIRED` to a caller off the server's host while the server was in setup mode, so a deploy script or an orchestrator that waited for `/health` to turn `200`
+**now passes at once**, before the start has finished. The probes now mean one thing each:
+
+| Probe | 0.13.x | 0.14.0 | Use it for |
+|---|---|---|---|
+| `GET /health` | `200`, but `503 SETUP_REQUIRED` off the host in setup mode | `200` to every caller in every state | the process is alive (a liveness probe) |
+| `GET /startup` | `503` for as long as setup mode lasted (the Helm chart's startupProbe restarted the pod every five minutes) | `503` while the start sequence runs (databases, auth, declared schema files, roles, grants, keys, replication), `200` once all of it has run, setup mode included | the start has finished |
+| `GET /ready` | `503 setup_required` in setup mode, else the component checks | unchanged meaning; new reasons `schema_applying` (with `progress: { "done": 4, "total": 11 }`), `not_initialized`, `server_starting`, `root_user_unusable` | the server can serve application traffic |
+
+**Change a deploy gate that waited on `/health` to wait on `/ready`** (and a Docker `HEALTHCHECK` or a compose `depends_on: condition: service_healthy` already does: the image's
+healthcheck is `/ready`). Full table: [HTTP API: the probes](../reference/http-api.md#the-probes-one-meaning-each), [Docker](../deployment/docker.md#health-checks).
+
+| Area | 0.13.x | 0.14.0 | What the old form gets |
+|---|---|---|---|
+| Overlay file name (**BL-1460**) | `aouda.schema.<env>.json` for every file in one directory | `<file without .json>.<env>.json` beside the file: `aouda.schema.json` + `prod` reads `aouda.schema.prod.json`; `rates.aouda.schema.json` + `prod` reads `rates.aouda.schema.prod.json` | the old name is not read: with several schema files in one directory each now needs its own overlay. An overlay that exists but cannot be read, or is empty, fails the start naming the file (it was skipped) |
+| Strict members (**BL-1460**) | an unknown member in a schema file, an overlay or a `schema/apply` / `schema/diff` body was dropped; names were read without case | refused with `400 SCHEMA_UNKNOWN_MEMBER`, every one named with its JSON pointer and the member meant; member names are case-sensitive; an `aouda plan` reports it as an error and the start fails | a file that "worked" because a slip was dropped now fails. Also refused in 0.14.0: a table's `description` (**accepted again from the 0.15.0**: documentation in the file only, see below), and on a materialized query **four** members, `authMode`, `permissionDimension`, `permissionColumn` and `rlsResolverName` (never read: a materialized query's result is always filtered by its **source table's** partition-level and row-level security, ADR 0040 D-9; the 0.14.0 changelog names the first three, `rlsResolverName` is refused too). **Delete the four members; to secure a result, set security on the source table.** From the 0.15.0 the refusal's message says this |
+| Overlay content (**BL-1460**) | any member was accepted and most were dropped | only `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability` | `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` (reported by a plan and a start as `SCHEMA_OVERLAY_INVALID`): move the member to the base file |
+| `clusterColumns` (**BL-1460**) | an entry naming no column was dropped | refused: `Cluster column 'nope' in table 'orders' is not a column of the table.` | the schema file or the apply is refused |
+| Schema apply (**BL-1460**) | a document-level error applied the valid tables and reported the bad one as a failed entry | `POST …/schema/apply` and `…/schema/diff` run the document-level checks first: one error is `400` and **nothing is applied** | a client that read a partial apply must read the `400` |
+| Table names (**BL-1468**) | `POST …/tables`, rename, graph and vector creates, the catalog API and the schema apply accepted any name | no `/ \ : * ? " < > \|`, no leading or trailing period or space, not empty, `.` or `..`, no `__mqbuild_` prefix: `400 INVALID_REQUEST` naming the rule; `DELETE` / `PATCH` of a `__mqbuild_*` name is `404 TABLE_NOT_FOUND` | **a schema file that declares such a table now fails `aouda plan` and the start.** The remedy is a clean cut: read the rows out, give the table a legal name in the file, start once with `SchemaAllowDestructive: true` (or on a fresh data directory), then load the rows into the new table |
+| Finding codes (**BL-1463**) | one coded line: `CONFIGURED_KEYS_INVALID`, `DECLARED_DATABASES_REFUSED`, `DECLARED_SCHEMA_REFUSED`, `DECLARED_ROLES_REFUSED` | those four are **gone**; a start prints every finding with its per-problem code (`SCHEMA_INVALID`, `ROLE_BUILTIN_NAME`, ...) on standard error, one `error    <CODE>  <setting or file>` line each. `CONFIGURATION_INVALID`, `DEV_ADMIN_REFUSED`, `SERVER_HAS_NO_OPERATOR` and `DATA_DIRECTORY_FORMAT_REFUSED` stay. `ROLE_SYSTEM_NAME` is not a code: the built-in roles are `ROLE_BUILTIN_NAME` (**BL-1622**) | a script that matched a removed code matches nothing: see [Declaration finding codes](../reference/plan-codes.md) |
+| `aouda keys check`, `aouda schema check` (**BL-1463**) | the offline checks | **deleted**: unknown subcommands, exit `64`, no alias | use `aouda plan` ([the table](plan.md#replacing-aouda-keys-check-and-aouda-schema-check)); a schema that is not declared is checked with `aouda schema diff`. Their exit `2` ("could not check") is gone |
+| Exit status of a refused start (**BL-1461**) | an unhandled exception: stack trace, SIGABRT, exit `134` | exit **78** (`EX_CONFIG`) and the findings on standard error; a start that only could not read a file (a volume not yet mounted) exits `1` | a supervisor that treated `134` as "refused" must treat `78` so. Docker's `restart:` policies cannot exempt a status: a refused container still restarts, and `docker compose logs` names the setting |
+| Exit status of `aouda service` (**BL-1461**) | `78` for a service-manager failure | **71** (`78` now means a configuration refusal) | a script that branches on the service commands' `78` must read `71`. The unit `aouda service install` writes gains `RestartPreventExitStatus=78`: re-run the install on an existing host |
+| Setup mode (**BL-1462**) | a declared server key was inert until a human created an admin | a declared server key (`Aouda:Auth:Bootstrap:ServerKey`, `ServerKeyFile`, the credential `aouda-server-key`, or a `server_admin` identity) **ends setup mode**: `_serverauth` is created with no user and the key operates the server. Setup mode exists only for a data directory never set up that declares nothing | a deploy that created an admin to get past setup mode needs no admin now. A data directory that has been set up **never re-enters setup mode**: with no user, no active server key and nothing declared the start is refused, `SERVER_HAS_NO_OPERATOR` (exit 78) |
+| `Aouda:Auth:RequireFirstAdmin` (**BL-1462**) | failed the start of a server with no admin | **removed**; `AOUDA_AUTH__REQUIREFIRSTADMIN` is ignored | nothing: delete it from your compose file. `docker-compose.yml` passes `AOUDA_SERVER_KEY` through and no longer defaults the root email |
+| The start window (**BL-1462**) | the port opened only after every start step, so callers met a closed port (71 s on an 11-file declaration) | the port opens first; the health endpoints answer and **every other request, loopback included, is `503 SERVER_STARTING` with `Retry-After: 5`** until the start has finished | a client that treated a refused connection as "not up yet" now sees `503`: retry on it and honour `Retry-After` |
+| `aouda create-admin` (**BL-1462**) | wrote to the data directory of a running server, which stayed in setup mode until a restart | refuses a data directory a running server holds (exit `1`, naming the remedy): call `POST /api/auth/setup` from the server's host, or stop the server first | a script that ran `create-admin` against a live container: stop the container, or use the setup route ([Docker](../deployment/docker.md#the-first-admin)) |
+| `POST /api/admin/reload` with a body (**BL-1463**) | `400 INVALID_REQUEST` | without `dryRun=true`: `400 RELOAD_CANDIDATE_NOT_APPLIED` (a posted declaration is only ever planned); a `dryRun` other than `true` / `false` is `400 INVALID_REQUEST` | a client that matched the old code |
+| Realtime sessions (**BL-1001**) | an open WebSocket or long-poll session was never re-checked for an API key | ends when the key is revoked, expires or is retracted (`AUTH_TOKEN_REVOKED`) | a service that kept a stream open on a revoked key must reconnect with a live one |
+
+**After 0.14.0: on `main`, not yet released** (**0.15.0**). Nothing here is breaking.
+
+- **A table's `description` is accepted** in a schema file (documentation in the file only; not stored, not diffed, not exported; a change is never drift and needs no migration). An overlay file still refuses it. A column's `description` is unchanged.
+- **A table carries no security members**, and neither does a materialized query. Access is statements on a principal or a role ([Access](../auth/index.md), **BL-1464, next train**).
+- **The declaration file is `aouda.json`, named by `Aouda:Declaration`.** There is no default path, no `AOUDA_CONFIG_FILE` and no `--config`. `Aouda:Databases` is refused (`SETTING_REMOVED`). [Declare a server in one file](declaration.md).
+- **Helm:** `declaration.file` (not `declaration.config`), `declaration.restartOnChange`, `extraEnv`, `extraEnvFrom`, `extraVolumes`, `extraVolumeMounts` ([Kubernetes and Helm](../deployment/kubernetes.md#declare-the-databases-bl-1463-next-train)).
+- **.NET client:** `WaitUntilReadyAsync`, `GetReadinessAsync`, the package `Aouda.Client.Extensions.DependencyInjection` with `AddAouda`, and `AoudaClientOptions.ApiKey` now trims surrounding white space (in 0.14.0 and earlier a key read from a file with a trailing newline made every request throw `FormatException`). A server that is still starting, `503 SERVER_STARTING`, no longer opens the circuit breaker or trips `AuthFailurePolicy.FailFast`: [.NET client](../clients/dotnet.md#waiting-for-the-server-to-start).
+
+**In-process hosts only** (tests, an embedding): `ConfiguredKeyStore` is no longer a DI service; resolve `ConfiguredKeyStoreHolder` and read `Current`. Nothing changes for an HTTP or SDK client.
+
+**New and not breaking:** `aouda plan` ([Plan a declaration](plan.md)) and `aouda reload`, which re-reads `aouda.json` (databases, schema files, roles, principals and credentials) of a running server without a restart; the `Expression` column type ([Formulas](formulas.md)). The complete list is the [changelog](../CHANGELOG.md).
+
+**A checklist for a compose deployment:** (1) wait on `/ready`, not `/health`; (2) rename each schema overlay to `<file>.<env>.json`; (3) run `aouda plan` on every schema file and fix every
+`SCHEMA_UNKNOWN_MEMBER`, table-name and `description` finding; (4) retry on `503 SERVER_STARTING`; (5) replace `aouda keys check` / `aouda schema check` with `aouda plan`; (6) drop `AOUDA_AUTH__REQUIREFIRSTADMIN`;
+(7) match exit status `78`, not `134`, for a refused start.
 
 ## What every release's notes carry
 

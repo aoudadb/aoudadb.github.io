@@ -63,14 +63,14 @@ authorization scope to prevent accidental use.
 
 ### Authorization
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   target column is restricted by a write policy for the caller's role, the mutation returns
   403 regardless of the expression type.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   cannot reference columns outside the caller's authorized partition boundary.
 
 ---
@@ -216,7 +216,7 @@ When both `set` and `setExpr` target the same column, the literal `set` value wi
    snapshot, producing a concrete value.
 3. The concrete values are written to the HRA and WAL — no expression AST is stored in the
    WAL. Crash recovery and replication replay see only resolved values.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Limitations
 
@@ -264,9 +264,9 @@ Content-Type: application/json
 
 ### Authorization requirement
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 truncate permission receives `403 AUTHORIZATION_DENIED`. Grant truncate permission explicitly
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```bash
 # Attempt with insufficient permissions → 403
@@ -1006,12 +1006,11 @@ await client.branches.delete(`backup-${Date.now()}`);
 | `400 INVALID_REQUEST` on `set` / `setExpr` | `set` is empty, or `setExpr` references an unknown column | Check that SET contains at least one key; verify column names exist in table schema |
 | `400 COLUMN_NOT_FOUND` on expression | A `$col` / `colRef` name in `setExpr` or `selectExpr` does not exist in the schema | Correct the column name; use `GET /api/databases/{db}/tables/{name}` to inspect the schema |
 | `400 INVALID_REQUEST` on `selectExpr` | Alias collides with a physical column name, duplicate alias, empty alias, or more than 20 expressions | Rename the alias; remove duplicates; stay under the 20-expression limit |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `hasMore: true` loop never terminates | ORDER BY column is not the same column as the WHERE filter | Ensure `orderBy` targets a column with monotonically increasing or decreasing values relative to the predicate; add a time-based cutoff |
 | RETURNING returns unexpected columns | `["*"]` was used and the schema has more columns than expected | Enumerate explicit column names instead of `"*"` |
 | Computed column value is `null` | Division by zero in the expression for that row | Guard with `$ifNull` or check denominator values before querying; this is intentional behavior |
 | Expression SELECT result type shows `"Unknown"` | Expression is uninferable (mixed coalesce, unbound param, missing col) | Expected for that expression; inferable expressions report a concrete type (P40 S08) |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 

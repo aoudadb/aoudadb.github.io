@@ -145,7 +145,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **Per-database memory governance** — `ServerMemoryBudgetManager` with per-engine budget tracking.
 - **Per-database health checks** — `DatabaseHealthCheck` included in `/health/detailed`.
 - **Unified CLI** — `aouda start`, `aouda stop`, `aouda databases list|get|create|drop`, `aouda version`.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - **First-run bootstrap** — `GET /api/auth/setup/status`, `aouda init`.
 
 ### Planned / Proposed
@@ -166,7 +166,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 | Phase | Tasks / Reports | Delivered capability | Undone / deferred | Backlog |
 |---|---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | **P6** (Multi-Database) | Epics A–F | Multi-database registry (`databases.json`); `DatabaseManager`; database-scoped routes (`/api/databases/{db}/…`); database CRUD; wire protocol v2 (required `database` field); .NET client `AoudaClient(url, dbName)`, `client.Databases.List/Create`; per-database memory governance (`ServerMemoryBudgetManager`); per-database metrics (`DatabaseMetricsTracker`); per-database health check; `GET /api/server/memory`, `/api/server/metrics`, `/api/server/databases/{db}/metrics`; replication v2/v3; write concern | TypeScript multi-database client (Epic C.3) not evidenced in this repo; Studio DB navigation (Epic D) not evidenced; per-database Prometheus deferred; dynamic table-subscription reconfig requires reconnect | BL-001 resolved; per-db Prometheus deferred |
 | **P7** (Production Scenarios) | T6 (durability), T10 (harness reports), bug-fix session | `POST /api/server/shutdown` (loopback-only, BL-028); `POST /api/databases/{db}/query/count`; `RemoteTableQuery.CountAsync`; harness scenario M.1–M.8 multi-database validation | BL-028 formal resolution carried into P14 write-path improvements | BL-028 resolved here; BL-023, BL-024 partially open |
 | **P16** (Cloud & Hub), SA6 | A.1–A.11, SA6, ENG1 | Unified CLI: `aouda start/stop/databases`; `ServerHostRunner`; admin API expansion under `/admin/*` (cluster, backup, config, node, capabilities); `cluster-state.json` + `backup-config.json` runtime persistence; CORS defaults for Hub; `Aouda:Bind`, `Aouda:Join`, `Aouda:Role` config keys | `aouda dev` not evidenced as distinct command vs `aouda start`; Hub/Studio/TypeScript implementations in sibling repos | BL-042, BL-043 (OAuth) deferred |
@@ -553,7 +552,7 @@ aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durab
 | `databases.<db>.onWriteConcernTimeout` | `string` | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` |
 | `databases.<db>.schema` | `string?` | `null` | Path of a schema file the server applies to this database at start, after the declared databases and the auth startup and before the server is ready. Absolute, or relative to the directory of `aouda.json`. Refused on a `"kind": "auth"` database. Its overlay (`<stem>.<env>.json` beside it) is merged over it for the process setting `Aouda:Environment` (`--env`; **BL-1463, next train**), which replaces the old `SchemaEnvironment`. Omitted = nothing is applied (**BL-1388, 0.11.0**) |
 | `databases.<db>.schemaAllowDestructive` | `bool` | `false` | Lets the start-time apply run destructive changes (drop table, drop column). When `false` they are refused, logged, and the start goes on. Needs `schema` (**BL-1388, 0.11.0**) |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 An invalid or unreadable `schema` file, or a declared role the roles API would refuse, **fails the start** and names the database and the file or role. A destructive change without `schemaAllowDestructive` is *refused*, not failed: it is logged and kept in the server's schema-apply state, and the catalog stays as it is (**BL-1388, 0.11.0**). See [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start).
 
@@ -701,7 +700,7 @@ aouda databases drop   --name trading --server http://localhost:5000
 aouda version
 
 # Offline admin bootstrap (Aouda.Server.exe only)
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
     --password-stdin --data /var/aouda/data
 ```
 
@@ -1006,7 +1005,7 @@ curl -s http://localhost:5000/api/databases
 
 **Related Functionality docs:**
 - `docs/dev/Functionality-HotCold-And-Memory.md` — Memory budget internals; `MemoryBudgetManager` per-engine.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - `docs/dev/Functionality-Replication-And-Clustering.md` — Wire protocol v2/v3, write concern, table subscription filtering.
 - `docs/dev/Functionality-Cloud-And-Hub.md` — CLI unification, Helm chart, Hub architecture.
 - `docs/dev/Functionality-Storage-And-Persistence.md` — On-disk layout for each database's segment files.
@@ -1017,4 +1016,4 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 - **`Aouda.Server.exe` vs `aouda` CLI internals** — The exact CLI command surface of `aouda databases get` and `drop` (P16 SA6) is documented at the HTTP layer; the internal CLI command handler (`DatabasesCommandHandler`) is not confirmed at method-level in source materials. No test artifacts for these CLI sub-commands are confirmed.
 - **TypeScript multi-database API** — Not verifiable in this repository; described as delivered in P6 and P16 reports in the `aouda-client-ts` sibling repo.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).

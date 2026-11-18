@@ -12,7 +12,7 @@ Last updated: 2026-05-22
 
 Coverage phases: P4, P7, P8, P14
 Primary task folders: `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P8/`, `docs/tasks/P14/`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-RealTime-Streaming.md`
 
 ## Start Here
@@ -22,7 +22,7 @@ If your question is "How do I manage schema safely right now?":
 - `2.10 Configuration and settings reference`
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 If your question is "What is shipped vs planned?":
 - `2.4 Availability status`
@@ -127,7 +127,7 @@ If you do not configure schema management explicitly:
 | `Aouda:Schema:InferenceMode` | `On` | `Off`, `On`, `Extend` | What an insert into a missing table does: `Off` and `On` answer `404`, `Extend` creates the table. It does not decide the declarative DDL lock |
 | `AOUDA_SCHEMA_INFERENCE_MODE` | unset | `Off`, `On`, `Extend`; or unset (no override) | No override unless explicitly set |
 | Apply option `allowDestructive` | `false` | `true`, `false` | Drop operations are skipped unless explicitly allowed |
-| Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested |
+| Apply option `dryRun` | `false` | `true`, `false` | Apply executes unless dry-run requested — and refused where the apply would refuse whatever the rows are (**BL-1494, 0.15.0**) |
 | CLI `schema history` pagination | `limit=50`, `offset=0` | Any non-negative integer for `limit` and `offset` | Newest-first history default view |
 | CLI output mode | human-readable | `human-readable` (default), `json` (via `--json` flag) | Use `--json` when machine parsing is needed |
 | C# `AutoReconcileSchema` / `ReconcilePolicy` | `true` / `Safe` | `true`, `false` / `Safe`, `Unsafe` | The first typed insert adds missing columns and drops none. `Unsafe` is opt-in and drops non-key columns the model omits. A typed update does not reconcile. (**BL-1178, 0.9.0**) Set `false` for declarative tables |
@@ -215,7 +215,7 @@ If you do not configure schema management explicitly:
 | P4 | `P4-EpicA-Task3-SchemaManagementApi-Report.md` | Core imperative table/column/policy HTTP management | Declarative desired-state not yet in this phase | N/A |
 | P7 | `BL025-Fix2-AddColumnColdBackfill-Report.md` | Correct add-column behavior over cold segments with aligned backfill | Further performance tuning can continue | N/A |
 | P8 | `P8-DeclarativeSchemaManagement-Tasks.md`, C.4 report, F.2/F.3/F.4 reports | Declarative schema diff/apply/export/history, migration history, CLI integration, branch isolation/merge/COW sharing | `InferenceMode: Extend` deferred; CLI seed command still stub on .NET tool | `docs/BACKLOG.md` (BL-022) |
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -395,7 +395,7 @@ Key anchors:
 | Field | Default | Behavior |
 |---|---|---|
 | `options.allowDestructive` | `false` | skip destructive changes unless true |
-| `options.dryRun` | `false` | plan only when true |
+| `options.dryRun` | `false` | plan only when true — and refused where the apply would refuse whatever the rows are (**BL-1494, 0.15.0**) |
 
 ---
 
@@ -498,7 +498,6 @@ This is a full, versioned example set you can keep in git and run end-to-end.
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     },
     "orders": {
       "columns": {
@@ -515,7 +514,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     }
   }
 }
@@ -547,7 +545,6 @@ Changes from v1:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     },
     "orders": {
       "columns": {
@@ -566,7 +563,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     },
     "payments": {
       "columns": {
@@ -584,7 +580,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     }
   }
 }
@@ -615,7 +610,6 @@ Changes from v2:
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     },
     "orders": {
       "columns": {
@@ -633,7 +627,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "Auto" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     },
     "payments": {
       "columns": {
@@ -651,7 +644,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
       "clusterColumns": ["created_at"],
       "policy": { "storageTemperature": "ColdPreferred" },
       "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
     }
   }
 }
@@ -743,7 +735,6 @@ When you add `Aouda.Schema.Contract` to your project, you get:
 | Type | Namespace | Purpose |
 |---|---|---|
 | `SchemaDocument` | `Aouda.Engine.Schema.Models` | Root type for `aouda.schema.json`: `$schema`, `database`, `tables`, `settings`, `extends` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `ColumnDefinition` | `Aouda.Engine.Schema.Models` | Per-column: `type`, `primaryKey`, `autoIncrement`, `nullable`, `references`, `default`, `description` |
 | `PartitionKeyEntry` | `Aouda.Engine.Schema.Models` | Partition key entry: `column`, `function` |
 | `TablePolicyDto` | `Aouda.Engine.Schema.Models` | Table policy: `storageTemperature` |
@@ -783,7 +774,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `Applied` | Change was successfully executed against the catalog. |
 | `Skipped` | Change was skipped — most commonly because `AllowDestructive` is `false` and the change is destructive. Also skipped for `ReplicationFactor`-only durability changes (not yet representable in the engine policy). |
 | `Failed` | Change execution threw an exception. The apply continues to the next change (continue-on-error). The `Reason` field on `ApplyResultEntry` contains the exception message. |
-| `Planned` | Dry-run mode: the change would have been executed but was not. A dry run (`DryRun = true`) gives every entry `Planned`, except a change the apply refuses whatever the table's rows are, which it reports `Failed` with the apply's own reason: an invalid authorization mode, and (**BL-1427, 0.14.0**) an added array, server-time or identity column that is not nullable. A refusal that depends on row values (a `NOT NULL` column on a table with rows, a `unique` flag on duplicates) is not checked by a dry run. |
+| `Planned` | Dry-run mode: the change would be executed but was not. A dry run reports `Failed`, with the apply's own reason, for a change the apply refuses whatever the rows are — an invalid authorization mode, an added array, server-time or identity column that is not nullable (**BL-1427, 0.14.0**), a named query or mutation over a table or column that does not exist (a table or column the same document adds counts), a default its column's type cannot hold, an unparsable `references`, an existing column made a server-time column (**BL-1494, 0.15.0**). A refusal that depends on the rows (a column made non-null over nulls, a type conversion's values, a primary key or unique constraint over duplicates) is not checked: it stays `Planned`. |
 
 #### SchemaChangeType
 
@@ -795,7 +786,6 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `AddColumn` | No | A column exists in desired table but not in actual. |
 | `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
 | `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies. |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `UpdateSettings` | No | The database-level `settings.durability` (its `replicationFactor`) changed. |
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
@@ -896,14 +886,13 @@ Console.WriteLine($"Changes: {diff.Summary.TotalChanges} ({diff.Summary.SafeChan
 
 This section documents every field available in `aouda.schema.json` by type. All fields are optional except `type` on `ColumnDefinition`.
 
-**Only these fields, spelled exactly** (**BL-1460, 0.14.0**). A member that is not listed here (a table has no `description`; a
-See [Access](../auth/index.md) (**BL-1464, next train**).
+**Only these fields, spelled exactly** (**BL-1460, 0.14.0**). A member that is not listed here, or a listed one in another case (`Nullable`, `PartitionKey`), is refused by every reader —
 `aouda plan`, `schema apply` / `diff`, the HTTP endpoints and the start-time apply — with `SCHEMA_UNKNOWN_MEMBER`, naming its JSON
 pointer and the member meant. It used to be dropped without a word. The same holds inside named queries (`where`, `joins`, `orderBy`,
 `selectExpr`, `aggregates`, `groupBy`, `perKey`), named mutations and expressions. `schemas/aouda-schema.v1.json` lists exactly these
 members, for an editor's completion and squiggles.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 partition-level security without a partition key, …) refuses the **whole** document at `schema apply` / `diff` with `400
 INVALID_REQUEST`, nothing applied (**BL-1460, 0.14.0**); the notes below that say "schema apply records the change `Failed`"
 describe the behaviour before that.
@@ -927,8 +916,8 @@ describe the behaviour before that.
 | `clusterColumns` | `clusterColumns` | `string[]` | None | Ordered list of clustering column names. Each must be a column of this table: `Cluster column 'nope' in table 'orders' is not a column of the table.` (**BL-1460, 0.14.0**; it was dropped). |
 | `policy` | `policy` | `TablePolicyDto` | None | Storage policy for this table. |
 | `durability` | `durability` | `TableDurabilityDto` | None | Durability level (**Lead S26, 0.6.0**) and replication settings for this table. |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `culture` | `culture` | `string` | None | IETF culture tag for locale-aware parsing (e.g. `"en-US"`). Null/omit = ISO defaults. |
+| `description` | `description` | `string` | None | (**0.15.0**; **0.14.0 refused it** with `SCHEMA_UNKNOWN_MEMBER`) A note on the table: **documentation in the schema file only**. It is checked for shape and then dropped: not stored in the catalog, not diffed, not exported by `aouda schema export`, and never a change in `aouda plan` or a schema apply. Adding, changing or removing one is not drift and needs no migration. It is a member of a table in a schema file only: an **overlay** file still refuses it. (A *column's* `description` is the opposite: stored, diffed, and a change to it is a schema change.) |
 
 #### ColumnDefinition (entry in `columns`)
 
@@ -1091,7 +1080,6 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
     "clusterColumns": ["created_at"],
     "policy": { "storageTemperature": "Auto" },
     "durability": { "level": "strict" },
-See [Access](../auth/index.md) (**BL-1464, next train**).
   }
 }
 ```
@@ -1347,7 +1335,7 @@ Expected result:
 
 - `docs/decisions/0018-alter-add-column-no-backfill.md`
 - `docs/decisions/0019-declarative-schema-management.md`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Task/report evidence
 

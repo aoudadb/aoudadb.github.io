@@ -78,7 +78,7 @@ The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, 
 | `SCHEMA_FILE_UNREADABLE` | error | `schema` | offline | 1 when the file cannot be read (I/O), else 78 | Make the schema file readable where the server runs (a volume not yet mounted clears when it is), or fix SchemaFile. |
 | `SCHEMA_INVALID` | error | `schema` | offline | 78 | Fix the schema file at the pointer named above. |
 | `SCHEMA_UNKNOWN_MEMBER` | error | `schema` | offline | 78 | Remove the member, or correct its spelling: a schema file takes only the members the schema format defines. |
-| `SCHEMA_OVERLAY_INVALID` | error | `schema` | offline | 78 | Make the overlay extend its base file by name and change only what an overlay may change. |
+| `SCHEMA_OVERLAY_INVALID` | error | `schema` | offline | 78 | Make the overlay extend its base file by name and change only what an overlay may change: `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. A member outside that list is the HTTP-reference error `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` (**BL-1460, 0.14.0**); a plan and a start report it under this code, naming the member and its JSON pointer. Move the member to the base file. |
 | `SCHEMA_LIMIT_EXCEEDED` | error | `schema` | offline | 78 | Simplify the named query, or raise Aouda:NamedQuery:MaxJoins / MaxCost. |
 | `SCHEMA_DATABASE_MISMATCH` | warning | `schema` | offline | — | Make the file's 'database' member name the database that declares it, or remove the member: the start applies the file to the declaring database. |
 | `SCHEMA_DATABASE_NOT_OPEN` | error | `schema` | state | 78 | Open the database (repair it), or list it in Aouda:SkipDatabases to start without it. |
@@ -86,7 +86,6 @@ The `PRINCIPAL_*`, `KEY_ROOT_*`, `KEY_DECLARATION_INVALID`, `KEY_ID_DUPLICATE`, 
 | `SCHEMA_DESTRUCTIVE_REFUSED` | warning | `schema` | state | — | Set SchemaAllowDestructive for the database to apply the destructive change, or make the file match the catalog. |
 | `ROLE_NAME_INVALID` | error | `roles` | offline | 78 | Give the role a name. |
 | `ROLE_NAME_DUPLICATE` | error | `roles` | offline | 78 | Declare the role once: role names are compared without regard to case. |
-| `ROLE_SYSTEM_NAME` | error | `roles` | offline and state | 78 | Declare a custom role and assign it: a system role cannot be declared. |
 | `ROLE_AUTH_DATABASE_NOT_OPEN` | error | `roles` | state | 78 | Open the auth database (repair it), or list it in Aouda:SkipDatabases to start without it. |
 | `ROLE_BUILTIN_NAME` | error | `roles` | offline | 78 | Name the role something else, or assign the built-in role to the principal: admin, writer and reader are built in and cannot be declared. |
 | `STATEMENT_NOT_GOVERNED` | error | `roles` | offline and state | 78 | Give the statement to a principal or role of the auth database that governs the resource (the message names it), or link the database to this auth database. |
@@ -108,4 +107,4 @@ A code whose half is **target** is emitted only by `aouda plan --server` or `aou
 
 `SERVER_HAS_NO_OPERATOR` is one rule checked at two moments of the start: before the schema step (stage `bootstrap`) and after the declared access section is converged (stage `principalRows`).
 
-A message never contains a key, a hash or a secret file's content; a path that contains a key is shown as `<redacted>`. A fingerprint (the first eight hex characters of a key's SHA-256, as `aouda keys hash` prints it) is the only value derived from a secret that may appear.
+A message never contains a key, a hash or a secret file's content; a path that contains a key is shown as `<redacted>`. `aouda keys new` prints the `sha256` you put beside a stored key's id. `aouda keys new-root` and `aouda keys derive` write a root or a key to a file.

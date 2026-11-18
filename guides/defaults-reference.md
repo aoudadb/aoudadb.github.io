@@ -187,6 +187,7 @@ length and how many writes it refused) is one line in the server log, prefixed `
 | Resident result rows | 262,144 keys per query | — | An aggregate's or latest / first-per-key query's rows kept in RAM between commits, charged to the memory governor, least recently touched evicted (**ColumnarMerge S10, 0.2.0**). |
 | Result checkpoint | every 15 s, and at clean shutdown | — | What a restart restores a current result from (**ColumnarMerge S08, 0.2.0**). |
 | Rebuild grant | 1 MB to start, doubling to at most ¼ of the database's governed budget | `Aouda:MaterializedQueries:Rebuild:ReservationFloorBytes` (the start) | (**WorkloadCore S12, 0.3.0**) A rebuild's memory; past it the build splits into `Aouda:MaterializedQueries:Rebuild:MaxPartitions` (64) partitions and spills. `ReservationCeilingBytes`, `SpillEnabled` and `PartitioningEnabled` are removed. See [Materialized queries](materialized.md#211b-what-a-rebuild-costs-and-what-bounds-it). |
+| Rebuild spill ceiling | `-1` (derive: 10 % of free space, ≥ 1 GiB) | `Aouda:MaterializedQueries:Rebuild:MaxOutstandingSpillBytes` | (**BL-624, 0.1.38**; kept files counted **BL-624, 0.15.0**) The disk a rebuild's scratch may occupy before `mqSpillCeilingExceeded` turns true; `0` is unbounded. A report, never a limit. |
 | Deferred-pass quiet window | 2 s with no load in flight or committed; 60 s bound | — (constants: `DeferredPassCoordinator.QuietPeriod` / `MaxLag`, `src/Aouda.Engine.Api/Internal/DeferredPassCoordinator.cs`) | (**ColumnarMerge S01, 0.2.0** — a load still streaming no longer counts as quiet.) (**LoadSpeed M.3, 0.4.0**) Also when an `Auto` load into a busy table is caught up: a table is busy while a load is in flight on it, an earlier load's job on it is pending, or a load into it committed within the 2 s; its queries are caught up in one pass once it has been quiet for 2 s, or when the oldest waiting job has waited 60 s (logged as caught up at the bound). Not configurable. |
 | Deferred-pass workers | the CPU budget | `Aouda:Cpu:ConfiguredCores` (or the probed quota) | Read when the work starts (**ColumnarCore S15, 0.2.0**); was the machine's core count capped at 16 / 8. An insert no longer writes queries side by side: in-commit maintenance is deleted (**WorkloadCore S09, 0.3.0**). See [Sizing CPU](sizing.md#sizing-cpu). |
 
@@ -236,7 +237,7 @@ is taken only if nothing of the same or a higher class is waiting — a read's o
 request blocked by its own database's cap holds back only that database (**BL-861, WorkloadCore S18, 0.3.0**; see
 [Sizing](sizing.md#memory-is-granted-before-work-starts-and-small-writes-have-a-reserve-workloadcore-s06-030)).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (`Interactive` 0.35, `Streaming` 0.05, `Ingest` 0.25, `Background` 0.25, `Maintenance` 0.10, with different fractions in
 the `Abundant` resource mode), borrowing of idle headroom between classes, and `Aouda:Memory:PerClassAdmissionEnabled` are
 removed; a class orders the queue and does not cap what it may hold. The resource modes those fractions differed by are
@@ -308,9 +309,7 @@ Aouda logs to the console, structured as JSON. Under systemd that is `journalctl
 |---|---|---|
 | Live subscriptions on one WebSocket connection | `32` | `Aouda:WebSocket:MaxSubscriptionsPerConnection` |
 | Live subscriptions for one identity, across every connection | `128` | `Aouda:WebSocket:MaxSubscriptionsPerIdentity` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Live connections (WebSocket and long-poll) for one identity (**BL-1383, 0.11.0**) | `16` | `Aouda:WebSocket:MaxConnectionsPerIdentity` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Subscribe attempts: bucket size per identity (**BL-1383, 0.11.0**) | `512` | `Aouda:WebSocket:SubscribeRate:Burst` |
 | Subscribe attempts: refill per second (**BL-1383, 0.11.0**) | `32` | `Aouda:WebSocket:SubscribeRate:RefillPerSecond` |
 | Data-plane permits per identity per window | `60` | `Aouda:IdentityQuota:PermitLimit` |
@@ -328,7 +327,7 @@ A subscribe is bounded by its own **token bucket per identity** (**BL-1383, 0.11
 on both listeners and on long-poll `/send`, and `Aouda:IdentityQuota:Enabled=false` does not switch it off.
 Over the bound the server answers `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` (a `Retry-After` header on a long-poll
 `/send`). The connection limit counts WebSocket and long-poll sessions together and refuses inside the handshake with
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 is known only if `Aouda:ForwardedHeaders` is configured: without it every visitor of a public key shares the proxy's address, so
 one connection budget, one subscription cap and one subscribe bucket. Configure it before relying on per-visitor limits.
 The server refuses to start on a cap below 1, a burst below 1 or a negative refill. `auth_ok.limits` reports `0` for a limit
@@ -361,7 +360,6 @@ not set) counts as not set and is not refused.
 
 | Removed | Replacement |
 |---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | The systemd credentials `aouda-server-key` and `aouda-admin-password` (present in `$CREDENTIALS_DIRECTORY`) | Remove the unit's `LoadCredential=` line and declare as above |
 
 A first admin by password seed, and a key-only operator whose key root comes from a secret:
@@ -418,8 +416,9 @@ configuration source refuses the start (`SETTING_REMOVED`, naming the member tha
 |---|---|---|
 | `kind` (**BL-1379, 0.11.0**; required since **BL-1463, next train**) | none | `"data"`, or `"auth"` for an application auth database (created like `POST /api/databases` with `kind: auth`, but not linked to itself and with no keys; always `strict` durability, so `durability` on an `auth` entry must be absent or `"strict"`) |
 | `schema`, `schemaAllowDestructive` (**BL-1388, 0.11.0**) | none, `false` | With `"kind": "data"`: a schema file the server applies at start (relative to the directory of `aouda.json`; its overlay follows `Aouda:Environment`), and permission for destructive changes. Opt-in. See [Schema management](schema-management.md#let-the-server-apply-it-at-start) |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `authDatabase` (**BL-1379, 0.11.0**) | none | With `"kind": "data"`: the name of the application auth database to link this database to. Declared in the same file or already in the catalog; it is never created for you |
+
+The file is wherever `Aouda:Declaration` points. There is no well-known path and no `AOUDA_CONFIG_FILE`. A reload re-reads that path; changing the setting itself takes a restart ([Server configuration §4a](server-configuration.md#declaration-file)).
 
 ```json
 {
@@ -455,7 +454,7 @@ unlinked" or "must not exist", and a database removed from the file is left alon
 `_auth` and `_settings` are never declarable (`_serverauth` is created by an operator declared in `server.principals`, the dev
 admin, or setup; **BL-1464, next train**).
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (which returns them once; a key that must survive a wipe is a declared principal's credential, **BL-1464, next train**); a `POST /api/databases` that links still returns
 them as before. Startup order after a wipe: declared databases and links, then `_serverauth` (its declared operators, or setup), then each
 declared `SchemaFile` (**BL-1388, 0.11.0**), then declared roles (**BL-1392, 0.11.0**) and principals with their credentials

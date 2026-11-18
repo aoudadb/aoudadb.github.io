@@ -10,9 +10,9 @@ Document status: Approved baseline
 Primary owner: Aouda maintainers
 Last updated: 2026-05-22
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 Primary task folders: `docs/tasks/P10/`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-Schema-Lifecycle.md`
 
 ## Start Here
@@ -176,7 +176,7 @@ If you do nothing:
 - Subscription behavior:
   - Snapshot + incremental delivery.
   - User filter evaluation.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   - Resume semantics with `resume_from` and change-buffer replay/fallback.
 - Write-stream behavior:
   - `stream_open`, `stream_rows`, `stream_ack`, `stream_close`.
@@ -201,7 +201,7 @@ Documented intent that is not currently fully productized:
 - Cross-database subscription surfaces.
 - Exactly-once delivery model and consumer-group semantics.
 - Broker-style stream partition management semantics.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Reserved / not yet wired
 
@@ -212,7 +212,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | P10 S7 | `P10-S7-StreamingWrites.md` | Write stream open/rows/close, insert/upsert, acks, backpressure thresholds, per-row auth rejections | None explicitly listed in S7 report | None |
 | P10 S9-S13 | `P10-S9-CSharpClientStreamingAPI.md`, `P10-S10-MaterializedQuerySubscriptions.md`, `P10-S11-HotCacheAndLiveCollection.md`, `P10-S12-TypeScriptWebSocketTransport.md`, `P10-S13-TypeScriptClientStreamingAPI.md` | .NET and TypeScript streaming APIs, typed subscribe, write streams, MQ subscription behavior | Hot cache + `Live()` withdrawn BL-162 | BL-053 (S10); BL-162 (S11) |
 | P10 S14 I3/I4 | `P10-S14-I3-MessagePackWireMode.md`, `P10-S14-I4-HttpLongPollFallback.md` | MessagePack negotiation + binary mode; long-poll fallback endpoint and client fallback transport | None called out in I3/I4 reports | None |
@@ -221,10 +220,8 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Snapshot + incremental table subscriptions | Yes | No | No | `SubscriptionHandler.cs`, S4 report/tests | Snapshot-first ordering with version |
 | Server-side user filters | Yes | No | No | `SubscriptionFilterEvaluator.cs`, S5 report/tests | Filter normalized against table schema |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Resume from version (`resume_from`) | Yes | Yes | No | `SubscriptionHandler.cs` resume paths | Implemented in code; dedicated S6 task report template remains unfilled but behavior is present |
 | Streaming writes (`insert`/`upsert`) | Yes | No | No | `WriteStreamHandler.cs`, S7 report/tests | Includes per-row rejection reporting |
 | Write-stream backpressure and ack cadence | Yes | No | No | `StreamingWriteOptions.cs`, `WriteStreamBackpressure.cs` | Soft reject/hard close thresholds |
@@ -296,9 +293,9 @@ A subscription is a read, and it is held to the rules of the HTTP read it mirror
   credential HTTP refused (the anonymous key, a user with no role) could read, and write, a table that has no partition or row
   security over the socket.
 - **The same rows.** A subscription's snapshot returns what an HTTP query by the same credential returns, and its change events
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   and one that does not receives only its own partitions'. Granting a role is described in
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - **Permissions are re-read on every `subscribe`**, a first subscribe included. A subscribe whose permissions cannot be read is
   **refused** (`PERMISSION_REVOKED`), or refused with a retryable capacity code (`SERVICE_UNAVAILABLE`, `MEMORY_BUDGET_EXCEEDED`, …)
   when the read is refused for capacity — never admitted on a stale answer.
@@ -308,10 +305,10 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
   role check, ends with an `error` frame `PERMISSION_REVOKED`. A subscription that is **widened** (a grant added) is
   **not re-snapshotted**: rows that became visible are not pushed, only events from the re-key on. Resubscribe to read the rows
   that were already there.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   (operation `insert`, on the first batch the grant decides, and again if the deciding grants change), and once for a re-key that newly uses a grant (operation `rekey`) — **never one per
   event**. The `cross_partition_access` flag alone
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 A subscription on a partitioned table needs the same partition filter as a read, or the `cross_partition_access` flag on the
 `subscribe` message (see the HTTP/protocol examples below, and
@@ -461,7 +458,7 @@ High-level runtime flow:
    resume reads them — the events a subscriber receives are unchanged (**ColumnarCore S09, 0.2.0**; the older
    per-event entry points are removed).
 2. Subscription manager fans out events to per-subscription channels.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. Write stream handler validates mode/sequence/security, writes rows, emits `stream_ack`.
 5. Client transports maintain reconnect behavior and re-subscribe/re-open flows.
 
@@ -495,7 +492,7 @@ Key implementation anchors:
 
 1. Client sends `subscribe` message with `id`, `target`, optional filter.
 2. `SubscriptionHandler.HandleSubscribeAsync(...)` validates table/filter and registers subscription first (gap-safety ordering).
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. Server sends `snapshot` message.
 5. Registration snapshot version is set; consumer unblocks and emits live `change` events with higher sequence only.
 
@@ -512,7 +509,7 @@ Primary proving tests:
 ### Walk-through B: Resume from reconnect (`resume_from`)
 
 1. Re-subscribe includes `resume_from`.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 3. Handler compares resume version with current sequence:
    - at-current -> attach to live only,
    - replay available -> deliver buffer events and continue live,
@@ -542,7 +539,7 @@ Primary proving tests:
    - batch limits and payload limits,
    - sequence continuity,
    - backpressure decision (accept/reject/close),
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. Accepted rows are inserted/upserted; server emits `stream_ack` with `through` and optional row errors.
 5. `stream_close` closes and removes state, sending `stream_closed`.
 
@@ -580,7 +577,6 @@ Primary proving tests:
 | Capability question | Typical systems | Aouda approach | User impact |
 |---|---|---|---|
 | Is live data push a first-class query/write path? | Often separate event bus or polling add-on | Built-in bidirectional streaming protocol tied to table operations | Fewer moving parts for app-level real-time behavior |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | How does reconnect continuity work? | Often opaque reconnect, app-level patching required | Versioned events + `resume_from` + buffer replay/fallback snapshot | Predictable client recovery model |
 | Is multi-transport support built in? | Usually WebSocket only or external gateway needed | WebSocket primary with built-in long-poll fallback and MessagePack mode | More deployment compatibility with constrained networks |
 | Are client SDKs symmetric for streaming primitives? | Often one SDK gets full support first | .NET and TypeScript both expose subscribe + write stream with reconnect support | Easier multi-platform app parity |
@@ -593,9 +589,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 | `Aouda:WebSocket:EnableMessagePack` | bool | `true` | `true/false` | server config | If `false`, `wire_mode=msgpack` auth is rejected |
 | `Aouda:WebSocket:MaxConnections` | int | `10000` | `>=1` | server config | Global connection cap (`CONNECTION_LIMIT_EXCEEDED`, a plain `error` frame before authentication; long-poll `connect` 429) |
 | `Aouda:WebSocket:MaxConnectionsPerIdentity` (**BL-1383, 0.11.0**) | int | `16` | `>=1` | server config | Live connections (WebSocket and long-poll) per identity; enforced in the handshake, after identity resolution and before `auth_ok`, as an `auth_error` with `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (long-poll `connect`: 429, same code). A public-key identity includes the remote address; a no-auth database has no limit |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `Aouda:WebSocket:SubscribeRate:Burst` / `RefillPerSecond` (**BL-1383, 0.11.0**) | int / number | `512` / `32` | `>=1` / `>=0` | server config | Per-identity token bucket on subscribe attempts (one refused for another reason still costs a token); both listeners and long-poll `/send`; independent of `IdentityQuota:Enabled`. Over it: `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `Aouda:WebSocket:IdleTimeout` | timespan | `00:05:00` | positive | server config | Idle close threshold |
 | `Aouda:WebSocket:LongPollWaitTimeout` | timespan | `00:00:25` | positive | server config | Max long-poll block |
 | `Aouda:WebSocket:LongPollSessionIdleTimeout` | timespan | `00:02:00` | positive | server config | Session expiry threshold |
@@ -733,12 +727,12 @@ Sec-WebSocket-Key: <key>
 Fields: `user_id` (null for API-key auth), `expires_at` (null when no expiry), `wire_mode` (the negotiated wire mode).
 
 **Which credentials the socket accepts** (**BL-1227, 0.9.0**). The handshake asks the same stores, in the same order, as an HTTP
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 long-poll connect (up to 0.8.0 both were refused with `AUTH_API_KEY_INVALID` / `AUTH_TOKEN_INVALID`). The socket keeps the store
 that accepted the credential, so `re_auth`, sign-out and revocation reach it. A session the server auth database accepted is
 authorized as HTTP authorizes a data call on the database — a database-level `read` by its grants — and is refused with HTTP's
 code (`auth_error` on the socket, `403` with HTTP's code on long-poll connect). A server key opens the socket; it holds
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **Step 1 response — `auth_error` (server → client on failure):**
 
@@ -758,7 +752,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 for a subscription that names no partition: a table `subscribe`, or a named-query `subscribe` (`name`, `args`) whose query binds no
 partition key, on a partitioned table that requires a partition filter. Without it that subscribe is refused
 `PARTITION_FILTER_REQUIRED`. It is a **cost waiver, not a grant**: the snapshot and every later event are still what the
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 own tenant), and one with no grant at all on a table with partition-level security is refused as before.
 The data-plane listener (the browser tier) ignores the flag, so a browser still binds the partition key in a named query. An
 older server ignores the field and answers `PARTITION_FILTER_REQUIRED`.
@@ -768,7 +762,7 @@ older server ignores the field and answers `PARTITION_FILTER_REQUIRED`.
 ```
 
 **A subscription that spans partitions.** A subscription with no partition filter would read every partition of the table, so a
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 and the flag, are in
 [A subscription that spans partitions](partitioning.md#a-subscription-that-spans-partitions).
 
@@ -858,7 +852,7 @@ Content-Type: application/json
 {"token":"<jwt-or-api-key>","wireMode":"json"}
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (**BL-1223, 0.9.0**). A refused credential answers `401` with `{ "code", "message" }` (`AUTH_TOKEN_INVALID`, `AUTH_TOKEN_EXPIRED`,
 `AUTH_TOKEN_REVOKED`, `AUTH_API_KEY_INVALID`); `500` with `AUTH_DB_UNAVAILABLE` means the auth database could not be read or the
 session's permissions could not be resolved — no session is created, and it is **retryable** (**BL-1223, 0.9.0**).
@@ -980,7 +974,6 @@ Suggested tuning sequence:
 |---|---|---|
 | First subscription message gets `AUTH_REQUIRED`/`AUTH_TIMEOUT` | Auth-required DB without valid first `auth` message | Send valid `auth` message as first frame with matching database |
 | `AUTH_DATABASE_MISMATCH` on auth | Auth payload database does not match route DB | Align `auth.database` with `/api/databases/{db}/ws` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Duplicate-looking changes after reconnect | At-least-once replay path | Deduplicate by event version in client reducer |
 | Resume returns fresh snapshot | Buffer replay expired for requested version | Accept snapshot fallback or increase practical reconnect cadence |
 | `INVALID_STREAM_SEQUENCE` during writes | Client sequence gap/out-of-order `stream_rows` frames | Ensure contiguous per-stream sequence numbers |
@@ -1004,9 +997,7 @@ Last verification context date (UTC): `2026-03-31` (from P10 session reports and
 
 | Capability | Test files / suites | Current status | Coverage strength | Notes |
 |---|---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Subscription snapshot/change lifecycle | `SubscriptionHandlerIntegrationTests.cs` | Pass | Strong | Includes empty/populated snapshot and CRUD change flow |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Server-side user filter behavior | `SubscriptionFilterEvaluatorTests.cs` + subscription integration tests | Pass | Strong | Includes normalization and update enter/leave scope behavior |
 | Write-stream lifecycle + backpressure | `WriteStreamHandlerIntegrationTests.cs` | Pass | Strong | Mode validation, sequence, ack, pressure, row-level errors |
 | .NET streaming API behavior | `SubscriptionApiTests.cs`, `WriteStreamApiTests.cs` | Pass | Strong | Reconnect, resume, typed mapping, close/dispose behavior |
@@ -1018,7 +1009,6 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Resume path dedicated server integration suite is less explicit than core subscribe suite | Resume correctness is critical under production reconnect churn | Add focused server integration tests for at-current/replay/expired resume triad with concurrent writes | High |
 | Long-duration pressure soak for write streams not explicit in current suite | Sustained throughput can reveal backpressure oscillation bugs | Add deterministic soak test with threshold tuning and expected ack/close behavior assertions | Medium |
 | Cross-SDK parity assertions for messagepack plus fallback combinations | Prevents subtle behavior divergence between .NET and TS | Add contract parity matrix tests shared via protocol fixture payload sets | Medium |
@@ -1042,7 +1032,7 @@ See [Access](../auth/index.md) (**BL-1464, next train**).
 - ADRs:
   - `docs/decisions/0020-real-time-streaming.md`
   - `docs/decisions/0023-authentication-and-authorization.md`
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Tasks/reports:
   - `docs/tasks/P10/P10-RealTimeStreaming-Tasks.md`
   - `docs/tasks/P10/P10-S1-ChangeEventFoundation.md`

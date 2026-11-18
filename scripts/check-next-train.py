@@ -26,6 +26,11 @@ Siblings are looked for next to this repo and next to each parent directory abov
 `git fetch` there first, this script never does) and, when that ref does not exist, from the file on disk. The aouda changelog is
 required; the other two are skipped with a note when no checkout is found.
 
+A BL id that a released section mentions only as an end of a range citation (`BL-1001 … BL-1004`, `BL-1001 – BL-1004`,
+`BL-1001..BL-1004`, `BL-1001 to BL-1004`) is not evidence of anything: the range names the cards a train's work was filed under,
+and ids are reused across repos' numbering (0.4.0's `Cards: BL-1001 … BL-1004.` is the NativeClients sign-out work, not the
+realtime API-key re-check that is `BL-1001` today, BL-1498). Every other mention counts, as before; a range is not expanded.
+
 A line of a released section that says the work is NOT shipped (`not yet shipped`, `unreleased`, `next train`, `planned`) does
 not count: the 0.13.0 section names BL-1380 that way.
 
@@ -50,6 +55,8 @@ _MARKER = re.compile(r"next[\s-]+train", re.IGNORECASE)
 # A BL id list straight before the words: "BL-1", "BL-1, BL-2", "BL-1 review", "aouda BL-1" (the prefix is skipped).
 _IDS_BEFORE = re.compile(r"(BL-\d+(?:[ \t]+[A-Za-z]+)?(?:[*`_]*[ \t]*[,/&][ \t]*[*`_]*BL-\d+(?:[ \t]+[A-Za-z]+)?)*)$")
 _BL = re.compile(r"BL-(\d+)")
+# "BL-1001 … BL-1004", "BL-1001 – BL-1004", "BL-1001..BL-1004", "BL-1001 to BL-1004" (markup around either end is skipped).
+_RANGE = re.compile(r"BL-\d+[*`_]*[ \t]*(?:…|\.{2,3}|–|—|-|\bto\b)[ \t]*[*`_]*BL-\d+")
 _VERSION_HEADING = re.compile(r"^(#{1,6})[ \t]+v?(\d+\.\d+\.\d+)\b")
 _ANY_HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+train|planned|not\s+shipped", re.IGNORECASE)
@@ -109,7 +116,7 @@ def parse_released(text: str, repo: str) -> dict[str, Release]:
             continue
         if version is None or _NOT_SHIPPED.search(line):
             continue
-        for n in _BL.findall(line):
+        for n in _BL.findall(_RANGE.sub(" ", line)):  # a range's two ends are not mentions (BL-1498)
             released[f"BL-{n}"] = Release(repo, version, number)  # a later (older) section overwrites: earliest wins
     return released
 

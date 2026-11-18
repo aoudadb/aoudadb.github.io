@@ -76,6 +76,24 @@ class ParseReleasedTests(unittest.TestCase):
     def test_a_line_that_says_not_yet_shipped_does_not_count(self):
         self.assertNotIn("BL-200", cnt.parse_released(AOUDA, "aouda"))
 
+    def test_a_range_citation_is_not_a_release(self):
+        """BL-1498: 0.4.0's `Cards: BL-1001 … BL-1004.` (verbatim) made BL-1001 "released in 0.4.0"; it is the realtime API-key re-check."""
+        changelog = (
+            "## Releases\n\n### 0.14.0 — 2026-11-15\n\n- **Re-check on a key (BL-1001, security).**\n\n"
+            "### 0.4.0 — 2026-09-01\n\n  `SignOutAsync(Others | Global)` throws when nothing was ended. Cards: BL-1001 … BL-1004.\n"
+        )
+        released = cnt.parse_released(changelog, "aouda")
+        self.assertEqual(released["BL-1001"].version, "0.14.0")   # the single mention, not the range's end
+        self.assertNotIn("BL-1004", released)
+        only_a_range = cnt.parse_released("## Releases\n\n### 0.4.0 — d\n\n- Cards: BL-1001 … BL-1004.\n", "aouda")
+        self.assertEqual(only_a_range, {})
+
+    def test_every_range_spelling_is_skipped_and_a_list_is_not(self):
+        for text in ("BL-5 … BL-9", "BL-5 – BL-9", "BL-5 — BL-9", "BL-5..BL-9", "BL-5...BL-9", "BL-5 to BL-9", "**BL-5** … **BL-9**", "BL-5-BL-9"):
+            self.assertEqual(cnt.parse_released(f"## Releases\n\n### 0.1.0 — d\n\n- {text}\n", "aouda"), {}, text)
+        listed = cnt.parse_released("## Releases\n\n### 0.1.0 — d\n\n- BL-5, BL-9 and BL-7 (BL-5 … BL-6)\n", "aouda")
+        self.assertEqual(sorted(listed), ["BL-5", "BL-7", "BL-9"])
+
     def test_client_changelog_sections(self):
         released = cnt.parse_released(CLIENT, "@aouda/client")
         self.assertEqual((released["BL-103"].version, released["BL-104"].version), ("0.13.0", "0.12.0"))

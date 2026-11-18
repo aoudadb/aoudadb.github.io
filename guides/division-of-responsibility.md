@@ -32,7 +32,6 @@ This page is the published form of ADR 0040 §5. Adopting teams draw service bou
 | Work | Mechanism | Why it belongs here |
 |---|---|---|
 | Shaping, filtering, projecting, authorizing reads for a frontend | [Named query](named-queries.md) | Declarative contract, not a process. It **is** the BFF. |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Insert-time normalization, validation, derivation, routing | [Transforms](insert-transforms.md) | Data-shaped and declarative. No language, no loop, no network call. |
 | Unique, check, referential validation | Engine constraints | When the database is the trust boundary, "the service validates it" is not a control. |
 | Fan-out, conflation, delivery guarantees | Streaming (`gap`, `snapshot_complete`, `values_skipped`, `re_auth`) | Amplification absorption. No app service does this better. |
@@ -88,7 +87,6 @@ A gateway that fans out `GET /positions` then N `GET /quotes/{ticker}` and shape
 |---|---|
 | Join positions to quotes | One named query with a join |
 | Hide `internalSpread` | Omit it from `select` |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Ten unrelated dashboard panels | [Named-query batch](named-queries.md#batch-one-snapshot) (one snapshot) |
 | Live last-price at ~10 Hz | (a) `latestPerKey` MQ + subscribe by name — recommended; MQ upserts carry `prev` so default `conflate` works. (b) Insert-only tick table + `"collapse_inserts": true` on the subscribe's `conflate` object. Default `conflate` without `collapse_inserts` is a no-op on insert-only streams. See [browser-tier read limits](browser-tier-read-limits.md#conflate-is-a-no-op-on-insert-only-streams) |
 
@@ -132,7 +130,6 @@ Adopt named queries for (2) and (3), and for the security properties (bounded co
 | Setting | Default |
 |---|---|
 | Decision when the test is ambiguous | Stays in a service |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | Intra-DC hop as the value case | **Not** the argument — see [latency caveat](#honest-caveat-about-latency) |
 | Streaming relay | Retire only on a P37 build (gap, complete snapshots, conflation, `re_auth`) |
 

@@ -103,7 +103,7 @@ If you do nothing except install artifacts:
 
 - `Aouda.Embedded` defaults to ephemeral temp-path operation when `DataPath` is not set.
 - `aouda start` is the shipped CLI server entry point (`aouda dev` was planned but is not exposed in the current CLI; use `aouda start` with `--port` and `--data-dir`). Typical local defaults when using appsettings:
-  - `--port 5433`
+  - `--port 5000`
   - `--database default`
   - ephemeral data path (temp folder, deleted on shutdown)
   - `--auth` disabled
@@ -114,7 +114,7 @@ If you do nothing except install artifacts:
 |---|---|---|
 | `Aouda.Embedded` data location | Temp directory when `DataPath` null | Zero-setup embedded trial path; data lost after dispose |
 | `Aouda.Embedded` durability | `Durability = "strict"` in embedded options (**Lead S26, 0.6.0**; replaces `EnableWal`, which now makes the open throw) | Writes forced to disk through the WAL when using persistent path; see [durability levels](../guides/write-durability.md#durability-levels-lead-s26-060) |
-| `aouda start --port` | `5433` (from config) | Predictable local URL (`http://localhost:5433`) |
+| `aouda start --port` | `5000` (from `appsettings.json`) | Predictable local URL (`http://localhost:5000`) |
 | Database name | from API / config | Create via `POST /api/databases` or appsettings `Databases` |
 | `aouda start --data-dir` | `./data` typical | Persistent server data |
 | App auth | via HTTP API | Enable with `auth.enabled` on create-database; keys in response |
@@ -150,7 +150,7 @@ If you do nothing except install artifacts:
 
 ### Reserved / not yet wired
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - No Docker image distribution flow is implemented in this repo snapshot.
 - No first-class HTTP API for artifact publishing/release management exists.
 
@@ -325,9 +325,8 @@ This section includes both runtime distribution settings and package/build metad
 | `AOUDA_DATA_PATH` | string | unset | path | env vars (embedded) | Drives embedded persistence path for no-args open |
 | `AOUDA_DATABASE` | string | `"default"` logical fallback | non-empty | env vars (embedded + CLI schema flows) | DB naming overlay |
 | `AOUDA_SERVER` / `AOUDA_URL` | string | unset | URL | CLI schema flows | Used by schema command context |
-| `aouda start --port` | int | `5433` | valid port | CLI args | Server listen port |
+| `aouda start --port` | int | `5000` | valid port | CLI args | Server listen port |
 | `aouda start --data-dir` | string? | from config | path | CLI args | Persistent data directory |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | npm `license` | string | `"MIT"` | SPDX | `aouda-client-ts/package.json` | Package-level legal declaration |
 | npm `engines.node` | string | `>=22` (**NativeClients, 0.4.0**; 0.3.0: `>=20`) | semver range | `aouda-client-ts/package.json` | Distribution runtime constraint |
 

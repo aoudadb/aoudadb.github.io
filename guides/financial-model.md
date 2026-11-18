@@ -53,25 +53,25 @@ year before's `RetainedEarnings`. A row condition lets each user see only their 
 
 ## Before you start
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 development machine:
 
 ```bash
 ASPNETCORE_ENVIRONMENT=Development AOUDA_DEV_ADMIN=true aouda start --port 5433 --data-dir "$TMPDIR/aouda-finance"
 # prints one line: AOUDA-DEV-ADMIN email=… password=… key=aouda_…
 export AOUDA=http://localhost:5433
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 H=(-H "Content-Type: application/json")
 
 curl -s -X POST "$AOUDA/api/databases" -H "Authorization: Bearer $SK" "${H[@]}" -d '{ "name": "auth", "kind": "auth" }'
 curl -s -X POST "$AOUDA/api/databases" -H "Authorization: Bearer $SK" "${H[@]}" -d '{ "name": "finance", "auth": { "database": "auth" } }'
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 A=(-H "Authorization: Bearer $SVC" -H "Content-Type: application/json")
 ```
 
 See [Development admin](development-admin.md) and [Auth setup](../auth/setup.md#linking-a-data-database-to-an-auth-database). The HTTP
 steps below use `curl` and [`jq`](https://jqlang.org/). The C# steps use the `Aouda.Client` package and the TypeScript steps
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```csharp
 using Aouda.Abstractions;                  // AoudaRequestException
@@ -95,14 +95,14 @@ const client = new AoudaClient({ serverUrl, database, apiKey: serviceKey });
 
 ## Step 1: two tables with a formula column
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```bash
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   "name": "by_dept",
   "resolverType": "ColumnMatch",
   "rules": [ { "ruleOrder": 0, "columnName": "dept", "operator": "In",
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 }'
 ```
 
@@ -122,7 +122,7 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables" "${A[@]}" -d '{
     { "name": "amount",  "type": "Decimal", "precision": 18, "scale": 2, "isNullable": true },
     { "name": "formula", "type": "Expression", "drives": "amount" }
   ],
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 }'
 ```
 
@@ -146,7 +146,7 @@ foreach (var name in new[] { "pnl", "balance" })
             new() { Name = "amount", Type = "Decimal", Precision = 18, Scale = 2, IsNullable = true },
             new() { Name = "formula", Type = "Expression", Drives = "amount" },
         ],
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
     });
 }
 ```
@@ -165,7 +165,7 @@ for (const name of ["pnl", "balance"]) {
       { name: "amount", type: "Decimal", precision: 18, scale: 2, isNullable: true },
       { name: "formula", type: "Expression", drives: "amount" },
     ],
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
   });
 }
 ```
@@ -462,7 +462,6 @@ update MarginGap:      1.67 ->    5.00
 `subscribe` on `ws://localhost:5433/api/databases/finance/ws`:
 
 ```json
-See [Access](../auth/index.md) (**BL-1464, next train**).
 { "type": "subscribe", "id": "retail-2026", "target": "pnl",
   "filter": { "and": [ { "column": "dept", "op": "eq", "value": "Retail" },
                        { "column": "year", "op": "eq", "value": 2026 } ] } }
@@ -753,7 +752,7 @@ only `"formula": null` keeps the last computed value as the input.
 - a **viewer** who may read both tables, for the Retail department only;
 - a **planner** who may read and write both tables, for Retail only.
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```bash
 curl -s -X POST "$AOUDA/api/databases/finance/auth/admin/roles" "${A[@]}" -d '{ "name": "viewer", "permissions": [
@@ -768,7 +767,7 @@ for who in viewer planner; do
           -d "{ \"email\": \"$who@example.com\", \"password\": \"Correct-Horse-42!\" }" | jq -r .id)
   curl -s -X PUT "$AOUDA/api/databases/finance/auth/admin/users/$uid/roles" "${A[@]}" \
        -d "{ \"roles\": [ { \"roleName\": \"$who\", \"scope\": \"finance\" } ] }"
-See [Access](../auth/index.md) (**BL-1464, next train**).
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
        -d '{ "dimension": "dept", "key": "Retail", "level": "read" }'
 done
 
@@ -807,12 +806,12 @@ curl -s -X POST "$AOUDA/api/databases/finance/tables/pnl/rows" -H "Authorization
 #      a row its writer may not read; …","code":"FORMULA_REFERENCE_NOT_READABLE",…}
 ```
 
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```csharp
 using var asPlanner = new AoudaClient(new AoudaClientOptions
 {
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 });
 try
 {
@@ -831,7 +830,7 @@ catch (AoudaFormulaRefusedException e) when (e.Kind == FormulaErrorKind.Referenc
 **TypeScript**
 
 ```typescript
-See [Access](../auth/index.md) (**BL-1464, next train**).
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 try {
   await asPlanner.table("pnl").insert({
     dept: "Retail", line: "RevenueVsOnline", year: 2026,
@@ -857,4 +856,4 @@ Two things follow from security being the table's:
 - [Formulas](formulas.md) — every rule this guide used, the functions, the limits and what is deliberately not there.
 - [Freshness](freshness.md) — tokens, and why a token read of a formula table on a replica is refused.
 - [Real-time streaming](real-time.md) — subscriptions, resuming, and the `change` message.
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).

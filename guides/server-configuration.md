@@ -112,6 +112,7 @@ Some `AOUDA_*` variables are read by **custom code**, not through the main optio
 | --- | --- | --- |
 | `AOUDA_CORS_ORIGINS` | Replace default CORS origin list | `ServerHostRunner` |
 | `AOUDA_STUDIO_ORIGIN` | Append one CORS origin to defaults | `ServerHostRunner` |
+| `AOUDA_DECLARATION` | Path of `aouda.json` (`Aouda:Declaration`). Unset: nothing is declared. Not a default path | the options binder |
 | `AOUDA_SCHEMA_INFERENCE_MODE` | Schema inference mode override | `SchemaOptionsEnvOverlay` |
 
 ### Variables for other components (not server config)
@@ -138,6 +139,7 @@ CLI flag mappings include:
 | `--trusted-proxies-enabled` | `Aouda:ForwardedHeaders:Enabled` |
 | `--trusted-proxies` | `Aouda:ForwardedHeaders:KnownProxies` |
 | `--trusted-proxy-networks` | `Aouda:ForwardedHeaders:KnownNetworks` |
+| `--declaration` | `Aouda:Declaration` — the path of `aouda.json` (`aouda start`, `aouda plan`). There is no default path |
 
 `Aouda:ForwardedHeaders:Enabled` (`AOUDA_FORWARDEDHEADERS__ENABLED` or `--trusted-proxies-enabled`) is required in addition to the trust list. Off by default. A CLI-only start is `aouda start --trusted-proxies-enabled --trusted-proxies 10.0.0.1`. See [Behind a reverse proxy](../deployment/reverse-proxy.md) — without it, per-IP rate limits, lockout attribution, and audit-log client IPs are the TCP peer (the proxy, in a typical public deployment).
 
@@ -151,7 +153,7 @@ They:
 
 1. Copy **binaries only** to the install directory (any path the operator chooses).
 2. Create the **data directory** (default `C:\ProgramData\Aouda\data` on Windows, `/var/lib/aouda` on Linux).
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. Register the OS service with bootstrap flags embedded in the service definition.
 
 **Windows Service** (`binPath` / `BinaryPathName`):
@@ -187,9 +189,46 @@ To change data path or port after install, update the **service command line** (
 | **Auth users, API keys** | Engine (in data dir) | Yes | Yes |
 | **Env vars / CLI on service** | OS service, container, K8s manifest | Yes | Yes until manifest changed |
 | **Optional appsettings.json** | Operator-placed file | Yes (re-read each start) | Yes if file kept outside binary folder |
+| **`aouda.json`** (`Aouda:Declaration`) | Operator-mounted file, named by the setting | Yes (re-read each start) **and by every `aouda reload`** | Yes |
 
 {: .note }
 Runtime config from `PATCH /admin/config` is **not** written back to `appsettings.json` or environment variables. Only backup schedule changes that go through `RuntimeBackupConfig` are persisted to disk automatically.
+
+---
+
+## 4a) The declaration file, and what a reload can change {#declaration-file}
+
+What exists — databases, schema files, roles, principals and credentials — is one file, `aouda.json`, named by **`Aouda:Declaration`** (`--declaration`, `AOUDA_DECLARATION`). There is **no default path** and no `AOUDA_CONFIG_FILE`. A server started without the setting declares nothing (`declaration: none`). The file's shape is `{ "version": 1, "databases": { ... } }`. `Aouda:Databases`, the identities file and the bootstrap key settings are refused (`SETTING_REMOVED`). The whole file is [Declare a server in one file](declaration.md) (**BL-1463, next train**).
+
+| To name the file | |
+|---|---|
+| `AOUDA_DECLARATION=/etc/aouda/aouda.json` or `Aouda__Declaration=...` | The variable |
+| `aouda start --declaration /etc/aouda/aouda.json` | The switch. `aouda plan --declaration` reads the same file |
+
+- A path that is set and cannot be read refuses the start (`DECLARATION_UNREADABLE`: exit **1** when the file cannot be read yet, so a supervisor retries a volume that is not mounted; exit **78** otherwise).
+- `{ "version": 1 }` declares nothing. A file that is not that version is `DECLARATION_VERSION_UNSUPPORTED`. A file that is not JSON is `DECLARATION_INVALID_JSON`.
+- **A reload re-reads the file from the path the process started with.** A changed `Aouda:Declaration` or `Aouda:Environment` is `restartRequired` and is not followed. A file that has vanished or cannot be read refuses the reload and changes nothing. In Docker, mount the **directory** (`./aouda:/etc/aouda:ro`), not one file: a single-file bind mount keeps the original inode, so a replaced file is never seen.
+- `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`) merges `aouda.<env>.json` over the file.
+
+### Reload or restart: one table {#reload-or-restart}
+
+What `aouda reload` applies, and what takes a restart. A setting a reload cannot apply is listed under `restartRequired` (`setting`, `from`, `to`; a value that could hold a secret is `(changed)`), and the rest of the reload proceeds. The caller needs `manage` on `server`. One reload at a time (`409 RELOAD_IN_PROGRESS`), one per 5 s and one dry run per 1 s (`429 RELOAD_RATE_LIMITED`, `Retry-After`). `POST /api/admin/reload?dryRun=true` and `aouda plan --server` write nothing.
+
+| What you change | Where it is set | Takes effect by | Notes |
+|---|---|---|---|
+| A **new** `databases` entry | `aouda.json` | **Reload** | Created, and linked when it names `authDatabase` |
+| An existing database's `schema` (and its overlay) | The file | **Reload** | Applied **non-destructively**; a drop is the warning `SCHEMA_DESTRUCTIVE_REFUSED` |
+| Roles, `signup`, principals and their credentials | The file's access section | **Reload** | The file is the one writer of what it declares (`409 DECLARED_IN_CONFIGURATION` on the API) |
+| `authDatabase` of a database with **no link yet** | The file | **Reload** | Changing an existing link, or `kind`, is an **error**: the reload changes nothing |
+| A database's operational fields (`durability`, `maxMemoryShareBytes`, `memoryWeight`, `defaultTemperature`, `replicationMode`, `writeConcern`, `writeConcernTimeoutMs`, `onWriteConcernTimeout`) | The file | **Restart** | Re-applied at every start; a reload lists them under `restartRequired` |
+| `schemaAllowDestructive` | The file | **Restart** | A reload never applies a destructive change |
+| A database **removed** from the file | The file | Nothing | Reported as `orphaned` and left alone |
+| A `{ "file": path }` secret (`keyRoot`, a password seed) | The file the declaration names | **Reload** | The file is re-read. A `{ "env": NAME }` secret is the process environment: changing it takes a **restart** |
+| `Aouda:Declaration` or `Aouda:Environment` | Settings | **Restart** | The reload keeps reading the file the process started with |
+| Port, bind address, listeners, memory budget, `Aouda:SkipDatabases`, every other `Aouda:` setting | Any | **Restart** | Listed under `restartRequired` |
+| Memory budgets, log level, backup schedule | `PATCH /admin/config` | **Immediately**, not a reload | Memory budgets and log level are in-memory only and revert on restart ([§4](#4-what-survives-a-restart)) |
+
+A reload refuses as a whole, changing nothing, when any finding is an error (`422 RELOAD_REFUSED`). On a node that does not accept writes, phase 1 runs and `writes` is `skipped`.
 
 ---
 
@@ -261,6 +300,9 @@ services:
       AOUDA_SHUTDOWNTIMEOUT: "00:02:00"
 ```
 
+When the server is ready it logs `Start timings: …` — each start step's duration, the schema files and the slowest one's database
+(**BL-1467, 0.15.0**).
+
 **Slow opens.** A Warning at 30 s means the open is still running — watch `docker logs -f`, do not restart to "unstick" it. Three process deaths *after* the open has chosen a path (`OpenPathDecided`) quarantine the database as `OpenKilled`. Recover with one command:
 
 ```bash
@@ -291,7 +333,6 @@ Every key below was read out of `src/Aouda.Server/Configuration/`; the defaults 
 |---|---|---|
 | `Aouda:Cpu:ConfiguredCores` | unset | Overrides CPU detection. Set it when the process is co-tenanted and no cgroup quota is available — see [Sizing](sizing.md#sizing-cpu). |
 | `Aouda:Cpu:OversubscriptionFactor` | `2.0` | Ceiling on total granted parallelism as a multiple of schedulable cores. |
-See [Access](../auth/index.md) (**BL-1464, next train**).
 | `Aouda:Memory:ForegroundQuiescenceWindow` | see `MemoryBudgetSection` | How long after the last foreground unit finishes before background work returns to full rate. |
 | `Aouda:Memory:PageCacheEnabled` | unset | Unset: **on**, within its `MaxPageCacheBytes` (`T12`) share (**ColumnarRead, 0.3.0** — it was off in `Constrained`, the resource mode every database started in; the modes are deleted, **WorkloadCore S17, 0.3.0**). `false` turns it off; `true` is the default said out loud. |
 | ~~`Aouda:Memory:ResourceMode`~~ | — | **Removed (WorkloadCore S17, 0.3.0)** with the resource mode: the engine no longer classifies itself `Constrained` / `Balanced` / `Abundant`, and its buffering thresholds are one formula on every host (see [Sizing](sizing.md#the-buffering-thresholds-are-one-formula-in-every-deployment-workloadcore-s17-030)). A server still configured with it logs a warning at boot. Was: pinned the resource state instead of measuring it. |
@@ -323,7 +364,7 @@ it is replicating — the deletions reach it through replication, like any other
 configuring for this; the sweep reads the node's role.
 
 ℹ️ **`_api_keys` is deliberately not swept**, though it also has an `expires_at`. That column is
-See [Access](../auth/index.md) (**BL-1464, next train**).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 expired key is *refused* at validation time, but the row stays so it still appears in the admin
 listing as expired rather than vanishing. `_audit_log` is not swept either — it is the one auth
 table left demotable on purpose, so unbounded growth pages to disk instead of exhausting a pin.
