@@ -46,7 +46,7 @@ It is the **existing-application branch** of [How to build apps effortlessly wit
                   │  workflow,       │    │ named mutation · ws      │
                   │  vendor I/O)     │    │ everything else → 404    │
                   └────────┬─────────┘    └────────────┬─────────────┘
-                           │  mk_svc_*                 │  mk_pub_* / user JWT
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
                            ▼                           ▼
                   ┌────────────────────────────────────────────────┐
                   │            Aouda ADMIN :5433                    │
@@ -58,7 +58,7 @@ It is the **existing-application branch** of [How to build apps effortlessly wit
 Four rules hold this together:
 
 1. **The trust boundary is the listener, not a route or a header.** The profile is tagged on the Kestrel connection. There is no request you can send to switch profiles.
-2. **The admin listener is never reachable from the internet.** Services inside your network hold `mk_svc_*` and use it. Browsers never see it and cannot be given a credential that works on it.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 3. **The edge stays thin.** TLS, WAF, CDN, geo-allow — yes. Deserializing the JSON and re-serializing it — no. A hop that only relays bytes is waste; a hop that adds trust has earned its place. Direct internet exposure with **no** edge is not a supported configuration in this release.
 4. **Browsers read through named artifacts only.** They cannot compose a query, cannot name a table, and cannot see that `admin/*` exists.
 
@@ -66,9 +66,6 @@ Four rules hold this together:
 
 | Credential | Held by | Listener | Ships in a browser bundle? |
 |---|---|---|---|
-| `mk_svc_*` / `mk_srv_*` | Your backend services, CI, migration jobs | Admin (and data-plane, but ad-hoc query is admin-only) | **Never** |
-| `mk_pub_*` | Your frontend | Data-plane only (`AUTH_KEY_LISTENER_MISMATCH` on admin) | Yes — that is what it is for |
-| `mk_anon_*` | Your frontend, if it only needs sign-in | Data-plane, auth endpoints only | Yes |
 | End-user JWT | The signed-in browser | Data-plane | Held in memory, refreshed |
 | Operator JWT | Studio / Hub users | Admin | n/a |
 
@@ -102,9 +99,9 @@ It is **not** deletable if it resolves an identifier against another system, qua
 
 ### 4. The auth proxy — **delete the user-facing half**
 
-If your gateway forwards sign-in, refresh, `me`, sign-out, password reset, and MFA to Aouda's auth endpoints, delete it. Those endpoints are on the data-plane allowlist and are designed to be called from a browser with `mk_anon_*` or `mk_pub_*`.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-**Keep server-side** anything that requires a service key — self-service signup you want to gate, admin user management (`/auth/admin/*` is 404 on the data-plane by design), and provisioning flows.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **Do not delete your JWT validation** in services that still exist. They validate the same Aouda-issued token via OIDC discovery / JWKS, which is published on both listeners.
 
@@ -179,7 +176,6 @@ A relay typically holds **one** Aouda subscription per data partition and fans i
 |---|---|---|
 | Subscriptions per WebSocket connection | **32** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
 | Subscriptions per identity | **128** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
-| Subscriptions per service key (no `user_token`) (**BL-1383, 0.11.0**) | **1 024** | `SUBSCRIPTION_LIMIT_EXCEEDED` |
 | Connections per identity, WebSocket and long-poll (**BL-1383, 0.11.0**) | **16** | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` |
 | Subscribe attempts per identity (**BL-1383, 0.11.0**) | burst **512**, **32** per second | `SUBSCRIBE_RATE_EXCEEDED` |
 | Send-buffer high-water mark | 1 MiB | close with `SLOW_CONSUMER` |
@@ -208,11 +204,10 @@ Named-query cost is `1 + joinCount`, capped at 3 joins / cost 8. A view that nee
 
 Do these in order. Each step is independently shippable and independently revertible.
 
-1. **Upgrade and verify the build.** Server `0.1.8`+, `@aouda/client` `0.1.12`+, `Aouda.Client` `0.1.8`+ ([compatibility](../clients/compatibility.md)). Check the four deliberate breaks on the trusted surface: `auth-db-rls` + `permissionDimension` is now a schema error, a zero-rule resolver cannot be persisted, grant sets above the caps are rejected at creation, and bulk load into a compute-bearing table requires an explicit intent flag.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 2. **Move the schema into a file.** `schema export` → `aouda.schema.json` in git → `schema diff` on every PR → `schema apply` on merge ([schema management](schema-management.md), [schema CI/CD](schema-cicd.md)). Named queries, named mutations, checks, and transforms can only be declared in this file — there is no runtime registration. Materialized queries can now be declared here too, but **export before you hand-edit**: a present `materializedQueries` map is desired state and drops anything not listed. Everything after this step depends on it.
 3. **Turn on the data-plane listener** behind your existing edge, on its own hostname. Prove the isolation before you use it: `POST …/query` and `GET /api/databases` must return **404** on the data-plane and work on admin.
-4. **Opt tables and MQ result tables in, one at a time.** `dataPlaneAccess` defaults to false on both tables **and** materialized-query entries. Every table a browser-tier caller touches — including join tables and MQ result tables — needs it. Set `"dataPlaneAccess": true` on the `materializedQueries` schema entry (not via table-options PATCH). **If the table is user-scoped, ship ADRA in the same change** (`authMode`, `rlsResolverName`, `permissionDimension`). A `dataPlaneAccess: true` table with no RLS is readable, through your declared named queries, by every signed-in user. That is right for reference and market data and wrong for anything owned by a user.
-5. **Add the CI gate now, not later.** `aouda schema diff --access` (**.NET CLI**) with an `aouda.identities.json` fixture set, failing the build on widening ([access surface](access-surface.md)). `npx @aouda/client schema diff --access` is **not shipped** (BL-176) — use `dotnet tool install --global Aouda.Cli` or `POST …/schema/diff?access=true` on admin. Adding the gate after ten named queries exist means approving ten findings at once.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 6. **Author named queries and switch reads over behind a flag.** Old gateway route and new named query both work. Compare results.
 7. **Move ingest normalization** that passes the [decision test](division-of-responsibility.md#the-test-when-it-is-not-obvious) into `checks` / `derived` / `route`. Expect an error-handling change: a failed check **fails the whole batch**, it does not skip the row, and the error names the check rather than the row. Decide where rejected rows go and who is alerted **before** you apply it. `route` must also be exhaustive — an unmatched row is `TRANSFORM_ROUTE_UNMATCHED`, not a row left behind on the landing table — so declare a catch-all route to a quarantine table. See [failure semantics](insert-transforms.md#failure-semantics-the-batch-fails-the-row-does-not-skip).
 8. **Move streaming** with `namedQueries.subscribe`, subject to [capacity](#capacity-what-changes-when-the-relay-is-gone) — this is where losing the relay's fan-out shows up. Build the direct path behind a flag while the relay still runs.
@@ -228,9 +223,7 @@ Hand this to whoever (or whatever) is writing the plan.
 - [ ] Server is `0.1.8`+ and the four trusted-surface breaks have been checked against current usage
 - [ ] `aouda.schema.json` is in git and `schema validate` is clean against every environment
 - [ ] Admin listener is unreachable from outside the private network — probed, not assumed
-- [ ] No `mk_svc_*` appears in any browser-delivered artifact — grepped, not assumed
-- [ ] Every data-plane table is either not user-scoped, or has `authMode` + a resolver
-- [ ] `aouda policy inspect` has been run for at least one real identity per table class, and the output is in the migration record
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [ ] `aouda schema diff --access` runs on every PR that touches the schema
 - [ ] Named queries have `select` (never `*`), a capped `limit`, and ≤3 joins
 - [ ] Subscriptions are collection-shaped; measured count per connection is well under 32
@@ -253,11 +246,10 @@ Hand this to whoever (or whatever) is writing the plan.
 | `429 IDENTITY_QUOTA_EXCEEDED` on page load | N independent executes | Use the batch envelope; then size `PermitLimit` from measurement |
 | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | One identity holds 16 sockets (tabs, devices, a reconnect loop) | Close what is not needed; do not retry in a loop; raise `MaxConnectionsPerIdentity` only from measurement |
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | A resubscribe loop, or a mass reconnect replay | Wait `retry_after_ms` (frame) or `Retry-After` (long-poll `/send`); pace the replay |
-| `404 TABLE_NOT_FOUND` on a table that exists | `dataPlaneAccess: false`, browser-tier, data-plane | Opt in — and check join tables too |
 | Studio shows a connect error after adding the listener | Studio is pointed at the data-plane | Studio and Hub use the **admin** URL |
 | Ingest throughput fell after adding transforms | Write amplification on small batches | Batch size is the tuning parameter; avoid stacking `tee`s on a hot path |
 | Rows silently vanished after adding `route` | Events follow storage, not the request | Query the target table, or use `tee` if you meant to keep both |
-| The plan assumes an OAuth redirect to your IdP | PKCE is not shipped | Aouda email/password (+ MFA), or a backend holding `mk_svc_*` |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -280,5 +272,5 @@ Hand this to whoever (or whatever) is writing the plan.
 - [Direct client access](direct-client-access.md) — listeners, keys, quotas, topology
 - [Named queries and mutations](named-queries.md) — authoring, execute, batch, subscribe
 - [Insert-time transforms](insert-transforms.md) — `derived`, `checks`, `route`/`tee`
-- [Access-surface diff](access-surface.md) — the CI gate and `policy inspect`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [Schema CI/CD](schema-cicd.md) · [Compatibility matrix](../clients/compatibility.md) · [HTTP API](../reference/http-api.md)

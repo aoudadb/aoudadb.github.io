@@ -12,8 +12,7 @@
         "ask":    { "type": "Decimal", "precision": 18, "scale": 2, "nullable": true }
       },
       "partitionKey":  [{ "column": "ticker" }, { "column": "source" }],
-      "clusterColumns": ["time"],
-      "dataPlaneAccess": true
+      "clusterColumns": ["time"]
     },
     "trades": {
       "columns": {
@@ -25,8 +24,7 @@
         "size":   { "type": "Int64" }
       },
       "partitionKey":  [{ "column": "ticker" }, { "column": "source" }],
-      "clusterColumns": ["time"],
-      "dataPlaneAccess": true
+      "clusterColumns": ["time"]
     },
     "listings": {
       "columns": {
@@ -35,8 +33,7 @@
         "sector":   { "type": "String" },
         "country":  { "type": "String" },
         "mcap":     { "type": "Int64" }
-      },
-      "dataPlaneAccess": true
+      }
     }
   },
   "materializedQueries": {
@@ -47,8 +44,7 @@
       "orderBy":     "time",
       "descending":  true,
       "select":      ["ticker", "source", "bid", "ask", "time"],
-      "updateMode":  "sync",
-      "dataPlaneAccess": true
+      "updateMode":  "sync"
     },
     "candles_bid_1h": {
       "type":        "aggregate",
@@ -63,8 +59,7 @@
         { "function": "first", "outputName": "open",  "sourceColumn": "bid", "orderByColumn": "time" },
         { "function": "last",  "outputName": "close", "sourceColumn": "bid", "orderByColumn": "time" }
       ],
-      "updateMode": "sync",
-      "dataPlaneAccess": true
+      "updateMode": "sync"
     },
     "bars_with_change": {
       "type":        "aggregate",
@@ -87,8 +82,7 @@
           }
         }
       ],
-      "updateMode": "sync",
-      "dataPlaneAccess": true
+      "updateMode": "sync"
     }
   },
   "namedQueries": {

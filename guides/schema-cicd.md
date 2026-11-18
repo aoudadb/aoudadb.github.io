@@ -20,7 +20,7 @@ This guide describes how to automate Aouda schema management in CI/CD: run **dif
 
 You can implement this with **.NET** (`dotnet aouda`) or **TypeScript** (`npx @aouda/client`). Ready-to-use GitHub Actions workflows are in the engine repo under `examples/github-actions/`.
 
-**Access-surface gate (P37):** `aouda schema diff --access` exits **1** when the branch widens what `mk_pub_*` or a fixture identity can read. Without `--access`, a successful plan still exits 0. The TypeScript CLI does not yet have `--access` — use the .NET tool in CI. Details: [Access-surface diff](access-surface.md). Named queries, named mutations, and materialized queries belong in `aouda.schema.json` (`namedQueries` / `namedMutations` / `materializedQueries`); identities stay in a **sibling** `aouda.identities.json`. Omitting `materializedQueries` does not drop live MQs; a present map (including `{}`) is desired state for the whole MQ set.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -316,10 +316,10 @@ Full examples are also under `examples/github-actions/schema-deploy-typescript.y
   Use `schema validate` in a job that should **fail** if the server has drifted from the schema file (e.g. someone changed the DB by hand). Exit code 0 = in sync, 1 = drift.
 
 - **Check the file before anything is running**  
-  `aouda plan --Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=aouda.schema.json [--Aouda:Databases:app:SchemaEnvironment=prod]` validates the file with no server and no data directory (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**); exit 0 valid, 1 invalid, and each problem names the file and a JSON pointer. It cannot see references between tables and columns, which `schema apply` refuses. See [Plan a declaration](plan.md).
+  `aouda plan --declaration aouda.json [--env prod]`, with `aouda.json` holding `{ "version": 1, "databases": { "app": { "kind": "data", "schema": "aouda.schema.json" } } }` (**BL-1463, next train**; in 0.14.0 the same was `--Aouda:Databases:app:Kind=data --Aouda:Databases:app:SchemaFile=aouda.schema.json --Aouda:Databases:app:SchemaEnvironment=prod`, which is refused now; [Declare a server in one file](declaration.md)), validates the file with no server and no data directory (**BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**); exit 0 valid, 1 invalid, and each problem names the file and a JSON pointer. It cannot see references between tables and columns, which `schema apply` refuses. See [Plan a declaration](plan.md).
 
 - **Letting the server apply the file at start**  
-  A declared database can name its schema file (`Aouda:Databases:<name>:SchemaFile`, optional `SchemaEnvironment`, `SchemaAllowDestructive`) and the server applies it at start, before it is ready (**BL-1388, 0.11.0**). That replaces an apply step in a *wipe and restart* flow, not the PR diff or `schema validate` jobs above. See [Schema management](schema-management.md#let-the-server-apply-it-at-start).
+  A declared database can name its schema file (`databases.<name>.schema` in `aouda.json`, optional `schemaAllowDestructive`; the overlay follows the process setting `Aouda:Environment`; **BL-1463, next train**) and the server applies it at start, before it is ready (**BL-1388, 0.11.0**). That replaces an apply step in a *wipe and restart* flow, not the PR diff or `schema validate` jobs above. See [Schema management](schema-management.md#let-the-server-apply-it-at-start).
 
 - **Environment overlays**  
   Use `--env prod` when applying to production so the CLI merges `aouda.schema.prod.json` (replication factor, table durability levels, etc.) before sending to the server.

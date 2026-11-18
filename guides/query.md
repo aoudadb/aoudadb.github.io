@@ -205,7 +205,7 @@ At a high level:
 
 1. HTTP receives `QueryMessage` in `QueryController.ExecuteQuery`.
 2. `QueryTranslator.Validate` performs request-level checks (database/table presence, `offset`, operators, order-by constraints, recursive `Groups` validation).
-3. Security layers run (PLS/RLS and optional cross-partition rate limiting/auditing).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. `QueryTranslator.Translate` builds an immutable `TableQuery` chain with:
    - projection,
    - predicate,
@@ -332,7 +332,7 @@ Precedence/override notes:
 - Response format: the JSON answer is always column arrays; `Accept` chooses JSON or column-batch frames (**Lead S12, 0.6.0**: the `format` parameter is gone).
 - Read preference: query parameter overrides header when both are present.
 - Limit handling: request value is normalized by translator (`0` special-case, negative->default, positive->cap).
-- Cross-partition behavior: the flag is a cost waiver for the partition-filter guard, not a visibility grant. A credential with entitlements plus the flag sees exactly its grants (a `jwt-claim` user, its tenant); a credential that holds no grant at all on a PLS table is still refused. There is no rate limit on it, and no `Aouda:PlsCrossPartitionRateLimit:*` setting (a leftover key is ignored). (**BL-1227, 0.9.0**) See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Operator and query-option glossary
 
@@ -555,7 +555,6 @@ Quick-answer matrix:
 | `Database is required` or path/body mismatch | Missing or inconsistent `database` field | Ensure body `database` matches `/api/databases/{db}` route. |
 | `ThenBy() requires OrderBy()` exception | Secondary sort called first | Add `OrderBy()` before `ThenBy()` in query chain. |
 | Query returns fewer rows than expected | Default/capped limit applied | Set explicit `limit` (or `0` when intentionally unbounded). |
-| Cross-partition query rejected | `PARTITION_FILTER_REQUIRED` without the flag; or the credential holds no grant at all on the PLS table — no `all-partitions`, no entitlement, no tenant claim (the flag never widens visibility: a user with entitlements and the flag reads its own partitions); or the request came through the data-plane listener, which ignores the flag | Send `crossPartitionAccess` on the admin listener, or bind the partition key. For visibility, see [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). (**BL-1227, 0.9.0**) |
 | Nested boolean request works over HTTP but not SDK builder | SDK does not expose groups API yet | Use raw protocol payload or flatten conditions; track `BL-044`. |
 | Slow cold predicate query | Limited pruning selectivity or high decode volume | Validate predicate columns, check pruning counters, review data distribution/segment stats. |
 

@@ -14,11 +14,11 @@ The wire contract is [reference/http-api.md](reference/http-api.md). Do not resu
 ```
 getting-started/   Main onboarding guides — embedded, server, auth, testing, backup
 guides/            Deep functionality guides — query, schema, named queries, streaming, …
-auth/              Auth and authorization — architecture, setup, client integration, ADRA, reference
+auth/              Access — principals, policy, credentials, whoami, moving from 0.14
 clients/           Client SDKs — TypeScript, .NET, distribution
 deployment/        Deployment — Kubernetes, Helm, Docker, Windows Service, systemd
 ai/                AI agent usage — bootstrap flows, auth patterns, MCP tools
-reference/         HTTP API reference, type reference
+reference/         HTTP API, CLI, declaration, plan codes
 ```
 
 ## For AI agents
@@ -26,7 +26,7 @@ reference/         HTTP API reference, type reference
 Read `llms.txt` at the root of the published site for a structured index of all documentation:
 https://aoudadb.github.io/llms.txt
 
-Browser-tier apps must use [named queries](guides/named-queries.md) on the [data-plane listener](guides/direct-client-access.md). Do not compose ad-hoc queries with `mk_pub_*`. OAuth authorization-code + PKCE is **not shipped**.
+Browser-tier apps use [named queries](guides/named-queries.md) on the [data-plane listener](guides/direct-client-access.md) and send no key. OAuth authorization-code + PKCE is **not shipped**.
 
 Agents standing up a throwaway local engine: [Local CLI testing (agents)](ai/local-cli-testing.md) — do not run `aouda start -h`.
 

@@ -374,7 +374,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  apiKey: "mk_srv_example",
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
 
 const mem = await client.admin.server.memory();
@@ -452,7 +452,7 @@ Steps:
 
 Expected result checks:
 - `/health` is reachable.
-- `ServiceKey("myapp")` starts with `mk_svc_`.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - `CreateUserHttpClientAsync(...).GetAsync("/api/databases/myapp/auth/me")` returns `200`.
 
 ### Scenario 2: Developer local workflow (`aouda start` + SDKs)

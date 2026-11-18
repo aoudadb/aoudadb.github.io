@@ -86,10 +86,10 @@ falls back to the `AOUDA_TOKEN` environment variable when the flag is omitted, t
 ```bash
 export AOUDA_SERVER=http://localhost:5433
 export AOUDA_DATABASE=myapp
-export AOUDA_TOKEN=mk_srv_...          # server admin key, or a bearer token
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 
 dotnet aouda schema diff                # no flags needed
-dotnet aouda schema apply --token mk_srv_...   # or pass it explicitly
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 ```
 
 Without one, these commands exit `2` with `AUTH_TOKEN_MISSING`. Against a database with auth
@@ -108,7 +108,7 @@ Config and env vars (e.g. `AOUDA_SERVER`, `AOUDA_DATABASE`) work the same way as
 
 ### 3. Verify
 
-- **Diff**: Shows a human-readable plan (add table, add column, etc.). Use it on every PR to review schema changes. Add `--access` to fail the job when the branch **widens** what `mk_pub_*` or `aouda.identities.json` principals can read ([Access-surface diff](access-surface.md)). Named queries live under `namedQueries` in the same file ([Named queries](named-queries.md)); optional `freshness` on the named query is keyed by name ([Freshness](freshness.md)). Omitting a name deletes the definition (there is no `dropNamedQueries`). Materialized queries live under [`materializedQueries`](#materialized-queries-in-the-schema-file).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - **Apply**: Sends the desired schema to the server; the server computes and applies the necessary DDL. Destructive changes (drop table/column) are **refused by default**; use `--allow-destructive` only when intentional.
 - **Check**: Use `aouda plan` in CI before anything is running — it validates a *declared* schema file with no server (exit 0 valid, 1 invalid; **BL-1463, 0.14.0**; it replaced `aouda schema check`, **BL-1419, 0.12.0**). See [Plan a declaration](plan.md). A schema file that is not declared is checked against a server with `schema diff`.
 - **Validate**: Use `schema validate` in CI — it needs a running server and exits 0 if the server matches the file, 1 if there is drift.
@@ -155,7 +155,6 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
     "latest_quote": {
       "type": "latestPerKey",
       "sourceTable": "EquityQuote",
-      "dataPlaneAccess": true,
       "groupBy": ["ticker"],
       "orderBy": "ts",
       "descending": true,
@@ -164,7 +163,6 @@ Materialized queries are declared under a top-level `materializedQueries` map, k
     "ohlc_1m": {
       "type": "aggregate",
       "sourceTable": "EquityQuote",
-      "dataPlaneAccess": true,
       "groupBy": [
         "ticker",
         { "column": "ts", "function": "TruncateToMinute", "outputName": "bucket" }
@@ -192,7 +190,7 @@ Five shapes, discriminated by `type`:
 | `filter` | `sourceTable`, `predicate` | A maintained subset of a table |
 | `topNPerGroup` | `sourceTable`, `orderBy`, `n` (`groupBy` optional) | At most **N rows per group** (or global top N when `groupBy` is omitted). Result PK is the source PK |
 
-`aggregate` functions are `count`, `sum`, `min`, `max`, `average`, `first`, `last`; `first` / `last` take an `orderByColumn`. A `groupBy` term is a column name, or an object with a `function` for time bucketing (`TruncateToMinute` / `Hour` / `Day` / `Week` / `Month` / `Year`) plus an `outputName`. All five shapes accept `updateMode` (`async` | `sync`), **`maxCoalesceMs`** (the freshness knob, 0–60000 ms, default 0: how long an `async` query's batches may coalesce before one apply — **ColumnarMerge S10, 0.2.0**; changing it replaces the query), `storage.storageTemperature`, and **`dataPlaneAccess`** (default `false`) — set it on the MQ entry so a `mk_pub_*` named query can read the result table without an imperative table-options PATCH.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **`window`** (**Horizon, 0.5.0**) — `"window": { "keep": "7d" }` (plus `"column"` where it must be named) on an `aggregate` with a `TruncateToMinute` / `Hour` / `Day` / `Week` bucket, or on a `topNPerGroup` grouped by a time column: the result keeps only its groups at or after the horizon (the server's clock minus `keep`), and a read of anything older is computed from the source, so the answer does not change. Every other declaration is refused at apply with its reason — the full list is in [Materialized queries — what is refused](materialized.md#window-refusals). `schema export` writes it, and changing it replaces the query.
 
@@ -224,38 +222,41 @@ The admin HTTP create endpoint still exists and still works; the schema file is 
 
 *(**BL-1388, 0.11.0**)*
 
-If you declare your databases in configuration (`Aouda:Databases`), the server can apply each database's schema file itself, so a wipe of the data directory followed by a plain start gives you the databases, their auth links, their keys **and** their tables, with no per-database script. It is **opt-in**: a database without a `SchemaFile` is not touched, and the server never looks for a file on its own.
+If you declare your databases in the declaration file (`aouda.json`, **BL-1463, next train**; before, in the `Aouda:Databases` settings, which are refused now: [Declare a server in one file](declaration.md)), the server can apply each database's schema file itself, so a wipe of the data directory followed by a plain start gives you the databases, their auth links, their keys **and** their tables, with no per-database script. It is **opt-in**: a database without a `schema` is not touched, and the server never looks for a file on its own.
 
 ```json
-"Aouda": {
-  "Databases": {
-    "derive_auth": { "Kind": "auth" },
+{
+  "version": 1,
+  "databases": {
+    "derive_auth": { "kind": "auth" },
     "ledger": {
-      "AuthDatabase": "derive_auth",
-      "SchemaFile": "/etc/aouda/schemas/ledger.json",
-      "SchemaEnvironment": "prod"
+      "kind": "data",
+      "authDatabase": "derive_auth",
+      "schema": "schemas/ledger.json"
     }
   }
 }
 ```
 
-What happens, in this order: **every `SchemaFile` is read and validated before anything opens** (**BL-1463, 0.14.0**: before a declared database is created, together with every other check of the declaration), the declared databases and their links are reconciled, `_serverauth` / `RootUser` start, **then each `SchemaFile` is applied**, and only then is the server ready. The apply runs inside the server with its own privileges, so no API key is needed, and it goes through the same code as `POST .../schema/apply`.
+in `/etc/aouda/aouda.json`, started with `Aouda__Declaration=/etc/aouda/aouda.json` and `AOUDA_ENVIRONMENT=prod`. A relative `schema` path is relative to the directory of `aouda.json` (**BL-1463, next train**; before, to the working directory), so the example reads `/etc/aouda/schemas/ledger.json`.
+
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 | You want to know | Answer |
 |---|---|
 | Is it safe to restart? | Yes. A file already in effect gives an empty diff: nothing is written, no history entry. A changed file applies only the difference. |
 | What if the file is wrong? | The start **fails**, naming the database and the file: missing, not JSON, an invalid schema (an unknown or wrong-case member included, **BL-1460, 0.14.0**), an overlay that adds a table. A change that cannot be applied fails the start too. (**BL-1463, 0.14.0**) Every bad file is reported at once, each with its code and a JSON pointer into the file (`SCHEMA_INVALID`, `SCHEMA_UNKNOWN_MEMBER`, `SCHEMA_OVERLAY_INVALID`, `SCHEMA_CHANGE_REFUSED`, ...; see [Declaration Finding Codes](../reference/plan-codes.md)); a file or an overlay that cannot be read (`SCHEMA_FILE_UNREADABLE`, `OVERLAY_UNREADABLE`) exits with status 1, so a supervisor retries it once the volume is mounted, and an invalid one exits 78. |
-| What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"SchemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
+| What about a drop? | Destructive changes (drop table, drop column) are **refused** unless the declaration says `"schemaAllowDestructive": true`. A refusal does not stop the start: it is logged as a warning and the catalog keeps the table. |
 | Which tables can I still change over HTTP? | None that the file created: a table schema apply creates refuses HTTP DDL in every inference mode, whether the CLI, the API or the start-time apply created it. |
 | Where is the history? | `GET /api/databases/{db}/schema/history`, with the source `DeclaredApply`. |
-| Do the CLI and the API still work? | Yes, unchanged. The catalog is the runtime truth; the next start applies the file again, and does not remove what you added through the API unless the file omits it **and** `SchemaAllowDestructive` is set. |
+| Do the CLI and the API still work? | Yes, unchanged. The catalog is the runtime truth; the next start applies the file again, and does not remove what you added through the API unless the file omits it **and** `schemaAllowDestructive` is set. |
 
-`SchemaEnvironment` is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
+The process setting `Aouda:Environment` (`--env`, `AOUDA_ENVIRONMENT`; **BL-1463, next train**, one per server; it replaces the per-database `SchemaEnvironment`) is the CLI's `--env`: the overlay next to the file is merged over it when it exists. The overlay is named after the
 file: `<file without .json>.<env>.json`, so `aouda.schema.json` → `aouda.schema.prod.json` and `rates.aouda.schema.json` →
 `rates.aouda.schema.prod.json` (**BL-1460, 0.14.0**; before, every file in one directory shared `aouda.schema.<env>.json`). An
-overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `SchemaFile` is refused on a `Kind: auth` database, and `SchemaEnvironment` or `SchemaAllowDestructive` without `SchemaFile` is refused at start.
+overlay that is there but cannot be read, or is empty, fails the start naming the file (**BL-1460, 0.14.0**; it was skipped). An overlay can override settings and per-table policy and durability, and cannot add or remove tables. `schema` is refused on a `"kind": "auth"` database, and `schemaAllowDestructive` without `schema` is refused at start.
 
-Custom roles can be declared the same way on a `Kind: auth` database (`Roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-aoudadatabasesname)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
+Custom roles can be declared the same way on a `"kind": "auth"` database (`roles`, see [Server and Multi-Database](server-multi-database.md#per-database-settings-databases-in-aoudajson)) and are applied right after the schema (**BL-1392, 0.11.0**). Seed files are not applied at start.
 
 ---
 
@@ -347,11 +348,11 @@ The overlay's name comes from the base file's: `<base without .json>.<env>.json`
 | `settings` | `durability` (`replicationFactor`) |
 | `tables.<a table of the base file>` | `policy` (`storageTemperature`, `retention`), `durability` (`level`, `replicationFactor`) |
 
-Any other member, including one the base file may carry (`partitionLevelSecurity`, `authMode`, `plsClaimBinding`, `dataPlaneAccess`,
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 `namedQueries`, `database`, `settings.allowTruncatingTimestampToDate`, …), is refused, never ignored:
 
 ```text
-SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED: member 'partitionLevelSecurity' at /tables/orders is not allowed in an overlay: an overlay overrides only settings.durability and an existing table's policy and durability. Move it to the base file.
+a principal, its statements, and an aouda_ key or a session (GET /api/auth/whoami)
 ```
 
 Before, the merge dropped such a member without a word: an overlay turning partition-level security on applied with it off.
@@ -371,11 +372,7 @@ Invalid schema: unknown member 'nulable' at /tables/orders/columns/status; did y
 Every such member is listed, each with its JSON pointer and, when one is close, the member meant (`… did you mean 'nullable'? Member
 names are case-sensitive.` for a wrong case). Nothing is applied. Before, the server dropped the member: `"nulable": true` made a
 non-nullable column, `"partitionLevelSecurty": true` left partition-level security off, and a named query's `"where": {"adn": […]}`
-lost its filter and returned every row. A table's `description` was refused in 0.14.0 (it is accepted from the 0.15.0: documentation in the file only, not stored and not diffed; a
-column's `description` is stored and diffed), and a materialized query has no `authMode`, `permissionDimension`, `permissionColumn` or
-`rlsResolverName`: those are refused too, with a message that says so. They were never read: a materialized query's result is always filtered by its
-**source table's** partition- and row-level security, so the source table's security always applied. Delete them, and set security on the source table
-([Materialized queries: who may read a result](materialized.md#232-who-may-read-a-result-the-sources-security)). Run [`aouda plan`](plan.md) with each file declared (and its overlay, `SchemaEnvironment`) to list them all.
+lost its filter and returned every row. A table's `description` was refused in 0.14.0 and is accepted from 0.15.0: documentation in the file only, not stored and not diffed; a column's `description` is stored and diffed. A table carries no security members, and neither does a materialized query: access is a principal's statements ([Access](../auth/index.md), **BL-1464, next train**). Run [`aouda plan`](plan.md) with each file declared (and its overlay, `--env`) to list unknown members.
 
 ### Summary
 

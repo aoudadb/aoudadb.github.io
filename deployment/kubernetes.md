@@ -43,21 +43,37 @@ start-time schema apply; raise it for a large declared schema. The port is open 
 (`/startup` 503, `/ready` with `not_initialized`, `server_starting`, `schema_applying` and its `progress`). Before this, `/startup` answered `503` for as long as the pod was in
 setup mode, so Kubernetes restarted a pod that had finished starting every five minutes, for ever.
 
-**Declare a server key and there is no setup mode.** The pod starts ready, operated through the key, with no human admin:
+**Declare an operator and there is no setup mode** (**BL-1464, next train**). The pod starts ready, operated by a key-only
+principal of the declaration, with no human admin. Its key is derived from a **key root** that reaches the pod from a Secret, never
+from values or a ConfigMap. Create the Secret, the root on standard input rather than on kubectl's command line:
 
 ```bash
-printf 'mk_srv_%s' "$(openssl rand -hex 32)" |
-  kubectl create secret generic aouda-server-key -n aouda --from-file=server-key=/dev/stdin
-helm upgrade --install aouda ./charts/aouda-cluster --namespace aouda \
-  --set auth.serverKeySecret.name=aouda-server-key
+openssl rand -hex 32 | tr -d '\n' |
+  kubectl create secret generic aouda-key-root -n aouda --from-file=key-root=/dev/stdin
 ```
 
-(`auth.serverKeySecret.key` defaults to `server-key`; the chart passes it as `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`. The key reaches
-kubectl on standard input, not on its command line.) ⚠️ With `replicaCount` above 1 every replica gets the key, and each creates
-its own server auth database at its first start, before replication assigns it a role: that is aouda **BL-1396** (startup writes on
-a replicated node), not handled by this chart yet.
+then pass it through `extraEnv` and declare the operator in `declaration.file`:
 
-With no key declared, a pod whose volume has never been set up is in setup mode: `/startup` is `200`, `/ready` is `503 setup_required`, and the pod stays NotReady.
+```yaml
+extraEnv:
+  - name: AOUDA_KEY_ROOT
+    valueFrom: { secretKeyRef: { name: aouda-key-root, key: key-root } }
+declaration:
+  file:
+    version: 1
+    keyRoot: { env: AOUDA_KEY_ROOT }
+    server:
+      principals:
+        ops: { roles: [admin], credentials: { derivedKey: { version: 1 } } }
+```
+
+The same root derives `ops`'s key for its client: [Keys that survive a wipe](../guides/keys-that-survive-a-wipe.md). The chart's
+`auth.serverKeySecret` is **gone**: the setting it passed, `AOUDA_AUTH__BOOTSTRAP__SERVERKEY`, is refused at start (`SETTING_REMOVED`,
+exit status `78`), so a values file that still sets it renders no key, and an `extraEnv` that sets the variable by hand refuses the
+pod. ⚠️ With `replicaCount` above 1 every replica gets the declaration and converges its own server auth database at its first start,
+before replication assigns it a role: that is aouda **BL-1396** (startup writes on a replicated node), not handled by this chart yet.
+
+With no operator declared, a pod whose volume has never been set up is in setup mode: `/startup` is `200`, `/ready` is `503 setup_required`, and the pod stays NotReady.
 Create the first admin over a port-forward, which reaches the pod as loopback:
 
 ```bash
@@ -68,56 +84,11 @@ printf '{"email":"%s","password":"%s"}' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" |
 
 The password goes on standard input, never on curl's command line.
 
-`kubectl exec ... aouda create-admin` refuses while the server runs in the pod: the server holds the data directory.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-## Declaring databases, keys and schema files (**0.15.0**) {#declaring-databases-keys-and-schema-files}
+## Declaring databases, keys and schema files
 
-Before this release the chart could declare nothing beyond `auth.serverKeySecret`: it had no way to add an environment variable, a volume or a mount to the Aouda pods, so the
-declarative flow ([Declare a deployment](../guides/declare-a-deployment.md)) did not work on Kubernetes. Six values, all empty by default, change that. They apply to the **data-node
-StatefulSet** only (not the witness, not Studio):
-
-| Value | What it is |
-|---|---|
-| `declaration.config` | An object rendered as JSON into a ConfigMap named `<fullname>-declaration` and mounted **read-only at `/etc/aouda`** as a directory, so the server reads `/etc/aouda/aouda.json` with no setting. Empty = no ConfigMap and no mount. Its shape is `appsettings.json`: a top-level `Aouda` object |
-| `declaration.restartOnChange` | Default `false`. `true` adds a checksum annotation to the pod template, so a changed `declaration.config` **rolls the pods** instead of waiting for a reload |
-| `extraEnv` | Container `env` entries (`name` / `value`, or `valueFrom`: a value from a Secret through `secretKeyRef`) |
-| `extraEnvFrom` | Container `envFrom` entries (a ConfigMap or Secret whose keys become variables) |
-| `extraVolumes`, `extraVolumeMounts` | Pod volumes and container volume mounts: the Secret or ConfigMap that holds the identities file, the schema files and the key files |
-
-```yaml
-declaration:
-  restartOnChange: false
-  config:
-    Aouda:
-      Auth: { Keys: { File: /etc/aouda-files/identities.json } }
-      Databases:
-        orders: { SchemaFile: /etc/aouda-files/orders.schema.json }
-extraVolumes:
-  - name: declaration-files
-    secret: { secretName: aouda-declaration }
-extraVolumeMounts:
-  - name: declaration-files
-    mountPath: /etc/aouda-files
-    readOnly: true
-```
-
-Create the Secret from the files (the key files go in it too, including `server_key`, the server key that `aouda reload` needs; the identities file names them by their mounted path):
-
-```bash
-kubectl create secret generic aouda-declaration -n aouda \
-  --from-file=identities.json --from-file=orders.schema.json \
-  --from-file=orders_service_key --from-file=feeder_key --from-file=server_key
-```
-
-Rules that follow from how the chart mounts things:
-
-- **Mount your other files somewhere other than `/etc/aouda`.** When `declaration.config` is set, that directory is the ConfigMap's; anything else mounted there conflicts. The example uses `/etc/aouda-files`.
-- **Never put a secret in `declaration.config`.** It is a ConfigMap, readable by anything that can read ConfigMaps in the namespace. A key, a password or a hash-less secret goes in a Secret mounted through `extraVolumes`, and the identities file names it as `{ "file": "/etc/aouda-files/feeder_key" }`; or pass a value through `extraEnv` with `valueFrom.secretKeyRef`.
-- **The directory is mounted, not one file (no `subPath`)**, deliberately: a `subPath` mount never sees a ConfigMap update, so a reload could not either.
-- **After `helm upgrade` the ConfigMap reaches the running pods in about a minute** (the kubelet's sync), and nothing watches it: run `aouda reload` once it has arrived (`kubectl exec -n aouda aouda-0 -- aouda reload --server http://localhost:5000 --key-file /etc/aouda-files/server_key`, with the server key in the mounted Secret). With `restartOnChange: true` the pods roll instead; a changed Secret never rolls them by itself.
-- A setting that needs a restart (the port, memory) is reported by the reload as `restartRequired`: [the table](../guides/server-configuration.md#reload-or-restart).
-- Declaring `Aouda:Databases` through `extraEnv` works, but a database declared there is **fixed for the life of the pod**: a reload reports `SOURCE_NOT_RELOADABLE` and `aouda plan` says `SOURCE_FIXED_AT_START` (info). Declare them in `declaration.config`.
-- The server key still comes from `auth.serverKeySecret` (or a `server_admin` entry in the identities file); see the first-start section above.
+The chart value is `declaration.file`: `aouda.json` with no `Aouda` wrapper, mounted read-only and named with `Aouda__Declaration`. `declaration.config` (an `appsettings` shape) is not a value. The worked values, `extraEnv`, `extraEnvFrom`, `extraVolumes` and `extraVolumeMounts` are [below](#declare-the-databases-bl-1463-next-train). A key root is a Secret mounted through `extraVolumes` and named from the file as `{ "file": "/etc/aouda-files/key-root" }`. It is never a ConfigMap entry. `Aouda__Databases__*` in `extraEnv` is refused (`SETTING_REMOVED`).
 
 ## Upgrade
 
@@ -175,6 +146,44 @@ Optional Studio overrides:
 
 If `studio.env.defaultServerUrl` is empty, the chart defaults it to:
 `http://<release-fullname>:5000`.
+
+### Declare the databases (**BL-1463, next train**)
+
+`declaration.file` is the declaration, `aouda.json`, as a value. The chart renders it as JSON into a ConfigMap, mounts it read-only
+at `/etc/aouda/aouda.json` on the data pods and sets `Aouda__Declaration=/etc/aouda/aouda.json` for you (the server reads no other
+path). With the value empty, which is the default, there is no ConfigMap, no mount and no setting: nothing is declared. The object is
+the file's own grammar with no `Aouda` wrapper, `version` included:
+
+```yaml
+declaration:
+  file:
+    version: 1
+    databases:
+      derive_auth: { kind: auth }
+      orders:
+        kind: data
+        authDatabase: derive_auth
+        schema: /etc/aouda-files/orders.schema.json
+```
+
+renders (`helm template`)
+
+```yaml
+  aouda.json: |
+    {
+      "databases": { "derive_auth": { "kind": "auth" }, "orders": { "authDatabase": "derive_auth", "kind": "data", "schema": "/etc/aouda-files/orders.schema.json" } },
+      "version": 1
+    }
+```
+
+(the chart's output is indented and its members sorted). Mount the schema files it names with `extraVolumes` and
+`extraVolumeMounts`, **not** under `/etc/aouda` (that directory is the ConfigMap's), and name them by absolute path. After
+`helm upgrade` the ConfigMap changes in the running pods within about a minute and `aouda reload` applies it; nothing watches the
+file. `declaration.restartOnChange: true` rolls the pods instead. Never put a secret in `declaration.file`: it is a ConfigMap. The
+chart renders one file and no overlay; use one values file per environment. The value was `declaration.config` (an `appsettings`
+shape with an `Aouda` wrapper) in an unreleased chart and has no alias: [Declare a server in one file](../guides/declaration.md).
+
+`Aouda__Databases__*` through `extraEnv` is **refused** at start (`SETTING_REMOVED`): declare databases in `declaration.file`.
 
 ## Accessing Services
 

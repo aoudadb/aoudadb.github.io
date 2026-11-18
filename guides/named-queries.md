@@ -43,10 +43,10 @@ An untrusted caller (a browser, a mobile app) must not compose an arbitrary `Que
 
 1. **Cost** — a five-way join or an unfiltered scan is unbounded.
 2. **Schema coupling** — the UI is welded to physical column names (the PostgREST failure).
-3. **Column exposure** — ADRA is row- and partition-scoped. The named query's `select` is the only column-level control.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. **Review** — a query that can leak a tenant is a schema change, not a string in a SPA.
 
-Trusted callers (Studio operators, `mk_svc_*` on the **admin** listener) still have the ad-hoc query surface. Named queries are **required** on the [data-plane listener](direct-client-access.md).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Performance: what is actually true
 
@@ -85,7 +85,7 @@ The strong arguments:
 
 Editing the body under the same name changes behaviour for every deployed frontend at apply time. That is deliberate — a consumer of "the current version" should get the current version. Coexistence, when you need it, is **two names** (`quoteByTicker` + `quoteByTickerV2`).
 
-The mitigation is not a compatibility shim. It is a **review-time signal**: the access-surface diff reports `named_query_body_changed` (`widen`) when the body under a name changes, plus the `V2` pattern. See [Access-surface diff](access-surface.md).
+The mitigation is not a compatibility shim. It is a **review-time signal**: the access-surface diff reports `named_query_body_changed` (`widen`) when the body under a name changes, plus the `V2` pattern. See [Access-surface diff](../auth/authorization.md#audit).
 
 ---
 
@@ -109,7 +109,6 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
   "database": "trading",
   "tables": {
     "EquityQuote": {
-      "dataPlaneAccess": true,
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1 },
         "ticker": { "type": "String" },
@@ -120,7 +119,6 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
       }
     },
     "Position": {
-      "dataPlaneAccess": true,
       "columns": {
         "id": { "type": "Int64", "primaryKey": 1 },
         "accountId": { "type": "Int64" },
@@ -186,10 +184,9 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
 
 Notes:
 
-- `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](access-surface.md).
+- `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](../auth/authorization.md#audit).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top. **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still a required param. Write `"required": false` explicitly for optional args (and always when pairing with `whenParamPresent`).
-- `dataPlaneAccess: true` is required for browser-tier callers on **every table the definition touches**, including join tables **and** a materialized-query result table. On an MQ, set it on the `materializedQueries` entry (default `false`) — do not PATCH table-options. Independent of ADRA: RLS/PLS still filter rows of the base table.
-- **A joined table is scoped as a direct read of it would be** (**BL-818, 0.3.0**; **BL-1227, 0.9.0**). The caller's RLS and PLS for every joined table are applied on that join's side, so an execute whose definition joins a table the caller may read only part of is answered with that part, and every joined table also needs the caller's grant. A holder of `all-partitions` or `all-rows` is lifted on the joined side as on a direct read; `crossPartitionAccess` is not carried to a joined table. Still `403 AUTHORIZATION_DENIED`, naming the table: a joined table whose partition-level security refuses the caller, and a joined materialized-query result whose source security cannot be applied.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### Legal `where` operators
 
@@ -417,18 +414,18 @@ Body is `{ "args": { … } }` only. No `database` field (the path already has it
 ### HTTP
 
 ```bash
-# Data-plane listener (mk_pub_* or application user JWT). Admin :5433 rejects mk_pub_*
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 # with AUTH_KEY_LISTENER_MISMATCH.
 curl -s -X POST \
-  -H "Authorization: Bearer $MK_PUB_OR_JWT" \
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
   -H "Content-Type: application/json" \
   http://localhost:5434/api/databases/trading/named-queries/equity.quoteByTicker/query \
   -d '{"args":{"ticker":"AAPL"}}'
 ```
 
-Success looks like any other query result: column arrays (`columns`, `types`, `data`, `rowCount`). (**Lead S12, 0.6.0**) There is no `format` parameter any more; `?format=` is refused `400 INVALID_FORMAT`. Unknown name → `404 NAMED_QUERY_NOT_FOUND`. On the **data-plane listener**, a missing token or an unentitled caller (`mk_anon_*`, a user JWT whose roles carry no `named-query` `execute` row for this name) is the **same** 404 — not 401/403 — so names are not enumerable. The **admin listener** still returns 401 (`AUTH_TOKEN_MISSING`) / 403 (`INSUFFICIENT_PERMISSIONS`, or `AUTHORIZATION_DENIED` for a caller with no role on the database).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-**Permission (BL-1417, 0.12.0, breaking).** The caller's role needs `{ "resourceType": "named-query", "resourceName": "<name or *>", "actions": "execute" }` (a named mutation: `named-mutation`). Table `read` / `write` do not run an artifact, and an execute row gives no table API. `db_admin` and a `mk_svc_` service key need no row; `db_reader` holds `named-query *`, `db_writer`, `db_operator` and `public` hold both kinds, `anonymous` neither. A custom role that ran artifacts on its table right before 0.12.0 must add the rows. See [Data Authorization §19.0](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls) for the shapes, the upgrade behaviour and the server's start-up Warning. Bind failure → `400 NAMED_QUERY_BIND_FAILED` (or `NAMED_QUERY_PARAM_REQUIRED`) **before** the engine runs.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### TypeScript (`@aouda/client`)
 
@@ -438,7 +435,7 @@ import { AoudaClient } from "@aouda/client";
 const client = new AoudaClient({
   serverUrl: "https://data.example.com", // data-plane listener
   database: "trading",
-  apiKey: process.env.AOUDA_PUB_KEY!, // mk_pub_…
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
 await client.connect();
 // after user sign-in, attach the user JWT — do not put identity in args
@@ -453,7 +450,7 @@ const { rows } = await client.namedQueries.execute("equity.quoteByTicker", {
 ```csharp
 var client = new AoudaClient("https://data.example.com", "trading")
 {
-    // configure mk_pub_ / user JWT on the options you already use
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 };
 
 var result = await client.NamedQueries.ExecuteAsync(
@@ -482,7 +479,7 @@ A dashboard of independent panels should not issue N sequential executes. A batc
 }
 ```
 
-HTTP **200** means the envelope was accepted. A missing name or a bind/ADRA failure is:
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```json
 {
@@ -530,7 +527,7 @@ Two sequential single executes under a concurrent writer **may disagree**. The b
 
 On the data-plane, WebSocket `subscribe` **requires** `"name"` (and optional `args`). Ad-hoc `target` + `filter` is `NAMED_QUERY_SUBSCRIBE_REQUIRED`.
 
-The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** that hash for the connection. Redeploying the alias does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -582,7 +579,7 @@ Endpoint: `wss://{host}/api/databases/{db}/ws`. Snapshot paging, `snapshot_compl
   "conflate": { "collapse_inserts": true } }
 ```
 
-The server conjoins named-query ∧ PLS ∧ RLS into one effective predicate at subscribe time and **pins** the bound `Where` + `Select` for the connection. Editing the named query does not change an in-flight subscription. A permission-version bump re-keys the fan-out bucket; revoked rows stop within one event.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Live `change` `row` / `prev` contain only the declared projection.
 
@@ -850,13 +847,13 @@ This is the recommended path for a bounded, continuous-trickle insert feed (e.g.
 
 ## Authorization (always underneath)
 
-Every named-query execute, batch element, mutation, and subscribe applies **the caller's** PLS and RLS. A bug in a named query cannot leak across a tenant boundary **if ADRA is intact** — which is why fail-closed resolvers and the [access-surface diff](access-surface.md) exist.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-Visibility is **granted**, never implied by the kind of key. A service key (`mk_svc_*`) holds `all-partitions` and `all-rows` on its database, and a user with a `db_admin` role assignment on the database holds the same (a token that only *claims* `db_admin` holds nothing), so a named query run by either sees what a direct read would see. Any other credential sees its entitlements or tenant, or holds the grant through a role. Service keys are for backends, not browsers. A call that a grant decided is audited like any read: one `access_grant_used` row per table and grant per request, and a batch whose slots read one table writes one row per grant, not one per slot. See [Visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows). (**BL-1227, 0.9.0**)
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### `crossPartitionAccess` per call
 
-A named-query call on the **admin** listener can send `crossPartitionAccess: true` (an execute body, or one item of a batch; `cross_partition_access` on a [subscribe](#subscribe-by-name)). It waives the partition-filter guard when the query's `where` binds no partition key, and nothing else: the rows stay the caller's grants: a credential without `all-partitions` reads only its entitlements (or its tenant), and one with no grant at all on a PLS table is still refused. A definition cannot set it, and the data-plane listener ignores it. A browser binds the key in the definition instead; see [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener). (**BL-1227, 0.9.0**)
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 There is no catalog field, header, or option that runs a named query as someone else.
 
@@ -867,8 +864,6 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Symptom | Cause | Action |
 |---|---|---|
 | `404 NAMED_QUERY_NOT_FOUND` | Name not deployed or typo | Apply schema; use the schema key as a string literal |
-| Data-plane execute 404 (no 401/403) | Missing token, `mk_anon_*`, or a caller whose roles hold no `named-query` / `named-mutation` `execute` row for the name (a table `read` / `write` does not count, **BL-1417, 0.12.0**) | Expected on the data-plane. Use `mk_pub_*` (role `public`), an entitled user JWT, or a service key; for a custom role, add the `execute` row. Admin listener still 401/403 (`INSUFFICIENT_PERMISSIONS`, details name the artifact). |
-| `404 TABLE_NOT_FOUND` on a table that exists | Data-plane + browser-tier + `dataPlaneAccess: false` | Set `dataPlaneAccess: true` on every touched table **and** MQ entry (including joins) |
 | `400 NAMED_QUERY_BIND_FAILED` | Arg type/constraint | Check `params` (`maxLength`, `min`/`max`, `enum`, `maxItems`) |
 | Schema apply `NAMED_QUERY_IDENTIFIER_PARAM` | `$table` / parameterized column | Rewrite; parameters are literals only |
 | Schema apply `NAMED_QUERY_UNCAPPED_LIMIT` | Missing `limit` | Set a numeric cap (or a constrained `limitParam`) |
@@ -887,7 +882,7 @@ There is no catalog field, header, or option that runs a named query as someone 
 | Batch HTTP 200 with a slot `code` | Per-element failure | Handle positional errors; do not retry the whole envelope unless you mean to |
 | `NAMED_QUERY_DEPRECATED` warning | Name sunset pending | Log it; migrate callers to the replacement name before `sunsetAt` |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Data-plane subscribe without `"name"` | Call `subscribe(name, args)` |
-| Data-plane `POST /query` 404 | Listener allowlist | Use named-query execute, or connect the service key to the **admin** listener |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -907,11 +902,11 @@ There is no catalog field, header, or option that runs a named query as someone 
 ## Related
 
 - [How to build apps effortlessly with Aouda](build-apps.md) — where named queries fit in the whole build path
-- [Direct client access](direct-client-access.md) — listeners, `mk_pub_*`, quotas
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - [What a browser-tier read cannot do](browser-tier-read-limits.md) — operators, allowlist, partition rule, conflation caveat
 - [Division of responsibility](division-of-responsibility.md) — what belongs in a service
 - [Adopting Aouda](adoption.md) — SDK coverage, capacity, and the order to migrate in
-- [Access-surface diff](access-surface.md) — CI gate on widening (including `named_query_body_changed` and `freshness` loosen)
+- [Access-surface diff](../auth/authorization.md#audit) — CI gate on widening (including `named_query_body_changed` and `freshness` loosen)
 - [Freshness and replica consistency](freshness.md) — token, `AtLeast`, named-query `freshness`, caveats
 - [HTTP API](../reference/http-api.md)
 - [TypeScript client](../clients/typescript.md)

@@ -12,7 +12,7 @@ Last updated: 2026-04-08
 
 Coverage phases: P12, P14
 Primary task folders: `docs/tasks/P12/`, `docs/tasks/P14/`
-Primary ADRs: `docs/decisions/0017-ai-native-interface.md`, `docs/decisions/0022-licensing-and-distribution-strategy.md`, `docs/decisions/0023-authentication-and-authorization.md`, `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Auth-And-Authorization.md`, `docs/dev/Functionality-Schema-Lifecycle.md`
 
 ## Start Here
@@ -24,8 +24,8 @@ If your question is "How should an AI agent use Aouda today?", start with:
 - `2.11 API and CLI coverage reference`
 - `2.12 Scenario playbooks`
 - [Local CLI testing (agents)](local-cli-testing.md) for a throwaway `aouda start` (unused ports, temp data-dir) and the traps that waste a session (`start -h`, data-plane `/query`, CorsOrigins shape, schema `where` / keys)
-- [Declare a deployment](../guides/declare-a-deployment.md) (**0.15.0**) when the agent must produce a deployment (compose, identities, roles, schema files) that survives a wipe: one working set, with `aouda plan` as the check an agent can run offline
-- [Named queries](../guides/named-queries.md) for generated browser apps (string names; no ad-hoc `mk_pub_*` queries)
+- [Declare a server in one file](../guides/declaration.md) (**BL-1463, next train**) when the agent must produce a deployment (compose, principals, statements, schema files) that survives a wipe: one `aouda.json`, checked with `aouda plan`
+- [Named queries](../guides/named-queries.md) for generated browser apps (string names; a browser holds no key — give `anonymous` the statements it may run)
 - [Division of responsibility](../guides/division-of-responsibility.md) before moving logic into the schema
 
 If your question is "What is implemented vs planned?", jump to:
@@ -48,8 +48,7 @@ The AI-native usage model exists to make Aouda practical for agent-driven softwa
 
 User outcomes:
 - Fast "first successful request" for local agents (`aouda start`, schema-on-write, simple HTTP/SDK paths).
-- Explicit connection and identity model for AI-generated apps (API key gate + user JWT).
-- Strong authorization modes (`jwt-claim`, `auth-db-entitlement`, `auth-db-rls`) that can be introduced incrementally.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Predictable error contracts (`error`, `message`, `suggestion`, `requestId`) suitable for retry/fix loops.
 
 Scope boundaries:
@@ -91,14 +90,14 @@ Scope boundaries:
   - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
-  - `docs/tasks/P14/P14-ADRA-Tasks.md`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
   - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
 - Design references:
   - `docs/decisions/0017-ai-native-interface.md` (proposed; intent-level)
   - `docs/decisions/0022-licensing-and-distribution-strategy.md` (draft; supersedes ADR 0017 licensing section)
   - `docs/decisions/0023-authentication-and-authorization.md`
-  - `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Core runtime/code evidence:
   - `src/Aouda.Server/DevServer/DevServerHost.cs`
   - `src/Aouda.Server/DevServer/DevServerOptions.cs`
@@ -107,8 +106,7 @@ Scope boundaries:
   - `src/Aouda.Server/Auth/AuthErrorResponses.cs`
   - `src/Aouda.Protocol/ErrorCodes.cs`
   - `src/Aouda.Protocol/Schema/TableMessages.cs`
-  - `src/Aouda.Engine.Auth/Adra/AdraResolutionService.cs`
-  - `src/Aouda.Engine.Auth/PLS/PartitionSecurityEnforcer.cs`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - SDK evidence:
   - `.NET`: `src/Aouda.Client/Auth/AppAuthOptions.cs`, `src/Aouda.Client/Auth/ServerAuthOptions.cs`
   - TypeScript: `../aouda-client-ts/src/client.ts`, `../aouda-client-ts/src/auth/auth-types.ts`, `../aouda-client-ts/src/auth/auth-client.ts`, `../aouda-client-ts/src/types.ts`
@@ -125,7 +123,7 @@ Scope boundaries:
 If you do nothing beyond starting local dev:
 
 - `aouda start` runs the foreground server (CLI flags `--port`, `--data-dir` override optional local `appsettings.json` — see [Server configuration](../guides/server-configuration.md)).
-- App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. Response includes `anonKey` and `serviceRoleKey` (shown once).
+- App auth is enabled by **HTTP**: `POST /api/databases` with `{ "auth": { "enabled": true } }` or `kind: "auth"`. The response has no key. A principal and its key are declared, or minted on the principal. See [Access](auth/index.md) (**BL-1464, next train**).
 - Password reset and invite emails require a **configured email provider** on the server (`Aouda:Auth:Email` — `console` for local dev, `sendgrid` for production) — see [auth/notifications.md](../auth/notifications.md).
 - HTTP database creation with `{ "auth": { "enabled": true } }`:
   - links to existing single app auth DB, or
@@ -144,8 +142,7 @@ If you do nothing beyond starting local dev:
 | `TokenOptions.Issuer` | `"aouda"` | Issuer of the server auth database's tokens; an app database's tokens carry `{base}/api/databases/{db}`, and (**0.4.0**) only that issuer is accepted for them |
 | `AuthenticationMiddlewareOptions.ValidationMode` | `Hybrid` | Signature + revocation checking by default |
 | `PasswordPolicy` | Min `8`, Max `128` | NIST-aligned baseline policy |
-| App auth endpoint gate | API key required | Prevents unauthenticated direct auth route calls |
-| Table `authMode` | `jwt-claim` | Existing behavior unless advanced modes are enabled |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -154,16 +151,12 @@ If you do nothing beyond starting local dev:
 - Agent-friendly local bootstrap:
   - `aouda start` with HTTP database + auth setup; keys from create-database response.
 - Auto-generated connection keys on auth-enabled DB creation:
-  - `anon` and `service_role` keys returned once.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Two-layer auth runtime:
-  - API key connection gate for app auth endpoints,
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   - user JWT identity/session flow.
 - Service-key user-context forwarding:
-  - `X-User-Token` support with strict validation/revocation checks.
-- ADRA authorization modes in table metadata and enforcement:
-  - `jwt-claim`, `auth-db-entitlement`, `auth-db-rls`.
-- TypeScript client wrappers for ADRA admin operations:
-  - entitlements and RLS resolver CRUD wrappers.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Structured auth errors with machine-usable fields:
   - `error`, `message`, `suggestion`, optional `detail`, optional `requestId`.
 
@@ -171,7 +164,7 @@ If you do nothing beyond starting local dev:
 
 - Full MCP server surface described in ADR 0017 (`aouda_create_database`, `aouda_query`, auth tools, schema resources).
 - Natural-language query pipeline and validation/explain flow from ADR 0017.
-- Broader cross-SDK parity for all auth/admin helper wrappers (especially .NET convenience wrappers for ADRA admin surfaces).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Cloud ephemeral instance provisioning model in ADR 0017/ADR 0022 distribution direction.
 
 ### Reserved / not yet wired
@@ -184,8 +177,6 @@ If you do nothing beyond starting local dev:
 
 | Phase | Tasks/Reports | Delivered capability | Undone/deferred | Backlog link |
 |---|---|---|---|---|
-| P12 | `P12-TwoLayerAuth-Tasks.md`, S1/S2/S4 reports | Two-layer auth model, API key gate, `X-User-Token`, generated app auth keys, `aouda start` + API auth setup, auth docs/protocol updates | MCP auth tools and richer AI error payload fields were tracked but not delivered as first-class runtime surfaces | `docs/BACKLOG.md` |
-| P14 | `P14-ADRA-Tasks.md`, S6/S7 task docs, ADR 0025 | ADRA table auth modes, dynamic grant/resolver model, TS client wrappers for entitlements + RLS resolvers, usage guidance updates | Wider SDK helper parity and extended enterprise identity scenarios remain future work | `docs/BACKLOG.md` |
 | ADR track (non-shipped intent) | ADR 0017 + ADR 0022 | Product direction for AI-native interface and distribution model | MCP server package, NL query, cloud ephemeral workflow not shipped in current codebase | `docs/BACKLOG.md` |
 
 ## 2.6 Capability coverage matrix
@@ -195,11 +186,6 @@ If you do nothing beyond starting local dev:
 | Local dev host (`DevServerHost`; no `aouda dev` command) | Yes | No | No | `DevServerHost.cs`, `DevServerIntegrationTests.cs` | Loopback by default; needs a first admin before any data call (**BL-1473, 0.13.1**); banner + schema-on-write mode |
 | Auth-enabled local bootstrap (`EnableAuth`) | Yes | No | No | `DevServerHost.cs`, `DevServerOptions.cs`, CLI tests | Prints generated keys or key-prefix fallback guidance; the first admin still comes first |
 | Auto-link/create auth DB during DB create | Yes | No | No | `DatabasesController.cs` | Handles 0/1/many auth DB shorthand rules |
-| Two-layer app auth gate | Yes | No | No | `AuthenticationMiddleware.cs`, middleware integration tests | App auth endpoints require API key layer |
-| Service key + `X-User-Token` user-context | Yes | No | No | `AuthenticationMiddleware.cs`, integration tests | Validates JWT and revocation; non-service keys ignore header |
-| ADRA auth modes in table schema | Yes | No | No | `TableMessages.cs`, PLS integration tests | `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` exposed |
-| TypeScript ADRA admin wrappers | Yes | No | No | `auth-client.ts`, TS auth tests | Entitlements and resolver wrappers available |
-| .NET ADRA admin convenience wrappers | No | Yes | No | `.NET` auth option/client surfaces | HTTP path possible; typed helpers not equivalent to TS |
 | MCP server/tooling package | No | No | Yes | `docs/decisions/0017-ai-native-interface.md`, code search | Direction documented; implementation absent |
 | Natural-language query surface | No | No | Yes | ADR 0017 intent; no runtime endpoints | Requires translation + validation pipeline not present |
 | AI-enriched error payload (`mcpTool`, `docs`) | No | Yes | No | `AuthErrorResponses.cs` | `suggestion` exists; `mcpTool/docs` fields not emitted |
@@ -212,21 +198,18 @@ If you do nothing beyond starting local dev:
   - machine-readable errors,
   - predictable schema and policy APIs.
 - Layered auth model for generated apps:
-  - Layer 1: API key (connection gate),
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   - Layer 2: user JWT/session identity.
 - Progressive authorization maturity:
   - start with `jwt-claim`,
-  - move to `auth-db-entitlement` for dynamic entitlements,
-  - move to `auth-db-rls` for row-level policy.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Agent-safe failure model:
   - stable error code + suggestion allow deterministic retries/fixes.
 - SDK behavior:
   - auth handler starts with key/token, upgrades to user JWT after sign-in where applicable.
 
 Invariants:
-- App auth routes do not accept missing API key in app-auth scope.
-- `X-User-Token` only affects service-key requests.
-- ADRA metadata fields must satisfy mode-specific requirements.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Missing/invalid policy context fails closed.
 
 ## 2.8 How Aouda implements it
@@ -234,14 +217,11 @@ Invariants:
 High-level runtime path:
 
 1. Bootstrap: `aouda start` (or HTTP DB create) starts DB and optional auth linkage.
-2. Connection: client sends bearer (API key or JWT) to middleware.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 3. Middleware:
-   - determines scope (`ServerAuth`, `AppAuth`, `AppAdmin`, `Data`),
-   - enforces app-auth API key rule,
-   - validates API key/JWT and revocation/session mode,
-   - handles service-key impersonation via `X-User-Token`.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. Authorization:
-   - table mode determines claim-based or ADRA-resolved policy path.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 5. Response:
    - structured error payload on failure,
    - standard protocol payloads on success.
@@ -251,7 +231,7 @@ Implementation anchors:
 - Auth DB linking and generated keys: `src/Aouda.Server/Controllers/DatabasesController.cs`
 - Auth scope and validation pipeline: `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
 - Error contract: `src/Aouda.Server/Auth/AuthErrorResponses.cs`, `src/Aouda.Protocol/ErrorCodes.cs`
-- ADRA mode metadata and DTOs: `src/Aouda.Protocol/Schema/TableMessages.cs`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - TS wrappers and options: `../aouda-client-ts/src/auth/auth-client.ts`, `../aouda-client-ts/src/auth/auth-types.ts`
 
 ## 2.8.1 Critical path walk-throughs (implementation-level)
@@ -279,28 +259,27 @@ Primary evidence:
 - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
 - `tests/Aouda.Server.Tests/Auth/AppAuthPublicEntryTests.cs`
 
-### Walk-through C: Service key with `X-User-Token`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 1. Primary bearer validates as service-level key.
-2. Middleware checks `X-User-Token`; if present, validates it as JWT in linked auth DB.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 3. On success, middleware replaces principal and sets `EffectiveUserTokenItemKey` for downstream cache isolation.
-4. On failure, middleware returns 401 with explicit `X-User-Token` guidance.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Primary evidence:
 - `src/Aouda.Server/Auth/AuthenticationMiddleware.cs`
 - `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs`
-- `tests/Aouda.Engine.Auth.Tests/Adra/AdraPermissionMiddlewareTests.cs`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-### Walk-through D: ADRA fan-out query on `auth-db-entitlement`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-1. Table includes `authMode = auth-db-entitlement`, `permissionDimension` (the entitlement namespace) and `permissionColumn` (the column the entitlement keys are compared with). Neither is inferred (**BL-1176, 0.7.0**).
-2. Request principal resolves entitlements for the dimension.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 3. Enforcer constrains query to granted partitions and blocks ungranted keys.
 4. Result set contains only rows from authorized partitions.
 
 Primary evidence:
 - `src/Aouda.Protocol/Schema/TableMessages.cs`
-- `src/Aouda.Engine.Auth/PLS/PartitionSecurityEnforcer.cs`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs`
 
 ## 2.9 Why Aouda is different (differentiators)
@@ -309,8 +288,6 @@ Primary evidence:
 |---|---|---|---|
 | How quickly can an agent start a real DB? | Multi-step infra/bootstrap | `aouda start` + HTTP DB create and schema inference | Faster first successful action |
 | How do auth defaults work for generated apps? | Inconsistent app-specific patterns | Built-in two-layer auth + generated anon/service keys | Lower security misconfiguration risk |
-| Can service backends keep user-context enforcement? | Often custom proxy logic | Native service key + `X-User-Token` flow | Easier secure backend mediation |
-| Can authorization evolve beyond fixed JWT claims? | Usually requires external policy service | ADRA (`auth-db-entitlement` + `auth-db-rls`) in-engine | Dynamic permissions without fat JWTs |
 | Are errors machine-actionable? | Generic text-only failures | Stable error codes + suggestion + request id | Better agent retry/correction loops |
 
 ## 2.10 Configuration and settings reference (complete surface)
@@ -329,12 +306,7 @@ Primary evidence:
 | `PasswordPolicy.MaxLength` | int | `128` | `>= MinLength` | Auth engine options | Password maximum length |
 | `.NET AppAuthOptions.RefreshThreshold` | timespan | `2m` | positive | Client code | Proactive refresh threshold |
 | `.NET ServerAuthOptions.RefreshThreshold` | timespan | `2m` | positive | Client code | Proactive refresh threshold |
-| TS `appAuth.refreshThresholdMs` | number | `120000` | positive | `@aouda/client` | Proactive refresh threshold |
-| TS `serverAuth.refreshThresholdMs` | number | `120000` | positive | `@aouda/client` | Proactive refresh threshold |
-| Table `authMode` | string | `jwt-claim` | `jwt-claim`, `auth-db-entitlement`, `auth-db-rls` | Table create/update payload | Per-table auth mode |
-| Table `permissionDimension` | string? | `null` | required for `auth-db-entitlement` | Table create/update payload | ADRA PLS entitlement namespace; selects no column |
-| Table `permissionColumn` | string? | `null` | required for `auth-db-entitlement`, a column of the table | Table create/update payload | The column the entitlement keys are compared with (**BL-1176, 0.7.0**) |
-| Table `rlsResolverName` | string? | `null` | required for `auth-db-rls` | Table create/update payload | ADRA RLS resolver |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Precedence and operational notes:
 - Host config precedence: code defaults → optional appsettings → env → `AOUDA_*` → CLI (see [Server configuration](../guides/server-configuration.md)).
@@ -343,7 +315,7 @@ Precedence and operational notes:
 - Auth route/admin policy changes are runtime dynamic.
 - Safety-gated behavior:
   - app auth routes reject missing API keys;
-  - invalid `X-User-Token` is rejected even when service key itself is valid.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Reserved/deferred:
   - no runtime config surface for MCP server tooling or NL query engine in this repo.
 
@@ -359,7 +331,7 @@ var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    ApiKey = "mk_anon_..."
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 });
 
 var auth = await client.Auth.SignInAsync("alice@example.com", "Pass123!");
@@ -371,7 +343,7 @@ Expected result: client signs in through app auth route and subsequent calls use
 
 Common mistake: setting both `ApiKey` and `Token` in app auth options (validation throws).
 
-### TypeScript example (service key + ADRA admin wrappers)
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```typescript
 import { createAoudaClient } from "@aouda/client";
@@ -379,7 +351,7 @@ import { createAoudaClient } from "@aouda/client";
 const client = createAoudaClient({
   serverUrl: "http://localhost:5433",
   database: "myapp",
-  apiKey: "mk_svc_..."
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
 
 await client.auth.signIn("admin@myapp.com", "Pass123!");
@@ -390,9 +362,9 @@ await client.auth.createEntitlement("550e8400-e29b-41d4-a716-446655440000", {
 });
 ```
 
-Expected result: authenticated admin creates entitlement through app admin API wrapper.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-Common mistake: providing both `apiKey` and `appAuth.token` (a key and a signed-in session are two credentials; `apiKey` is a top-level option since **BL-1385, 0.11.0**). Browser login needs neither.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### HTTP/protocol examples
 
@@ -407,7 +379,7 @@ Content-Type: application/json
 ```
 
 ```http
-POST /api/databases/myapp/auth/admin/users/550e8400-e29b-41d4-a716-446655440000/entitlements
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 Authorization: Bearer <access_token>
 Content-Type: application/json
 
@@ -418,9 +390,9 @@ Content-Type: application/json
 }
 ```
 
-Expected result: first call returns token pair; second call creates ADRA grant for user.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-Common mistake: calling app auth endpoints with JWT bearer only and no API key at the app-auth gate.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ### A) API coverage matrix
 
@@ -429,10 +401,6 @@ Common mistake: calling app auth endpoints with JWT bearer only and no API key a
 | Start local server | `aouda start` CLI | `aouda start` CLI | local HTTP service | Implemented | Auth via POST /api/databases |
 | Create DB with auth and generated keys | HTTP call from .NET/transport | HTTP call from TS/transport | `POST /api/databases` with `auth.enabled` | Implemented | Returns keys only at creation/link time |
 | App auth sign-up/sign-in/refresh/me/password | `.NET` auth client | `client.auth.*` | `/api/databases/{db}/auth/*` | Implemented | Two-layer flow |
-| Service key user-context forwarding | `UserToken` option; `UpdateUserTokenAsync` | `userToken` option; `updateUserToken` | `X-User-Token` header; `user_token` on WebSocket `auth` / `re_auth`, `userToken` on long-poll connect (**BL-1223, 0.9.0**) | Implemented | Effective only for service-level API keys; a realtime session gets the user's PLS / RLS (no role check on realtime yet) and ends with the user token |
-| ADRA table mode metadata | Table request DTOs | `CreateTableRequest` fields in TS types | table create/update payloads | Implemented | `authMode`, `permissionDimension`, `permissionColumn`, `rlsResolverName` |
-| ADRA admin entitlement wrappers | No first-class helper | `createEntitlement / listEntitlements / deleteEntitlement` | app admin endpoints | Partial | .NET uses raw HTTP path today |
-| ADRA admin resolver wrappers | No first-class helper | `create/list/get/update/deleteRlsResolver` | app admin endpoints | Partial | TS wrapper parity is stronger |
 | MCP auth tools | None | None | None | Missing | Planned in P12 Epic E / ADR 0017 intent |
 | Natural-language query interface | None | None | None | Missing | ADR 0017 proposed only |
 
@@ -442,7 +410,6 @@ Common mistake: calling app auth endpoints with JWT bearer only and no API key a
 |---|---|---|---|---|
 | First-class MCP server package and tools | No `@aouda/mcp-server` implementation in repo | Use CLI + HTTP/SDK directly | ADR 0017 + future tasking | High |
 | Natural-language query tool/API | No NL query endpoint/tool in server/client | Build queries through existing query APIs | ADR 0017 proposed component | High |
-| .NET typed wrappers for ADRA admin endpoints | No parity convenience methods in `.NET` auth client | Use raw HTTP/admin transport from .NET | P14 follow-up parity tasks | High |
 | AI-oriented error fields (`mcpTool`, `docs`) | Not emitted by current `AuthErrorPayload` | Use `error` + `suggestion` + `requestId` | P12 Epic E intent / future hardening | Medium |
 | Cloud ephemeral provisioning endpoint | No public cloud provisioning API in repo | Run local dev server or self-hosted server | ADR 0017/0022 direction | Medium |
 
@@ -470,29 +437,23 @@ When to use:
 - backend service performs operations for user while preserving row/partition controls.
 
 Steps:
-1. Connect backend with `service_role` key.
-2. Attach user JWT as `X-User-Token`.
-3. Execute data query/write on PLS/RLS-enabled tables.
-4. Verify results are scoped to user policy, not the service key's unrestricted view.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 Expected checks:
-- service key alone sees past PLS and RLS, because it holds `all-partitions` and `all-rows` on its database (**BL-1227, 0.9.0**; [how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows));
-- service key + valid `X-User-Token` applies user-context enforcement;
-- invalid/revoked `X-User-Token` yields 401 with explicit guidance.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-### Scenario 3: Evolve from static claim to ADRA grant-based access
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 When to use:
 - user needs access to multiple partition keys and static claim model is insufficient.
 
 Steps:
-1. Update table to `authMode = auth-db-entitlement` with `permissionDimension` and `permissionColumn`.
-2. Create entitlements for target users.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 3. Run fan-out query without explicit partition filter.
 4. Validate only granted partitions are returned.
 
 Expected checks:
-- table metadata reflects ADRA mode fields;
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - fan-out query returns only granted partitions;
 - writes without proper access-level grant fail with specific error code.
 
@@ -507,39 +468,34 @@ Monitor first:
   - `AUTH_TOKEN_REVOKED`.
 - dev bootstrap behavior:
   - key generation vs existing-key prefix branch in startup output.
-- ADRA enforcement health:
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   - grant-not-found and insufficient-access error patterns,
-  - RLS validation failures.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - request-level diagnostics:
   - response `requestId`,
   - `X-Auth-Database` on relevant auth failures.
 
 Recovery expectations:
 - restart preserves auth metadata and policy state (auth DB tables persisted under normal server mode);
-- permission changes propagate on subsequent requests through version-aware ADRA flow;
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - token revocation behavior depends on selected validation mode (`Hybrid`/`Stateful` stronger than `SignatureOnly`).
 
 Recommended tuning sequence:
 1. Keep default `Hybrid` validation in most app flows.
 2. Keep short access tokens and rely on refresh workflow.
-3. Introduce ADRA modes incrementally per table/user cohort.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 | Question | Practical answer |
 |---|---|
 | What is the safest default for generated apps? | App auth with anon key + sign-in, middleware in `Hybrid` mode |
-| How do I preserve user-level enforcement from backend jobs? | Service key plus `X-User-Token` |
-| How do I debug denied operations quickly? | Start with error code + suggestion, then inspect grants/resolver bindings |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ## 2.14 Troubleshooting by symptom
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | `AUTH_API_KEY_REQUIRED` on app auth route | Pre-BL-355 server, or a non-public `/auth/*` path | Public signup/signin/refresh are keyless. `/me` and `/mfa/*` need a user JWT. |
-| Service key request fails with `X-User-Token` error | User token expired/revoked/invalid | Refresh/reissue user token, retry |
-| Fan-out query returns too few rows | Missing entitlements for dimension | Add entitlements for the missing keys |
-| Write denied on granted partition | Entitlement is `read` level only | Promote to `write`/`admin` access level |
-| RLS seems not applied | The caller holds `all-rows` (a service key, a `db_admin` user, or a role grant) (**BL-1227, 0.9.0**), or the table is not a mode that takes a resolver. `rlsResolverName` on `jwt-claim` (including when `authMode` is omitted) is refused: create and options answer `400 INVALID_REQUEST`, and schema apply records that change `Failed` and does not write the table. A resolver applies on `auth-db-rls` and `auth-db-entitlement` (**BL-1281, 0.9.0**) | Put the resolver on `auth-db-rls` or `auth-db-entitlement`; check what the caller holds with `GET …/auth/admin/users/{id}/access-grants` |
-| No full keys in create-database response | Keys already existed and are one-time display | Use `POST .../auth/admin/regenerate-keys` |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ## 2.15 Verification ledger
 
@@ -547,27 +503,20 @@ Last verification date (UTC): `2026-04-01`.
 
 | Verification scope | Command | Result | Date (UTC) | Notes |
 |---|---|---|---|---|
-| Middleware auth integration suite | `dotnet test tests/Aouda.Server.Tests --no-build --filter "FullyQualifiedName~AuthenticationMiddlewareIntegrationTests" --verbosity minimal` | Pass (`37/37`) | 2026-04-01 | Covers API key gate, token modes, `X-User-Token`, linked/unlinked DB behavior |
-| Dev server auth output tests | `dotnet test tests/Aouda.Cli.Tests --no-build --filter "FullyQualifiedName~DevServerIntegrationTests.AuthMode_" --verbosity minimal` | Pass (`2/2`) | 2026-04-01 | Verifies key output and existing-key prefix guidance |
-| ADRA fan-out integration path | `dotnet test tests/Aouda.Server.Tests --no-build --filter "FullyQualifiedName~PartitionLevelSecurityEnforcementIntegrationTests" --verbosity minimal` | Pass (class filter; the fan-out case is among them) | 2026-04-01 | Confirms auth-db-entitlement grant-constrained fan-out behavior |
+| Dev server auth output tests | `dotnet test tests/Aouda.Cli.Tests --no-build --filter "FullyQualifiedName~DevServerIntegrationTests" --verbosity minimal` | Pass (`2/2`) | 2026-04-01 | Verifies the dev-admin line |
 | TypeScript auth client/handler/integration | `npm test -- tests/auth-client.test.ts tests/auth-handler.test.ts tests/auth-integration.test.ts` (in `../aouda-client-ts`) | Pass (`72/72`) | 2026-04-01 | Confirms app/server auth client lifecycle and transport behavior |
 
 ## 2.16 Test coverage matrix
 
 | Capability | Test files / suites | Current status | Coverage strength | Notes |
 |---|---|---|---|---|
-| App auth API key gate + scope handling | `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs` | Pass | Strong | Includes no-token and JWT-instead-of-key rejection paths |
-| Service key + `X-User-Token` flow | `tests/Aouda.Server.Tests/Auth/AuthenticationMiddlewareIntegrationTests.cs` | Pass | Strong | Includes valid, invalid, expired, revoked, and ignored-header cases |
 | Dev bootstrap auth output UX | `tests/Aouda.Cli.Tests/DevServerIntegrationTests.cs` | Pass | Medium/Strong | Covers generated-key and existing-key output branches |
-| ADRA partition fan-out enforcement | `tests/Aouda.Server.Tests/PartitionLevelSecurityEnforcementIntegrationTests.cs` | Pass | Strong | Includes grant-constrained fan-out and write checks |
-| ADRA table metadata serialization | `tests/Aouda.Protocol.Tests/SerializationTests.cs` | Pass (existing suite) | Medium | Confirms `authMode` DTO round-trip |
 | TS auth client lifecycle and wrappers | `../aouda-client-ts/tests/auth-client.test.ts`, `auth-handler.test.ts`, `auth-integration.test.ts` | Pass | Medium/Strong | Covers token lifecycle and auth API usage |
 
 ## 2.17 Testing gaps and proposed tests
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| No end-to-end agent flow test chaining API key capture -> signup -> ADRA grant -> scoped query in one script | Cross-surface regressions can hide between suites | Add scenario test that creates auth DB via API and executes full bootstrap flow | High |
 | Limited explicit tests for error payload contract stability as an AI interface | Agents rely on stable fields for remediation loops | Add contract tests for `error/message/suggestion/requestId` across auth failure types | High |
 | No tests for future MCP compatibility adapters | Migration to MCP surface risks drift | Add adapter-contract tests once MCP layer exists | Medium |
 | No dedicated test asserting absence/presence of `mcpTool`/`docs` fields by version | Prevents accidental undocumented contract changes | Add explicit payload schema version tests | Medium |
@@ -580,8 +529,7 @@ Last verification date (UTC): `2026-04-01`.
 - AI-friendly error payload is useful but incomplete relative to P12 Epic E intent:
   - current payload has `error/message/suggestion/detail/requestId`,
   - fields like `mcpTool` and `docs` are not emitted.
-- Cross-SDK ADRA helper parity:
-  - TS includes ADRA admin wrappers; .NET still relies on lower-level HTTP paths for those operations.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Cloud ephemeral provisioning path is not present in current server:
   - distribution direction exists in ADR 0022, not as shipped endpoint in this workspace.
 
@@ -591,13 +539,13 @@ Last verification date (UTC): `2026-04-01`.
   - `docs/decisions/0017-ai-native-interface.md`
   - `docs/decisions/0022-licensing-and-distribution-strategy.md`
   - `docs/decisions/0023-authentication-and-authorization.md`
-  - `docs/decisions/0025-adra-auth-db-resolved-authorization.md`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - Tasks/reports:
   - `docs/tasks/P12/P12-TwoLayerAuth-Tasks.md`
   - `docs/tasks/P12/P12-TwoLayer-S1-ApiKeyInfrastructure-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S2-MiddlewareAndAuthorization-Report.md`
   - `docs/tasks/P12/P12-TwoLayer-S4-DocumentationAndDX-Report.md`
-  - `docs/tasks/P14/P14-ADRA-Tasks.md`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
   - `docs/tasks/P14/P14-TaskS6-TypeScriptClientWrappers.md`
   - `docs/tasks/P14/P14-TaskS7-GettingStartedAuthRewrite.md`
 - Code:

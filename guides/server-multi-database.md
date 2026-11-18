@@ -145,7 +145,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 - **Per-database memory governance** — `ServerMemoryBudgetManager` with per-engine budget tracking.
 - **Per-database health checks** — `DatabaseHealthCheck` included in `/health/detailed`.
 - **Unified CLI** — `aouda start`, `aouda stop`, `aouda databases list|get|create|drop`, `aouda version`.
-- **`Aouda.Server.exe` split** — `Aouda.Server.exe start` and `create-admin` only; all operator workflows via `aouda`.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - **First-run bootstrap** — `GET /api/auth/setup/status`, `aouda init`.
 
 ### Planned / Proposed
@@ -166,7 +166,6 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 
 | Phase | Tasks / Reports | Delivered capability | Undone / deferred | Backlog |
 |---|---|---|---|---|
-| **P4** (Server & Clients) | Epics A, B, C; Command Surface Separation; First-Run Init | HTTP server process; REST query + schema + insert APIs; connection lifecycle middleware; `AOUDA_*` config; wire protocol (`Aouda.Protocol`); C# thin client (`Aouda.Abstractions`); connection resilience; metrics REST API; structured logging; OpenTelemetry tracing; health endpoints; `Aouda.Server.exe create-admin`; `aouda init` | `MemoryBudgetManager` not wired to storage (BL-001); `ActiveConnections` counter returns 0; `MetricsCollector.RecordQueryLatency()` not called; Prometheus export deferred | BL-001 (resolved P6), BL-002 (ORDER BY — resolved P5) |
 | **P6** (Multi-Database) | Epics A–F | Multi-database registry (`databases.json`); `DatabaseManager`; database-scoped routes (`/api/databases/{db}/…`); database CRUD; wire protocol v2 (required `database` field); .NET client `AoudaClient(url, dbName)`, `client.Databases.List/Create`; per-database memory governance (`ServerMemoryBudgetManager`); per-database metrics (`DatabaseMetricsTracker`); per-database health check; `GET /api/server/memory`, `/api/server/metrics`, `/api/server/databases/{db}/metrics`; replication v2/v3; write concern | TypeScript multi-database client (Epic C.3) not evidenced in this repo; Studio DB navigation (Epic D) not evidenced; per-database Prometheus deferred; dynamic table-subscription reconfig requires reconnect | BL-001 resolved; per-db Prometheus deferred |
 | **P7** (Production Scenarios) | T6 (durability), T10 (harness reports), bug-fix session | `POST /api/server/shutdown` (loopback-only, BL-028); `POST /api/databases/{db}/query/count`; `RemoteTableQuery.CountAsync`; harness scenario M.1–M.8 multi-database validation | BL-028 formal resolution carried into P14 write-path improvements | BL-028 resolved here; BL-023, BL-024 partially open |
 | **P16** (Cloud & Hub), SA6 | A.1–A.11, SA6, ENG1 | Unified CLI: `aouda start/stop/databases`; `ServerHostRunner`; admin API expansion under `/admin/*` (cluster, backup, config, node, capabilities); `cluster-state.json` + `backup-config.json` runtime persistence; CORS defaults for Hub; `Aouda:Bind`, `Aouda:Join`, `Aouda:Role` config keys | `aouda dev` not evidenced as distinct command vs `aouda start`; Hub/Studio/TypeScript implementations in sibling repos | BL-042, BL-043 (OAuth) deferred |
@@ -187,7 +186,7 @@ Starting `aouda start` (or `Aouda.Server.exe start`) with no arguments produces:
 | `DatabaseManager` lifecycle orchestration | ✅ | | | `src/Aouda.Engine.Api/DatabaseManager.cs`, P6 §2 #3 | |
 | Database CRUD via HTTP | ✅ | | | `src/Aouda.Server/Controllers/DatabasesController.cs`, P6 §5.2 | |
 | Database-scoped data routes `/api/databases/{db}/…` | ✅ | | | P6 §5.2; code in `TablesController.cs`, `QueryController.cs` | |
-| Startup `Aouda:Databases` reconcile | ✅ | | | P6 §2 #7 | |
+| Startup reconcile of the declared `databases` | ✅ | | | P6 §2 #7 | |
 | Database lifecycle state machine (Creating/Active/Dropping/Dropped) | ✅ | | | `src/Aouda.Engine.Storage/Registry/DatabaseState.cs` | |
 | Per-database memory governance | ✅ | | | `src/Aouda.Engine.Api/ServerMemoryBudgetManager.cs`, P6 §2 #14 | |
 | Per-database metrics tracking | ✅ | | | `src/Aouda.Server/Metrics/DatabaseMetricsTracker.cs`, P6 §2 #15 | |
@@ -465,10 +464,10 @@ POST /api/server/shutdown  (must originate from loopback)
 ### Walk-through 4: Server startup reconcile with pre-configured databases
 
 ```
-Startup config: { "Aouda": { "Databases": { "analytics": { "Durability": "strict", "MaxMemoryShareBytes": 1073741824 } } } }
-  → AoudaServerOptions binds DatabaseConfigSection entries
-  → AoudaHostedService (or server startup middleware) reads Aouda:Databases
-  → foreach entry name in config:
+aouda.json: { "version": 1, "databases": { "analytics": { "kind": "data", "durability": "strict", "maxMemoryShareBytes": 1073741824 } } }
+  → DeclarationFileReader reads it (Aouda:Declaration) into DatabaseConfigSection entries
+  → AoudaHostedService (or server startup middleware) reads the declaration's databases
+  → foreach entry name in the declaration:
       → if !DatabaseManager.DatabaseExists(name):
           → DatabaseManager.CreateDatabaseAsync(name, configOptions)  // idempotent
       → if exists: no-op (reconcile is additive, not destructive)
@@ -538,25 +537,24 @@ Startup config: { "Aouda": { "Databases": { "analytics": { "Durability": "strict
 | `Aouda:Health:Thresholds:ReplicationLagDegradedSeconds` | `int` | `10` | |
 | `Aouda:Health:Thresholds:WalQueueDegradedPercent` | `int` | `80` | |
 
-### Per-database settings (`Aouda:Databases:<name>`)
+### Per-database settings (`databases` in `aouda.json`)
 
-These can be declared in config to provision databases at startup or to set defaults; they map to `DatabaseOptions` in the registry.
+(**BL-1463, next train**) These are declared in the `databases` of the [declaration file](declaration.md) (`aouda.json`, named by `Aouda:Declaration`) to provision databases at startup or to set defaults; they map to `DatabaseOptions` in the registry. They are **no longer settings**: `Aouda:Databases:<name>:…` in `appsettings.json`, the environment or a switch is refused at start (`SETTING_REMOVED`, naming the member below). The exact JSON of every member is the [reference](../reference/declaration.md#databasesname).
 
-| Setting | Type | Default | Notes |
+| Member of `databases.<name>` | Type | Default | Notes |
 |---|---|---|---|
-| `Aouda:Databases:<name>:Durability` | `string` | `strict` | (**Lead S26, 0.6.0**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-060)). It replaces `EnableWal` and `DataDurability`: either key here fails startup validation, naming `Durability`. |
-| `Aouda:Databases:<name>:ReplicationMode` | `string` | `Replicate` | `Replicate` or `DoNotReplicate` |
-| `Aouda:Databases:<name>:MaxMemoryShareBytes` | `long?` | `null` | Optional cap on this database's share of the server budget |
-| `Aouda:Databases:<name>:DefaultTemperature` | `string` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` |
-| `Aouda:Databases:<name>:WriteConcern` | `string` | `One` | `One`, `Majority`, `All` |
-| `Aouda:Databases:<name>:WriteConcernTimeoutMs` | `int` | `5000` | ACK wait timeout (≥ 100 ms) |
-| `Aouda:Databases:<name>:OnWriteConcernTimeout` | `string` | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` |
-| `Aouda:Databases:<name>:SchemaFile` | `string?` | `null` | Path of a schema file the server applies to this database at start, after the declared databases and the auth startup and before the server is ready. Absolute, or relative to the server's working directory. Refused on a `Kind: auth` database. Omitted = nothing is applied (**BL-1388, 0.11.0**) |
-| `Aouda:Databases:<name>:SchemaEnvironment` | `string?` | `null` | The overlay, as the CLI's `--env`: `<file without .json>.<env>.json` next to the file (`aouda.schema.json` with `prod` reads `aouda.schema.prod.json`) is merged over it when it exists (**BL-1460, 0.14.0**). Needs `SchemaFile` (**BL-1388, 0.11.0**) |
-| `Aouda:Databases:<name>:SchemaAllowDestructive` | `bool` | `false` | Lets the start-time apply run destructive changes (drop table, drop column). When `false` they are refused, logged, and the start goes on. Needs `SchemaFile` (**BL-1388, 0.11.0**) |
-| `Aouda:Databases:<authdb>:Roles:<role>` | `object` | none | Custom roles of a `Kind: auth` database: `Description` and `Permissions` (a list of `ResourceType`, `ResourceName`, `Actions`, as the roles API takes them). Created when missing and converged when present at start, after the schema apply; roles not listed are never touched; a system role cannot be listed, and a role that is the signup role of the auth database or of a database linked to it cannot carry an `all-partitions` / `all-rows` grant (the start fails naming the role and the database) (**BL-1392, 0.11.0**) |
+| `databases.<db>.durability` | `string` | `strict` | (**Lead S26, 0.6.0**) The database's durability level: `strict`, `os`, `unlogged` or `memory` ([levels](write-durability.md#durability-levels-lead-s26-060)). It replaces `EnableWal` and `DataDurability`: as a setting either is refused at start (`SETTING_REMOVED`, naming `databases.<db>.durability`), and in `aouda.json` either is an unknown member (`DECLARATION_UNKNOWN_MEMBER`). |
+| `databases.<db>.replicationMode` | `string` | `Replicate` | `Replicate` or `DoNotReplicate` |
+| `databases.<db>.maxMemoryShareBytes` | `long?` | `null` | Optional cap on this database's share of the server budget |
+| `databases.<db>.defaultTemperature` | `string` | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` |
+| `databases.<db>.writeConcern` | `string` | `One` | `One`, `Majority`, `All` |
+| `databases.<db>.writeConcernTimeoutMs` | `int` | `5000` | ACK wait timeout (≥ 100 ms) |
+| `databases.<db>.onWriteConcernTimeout` | `string` | `DegradeAndLog` | `Fail`, `Degrade`, `DegradeAndLog` |
+| `databases.<db>.schema` | `string?` | `null` | Path of a schema file the server applies to this database at start, after the declared databases and the auth startup and before the server is ready. Absolute, or relative to the directory of `aouda.json`. Refused on a `"kind": "auth"` database. Its overlay (`<stem>.<env>.json` beside it) is merged over it for the process setting `Aouda:Environment` (`--env`; **BL-1463, next train**), which replaces the old `SchemaEnvironment`. Omitted = nothing is applied (**BL-1388, 0.11.0**) |
+| `databases.<db>.schemaAllowDestructive` | `bool` | `false` | Lets the start-time apply run destructive changes (drop table, drop column). When `false` they are refused, logged, and the start goes on. Needs `schema` (**BL-1388, 0.11.0**) |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-An invalid or unreadable `SchemaFile`, or a declared role the roles API would refuse, **fails the start** and names the database and the file or role. A destructive change without `SchemaAllowDestructive` is *refused*, not failed: it is logged and kept in the server's schema-apply state, and the catalog stays as it is (**BL-1388, 0.11.0**). See [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start).
+An invalid or unreadable `schema` file, or a declared role the roles API would refuse, **fails the start** and names the database and the file or role. A destructive change without `schemaAllowDestructive` is *refused*, not failed: it is logged and kept in the server's schema-apply state, and the catalog stays as it is (**BL-1388, 0.11.0**). See [Schema management: let the server apply it at start](schema-management.md#let-the-server-apply-it-at-start).
 
 ### Logging
 
@@ -702,7 +700,7 @@ aouda databases drop   --name trading --server http://localhost:5000
 aouda version
 
 # Offline admin bootstrap (Aouda.Server.exe only)
-printf '%s' "$PASSWORD" | ./Aouda.Server create-admin --email admin@example.com \
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
     --password-stdin --data /var/aouda/data
 ```
 
@@ -859,7 +857,7 @@ curl -s http://localhost:5000/api/databases
 
 ### Tuning sequence
 
-1. If memory pressure is `High` or `Critical` on a database: increase `Aouda:Databases:{db}:MaxMemoryShareBytes` via `/admin/config PATCH` or restart with new config.
+1. If memory pressure is `High` or `Critical` on a database: increase `databases.<db>.maxMemoryShareBytes` via `/admin/config PATCH` or restart with new config.
 2. If `/ready` returns 503 on startup: check `Aouda:Health:StartupDelaySeconds` (default 10 s) and increase if catalog initialization is slow.
 3. If queries are timing out (`504`): increase `Aouda:RequestTimeoutMs` (default 30 000 ms).
 4. If server returns `503 SERVICE_UNAVAILABLE` under load: increase `Aouda:MaxConcurrentRequests` (default 50) and/or `Aouda:RequestQueueLimit` (default 100).
@@ -886,9 +884,9 @@ curl -s http://localhost:5000/api/databases
 | `504 REQUEST_TIMEOUT` on heavy query | Query exceeded `RequestTimeoutMs` | Increase timeout or add predicates to reduce scan scope |
 | `403 Forbidden` on `POST /api/server/shutdown` | Non-loopback caller | Only call from same machine (e.g., `curl -X POST http://localhost:5000/api/server/shutdown`) |
 | `/ready` returns 503 shortly after start | Startup delay window active | Wait for `StartupDelaySeconds` (default 10 s) before load-balancer routing |
-| `/ready` returns 503 after startup | Something listed in `reasons` is still missing (**BL-1393, 0.11.0**) | Read `reasons[].code`: `setup_required`, `database_pending` / `database_not_open` (an `Aouda:Databases` entry), `configured_key_inactive`, or `component_unhealthy` (then call `/health/detailed`; check `catalog` and `wal`); inspect logs. All codes: [HTTP API](../reference/http-api.md#get-ready) |
+| `/ready` returns 503 after startup | Something listed in `reasons` is still missing (**BL-1393, 0.11.0**) | Read `reasons[].code`: `setup_required`, `database_pending` / `database_not_open` (a declared database), `configured_key_inactive`, or `component_unhealthy` (then call `/health/detailed`; check `catalog` and `wal`); inspect logs. All codes: [HTTP API](../reference/http-api.md#get-ready) |
 | Database stays in `Creating` state after restart | Process crashed during `CreateDatabaseAsync` | Delete partial directory and retry `POST /api/databases`; or call admin cleanup |
-| High memory pressure on one database | Tables fully loaded in hot tier | Add `Aouda:Databases:{db}:MaxMemoryShareBytes` cap; review table `StoragePolicy` |
+| High memory pressure on one database | Tables fully loaded in hot tier | Add `databases.<db>.maxMemoryShareBytes` cap; review table `StoragePolicy` |
 | Write concern timeouts on insert | Replica ACK slower than `WriteConcernTimeoutMs` | Increase timeout or switch `OnWriteConcernTimeout` to `DegradeAndLog`; check replication lag via `/admin/replication/topology` |
 | `AOUDA_*` env vars ignored | Wrong naming or missing `__` for nested keys | Top-level: `AOUDA_PORT`, `AOUDA_DATAPATH`. Nested: `AOUDA_MEMORY__MAXTOTALRAMBYTES` (double `__`, not single `_`). See [Server configuration](server-configuration.md#21-environment-variable-naming-aouda_) |
 | Flat `/api/query` route returns 404 | P4-era flat routes removed in P6 | Update client to use `/api/databases/{db}/query` with `"database"` field in body |
@@ -946,7 +944,7 @@ curl -s http://localhost:5000/api/databases
 |---|---|---|---|
 | `AoudaDatabasesApi` unit test suite | No test evidence found for `ListAsync` / `CreateAsync` client wrappers; correctness of `CreateDatabaseRequestDto` mapping is untested at unit level | Add `tests/Aouda.Client.Tests/AoudaDatabasesApiTests.cs` with mock transport | High |
 | `GET /api/databases/{db}` and `DELETE /api/databases/{db}` integration test | HTTP endpoints exist on server; no client wrapper; no integration test confirmed in source materials | Add `tests/Aouda.Server.Tests/DatabasesIntegrationTests.cs` assertions for get-by-name and drop | Medium |
-| Startup reconcile for `Aouda:Databases` config | Declarative provisioning on startup is described in P6 but no dedicated test confirmed | Add scenario: config declares two databases → server starts → both are Active without manual POST | High |
+| Startup reconcile for the declared `databases` | Declarative provisioning on startup is described in P6 but no dedicated test confirmed | Add scenario: `aouda.json` declares two databases → server starts → both are Active without manual POST | High |
 | `Creating` state recovery after crash | Partial directory scaffold on aborted create; behavior on retry not covered | Add `DatabaseManagerTests` case: simulate crash after directory creation but before `Active` write; verify retry creates successfully | Medium |
 | Non-loopback caller rejection on shutdown | Unit test for `IsShutdownCallerLoopback` is in `CountIntegrationTests.cs` but path coverage of `RemoteIpAddress == null` fallback is unclear | Add unit test with null `RemoteIpAddress` and loopback `LocalIpAddress` | Low |
 | `ActiveConnections` counter wiring | Returns 0 always; when connection tracking is added, test should verify accurate reporting | Add integration test: open N concurrent connections, read `MetricsSummary.ActiveConnections` | Low (deferred) |
@@ -1007,7 +1005,7 @@ curl -s http://localhost:5000/api/databases
 
 **Related Functionality docs:**
 - `docs/dev/Functionality-HotCold-And-Memory.md` — Memory budget internals; `MemoryBudgetManager` per-engine.
-- `docs/dev/Functionality-Partitioning-And-Multitenancy.md` — `DatabaseManager` narrative and PLS details; cross-link from here.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 - `docs/dev/Functionality-Replication-And-Clustering.md` — Wire protocol v2/v3, write concern, table subscription filtering.
 - `docs/dev/Functionality-Cloud-And-Hub.md` — CLI unification, Helm chart, Hub architecture.
 - `docs/dev/Functionality-Storage-And-Persistence.md` — On-disk layout for each database's segment files.
@@ -1018,4 +1016,4 @@ curl -s http://localhost:5000/api/databases
 
 - **`Aouda.Server.exe` vs `aouda` CLI internals** — The exact CLI command surface of `aouda databases get` and `drop` (P16 SA6) is documented at the HTTP layer; the internal CLI command handler (`DatabasesCommandHandler`) is not confirmed at method-level in source materials. No test artifacts for these CLI sub-commands are confirmed.
 - **TypeScript multi-database API** — Not verifiable in this repository; described as delivered in P6 and P16 reports in the `aouda-client-ts` sibling repo.
-- **Admin endpoint authentication details** — The `/admin/*` routes require `ServerAuth` scope (P16); the full auth middleware flow is documented in `Functionality-Auth-And-Authorization.md` rather than repeated here.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).

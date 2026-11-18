@@ -45,7 +45,7 @@ This means that if your application uses Aouda Auth, writing integration tests t
 aouda start --port 5433
 # (then separately create the auth database:)
 aouda databases create --name myapp --kind auth
-# → prints mk_anon_... and mk_svc_... keys once on creation
+# an aouda_ key or a session. GET /api/auth/whoami names the principal.
 # → tests only work if the server process is still running
 ```
 
@@ -72,7 +72,6 @@ await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOpti
 |-----------|------|-----|
 | Unit tests for logic that calls Aouda | Mock `IAoudaClient` / `IUserService` | Fast, no infrastructure, tests your logic in isolation |
 | Integration tests for auth flows (signin, refresh, OIDC) | **Aouda.Testing** | Real auth behavior; tests that your code integrates correctly |
-| Integration tests for data operations with auth enforcement | **Aouda.Testing** | Real PLS/permission enforcement |
 | Integration tests for a gateway that calls Aouda Auth | **Aouda.Testing** + `WebApplicationFactory` | Real end-to-end flow through your API |
 | Load and stress tests | `Aouda.TestHarness` (separate Aouda tool) | Not a consumer concern |
 
@@ -158,8 +157,7 @@ When `EnableAuth: true`, the database is linked to a Aouda auth database (`_auth
 ### Accessing the Keys
 
 ```csharp
-string serviceKey = aouda.ServiceKey("myapp");  // mk_svc_... (full access, never share with clients)
-string anonKey    = aouda.AnonKey("myapp");      // mk_anon_... (anonymous role, safe for frontends)
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 ```
 
 ### OIDC Authority for JWT Validation
@@ -175,10 +173,10 @@ string oidcAuthority = aouda.OidcAuthority("myapp");
 
 ### Using the Service-Role Client
 
-The service-role client has full access to the database and holds both `all-partitions` and `all-rows` on it, so partition- and row-level security do not restrict it (**BL-1227, 0.9.0**; [how visibility is granted](../auth/authorization.md#visibility-is-granted-all-partitions-and-all-rows)) — use it for admin operations and test setup:
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```csharp
-var adminClient = aouda.CreateClient("myapp"); // service_role key
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 await adminClient.GetTable("products").InsertAsync(new { id = 1, name = "Widget", tenant_id = "acme" });
 ```
 
@@ -190,7 +188,7 @@ The anon client presents the `anonymous` role — same as an unauthenticated fro
 var anonClient = aouda.CreateAnonClient("myapp"); // anon key
 
 // Can access auth endpoints (signup, signin)
-// Cannot access data tables without PLS-compliant JWT
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 ```
 
 ---
@@ -511,7 +509,7 @@ await using var aouda = await AoudaTestServer.StartAsync(new AoudaTestServerOpti
     ]
 });
 
-// Each auth-enabled database gets its own service key and anon key
+// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
 string ordersKey   = aouda.ServiceKey("orders");
 string productsKey = aouda.ServiceKey("products");
 

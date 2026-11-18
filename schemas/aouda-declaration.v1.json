@@ -1,0 +1,697 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aoudadb.github.io/schemas/aouda-declaration.v1.json",
+  "title": "Aouda declaration (aouda.json), version 1",
+  "type": "object",
+  "description": "aouda.json: what exists and who may do what, read by the server named by Aouda:Declaration (--declaration).",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "The JSON schema of this file, for an editor; the server ignores it and never fetches it."
+    },
+    "version": {
+      "type": "integer",
+      "description": "The grammar's version. Required; 1 is the only one.",
+      "const": 1
+    },
+    "databases": {
+      "type": "object",
+      "description": "The declared databases, keyed by database name.",
+      "additionalProperties": {
+        "type": "object",
+        "description": "One declared database: created when missing and converged at every start; its name is the member's name.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "data (an ordinary database) or auth (an application auth database). Required."
+          },
+          "authDatabase": {
+            "type": "string",
+            "description": "data only: the application auth database this database is linked to."
+          },
+          "schema": {
+            "type": "string",
+            "description": "data only: the schema file applied at start, relative to this file's directory (or absolute). Its overlay for Aouda:Environment E is <stem>.E.json beside it."
+          },
+          "schemaAllowDestructive": {
+            "type": "boolean",
+            "description": "With schema: whether the start-time apply may drop tables and columns (default false; never on reload)."
+          },
+          "durability": {
+            "type": "string",
+            "description": "strict (the default), os, unlogged or memory. An auth database is always strict."
+          },
+          "replicationMode": {
+            "type": "string",
+            "description": "Replicate (the default) or DoNotReplicate."
+          },
+          "writeConcern": {
+            "type": "string",
+            "description": "One (the default), Majority or All."
+          },
+          "writeConcernTimeoutMs": {
+            "type": "integer",
+            "description": "Milliseconds to wait for the write concern's acknowledgements; at least 100 (default 5000)."
+          },
+          "onWriteConcernTimeout": {
+            "type": "string",
+            "description": "Fail, Degrade or DegradeAndLog (the default)."
+          },
+          "defaultTemperature": {
+            "type": "string",
+            "description": "Auto (the default), HotOnly or ColdPreferred."
+          },
+          "memoryWeight": {
+            "type": "number",
+            "description": "Relative weight of this database's memory share; positive (default 1)."
+          },
+          "maxMemoryShareBytes": {
+            "type": "integer",
+            "description": "Cap on the computed memory share, in bytes (default: none)."
+          },
+          "signup": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "statements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "actions": {
+                      "type": "array",
+                      "description": "read, write, delete, execute, manage, set-identity, or *.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "resources": {
+                      "type": "array",
+                      "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "where": {
+                      "type": "object",
+                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                    },
+                    "embargoSeconds": {
+                      "type": "integer",
+                      "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                    },
+                    "unrestricted": {
+                      "type": "boolean",
+                      "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                    }
+                  },
+                  "required": [
+                    "actions",
+                    "resources"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "enabled"
+            ],
+            "additionalProperties": false,
+            "description": "Self-signup (ADR 0071 D-5): { \"enabled\", \"roles\"?, \"statements\"? }, what a principal that signs itself up holds."
+          },
+          "roles": {
+            "type": "object",
+            "description": "The roles of this auth database (auth only), keyed by role name (not admin, writer or reader: built in).",
+            "additionalProperties": {
+              "type": "object",
+              "description": "A role of this auth database, owned by the declaration: created, converged and removed at every start and reload (source: declared).",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "The role's description."
+                },
+                "statements": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "actions": {
+                        "type": "array",
+                        "description": "read, write, delete, execute, manage, set-identity, or *.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "resources": {
+                        "type": "array",
+                        "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "where": {
+                        "type": "object",
+                        "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                      },
+                      "embargoSeconds": {
+                        "type": "integer",
+                        "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                      },
+                      "unrestricted": {
+                        "type": "boolean",
+                        "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                      }
+                    },
+                    "required": [
+                      "actions",
+                      "resources"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "What the role grants: a non-empty list of statements (ADR 0071 D-6)."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "principals": {
+            "type": "object",
+            "description": "The principals of this auth database (auth only), keyed by name (a slug or an email address); 'anonymous' declares what unauthenticated callers hold.",
+            "additionalProperties": {
+              "type": "object",
+              "description": "A principal of this auth database, owned by the declaration (source: declared); its name is the member's name: a slug or an email address.",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Free text."
+                },
+                "roles": {
+                  "type": "array",
+                  "description": "The roles it holds: declared, built-in (admin, writer, reader) or runtime roles of its auth database.",
+                  "items": {
+                    "type": "string",
+                    "description": "A role name."
+                  }
+                },
+                "statements": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "actions": {
+                        "type": "array",
+                        "description": "read, write, delete, execute, manage, set-identity, or *.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "resources": {
+                        "type": "array",
+                        "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 1
+                      },
+                      "where": {
+                        "type": "object",
+                        "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                      },
+                      "embargoSeconds": {
+                        "type": "integer",
+                        "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                      },
+                      "unrestricted": {
+                        "type": "boolean",
+                        "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                      }
+                    },
+                    "required": [
+                      "actions",
+                      "resources"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Its own statements (ADR 0071 D-6); may be empty."
+                },
+                "attributes": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean"
+                      ]
+                    }
+                  },
+                  "description": "Its attributes (ADR 0071 D-12): name → a string, number, boolean or an array of them; a where reads them as principal.<name>."
+                },
+                "credentials": {
+                  "type": "object",
+                  "description": "How the principal authenticates. Every secret is given by reference; none is a literal.",
+                  "properties": {
+                    "password": {
+                      "type": "object",
+                      "properties": {
+                        "env": {
+                          "type": "string",
+                          "description": "An environment variable's name."
+                        },
+                        "file": {
+                          "type": "string",
+                          "description": "A file's path, relative to the declaration file's directory."
+                        },
+                        "hash": {
+                          "type": "string",
+                          "description": "The server's password-hasher output ($argon2id$…)."
+                        }
+                      },
+                      "minProperties": 1,
+                      "maxProperties": 1,
+                      "additionalProperties": false,
+                      "description": "A password seed: { \"file\" }, { \"env\" } or { \"hash\": <the server's password-hasher output> }. Applied only when the principal is created, with forcePasswordChange; the principal must be named by an email."
+                    },
+                    "keys": {
+                      "type": "array",
+                      "description": "Stored keys: { \"id\": \"aouda_<16>\", \"sha256\": \"<64 hex>\" } each — the public id and the hash of the whole key, never the key.",
+                      "items": {
+                        "type": "object",
+                        "description": "A stored key.",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "The key's public id, aouda_ and 16 characters."
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "description": "The SHA-256 of the whole key, 64 hexadecimal characters."
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "sha256"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "derivedKey": {
+                      "type": "object",
+                      "description": "A key derived from keyRoot (ADR 0071 D-17): the same key after a wipe. Bump version to rotate it.",
+                      "properties": {
+                        "version": {
+                          "type": "integer",
+                          "description": "The key's version, 1 or more."
+                        }
+                      },
+                      "required": [
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "oidc": {
+                      "type": "array",
+                      "description": "OIDC trusts (ADR 0071 D-18): a token whose issuer, audience, subject and claims match is exchanged for a session.",
+                      "items": {
+                        "type": "object",
+                        "description": "One trust.",
+                        "properties": {
+                          "issuer": {
+                            "type": "string",
+                            "description": "The issuer, an https URL, matched exactly."
+                          },
+                          "audience": {
+                            "type": "string",
+                            "description": "The audience, matched exactly."
+                          },
+                          "subject": {
+                            "type": "string",
+                            "description": "The subject, matched exactly."
+                          },
+                          "claims": {
+                            "type": "object",
+                            "description": "More claims the token must carry, name → exact value.",
+                            "additionalProperties": {
+                              "type": "string",
+                              "description": "The value."
+                            }
+                          },
+                          "jwks": {
+                            "type": "object",
+                            "description": "Where the issuer's keys are read: one of file or url (default: the issuer's discovery).",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "description": "A JWKS file."
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "A JWKS URL (https)."
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "issuer",
+                          "audience",
+                          "subject"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "disabled": {
+                  "type": "boolean",
+                  "description": "true refuses every credential of it (default false). Not for anonymous."
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "server": {
+      "type": "object",
+      "description": "Who operates the server: the server auth database's roles and principals (ADR 0071 D-22). Its statements may name every database and server.",
+      "properties": {
+        "roles": {
+          "type": "object",
+          "description": "The roles of the server auth database, keyed by role name (not admin, writer or reader: built in).",
+          "additionalProperties": {
+            "type": "object",
+            "description": "A role of this auth database, owned by the declaration: created, converged and removed at every start and reload (source: declared).",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "The role's description."
+              },
+              "statements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "actions": {
+                      "type": "array",
+                      "description": "read, write, delete, execute, manage, set-identity, or *.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "resources": {
+                      "type": "array",
+                      "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "where": {
+                      "type": "object",
+                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                    },
+                    "embargoSeconds": {
+                      "type": "integer",
+                      "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                    },
+                    "unrestricted": {
+                      "type": "boolean",
+                      "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                    }
+                  },
+                  "required": [
+                    "actions",
+                    "resources"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "What the role grants: a non-empty list of statements (ADR 0071 D-6)."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "principals": {
+          "type": "object",
+          "description": "The principals of the server auth database, keyed by name (a slug or an email address); 'anonymous' declares what unauthenticated callers hold.",
+          "additionalProperties": {
+            "type": "object",
+            "description": "A principal of this auth database, owned by the declaration (source: declared); its name is the member's name: a slug or an email address.",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "Free text."
+              },
+              "roles": {
+                "type": "array",
+                "description": "The roles it holds: declared, built-in (admin, writer, reader) or runtime roles of its auth database.",
+                "items": {
+                  "type": "string",
+                  "description": "A role name."
+                }
+              },
+              "statements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "actions": {
+                      "type": "array",
+                      "description": "read, write, delete, execute, manage, set-identity, or *.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "resources": {
+                      "type": "array",
+                      "description": "Resource paths: <db>, <db>/table/<t>, <db>/query/<q>, <db>/mutation/<m>, <auth>/principal/<p>, <auth>/role/<r>, server (* allowed).",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    },
+                    "where": {
+                      "type": "object",
+                      "description": "A row condition (ADR 0071 D-9): a condition { column, op, value, principal, ignoreCase } or a group { and, or, groups }; checked by the server."
+                    },
+                    "embargoSeconds": {
+                      "type": "integer",
+                      "description": "Rows newer than this many seconds are not read (ADR 0071 D-8)."
+                    },
+                    "unrestricted": {
+                      "type": "boolean",
+                      "description": "An unconditional read anonymous or signup may hold on a row-scoped table (ADR 0071 D-9)."
+                    }
+                  },
+                  "required": [
+                    "actions",
+                    "resources"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "Its own statements (ADR 0071 D-6); may be empty."
+              },
+              "attributes": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "description": "Its attributes (ADR 0071 D-12): name → a string, number, boolean or an array of them; a where reads them as principal.<name>."
+              },
+              "credentials": {
+                "type": "object",
+                "description": "How the principal authenticates. Every secret is given by reference; none is a literal.",
+                "properties": {
+                  "password": {
+                    "type": "object",
+                    "properties": {
+                      "env": {
+                        "type": "string",
+                        "description": "An environment variable's name."
+                      },
+                      "file": {
+                        "type": "string",
+                        "description": "A file's path, relative to the declaration file's directory."
+                      },
+                      "hash": {
+                        "type": "string",
+                        "description": "The server's password-hasher output ($argon2id$…)."
+                      }
+                    },
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "additionalProperties": false,
+                    "description": "A password seed: { \"file\" }, { \"env\" } or { \"hash\": <the server's password-hasher output> }. Applied only when the principal is created, with forcePasswordChange; the principal must be named by an email."
+                  },
+                  "keys": {
+                    "type": "array",
+                    "description": "Stored keys: { \"id\": \"aouda_<16>\", \"sha256\": \"<64 hex>\" } each — the public id and the hash of the whole key, never the key.",
+                    "items": {
+                      "type": "object",
+                      "description": "A stored key.",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The key's public id, aouda_ and 16 characters."
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "description": "The SHA-256 of the whole key, 64 hexadecimal characters."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "sha256"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "derivedKey": {
+                    "type": "object",
+                    "description": "A key derived from keyRoot (ADR 0071 D-17): the same key after a wipe. Bump version to rotate it.",
+                    "properties": {
+                      "version": {
+                        "type": "integer",
+                        "description": "The key's version, 1 or more."
+                      }
+                    },
+                    "required": [
+                      "version"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "oidc": {
+                    "type": "array",
+                    "description": "OIDC trusts (ADR 0071 D-18): a token whose issuer, audience, subject and claims match is exchanged for a session.",
+                    "items": {
+                      "type": "object",
+                      "description": "One trust.",
+                      "properties": {
+                        "issuer": {
+                          "type": "string",
+                          "description": "The issuer, an https URL, matched exactly."
+                        },
+                        "audience": {
+                          "type": "string",
+                          "description": "The audience, matched exactly."
+                        },
+                        "subject": {
+                          "type": "string",
+                          "description": "The subject, matched exactly."
+                        },
+                        "claims": {
+                          "type": "object",
+                          "description": "More claims the token must carry, name → exact value.",
+                          "additionalProperties": {
+                            "type": "string",
+                            "description": "The value."
+                          }
+                        },
+                        "jwks": {
+                          "type": "object",
+                          "description": "Where the issuer's keys are read: one of file or url (default: the issuer's discovery).",
+                          "properties": {
+                            "file": {
+                              "type": "string",
+                              "description": "A JWKS file."
+                            },
+                            "url": {
+                              "type": "string",
+                              "description": "A JWKS URL (https)."
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "issuer",
+                        "audience",
+                        "subject"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "disabled": {
+                "type": "boolean",
+                "description": "true refuses every credential of it (default false). Not for anonymous."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "keyRoot": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "string",
+          "description": "An environment variable's name."
+        },
+        "file": {
+          "type": "string",
+          "description": "A file's path, relative to the declaration file's directory."
+        }
+      },
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "description": "Principals S11a (ADR 0071 D-17): the root the declared principals' derived keys are computed from: { \"env\": NAME } or { \"file\": path } (relative to this file's directory). Never a literal."
+    },
+    "previousKeyRoot": {
+      "type": "object",
+      "properties": {
+        "env": {
+          "type": "string",
+          "description": "An environment variable's name."
+        },
+        "file": {
+          "type": "string",
+          "description": "A file's path, relative to the declaration file's directory."
+        }
+      },
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "description": "The key root before a rotation: its derived keys are still accepted (and marked as such) until it is removed."
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "additionalProperties": false
+}

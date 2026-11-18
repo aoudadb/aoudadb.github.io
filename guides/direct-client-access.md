@@ -26,9 +26,6 @@ Wire-level matrix and routes: [HTTP API — Listeners](../reference/http-api.md#
 |---|---|
 | See a complete end-to-end example | [Market-data guide](market-data.md) and `examples/p40-browser-tier/` |
 | Turn on the data-plane listener | [Configure dual-listen](#configure-dual-listen) |
-| Give a SPA a data credential | [`mk_pub_*`](#mk_pub_-vs-mk_anon_) |
-| Opt a table into browser reads | [`dataPlaneAccess`](#table-opt-in-fail-closed) |
-| Opt an MQ result table into browser reads | [`dataPlaneAccess` on MQ entries](#table-opt-in-fail-closed) |
 | Connect Studio or Hub | [Studio and Hub](#studio-and-hub) |
 | Put TLS/WAF in front | [Topology](#topology-a-thin-edge) · [Behind a reverse proxy](../deployment/reverse-proxy.md) |
 | Sign users in from a browser | [Authentication that exists](#authentication-that-exists) |
@@ -58,7 +55,7 @@ Keep today's `Aouda:Bind` / `Aouda:Port` (or `--port`) as the **admin** listener
 
 Environment: `Aouda__Listeners__DataPlane__Bind=0.0.0.0:5434` and `Aouda__Listeners__DataPlane__CorsOrigins=https://app.example.com`.
 
-If `DataPlane:Bind` is **unset**, behaviour equals today: one listener, current CORS, **no** `mk_pub_*` acceptance. The fail-closed table default (`dataPlaneAccess: false`) only affects browser-tier credentials on a data-plane listener that is actually listening.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 **CORS is per listener.** Admin defaults include Studio / Hub origins (`https://studio.aouda.com`, `https://hub.aouda.dev`, plus `Aouda:StudioOrigin`) unless `Aouda:CorsOrigins` replaces them. Data-plane origins come **only** from `Aouda:Listeners:DataPlane:CorsOrigins` (empty = no browser origins). The setting accepts `*` — that lets **any** website's JavaScript call public auth POSTs and, after login, any data-plane route the JWT can reach. Prefer an explicit origin list. Do not put the Studio origin on the data-plane.
 
@@ -72,23 +69,19 @@ Allowed: `/health` `/ready` `/startup`, app-auth except `/auth/admin/*`, OIDC/JW
 
 The data-plane listener **ignores `crossPartitionAccess`** (**BL-1227, 0.9.0**): the partition-filter guard decides, and the error says the flag is not accepted there. The flag only waives that guard on the admin listener and never widens what a credential sees — [`crossPartitionAccess` on the data-plane listener](browser-tier-read-limits.md#crosspartitionaccess-on-the-data-plane-listener).
 
-Listed named-artifact routes still **do not enumerate names**. On the data-plane, unsigned, `mk_anon_*`, and other unentitled callers (a caller whose roles hold no `named-query` / `named-mutation` `execute` row for the name, whatever table rights they hold; **BL-1417, 0.12.0**) get **404** `NAMED_QUERY_NOT_FOUND` / `NAMED_MUTATION_NOT_FOUND` — the same code as an unknown name — not 401 vs 404. Unlisted paths stay empty 404 (D-11). The admin listener keeps 401/403 so operators can tell missing token from denied. Invalid credentials stay 401 on both listeners.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
-## `mk_pub_*` vs `mk_anon_*`
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 | Prefix | May call | Listener |
 |---|---|---|
-| `mk_anon_` | Leftover; public auth POSTs ignore it | Data-plane (optional on auth). **Denied on data routes** (404 `NAMED_QUERY_NOT_FOUND` on listed named-artifact execute, not 403). Keep it that way. |
-| `mk_pub_` | Named query / mutation / subscribe (plus auth) | **Data-plane only.** On admin → `401 AUTH_KEY_LISTENER_MISMATCH`. |
-| `mk_svc_` | Full data + admin (per RBAC) | Either; **ad-hoc query only on admin** (data-plane `/query` is 404 for everyone). |
-| User JWT (end user) | Same as `mk_pub_*` | Data-plane |
 | User JWT (Studio operator) | Ad-hoc + admin | Admin |
 
-`mk_pub_*` is provisioned next to anon and service-role when you enable application auth (`PublicKey` on the keys response). It is a distinct prefix so "which keys can read data?" is answerable by inspection.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-Do **not** send `X-User-Token` with `mk_pub_*`. That header remains a service-key (`mk_svc_*` / `mk_srv_*`) feature.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -98,22 +91,20 @@ Do **not** send `X-User-Token` with `mk_pub_*`. That header remains a service-ke
 {
   "tables": {
     "EquityQuote": {
-      "dataPlaneAccess": true,
       "columns": { }
     }
   }
 }
 ```
 
-Default is **false** for both tables and **materialized-query entries**. On the data-plane, for `mk_pub_*` and user JWT, a named query that touches a non-opted-in table or MQ result table returns **404 `TABLE_NOT_FOUND`**.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
-Set `dataPlaneAccess: true` on the `materializedQueries` schema entry — there is no table-options PATCH on the data-plane:
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ```json
 "materializedQueries": {
   "latest_quote": {
     "type": "latestPerKey",
-    "dataPlaneAccess": true,
     ...
   }
 }
@@ -121,7 +112,7 @@ Set `dataPlaneAccess: true` on the `materializedQueries` schema entry — there 
 
 Service keys on the data-plane may execute named artifacts over non-opted-in tables. The admin listener ignores the flag.
 
-A named query over a non-opted-in table is still **allowed to apply** — operators and services need it. Browser-tier widening of `dataPlaneAccess` false→true is reported by [`aouda schema diff --access`](access-surface.md).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -135,7 +126,7 @@ A named query over a non-opted-in table is still **allowed to apply** — operat
 default 32; `MaxSubscriptionsPerIdentity`, default 128) count the identity, not the device, so a user on a browser, a desktop
 agent and a phone shares them: size `PermitLimit` from the sum of every device's steady rate (a 30 s heartbeat is 2 permits a
 minute per device) plus headroom for page loads and reconnects, and `MaxSubscriptionsPerIdentity` from the sum of their live
-subscriptions. Two more per-identity bounds apply (**BL-1383, 0.11.0**): a **connection limit** (`MaxConnectionsPerIdentity`, default 16; WebSocket and long-poll sessions together; refused inside the handshake with `IDENTITY_CONNECTION_LIMIT_EXCEEDED`, which a client must treat as final rather than reconnect in a loop) and a **subscribe-rate bucket** (`Aouda:WebSocket:SubscribeRate`, burst 512, 32 per second; `SUBSCRIBE_RATE_EXCEEDED` with `retry_after_ms`). For a public (`mk_pub_*`) key the identity is the key plus the visitor's remote address, so the anonymous visitors of one app are not one identity — **provided the server sees the visitor's address**: behind a reverse proxy, configure `Aouda:ForwardedHeaders`, or every visitor shares one connection budget, one subscription cap and one subscribe bucket. A service key (`mk_svc_`) or server admin key (`mk_srv_`) without a `user_token` is identified by the key alone and has its own connection limit (`MaxConnectionsPerServiceKey`, default 64); with a `user_token` it is that user and keeps the identity limits. Worked numbers: [Defaults reference](defaults-reference.md#data-plane-subscriptions-and-the-identity-quota)
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 (**NativeClients, 0.4.0**).
 
 **Server clock.** Every response carries a `Date` header that a browser can read cross-origin (**NativeClients, next
@@ -178,9 +169,7 @@ Hub     ──────────────────►  Aouda admin  
 
 Application end users today:
 
-1. Browser holds the **data-plane URL and database name** — no `mk_anon_*`. CORS on `Aouda:Listeners:DataPlane:CorsOrigins` is the origin control (unset = no browser origins; `*` = any origin can call public auth POSTs — prefer an explicit list).
-2. `POST /api/databases/{db}/auth/signup` or `/signin` with **no API key** → user JWT + refresh token. Signup is **opt-in** (`allowSelfSignup`, default off) and grants `db_writer` (`read,write,delete`) on `{db}` unless `selfSignupRole` is set. Enable via `PUT …/auth/admin/signup-settings` or create-database `allowSelfSignup`. Password reset can send email unauthenticated at 20/min/IP; `request-password-reset` does not disclose whether the account exists.
-3. Subsequent named-query calls: `Authorization: Bearer <user JWT>` on the **data-plane**. Pre-auth named queries still need `mk_pub_*` (BL-356).
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 4. `POST …/auth/refresh` when the access token expires (also keyless).
 5. WebSocket: first message `auth` with the JWT; later `re_auth` with the refreshed token so subscriptions survive. Failed `re_auth` closes the session.
 
@@ -193,7 +182,7 @@ and the app redeems it for its own session (**NativeClients, 0.4.0**) — [Nativ
 
 OIDC discovery and JWKS **are** published for **validating JWTs Aouda issued**. That is not a federated login.
 
-For the browser itself, the supported pattern is: Aouda app-auth signup/signin/refresh (email/password, optional MFA as documented under [Auth](../auth/setup.md)) with **no API key**, or a **backend** that holds `mk_svc_*` and never exposes it to the browser.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 The **application** holds the consistency token (cookie or header **you** name). The SDK captures `X-Aouda-Token` in memory and **never** `Set-Cookie`. Recreating the client without a shared store loses read-your-writes. See [Freshness](freshness.md).
 
@@ -210,7 +199,7 @@ const dataPlane = "https://data.example.com"; // :5434 behind TLS
 const client = new AoudaClient({
   serverUrl: dataPlane,
   database: "trading",
-  apiKey: import.meta.env.VITE_AOUDA_PUB_KEY, // mk_pub_…
+// client.whoami() — apiKey is an aouda_ key, or session, never both.
 });
 await client.connect();
 
@@ -242,16 +231,12 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 | Symptom | Cause | Action |
 |---|---|---|
 | Studio connect 404 | URL is the data-plane | Point Studio at the **admin** port |
-| `AUTH_KEY_LISTENER_MISMATCH` | `mk_pub_*` on admin | Use the data-plane URL, or use `mk_svc_*` / operator JWT on admin |
-| `TABLE_NOT_FOUND` for a table you created | `dataPlaneAccess` false | Set true; re-apply; check join tables too |
 | `IDENTITY_QUOTA_EXCEEDED` | 60 req / 60 s default | Back off using `Retry-After`; raise `PermitLimit` for known clients |
 | `IDENTITY_CONNECTION_LIMIT_EXCEEDED` (**BL-1383, 0.11.0**) | 16 connections per identity (public key: per remote address) | Close unused sockets; terminal for the handshake |
 | `SUBSCRIBE_RATE_EXCEEDED` (**BL-1383, 0.11.0**) | Subscribe bucket empty | Wait `retry_after_ms` / `Retry-After` |
 | Data-plane CORS fails from Studio origin | Different CORS policies | Do not add Studio to data-plane origins |
-| Data-plane named-query 404 with no token | Listed-route non-disclosure | Expected. Admin listener still 401. Use `mk_pub_*` or an entitled JWT. |
-| Data-plane named-mutation 404 with a valid, entitled JWT | Same listed-route non-disclosure, but the cause is the caller's RBAC role lacking a `named-mutation` `execute` row for this artifact (**BL-1417, 0.12.0**; before 0.12.0: lacking `write` on this database) — a table `write` does not count, and it is **not** the name and not PLS/RLS | Same masked 404 as "no token" (not 403). Check the role's `execute` row, then its `db_roles` scope for this database, before suspecting the artifact name; see [RBAC vs PLS/RLS](../auth/authorization.md#190-rbac-is-a-separate-gate-from-plsrls) |
 | WS `NAMED_QUERY_SUBSCRIBE_REQUIRED` | Ad-hoc subscribe on data-plane | Subscribe by `name` |
-| WS `DATA_PLANE_WRITE_STREAM` | `stream_open` on data-plane | Ingest from a service key on admin, or HTTP named mutation |
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 
@@ -261,7 +246,7 @@ curl -i -X POST https://data.example.com/api/databases/trading/query \
 - A hosted OAuth authorization server (login page, social login, consent) / token introspection. (Native sign-in through the
   browser with a PKCE code ships in the 0.4.0 — **NativeClients**.)
 - Per-identity quotas on the admin listener (operators use the existing global concurrency limiter).
-- Extending `mk_anon_*` to read data.
+Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, next train**).
 
 ---
 

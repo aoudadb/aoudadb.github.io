@@ -7,9 +7,7 @@
         "id": { "type": "String", "primaryKey": 1 },
         "name": { "type": "String" },
         "IsPublic": { "type": "String" }
-      },
-      "authMode": "auth-db-rls",
-      "rlsResolverName": "rooms_visibility"
+      }
     },
     "messages": {
       "columns": {
@@ -17,9 +15,7 @@
         "room_id": { "type": "String" },
         "SenderId": { "type": "String", "derived": { "identity": "subject" } },
         "body": { "type": "String" }
-      },
-      "authMode": "auth-db-rls",
-      "rlsResolverName": "messages_access"
+      }
     },
     "notes": {
       "columns": {
@@ -27,10 +23,7 @@
         "UserId": { "type": "String", "derived": { "identity": "subject" } },
         "body": { "type": "String" }
       },
-      "partitionKey": [{ "column": "UserId" }],
-      "partitionLevelSecurity": true,
-      "authMode": "jwt-claim",
-      "plsClaimBinding": "subject"
+      "partitionKey": [{ "column": "UserId" }]
     }
   }
 }
