@@ -217,7 +217,7 @@ Open sockets end as [Revocation](../auth/credentials.md#revocation) describes: o
 | `POST` | `…/auth/refresh` | the refresh token | A new pair at the same `aal`. |
 | `POST` | `…/auth/signout` | | Revokes the session. |
 
-A session token carries `iss`, `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` from its limit. The library may also write `nbf`. It does not carry a role list or a permission list.
+A session token carries `iss`, `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` from its limit. An omitted `databases` on sign-in (no limit) is `aud: ["*"]` — not the auth database name. The library may also write `nbf`. It does not carry a role list or a permission list.
 
 Password reset and MFA stay on the routes in [Setup and flows](../auth/setup.md). The admin path segment `users/{id}` takes the principal's id.
 

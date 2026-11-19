@@ -65,6 +65,8 @@ Password-reset and MFA codes (`AUTH_RESET_*`, `AUTH_MFA_*`) are [Setup and flows
 
 `iss` (the auth database's issuer), `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` taken from the session's limit. The library may also write `nbf`. It does not carry a role list, a permission list, or attributes. Those are read from the store on each request. Validate a token you received from Aouda against the auth database's JWKS; do not read an authorization decision out of the claims.
 
+`aud` is the session's database limit, not the auth database name. A sign-in that omits `databases` (no limit) mints `aud: ["*"]`. A gateway or BFF that validates the JWT with a fixed audience such as `auth` or `_auth` will refuse every ordinary browser session. Match `ValidAudience` (or the equivalent) to `*`, or accept the claim values the token actually carries.
+
 ## Testing
 
 `AoudaTestServer` takes a `Declaration` and a derived key. `CreateClient(db, key)` sends that key. `CreateAnonymousClient(db)` sends none, which on the data plane is the `anonymous` principal. A throwaway server on a laptop is `aouda start --dev-admin`; the one stdout line is `AOUDA-DEV-ADMIN email=… password=… key=…`. The `key=` value is a stored key of the dev-admin principal, in the current format. Do not copy it into a page.
