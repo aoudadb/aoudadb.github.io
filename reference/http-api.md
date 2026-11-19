@@ -652,7 +652,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"`. By design: the data-plane cannot compose a query (ADR 0040 C-2). Subscribe by name, or send the table subscription (`target` + `filter`) to the **admin** listener with a credential whose statements allow it |
 | `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-name also sent a client `filter` |
-| `INVALID_SUBSCRIPTION_FILTER` | WS error | A table `subscribe`'s `filter` cannot be used: not an object, a shorthand entry that is not one operator object, a member a where clause or a condition does not have, a shorthand column mixed into the structured form, no condition at all (`{}` included), or over the rewrite's bound. The subscription is not created. (**BL-1036, next train**) The last four were parsed with the member dropped, or as "no filter", and the subscription received every row |
+| `INVALID_SUBSCRIPTION_FILTER` | WS error | A table `subscribe`'s `filter` cannot be used: not an object, a shorthand entry that is not one operator object, a member a where clause or a condition does not have, a shorthand column mixed into the structured form, no condition at all (`{}` included), a `null` list entry, or over the rewrite's bound. The subscription is not created. (**BL-1036, next train**) The last four were parsed with the member dropped, or as "no filter", and the subscription received every row |
 | `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
 | `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
@@ -1021,6 +1021,9 @@ server could not read was not refused: it filtered less, or nothing.
   and an empty group was skipped. On `PATCH` / `DELETE …/rows` and `rows/batch`, an empty top-level `where` keeps its refusal
   (*WHERE clause is required and must contain at least one condition.*, prefixed `Operation[i]` in a batch); an empty group inside a
   mutation's `where` is now refused with the message above, where before it was skipped and the write ran on the other conditions.
+- **A `null` entry in a list is `400 INVALID_REQUEST`** (`"and": [null]`, `"groups": [null]`), naming where it is: *The where clause
+  holds a null at 'where.and[0]': …*; a subscription `filter` with one is `INVALID_SUBSCRIPTION_FILTER`. Up to 0.16.0 it answered
+  `500 INTERNAL_ERROR`.
 - A **named query**'s definition already refused an unknown member at `schema/apply` (`SCHEMA_UNKNOWN_MEMBER`). A named query whose
   conditions are all `whenParamPresent` and whose arguments are all absent still reads every row: the rule is about what a client
   sends, not about a definition's bound clause.
