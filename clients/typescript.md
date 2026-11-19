@@ -1210,6 +1210,12 @@ A filter may use any operator the query builder has, `in` and `notIn` (the wire'
 (`.where('severity', 'in', ['error', 'fatal'])`). (**BL-1226, 0.9.0**) A server up to 0.8.0 refuses a subscription whose filter
 uses `in` or `notIn` with `INVALID_SUBSCRIPTION_FILTER` ("IN/NIN value must be an array"); the client's request was correct.
 
+(**BL-1036, next train**) Give a subscription's filter **one way** — the builder's `where()` predicates *or* `subscribe({ filter })`,
+not both. With both, this client merges the two objects member by member: a shorthand `options.filter` (`{ severity: { eq: 'error' } }`)
+beside the builder's `and` list makes a filter of both forms, which the server now refuses with `INVALID_SUBSCRIPTION_FILTER` naming
+the shorthand column (a server up to 0.16.0 dropped the shorthand half without a word), and a structured `options.filter` replaces the
+builder's lists of the same name. The server also refuses a filter with no condition (`{}`): to subscribe to every row, give no filter.
+
 **Which listener takes this.** `client.table(t).subscribe(...)` is a **table subscription** (a table and a filter). It works on the
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 it with `NAMED_QUERY_SUBSCRIBE_REQUIRED`: its callers cannot compose a query, so they subscribe **by name**
