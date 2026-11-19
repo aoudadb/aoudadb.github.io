@@ -461,7 +461,7 @@ All errors return a JSON body with this structure:
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path |
+| `INVALID_REQUEST` | 400 | Request body is malformed or missing required fields; or request body `database` does not match URL path; or a `where` (or a group inside it, or a `joins[].where`) holds no condition (**BL-1036, next train**; see [Where Clause](#where-clause)) |
 | `INVALID_FORMAT` | 400 | (**Lead S12, 0.6.0**) The request names the `format` query parameter (`/query`, a named query's execute or batch). It is no longer read: every JSON result is column arrays (`columns`, `data`), and the binary form is asked for with `Accept: application/vnd.aouda.column-batch-v2`. Any value is refused, `columnar` included, so an old client asking for `rows` is told rather than handed a body it misreads. Drop the parameter |
 | `ROW_OBJECTS_UNSUPPORTED` | 400 / 415 | (**Lead S12, 0.6.0**) A write body carries row objects (`rows`, or a named mutation's batch argument given as an array of objects), which no surface reads any more: `POST …/rows`, a branch insert, a named mutation's `batchParam`, the schema seed and `aouda.seed.json`, and a WebSocket `stream_rows` (as its `error` code). A bulk-load `:append` sent as NDJSON (`application/x-ndjson`) is refused the same way with `415`. Send [column arrays](#column-arrays-the-write-body) — `columns`, `data` and, for a cell that is not given, `absent` — or upgrade the client library. Nothing was written |
 | `MISSING_TABLE` | 400 | Table name is missing from request |
@@ -652,6 +652,7 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"`. By design: the data-plane cannot compose a query (ADR 0040 C-2). Subscribe by name, or send the table subscription (`target` + `filter`) to the **admin** listener with a credential whose statements allow it |
 | `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-name also sent a client `filter` |
+| `INVALID_SUBSCRIPTION_FILTER` | WS error | A table `subscribe`'s `filter` cannot be used: not an object, a shorthand entry that is not one operator object, a member a where clause or a condition does not have, a shorthand column mixed into the structured form, no condition at all (`{}` included), a `null` list entry, or over the rewrite's bound. The subscription is not created. (**BL-1036, next train**) Up to 0.16.0 a member the types lack and a mixed filter were parsed with the member dropped, and a filter with no condition as "no filter" — the subscription received rows its filter did not select; a `null` entry failed the subscribe without this code |
 | `NAMED_QUERY_SUBSCRIBE_TARGET` | WS error | Subscribe-by-name `target` does not match the definition |
 | `NAMED_QUERY_SUBSCRIBE_MUTATION` | WS error | Subscribe `"name"` addresses a named mutation |
 | `NAMED_QUERY_SUBSCRIBE_UNSUPPORTED` | WS error | Definition cannot be subscribed (e.g. unsupported shape) |
@@ -965,6 +966,7 @@ Execute a query against a table.
 | `perKey` | object | No | `{ "keys": [...], "orderBy": "col", "latest": true }` — one row per distinct `keys` tuple, the one with the greatest (`latest: false`: least) `orderBy` value, ties to the lowest primary key. `select`, `orderBy` and the page apply to the collapsed rows; a `LatestPerKey` / `FirstPerKey` materialized query of the same shape answers it when current (`stats.routedTo`). Not with `aggregates`, `groupBy`, `distinct`, `selectExpr` or `joins` (400); `/query/count` refuses it (**BL-801, 0.3.0**). |
 
 **Where Clause:**
+{: #where-clause}
 
 ```json
 {
@@ -985,6 +987,46 @@ Execute a query against a table.
 | `groups` | WhereClause[] | Nested sub-clauses. Each group is AND'd with the top-level conditions. Enables safe composition of independent filter layers (e.g., row conditions partition scope + row conditions row scope). Maximum nesting depth: **5** (`ProtocolConstants.MaxWhereClauseNestingDepth`). |
 
 `groups` contains nested `WhereClause` objects that are AND-combined with the top-level `and`/`or`. Use `groups` to express nested boolean logic (e.g. `AND(OR(...))`). Each group can itself contain `and`, `or`, and nested `groups`.
+
+**A `where` is read strictly (**BL-1036, next train**).** The two rules below hold wherever a where clause is accepted: `POST …/query`
+and `…/query/count` (with `aggregates` and `groupBy` too), each `joins[].where`, a `setExpr` `conditional`'s `when`, `PATCH` and
+`DELETE …/tables/{name}/rows`, `POST …/rows/batch`, and a WebSocket or long-poll `subscribe` `filter` (below). Up to 0.16.0 a where the
+server could not read was not refused: it filtered less, or nothing.
+
+- **A member a where clause or a condition does not have is `400`.** A where clause has only `and`, `or` and `groups`; a condition has
+  only `column`, `op`, `value`, `param`, `whenParamPresent` and `ignoreCase`. A condition written at the top level
+  (`"where": {"column": "v", "op": "gte", "value": 3}` instead of `"where": {"and": [{…}]}`), a misspelt list (`"ors"`) or a misspelt
+  member (`"vlaue"`, `"values"`, `"ignore_case"`) is refused before the request runs, and nothing is read or written. The body is the
+  framework's validation body (it has no `code`); `errors` is keyed by the member's JSON path and the message names the member:
+
+  ```json
+  {
+    "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+    "title": "One or more validation errors occurred.",
+    "status": 400,
+    "errors": {
+      "$.where.column": ["The JSON property 'column' could not be mapped to any .NET member contained in type 'Aouda.Protocol.WhereClause'."]
+    },
+    "traceId": "00-…"
+  }
+  ```
+
+  `errors` may also hold a `"request"` entry (*"The request field is required."*): the body as a whole could not be read. Up to 0.16.0
+  the member was dropped. A condition at the top level left an empty where clause, and the read answered **every row**; a stray list
+  beside a valid one dropped those conditions, which widened what an update or a delete touched.
+- **A where clause with no condition is `400 INVALID_REQUEST`** — `{}`, `{"and": []}`, `{"or": []}`, `{"groups": []}`, and any group
+  inside it or a join's `where` that holds none (`{"and": [{…}], "groups": [{}]}`). The `error` names where it is: *The where clause has
+  no condition at 'where.groups[0]': give at least one condition in "and", "or" or "groups", or omit "where" to read every row.* (the
+  path is `joins[0].where` for a join's). To read every row, omit `where` (or send `null`). Up to 0.16.0 an empty clause read every row
+  and an empty group was skipped. On `PATCH` / `DELETE …/rows` and `rows/batch`, an empty top-level `where` keeps its refusal
+  (*WHERE clause is required and must contain at least one condition.*, prefixed `Operation[i]` in a batch); an empty group inside a
+  mutation's `where` is now refused with the message above, where before it was skipped and the write ran on the other conditions.
+- **A `null` entry in a list is `400 INVALID_REQUEST`** (`"and": [null]`, `"groups": [null]`), naming where it is: *The where clause
+  holds a null at 'where.and[0]': …*; a subscription `filter` with one is `INVALID_SUBSCRIPTION_FILTER`. Up to 0.16.0 it answered
+  `500 INTERNAL_ERROR`.
+- A **named query**'s definition already refused an unknown member at `schema/apply` (`SCHEMA_UNKNOWN_MEMBER`). A named query whose
+  conditions are all `whenParamPresent` and whose arguments are all absent still reads every row: the rule is about what a client
+  sends, not about a definition's bound clause.
 
 **Operators:**
 
@@ -2849,7 +2891,7 @@ Update rows matching a WHERE filter.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET; a JSON array or object in SET for a scalar column (**BL-1250, next train** — for a number column it was `500 INTERNAL_ERROR`, a `String` column stored it as a type name) |
+| `INVALID_REQUEST` | 400 | Missing/empty WHERE, or a group inside it with no condition (**BL-1036, next train**), missing/empty SET, or invalid column name in SET; a JSON array or object in SET for a scalar column (**BL-1250, next train** — for a number column it was `500 INTERNAL_ERROR`, a `String` column stored it as a type name) |
 | `AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
@@ -2902,7 +2944,7 @@ Delete rows matching a WHERE filter.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing or empty WHERE clause |
+| `INVALID_REQUEST` | 400 | Missing or empty WHERE clause, or a group inside it with no condition (**BL-1036, next train**) |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts. Nothing is deleted; retry with backoff. |
 
@@ -3158,7 +3200,7 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 
 | Code | Status | When |
 |------|--------|------|
-| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE; a JSON array or object in a `set` for a scalar column (**BL-1250, next train**) |
+| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE, or a group inside one with no condition (**BL-1036, next train**); a JSON array or object in a `set` for a scalar column (**BL-1250, next train**) |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity; operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
 | `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
@@ -4549,7 +4591,7 @@ The data-plane requires `"name"` (`NAMED_QUERY_SUBSCRIBE_REQUIRED`). The subscri
 | `target` | string | Conditional | Table name. Required for ad-hoc subscribe (admin listener). On the data-plane, omit or match the named query's table when `name` is set. |
 | `name` | string? | Conditional | Named-query unique name. **Required on the data-plane listener.** |
 | `args` | object? | No | Bind arguments for `name` subscribe. Same shape as HTTP execute `args`. |
-| `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin` and `like`, on the column types the query path accepts them for (no ordering on `Bool` or `Guid`; `like` on `String`). `in` / `nin` take a non-empty array of non-null members of the column's type (**BL-1226, 0.9.0**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). The snapshot and the live events select the same rows, a nullable column included: a null never matches `ne`, `nin`, `lt` or `lte` (`eq null` and `ne null` test for null), as in a query. To state that for live events the server adds an `IS NOT NULL` beside each such condition, and an `or` list needs a copy of itself per alternative, so the cost is bounded (**BL-1226, 0.9.0**): one `or` list may hold at most 6 conditions with `ne`, `nin`, `lt` or `lte`, the rewrite may add at most 256 groups and 2048 conditions to one filter, and it may not nest groups past the depth limit of 5. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot. Fold several `ne` on one column that mean "none of these" into one `nin` (`ne` conditions in an `and` list cost one `IS NOT NULL` per column, which no honest filter reaches the bound with), or split the subscription. Up to 0.8.0 a live event with a null matched those four while the snapshot held none, and a `Bool` column's `eq`, `ne`, `in` and `nin` never matched a live event. The user-filter rewrite is unchanged. The same null rule now holds for an row conditions predicate and for a named query's bound clause on the live path, without that rewrite (**BL-1251, 0.9.0**). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). |
+| `filter` | object? | No | Ad-hoc `WhereClause`, or the shorthand `{"column": {"op": value}}`. The operators are `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `nin` and `like`, on the column types the query path accepts them for (no ordering on `Bool` or `Guid`; `like` on `String`). `in` / `nin` take a non-empty array of non-null members of the column's type (**BL-1226, 0.9.0**; up to 0.8.0 they were refused `INVALID_SUBSCRIPTION_FILTER`). The snapshot and the live events select the same rows, a nullable column included: a null never matches `ne`, `nin`, `lt` or `lte` (`eq null` and `ne null` test for null), as in a query. To state that for live events the server adds an `IS NOT NULL` beside each such condition, and an `or` list needs a copy of itself per alternative, so the cost is bounded (**BL-1226, 0.9.0**): one `or` list may hold at most 6 conditions with `ne`, `nin`, `lt` or `lte`, the rewrite may add at most 256 groups and 2048 conditions to one filter, and it may not nest groups past the depth limit of 5. A filter over a bound is refused `INVALID_SUBSCRIPTION_FILTER` before a snapshot. Fold several `ne` on one column that mean "none of these" into one `nin` (`ne` conditions in an `and` list cost one `IS NOT NULL` per column, which no honest filter reaches the bound with), or split the subscription. Up to 0.8.0 a live event with a null matched those four while the snapshot held none, and a `Bool` column's `eq`, `ne`, `in` and `nin` never matched a live event. The user-filter rewrite is unchanged. The same null rule now holds for an row conditions predicate and for a named query's bound clause on the live path, without that rewrite (**BL-1251, 0.9.0**). **Illegal** together with `name` (`NAMED_QUERY_SUBSCRIBE_FILTER`). (**BL-1036, next train**) Read as strictly as a query's `where`: an object with an `and`, `or` or `groups` member is the structured form and may hold nothing else — a shorthand column beside them (`{"v": {"gte": 3}, "and": […]}`) or a member a condition does not have is refused `INVALID_SUBSCRIPTION_FILTER` naming it — and a filter with no condition (`{}`, `{"and": []}`, `{"groups": [{}]}`) is refused too: omit `filter` to subscribe to every row. Up to 0.16.0 the member was dropped (the shorthand half of a mixed filter was lost) and `{}` subscribed to every row. |
 | `resume_from` | number? | No | Resume from this **change-event sequence** version. Three outcomes (unchanged): at-current / buffer replay / expired → **fresh complete snapshot**. Feed `gap.last_seq` here after a `gap`. **Not** the consistency token. |
 | `at_least` | string? | No | Consistency-token pin: snapshot at at least this token. Optional `wait_ms` / `on_exceeded` (same values as HTTP). Omitted `at_least` leaves `resume_from` byte-for-byte today's path. |
 | `wait_ms` | number? | No | Subscribe freshness wait (with `at_least`). |
