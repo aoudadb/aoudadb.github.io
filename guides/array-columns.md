@@ -92,9 +92,11 @@ give a `Float64Array` in TypeScript for a `Double[]` column.
 
 **A `Byte[]` column is not a column of `Byte`.** A scalar `Byte` column holds one byte per row; a `Byte[]` column holds a whole
 byte string per row, and travels as base64 in JSON. In C# the `byte[]` you pass is a `Byte[]` value only when the **column** is
-`Byte[]`. It travels as its base64 text, so sent to a scalar `Byte` column it is refused as not a number, with one
-exception: a base64 text made only of digits (the three bytes `D3 4D 76` are `"0012"`) is read as that number (BL-1265).
-Do not send a `byte[]` to a `Byte` column.
+`Byte[]`. It travels as its base64 text, and a base64 text made only of digits (the three bytes `D3 4D 76` are `"0012"`) is
+numeric text a scalar `Byte` column would read as that number. So the C# SDK reads the table's column types when a row holds a
+`byte[]` and refuses one bound to a column that is neither `Byte[]` nor `String` with `ArgumentException`, before sending
+(**BL-1265, next train**; before, `"0012"`-shaped bytes were stored as `12`). A `String` column stores the base64 text. The
+TypeScript SDK does not check this yet: do not send a `Uint8Array` to a `Byte` column.
 
 ---
 
