@@ -2585,12 +2585,37 @@ fields beside these three:
 **Absent is not null.** An absent cell is what a key left out of a row object used to be: an absent `autoIncrement` cell is
 generated, and an absent column that has a default takes its default. An explicit `null` is a null — an `autoIncrement` cell sent as `null` is not generated. In the example,
 rows 0 and 1 give their ids and row 2's is generated. A column absent in **every** row can simply be left out of `columns`; `absent`
-is only needed when some rows give a column and others do not. ⚠️ **A bulk-load `:append` does not apply defaults:** an absent cell
-there is stored as null (an absent `autoIncrement` cell is still generated), for a JSON body as for a frame (BL-1104).
+is only needed when some rows give a column and others do not. (**BL-1104, next train**) **A bulk-load `:append` applies defaults
+too**, for a JSON body as for a frame and at either `validation` level: an absent cell takes its column's default, and an absent
+`autoIncrement` cell is generated. Until then a bulk load stored an absent cell as null (a NOT NULL column: the type's default, `""`
+or `0`).
 
 **Values** are read as before: an integer is an integer, a fraction keeps the scale it is written with, a string is a string, and an
-array or an object (a vector, a nested value) is converted the way the column's type takes it. A value is judged exactly as the same
+array (a vector, an array column's value) is converted the way the column's type takes it. A value is judged exactly as the same
 cell sent in a [column-batch frame](#the-column-batch-frame-acb2) — the same conversions, the same errors.
+
+(**BL-1108, BL-1250, BL-1220, next train**) **One rule per value, on every write surface** — `POST …/rows`, a branch insert, the
+`set` of `PATCH …/rows` and `rows/batch`, `stream_rows`, `:append`, a named mutation's parameter, literal and `batchParam` rows, a
+seed, and the embedded engine:
+
+- **A number written to a `String` column is stored as its text as sent**: `2.50` is `"2.50"`, `1E+17` is `"1E+17"`, and `1`
+  beside `2.5` in one column is `"1"`. Until then the text was rebuilt from the number's value (`"1.0"`, `"100000000000000000"`,
+  `"2.5"`, depending on the surface). A seed keeps refusing a number for a `String` column (*"expected string for type String, got
+  number"*).
+- **A JSON array or object written to a scalar column is refused** — a `String` column included; an array column and a vector take
+  an array. It is `400 INVALID_REQUEST` naming the column (and the row, where the body has rows): *"Column 'note': a JSON array is
+  not a String value — send text as a JSON string (an array goes in an array column)."*; on a named mutation it is
+  `400 NAMED_QUERY_BIND_FAILED` naming the parameter (*"Parameter 'v' expected a scalar value for its String column, got Array
+  …"*); on `stream_rows`, an `error` naming the row and the column. Until then a `String` column stored the value's JSON text or a
+  type name (`System.Collections.Generic.List`1[System.Object]`), and `PATCH` of an array into a number column answered
+  `500 INTERNAL_ERROR`. A read filter follows the same rule: a JSON array as the operand of `eq`, `ne` or a range operator on a
+  `String` column is `400 INVALID_REQUEST` naming the column (it was compared with that type name, so `ne` matched every row);
+  `in` / `nin` take their list as before. (A JSON object there is still compared as its JSON text, BL-1643.)
+- **A scalar `-0` is stored as `0`** in a `Double` and a `Float32` column, whatever carried it: a JSON body always stored `0`; a
+  frame's cell, a named mutation's parameter, literal or `setExpr`, a seed and the embedded engine kept the sign. An
+  [array column](../guides/array-columns.md)'s element keeps its `-0`.
+- **A numeric string written to an integer column stays accepted** (`"0012"` is `12`), except for a named mutation's integer
+  parameter, which refuses a string (*"Parameter 'id' expected integer, got String"*).
 
 (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md)'s slot holds one JSON array per row** (the data is nested
 twice), `null` for a null cell, `[]` for an empty one, and a `Byte[]` cell is a base64 string. Numbers are read from their text
@@ -2719,7 +2744,8 @@ into a `String` column is stored as its JSON text (`2.50`, not a culture's `2,50
 (**LoadSpeed S13, 0.4.0**) A frame's decimal column has one scale, its largest, so such a number is stored at that
 scale: `3` sent beside `2.50` is stored as `3.00`. A client
 that writes its own frames should send a number whose JSON text uses an exponent (`1E+17`) as JSON instead: the frame
-cannot say which text it had.
+cannot say which text it had. A JSON body keeps each number's text as sent (**BL-1108, next train**): `3` beside `2.50` is
+stored `"3"` there (see [values](#column-arrays-the-write-body)).
 
 - (**BL-035, 0.9.0**) **An array column's frame column (kind 9) must carry the column's own element kind**: nothing is widened
   (an `Int32` run for a `Double[]` column, or an array column sent to a scalar column, is `400 INVALID_REQUEST` naming the column —
@@ -2765,7 +2791,7 @@ like every other error of this endpoint, and an empty body is `400 MISSING_DATAB
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
 | `ROW_OBJECTS_UNSUPPORTED` | 400 | (**Lead S12, 0.6.0**) A JSON body with `rows` (row objects). Send [column arrays](#column-arrays-the-write-body). Nothing is inserted |
-| `INVALID_REQUEST` | 400 | Missing `columns` / `data`, column arrays that do not match (see [column arrays](#column-arrays-the-write-body)), invalid column name, schema mismatch, `identityInsert: true` with a missing, absent or `null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
+| `INVALID_REQUEST` | 400 | Missing `columns` / `data`, column arrays that do not match (see [column arrays](#column-arrays-the-write-body)), invalid column name, schema mismatch, `identityInsert: true` with a missing, absent or `null` autoIncrement column, a body that is not valid JSON, a frame body that is not one valid column-batch frame, a frame `Double` cell that is NaN or ±Infinity (**BL-716, 0.2.0** — JSON cannot carry them either), a string cell that is not valid UTF-8 (**BL-716, 0.2.0**), a JSON array or object for a scalar column (**BL-1250, next train**; see [values](#column-arrays-the-write-body)), or a frame column of the retired 128-bit `Decimal` kind 6 (**LoadSpeed S13, 0.4.0**; see [the frame](#post-jobidappend)) |
 | — | 415 | A `Content-Type` other than `application/json`, `text/json`, `application/*+json` or `application/vnd.aouda.column-batch-v2` |
 | `FRAME_VERSION_UNSUPPORTED` | 415 | (**Lead S09, 0.6.0**) An `ACB1` frame body, or the retired `application/vnd.aouda.column-batch` type. The message names the version found and the one expected. Nothing is inserted |
 | `INVALID_VALUE` | 400 | Value type does not match column type |
@@ -2823,7 +2849,7 @@ Update rows matching a WHERE filter.
 | Code | Status | When |
 |------|--------|------|
 | `TABLE_NOT_FOUND` | 404 | Table does not exist |
-| `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET |
+| `INVALID_REQUEST` | 400 | Missing/empty WHERE, missing/empty SET, or invalid column name in SET; a JSON array or object in SET for a scalar column (**BL-1250, next train** — for a number column it was `500 INTERNAL_ERROR`, a `String` column stored it as a type name) |
 | `AUTH_ENTITLEMENT_NOT_FOUND`, `AUTH_ENTITLEMENT_INSUFFICIENT_ACCESS`, `AUTH_PLS_WRITE_SCOPE_VIOLATION` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `MEMORY_BUDGET_EXCEEDED` | 503 | The rows the WHERE matches do not fit the read budget, as the same `SELECT` would not (**BL-817, 0.3.0**). Nothing is changed; `Retry-After` is set. Narrow the predicate and mutate in pieces. |
 | `WRITE_CONFLICT` | 409 | (**BL-881, 0.3.0**) Other writers kept changing the matched rows through all 16 attempts, and every attempt's scan still matched `where` (**BL-1120, 0.6.0** — a compare that has stopped matching is 200 with `rowsUpdated: 0`, not 409). Each attempt re-checks its matches at commit and rescans if one changed; (**BL-920, 0.4.0**) with a short pause between attempts — 1 ms doubling to 64 ms, jittered, under a second in all — so a large DELETE under a stream of writes no longer spends them in a burst. Nothing is changed; retry with backoff. See [`WRITE_CONFLICT`](#named-query-streaming-and-data-plane-errors). |
@@ -3132,7 +3158,7 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 
 | Code | Status | When |
 |------|--------|------|
-| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE |
+| `INVALID_REQUEST` | 400 | Empty operations list, or an operation missing both `set`/`setExpr` and `delete`, or missing WHERE; a JSON array or object in a `set` for a scalar column (**BL-1250, next train**) |
 | `MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED` | 503 | The first operation was refused for capacity; nothing was applied. `Retry-After` is set |
 | `BATCH_PARTIALLY_APPLIED` | 503 | (**Lead group 3 review, 0.6.0**) Operation `k` ≥ 1 was refused for capacity; operations before it were applied. No `Retry-After`; re-send only the remaining operations. See [above](#post-apidatabasesdbtablesnamerowsbatch) |
 | `BATCH_RLS_PREFIX_APPLIED` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
@@ -5200,7 +5226,7 @@ Allocate a bulk-load session and acquire table locks. Returns a `jobId` that all
 | `conflictPolicy` | string? | `"block"` | `"block"`, `"failFast"` | How to handle a conflicting in-flight job on the same table. `"block"` waits; `"failFast"` returns `BULK_LOAD_TABLE_LOCKED` immediately. Case-insensitive. |
 | `afterJobId` | string? | null | a `jobId` a `:begin` returned | (**Lead S21b, 0.6.0**) The job this one follows: a job on the same tables, begun before it. This job takes its place in the tables' commit order after that one — it does not take the tables first, even if that job is still waiting for them behind another loader's job — and **commits only if that job committed**. If that job failed or was aborted, this job's commit is refused `409 BULK_LOAD_PREDECESSOR_NOT_COMMITTED` and none of its rows is loaded. A loader that sends job N+1 while job N commits names N here, so a failure in N leaves every later job uncommitted, and a sequence of jobs commits a prefix of them, in order. A job that follows a job on **other** tables waits, at its commit point, for that job's outcome (**Lead group 5 review, 0.6.0**: it read the outcome at once, and was refused or not by timing). A job that names itself is refused `400 BULK_LOAD_INVALID_OPTIONS`. Not a job id: `400 BULK_LOAD_INVALID_OPTIONS`. Both SDKs' multi-job loaders set it (`@aouda/client` from **Lead S22, 0.6.0**). |
 | `validation` | string? | `"coerce"` | `"coerce"`, `"strict"` | (**Lead S27a, 0.6.0**) What the load checks ([Bulk Load — a load's validation](../guides/bulk-load.md#a-loads-validation-coerce-or-strict-lead-s27a-060)). `"coerce"`: a null or absent cell in a NOT NULL column is stored as the type's default (`0`, `""`) — **except in a primary-key column**, which is refused (see [`:append`](#post-jobidappend)); keys are not checked for uniqueness — except a formula table's (a table with an Expression column), whose keys are checked at
-every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way, and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
+every level, as at `"strict"` (**BL-1488, 0.15.0**). (**BL-035, 0.9.0**) **An [array column](../guides/array-columns.md) has no default, so a NOT NULL array column refuses a null or missing cell at every level, `coerce` included.** `"strict"`: a null or absent cell in any NOT NULL column is refused the same way — (**BL-1104, next train**) except an absent cell of a column with a default, which takes the default at either level (only a null is refused there) — and a primary key the job holds twice, or one the table already holds, fails the job at its commit (`409 BULK_LOAD_DUPLICATE_PK`, nothing committed). Every load refuses a column its table does not have. An auto-increment column is exempt (a missing value takes the next id). Refused `400 BULK_LOAD_INVALID_OPTIONS`: any other value (case-sensitive); `"strict"` on a table whose key mode (`pkUniqueness`) is not `Strict` — a job is never stricter than its table — or with `applyTransforms`. |
 | `pkUniquenessOverride` | — | — | — | (**Lead S27a, 0.6.0; breaking**) Removed: no server ever applied it. Any value is refused `400 BULK_LOAD_INVALID_OPTIONS` with a message naming `validation`. |
 | `replicationMode` | string? | `"logShipSegments"` | `"logShipSegments"`, `"skipReplication"`, `"markForSnapshot"` | Replication strategy. `"skipReplication"` on a multi-node cluster without `forceSingleNodeReplicationBypass: true` is rejected (400 `BULK_LOAD_INVALID_OPTIONS`). Case-insensitive. |
 | `forceSingleNodeReplicationBypass` | bool? | `false` | `true`, `false`, null | Two-key safety valve: must be `true` to use `"skipReplication"` on a multi-node cluster. |
@@ -5488,7 +5514,8 @@ S:  09 00      06   00000000 02000000 02000000   00000000 01000000 02000000   78
 
 **JSON column arrays** are the body for curl and for any client without the frame (**Lead S12, 0.6.0**; NDJSON was, until
 this train). The server decodes them straight into a column batch, as it does a frame. A column whose rows mix integers and
-fractions is read as decimal for every row.
+fractions is read as decimal for every row — except in a `String` column, whose numbers keep their text as sent (**BL-1108, next
+train**; see [values](#column-arrays-the-write-body)).
 
 **Example (single table):**
 ```
@@ -5545,7 +5572,7 @@ Content-Type: application/json
 | `MEMORY_BUDGET_EXCEEDED` | 503 | (**BL-831, 0.3.0**) A column-batch body could not get the memory to decode its next frame: each column's array is asked of the memory queue before it is allocated, waiting at most one sampling tick. The session stays open and the frames queued before the refusal stay credited: wait `Retry-After` and resume as on any reconnect (the same `:begin`, from its `nextSequence` — **Lead S21a, 0.6.0**; it was `resumeFromRow`). It used to fail on the heap mid-frame and answer `500`. |
 | `BULK_LOAD_MISSING_DISCRIMINATOR` | 400 | Multi-table job and a row is missing `_table`, or names a table outside the job; none of its frame's rows is applied (**Lead S21a, 0.6.0**). `details: frame={f}, row={n}, …` (**Lead S12, 0.6.0**: was `lineNumber=N`). |
 | `ROW_OBJECTS_UNSUPPORTED` | 415 / 400 | (**Lead S12, 0.6.0**) `415`: an NDJSON body (`application/x-ndjson`), no longer read. `400`: a JSON body that carries `rows`. Nothing is appended. Send frames or [column arrays](#column-arrays-the-write-body). |
-| `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). |
+| `INVALID_REQUEST` | 400 | A JSON body that is not valid column arrays (it appends nothing), or a malformed frame (the frames before it stay credited). (**BL-1110, next train**) A frame `Double` cell that is NaN or ±Infinity, as `POST …/rows` refuses it: *"Column 'px' row 2 of frame 0 is NaN: a Double cell must be finite (JSON cannot carry NaN or Infinity). None of the frame's rows was applied."* — it was stored. (**BL-1250, next train**) A JSON array or object for a scalar column, naming the column and the row. |
 | `BULK_LOAD_CURSOR_MISMATCH` | 409 | (**Lead S21a, 0.6.0**) The body's first frame is above the job's next number: frames between them were never applied. Nothing of the body is applied; `details` name `nextSequence`. (It was documented as "resumed below `rowsDurablyCommitted`", which no server answered.) (**Lead S21b, 0.6.0**) Also a body whose end frame commits and names fewer frames than the job holds: nothing committed. |
 | `BULK_LOAD_INVALID_STATE` | 409 | The job is committing, committed, aborted or failed. (**Lead S21b, 0.6.0**) `details` name the state (`state=Committing`, …): a body sent again while its own commit runs reads `Committing` — wait, then `:begin` with the job's key. |
 | `BULK_LOAD_PREDECESSOR_NOT_COMMITTED` | 409 | (**Lead S21b, 0.6.0**) A body that commits a job begun with `afterJobId`: the job it follows failed or was aborted, so this one is not committed and none of its rows is loaded. `details` name `afterJobId`. Also answered by `:commit`. |

@@ -671,7 +671,7 @@ const batch = ColumnBatch.of(
   column.string('sym', ['AAPL', 'MSFT', null]),                  // null = a null cell
   column.double('px', new Float64Array([187.5, 410.25, 0.5])),
   column.timestamp('ts', [new Date(), new Date(), new Date()]),  // or epoch ms; column.timestampTicks for 100-ns ticks
-  column.decimal('price', ['187.50', 410.25, undefined], 4),     // undefined = absent: insert applies the default; bulkLoad stores null (BL-1104)
+  column.decimal('price', ['187.50', 410.25, undefined], 4),     // undefined = absent: insert and bulkLoad apply the default (BL-1104, next train)
   column.bool('open', new Uint8Array([1, 0, 1])),
 ).validate();
 
@@ -692,7 +692,7 @@ await client.table('trades').insert(batch);       // one insert; frames once the
 
 A typed array is kept as it is, not copied: do not change it until the call that sends it has returned. A plain array may
 hold `null` (a null cell) and `undefined` (an **absent** cell — not given, so a generated id or the column's default applies;
-a bulk load stores it as null, BL-1104); a typed array takes `{ nulls, absent }` bitmaps. **Call `validate()` while building
+a bulk load applies it too, **BL-1104, next train**); a typed array takes `{ nulls, absent }` bitmaps. **Call `validate()` while building
 batches**: it throws, naming the column and row, for everything the server's frame reader would refuse — a name given twice,
 empty or over 1 KB, a code past its dictionary, a timestamp outside .NET's `DateTime`, an int64 in a `Float64Array` that is
 not a safe integer, a string over 16 MiB, a bitmap shorter than its rows, more than 4,096 columns. A load validates each batch
