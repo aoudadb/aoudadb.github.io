@@ -735,6 +735,9 @@ A load names what it checks in `:begin`'s `options.validation` ([HTTP API](../re
 | `coerce` (default) | Stored as the type's default (`0`, `""`) — **refused in a primary-key column**, and **in an [array column](#array-columns)** (it has no default) (**BL-035, 0.9.0**) | Loaded as a second row (not checked) — **except in a table with an Expression column (a formula table), whose keys are checked at every level, as `strict` checks them** (**BL-1488, 0.15.0**) |
 | `strict` | Refused | The job fails at its commit, nothing committed |
 
+(**BL-1104, next train**) An **absent** cell of a column that has a default is neither: it takes the column's default at either
+level, as an insert stores it. Only a null (or an absent cell of a column without a default) is what the table above describes.
+
 Every load, at either level, **refuses a column its table does not have** (names are case-sensitive) — in a multi-table job, a value
 in a column the row's own table (`_table`) does not have, even when another table of the job has it (**Lead group 6 review, next
 train**; a null there carries nothing and passes). The server checks each

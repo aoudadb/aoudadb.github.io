@@ -2608,7 +2608,9 @@ seed, and the embedded engine:
   `400 NAMED_QUERY_BIND_FAILED` naming the parameter (*"Parameter 'v' expected a scalar value for its String column, got Array
   …"*); on `stream_rows`, an `error` naming the row and the column. Until then a `String` column stored the value's JSON text or a
   type name (`System.Collections.Generic.List`1[System.Object]`), and `PATCH` of an array into a number column answered
-  `500 INTERNAL_ERROR`.
+  `500 INTERNAL_ERROR`. A read filter follows the same rule: a JSON array as the operand of `eq`, `ne` or a range operator on a
+  `String` column is `400 INVALID_REQUEST` naming the column (it was compared with that type name, so `ne` matched every row);
+  `in` / `nin` take their list as before. (A JSON object there is still compared as its JSON text, BL-1643.)
 - **A scalar `-0` is stored as `0`** in a `Double` and a `Float32` column, whatever carried it: a JSON body always stored `0`; a
   frame's cell, a named mutation's parameter, literal or `setExpr`, a seed and the embedded engine kept the sign. An
   [array column](../guides/array-columns.md)'s element keeps its `-0`.
@@ -5512,7 +5514,8 @@ S:  09 00      06   00000000 02000000 02000000   00000000 01000000 02000000   78
 
 **JSON column arrays** are the body for curl and for any client without the frame (**Lead S12, 0.6.0**; NDJSON was, until
 this train). The server decodes them straight into a column batch, as it does a frame. A column whose rows mix integers and
-fractions is read as decimal for every row.
+fractions is read as decimal for every row — except in a `String` column, whose numbers keep their text as sent (**BL-1108, next
+train**; see [values](#column-arrays-the-write-body)).
 
 **Example (single table):**
 ```
