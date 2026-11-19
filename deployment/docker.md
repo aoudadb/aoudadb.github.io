@@ -130,6 +130,8 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=6
 
 ⚠️ **`--start-period=60s` is doing real work**: WAL recovery on a large database can legitimately take minutes, and a probe that starts immediately will kill a server that is recovering correctly.
 
+⚠️ **A fresh container is `unhealthy` until it has a first admin.** (**BL-1407, next train**) A server with no admin is in setup mode and serves no application traffic, so `/ready` answers `503` with the reason `setup_required` (the body lists every reason: `wget -qO- http://localhost:5000/ready`, or `docker exec aouda wget -qO- http://localhost:5000/ready`). That is the probe telling the truth, not a fault, and it ends the moment the admin exists. Create it at start with `AOUDA_AUTH__ROOTUSER__EMAIL` and `AOUDA_AUTH__ROOTUSER__PASSWORD` (or a mounted secret, see below), or by hand as in the next section. Anything that waits on the healthcheck (`depends_on: condition: service_healthy`, a deploy gate) waits for the admin too. The repository's `docker-compose.yml` sets both variables from `AOUDA_ROOT_EMAIL` / `AOUDA_ROOT_PASSWORD` and refuses to start without the password, so port 5000 never answers with a default credential. In Kubernetes the same holds for the readiness probe: a pod with no admin stays NotReady.
+
 ---
 
 ## The first admin
@@ -155,6 +157,15 @@ secrets:
 ```
 
 then `--password-file /run/secrets/aouda_admin_password`.
+
+**API keys from secrets (BL-1389, next train).** A key declared in the identities file (`Aouda:Auth:Keys:File`) can be read from a secret file, so it never passes through an environment variable:
+
+```json
+{ "identities": [ { "name": "feeder", "kind": "scoped_service", "database": "deposit",
+    "roles": ["quote_writer"], "secrets": [ { "file": "/run/secrets/feeder_key" } ] } ] }
+```
+
+The file holds the key and nothing else; one trailing newline is ignored, and nothing else is trimmed. A relative path is read from the identities file's directory, not the working directory. The file is read once, at start: a missing, unreadable or empty file stops the server and the message names the entry and the path, never the content. Docker mounts file-based secrets readable by everyone in the container (`0444`) by default, and this source does not refuse that. A secret may also be `{ "env": "NAME" }` or `{ "hash": "sha256:..." }`.
 
 ---
 

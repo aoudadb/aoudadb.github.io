@@ -13,6 +13,37 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+- **One `ApiKey` setting in the .NET client, for a key of any kind (BL-1385, next train, breaking).** `AoudaClientOptions.ApiKey`
+  takes `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_` key and sends it as
+  `Authorization: Bearer` to the same URLs; the server resolves the kind. `AppAuth.ApiKey`, `ServerAuth.ApiKey`, `AuthAdmin` and
+  `AuthAdminOptions` are removed, and `UserToken` moves to `AoudaClientOptions` (it still needs a `mk_svc_` or `mk_srv_` key). `AppAuth`
+  and `ServerAuth` stay for a signed-in session (a JWT, or a server user's email and password). A value that is not an Aouda key, a key
+  beside a session, or a `UserToken` beside a key that cannot carry one is refused at construction, naming the setting or key kind
+  needed. A `mk_svc_` key for `Databases.ListAsync` / `CreateAsync` now says it needs a `mk_srv_` key in `ApiKey`.
+  [Client integration](auth/client-integration.md).
+
+- **A rejected key is fatal for a writer, on request (BL-1386, next train).** `AoudaClientOptions.AuthFailurePolicy`: `FailFast` throws
+  `AoudaAuthenticationFatalException` (a subtype of `AoudaAuthenticationException`) for a 401, or a 403 that refuses the credential,
+  instead of a failure a caller may retry later; a batch writer faults on it even with `ContinueOnError`; `OnSustained` is called once when
+  `SustainedAfter` failures in a row (default 3) pass with no success between them, with the error code, count and first-seen time and never
+  the key. An HTTP 403 now reports `StatusCode` 403 (it reported 400). [Getting started](getting-started/index.md).
+
+- **`GET /ready` lists everything still missing (BL-1393, next train).** The body is `{ "ready": false, "reasons": [{ "code", "message", "subject"? }] }`
+  (the single `reason` string is gone): setup mode, declared databases (`Aouda:Databases`) that are pending or not open,
+  configured keys that are not active yet, the startup delay and every unhealthy critical component, each with a stable `code`.
+  `503` while any is listed, `200` with `"reasons": []` when none. No credential is needed, including in setup mode and while
+  the server is starting. [HTTP API](reference/http-api.md#get-ready).
+
+- **A declared database can name a schema file and the server applies it at start (BL-1388, next train).** `Aouda:Databases:<name>:SchemaFile`
+  (with `SchemaEnvironment` and `SchemaAllowDestructive`) is applied in the server, with its own privileges, after the declared databases
+  and the auth startup and before the server is ready; idempotent, an invalid file fails the start naming the file and the database, a
+  destructive change is refused unless allowed. Opt-in. Migration history source `DeclaredApply`.
+  [Schema management](guides/schema-management.md#let-the-server-apply-it-at-start).
+
+- **Custom roles can be declared on a declared auth database (BL-1392, next train).** `Aouda:Databases:<auth>:Roles:<role>` is created or
+  converged at start, after the schema apply; roles not listed are never touched.
+  [Server and multi-database](guides/server-multi-database.md).
+
 - **Database catalog credentials (BL-1128).** `GET /api/databases` and `POST /api/databases` need a server credential
   (`mk_srv_` or a scoped server key). A live application `mk_svc_` / `mk_adm_` on those routes is **403**
   `AUTH_KEY_ROUTE_MISMATCH` (not 401 `AUTH_API_KEY_INVALID` / "Unknown API key"). `GET /api/databases/{name}` accepts a

@@ -108,7 +108,9 @@ The same four routes under `/api/databases/{authDb}/auth-admin-keys` mint `mk_ad
 
 `POST /api/databases/{db}/auth/admin/regenerate-keys` takes `{ "overlapSeconds"? }` the same way and returns `validUntil` (`null` when the previous system keys were revoked at once). Named keys are not swept.
 
-`Aouda.Client` and `@aouda/client` refuse a prefix in the wrong setting: `AppAuth` / `appAuth` rejects `mk_srv_` and `mk_adm_`; `ServerAuth` / `serverAuth` rejects `mk_svc_`, `mk_anon_`, `mk_pub_`, and `mk_adm_`; `AuthAdmin` / `authAdmin` accepts only `mk_adm_`. A custom `mk_` stays legal on the app and server settings.
+`Aouda.Client` takes a key of any kind in one setting, `AoudaClientOptions.ApiKey` (**BL-1385, next train**): `mk_svc_`, `mk_scp_`, `mk_srv_`, `mk_adm_`, `mk_anon_`, `mk_pub_` or a custom `mk_`. Every kind goes out the same way, `Authorization: Bearer <key>` to the same URLs; the server resolves the kind, and the auth database that checks it, from the key. The client reads the prefix only to refuse a value that is not an Aouda key (a JWT goes in `AppAuth.Token` or `ServerAuth.Token`), to choose the auth endpoints a sign-in on that client calls (`/api/auth/...` for `mk_srv_`, the database's own for every other kind), and to allow `UserToken` (`X-User-Token`) beside `mk_svc_` or `mk_srv_` only. The old `AppAuth.ApiKey`, `ServerAuth.ApiKey` and `AuthAdmin` are removed. `@aouda/client` still takes `appAuth` / `serverAuth` / `authAdmin` until its own change lands.
+
+A key of the wrong kind for a route is refused by the server naming the kind the route needs (`403 AUTH_KEY_ROUTE_MISMATCH` on `GET|POST /api/databases` for an application key); `Aouda.Client`'s `Databases.ListAsync` / `CreateAsync` add that this needs `AoudaClientOptions.ApiKey` set to a `mk_srv_` key.
 
 #### Listeners and profiles
 
@@ -2931,7 +2933,34 @@ This is **not** “ready for schema apply or traffic”. A database can be `Drop
 
 #### `GET /ready`
 
-Readiness probe. 200 when `DatabaseManager` is initialized and **critical** components (catalog, WAL) are healthy. 503 otherwise (body includes `ready: false` and `reason`).
+Readiness probe: 200 when nothing is missing, 503 with **everything** that is still missing (**BL-1393, next train**). No credential is needed, and the route is answered in setup mode and while the server is starting, to any caller (not only loopback).
+
+```json
+{
+  "ready": false,
+  "reasons": [
+    { "code": "setup_required", "message": "The server is in setup mode: no admin account exists. Create it with POST /api/auth/setup from the server's own host, or set Aouda:Auth:RootUser." },
+    { "code": "database_pending", "message": "Declared database 'ledger' (Aouda:Databases) does not exist yet.", "subject": "ledger" }
+  ]
+}
+```
+
+`reasons` is empty when `ready` is `true`. Switch on `code`; `message` is a sentence for a person and may be reworded. `subject` names the database, configured key or component the reason is about, and is absent when it is about the server.
+
+| `code` | Meaning | `subject` |
+|---|---|---|
+| `not_initialized` | The engine has not finished opening its databases. | none |
+| `server_starting` | The auth bootstrap has not completed (other routes answer `503 SERVER_STARTING`). | none |
+| `startup_delay` | `Aouda:Health:StartupDelaySeconds` has not elapsed. | none |
+| `setup_required` | No admin exists; the server is in setup mode (other routes answer `503 SETUP_REQUIRED`). | none |
+| `root_user_unusable` | `Aouda:Auth:RootUser` is set but its password could not be used, so setup mode was not left. | none |
+| `database_pending` | A database in `Aouda:Databases` does not exist yet. | the database |
+| `database_not_open` | A database in `Aouda:Databases` is registered and not open (failed to open, quarantined for a reason other than an operator's). | the database |
+| `database_reconcile_failed` | The reconcile of `Aouda:Databases` after a restore was refused; the server keeps running. | the database, when one is named |
+| `configured_key_inactive` | A configured key (`Aouda:Auth:Bootstrap:ServerKey`, `Aouda:Auth:Keys:File`) cannot authenticate yet: a server key waits for the first admin, a scoped key for its auth database and database to be open. | the key's name |
+| `component_unhealthy` | A critical component (catalog, WAL, memory, ...) is unhealthy or degraded; every such component is listed. | the component |
+
+A database an operator quarantined, or listed in `Aouda:SkipDatabases`, is a decision and is not listed. A reason never contains a key, a hash or fingerprint of one, a password, or an exception message; the server log has the detail. The single `reason` string of earlier versions is gone. A deploy script waits for `200`, and prints `reasons` when it gives up.
 
 `/ready` does **not** fail because an operator database is `Creating` or `Dropping` — that would take the whole node out of a load balancer for a long drop. Per-database readiness is `GET /api/databases/{name}` (`state=Active`) and `/health/detailed`.
 
@@ -2939,7 +2968,7 @@ The `memory` component is critical too. Either of these makes `/ready` return 50
 limit, or a database holding more than 110 % of what it was granted. A database's grant is its **governed ceiling** — the
 process's budget, or its hard cap where it has one — not its nominal share, so using room it was given never fails readiness
 (**BL-788, 0.3.0**; WorkloadCore S06 deleted elastic lending and the "tightened" verdict). Before that, a database inside
-its ceiling could hold `/ready` at 503 for as long as it used it. The `reason` names the database, its usage and its grant, and the `memory` component's details carry them as
+its ceiling could hold `/ready` at 503 for as long as it used it. The reason (`component_unhealthy`, subject `memory`) names the database, its usage and its grant, and the `memory` component's details carry them as
 `overBudgetDatabase`, `overBudgetUsedBytes` and `overBudgetGrantBytes`.
 
 Use as a Kubernetes `readinessProbe`.
@@ -3804,7 +3833,7 @@ Get cluster topology.
 
 ### Timestamp semantics
 
-`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
+`Timestamp` values are **UTC instants** stored as **Int64** (.NET UTC ticks). Insert payloads may use ISO-8601 strings or numeric forms accepted by the server; **the original timezone offset is not stored** and is **not** round-tripped on read (unlike SQL Server `datetimeoffset`). Clients should expect results in **UTC**. For full detail and CLR mapping notes, see [Timestamp Type](./timestamp.md) (corrected: it said Unix milliseconds — **BL-808, 0.3.0**). On a subscription, a `snapshot` message's `column_types` names each `Timestamp` column (`"Timestamp"`) and each `Date` column (`"Date"`, **BL-1391, next train**; its value is a number of days since the Unix epoch), so a client can tell a time or a day from any other number; the value itself is unchanged. An **upsert** — `"op": "upsert"` on a named mutation, or an upsert on the write stream — accepts exactly the `Timestamp` and `Date` values an insert does, and refuses the ones an insert refuses (a boolean, a fractional number); a table's `culture` applies to a `Date` string on upsert as it does on insert (**BL-643, 0.1.38**).
 
 ---
 
@@ -4211,6 +4240,7 @@ One page of a subscription's current data. Pages share one pinned `version`. Mor
 | `rows` | object[] | Rows in this page. May be empty. |
 | `version` | number | Pinned snapshot **change-event** version. Store this; pass as `resume_from` on reconnect. |
 | `token` | string? | Consistency token of the snapshot cut (same string on every page and `snapshot_complete`). |
+| `column_types` | object? | Column name → type name for the columns whose JSON form does not say what they are: each array column (`"Double[]"`, `"Float32[]"`, `"Int32[]"`, `"Int64[]"`, `"Byte[]"`, `"String[]"`), each `Timestamp` column (`"Timestamp"`: a number of .NET UTC ticks) and each **`Date`** column (**BL-1391, next train**; `"Date"`: a number of days since the Unix epoch). The same spelling as the `types` of a query result. On **every** page, an empty snapshot's included. Omitted when the table has none of them. A `change` message names only array columns: keep the snapshot's `Timestamp` and `Date` names and read the changes' (and a delete's `key`) cells by them. |
 
 **Example:**
 ```json

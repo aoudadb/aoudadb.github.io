@@ -356,10 +356,7 @@ var client = new AoudaClient(new AoudaClientOptions
 {
     ServerUrl = "http://localhost:5433",
     DatabaseName = "myapp",
-    AppAuth = new AppAuthOptions
-    {
-        ApiKey = "mk_anon_..."
-    }
+    ApiKey = "mk_anon_..."
 });
 
 var auth = await client.Auth.SignInAsync("alice@example.com", "Pass123!");

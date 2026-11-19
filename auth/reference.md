@@ -1276,7 +1276,7 @@ builder.Services.AddSingleton(_ => new AoudaClient(new AoudaClientOptions
 {
     ServerUrl    = builder.Configuration["AoudaAuth:ServerUrl"]!,
     DatabaseName = builder.Configuration["AoudaAuth:DatabaseName"]!,
-    AppAuth      = new AppAuthOptions { ApiKey = builder.Configuration["AoudaAuth:ServiceKey"]! }
+    ApiKey       = builder.Configuration["AoudaAuth:ServiceKey"]!
 }));
 ```
 
