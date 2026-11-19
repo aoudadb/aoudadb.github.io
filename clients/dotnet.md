@@ -495,9 +495,10 @@ JSON, queries, named queries, subscriptions, typed and untyped) and both WebSock
 A null cell is `null` and an empty array is empty. The `byte[]` of a `Byte[]` column is told from a scalar `Byte` by the column's
 type, never by the value's shape. A `byte[]` travels as its base64 text, which a `String` column stores as sent and which the
 three bytes `D3 4D 76` spell as the numeric text `"0012"`. So the SDK refuses a `byte[]` bound to a column that is neither
-`Byte[]` nor `String` before sending (**BL-1265, next train**), on every write that takes dictionaries — `InsertAsync`, `UpdateAsync`,
-the write stream (insert and upsert), `BulkLoadAsync`, `BulkLoadMultiTableAsync` (the table a row's `_table` names) and
-`BulkLoadJobsAsync` — with `ArgumentException`:
+`Byte[]` nor `String` before sending (**BL-1265, next train**), on every write that carries values — `InsertAsync`, `UpdateAsync`,
+`BatchAsync`'s updates, the write stream (insert and upsert), `BulkLoadAsync`, `BulkLoadMultiTableAsync` (the table a row's `_table`
+names) and `BulkLoadJobsAsync` — with `ArgumentException`. The same holds for a `ReadOnlyMemory<byte>` or `Memory<byte>` (also sent
+as base64), and for a `byte[]` in a column batch's object column (`ColumnBatchBuilder`'s `SetObject`), which is sent as JSON:
 
 ```text
 ArgumentException: Column 's' (row 0) is Byte; a byte[] is sent as base64 text, which a Byte column would read as a number — send a byte, or use a Byte[] column.
@@ -508,7 +509,9 @@ the SDK reads the table (`GET …/tables/{name}`) the first time a row holds a `
 when a `byte[]` names a column it does not know or a write that used it fails, and reads it fresh at the start of each bulk load. A
 row without a `byte[]` costs nothing. The read needs `Read` on the table: a principal that may write a table but not read it gets
 that refusal when a row holds a `byte[]`, and nothing is sent. A table that does not exist, and a column it does not have, are left
-to the server, as before.
+to the server, as before. ⚠️ Outside a bulk load the SDK does not notice that someone else changed a column's type: if a table is
+dropped and re-made with a `String` or `Byte[]` column turned `Byte` (or the type altered) after this client read it, a `byte[]`
+sent there is still stored as a number until a write fails or a new client is made (**BL-1650**).
 
 ```csharp
 var samples = client.GetTable("Samples");
