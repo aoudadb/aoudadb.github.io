@@ -518,8 +518,9 @@ The factories, the null and absent bitmaps, `ColumnBatchBuilder` and `ColumnBatc
 - **The JSON fallback.** A batch with a column no frame can carry (an object column from `ColumnBatchBuilder`) is sent as a JSON
   column-array body of the same rows, after the frames before it. So is every batch when `:begin` does not list
   `column-batch-v2` in `acceptedAppendFormats`. The values loaded are the same either way.
-- **Absent is not null, and a bulk load applies no defaults.** A cell marked absent is stored as null, except that an absent
-  `autoIncrement` cell is generated (BL-1104, as for any `:append`). An insert (`InsertAsync(ColumnBatch)`) does apply defaults.
+- **Absent is not null, and a bulk load applies defaults as an insert does** (**BL-1104, next train**). A cell marked absent takes
+  its column's default (null when it has none), and an absent `autoIncrement` cell is generated, as for any `:append`. Until then a
+  bulk load stored an absent cell as null.
 - **A bulk load refuses a column its table does not have and a missing key** (**Lead S27a, 0.6.0**; BL-1130, BL-1129: the
   column used to be dropped, the key stored as `0`). A null in another NOT NULL column is stored as the type's default unless the
   load asks for `Validation = BulkLoadValidation.Strict`; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060).
