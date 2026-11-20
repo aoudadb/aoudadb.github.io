@@ -533,13 +533,13 @@ Primary proving tests:
 ## 2.10 Configuration and settings reference (complete surface)
 
 {: .note }
-**Precedence and restart:** [Server configuration](server-configuration.md). Memory limits can also be changed at runtime via `PATCH /admin/config` (in-memory until restart unless set in startup config).
+**Precedence and restart:** [Server configuration](server-configuration.md). Memory limits can also be changed at runtime via `PATCH /admin/config`, which saves them: a PATCHed `memory.maxTotalRamBytes`, `memory.maxHotBytes` or `memory.maxPageCacheBytes` applies at once and again after a restart; a saved `0` cap leaves the startup configuration's value standing (**BL-1099, next train** — the two caps used to be saved and echoed and change nothing). See [`PATCH /admin/config`](../reference/http-api.md#patch-adminconfig).
 
 | Setting | Type | Default | Allowed values | Where set | Notes |
 |---|---|---|---|---|---|
 | `Aouda:Memory:MaxTotalRamBytes` | long | `0`: derived from the host (70 % of a cgroup limit, else 40 % of RAM) | `0` or `>= 1048576` | startup config / runtime resize | Process RSS ceiling; hot/cache thresholds derive from the governed budget |
-| `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config | `0` means 45% of the governed budget (floor 32 MB) |
-| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, 0.6.0**); on (**ColumnarRead, 0.3.0**) |
+| `Aouda:Memory:MaxHotBytes` | long | `0` | `>= 0` | startup config / runtime (`memory.maxHotBytes`, **BL-1099, next train**) | `0` means 45% of the governed budget (floor 32 MB); a set value is the server's total, scaled to each database's share |
+| `Aouda:Memory:MaxPageCacheBytes` | long | `0` | `>= 0` | startup config / runtime (`memory.maxPageCacheBytes`, **BL-1099, next train**) | `0` means 10% of each database's share of the governed budget (floor 8 MB); a set value is the server's total, scaled to each database's share (**Lead S10, 0.6.0**); on (**ColumnarRead, 0.3.0**) |
 | `databases.<db>.maxMemoryShareBytes` | long? | `null` | null or non-negative | `aouda.json` (**BL-1463, 0.16.0**) | Cap on the database's share of the server budget when set (`MaxMemoryBytes` is refused at startup: "no longer supported") |
 | `databases.<db>.defaultTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | `aouda.json` (**BL-1463, 0.16.0**) | Default for new tables in that DB |
 | `CreateTableRequest.policy.storageTemperature` | string | `Auto` | `Auto`, `HotOnly`, `ColdPreferred` | HTTP create-table body | Per-table policy at creation |
