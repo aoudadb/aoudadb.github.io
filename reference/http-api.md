@@ -5137,7 +5137,10 @@ arrive after this message are live whatever their time. No per-row `change` is s
 **Both notices** are ordered in the table's change stream (a `range_delete` is emitted inside the statement's commit, so a row
 inserted after it arrives after it), kept by the resume buffer and replayed on `resume_from`. They go to every subscriber of the table
 that is not denied it: a notice names no row, so `filter`, a named query's bound `where` and row conditions do not apply. A conflated
-subscription sends what it holds first. A client that does not know these types ignores them ([Type Discriminator](#type-discriminator))
+subscription sends what it holds first. An embargoed subscription's notice goes through its embargo hold (**BL-1317, next train**):
+a held change the notice covers is never released after it, the notice's time (`horizon` / `before`) is at most the subscriber's
+cutoff — `now − embargoSeconds` plus one tick, for a `Date` column the next day at midnight UTC — and a subscription whose embargo
+releases nothing gets none. A client that does not know these types ignores them ([Type Discriminator](#type-discriminator))
 and keeps rows the server no longer returns until it subscribes again. See
 [Real-time Streaming — Horizons and range deletes](../guides/real-time.md#horizons-and-range-deletes).
 
