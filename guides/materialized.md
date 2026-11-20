@@ -383,7 +383,12 @@ the answer equal.
     `client.MaterializedQueries.RefreshTableAsync(...)` / `RefreshManyAsync(...)`, and
     `aouda mq refresh --source-table <table> [--stale-only]`. See
     [§2.11a](#211a-refreshing-several-queries-at-once-pooled-refresh). No TypeScript client surface
-    yet.
+    yet. The refresh finishes current, including commits that land while it scans, and does not read the source
+    table a second time. A commit already in the snapshot that scan read is not applied again; a commit that becomes
+    visible after it is applied once, in order, before the refresh returns. A maintenance-feed failure during the scan
+    still leaves the query stale. The frontier is that snapshot's position and the commits the new result actually
+    applies, not the database log head. A bulk-load job the snapshot did not read stays owed, and the refresh does not claim
+    current over it (**BL-1697, next train**).
   - **Memory budget**: a rebuild holds one grant. A build that outgrows it partitions and spills
     through its build table instead of being retired (**WorkloadCore S12, 0.3.0**); a rebuild
     refused for capacity leaves the query readable, stale and requeued, never in `Error`. See
