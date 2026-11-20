@@ -1317,7 +1317,8 @@ The same applies to `POST …/named-queries/{name}/query`; the named-query batch
   still held whole and still refused there. A batch is sized from what the rows' frames actually cost — the first is one row
   group, so long strings are measured before they are batched — and the size only grows with what it meets: a table whose rows
   become much wider partway through can still pass the ceiling in one batch, and that read then ends with an error end frame
-  (`MEMORY_BUDGET_EXCEEDED`). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
+  (`STATEMENT_TOO_LARGE`, status 400, when that batch alone exceeds the ceiling — the same read meets it again — **BL-1033, next
+  train**; `MEMORY_BUDGET_EXCEEDED`, status 503, when other work held the memory). Its frames are cut per row group (at most 65,536 rows, never past half the reader's 256 MB frame
   budget) and come in the order the JSON answer's rows have. Its `stats.rowsScanned` is the rows the scan read (the rows of the row
   groups no statistic ruled out) and `executionMs` the time to the last frame (**Lead S09, 0.6.0**: before, `rowsScanned`
   repeated `rowsReturned` and `executionMs` was the time to the count). A string value over 16 MB fails a streamed read with an
