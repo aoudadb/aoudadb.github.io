@@ -279,8 +279,8 @@ Aouda extends its columnar storage model with two new primitives alongside the e
   row sent, and so did `InsertEdgesAsync` / `POST …/edges`; only the row API kept them.
 
   An edge inserted through `POST …/edges` keeps the `null` it was stored with when a property's `default` or nullability changes
-  later: the change first writes the table's buffered edges to segments (**BL-1249, next train**), so it reaches only edges written
-  after it — in the running server and after a crash replays the log. If those edges cannot be written out at that moment, the
+  later: the change first writes the table's buffered rows and edges to segments (**BL-1249, next train**), so it reaches only edges
+  written after it — in the running server and after a crash replays the log. If they cannot be written out at that moment, the
   change is refused with nothing changed; retry it. A property **added** after an edge was stored reads as on a tabular table (the
   column's `default` at the change, else `null`).
 
