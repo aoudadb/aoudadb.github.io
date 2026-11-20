@@ -375,7 +375,7 @@ ARRAY_COLUMN_UNSUPPORTED: column 'Samples.D' is Double[]; an array column cannot
 | an ad-hoc `PATCH …/rows` with a `setExpr` on one; a `DELETE …/rows` or a `POST …/rows/batch` delete with an `orderBy` on one (**BL-035, 0.9.0**) | the request | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing deleted |
 | a subscription `filter`, or a `conflate.key` (**BL-035, 0.9.0**) | `subscribe` | an `error` message with code `ARRAY_COLUMN_UNSUPPORTED` |
 | a route or tee under `applyTransforms` that copies an array column into a column of another type, or a scalar into an array column (**BL-035, 0.9.0**) | bulk-load `:begin` | `400 ARRAY_COLUMN_UNSUPPORTED` |
-| a column of an **edge table** (an edge table stores only its source, destination and label) (**BL-035, 0.9.0**) | `POST …/tables/{name}/columns` on an edge table (and the engine's `CreateEdgeTableAsync`) | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing added |
+| an edge table's **source, destination or label** column (**BL-1249, next train**; from 0.9.0 until then, every column of an edge table) | the engine's `CreateEdgeTableAsync`, and adding a column of that name | `400 ARRAY_COLUMN_UNSUPPORTED`, nothing created or added |
 | a `filter` materialized query over a table **without a primary key**, selecting an array column (**BL-035, 0.9.0**) | `schema apply` | that entry is `Failed` |
 
 A `default` given as text is refused with `ARRAY_COLUMN_UNSUPPORTED`; one given as a JSON array (`"default": [1.0]`) is not a valid
@@ -408,8 +408,9 @@ full size; the whole table took 0.46 ×.
 
 - **Element selection and element predicates.** No `Rates[10]`, no `any element > x`, no `array_length`. The array is a value.
 - **Sorting, grouping, aggregating, joining or keying on an array column.** See the table above.
-- **An array column on an edge table.** Refused (see the table above): an edge table stores only its source, destination and
-  label.
+- **An array column on an edge table** is a property like any other (**BL-1249, next train**): the bulk load and `POST …/rows`
+  write it, and `POST …/edges` gives a nullable one its null cell (a `NOT NULL` one makes `POST …/edges` refuse the call). It was
+  refused from 0.9.0 until then, because an edge table stored only its source, destination and label.
 - **Embedded mapping.** `Aouda.Embedded` refuses the six names (BL-1213) and keeps inferring a CLR array property as a JSON
   `String` column.
 - **Studio can read an array column but not edit one**: no edit, no add-row field, no filter, sort, group or join on it.

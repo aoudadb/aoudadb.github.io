@@ -421,8 +421,8 @@ batches, rows, `applyTransforms`, `preTransformed`, partitioned and clustered ta
   insert with such a transform is refused before anything lands).
 - **An array's payload counts against the job's ingest buffer** (its raw bytes plus 32 a value, so a load of wide curves fills the buffer
   in fewer rows) and spills like any column.
-- **An edge table cannot have an array column** (refused when the column is added, with `ARRAY_COLUMN_UNSUPPORTED`), so a bulk
-  load never meets one.
+- **An edge table's array property loads as on any table** (**BL-1249, next train**; an edge table refused an array column
+  from 0.9.0 until then). Only its source, destination and label column cannot be an array.
 
 **The SDK factories.** C#: `ColumnBatchColumn.FromDoubleArrays`, `FromFloat32Arrays`, `FromInt32Arrays`, `FromInt64Arrays`,
 `FromByteArrays` and `FromStringArrays`, each `(string name, T[]?[] values, byte[]? absentBits = null)` — a `null` row is a null cell, and the rows are **copied**
@@ -992,7 +992,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.WriteConcernTimeout` | `TimeSpan` | `5m` | positive duration | Engine/API/client | Timeout does not roll back committed load. |
 | `BulkLoadOptions.AdditionalTables` | list | `null` | table names | Engine/API/client | Enables multi-table atomic load. |
 | `BulkLoadOptions.DeferIndexBuild` | bool | `true` | `true/false` | Engine/API/client | Deferred work reported in progress DTO. |
-| `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables. |
+| `BulkLoadOptions.EmbeddingModelVersion` | string? | `null` | any non-empty string for vector tables | Engine/API/client | Required for vector-bearing tables: (**BL-1248, next train**) refused at `:begin` with `400 BULK_LOAD_INVALID_OPTIONS` when missing (it failed the job at its first `:append` and `:commit` before). |
 | `BulkLoadOptions.MaxRowsPerSegment` | int? | `TargetRowsPerPage * 16` | positive int | Engine/API/client | Segment sizing knob. |
 | `BulkLoadOptions.ConflictPolicy` | enum | `Block` | `Block`, `FailFast` | Engine/API/client | Controls behavior for concurrent regular writes. |
 | `BulkLoadOptions.Validation` / `options.validation` | `BulkLoadValidation` / string | `Coerce` / `"coerce"` | `Coerce`, `Strict` / `"coerce"`, `"strict"` | Engine/API/client / HTTP `:begin` options / CLI `--validation` | (**Lead S27a, 0.6.0**) What the load checks; see [A load's validation](#a-loads-validation-coerce-or-strict-lead-s27a-060). Replaces `PkUniquenessOverride`, which nothing applied and the server now refuses. |
