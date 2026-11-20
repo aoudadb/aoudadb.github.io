@@ -1066,7 +1066,7 @@ handles (namespace `Aouda.Client` unless noted):
 
 | Exception | When |
 |---|---|
-| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. |
+| `AoudaRequestException` (`Aouda.Abstractions`) | The server refused the request: `400`, `403` or `409`; `ErrorCode` says why. `400 PARTITION_FILTER_REQUIRED` is its subclass `AoudaPartitionFilterRequiredException`. (**BL-1033, next train**) `400 STATEMENT_TOO_LARGE` — a statement that alone exceeds the server's read-path memory ceiling — is this exception, never retried; `Details` says how to narrow it (it was a `503` the policy retried to its bound). |
 | `AoudaAuthenticationFatalException` | A subtype of `AoudaAuthenticationException`, thrown only with `AuthFailurePolicy.FailFast` (**BL-1386, 0.11.0**): a `401`, or a `403` that refuses the credential itself. The original failure is the `InnerException`. A batch writer faults on it even with `ContinueOnError`. |
 | `AoudaCapacityException` | The server is short of capacity (`503 MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, `429 SERVER_AT_CAPACITY`); `RetryAfter` says when to come back. Retried by the policy first (§8). A subclass of `AoudaServiceUnavailableException`, which is any other `503`. |
 | `AoudaServerStartingException` (**0.15.0**) | `503 SERVER_STARTING` or `503 SETUP_REQUIRED`: the server is up and not ready. A subclass of `AoudaServiceUnavailableException`; `RetryAfter` is the server's wait (`null` for `SETUP_REQUIRED`). Retried first, waiting `Retry-After` (§3a), and never counted by the circuit breaker or `AuthFailurePolicy`. |
