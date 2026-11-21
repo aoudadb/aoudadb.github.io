@@ -64,6 +64,7 @@ _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+t
 _ALLOW = {
     # Durability-1: cards whose released-changelog mention is an older, open note, not the fix this train ships. Remove each id in the
     # same commit that replaces its markers with the version (dev/Release-And-Version-Bump.md section 2).
+    "BL-332",   # Studio's point-in-time restore: Studio 0.0.22 shipped the exact-restore page only
     "BL-403",   # the `aouda backup` CLI: 0.1.20 listed it as not implemented
     "BL-1010",  # a backup at WAL position 0: 0.4.0 made it exact-restore-only
     "BL-1133",  # frameless multi-table loads: 0.6.0 names the gap

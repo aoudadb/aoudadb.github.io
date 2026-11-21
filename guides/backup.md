@@ -284,8 +284,9 @@ const schedule = await client.admin.backup.getSchedule();
 await client.admin.backup.setSchedule({ ...schedule, cronExpression: "0 2 * * *" });
 ```
 
-The MCP `aouda_backup_restore` tool restores exactly only. Studio's backup page restores exact points; point-in-time restore over HTTP, the CLI
-and both SDKs.
+The MCP `aouda_backup_restore` tool restores exactly only. Studio's backup page restores exact points; from the Studio release after 0.16.0 it also
+restores to a point in time, edits retention, previews a prune, labels an incomplete set and shows each error with its remedy (**BL-332, next train**).
+Point-in-time restore is available over HTTP, the CLI and both SDKs.
 
 ## 8. Operations
 
