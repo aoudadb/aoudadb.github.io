@@ -62,8 +62,8 @@ nothing is lost, a named test in the repository proves it.
   does not match the manifest, is refused the same way. A server keeps that database quarantined with the refusal as its message and
   opens the others. Two ways on: restore the database from a backup, or open it past the damaged frame with
   `POST /api/databases/{db}/unquarantine?salvagePastCorruptWal=true` (or `aouda databases unquarantine --salvage-corrupt-wal`), which
-  skips the frame and applies the frames after it — the writes of the skipped frame are lost, and the open logs it. Until a checkpoint
-  moves past the damaged frame, a restart of that database refuses it again. One limit of the check: a damaged frame followed by a whole
+  skips the frame and applies the frames after it — the writes of the skipped frame are lost, and the open logs it. The salvaged open
+  closes the damaged segment at its next write; a crash before the next checkpoint can refuse the database again (salvage it again). One limit of the check: a damaged frame followed by a whole
   512-byte block of zeros reads as a torn tail and is trimmed, as before, with a warning in the log.
 - **The `os` power-loss statement is proved against a model of power loss**, not on a real disk. On a real disk the kernel can write some files
   back out of order; one such case (an `os` mark or a load file reaching the disk ahead of the log) is an open card (BL-1705): it can keep
