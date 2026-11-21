@@ -53,10 +53,21 @@ nothing is lost, a named test in the repository proves it.
 - **A damaged control file is refused, not read partly.** A log manifest, a pending restore's control file, a write-buffer snapshot, the
   clean-shutdown marker or another versioned file that is damaged or of another version is **refused** with a coded error that names the file
   and both versions (`FILE_FORMAT_REFUSED`, `WAL_MANIFEST_REFUSED`; a start exits 78) — no missing field is defaulted.
-- **A damaged WAL frame ends the replay there.** A write cut off by the loss (a torn tail) is trimmed and everything before it is kept. The
-  same holds for a frame that fails its checksum in the middle of the log: the open replays up to it, logs a warning and opens with that
-  prefix — frames after it are not replayed, and in the segment being written they are trimmed (BL-1741). A segment the log manifest names
-  but that is missing fails the open.
+- **A torn tail is trimmed; a damaged WAL frame anywhere else refuses the open** (**BL-1741, next train**). A write cut off by a crash or
+  a power loss (the torn tail of the log's last write) is trimmed and everything before it is kept, as before. Any other frame that fails
+  its check — in a segment the log has already closed, or in the segment being written with frames written after it — is damage, not a
+  crash: the database **does not open** and nothing in the log is changed. The refusal is
+  `FILE_FORMAT_REFUSED: kind=wal-segment found=<checksum mismatch | length mismatch | truncated> …` and names the segment file, its
+  sequence number and the frame's position. A segment the log manifest names but that is missing (`found=missing`), or whose header
+  does not match the manifest, is refused the same way. A server keeps that database quarantined with the refusal as its message and
+  opens the others. Two ways on: restore the database from a backup, or open it past the damaged frame with
+  `POST /api/databases/{db}/unquarantine?salvagePastCorruptWal=true` (or `aouda databases unquarantine --salvage-corrupt-wal`), which
+  skips the frame and applies the frames after it — the writes of the skipped frame are lost, and the open logs it. The salvaged open
+  closes the damaged segment at its next write; until a checkpoint moves the replay's start past the damaged frame (the rows after it
+  written out of the write buffer), a later open — after a crash, or after a clean close that wrote nothing out — can refuse the
+  database again: salvage it again. Limits of the check: a damaged frame followed by a whole 512-byte block of zeros reads as a torn
+  tail and is trimmed, as before, with a warning in the log; damage in the very last frame written, or a length prefix damaged in more
+  than one bit so that the frame seems to run past the last written byte, is trimmed as a torn tail too.
 - **The `os` power-loss statement is proved against a model of power loss**, not on a real disk. On a real disk the kernel can write some files
   back out of order; one such case (an `os` mark or a load file reaching the disk ahead of the log) is an open card (BL-1705): it can keep
   an UPDATE's delete of the old row and lose the new row — half a statement, which the model does not show. If you cannot lose
@@ -407,7 +418,7 @@ Design characteristics:
 
 1. Process is terminated after durable and non-durable writes are interleaved.
 2. On startup, storage initializes and WAL replay is invoked.
-3. Replay reads segments, validates frames (CRC), trims torn tail if present, and reapplies durable frames. Reopening the log for writing also checks each frame's CRC and clears what a torn write left, so new commits are not appended behind the tear (**ColumnarCore S07 review, 0.2.0**).
+3. Replay reads segments, validates frames (CRC), trims torn tail if present, and reapplies durable frames. Reopening the log for writing also checks each frame's CRC and clears what a torn write left, so new commits are not appended behind the tear (**ColumnarCore S07 review, 0.2.0**). A frame that fails its check and is not the torn tail of the last write refuses the open instead (`FILE_FORMAT_REFUSED`, kind `wal-segment`; **BL-1741, next train**).
 4. `{db}/wal/CHECKPOINT` supplies `redoStartPosition`; segments whose end is at or below that horizon are not opened.
 5. Queries after startup observe replayed state; scenario tests validate expected rows.
 
@@ -638,6 +649,10 @@ Operational guidance:
     `strict` loses nothing acknowledged; `os` loses nothing to a process crash and may lose its last acknowledged writes to a power loss;
     `unlogged` keeps its flushed rows after a crash, or is emptied if it was being changed; `memory` loses everything.
   - Check the server log of the open for a torn-tail repair, a refusal (`FILE_FORMAT_REFUSED`, `WAL_MANIFEST_REFUSED`) or a retirement.
+- "A database is quarantined with `FILE_FORMAT_REFUSED: kind=wal-segment`" (**BL-1741, next train**)
+  - A frame of its WAL is damaged where no crash can leave one (the message names the segment, the sequence number and the position).
+    Restore the database from a backup, or accept the loss of that frame's writes with
+    `POST /api/databases/{db}/unquarantine?salvagePastCorruptWal=true`. Check the disk: a damaged log file is usually a failing device.
 - "An `unlogged` table is empty after a restart" (**Lead S26c, 0.6.0**)
   - The open did not follow a clean close (a crash, a kill, a close whose snapshot failed, a restore) and the table was being
     changed at the time, so the server emptied it and logged a warning naming it and its row count. That is the level's contract
