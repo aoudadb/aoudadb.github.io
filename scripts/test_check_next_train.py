@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("check_next_train", os.path.join(_HERE, "check-next-train.py"))
@@ -128,9 +129,10 @@ class CheckTests(unittest.TestCase):
 
     def test_an_allow_listed_phase_card_stays_next_train(self):
         """0.14.0 names BL-1463 for a Declare slice. A marker for the rest of that card is not stale."""
-        self.assertEqual(cnt._ALLOW, {"BL-1463", "BL-1464"})
-        self.write("a.md", "(**BL-1463, next train**) and (**BL-100, next train**)\n")
-        findings = cnt.check(self.root, self.released)
+        # The set changes with each train (a card whose released mention is an older note); the mechanism is what is pinned here.
+        with mock.patch.object(cnt, "_ALLOW", {"BL-1463", "BL-1464"}):
+            self.write("a.md", "(**BL-1463, next train**) and (**BL-100, next train**)\n")
+            findings = cnt.check(self.root, self.released)
         self.assertEqual([f.bl for f in findings], ["BL-100"])
 
     def test_client_only_id_names_the_client(self):
