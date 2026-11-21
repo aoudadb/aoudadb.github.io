@@ -39,7 +39,7 @@ The response is a token pair. When the principal has an active MFA factor the pa
 
 `POST /api/databases/{db}/auth/signout` revokes the session. `POST …/auth/refresh` remints the access token at the same assurance level the session was minted with. It does not drop `aal2` to `aal1`.
 
-A session token carries the session. It does not carry a role list or a permission list. The server reads statements on each request.
+A session token carries the session (`aud` is the database limit; omit `databases` on sign-in and it is `["*"]`). It does not carry a role list or a permission list. The server reads statements on each request.
 
 `POST /api/auth/signin` is the same call for a `_serverauth` principal (an operator).
 

@@ -39,3 +39,5 @@ There is no per-call credential on a shared client, and no second header. A shar
 ## A backend-for-frontend
 
 A BFF that signs the person in holds the session in its own cookie and sends the session as the bearer to Aouda. The browser never sees a key. The BFF's own key, if it has one, is for the calls it makes as itself, on a different client.
+
+If the BFF (or another gateway) validates the session JWT itself, match `aud` to what the token carries. An ordinary sign-in with no `databases` limit is `aud: ["*"]`; a fixed audience of `auth` or `_auth` fails every such token. Details: [What a session token carries](reference.md#what-a-session-token-carries).
