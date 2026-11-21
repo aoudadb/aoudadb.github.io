@@ -600,7 +600,7 @@ Expected result:
 1. Create the database at `durability: "os"`.
 2. Give one table `"durability": { "level": "unlogged" }` in the declarative schema; leave another without a level.
 3. `GET .../tables/{table}`: the first reads `{ "level": "unlogged", "source": "table" }`, the second `{ "level": "os", "source": "database" }`.
-4. Attempt invalid config: a table naming `strict` (needs a `strict` database) or `os` (a database level only).
+4. Attempt invalid config: a table naming `strict` (needs a database with a WAL — `strict` or `os`) or `os` (a database level only).
 
 Expected result:
 - Valid overrides apply; invalid override is rejected.

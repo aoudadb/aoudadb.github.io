@@ -705,8 +705,8 @@ Steps:
 
 Expected result checks:
 - `durable_db` emits WAL writes; `ephemeral_db` does not.
-- A table naming `strict` in `ephemeral_db` is rejected (`strict` needs a `strict` database).
-- Reopening `durable_db` at `unlogged` is refused: it has a WAL, and the open would ignore the writes it holds (BL-1145).
+- A table naming `strict` in `ephemeral_db` is rejected (`strict` needs a database with a WAL: `strict` or `os`).
+- Reopening `durable_db` at `unlogged` replays and flushes its WAL, then retires it (**BL-1145, next train**); it is refused (`WAL_RETIREMENT_REFUSED`) only when that cannot finish.
 - Replication filtering follows effective table/database durability settings.
 
 ### Scenario 3: Engine-level backup + exact restore validation

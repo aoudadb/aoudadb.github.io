@@ -696,7 +696,7 @@ await foreach (var handle in client.BulkLoadJobsAsync("trades", days, new BulkLo
 | `PostLoadMqBehavior` | `ClientPostLoadMqBehavior.Auto` | `Skip` leaves the load's materialized queries behind until you refresh them. |
 | `WriteConcern` / `WriteConcernTimeout` | `Acknowledged` / 5 minutes | Replica acknowledgement at commit. |
 | `IdentityInsert` | `false` | Store explicit `autoIncrement` values as they are; every row must give them. |
-| `Durability` | `null` (the database's level for a load) | (**Lead S26c, 0.6.0**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os`, `Strict` everywhere else. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
+| `Durability` | `null` (the database's level for a load) | (**Lead S26c, 0.6.0**) `BulkLoadDurability.Strict` or `Os`. `null` is `Os` in a database at `os` (`Strict` when every table of the job names `strict`; **BL-1175, next train**), `Strict` everywhere else. A multi-table job, or one into an edge or vector table, needs `Strict` in an `os` database. `Os` skips the fsync before the commit: a power loss before the server has synced the job drops it whole, and its status reads `lost`. See [A load's durability](../guides/bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060). |
 | `ApplyTransforms` / `PreTransformed` | `false` / `false` | A table with derived columns, checks or transforms needs exactly one of them. |
 | `ConflictPolicy` | `BulkLoadConflictPolicy.Block` | `FailFast` fails at once when another load holds the table. |
 | `Progress` | none | An `IProgress<BulkLoadProgress>` called after each `:append` and at commit. `BulkLoadProgress` carries deferred-work counters, not rows: the per-`:append` report is empty, so count rows in your source. |
@@ -1040,6 +1040,80 @@ catching it:
 | `FORMULA_TOKEN_REQUIRES_PRIMARY` (421) | `AoudaFormulaTokenRequiresPrimaryException` (an `AoudaMisdirectedRequestException`): read from the primary |
 | `FORMULA_NOT_MAINTAINED` (503) | `AoudaFormulaNotMaintainedException` (an `AoudaServiceUnavailableException`): **not retried** and not counted against the circuit breaker; it is the node's state, not overload |
 
+## 8d) Backup and restore (**Durability-1 S14, next train**) {#backup}
+
+`client.Backup` (`BackupAdminApi`, namespace `Aouda.Client.Admin`) is the admin surface over `/admin/backup/*` and needs an
+administrator's key. A backup is a **set** — one id, every database, the auth database first; see [Backup and restore](../guides/backup.md).
+
+```csharp
+using Aouda.Abstractions;
+using Aouda.Client;
+using Aouda.Client.Admin;
+
+public static class BackupExamples
+{
+    public static async Task RunAsync(AoudaClient client, CancellationToken ct)
+    {
+        // Trigger a backup (a set for every database)
+        TriggerBackupResponse made = await client.Backup.TriggerAsync(new TriggerBackupRequest(Incremental: true), ct);
+
+        // List: Complete is false for a set a member failed; Refused says why a record could not be read
+        ListBackupsResponse list = await client.Backup.ListAsync(ct);
+        IEnumerable<BackupSummary> restorable = list.Backups.Where(b => b.Complete && b.Refused is null);
+
+        // One set: per member database, the manifest's cut, redo-start position and branches
+        BackupSetDetail detail = await client.Backup.ShowAsync(made.BackupId, ct);
+        foreach (BackupSetMember m in detail.Members)
+            Console.WriteLine($"{m.Database} R={m.RedoStartPosition} P={m.WalPosition}");
+
+        // Exact restore
+        await client.Backup.RestoreAsync(made.BackupId, ct);
+
+        // Point-in-time restore: the last transaction commit <= TargetTime; BackupId may be left out
+        RestoreBackupResponse restored = await client.Backup.RestoreAsync(
+            new RestoreBackupRequest(BackupId: made.BackupId, TargetTime: DateTimeOffset.Parse("2026-05-01T12:00:00Z")), ct);
+        Console.WriteLine(restored.Pitr?.Count);
+
+        // Retention: none by default (nothing is pruned). SetRetentionAsync replaces the whole policy
+        await client.Backup.SetRetentionAsync(new RetentionPolicy(KeepLast: 5, PitrWindow: TimeSpan.FromDays(7)), ct);
+        RetentionPolicy saved = await client.Backup.GetRetentionAsync(ct);
+
+        // Prune: a dry run unless execute is true; the executed plan is computed again by the server
+        PruneBackupsResponse plan = await client.Backup.PruneAsync(execute: false, ct);
+        foreach (PruneSet set in plan.Sets)
+            Console.WriteLine($"{set.BackupId} {(set.Keep ? "kept" : "deleted")} {string.Join(",", set.Rules)}");
+        await client.Backup.PruneAsync(execute: true, ct);
+
+        // Schedule
+        BackupSchedule schedule = await client.Backup.GetScheduleAsync(ct);
+        await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *" }, ct);
+
+        // A backup error carries the server's code and RemedyText: what to do, as an instruction
+        try
+        {
+            await client.Backup.RestoreAsync("no-such-backup", ct);
+        }
+        catch (AoudaException ex)
+        {
+            Console.Error.WriteLine($"{ex.ErrorCode}: {ex.RemedyText}");
+        }
+    }
+}
+```
+
+- `ShowAsync`, `PruneAsync`, `GetRetentionAsync`, `SetRetentionAsync`, the `RestoreBackupRequest` form of `RestoreAsync` and
+  **`RemedyText`** on `AoudaException` are new. `RetentionPolicy.PitrWindow` is a `TimeSpan`.
+- **A call that runs long is not cut off at the client's default timeout.** `TriggerAsync`, both `RestoreAsync` forms and an executed
+  `PruneAsync` wait up to `BackupAdminApi.BackupOperationTimeout` (one hour). A call that times out may still be running on the server;
+  a retry meets `409 BACKUP_IN_PROGRESS`. They are **not re-sent** after a lost answer (a repeat would take a second backup, or restore
+  again over what was written after the first restore) — §8.
+- **`RemedyText`** is set on the exception of every `/admin/backup/*` error: the server's `remedy` string. `Remedy` stays the structured auth remedy.
+  A backup call can also meet `507 DISK_FULL` (an `AoudaException`) and `503 WAL_FAILED` (an `AoudaServiceUnavailableException`): the server applied nothing, but a write is re-sent only after the capacity refusals the client knows (`AoudaCapacityException`), so these two reach your code — retry after `RetryAfter` yourself.
+- **After a restore, discard the consistency token this client holds.** A restore rewinds the node; a token from before it is ahead of
+  the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a new client.
+
+---
+
 ## 9) Errors
 
 Server errors are `AoudaException` (namespace `Aouda.Abstractions`) or a subclass, with `ErrorCode`, `StatusCode`, `RequestId`
@@ -1054,7 +1128,7 @@ handles (namespace `Aouda.Client` unless noted):
 | `AoudaServerStartingException` (**0.15.0**) | `503 SERVER_STARTING` or `503 SETUP_REQUIRED`: the server is up and not ready. A subclass of `AoudaServiceUnavailableException`; `RetryAfter` is the server's wait (`null` for `SETUP_REQUIRED`). Retried first, waiting `Retry-After` (§3a), and never counted by the circuit breaker or `AuthFailurePolicy`. |
 | `AoudaNotReadyException` (**0.15.0**) | `WaitUntilReadyAsync` reached its deadline; `ErrorCode` `CLIENT_SERVER_NOT_READY`, with `Waited`, `Issues`, `LastFailure` (§3a). |
 | `AoudaConnectionException` / `AoudaTimeoutException` | The connection failed, or the request timed out (a `504` too). For an insert, the rows may or may not have been written (§8). |
-| `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY` — with `StatusCode` set. |
+| `AoudaException` | Any other status — a `500`, a `413`, a `429` other than `SERVER_AT_CAPACITY`, a `507 DISK_FULL` (the write was not applied; the client does not re-send it) (**BL-1658, next train**) — with `StatusCode` set. |
 | `CircuitBreakerOpenException` | The circuit breaker is open; the call was not attempted. |
 | `ArgumentException` | A column batch failed `Validate()` (§6), or a factory refused its input (a decimal with too many places, a bitmap too short). Nothing was sent for that batch. |
 
