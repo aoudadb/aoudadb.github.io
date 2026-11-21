@@ -94,7 +94,7 @@ Principals and keys of the auth database come back with it (they are the lost ho
 | `PITR_BULK_LOAD_UNAVAILABLE` | A bulk load committed before the target has no files in the store or the archive | Restore to before the load's commit (the message names the job), or from a later backup |
 | `BACKUP_TARGET_TIME_INVALID` | The target is at or before the backup, or in the future; or the set is exact-restore-only (a database without a WAL) | Pick a target after the set's cut, or restore exactly |
 | exit 78 | The `--to` directory is not empty | Use an empty one |
-| `BACKUP_BLOB_DAMAGED` | A blob of the set or the WAL archive does not match its key (the message names the file and the set); nothing was written under its name, and the database the restore stopped in refuses to open (`RESTORE_INCOMPLETE`) (**BL-1739, next train**) | Delete the directory and restore another set |
+| `BACKUP_BLOB_DAMAGED` | A blob of the set or the WAL archive does not match its key (the message names the file and the set); nothing was written under its name, and the database the restore stopped in, if the restore had started writing it, refuses to open (`RESTORE_INCOMPLETE`; the message says so) (**BL-1739, next train**) | Delete the directory and restore another set |
 
 Over HTTP each refusal carries a one-line `remedy` field beside the message; the CLI prints it after the message. A directory a failed offline restore left behind holds a partial
 restore and **no registry**: nothing in it is opened by a start, and the database the restore stopped in holds `restore.incomplete`, so it

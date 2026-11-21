@@ -339,7 +339,7 @@ refused key (401 / 403) has the authentication envelope instead. The ones you wi
 | `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |
 | A restore failed part-way over several databases | the message ends `Databases already restored: …` | Restore again once the cause is fixed; those databases are already at the restore |
 | A blob of the set or the WAL archive does not match its key | `BACKUP_BLOB_DAMAGED` 409, naming the file and the set | Restore another set: the destination's copy is damaged. The database the restore stopped in refuses to open until a restore of it completes (**BL-1739, next train**) |
-| A database whose restore did not complete | `RESTORE_INCOMPLETE`: the database is quarantined (an embedded open throws) | Run the restore again, or restore another set; a restore that completes clears it (**BL-1739, BL-1740, next train**) |
+| A database whose restore did not complete | `RESTORE_INCOMPLETE`: the database is quarantined (an embedded open throws; an unquarantine answers 503 `RESTORE_INCOMPLETE`) | Run the restore again, or restore another set; a restore that completes clears it (**BL-1739, BL-1740, next train**) |
 | An S3 error on first use | `AmazonServiceException` in the log | Check the bucket, the region and the credential chain |
 
 ## 11. Formats and upgrading
