@@ -70,11 +70,17 @@ server on it with `aouda start --data-path <dir>`.
 - **The first open after an exact restore takes longer**: it flushes the restored write buffers so the restored rows are durable
   (**BL-1625, next train**). A crash before it finishes loses nothing; the next open does it again.
 - **A restore syncs what it wrote** before it reports success (**BL-1687, next train**).
-- A restore **refuses** a set that is not complete, a set record or manifest of another format, a target time it cannot serve and a backup it
-  cannot read, before it stops anything. Two checks come **after** the target has been replaced: the files' SHA-256 hashes, and a
-  point-in-time restore's archive window (§4.1). A hash that does not match is reported, not refused: the response says
-  `integrityVerified: false` and the database is opened on what was written — **treat that restore as failed** and restore again from
-  another set (BL-1739). A refused window leaves the database it was restoring part-restored (BL-1740): restore again.
+- A restore **refuses** a set that is not complete, a set record or manifest of another format, a target time it cannot serve, a backup it
+  cannot read and a point-in-time restore outside its archive window (§4.1), before it stops anything — a refused window changes nothing
+  (**BL-1740, next train**).
+- **Every blob is checked against its key as it is read** — its SHA-256 and its length, before the file gets its name: a backed-up file,
+  the catalog, an archived WAL segment, a branch's files. A blob that does not match refuses the restore with `BACKUP_BLOB_DAMAGED` (409),
+  naming the file and the set (**BL-1739, next train**); nothing is written under that file's name. `integrityVerified` in a successful
+  response is therefore always `true`.
+- **A restore that stops part-way leaves a database that refuses to open.** From its first change to its last step a restore marks the
+  database `restore.incomplete`; a database that holds it is not opened (`RESTORE_INCOMPLETE`) — the server keeps it quarantined, an
+  embedded open throws — until a restore of it completes (**BL-1739, BL-1740, next train**). A refused blob, a cancellation or a crash
+  part-way therefore never leaves the old database's catalog over the backup's files: run the restore again, or restore another set.
 
 **Point-in-time restore** — see §4.
 
@@ -121,8 +127,8 @@ instant** (`targetTime`).
   (**BL-1010, next train**).
 - **WAL that covers the window.** The local WAL since the backup — bounded by write volume, not by days (`MaxSlotWalKeepBytes`) — or,
   past that, the **WAL archive** (`Aouda:Archive`, §6). A restore whose archive does not reach back to the backup's replay position is
-  refused with `PITR_WINDOW_UNAVAILABLE` (409), never restored short (**BL-334, next train**). The check runs after the database's
-  files were replaced, so that database is left part-restored: restore it again, exactly or to a target inside the window (BL-1740).
+  refused with `PITR_WINDOW_UNAVAILABLE` (409), never restored short (**BL-334, next train**). Every database's window is checked before
+  any engine stops or any file changes, so a refused window leaves every database as it was (**BL-1740, next train**).
 - **The WAL-root incarnation the backup was taken in.** An exact restore starts a new incarnation, so a PITR from a backup that
   predates it needs the archive, or a backup taken after the restore.
 - **The archive's RPO for a host loss** is `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (a minute):
@@ -323,7 +329,7 @@ refused key (401 / 403) has the authentication envelope instead. The ones you wi
 | Restore of a set one database failed | `BACKUP_SET_INCOMPLETE` 409 | Restore another set; a prune removes it |
 | A set record of another version | `BACKUP_SET_REFUSED` 400 | Restore with the build that took it |
 | A target at or before the backup, or in the future; or a PITR of an exact-restore-only set | `BACKUP_TARGET_TIME_INVALID` 400 | Pick a target after the set's last cut, or restore the set exactly |
-| The archive does not cover the window | `PITR_WINDOW_UNAVAILABLE` 409 | The database named was left part-restored: pick a target inside the window, restore exactly, or point `--archive` at the archive's destination |
+| The archive does not cover the window | `PITR_WINDOW_UNAVAILABLE` 409 | Nothing was changed (**BL-1740, next train**): pick a target inside the window, restore exactly, or point `--archive` at the archive's destination |
 | A bulk load committed before the target is not in the store | `PITR_BULK_LOAD_UNAVAILABLE` 409 | Restore before the load's commit (the message names the job) or from a later backup |
 | A keyless delete the restore cannot apply | `PITR_KEYLESS_DELETE_UNRESOLVED` 409 | Restore to before the instant named, or from a later backup |
 | A damaged pending restore (`PITR_TARGET`) | `PITR_TARGET_REFUSED` | Run the restore again |
@@ -332,7 +338,8 @@ refused key (401 / 403) has the authentication envelope instead. The ones you wi
 | A read meets a cold segment whose column file is missing or short | `COLD_SEGMENT_UNREADABLE`, HTTP 500, logged | The read is refused, not answered with nulls; restore from a backup |
 | `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |
 | A restore failed part-way over several databases | the message ends `Databases already restored: …` | Restore again once the cause is fixed; those databases are already at the restore |
-| A restored file does not match its hash | the response has `integrityVerified: false` (a success status) | Treat the restore as failed; restore another set (BL-1739) |
+| A blob of the set or the WAL archive does not match its key | `BACKUP_BLOB_DAMAGED` 409, naming the file and the set | Restore another set: the destination's copy is damaged. The database the restore stopped in refuses to open until a restore of it completes (**BL-1739, next train**) |
+| A database whose restore did not complete | `RESTORE_INCOMPLETE`: the database is quarantined (an embedded open throws; an unquarantine answers 503 `RESTORE_INCOMPLETE`) | Run the restore again, or restore another set; a restore that completes clears it (**BL-1739, BL-1740, next train**) |
 | An S3 error on first use | `AmazonServiceException` in the log | Check the bucket, the region and the credential chain |
 
 ## 11. Formats and upgrading

@@ -90,14 +90,15 @@ Principals and keys of the auth database come back with it (they are the lost ho
 |---|---|---|
 | `BACKUP_MANIFEST_REFUSED: found=<n> expected=4 …` | A member's manifest is of another format | Restore it with the build that took it, or restore a newer backup |
 | `BACKUP_SET_INCOMPLETE` | A database of the set has no manifest, or the set has no completion record (every set taken before this release) | Restore another set |
-| `PITR_WINDOW_UNAVAILABLE` | The archive does not cover the time between the backup and the target. The check runs after the files were written: the database named is part-restored (BL-1740) | A later target is not better: pick one inside the window, restore exactly, or point `--archive` at the archive's destination |
+| `PITR_WINDOW_UNAVAILABLE` | The archive does not cover the time between the backup and the target. Checked for every database before anything is written: nothing was written under `--to` (**BL-1740, next train**) | A later target is not better: pick one inside the window, restore exactly, or point `--archive` at the archive's destination |
 | `PITR_BULK_LOAD_UNAVAILABLE` | A bulk load committed before the target has no files in the store or the archive | Restore to before the load's commit (the message names the job), or from a later backup |
 | `BACKUP_TARGET_TIME_INVALID` | The target is at or before the backup, or in the future; or the set is exact-restore-only (a database without a WAL) | Pick a target after the set's cut, or restore exactly |
 | exit 78 | The `--to` directory is not empty | Use an empty one |
-| `integrityVerified: false` (or `verified no`) in a successful result | A restored file does not match its hash; the restore wrote it anyway (BL-1739) | Treat the restore as failed: restore another set |
+| `BACKUP_BLOB_DAMAGED` | A blob of the set or the WAL archive does not match its key (the message names the file and the set); nothing was written under its name, and the database the restore stopped in, if the restore had started writing it, refuses to open (`RESTORE_INCOMPLETE`; the message says so) (**BL-1739, next train**) | Delete the directory and restore another set |
 
-Over HTTP each refusal carries a one-line `remedy` field beside the message; the CLI prints it after the message. A directory a failed offline point-in-time restore left behind holds a partial
-restore and **no registry**: nothing in it is opened by a start. Delete it and restore again.
+Over HTTP each refusal carries a one-line `remedy` field beside the message; the CLI prints it after the message. A directory a failed offline restore left behind holds a partial
+restore and **no registry**: nothing in it is opened by a start, and the database the restore stopped in holds `restore.incomplete`, so it
+refuses to open (`RESTORE_INCOMPLETE`) whatever opens it (**BL-1739, BL-1740, next train**). Delete it and restore again.
 
 ## What not to do
 
