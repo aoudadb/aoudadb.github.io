@@ -3720,23 +3720,60 @@ those details with the resource mode.
 
 ---
 
-### Backup/Restore Endpoints
+### Backup and restore admin routes
 
-All endpoints live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
+All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
+A backup is one **set**: every database of the server, the auth database first, committed by a set record written last (**BL-1637, next train**). Every example below is a response captured from a running server; ids are shortened.
 
 #### Summary
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/admin/backup/trigger` | Trigger an immediate backup |
-| `GET` | `/admin/backup/list` | List available backups |
-| `POST` | `/admin/backup/restore/{id}` | Restore from a specific backup |
-| `GET` | `/admin/backup/schedule` | Get the current backup schedule |
-| `PUT` | `/admin/backup/schedule` | Update the backup schedule |
+| `POST` | `/admin/backup/trigger` | Back up every database as one set |
+| `GET` | `/admin/backup/list` | List the sets |
+| `GET` | `/admin/backup/{id}` | One set, with each member's cut and branches (**BL-1637, BL-335, next train**) |
+| `POST` | `/admin/backup/restore/{id}` | Restore a set: exactly, or with a `targetTime` in the body |
+| `POST` | `/admin/backup/restore` | Restore by `backupId` and/or `targetTime` |
+| `POST` | `/admin/backup/prune` | Apply the retention policy; a dry run unless `execute` is `true` (**BL-1635, next train**) |
+| `GET` | `/admin/backup/retention` | The saved retention policy |
+| `PUT` | `/admin/backup/retention` | Save the retention policy (**BL-1635, next train**) |
+| `GET` | `/admin/backup/schedule` | The backup schedule |
+| `PUT` | `/admin/backup/schedule` | Update the schedule |
+
+#### The error envelope
+
+Every error from these routes is a JSON body with `error` (the message), a `code` from the list below, `details` (or `null`) and **`remedy`, a string that says what to do** (**BL-1637, next train**; `remedy` on these routes is a string, not the object other routes use). A message that carries a database name or a path is redacted where it names a key-shaped value (**BL-1607, next train**).
+
+```json
+{"error":"Backup 'nope' not found.","code":"BACKUP_NOT_FOUND","details":null,"requestId":null,"remedy":"List the backups (GET /admin/backup/list) and name a set that is listed, or a target time after a complete set's cut."}
+```
+
+| Code | Status | Raised by |
+|------|--------|-----------|
+| `BACKUP_IN_PROGRESS` | 409 | trigger, prune: another backup, restore, prune or declaration reload is running |
+| `BACKUP_NOT_FOUND` | 404 | `{id}`, restore: no such set, or no complete set at or before `targetTime` |
+| `BACKUP_SET_INCOMPLETE` | 409 | restore: the set has no completion record, or a member has no manifest |
+| `BACKUP_SET_REFUSED` | 400 | restore: the set record is of another version or damaged |
+| `BACKUP_MANIFEST_REFUSED` | 400 | restore: a member's manifest is of another backup format (`found=3 expected=4 backup=<id> path=<manifest>`) |
+| `BACKUP_DESTINATION_UNAVAILABLE` | 400 / 503 | an `azure://` or `gcs://` destination, a provider that is not registered, a destination that cannot be reached |
+| `BACKUP_ENGINE_NOT_READY` | 503 | the engine is not initialised yet |
+| `BACKUP_REQUEST_INVALID` | 400 | restore with neither `backupId` nor `targetTime` |
+| `BACKUP_TARGET_TIME_INVALID` | 400 | `targetTime` in the future, or at or before the set's cut |
+| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window |
+| `PITR_BULK_LOAD_UNAVAILABLE` | 409 | a bulk load committed before the target has no files in the store or the archive |
+| `PITR_KEYLESS_DELETE_UNRESOLVED` | 409 | a delete of a keyless table's row that the restore cannot apply (**BL-1624, next train**) |
+| `PITR_FAILED` | 500 | staging or replay failed; the database is quarantined (`POST /api/databases/{db}/unquarantine` after the cause is fixed) |
+| `BACKUP_RESTORE_FAILED` | 500 | any other failure in a restore |
+| `BACKUP_FAILED` | 500 | a backup or prune failed for another reason; no set was committed |
+| `BACKUP_SCHEDULE_INVALID` | 400 | `PUT schedule` with a cron expression that is not five fields |
+| `BACKUP_RETENTION_INVALID` | 400 | `PUT retention` out of range, or `prune` with no policy saved |
+| `BACKUP_FENCE_TIMEOUT` | 503 | the backup could not take its fence within 5 seconds (**BL-337, next train**) |
+| `BACKUP_BUFFERS_UNSEALED` | 503 | a write buffer could not be sealed for the backup |
+| `BACKUP_BRANCH_UNAVAILABLE` | 409 | a branch could not be captured (**BL-335, next train**) |
 
 #### `POST /admin/backup/trigger`
 
-Trigger an immediate backup of all active databases. Runs concurrently across databases.
+Back up every database of the server as one set. Returns when the set is committed.
 
 **Request body** (optional):
 ```json
@@ -3749,72 +3786,119 @@ Trigger an immediate backup of all active databases. Runs concurrently across da
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `destination` | string? | null | Override backup destination; null = use configured default |
+| `destination` | string? | null | Override the destination. Null: the schedule's destination, else `Aouda:Archive:Destination`, else `<data path>/backups` |
 | `incremental` | bool | true | false = full backup |
 | `baseBackupId` | string? | null | Specific base backup ID; null = most recent |
 
-**Response** (`200 OK`):
+**Response** (`202 Accepted`):
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "createdUtc": "2026-01-28T14:30:00Z",
+  "backupId": "backup-2026-11-21-150259-e1638d21",
+  "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
   "basedOn": null,
-  "totalBytes": 104857600,
-  "newBytes": 10485760,
-  "fileCount": 150,
-  "newFileCount": 15,
-  "blobsUploaded": 15,
-  "blobsSkipped": 135,
-  "durationSeconds": 2.34
+  "totalBytes": 87871,
+  "newBytes": 87871,
+  "fileCount": 53,
+  "newFileCount": 53,
+  "blobsUploaded": 53,
+  "blobsSkipped": 0,
+  "durationSeconds": 0.367
 }
 ```
+
+The counts are totals over the members. An incremental backup records its base in `basedOn`.
 
 **Errors:**
 
 | Status | When |
 |--------|------|
-| 409 Conflict | A backup or restore is already in progress |
-| 503 Service Unavailable | Cloud destination not yet supported (S3/Azure/GCS), or engine not ready; (**BL-944, 0.4.0**) or the backup was refused for capacity (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, with `Retry-After`) |
-| 400 Bad Request | Destination path cannot be created or accessed |
-| 500 Internal Server Error | (**BL-944, 0.4.0**) The backup failed for another reason (an I/O error in the checkpoint, say). Before, every failure was answered 400 as if the destination were wrong |
+| 400 Bad Request | `BACKUP_DESTINATION_UNAVAILABLE`: the destination path cannot be created or accessed |
+| 409 Conflict | `BACKUP_IN_PROGRESS`, or `BACKUP_BRANCH_UNAVAILABLE` |
+| 503 Service Unavailable | `BACKUP_FENCE_TIMEOUT` or `BACKUP_BUFFERS_UNSEALED` (retry); `BACKUP_DESTINATION_UNAVAILABLE` for `azure://` / `gcs://` (**S3 is supported**) or a provider that is not registered; `BACKUP_ENGINE_NOT_READY`; (**BL-944, 0.4.0**) a backup refused for capacity (`MEMORY_BUDGET_EXCEEDED` / `WAL_CAPACITY_EXCEEDED`, with `Retry-After`) |
+| 500 Internal Server Error | `BACKUP_FAILED` |
 
 #### `GET /admin/backup/list`
 
-List all backups at the configured destination, ordered newest-first.
+List the sets at the configured destination, newest first.
 
 **Response** (`200 OK`):
 ```json
 {
   "backups": [
     {
-      "backupId": "backup-2026-01-28-143000",
-      "createdUtc": "2026-01-28T14:30:00Z",
+      "backupId": "backup-2026-11-21-150259-e1638d21",
+      "createdUtc": "2026-11-21T15:02:59.4266741+00:00",
       "basedOn": null,
-      "totalBytes": 104857600,
-      "newBytes": 10485760,
-      "fileCount": 150,
-      "newFileCount": 15,
-      "pitrEligible": true
+      "totalBytes": 87871,
+      "newBytes": 87871,
+      "fileCount": 53,
+      "newFileCount": 53,
+      "databases": ["_serverauth", "_settings", "shop"],
+      "pitrEligible": true,
+      "complete": true,
+      "members": [
+        { "database": "_serverauth", "pitrEligible": true },
+        { "database": "_settings", "pitrEligible": true },
+        { "database": "shop", "pitrEligible": true }
+      ]
     }
   ],
   "warning": null
 }
 ```
 
-`warning` is non-null when no destination is configured or when the destination is unavailable.
+- `complete` is `true` when the set's record is present, reads whole, and every database it names has its manifest. An incomplete set is listed and is never restored (`BACKUP_SET_INCOMPLETE`); its `pitrEligible` is `false`. A set taken before this release has no record and lists incomplete (**BL-1637, next train**).
+- `refused` appears (a string) when the set's record could not be read: another version, or damaged.
+- `members[].pitrEligible` is `true` when that database's manifest recorded the WAL-root incarnation a point-in-time restore needs. `pitrEligible` on the set is `true` only when every member is. A database without a WAL (`unlogged`, `memory`) has no incarnation, and its backups are exact-restore-only; a backup of a database that has one is eligible even at WAL position `0` (**BL-1010, next train**). A version-3 backup lists with `pitrEligible: false` and cannot be restored (below).
+- `warning` is non-null when the destination is unavailable or some listing failed.
 
-`pitrEligible` is `true` when every contributing database's manifest recorded a WAL position greater than 0 and (**BL-980, 0.4.0**) the WAL-root incarnation (epoch and root id) a point-in-time restore needs. Position `0` means *unknown* (ADR 0044 D-2); a backup without the incarnation is one of a database without a WAL, or one taken by an older build. Either way the backup is exact-restore-only, and a point-in-time restore of it is refused.
+#### `GET /admin/backup/{id}`
+
+One set: its record, and per member the manifest's cut, redo-start position and branches (**BL-1637, BL-335, next train**).
+
+**Response** (`200 OK`), abridged to one member:
+```json
+{
+  "backupId": "backup-2026-11-21-150259-e1638d21",
+  "complete": true,
+  "createdUtc": "2026-11-21T15:02:59.2808837+00:00",
+  "completedUtc": "2026-11-21T15:02:59.7414278+00:00",
+  "pitrEligible": true,
+  "members": [
+    {
+      "database": "shop",
+      "isAuthDatabase": false,
+      "authDatabaseKind": "None",
+      "linkedAuthDatabaseName": null,
+      "isInternal": false,
+      "manifestVersion": 4,
+      "createdUtc": "2026-11-21T15:02:59.7246936+00:00",
+      "walPosition": 406,
+      "redoStartPosition": 225,
+      "basedOn": null,
+      "pitrEligible": true,
+      "fileCount": 4,
+      "totalBytes": 2054,
+      "branches": []
+    }
+  ],
+  "missing": [],
+  "unrecorded": []
+}
+```
+
+`walPosition` is the WAL position at the backup's fence; `redoStartPosition` is the position a point-in-time restore replays from — earlier, so rows that were in a write buffer at the fence come back (**BL-1440, next train**). `branches[]` lists the branches the member's backup holds: `name`, `from`, `createdUtc`, `durabilityLevel`, `cutUtc`, `fileCount`, `bytes`. `missing` names members the record lists whose manifest is absent; `unrecorded` names manifests under the id that the record does not list. `404 BACKUP_NOT_FOUND` when there is no such set.
 
 #### `POST /admin/backup/restore/{id}`
 
-Restore from the backup with the given ID. The server engine is stopped, restored, and restarted — this is a blocking, server-wide operation.
+Restore the set with the given ID. The engines are stopped, restored and restarted: a blocking, server-wide operation.
 
-An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). An absent or empty body is an **exact restore** of that backup: the response omits `targetTime` and `pitr`.
+An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). An absent or empty body is an **exact restore** of that set: the response omits `targetTime` and `pitr`.
 
 **Request body** (optional):
 ```json
 {
-  "targetTime": "2026-01-28T14:32:00Z"
+  "targetTime": "2026-11-21T15:10:34Z"
 }
 ```
 
@@ -3824,19 +3908,19 @@ An optional JSON body may carry `targetTime` for point-in-time recovery (PITR). 
 
 #### `POST /admin/backup/restore`
 
-Same operation, with both fields in the body. Omitting `backupId` while supplying `targetTime` selects the newest backup run whose `createdUtc` is at or before that time.
+Same operation, with both fields in the body. Omitting `backupId` while supplying `targetTime` selects the **newest complete set that lies wholly at or before that time**; `404` when there is none.
 
 **Request body**:
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "targetTime": "2026-01-28T14:32:00Z"
+  "backupId": "backup-2026-11-21-151032-22d0e575",
+  "targetTime": "2026-11-21T15:10:34Z"
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `backupId` | string? | null | Backup to restore. Null with a `targetTime` selects the newest run at or before that time. |
+| `backupId` | string? | null | Set to restore. Null with a `targetTime` selects the newest complete set at or before that time. |
 | `targetTime` | string? (ISO-8601) | null | Point-in-time target. Null with a `backupId` is an exact restore. |
 
 At least one of `backupId` or `targetTime` is required.
@@ -3844,51 +3928,92 @@ At least one of `backupId` or `targetTime` is required.
 **Response** (`200 OK`) — exact restore (`targetTime` / `pitr` omitted):
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "restoredUtc": "2026-01-28T15:00:00Z",
-  "filesRestored": 150,
-  "bytesDownloaded": 104857600,
+  "backupId": "backup-2026-11-21-150449-d1090a91",
+  "restoredUtc": "2026-11-21T15:04:56.1835586+00:00",
+  "filesRestored": 62,
+  "bytesDownloaded": 105587,
   "integrityVerified": true,
-  "durationSeconds": 8.12
+  "durationSeconds": 0.3148055,
+  "notInSet": [],
+  "branches": []
 }
 ```
 
 **Response** (`200 OK`) — point-in-time restore:
 ```json
 {
-  "backupId": "backup-2026-01-28-143000",
-  "restoredUtc": "2026-01-28T15:00:00Z",
-  "filesRestored": 150,
-  "bytesDownloaded": 104857600,
+  "backupId": "backup-2026-11-21-151032-22d0e575",
+  "restoredUtc": "2026-11-21T15:10:36.7220017+00:00",
+  "filesRestored": 64,
+  "bytesDownloaded": 107857,
   "integrityVerified": true,
-  "durationSeconds": 8.12,
-  "targetTime": "2026-01-28T14:32:00Z",
+  "durationSeconds": 0.2210697,
+  "targetTime": "2026-11-21T15:10:34+00:00",
   "pitr": [
-    {
-      "database": "sales",
-      "replayed": true,
-      "transactionsReplayed": 4,
-      "rowsReplayed": 120,
-      "lastAppliedCommitUtc": "2026-01-28T14:31:58Z",
-      "stoppedAtTarget": true
-    }
-  ]
+    { "database": "_serverauth", "replayed": true, "transactionsReplayed": 0, "rowsReplayed": 0, "lastAppliedCommitUtc": null, "stoppedAtTarget": false },
+    { "database": "shop", "replayed": true, "transactionsReplayed": 2, "rowsReplayed": 2, "lastAppliedCommitUtc": "2026-11-21T15:10:32.4254192+00:00", "stoppedAtTarget": true }
+  ],
+  "notInSet": [],
+  "branches": []
 }
 ```
 
-`declarationConflict` (**BL-1379, 0.11.0**) is present only when the restored catalog conflicts with the databases declared in `aouda.json` (for example a declared link that differs from the recorded one): the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
+- `notInSet` lists registered databases that are not members of the restored set; they are left as they were (**BL-1637, next train**).
+- `branches[]` has one entry per member that has branches: `database`, `restored` (the branches an **exact** restore brought back) and `droppedBranches` (the branches a **point-in-time** restore dropped — a branch's history is not on its parent's timeline) (**BL-335, next train**).
+- `declarationConflict` (**BL-1379, 0.11.0**) is present only when the restored catalog conflicts with the databases declared in `aouda.json`: the restore succeeded and the engines are open, and the next process start fails on the same conflict until the declaration or the catalog is changed. See [Declared databases](../guides/defaults-reference.md#declared-databases).
+- A restore keeps each database's durability level: the level travels with the backup (**BL-1168, next train**). The first open after an exact restore flushes the restored write buffers and takes longer (**BL-1625, next train**).
 
-PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6). `lastAppliedCommitUtc` is that commit, in UTC.
+PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044 D-6) — a commit boundary, nothing finer. `lastAppliedCommitUtc` is that commit, in UTC.
 
 **Errors:**
 
 | Status | When |
 |--------|------|
-| 400 Bad Request | Neither field supplied; `targetTime` is in the future; `targetTime` is at or before the backup's `createdUtc`; or the backup recorded WAL position `0` (unknown — exact-restore-only, ADR 0044 D-2) |
-| 404 Not Found | Backup ID does not exist at the destination, or no backup run exists at or before `targetTime` |
-| 409 Conflict | A backup operation is already in progress |
-| 500 Internal Server Error | Point-in-time staging or replay failed — (**BL-980, 0.4.0**) among them a backup that records no WAL-root incarnation, and a replay that meets a WAL frame or catalog-DDL record this build does not read. The body names the database and the error. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. |
-| 503 Service Unavailable | Engine not initialized |
+| 400 Bad Request | `BACKUP_REQUEST_INVALID` (neither field); `BACKUP_TARGET_TIME_INVALID` (`targetTime` in the future, or at or before the set's cut — the message names both instants); `BACKUP_MANIFEST_REFUSED` or `BACKUP_SET_REFUSED` (another format) |
+| 404 Not Found | `BACKUP_NOT_FOUND`: the set does not exist at the destination, or no complete set lies at or before `targetTime` |
+| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
+| 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. `BACKUP_RESTORE_FAILED` for any other failure |
+| 503 Service Unavailable | `BACKUP_ENGINE_NOT_READY`; `BACKUP_DESTINATION_UNAVAILABLE` |
+
+A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` and those databases are at the restore; run the restore again.
+
+#### `POST /admin/backup/prune`
+
+Apply the saved retention policy (**BL-1635, next train**). The body `{ "execute": false }` (the default) is a **dry run**: it returns the plan and deletes nothing. `{ "execute": true }` deletes exactly the plan it returns. With no policy saved the answer is `400 BACKUP_RETENTION_INVALID`.
+
+**Response** (`200 OK`), a dry run with policy `keepLast 3, keepDays 14, pitrWindow 7 days`:
+```json
+{
+  "executed": false,
+  "policy": { "keepLast": 3, "keepDays": 14, "pitrWindow": "7.00:00:00" },
+  "nowUtc": "2026-11-21T15:04:50.2970824+00:00",
+  "sets": [
+    { "backupId": "backup-2026-11-21-150449-d1090a91", "createdUtc": "2026-11-21T15:04:50.0405424+00:00", "complete": true, "keep": true, "rules": ["floor", "keepLast", "keepDays"] },
+    { "backupId": "backup-2026-11-21-150259-e1638d21", "createdUtc": "2026-11-21T15:02:59.7246936+00:00", "complete": true, "keep": true, "rules": ["keepLast", "keepDays", "baseOf:backup-2026-11-21-150449-d1090a91"] }
+  ],
+  "databases": [
+    { "database": "shop", "backupsDeleted": [], "blobsDeleted": 0, "bytesReclaimed": 0 }
+  ]
+}
+```
+
+`rules` names why a set is kept: `floor` (the newest complete, restorable set is always kept), `keepLast`, `keepDays`, `pitrWindow`, or `baseOf:<id>` (a kept set's incremental base). A set is kept or deleted whole. `blobGcWithheld` appears on a database when blob collection was withheld in its destination for the pass, with the reason (an unreadable kept manifest, or the WAL archive's manifest absent). `409 BACKUP_IN_PROGRESS`, `503`, `500 BACKUP_FAILED` as above.
+
+#### `GET /admin/backup/retention` and `PUT /admin/backup/retention`
+
+The saved policy (**BL-1635, next train**), persisted in the server's settings. **There is no default: with none saved nothing is pruned** (every field `null`).
+
+```json
+{ "keepLast": 3, "keepDays": 14, "pitrWindow": "7.00:00:00" }
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `keepLast` | int? (≥ 1) | Keep the newest N sets |
+| `keepDays` | int? (≥ 1) | Keep the sets of the last N days |
+| `pitrWindow` | duration? (`d.hh:mm:ss`, > 0) | Keep what a point-in-time restore to any instant of this window needs |
+
+`PUT` saves the **whole** policy: a term not given is not kept, and all `null` clears it. `400 BACKUP_RETENTION_INVALID` names the field in `details` (`"keepLast must be at least 1."`). Retention runs after every successful scheduled backup and on `prune`.
 
 #### `GET /admin/backup/schedule`
 
@@ -3898,7 +4023,7 @@ Get the current backup schedule.
 ```json
 {
   "cronExpression": "0 2 * * *",
-  "destination": "./backups",
+  "destination": "/var/aouda/archive",
   "incremental": true
 }
 ```
@@ -3926,8 +4051,12 @@ Set `cronExpression` to null to disable scheduled backups.
 
 | Status | When |
 |--------|------|
-| 400 Bad Request | `cronExpression` is not a valid 5-field cron expression |
+| 400 Bad Request | `BACKUP_SCHEDULE_INVALID`: `cronExpression` is not a valid 5-field cron expression |
 | 503 Service Unavailable | (**BL-1016, 0.4.0**) The save was refused (`WAL_CAPACITY_EXCEEDED`, `MEMORY_BUDGET_EXCEEDED`); `Retry-After` is set and the schedule is unchanged — retry. (0.3.0 answered `200` and the schedule reverted at the next start.) |
+
+#### Branch routes during a backup
+
+While a backup captures (or uploads) a database's branches, creating or deleting a branch of that database answers `409 BRANCH_BUSY` with a `remedy`; retry when the backup is done (**BL-335, next train**).
 
 ---
 

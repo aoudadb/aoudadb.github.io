@@ -6,6 +6,9 @@ parent: "Guides"
 
 # Single-node deployment
 
+{: .warning }
+**Replication is not supported in any release of Aouda yet.** A replica cannot catch up after a disconnect, keeps streamed rows only in memory, and a primary's election and failover are not proven; run one node per database and protect data with [backups](backup.md). This page describes the code as it stands.
+
 Aouda works out of the box on one node — most deployments start here, and many stay here. This page
 covers the one setting that makes a single node a **supported** profile rather than an accident of which
 flags you happened not to set, what it changes today, and exactly what changes the day you add a second
@@ -37,43 +40,42 @@ a safe fraction from detected host memory whether or not you have replicas — s
 
 | Concern | `Replicate` (default) | `DoNotReplicate` (single-node profile) |
 |---|---|---|
-| Bulk-load `LogShipSegments` WAL frames | Emitted for every segment | Elided by default — no per-segment re-read/hash, no fsync'd WAL frame. The job's commit point becomes its durable catalog registration instead. Override with `Aouda:BulkLoad:EmitFramesOnSingleNode=true` to keep a WAL trail ready ahead of a later join (see below). A job that loads **several tables** emits its frames anyway (**Lead group 5 review, 0.6.0**): its closing frame is what commits it on every table at once — without it a crash between two tables' catalog records left one table's rows loaded and the other's lost. |
+| Bulk-load `LogShipSegments` WAL frames | Written for every `strict` load | Written for every `strict` load too — one table or several, `skipReplication` included; **no setting elides them** (**BL-1118, BL-1653, next train**). An `os` load, and a load into a database without a WAL, write none |
 | Replication streaming | Runs for this database | Not started for this database |
 | Per-table replication override | May be enabled | Rejected — a table cannot opt into replication while its database has it disabled |
 
 A database's `MaxTotalRamBytes`/governed-budget derivation is identical in both columns; see the
 [Defaults Reference](defaults-reference.md) for those numbers.
 
-### The trade-off: point-in-time recovery
+### Point-in-time recovery and bulk loads
 
-**A frameless bulk load's rows do not participate in point-in-time recovery (PITR).** PITR works by
-restoring a base backup, then replaying WAL forward through the same crash-recovery path the server uses
-after an unclean shutdown, up to the requested target time (see [Backup and Restore](backup.md)). That
-replay can only reconstruct what the WAL actually recorded. A `LogShipSegments` bulk load on a
-`DoNotReplicate` database (or with `EmitFramesOnSingleNode` left at its default) commits **without**
-writing the `BulkSegmentCommitted`/`BulkLoadCommitted` WAL frames a replicated load writes — its rows
-become durable and query-visible through the job's catalog registration instead. There is nothing in the
-WAL for a PITR replay to find, so those specific rows are not recoverable by restoring to **any** target
-time through PITR, not merely a target time inside some window.
+Every `strict` bulk load writes its closing WAL frame and keeps its files in the database's bulk-load store (`{db}/bulk-wal/`), and the WAL archive holds
+them with the log segment (**BL-1653, BL-1654, next train**). A point-in-time restore therefore brings back a `strict` load that committed before its target —
+or refuses, naming the job (`PITR_BULK_LOAD_UNAVAILABLE`), when its files are gone. It does not depend on the replication mode.
 
-This is not a bug — it is the same trade-off `ReplicationMode.SkipReplication` has always made, now also
-the *default* shape for a single-node bulk load. An **exact** backup or restore taken after the load is
-unaffected: it captures the segment files that already exist on disk, regardless of whether a WAL frame
-was ever written for them. Only a **PITR** restore targeting a time during or after a frameless load is
-where the gap shows.
+- An **`os` load** made after the backup is **not** restored by a point-in-time restore (BL-1717); an exact restore of a backup taken after it is.
+- **The cost is disk.** The store holds hard links (no extra bytes while a segment lives); a compacted load's bytes are kept until its WAL is reclaimed, and the archive
+  grows by each load's size ([Sizing](sizing.md)).
+- A frameless multi-table load no longer exists: a load of several tables is all-or-nothing, and one a crash cut part-way is dropped whole at the next open and reported
+  `lost`; load it again with the same idempotency key (**BL-1133, next train**).
 
-If you take regular backups and might need PITR back through a bulk-load window, set
-`Aouda:BulkLoad:EmitFramesOnSingleNode=true` before that load — it restores per-segment WAL frames on a
-single node at the cost this whole family of pages exists to let you avoid paying by default (a
-per-segment re-read and hash, and a fsync per segment). Choose it deliberately, for the loads where it
-matters, rather than leaving it on everywhere.
+---
+
+## Backups on a single node
+
+With no replica, backups are how you protect data, so set them up before you need them:
+
+- **Schedule backups:** `PUT /admin/backup/schedule`. With no schedule, nothing is backed up unless you trigger it.
+- **Set a retention policy:** `PUT /admin/backup/retention` (**Durability-1 S12, next train**). There is none by default, so backups accumulate until you remove them.
+- **Test a restore on a second host** before you rely on it: [Restore to a new host](restore-to-a-new-host.md).
+- **A crash is recovered by restarting the node.** The server replays its write-ahead log at start; see [Write durability](write-durability.md).
 
 ---
 
 ## What changes when a second node joins
 
-⚠️ **Replication is not supported in 0.3.0 (BL-839):** a replica cannot catch up after a disconnect. Keep databases
-single-node for now; see the note at the top of [Replication and Clustering](replication.md).
+Replication is not supported, so this is a description of the code, not a step to take; see the note at the top of this page
+and of [Replication and Clustering](replication.md). The steps are:
 
 1. Configure `Aouda:ReplicaSet` with the joining node(s) — see [Replication and Clustering](replication.md)
    for cluster setup. This is independent of the setting below.
@@ -81,8 +83,7 @@ single-node for now; see the note at the top of [Replication and Clustering](rep
 3. The change takes effect on the **next time the database's engine opens** — not live. A running server
    picks it up the same way it picks up a restore: close and reopen that database, or restart the
    process.
-4. After reopen: `LogShipSegments` bulk loads resume emitting WAL frames, and replication streaming
-   starts for that database.
+4. After reopen: replication streaming starts for that database.
 
 There is no data migration step — this is a configuration change, not a schema or storage change.
 Existing data is unaffected either way.

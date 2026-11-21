@@ -7,11 +7,11 @@ parent: "Guides"
 # Aouda Functionality: Replication and Cluster Behavior
 
 {: .warning }
-**Replication is not supported in 0.3.0 (BL-839).** A replica receives only the WAL frames the primary broadcasts
-while it is connected: frames written while it is disconnected — a network blip, a replica restart, the time a checkpoint
-takes to transfer — are never sent to it, so **a replica cannot catch up after a disconnect** and misses those
-writes. Run single-node (`ReplicationMode: DoNotReplicate`, see [Single-Node Deployment](single-node-deployment.md)) and protect
-data with [backups](backup.md). This page describes the replication code as it stands, for when catch-up ships.
+**Replication is not supported in any release of Aouda yet.** A replica cannot catch up after a disconnect, keeps streamed rows only in memory, and a primary's election and failover are not proven; run one node per database and protect data with [backups](backup.md). This page describes the code as it stands.
+
+A replica receives only the WAL frames the primary broadcasts while it is connected: frames written while it is
+disconnected — a network blip, a replica restart, the time a checkpoint takes to transfer — are never sent to it, so it
+misses those writes. Run single-node (`ReplicationMode: DoNotReplicate`, see [Single-Node Deployment](single-node-deployment.md)).
 
 Document status: Approved baseline
 Primary owner: Aouda maintainers
@@ -42,14 +42,13 @@ If your question is "What is implemented vs missing?", jump to:
 
 ## 2.1 Why this functionality exists
 
-Replication and clustering exist so Aouda can provide high availability, failover, read scaling, and stronger durability options without changing the core write path model.
+The replication and clustering code is the groundwork for read scaling and stronger durability options without changing the core write path model. None of it is supported yet (see the note at the top of this page).
 
-- User problem solved:
-  - Keep data available when a node fails.
+- Problem the code is aimed at:
   - Scale reads to secondaries and hidden replicas.
   - Choose durability guarantees (`w:1`, `w:majority`, `w:all`) per workload.
-- Operational outcomes:
-  - Automatic heartbeat/election and role transition behavior.
+- Mechanisms in the code:
+  - Heartbeat/election and role transition behavior (not proven).
   - Explicit node roles (`Primary`, `Secondary`, `Hidden`, `Backup`, `Arbiter`, `Standalone`) with safety guards.
   - Observable replication health, lag, topology, and subscription coverage through admin APIs.
 - Scope boundaries:
@@ -207,7 +206,7 @@ If you do nothing:
 
 - Catch-up from the primary's WAL files: a replica receives frames broadcast while it is connected, so frames written while it is
   disconnected — including during a checkpoint transfer — are not sent to it (**BL-839**). This is why replication is not
-  supported in 0.3.0 (see the note at the top of this page). Streamed rows are held in memory on the
+  supported (see the note at the top of this page). Streamed rows are held in memory on the
   replica and are not re-applied after a replica restart (**BL-839**).
 - ⚠️ (**Lead S20, 0.6.0**) **Bulk loads are not yet replicated** (**BL-1116**): no server wires a replica's side of a bulk load
   (the coordinator, the segment fetch, the registration), so a replica does not receive a load's segments when it commits. Its
@@ -234,7 +233,7 @@ If you do nothing:
 | Capability | Implemented | Partial | Missing | Primary evidence | Notes |
 |---|---|---|---|---|---|
 | Replica set roles and write gating | Yes | No | No | P4 E0 report + `WriteGuardFilter` + server tests | Secondary/hidden/backup reject writes |
-| Heartbeat, election, fencing failover loop | Yes | No | No | P4 E4 report + election tests | Election port is replication port + 1 |
+| Heartbeat, election, fencing failover loop | Exists in code; not supported | No | No | P4 E4 report + election tests | Election port is replication port + 1; not proven end to end |
 | WAL stream replication (steady-state) | Yes | No | No | P4 E1 report + streaming tests | HMAC + CRC + ACK paths |
 | Too-far-behind checkpoint bootstrap | Yes | Yes | No | P4 E2 report + checkpoint tests; `ReplicaCheckpointBootstrapTests` (two nodes) | Every open database, per-database positions (**BL-763, 0.3.0**) |
 | Replica WAL replay into storage/catalog | Yes | No | No | P4 E3 report + replica state machine code/tests | Includes DDL and Tx frame handling |
@@ -246,7 +245,7 @@ If you do nothing:
 | SDK read preference parity (.NET + TS) | No | Yes | No | `.NET` `RemoteTableQuery.WithReadPreference`, TS no equivalent | TS gap |
 | SDK write concern request parity (.NET + TS) | No | Yes | No | Protocol field exists, SDK APIs do not expose typed option | Raw HTTP workaround |
 | Slot observability API | No | No | Yes | P4 I4 report follow-up items | No `/admin/replication/slots` endpoint |
-| Full process-level failover E2E scenarios | No | Yes | No | P7 Task7 report + BL-024 | Harness exists; server-process scenario remains incomplete |
+| Full process-level failover E2E scenarios | No | Yes | No | P7 Task7 report + BL-024 | Harness exists; server-process scenario remains incomplete, so failover is not proven |
 
 ## 2.7 Core concepts and mental model
 
@@ -421,7 +420,7 @@ Key implementation anchors:
 | `Aouda:ReplicaSet:HeartbeatIntervalMs` | int | `2000` | positive | appsettings/env | Heartbeat period |
 | `Aouda:ReplicaSet:ElectionTimeoutMs` | int | `10000` | positive | appsettings/env | Failure/election threshold |
 | `Aouda:ReplicaSet:ReplicationPort` | int | `5433` | `1..65535` | appsettings/env | WAL stream port; election uses `+1` |
-| `Aouda:Archive:Enabled` | bool | `false` | true/false | appsettings/env | Starts a WAL archive worker when a destination is also set — see [Backup and restore §2.4](backup.md#24-availability-status) |
+| `Aouda:Archive:Enabled` | bool | `false` | true/false | appsettings/env | Starts a WAL archive worker when a destination is also set — see [Backup and restore §1](backup.md#1-what-is-and-is-not-available) |
 | `Aouda:Archive:Destination` | string | `""` | URI/path | appsettings/env | Required when archive enabled |
 | `Aouda:Archive:WalRetentionDays` | int | `7` | `>=1` | appsettings/env | How long archived WAL is kept (not the local PITR window) |
 | `databases.<db>.replicationMode` | string | `Replicate` | `Replicate`, `DoNotReplicate` | `aouda.json` (**BL-1463, 0.16.0**) | Source-side DB replication switch |
@@ -832,7 +831,7 @@ Monitor first:
   - `ReplicationSlotsCreatedTotal`
   - `ReplicationSlotUpdatesTotal`
   - `ReplicationSlotReconnectsTotal`
-  - `WalSlotMinPosition`
+  - `wal.slotCount` and `wal.slotMaxLagBytes` (process aggregates in the metrics `wal` object; per-database figures are in `wal.databases[]`)
 
 Recovery/restart expectations:
 
@@ -858,7 +857,7 @@ Suggested tuning sequence:
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | Writes return `503 READ_ONLY` | Request hit non-primary node | Route writes to current primary; inspect topology |
-| Writes return `409 STALE_FENCING_TOKEN` | Client token is stale after failover | Refresh token/state and target current primary |
+| Writes return `409 STALE_FENCING_TOKEN` | Client's fencing token is older than the node's current one (for example after a primary change) | Refresh token/state and target current primary |
 | Query returns `421 Misdirected Request` | Requested read preference not satisfiable on node | Use topology read candidates or adjust preference |
 | Hidden node does not serve default reads | Expected behavior (`Hidden` requires explicit preference) | Query with `readPreference=Hidden` only for hidden workloads |
 | `writeConcern=majority` frequently degrades | Insufficient ACK quorum or timeout too short | Check subscriber counts, lag, timeout config |
@@ -895,7 +894,7 @@ Last verification date (UTC): `2026-03-31`.
 
 | Gap | Why it matters | Proposed test | Priority |
 |---|---|---|---|
-| Multi-process failover scenario still not validated end-to-end in harness style | Most realistic operator scenario (kill primary, promote, continue writes) | Add process-level integration test that boots 3 servers with real `ReplicaSet` config and validates failover continuity | High |
+| Multi-process failover scenario still not validated end-to-end in harness style | Most realistic operator scenario (kill primary, promote, continue writes) | Add process-level integration test that boots 3 servers with real `ReplicaSet` config and exercises a primary change | High |
 | No dedicated API test for slot inspection endpoints (because endpoint is absent) | Operators cannot audit slot lag/positions directly | Add `/admin/replication/slots` endpoint + controller tests + TS client tests | High |
 | TS client lacks read preference query support tests (feature absent) | Causes API parity drift and manual HTTP workarounds | Add TS query API option + integration tests against read preference behavior | High |
 | SDK write concern request/response model not covered (feature absent in SDK APIs) | Limits adoption of durable writes from SDK workflows | Add typed SDK writeConcern options and response mapping tests in `.NET` and TS clients | High |
@@ -908,10 +907,10 @@ _Updated 2026-04-08 after P16 completion._
 ### Resolved gaps
 
 - ~~Dynamic cluster membership~~ — ✅ **Resolved (P16 Epic A, task A.3)**: full cluster lifecycle REST APIs at `/admin/cluster/` — join, leave, promote, failover, drain, config. Runtime cluster state persists to `cluster-state.json`. Join-on-startup via `--join` CLI flag. See `docs/tasks/P16/P16-SA3-Cluster-Lifecycle-APIs-And-Witness.md`.
-- ~~Witness/arbiter node role~~ — ✅ **Resolved (P16 Epic A, task A.8)**: `NodeConfig.Arbiter = true`, participates in elections but stores no data. CLI: `--role witness`. Enables 1+1+witness automatic failover.
+- ~~Witness/arbiter node role~~ — ✅ **Resolved (P16 Epic A, task A.8)**: `NodeConfig.Arbiter = true`, participates in elections but stores no data. CLI: `--role witness`.
 - ~~Cloud control plane orchestration~~ — ✅ **Resolved (P16 Epics F)**: Hub control plane with `IClusterProvisioner`, K8s operator reconciling `AoudaCluster` CRD objects. See `docs/tasks/P16/P16-Completion-Report.md` §7.
 - ~~No first-class cluster management from Studio~~ — ✅ **Resolved (P16 Epic C)**: Studio cluster ops (add/remove node, promote, failover), topology visualization, node detail views.
-- ~~No Kubernetes deployment~~ — ✅ **Resolved (P16 Epic E)**: Helm chart (`charts/aouda-cluster/`) with StatefulSet, automatic replication bootstrap, witness support. See `docs/dev/Functionality-Cloud-And-Hub.md` §5.
+- ~~No Kubernetes deployment~~ — ✅ **Resolved (P16 Epic E)**: Helm chart (`charts/aouda-cluster/`) with StatefulSet, replication bootstrap settings, witness support (chart reference only; `replicaCount > 1` is not supported). See `docs/dev/Functionality-Cloud-And-Hub.md` §5.
 
 ### Remaining gaps
 

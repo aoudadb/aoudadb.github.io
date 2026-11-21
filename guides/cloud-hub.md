@@ -6,6 +6,9 @@ parent: "Guides"
 
 # Aouda Cloud, Hub, and Deployment
 
+{: .warning }
+**Replication is not supported in any release of Aouda yet.** A replica cannot catch up after a disconnect, keeps streamed rows only in memory, and a primary's election and failover are not proven; run one node per database and protect data with [backups](backup.md). This page describes the code as it stands.
+
 _Domain: Server CLI, Docker, Kubernetes, Aouda Hub, Managed Cloud_
 _Status: MVP Complete + P34 Distribution (2026-06-23)_
 _Primary Phases: P16, P34_
@@ -19,7 +22,7 @@ This document describes how Aouda is deployed, distributed, and managed at the i
 
 - **Server CLI** — how to start and configure Aouda from the command line
 - **Docker** — official container images and Compose configurations
-- **Kubernetes** — Helm chart for production clusters
+- **Kubernetes** — Helm chart (single node supported; see the note at the top)
 - **Aouda Hub** — central management platform (accounts, orgs, server registry)
 - **Managed Cloud** — control plane and K8s operator for automated cluster lifecycle
 
@@ -32,7 +35,7 @@ This document describes how Aouda is deployed, distributed, and managed at the i
 | Run Aouda locally for development | §3 Server CLI — `aouda start` |
 | Install Aouda interactively (no CLI knowledge) | §3.1 Aouda.Setup Installer |
 | Run Aouda in Docker | §4 Docker |
-| Deploy a production cluster | §5 Kubernetes Helm Chart |
+| Deploy to Kubernetes (single node) | §5 Kubernetes Helm Chart |
 | Manage servers across a team | §6 Aouda Hub |
 | Provision managed clusters | §7 Managed Cloud |
 | Configure CORS for Studio or browser access | §8 Server Admin APIs — CORS |
@@ -171,14 +174,14 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 
 ### Docker Compose — Cluster
 
-`docker-compose.cluster.yml` provides 3-node cluster + witness + Studio:
+`docker-compose.cluster.yml` is an example of the topology the code supports, not a deployment to run: replication is not supported, so run one node. It lays out a 3-node cluster + witness + Studio:
 
 ```bash
 docker compose -f docker-compose.cluster.yml up
 ```
 
 - Primary + 2 replicas + witness
-- Automatic replication bootstrap via environment variables
+- Replication settings passed as environment variables
 - Studio pre-configured to connect to primary
 
 ---
@@ -212,12 +215,14 @@ No replication environment variables set. Single-node standalone operation.
 
 ### Cluster Mode (3+ Nodes)
 
+Chart reference only: `replicaCount > 1` is not supported, so keep `replicaCount: 1`.
+
 ```yaml
 # values.yaml
 replicaCount: 3
 ```
 
-Automatic replication bootstrap:
+With `replicaCount > 1` the chart renders these replication settings:
 - `AOUDA_REPLICASET__NAME` set from chart
 - `AOUDA_REPLICASET__MEMBERS__0..N-1` enumerated for all pods
 - `AOUDA_REPLICASET__THISNODE__ADDRESS` uses `$(POD_NAME)` downward-API substitution
@@ -575,7 +580,7 @@ See [Server configuration](server-configuration.md) for precedence vs `AOUDA_COR
 | Hub unreachable | Servers continue operating normally, Studio direct-mode works |
 | No backup schedule | No scheduled backups; manual trigger via API/Studio available |
 | Single replica in Helm | Standalone mode, no replication env vars |
-| 3 replicas in Helm | Automatic cluster bootstrap with replication |
+| 3 replicas in Helm | Renders replication settings; not supported, keep one replica |
 
 ---
 
@@ -586,7 +591,6 @@ See [Server configuration](server-configuration.md) for precedence vs `AOUDA_COR
 | Single binary | `aouda start` in one binary | Separate CLI tools, agents, config generators |
 | Self-hosting Hub | Hub uses Aouda as its own database | Separate management database required |
 | Browser-direct | Studio connects directly to servers; Hub never proxies data | Management plane often proxies all traffic |
-| Zero-config cluster | Docker Compose or Helm, automatic replication bootstrap | Manual replica set initialization required |
 | AI-manageable | All admin APIs idempotent, JSON schema documented, MCP tool definitions shipped in client SDK | Manual runbooks, ad-hoc scripts |
 
 ---

@@ -11,10 +11,10 @@ reads another version refuses the **whole directory** at start, older and newer 
 bump and the exact line a build prints when it meets the previous one, so a deploy script or an operator can recognise it. Source: the Aouda
 repository's `docs/dev/Upgrade-Notes.md`.
 
-To keep the data across a bump: **export it with the build that wrote it, delete the data directory, start the new build fresh, load the export.**
+To keep the data across a bump: **`aouda dump` it from the server that wrote it, start the new build on a new, empty data directory, and `aouda load` the dump** ([Dump and load](dump-load.md), **Durability-1 S13, next train**). A dump is not a backup: take [backups](backup.md) too.
 
 Status: the refusal code described here is shipped in **0.12.0** (**BL-1420**). The format version is **17** in 0.11.0 and 0.12.0, so a 0.11.0
-directory starts on 0.12.0 unchanged. Server **0.13.0** writes format **18** (**BL-1418, 0.13.0**) and refuses a 17 directory. Server **0.14.0** and **0.15.0** do not bump the format (it stays **18**): a 0.13.x data directory starts on 0.14.0 and on 0.15.0. The declaration and the probes changed in 0.14.0; see [Upgrading from 0.13 to 0.14](#upgrading-from-013-to-014-0140). Access from the principals release is [Moving from 0.14](../auth/migrating-from-0-14.md) (**BL-1464, 0.16.0**).
+directory starts on 0.12.0 unchanged. Server **0.13.0** writes format **18** (**BL-1418, 0.13.0**) and refuses a 17 directory. Server **0.14.0** and **0.15.0** do not bump the format (it stays **18**): a 0.13.x data directory starts on 0.14.0 and on 0.15.0. Server **0.16.0** writes format **19**, and the release after it writes **20** (**Durability-1, next train**): see [Upgrading from 0.16 to the next release](#upgrading-from-016-to-the-next-release). The declaration and the probes changed in 0.14.0; see [Upgrading from 0.13 to 0.14](#upgrading-from-013-to-014-0140). Access from the principals release is [Moving from 0.14](../auth/migrating-from-0-14.md) (**BL-1464, 0.16.0**).
 
 ## Detecting a refusal: `DATA_DIRECTORY_FORMAT_REFUSED`
 
@@ -63,6 +63,9 @@ The last column is the first line a server that **reads that version and carries
 | 15 | development builds only | allowance on `_refresh_tokens` and `_authorization_codes` | `found=14 expected=15` |
 | 16 | 0.9.x and 0.10.0 | bulk-load commit header carries the beginning principal | `found=15 expected=16` |
 | 17 | 0.11.0 (and 0.12.0) | `source` on `_api_keys` and the per-user permission table | `DATA_DIRECTORY_FORMAT_REFUSED: found=16 expected=17 path=<root file>` |
+| 18 | 0.13.0 | the per-user permission table is renamed (`_user_partition_grants` is `_user_entitlements`) | `found=17 expected=18` |
+| 19 | 0.16.0 | principals: `_users` is `_principals`; roles carry statements; the built-in `anonymous` principal and `admin`, `writer`, `reader` roles | `found=18 expected=19` |
+| 20 | the release after 0.16.0 (**Durability-1, next train**) | the WAL directory's new and versioned files: a pending point-in-time restore (`PITR_TARGET` v2), `wal.manifest.json` v1, a replica's `catalog.chk` v6, the exact-restore and bulk-load markers and `{db}/bulk-wal/`, new catalog frame ops | `DATA_DIRECTORY_FORMAT_REFUSED: found=19 expected=20 path=<root file>` |
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).
 
 In the shortened rows the line is the same as in the first two, with `path=<root file>`. Formats 1 to 5 (0.2.x and earlier) are not listed: a build
@@ -146,13 +149,47 @@ healthcheck is `/ready`). Full table: [HTTP API: the probes](../reference/http-a
 `SCHEMA_UNKNOWN_MEMBER`, table-name and `description` finding; (4) retry on `503 SERVER_STARTING`; (5) replace `aouda keys check` / `aouda schema check` with `aouda plan`; (6) drop `AOUDA_AUTH__REQUIREFIRSTADMIN`;
 (7) match exit status `78`, not `134`, for a refused start.
 
+## Upgrading from 0.16 to the next release
+
+(**Durability-1, next train**) This release changes the formats the single-node durability work depends on. **There is no migration and no reader of the old files**; each old file is
+refused with a line that names it, and the procedure is the dump.
+
+| What | Before | Now | What the old file gets |
+|---|---|---|---|
+| Data-directory format | 19 | **20** | `DATA_DIRECTORY_FORMAT_REFUSED: found=19 expected=20 path=<catalog root file>`; `aouda start` exits 78 |
+| Backup manifest | 3 | **4** (the redo-start position, the durability level, the branches) | a version-3 backup is listed (`pitrEligible: false`) and refused at restore: `BACKUP_MANIFEST_REFUSED: found=3 expected=4 backup=<id> path=<manifest>`. Restore it with the build that took it, or take a new backup after the upgrade |
+| Server backup set | none | a set record written last | a set taken before has no record: listed `complete: false`, restore is `409 BACKUP_SET_INCOMPLETE`. Take a new backup |
+| WAL archive manifest | 1 | **2** (each entry names its WAL root) | `FILE_FORMAT_REFUSED: kind=wal-archive-manifest found=1 expected=2 path=<destination>:<key>`. Point the server at a **new destination** and take a new backup. A backup or WAL archived by an older build cannot be restored to a point in time by this one; while the archive refuses, the archive worker logs it on every pass and the local WAL is kept (nothing is lost, the disk grows) |
+| `wal.manifest.json`, a pending restore, a replica's `catalog.chk` and every other versioned file | read tolerantly | refused when damaged or of another version | `FILE_FORMAT_REFUSED: kind=<kind> found=<n or the reason> expected=<m> path=<file>` or `WAL_MANIFEST_REFUSED`, `PITR_TARGET_REFUSED`; a start over such a directory exits 78 |
+| `aouda backup`, `aouda dump`, `aouda load` | none | new commands | — |
+
+**The procedure** — the data directory is refused whole, so the data crosses by dump:
+
+1. On the old server, with its writers stopped: `aouda dump --server <old> --key-env AOUDA_KEY --out <dir>` (run the `aouda` of the new build).
+2. Keep the old data directory until step 4 has passed.
+3. Start the new build on a new, empty data directory (with the dump's declaration when a dumped database is linked to an auth database).
+4. `aouda load --server <new> --key-env AOUDA_KEY --in <dir>`; every table is verified by row count and digest.
+5. Take a new backup with the new build, and point it at a new archive destination if the old one refused (above).
+
+Details, options and what a dump does not carry: [Dump and load](dump-load.md). Other single-node durability changes in this release — what each level
+loses, level changes, backups that need no quiesce, retention, restore to a new host — are in [Write durability](write-durability.md),
+[Backup and restore](backup.md) and [Restore to a new host](restore-to-a-new-host.md).
+
+### Other refusals
+
+| First line | Meaning |
+|---|---|
+| `DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<file>` | the catalog root, or a file of the directory, is of another format; exit 78 |
+| `FILE_FORMAT_REFUSED: kind=<kind> found=<n \| bad magic \| truncated \| missing \| crc \| unreadable> expected=<m> path=<file>` | a versioned file is damaged or of another version; the file is named; exit 78 |
+| `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> …` | not a start: a **read** of a cold segment whose column file is missing or short is refused (HTTP 500, logged) instead of answered with nulls; restore the database from a backup |
+
 ## What every release's notes carry
 
 Each changelog entry that bumps the format quotes the line a server prints when it meets the previous version, with the real numbers, says what
-an old directory now gets, and says the data must be exported with the build that wrote it. If a release's notes do not quote the line, the
+an old directory now gets, and says the data must be dumped from the server that wrote it (`aouda dump`) and loaded into the new one (`aouda load`). If a release's notes do not quote the line, the
 format did not change.
 
 ## See also
 
-- [Storage and persistence](storage.md) and [Backup and restore](backup.md).
+- [Storage and persistence](storage.md), [Backup and restore](backup.md) and [Dump and load](dump-load.md).
 - [Declared databases](declared-databases.md): after a wipe, a plain start recreates the declared set, empty of data.

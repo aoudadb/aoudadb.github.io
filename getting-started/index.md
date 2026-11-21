@@ -256,7 +256,6 @@ Aouda runs as a **standalone HTTP server** built on ASP.NET Core. Clients connec
 - You need clients in different languages (TypeScript, .NET, or raw HTTP)
 - You want centralized database management with monitoring (Aouda Studio)
 - Production deployments with access control
-- You want replication across multiple nodes
 
 **Server authentication is available and recommended** for production. It controls which clients can connect and what they're allowed to do. See [Section 8](#8-server-authentication--securing-database-access).
 
@@ -268,7 +267,7 @@ Aouda runs as a **standalone HTTP server** built on ASP.NET Core. Clients connec
 | Multiple clients | No (single process) | Yes |
 | Languages | .NET only | .NET, TypeScript, HTTP |
 | Authentication | Not needed | Available |
-| Replication | No | Yes |
+| Replication | No | Not supported yet |
 | Aouda Studio | No | Yes |
 | Setup complexity | Zero | Minimal |
 | Performance | Fastest (no serialization) | Fast (HTTP overhead) |
@@ -606,11 +605,7 @@ Studio connects to Aouda automatically. No additional configuration needed — o
 
 The compose file sets `stop_grace_period: 130s` on the server so Docker waits longer than the host's 120 s `Aouda:ShutdownTimeout`. If you copy the file, keep those two numbers paired — a shorter grace SIGKILLs the process before shutdown has finished. See [Server configuration §8](../guides/server-configuration.md#8-startup-shutdown-and-slow-opens).
 
-For a 3-node cluster with replication and a witness node:
-
-```bash
-docker compose -f docker-compose.cluster.yml up
-```
+Replication is not supported yet, so run one node; see [Single-node deployment](../guides/single-node-deployment.md).
 
 ### Creating Databases via API
 

@@ -4,316 +4,201 @@ nav_order: 8
 parent: "Guides"
 ---
 
-# Aouda Functionality: Backup and Restore
+# Backup and Restore
 
-Document status: Approved baseline
-Primary owner: Aouda maintainers
-Last updated: 2026-09-01
+Last updated: 2026-11-21 (Durability-1)
 
-Coverage phases: P4 (Epic D + Epic I), P7 follow-up, P16 (HTTP/SDK), P24-B (S3 provider), BL-186 (recoverable restore + PITR)
-Primary task folders: `docs/tasks/P4/`, `docs/tasks/P7/`, `docs/tasks/P24/`, `docs/tasks/BL/`
-Primary ADRs: `docs/decisions/0010-cluster-membership-replication.md`, `docs/decisions/0016-wal-lifecycle-management.md`, `docs/decisions/0044-recoverable-restore-and-point-in-time-recovery.md`
-Related docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-Write-Path-Durability.md`
+A backup is a copy of every database of the server in a destination you choose — a directory or an S3 bucket. A restore puts the
+copy back, **exactly** as it was at the backup, or **to a point in time** after it by replaying the write-ahead log (WAL). This page
+says what a backup holds, what a restore returns, what happens to retention, and what is not there.
 
-## Start Here
+- **Take a backup, test a restore on a second host, and set a retention policy.** The runbook for the second host is
+  [Restore to a new host](restore-to-a-new-host.md).
+- **A dump is not a backup.** [`aouda dump` / `aouda load`](dump-load.md) moves data across a format bump; it has no point in time.
+- Durability levels and what each loses in a crash: [Write durability](write-durability.md).
 
-- Need practical usage now: `2.3`, `2.10`, `2.12`
-- Need implementation status honesty: `2.4`, `2.5`, `2.6`, `2.11`, `2.18`
-- Need architecture/code grounding: `2.8`, `2.8.1`, `2.15`, `2.16`
+## 1. What is and is not available
 
----
-
-## 2.1 Why this functionality exists
-
-Backup and restore exists to protect data with predictable recovery:
-- Incremental backups reduce copy cost using SHA256 content-addressable blobs.
-- Restore recovers exact backup state.
-- Lifecycle management controls archive growth with safe retention + garbage collection.
-
-**Point-in-time recovery (PITR) is implemented.** Restore a backup, then replay WAL to the last
-transaction whose commit time is at or before a target instant. Reach it over HTTP
-(`POST /admin/backup/restore` with `targetTime`), `Aouda.Client`, and `@aouda/client`. The local
-window is a **write-volume bound** (`MaxSlotWalKeepBytes`, typically 128 MB–2 GB of WAL since the
-last backup) — not a number of days. Retention past that bound requires `Archive.Enabled` and a
-destination; the archive worker runs when those are set. Studio's backup page still restores exact
-backup points only. See `2.4`.
-
-Scope note: exact backup/restore and PITR are both implemented end to end, including the public
-server and client APIs. The MCP `aouda_backup_restore` tool stays exact-restore-only.
-
-## 2.2 Discovery and navigation map
-
-| If you need... | Go to |
+| Capability | Status |
 |---|---|
-| Defaults and "what happens if I do nothing" | `2.3` |
-| Implemented vs missing surfaces | `2.4`, `2.6`, `2.11`, `2.18` |
-| Phase-by-phase delivery evidence | `2.5` |
-| How backup/restore actually runs | `2.8`, `2.8.1` |
-| Config and tunables | `2.10` |
-| Operational metrics/health | `2.13` |
-| Troubleshooting | `2.14` |
+| Incremental backups of every database of the server as one **set**, with an S3 or local destination | Available |
+| Backup while the server takes writes (no quiesce) | Available (**BL-337, next train**) |
+| Exact restore, against the server or offline into an empty directory | Available |
+| Point-in-time restore (PITR) to a commit boundary, from the local WAL or the WAL archive | Available |
+| Restore onto a new host from the destination alone | Available (**BL-334, next train**) |
+| Schedule (cron) | Available |
+| Retention policy (`keepLast`, `keepDays`, `pitrWindow`) and `aouda backup prune` | Available; **none by default** (**BL-1635, next train**) |
+| `aouda backup` command line | Available (**BL-403, next train**) |
+| Branches in a backup and in an exact restore | Available (**BL-335, next train**); a PITR drops them |
+| Encryption of a backup | Not provided: it is the destination's (§9) |
+| Azure Blob Storage and Google Cloud Storage destinations | Not supported (`azure://`, `gcs://` are refused) |
+| Restore of one table, or to a time inside a transaction | Not supported: the finest point is a transaction's commit |
+| One consistent cut across all databases of a server | Not supported: each database has its own cut |
 
-Primary evidence sources:
-- Reports: P4 D.1-D.5, P4 I.5-I.6 in `docs/tasks/P4/*-Report.md`
-- Code: `src/Aouda.Engine.Storage/Backup/*`, `src/Aouda.Engine.Storage/WalIntegration/Archive/*`, `src/Aouda.Engine.Wal/Retention/*`
-- Server observability: `src/Aouda.Server/Metrics/*`, `src/Aouda.Server/Health/BackupHealthCheck.cs`
-- Tests: `tests/Aouda.Engine.Storage.Tests/Backup/*`, server metrics/health tests
-- Backlog: `docs/BACKLOG-ARCHIVE.md` (BL-186 closed); remaining follow-ups BL-332 (Studio PITR UI), BL-023 (harness)
+## 2. What a backup is
 
-## 2.3 Defaults and zero-config behavior
+- **One set per backup.** `aouda backup create` (or `POST /admin/backup/trigger`) backs up every database of the server — the auth
+  database first — and writes the **set record** last. A set is **complete** only when its record is there; a set that one database
+  failed is listed as incomplete and **refused** by a restore, never restored in part (**BL-1637, next train**). A set from a build
+  before this release has no record and is listed incomplete.
+- **No cross-database consistency.** Every database has its own cut. A write to two databases is not a unit across them.
+- **Incremental by default.** Files are stored by SHA-256, so an unchanged file is stored once. An incremental backup records its base;
+  `--full` uploads everything again. If the newest base is of an older backup format, the backup is taken in full.
+- **It needs no quiesced database.** A backup under write load restores exactly. It takes one **fence** — a cut that a transaction in
+  its commit section finishes before — and writers wait for it; they are never failed by it. The wait is bounded at **5 seconds**; in
+  this release's tests, with writes running, the longest hold measured was about 65 ms (**BL-337, next train**). A backup that cannot
+  take the fence in time fails with `BACKUP_FENCE_TIMEOUT` (HTTP 503); retry it.
+- **Rows in a write buffer are in the backup.** A row that was only in memory (the table's write buffer, or an edge or vector buffer)
+  at the cut is written into the backup, and a point-in-time restore replays the log **from the redo-start position**, an earlier position than
+  the cut, so that row comes back too (**BL-1440, next train**). Before this release a PITR dropped those rows.
+- **Branches** are backed up with their parent and come back with an exact restore (§5.3).
+- **What it holds.** Every column value of every table, and in an auth database the credential hashes. A backup is as sensitive as the
+  data (§9).
 
-| Default | Value | Impact |
+## 3. Restore
+
+There are two kinds.
+
+**Exact restore** returns the database as of the backup's cut. Over HTTP `POST /admin/backup/restore/{id}` (or
+`aouda backup restore <id>`) stops the engines, puts the files back, verifies their hashes and restarts. Offline,
+`aouda backup restore <id> --to <empty directory> --from <destination>` writes a data directory with no server running; start the
+server on it with `aouda start --data-path <dir>`.
+
+- **A restored database keeps its durability level.** The level travels with the backup and a restore registers and opens the database at
+  it; a declaration still wins (**BL-1168, next train**).
+- **The first open after an exact restore takes longer**: it flushes the restored write buffers so the restored rows are durable
+  (**BL-1625, next train**). A crash before it finishes loses nothing; the next open does it again.
+- **A restore syncs what it wrote** before it reports success (**BL-1687, next train**).
+- A restore **refuses** a backup of another format, a damaged file, or a set that is not complete. It tells you why before it touches
+  the target.
+
+**Point-in-time restore** — see §4.
+
+### 3.1 What a restore does not bring back
+
+- Anything outside the data directory: the declaration file (`aouda.json`) and keys set in the environment. Carry them as you do for
+  any server.
+- A database the set did not contain.
+- Edge and vector data that a backup taken before this release did not hold; such a backup restores its vector columns unsearchable —
+  take a new backup.
+
+After a restore the server reconciles declared databases as it does at any start.
+
+## 4. What a point-in-time restore returns
+
+A point-in-time restore takes a backup, then replays the WAL to the **last transaction whose commit is at or before the target
+instant** (`targetTime`).
+
+- **Commit boundaries.** The log carries the time a transaction committed, nothing finer. A restore never lands in the middle of a
+  transaction.
+- **Rows buffered at the backup come back** (§2), whether their table existed at the backup or was created after it (**BL-1440, next train**).
+- **Tables created after the backup come back** through any route — REST, a table an insert inferred, an edge table or a vector column,
+  schema apply, Embedded — with one row per key; a materialized query defined after the backup comes back, rebuilt. Before this release a
+  PITR across a created table could show two versions of an updated row, and a [formula](formulas.md) database then refused to open
+  (**BL-1485, next train**).
+- **A crash after a PITR** neither revives what the restore excluded nor loses later writes, and a later PITR honours the exclusion of
+  the first (**BL-1626, next train**). Concurrent policy changes restore to the last (**BL-1524, next train**). A bulk load committed after the
+  target is not committed after the restore (**BL-1168, next train**).
+- **Bulk loads.** A `strict` load committed before the target is restored from the bulk-load store or from the archive; if its
+  files are not there the restore is refused, naming the job (`PITR_BULK_LOAD_UNAVAILABLE`, HTTP 409) (**BL-1653, BL-1654, next train**).
+  An `os` load made after the backup is **not** restored (BL-1717).
+- **A table without a primary key** is exact up to the first delete or update, after the backup, of a row that the table flushed, bulk-loaded or
+  merged after the backup. Past that instant the restore is refused with `PITR_KEYLESS_DELETE_UNRESOLVED`, naming the table and the instant, and
+  the database stays quarantined until a new restore — to an earlier target or from a later backup. Give the table a primary key and every
+  target is exact (**BL-1624, next train**).
+- **Edge and vector writes** made after the target and before the next row commit are restored (a known limit, BL-1726).
+- **A target earlier than the backup** is refused (`BACKUP_TARGET_TIME_INVALID`, 400), naming both instants; so is a target in the future.
+- **Without a `backupId`** the newest complete set that lies wholly at or before the target is chosen; `404` when there is none.
+
+### 4.1 What a PITR needs
+
+- **A PITR-eligible backup**: its manifest records a WAL root. A database at `unlogged` or `memory` has no WAL, so its backups are
+  exact-restore-only (`pitrEligible: false`). A backup of a database that has a WAL root is eligible even at WAL position 0
+  (**BL-1010, next train**).
+- **WAL that covers the window.** The local WAL since the backup — bounded by write volume, not by days (`MaxSlotWalKeepBytes`) — or,
+  past that, the **WAL archive** (`Aouda:Archive`, §6). A restore whose archive does not reach back to the backup's replay position is
+  refused with `PITR_WINDOW_UNAVAILABLE` (409), never restored short (**BL-334, next train**).
+- **The WAL-root incarnation the backup was taken in.** An exact restore starts a new incarnation, so a PITR from a backup that
+  predates it needs the archive, or a backup taken after the restore.
+- **The archive's RPO for a host loss** is `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (a minute):
+  the active WAL segment is sealed and shipped when its oldest frame is that old (**BL-1657, next train**).
+- **A level change that retires the WAL ends the window** at the change; see [Write durability](write-durability.md#changing-a-level).
+
+### 4.2 Branches and a PITR
+
+A point-in-time restore **drops every branch** of the databases it restores and names each one in the response (`droppedBranches`).
+Restore exactly to keep them; a per-branch point in time is not available (**BL-335, next train**).
+
+### 4.3 Onto another host
+
+A PITR and an exact restore onto another host from the destination alone are supported: segment ids are not reissued and `.hot` rows come
+back (**BL-334, next train**). A restored copy must archive to **its own** destination while its source still runs: two databases
+archiving to one destination at the same time lose each other's archive-manifest entries. The runbook is
+[Restore to a new host](restore-to-a-new-host.md).
+
+## 5. Retention
+
+Backups and the archive grow until you prune them. **There is no default policy: nothing is pruned** until you save one
+(**BL-1635, next train**).
+
+| Term | Keeps |
+|---|---|
+| `keepLast` | the newest N sets |
+| `keepDays` | the sets of the last N days |
+| `pitrWindow` | what a PITR to any instant of this window needs: the newest complete set at or before `now − window`, and everything after it |
+
+- **The unit is the set**: a set is kept or deleted whole, and a kept set keeps its incremental bases.
+- **The floor**: the newest complete, restorable set is always kept, whatever the policy says.
+- **When it runs**: after every successful scheduled backup, and when you run `aouda backup prune` (or `POST /admin/backup/prune`).
+  `--dry-run` prints the plan — each set, kept or deleted, with the rules that decided it — and deletes nothing.
+- **An unreadable kept manifest withholds blob collection** in that database's destination for the pass; the plan says why.
+- **The WAL archive is kept from the oldest listed backup's redo-start** (**BL-1636, next train**), so retention never prunes the log a
+  listed backup's PITR needs. `Aouda:Archive:WalRetentionDays` (default 7) bounds archived WAL that no listed backup needs.
+
+```bash
+aouda backup retention --keep-last 5 --pitr-window 7d     # the whole policy: a term not given is not kept
+aouda backup prune --dry-run
+```
+
+## 6. Configuration
+
+Archive and the backup destination are server settings (`Aouda:Archive:*`; environment variables `AOUDA_ARCHIVE__*`; see
+[Server configuration](server-configuration.md)).
+
+| Setting | Default | Meaning |
 |---|---|---|
-| `ArchiveConfig.Enabled` | `false` | Archiving off unless enabled |
-| `ArchiveConfig.WalRetentionDays` | `7` | How long archived WAL is kept; consumed by the archive worker |
-| `ArchiveConfig.RequireArchiveBeforeDelete` | `false` | If true, local WAL is not pruned until it has been archived (rejected at startup unless archive is enabled and destinationed) |
-| `BackupOptions.Incremental` | `true` | Uses incremental chain by default |
-| `BackupOptions.Parallelism` | `4` | Parallel uploads |
-| `BackupOptions.ManifestFormat` | `Auto` | Auto flat/hierarchical |
-| `RestoreOptions.VerifyIntegrity` | `true` | SHA verification on restore |
-| `RestoreOptions.CleanTargetDirectory` | `true` | Clean restore target by default |
-| `LifecycleOptions.Execute` | `false` | Dry-run by default |
-| `RetentionPolicy.PreserveIncrementalChains` | `true` | Protects base chains |
-| `HealthThresholds.BackupIntervalHours` | `24` | Backup health warning threshold |
-
-Zero-config reality:
-- No automatic public backup scheduling endpoint is exposed by server controllers.
-- Engine APIs are available for embedded/hosted usage.
-- Metrics/health endpoints are available for observability.
-
-## 2.4 Availability status
-
-### Implemented now
-- `BackupManifest`/`BackupFile` + SHA256 dedup model.
-- `IArchiveDestination` + `LocalArchiveDestination`.
-- `S3ArchiveDestination` (AWS S3 and S3-compatible services, e.g. MinIO, LocalStack). ← **P24-B**
-- `BackupEngine` incremental backup orchestration.
-- `RestoreEngine` exact restore **and** point-in-time restore (transaction-commit granularity).
-- `BackupLifecycleManager` retention + GC.
-- WAL slot integration for backup, system, and archive consumers. Backup records a real per-database WAL position; a position of `0` means *unknown* and that backup is exact-restore-only.
-- `WalArchiveWorker` runs when `Archive.Enabled` is true and a destination is set (standalone `Archive`, or a replica-set Backup node's `ThisNode.Archive`).
-- Backup metrics, WAL/PITR counters on `GET /api/metrics`, `aouda db inspect` `earliestRecoverablePitrPosition`, and an archive-not-advancing health check.
-- HTTP restore with optional `targetTime`; `GET /admin/backup/list` `pitrEligible`; both SDKs.
-
-### Partial / host-only
-
-- Engine-host direct APIs (`BackupEngine`, `RestoreEngine`, `BackupLifecycleManager`) are also available for embedded/custom host usage alongside the server REST API.
-- Studio's backup page restores exact catalog points only — WAL-level PITR is HTTP/SDK, not this UI.
-- The MCP `aouda_backup_restore` tool is exact-restore-only.
-
-### Not implemented
-
-- Azure Blob Storage and Google Cloud Storage archive destinations (`azure://` / `gcs://` throw `NotSupportedException`).
-- `aouda backup create/list/restore` CLI subcommands.
-- Branches: branch engines open at durability `unlogged` (no WAL) and sit outside backup/PITR.
-- Sub-commit (row-level) PITR — the finest boundary is a transaction commit.
-
-**Known issue (BL-1485, open).** A point-in-time restore whose replay **creates a table** — one that did not exist at the backup — can
-show **both versions** of a row of that table that was updated before the target time. Tables that existed at the backup are not
-affected, nor is an exact restore. (**ADR 0072, 0.14.0**) On a [formula table](formulas.md) the duplicate is a second formula for one
-cell, and the database then refuses to open rather than pick one. Until this is fixed, take a backup after creating a table you may need
-to restore to a point in time, or restore exactly.
-
-## 2.5 Phase coverage matrix
-
-| Phase | Delivered | Evidence |
-|---|---|---|
-| P4 Epic D | Manifest, destination abstraction, backup engine, exact restore, lifecycle/GC; a PITR code path was also written (later made to work by BL-186) | D.1-D.5 reports + code/tests |
-| P4 Epic I | Backup/system slot integration; archive-assisted PITR scaffolding (worker later started by BL-186 S05) | I.5 and I.6 reports + code/tests |
-| P7 follow-up | Durability scenario identifies missing server backup API | `BL-023`, `BackupRestoreScenario.cs` |
-| P16 | `/admin/backup/*` REST + both SDKs for exact restore | P16-SA4, P16-H6 |
-| P24-B | S3 archive destination + `S3ArchiveDestination` + factory wiring | P24-B-S3BackupProvider.md |
-| BL-186 | Recoverable exact restore (WAL root + catalog re-base); per-database backup WAL position; archive positions in bytes; running archive worker; PITR on the recovery path; HTTP/SDK `targetTime`; recoverable-window metrics; restore divergence handshake | [ADR 0044](https://github.com/aoudadb/aouda/blob/main/docs/decisions/0044-recoverable-restore-and-point-in-time-recovery.md), `docs/tasks/BL/BL-186-BackupPitrAndRetention-Overview.md` |
-
-Note: Some task spec status rows remain stale ("Planned") while report+code show completion.
-
-## 2.6 Capability coverage matrix
-
-| Capability | Status | Evidence |
-|---|---|---|
-| Incremental SHA256 backups | Implemented | `BackupManifestBuilder`, backup tests |
-| Local archive destination | Implemented | `LocalArchiveDestination` |
-| S3 archive destination | Implemented (P24-B) | `S3ArchiveDestination`, `ArchiveDestinationFactory` |
-| Backup orchestration + progress | Implemented | `BackupEngine` |
-| Exact restore + integrity verification | Implemented | `RestoreEngine`; exact restore re-bases the WAL root and the catalog directory |
-| PITR with local WAL and archived WAL | Implemented | HTTP `targetTime`; recovery-path replay at transaction-commit granularity; archive worker when configured |
-| Retention + GC | Implemented | `BackupLifecycleManager` |
-| WAL slot safety integration | Implemented for backup/system/archive | Backup slot is per-database and monotonic; position `0` does not pin a slot |
-| Server backup execution endpoint | Implemented (P16) | P16-SA4, `/admin/backup/` |
-| PITR over HTTP + both SDKs | Implemented (BL-186 S07) | `targetTime`, `pitr`, `pitrEligible`; MCP tool stays exact-restore-only |
-| TS/.NET client backup execution APIs | Implemented (P16; PITR overload BL-186 S07) | `client.admin.backup.*` / `BackupAdminApi` |
-| Azure Blob / GCS destinations | Missing | — |
-
-## 2.7 Core concepts and mental model
-
-- **Manifest is truth**: backup identity and file hashes live in `BackupManifest`.
-- **Dedup is hash-based**: archive blob key is SHA256; path/name changes do not force re-upload.
-- **Incremental chain**: `BasedOn` links backup lineage.
-- **PITR is base backup + WAL replay** to a transaction-commit boundary. The local window is write volume since the last backup, not a duration. Archive extends that window when configured.
-- **Safety-first lifecycle**: default dry-run and chain preservation avoid accidental data loss.
-- **WAL slot coordination**: backup, system, and (when archiving) archive slots protect needed WAL from premature pruning. The backup slot is never exempted from the write-volume ceiling.
-
-## 2.8 How Aouda implements it
-
-Core types:
-- Backup: `BackupEngine`, `BackupOptions`, `BackupResult`, `BackupProgress`
-- Restore: `RestoreEngine`, `RestoreOptions`, `RestoreResult`, `PitrWindowException`
-- Lifecycle: `BackupLifecycleManager`, `RetentionPolicy`, `LifecycleOptions`, `LifecycleResult`
-- Archive: `IArchiveDestination`, `LocalArchiveDestination`, `S3ArchiveDestination`, `ArchiveDestinationFactory`
-
-`ArchiveDestinationFactory` uses an opt-in provider registration pattern so that the
-`AWSSDK.S3` dependency is isolated to the `Aouda.Engine.Storage.S3` package and does not
-affect `Aouda.Embedded` users. `S3ArchiveDestination` is **not** available by default — it
-requires calling `S3ArchiveProvider.Register()` at startup (done automatically in
-`Aouda.Server`) or by adding a reference to `Aouda.Engine.Storage.S3` and calling
-`S3ArchiveProvider.Register()` in your own host. See `Getting-Started-Backup.md §S3` for
-usage details.
-- WAL integration: `WalArchiveWorker` (started by `AoudaEngine.OpenAsync` when an archive destination is supplied), `RetentionWorker`, `WalSlotManager`
-
-High-level flow:
-1. Backup: checkpoint -> manifest build -> upload new blobs -> write manifest -> update backup slot.
-2. Restore: resolve backup -> download/materialize -> verify integrity -> optional WAL replay.
-3. PITR: restore the backup, stage a WAL root + `PITR_TARGET`, reopen, replay through crash recovery to the last commit `<= targetTime`.
-4. Lifecycle: analyze keep/delete -> optional verify -> GC unreferenced blobs -> delete manifests.
-
-## 2.8.1 Critical path walk-throughs
-
-### A) Create incremental backup
-- `BackupEngine.CreateBackupAsync(...)`
-- (**BL-840, 0.3.0**) Takes one image of the **catalog store** — every table entry (keys, partitioning, cluster order,
-  nullability, table policy) and every segment entry, plus the database policy — and ships its files under `_catalog/`. The
-  segments that image names are pinned on disk until the upload has read them. It no longer writes a catalog checkpoint
-  (`catalog.chk`) for the backup, which held only each column's id, name, type and encoder.
-- Computes hashes, marks `IsNew`, uploads only new blobs, writes manifest.
-- Updates `backup` slot position on success.
-- Counters: `BackupOperations*`, `BackupBlobs*`, `BackupBytesUploaded`, `BackupSlotUpdatesTotal`.
-
-### B) Restore exact backup
-- `RestoreEngine.RestoreAsync(...)` with `TargetTime = null`.
-- Rehydrates files, verifies hashes (default), returns restore stats.
-- (**BL-840, 0.3.0**) **The restore puts the catalog store back as it was backed up**, on a fresh target and in place alike
-  (exact restore and PITR): primary keys, partitioning, cluster order, nullability, and each table's and the database's policy
-  all survive. Before, a restore rebuilt every column from `catalog.chk` as a nullable non-key and every policy as a default (or
-  the live catalog's): a restored `Strict` table accepted duplicate keys, and a partitioned table lost its partitioning. The open
-  no longer bootstraps a catalog from a lone `catalog.chk`; reads use the restored catalog's segment list and never list a
-  directory (**ColumnarRead, 0.3.0**).
-- ⚠️ **The backup format is 3 (BL-840, 0.3.0; clean cut).** A restore refuses a backup of format 1 or 2 — any backup taken by
-  an older build — **before it touches the target**, with an error naming the version it found and version 3. Restore such a
-  backup with the build that took it (then take a new backup with this build). A format-3 backup that lists no catalog root is
-  refused the same way, as incomplete.
-- ⚠️ **Rows in hot segments come back** (**architecture review, 0.3.0**; since **BL-840** the restored catalog image carries their entries). The open catalogues every restored `.hot` file as a Hot segment (a promoted segment once), with the partition key a hot-only segment's `hot_segment.marker` records; backups now carry those markers, and no longer carry a retired segment's `.hot` file. Before, `.hot` files were backed up and restored but never catalogued, and the restore resets the WAL, so **every row still in a hot segment at backup time was lost** by a clean restore.
-- **A 0.2.x backup** is refused by this build's restore (backup format 3, above), before it touches the target; this build could not read its pages either. To move 0.2.x data to this build, restore with the 0.2.x build, export, and reload — see [Storage — upgrading from 0.2.x](storage.md#27-core-concepts-and-mental-model).
-- Counters: `RestoreOperations*`, `RestoreBlobsDownloaded`, verification counters.
-
-### C) PITR (HTTP or engine)
-- HTTP: `POST /admin/backup/restore` with `{ "backupId", "targetTime" }`, or omit `backupId` to pick the newest run at or before that time. Pre-flight refusals (future target, target at or before the backup, WAL position `0`, no run before the time) return `4xx` without stopping engines. See [HTTP API](../reference/http-api.md#post-adminbackuprestoreid).
-- Engine: `RestoreEngine.RestoreAsync` with `TargetTime` set **stages** the restore; replay happens on the next `AoudaEngine.OpenAsync`.
-- **A point-in-time restore needs the WAL-root incarnation the backup was taken in** (the epoch and root id its manifest records).
-  (**BL-980, 0.4.0**) A backup that records none — one of a database without a WAL (durability `unlogged` or `memory`), or one taken by an older build — is
-  **refused** for a point-in-time restore (`PitrWindowException` naming what the manifest holds; nothing is staged). Up to 0.3.x
-  the server inferred the epoch from the archive and fell back to byte-offset coverage, which a recreated WAL root could pass.
-  An **exact** restore of such a backup (no `targetTime`) is unchanged, and `pitrEligible` on the backup list is `false` for it.
-- A replay that meets a WAL frame this build does not read is refused, not skipped (**BL-980, 0.4.0**): a frame of the
-  retired page-append family, or a catalog-DDL record with an unknown opcode or payload version, aborts the point-in-time
-  replay (the database is quarantined, as for any failed replay).
-- Replay applies whole transactions only, through the crash-recovery path. Archived WAL is used when the local log no longer covers the window.
-- Counters: `PitrSegmentsDownloaded`, `PitrFromArchiveTotal`, and the `pitr` block on the HTTP restore response.
-
-### D) Retention + GC
-- `BackupLifecycleManager.EnforceRetentionAsync(...)`.
-- Builds keep/delete sets, computes referenced hashes, deletes unreferenced blobs/manifests when execute mode is on.
-- Default mode is dry-run.
-
-## 2.9 Why Aouda is different
-
-| Area | Aouda approach | Impact |
-|---|---|---|
-| Incremental identity | SHA256 content addressing | Strong dedup and deterministic integrity |
-| PITR architecture | Base backup + WAL replay to a transaction commit; local window is write volume | Shipped (BL-186); Studio UI is exact-restore-only |
-| WAL deletion safety | Slot-managed boundaries | Lower risk of deleting required WAL |
-| Manifest scalability | Flat + hierarchical formats | Handles larger backup catalogs |
-| Lifecycle safety | Dry-run default + chain preservation | Safer operations |
-
-## 2.10 Configuration and settings reference
-
-Server/runtime:
-- `AoudaServerOptions.Archive` (`ArchiveConfig`)
-  - `Enabled` (default `false`)
-  - `Destination` (required if enabled; `s3://bucket/prefix` or local path)
-  - `WalRetentionDays` (default `7`) — archive retention; **not** the local PITR window
-  - `RequireArchiveBeforeDelete` (default `false`) — only valid with enabled + destinationed archive
-  - `S3` (`S3Config`) — optional, used when `Destination` is an `s3://` URI
-    - `Region` — AWS region (e.g. `us-east-1`); optional when using custom `ServiceUrl`
-    - `ServiceUrl` — override endpoint for S3-compatible services (MinIO, LocalStack, etc.)
-    - `ForcePathStyle` — set `true` for MinIO and LocalStack (default `false`)
-    - `AccessKeyId` / `SecretAccessKey` — explicit credentials; omit to use the standard AWS credential chain
-- `AoudaServerOptionsValidator` validates archive settings when enabled.
-- Backup health threshold: `HealthThresholds.BackupIntervalHours` (default `24`).
-
-Engine operation options:
-- Backup: `BackupOptions` (`Incremental`, `BaseBackupId`, `Parallelism`, `ManifestFormat`, `VerifyAfterUpload`)
-- Restore: `RestoreOptions` (`BackupId`, `TargetTime`, `WalPath`, `Parallelism`, `VerifyIntegrity`, `CleanTargetDirectory`)
-- Lifecycle: `RetentionPolicy` + `LifecycleOptions` (`Execute`, `VerifyBeforeDelete`, `OnlyDeleteBlobsOlderThan`)
-
-WAL lifecycle defaults:
-- `WalLifecycleOptions.Default` controls archive check interval, retention check interval, archive retention window, slot inactivity, and archive-before-delete behavior.
-
-### ArchiveConfig activation and wiring examples
-
-**These examples start a WAL archive worker** when `Enabled` is true and `Destination` is set.
-`WalRetentionDays` is consumed. There is no `CheckpointIntervalHours` setting.
-
-The local PITR window stays a write-volume bound even when archiving is off: it is
-`MaxSlotWalKeepBytes` of WAL since the last backup, not a duration. Archiving extends recovery
-beyond that bound.
-
-The server binds `AoudaServerOptions` from `Aouda` config and validates archive settings during hosted service startup. In current startup wiring this happens through:
-- `builder.Services.AddAoudaServer(builder.Configuration)`
-- `builder.Services.AddOptions<AoudaServerOptions>().Bind(builder.Configuration.GetSection("Aouda"))`
-
-#### Example A: standalone server with archive mode enabled (startup config — optional `appsettings.json` or `AOUDA_ARCHIVE__*` env vars)
+| `Aouda:Archive:Enabled` | `false` | Runs the WAL archive worker. Needed for a PITR beyond the local WAL, and for restoring a PITR on a new host |
+| `Aouda:Archive:Destination` | none | A local path or `s3://bucket/prefix`. Required when enabled; also the backups' destination unless the schedule names another. With none set at all, backups go to `<data path>/backups` — on the disk they protect, so not a backup against losing it |
+| `Aouda:Archive:WalRetentionDays` | `7` | How long archived WAL is kept; not the local PITR window |
+| `Aouda:Archive:MaxUnarchivedSeconds` | `60` | How old a WAL frame may get before its segment is sealed and shipped |
+| `Aouda:Archive:RequireArchiveBeforeDelete` | `false` | Local WAL is not pruned until archived (needs `Enabled` and a destination) |
+| `Aouda:Wal:Lifecycle:ArchiveCheckInterval` | 1 minute | How often the archive worker runs |
+| `Aouda:Wal:Lifecycle:ReplicationSlotMaxInactivity` | 7 days | A slot unused this long logs a warning |
+| `Aouda:Wal:Lifecycle:SlotPersistInterval` | 30 seconds | How often slot positions are saved |
+| `Aouda:Wal:Lifecycle:EnablePruning` | `true` | Local WAL that every slot has passed is deleted |
+| Retention | none | §5 |
 
 ```json
 {
   "Aouda": {
     "DataPath": "./data",
-    "Port": 5000,
-    "Archive": {
-      "Enabled": true,
-      "Destination": "C:\\aouda\\archive",
-      "WalRetentionDays": 7
-    }
+    "Archive": { "Enabled": true, "Destination": "/var/aouda/archive", "WalRetentionDays": 7 }
   }
 }
 ```
 
-Behavior:
-- Server runs in standalone mode when no replica set is configured.
-- `AoudaServerOptionsValidator` fails startup if `Destination` is empty or retention values are invalid.
-- `AoudaHostedService` stamps `DatabaseManager` with the effective archive config; each engine open starts a `WalArchiveWorker` next to `RetentionWorker`.
-
-#### Example B: S3 archive destination — AWS credentials from standard chain
+S3 destination, credentials from the standard AWS chain (environment, `~/.aws/credentials`, instance metadata):
 
 ```json
 {
   "Aouda": {
-    "DataPath": "./data",
-    "Port": 5000,
-    "Archive": {
-      "Enabled": true,
-      "Destination": "s3://my-aouda-backups/prod",
-      "WalRetentionDays": 30,
-      "S3": {
-        "Region": "us-east-1"
-      }
-    }
+    "Archive": { "Enabled": true, "Destination": "s3://my-aouda-backups/prod", "S3": { "Region": "us-east-1" } }
   }
 }
 ```
 
-Credentials are resolved from the standard AWS chain (environment variables, `~/.aws/credentials`, EC2/ECS instance metadata). Passing `Region` is optional when the region is already set in the environment or credential profile.
-
-#### Example C: S3-compatible service (MinIO / LocalStack)
+An S3-compatible service (MinIO, LocalStack) needs `ServiceUrl` and `ForcePathStyle`. The keys below are the defaults of a **throwaway
+container**; never write a real credential into a file:
 
 ```json
 {
@@ -321,473 +206,154 @@ Credentials are resolved from the standard AWS chain (environment variables, `~/
     "Archive": {
       "Enabled": true,
       "Destination": "s3://my-bucket/aouda-archive",
-      "S3": {
-        "ServiceUrl": "http://localhost:9000",
-        "ForcePathStyle": true,
-        "AccessKeyId": "minioadmin",
-        "SecretAccessKey": "minioadmin"
-      }
+      "S3": { "ServiceUrl": "http://localhost:9000", "ForcePathStyle": true, "AccessKeyId": "minioadmin", "SecretAccessKey": "minioadmin" }
     }
   }
 }
 ```
 
-`ForcePathStyle: true` is required for MinIO and LocalStack.
+### 6.1 Schedule
 
-#### Example D: replica set backup node archive wiring (startup config)
+`PUT /admin/backup/schedule` sets a five-field cron expression (`null` disables); Studio's backup page sets the same. The schedule and the
+retention policy are saved in the server's settings and survive a restart.
 
-```json
-{
-  "Aouda": {
-    "ReplicaSet": {
-      "Name": "prod-rs",
-      "Members": [
-        "aouda-a:5433",
-        "aouda-b:5433",
-        "aouda-dr:5433"
-      ],
-      "ThisNode": {
-        "Address": "aouda-dr:5433",
-        "Backup": true,
-        "Archive": {
-          "Enabled": true,
-          "Destination": "s3://my-aouda-backups/prod-dr",
-          "WalRetentionDays": 14,
-          "S3": {
-            "Region": "eu-west-1"
-          }
-        }
-      }
-    }
-  }
-}
+```bash
+curl -s -X PUT http://localhost:5000/admin/backup/schedule -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+     -d '{"cronExpression":"0 2 * * *","incremental":true}'
+# → 200 {"cronExpression":"0 2 * * *","destination":"/var/aouda/archive","incremental":true}
 ```
 
-Behavior:
-- Node starts with backup role semantics (`ThisNode.Backup = true`).
-- `ThisNode.Archive` is the effective archive config on a backup node and starts the same worker.
+## 7. The command line and the API
 
-#### Example E: programmatic override at server creation time
+`aouda backup` takes the server from `--server` / `AOUDA_SERVER` and an operator key from `AOUDA_TOKEN` (or `--token`; an argument shows in the process list) (**BL-403, next train**).
+Exit statuses: 0 done, 1 refused or failed, 64 misuse, 69 server unreachable or 5xx, 77 key refused, 78 (offline restore) the directory is not empty.
 
-```csharp
-using Aouda.Engine.Replication;
-using Aouda.Server.Configuration;
-
-var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddAoudaServer(builder.Configuration);
-
-// Optional runtime override (e.g., tests, dev host, one-off deployments)
-builder.Services.Configure<AoudaServerOptions>(o =>
-{
-    o.Archive ??= new ArchiveConfig();
-    o.Archive = new ArchiveConfig
-    {
-        Enabled = true,
-        Destination = @"C:\aouda\archive",
-        WalRetentionDays = 7
-    };
-});
+```bash
+aouda backup create                    # one set, every database; --full for a full backup
+aouda backup list                      # complete? PITR-eligible? which databases
+aouda backup show <id>                 # per database: cut, redo-start, manifest version, branches
+aouda backup restore <id>              # exact
+aouda backup restore --target-time 2026-11-21T15:03:16Z                 # PITR; the newest set at or before the target
+aouda backup restore <id> --to /srv/aouda-data --from /backups/aouda    # offline, into an empty directory
+aouda backup prune --dry-run
+aouda backup retention --keep-last 5 --pitr-window 7d
 ```
 
-This override path is the same pattern used by test/development hosts when they need to adjust `Aouda` options after base configuration binding.
+Every verb takes `--json`, and `--timeout` (default one hour for `create`, `restore` and `prune`, 30 seconds otherwise). The full option
+list is in the [CLI reference](../reference/cli.md#backup). The routes, fields and error codes are in the
+[HTTP API](../reference/http-api.md#backup-and-restore-admin-routes).
 
-## 2.11 API and CLI coverage reference
+### HTTP
 
-### Current public surfaces
+```bash
+# Trigger a backup (an operator key; GET /api/auth/whoami names the principal)
+curl -s -X POST http://localhost:5000/admin/backup/trigger -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{"incremental":true}'
+# → 202 {"backupId":"backup-2026-11-21-150259-e1638d21","totalBytes":87871,"newBytes":87871,...}
 
-- Server admin REST API (P16):
-  - `POST /admin/backup/trigger` — trigger an immediate backup (returns 202 with result)
-  - `GET /admin/backup/list` — list all available backups at the configured destination
-  - `POST /admin/backup/restore/{id}` — exact restore by ID (optional `{ "targetTime" }` body for PITR)
-  - `POST /admin/backup/restore` — body `{ "backupId"?, "targetTime"? }`; omit `backupId` with a `targetTime` to pick the newest run at or before that instant
-  - `GET /admin/backup/schedule` — get the current backup schedule
-  - `PUT /admin/backup/schedule` — set a backup schedule (5-field cron expression or `null` to disable)
+curl -s http://localhost:5000/admin/backup/list -H "Authorization: Bearer $KEY"        # → 200 {"backups":[...]}
+curl -s http://localhost:5000/admin/backup/<backupId> -H "Authorization: Bearer $KEY"  # → 200, one set
 
-- Observability HTTP:
-  - `GET /api/admin/metrics`
-  - `GET /api/admin/metrics/summary`
-  - `GET /api/admin/metrics/{subsystem}`
-  - `GET /health/detailed`
+# Exact restore
+curl -s -X POST http://localhost:5000/admin/backup/restore/<backupId> -H "Authorization: Bearer $KEY"
 
-- Engine-host APIs (for embedded/custom host usage):
-  - `BackupEngine.CreateBackupAsync/ListBackupsAsync/GetBackupAsync`
-  - `RestoreEngine.RestoreAsync/ListBackupsAsync/FindBackupForPitrAsync/VerifyBackupAsync`
-  - `BackupLifecycleManager.EnforceRetentionAsync/AnalyzeRetentionAsync/GarbageCollectAsync`
+# Point-in-time restore: the newest complete set at or before the target
+curl -s -X POST http://localhost:5000/admin/backup/restore -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+     -d '{"targetTime":"2026-11-21T15:03:16Z"}'
+```
 
-### .NET client (`client.Backup`)
-
-Access via `AoudaClient.Backup` property.
+### SDKs
 
 ```csharp
-using Aouda.Client;
-using Aouda.Client.Admin;
+await using var client = new AoudaClient(new AoudaClientOptions { ServerUrl = "http://localhost:5000", DatabaseName = "appdb" });
 
-await using var client = new AoudaClient(new AoudaClientOptions
-{
-    ServerUrl = "http://localhost:5000",
-    DatabaseName = "appdb",
-// WhoAmIAsync() — an aouda_ key (AoudaCredential.Key) or a session.
-});
-
-// Trigger an immediate backup
 var result = await client.Backup.TriggerAsync(new TriggerBackupRequest(Incremental: true));
-Console.WriteLine($"Backup {result.BackupId}: {result.TotalBytes} total bytes, {result.NewBytes} new bytes");
-
-// List all backups (newest first)
 var list = await client.Backup.ListAsync();
-foreach (var b in list.Backups)
-    Console.WriteLine($"  {b.BackupId}  {b.CreatedUtc:u}  {b.TotalBytes / 1024} KB");
-
-// Restore from a specific backup
-var restoreResult = await client.Backup.RestoreAsync(list.Backups[0].BackupId);
-Console.WriteLine($"Restored {restoreResult.FilesRestored} files, " +
-                  $"integrity verified: {restoreResult.IntegrityVerified}");
-
-// Point-in-time restore
 await client.Backup.RestoreAsync(new RestoreBackupRequest(
     BackupId: list.Backups[0].BackupId,
-    TargetTime: DateTimeOffset.Parse("2026-05-01T12:00:00Z")));
-
-// Get and update the backup schedule
-var schedule = await client.Backup.GetScheduleAsync();
-// Set a daily schedule at 02:00 UTC; pass null CronExpression to disable
-await client.Backup.SetScheduleAsync(schedule with { CronExpression = "0 2 * * *" });
+    TargetTime: DateTimeOffset.Parse("2026-11-21T15:03:16Z")));
 ```
-
-### TypeScript client (`client.admin.backup`)
 
 ```typescript
 import { createAoudaClient } from "@aouda/client";
+const client = createAoudaClient({ serverUrl: "http://localhost:5000", database: "appdb" });
 
-const client = createAoudaClient({
-  serverUrl: "http://localhost:5000",
-  database: "appdb",
-// client.whoami() — apiKey is an aouda_ key, or session, never both.
-});
-
-// Trigger backup
 const result = await client.admin.backup.trigger({ incremental: true });
-console.log(`Backup ${result.backupId}: ${result.newBytes} new bytes`);
-
-// List backups
 const list = await client.admin.backup.list();
-for (const b of list.backups)
-  console.log(`  ${b.backupId}  ${b.createdUtc}  ${b.totalBytes} bytes`);
-
-// Restore exact backup
-const restored = await client.admin.backup.restore(list.backups[0].backupId);
-console.log(`Restored ${restored.filesRestored} files`);
-
-// Point-in-time restore (last commit <= targetTime)
-await client.admin.backup.restore({
-  backupId: list.backups[0].backupId,
-  targetTime: "2026-05-01T12:00:00Z",
-});
-
-// Schedule
+await client.admin.backup.restore({ backupId: list.backups[0].backupId, targetTime: "2026-11-21T15:03:16Z" });
 const schedule = await client.admin.backup.getSchedule();
 await client.admin.backup.setSchedule({ ...schedule, cronExpression: "0 2 * * *" });
 ```
 
-### HTTP examples
+The MCP `aouda_backup_restore` tool restores exactly only. Studio's backup page restores exact points; point-in-time restore over HTTP, the CLI
+and both SDKs.
 
-```bash
-# Trigger a backup (requires server-auth scope)
-curl -s -X POST http://localhost:5000/admin/backup/trigger \
-     -H "Content-Type: application/json" \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-     -d '{"incremental":true}'
-# → 202 + TriggerBackupResponse
+## 8. Operations
 
-# List backups
-curl -s http://localhost:5000/admin/backup/list \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-# → 200 + { "backups": [...] }
+- **Metrics**: `GET /api/admin/metrics` carries backup counters, the `wal` block (`archiveSegmentsArchivedTotal`, `archiveErrorsTotal`,
+  `pitrFromArchiveTotal`, and per database `wal.databases[]` with `slotMinPosition` and `slotMaxLagBytes`; the process-wide
+  `slotMinPosition` is gone, **BL-329, next train**). `GET /api/admin/metrics/summary` has `lastBackupHoursAgo`.
+- **Health**: `GET /health/detailed` reports a backup component (stale if no recent success; `not_configured` before any backup) and an archive
+  that is not advancing.
 
-# Restore backup by id
-curl -s -X POST "http://localhost:5000/admin/backup/restore/<backupId>" \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-# → 200 + RestoreBackupResponse
+## 9. Encryption, and who can read a backup
 
-# Set a daily schedule at 02:00
-curl -s -X PUT http://localhost:5000/admin/backup/schedule \
-     -H "Content-Type: application/json" \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-     -d '{"cronExpression":"0 2 * * *","incremental":true}'
-# → 200 + BackupSchedule
-```
+**Aouda does not encrypt a backup, the archive or a dump.** Encryption is the destination's: S3 server-side encryption, an encrypted volume.
+A backup holds every column value and, in an auth database, credential hashes; protect the destination like the data. The server never
+shows an S3 credential in a log, an error or a CLI line, and a database name that looks like a key is redacted in them (**BL-1607, next train**).
 
-### Common error responses
+## 10. Errors
 
-| Status | Condition |
-|--------|-----------|
-| 202 | Trigger: backup completed |
-| 400 | Trigger: invalid destination URI |
-| 409 | Trigger or restore: a backup/restore is already in progress |
-| 503 | Trigger or restore: archive not configured or engine not ready |
-| 404 | Restore: backup ID not found |
+Every `/admin/backup/*` error carries a `code`, a `message` and a string `remedy` (**BL-1637, next train**). The ones you will meet:
 
-### TypeScript observability example
-
-```typescript
-const snapshot = await client.admin.metrics.snapshot();
-console.log(snapshot.backup.operationsCompleted);
-const summary = await client.admin.metrics.summary();
-console.log(summary.lastBackupHoursAgo);
-```
-
-### Missing / not yet implemented
-
-| Intended capability | Status | Workaround |
-|---------------------|--------|------------|
-| `aouda backup create/list/restore` CLI subcommands | Not implemented | Use `curl` or client SDK against `/admin/backup/*` |
-| Azure Blob Storage archive destination | Not implemented | Use `s3://` or local path |
-| Google Cloud Storage archive destination | Not implemented | Use `s3://` or local path |
-
-## 2.12 Scenario playbooks
-
-### 1. Server-managed incremental backup via API
-
-When using Aouda in server mode with the admin API:
-
-```bash
-# One-time: configure archive destination via env vars, optional appsettings, or Studio (see §2.10 and [Server configuration](server-configuration.md))
-# Then trigger a backup via API
-curl -s -X POST http://localhost:5000/admin/backup/trigger \
-     -H "Content-Type: application/json" \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-     -d '{"incremental":true}'
-# → 202 + { "backupId": "...", "totalBytes": ..., "newBytes": ..., ... }
-```
-
-Subsequent triggers with `"incremental":true` will only upload blobs that changed (SHA256 dedup). Monitor `newBytes` vs `totalBytes` to verify the incremental chain is working.
-
-### 2. Embedded incremental backup (local)
-
-In embedded/custom host scenarios, use `BackupEngine` directly:
-
-```csharp
-var destination = new LocalArchiveDestination("./archive");
-var engine = new BackupEngine(aoudaEngine, destination);
-var result = await engine.CreateBackupAsync(new BackupOptions());
-Console.WriteLine($"Backup {result.BackupId}: {result.NewBytes} new bytes");
-```
-
-Repeat incremental backups and verify reduced `NewBytes` on each subsequent call.
-
-### 3. Embedded incremental backup (S3)
-
-```csharp
-// Requires S3ArchiveProvider.Register() at startup (done automatically in Aouda.Server)
-var destination = ArchiveDestinationFactory.Create("s3://my-bucket/my-db");
-var engine = new BackupEngine(aoudaEngine, destination);
-var result = await engine.CreateBackupAsync(new BackupOptions { Incremental = true });
-```
-
-### 4. Disaster restore to known backup (server API)
-
-```bash
-# List backups to find the ID
-curl -s http://localhost:5000/admin/backup/list \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-
-# Restore by ID
-curl -s -X POST "http://localhost:5000/admin/backup/restore/<backupId>" \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-# Server restarts the engine after a successful restore
-```
-
-### 5. Disaster restore to known backup (embedded)
-
-```csharp
-var result = await restoreEngine.RestoreAsync(new RestoreOptions
-{
-    BackupId = "<backupId>",
-    VerifyIntegrity = true,   // default true — always verify on restore
-    CleanTargetDirectory = true
-});
-Console.WriteLine($"Restored {result.FilesRestored} files, integrity verified: {result.IntegrityVerified}");
-```
-
-### 6. PITR restore (HTTP)
-
-```bash
-# Restore to a time (picks newest backup at or before the instant)
-curl -s -X POST http://localhost:5000/admin/backup/restore \
-     -H "Content-Type: application/json" \
-# an aouda_ key or a session. GET /api/auth/whoami names the principal.
-     -d '{"targetTime":"2026-05-01T12:00:00Z"}'
-```
-
-Or pass both `backupId` and `targetTime`. Replay stops at the last transaction commit `<= targetTime`.
-A backup whose manifest recorded WAL position `0` is exact-restore-only (`400`). The response
-includes a per-database `pitr` block. Studio's backup page does not offer this; use HTTP or an SDK.
-
-Embedded equivalent: `RestoreOptions.TargetTime` set, then reopen the engine (replay is on open).
-Do not pass a `WalPath` — it defaults to the database's own WAL root.
-
-### 7. Retention policy rollout
-
-```csharp
-// Step 1: dry-run to see what will be deleted
-var analysis = await lifecycleManager.AnalyzeRetentionAsync(retentionPolicy);
-Console.WriteLine($"Would delete {analysis.ManifestsToDelete.Count} manifests");
-
-// Step 2: execute with chain preservation safeguard
-await lifecycleManager.EnforceRetentionAsync(retentionPolicy, new LifecycleOptions { Execute = true });
-```
-
-### 8. Scheduled backups via Studio
-
-In the Studio backup management page (§7 of the Studio guide), you can set a cron schedule using the built-in cron builder. The schedule is persisted in `backup-config.json` and survives restarts.
-
-## 2.13 Operations and observability
-
-Key signals:
-- Backup throughput/failures: `BackupOperations*`, `BackupBytesUploaded`
-- Restore effectiveness: `RestoreOperations*`, verification counters
-- PITR activity: `PitrSegmentsDownloaded`, `PitrFromArchiveTotal`; inspect `earliestRecoverablePitrPosition`
-- Lifecycle reclamation: `LifecycleBytesReclaimed`, delete counters
-- WAL archive health: `WalSegmentsArchivedTotal`, archive error counters
-
-Health behavior:
-- Backup component health is computed from backup perf counters and backup interval threshold.
-- "not_configured" state is possible when no backup activity has started.
-
-## 2.14 Troubleshooting by symptom
-
-| Symptom | Likely cause | Resolution |
+| Symptom | Code and status | What to do |
 |---|---|---|
-| `NotSupportedException` on `azure://` or `gcs://` URI | Azure/GCS not yet implemented | Use `s3://` or a local path |
-| Missing blob during restore | Archive inconsistency or aggressive lifecycle policy | Run `VerifyBackupAsync`, review retention/GC decisions |
-| `PitrWindowException` | Target time outside the local WAL window and the archive (or no PITR-eligible backup) | Take a newer backup, enable archiving, or pick a later `targetTime`. The local window is write volume since the last backup, not a duration |
-| Health says stale backup | No recent successful backups | Ensure host invokes backups on schedule |
-| A restore is refused: "backup format version 1" (or 2) "… restores format version 3 only" | The backup was taken by an older build — 0.2.x or earlier (**BL-840, 0.3.0**) | Restore it with the build that took it; to move 0.2.x data to this build, export and reload into this build, then take a new backup |
-| Restore refused: "Backup '…' is backup format version 2; this build restores format version 3 only" (or version 1) | The backup was taken by an older build (**BL-840, 0.3.0**): formats 1 and 2 hold the catalog without keys, partitioning or nullability. Nothing was restored; the target is untouched | Restore it with the build that took it, then take a new backup with this build |
-| Durability D.3 scenario skipped | Public backup endpoint absent | Expected until BL-023 is completed |
-| S3 `AmazonServiceException` on first operation | Invalid bucket, region mismatch, or credential chain failure | Verify `Destination` URI, check IAM permissions, set `Region` or `ServiceUrl` explicitly |
+| A backup, restore or prune is already running | `BACKUP_IN_PROGRESS` 409 | Wait, then retry |
+| The backup could not take its fence | `BACKUP_FENCE_TIMEOUT` 503 | Retry; a less loaded server takes it |
+| A buffer could not be sealed for the backup | `BACKUP_BUFFERS_UNSEALED` 503 | Retry |
+| A branch could not be captured | `BACKUP_BRANCH_UNAVAILABLE` 409 | Repair or delete the branch the message names, retry |
+| Restore of a backup taken by another build | `BACKUP_MANIFEST_REFUSED` 400 | The first line is `found=3 expected=4 backup=<id> path=<manifest>`. Restore it with the build that took it, or take a new backup after the upgrade |
+| Restore of a set one database failed | `BACKUP_SET_INCOMPLETE` 409 | Restore another set; a prune removes it |
+| A set record of another version | `BACKUP_SET_REFUSED` 400 | Restore with the build that took it |
+| A target before the backup, or in the future | `BACKUP_TARGET_TIME_INVALID` 400 | Pick a target after the set's last cut |
+| The archive does not cover the window | `PITR_WINDOW_UNAVAILABLE` 409 | Pick a target inside the window, restore exactly, or point `--archive` at the archive's destination |
+| A bulk load committed before the target is not in the store | `PITR_BULK_LOAD_UNAVAILABLE` 409 | Restore before the load's commit (the message names the job) or from a later backup |
+| A keyless delete the restore cannot apply | `PITR_KEYLESS_DELETE_UNRESOLVED` 409 | Restore to before the instant named, or from a later backup |
+| A damaged pending restore (`PITR_TARGET`) | `PITR_TARGET_REFUSED` | Run the restore again |
+| A damaged log manifest | `WAL_MANIFEST_REFUSED` | The file and both versions are named; restore from a backup |
+| A damaged versioned file | `FILE_FORMAT_REFUSED`, start exits 78 | The file is named; restore from a backup |
+| A read meets a cold segment whose column file is missing or short | `COLD_SEGMENT_UNREADABLE`, HTTP 500, logged | The read is refused, not answered with nulls; restore from a backup |
+| `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |
+| A restore failed part-way over several databases | the message ends `Databases already restored: …` | Restore again; those databases are already at the restore |
+| An S3 error on first use | `AmazonServiceException` in the log | Check the bucket, the region and the credential chain |
 
-## 2.15 Verification ledger
+## 11. Formats and upgrading
 
-| Claim | Evidence |
-|---|---|
-| Incremental backup implemented | P4 D.3 report + `BackupEngine.cs` + backup tests |
-| Exact restore and PITR implemented | P4 D.4/I.6 + BL-186 S03/S06/S07; `RestoreEngine`, HTTP `targetTime`, both SDKs |
-| Lifecycle management implemented | P4 D.5 report + `BackupLifecycleManager.cs` + lifecycle tests |
-| Slot integration implemented | P4 I.5 report + slot tests |
-| Observability implemented | metrics/health code + server tests |
-| S3 archive destination implemented | P24-B + `S3ArchiveDestination.cs` + unit/integration tests |
-| Public backup execution API implemented | P16 SA4 + `/admin/backup/` controller + P16 tests |
+A backup carries its own format (`manifest.json`, version **4**). A build reads one version: a version-3 backup is **listed**
+(`pitrEligible: false`) but cannot be restored by a version-4 build —
+`BACKUP_MANIFEST_REFUSED: found=3 expected=4 backup=<id> path=<manifest>` — and there is no converter. Restore it with the build that took it, or take
+a new backup after upgrading; the first incremental backup after an upgrade is taken full. A data-directory format bump is crossed with
+`aouda dump` and `aouda load`: [Upgrading](upgrading.md). A backup from 0.2.x or earlier (format 1 or 2) is refused the same way.
 
-## 2.16 Test coverage matrix
+## 12. Implementation notes
 
-| Area | Test groups | Status |
-|---|---|---|
-| Manifest/build/serialization | backup manifest tests | Strong |
-| Backup engine | engine/integration/parallel tests | Strong |
-| Restore + replay | restore + replay tests | Strong |
-| PITR (local WAL + archive) | `Bl186S06PitrRecoveryPathTests`, `Bl186S07PitrHttpTests`, `PitrFromArchivedWalTests` | Strong — production `HraRowBatch` WAL through recovery-path replay and HTTP |
-| Lifecycle retention/GC | retention/lifecycle tests | Strong |
-| S3 destination (unit) | `S3ArchiveDestinationTests` | Strong |
-| S3 destination (integration/LocalStack) | `S3ArchiveDestinationIntegrationTests` | Skippable — requires `AOUDA_TEST_S3_URL` |
-| Server observability | metrics + health tests | Moderate-Strong |
+**Exact restore.** After the files are written, a synthetic `clean_shutdown.marker` with WAL head 0 points at the restored `.hra`
+snapshots; the first open loads them into the write buffers and flushes them (§3). **Point-in-time restore.** The restore deletes the restored
+snapshots, stages a WAL root and a `PITR_TARGET` file (version 2: the backup's redo-start and cut positions), and the next open replays whole
+transactions from the redo-start through the crash-recovery path to the last commit at or before the target.
 
-## 2.17 Testing gaps and proposed tests
+**Order inside a backup**: the fence, then the buffer snapshots, then the redo-start and WAL positions, then the manifest — so the snapshots
+serve the exact restore and the redo-start serves the PITR.
 
-- Add large-window PITR stress tests with many archived segments.
-- Add Azure Blob / GCS fault-injection tests when those destinations ship.
-- Add S3 end-to-end integration test: trigger → insert → S3 restore → query round-trip.
+**Hot and mutable-tier tables.** A table with data files and a write buffer is backed up with its `.hra` snapshot beside its segments; a
+never-sealing mutable table is covered entirely by the snapshot. `memory` tables write nothing to disk and are not in a backup.
 
-## 2.18 Known gaps and undone work
+## 13. Scenarios
 
-_Updated 2026-09-01 after BL-186 completion._
+**Server-managed incremental backup**: set the archive (§6), `aouda backup create` (twice: the second shows `newBytes` below `totalBytes`).
 
-### Resolved gaps
+**Disaster restore**: `aouda backup list` → `aouda backup restore <id>`; the engines restart. On a new host: [Restore to a new host](restore-to-a-new-host.md).
 
-- ~~BL-023: missing server backup/restore execution API~~ — ✅ **Resolved (P16 Epic A, task A.4)**: full REST API surface at `/admin/backup/` — trigger, list, restore, schedule (GET/PUT). Provider abstraction over `IArchiveDestination`. Scheduled backups via 5-field cron expressions. See `docs/tasks/P16/P16-SA4-Backup-Restore-APIs.md`.
-- ~~No high-level backup/restore surface in `@aouda/client`~~ — ✅ **Resolved (P16 Epic H, task H.6)**: `client.admin.backup.trigger()`, `.list()`, `.restore(id)`, `.getSchedule()`, `.setSchedule()` — all typed.
-- ~~Some task-spec status rows are stale~~ — ✅ **Resolved**: all P16 task specs updated to Complete status.
-- ~~Cloud archive destinations (`s3://`, `azure://`, `gcs://`) pending~~ — ✅ **Partially resolved (P24-B)**: `S3ArchiveDestination` ships with full `IArchiveDestination` implementation, factory wiring, server config (`S3Config`), and unit + LocalStack integration tests. Azure Blob and GCS remain pending.
+**A mistake at 15:03**: `aouda backup restore --target-time 2026-11-21T15:03:00Z`. The response lists, per database, the transactions and rows replayed.
 
-### New capabilities (P24-B)
-
-- **S3 archive destination**: `s3://bucket/prefix` URIs accepted by `ArchiveDestinationFactory`.
-- **S3-compatible services**: MinIO, LocalStack, and any S3-compatible endpoint via `ServiceUrl` + `ForcePathStyle`.
-- **Standard AWS credential chain**: region/key/secret explicit config or environment/profile/instance-metadata chain.
-- **Lazy client init**: factory `Create()` never throws on credential absence — client is created on first I/O call.
-
-### Remaining gaps
-
-- ~~Point-in-time recovery~~ — ✅ **Resolved (BL-186)**: PITR over HTTP and both SDKs; archive worker runs when configured; local window is write volume. See `2.4`.
-- Azure Blob Storage and Google Cloud Storage archive destination implementations.
-- `aouda backup create/list/restore` CLI subcommands (wrapping REST APIs) not yet implemented.
-- Studio backup page has no PITR UI (exact restore only) — BL-332.
-- Integration test: trigger → insert → S3 restore → query round-trip (deferred from P24-B).
-
-## 2.20 HRA and mutable-tier table backup contract
-
-_Added 2026-06-07 (MemTiering S12 — closes Gap C)._
-
-### What is covered
-
-An **exact backup** captures a point-in-time snapshot of every table with data files (any durability level but `memory`; `DiskBacked` before **Lead S26, 0.6.0**) that holds unbuffered rows in the Hot Row Accelerator (HRA). This means:
-
-- **Never-sealing mutable-tier tables** (those with `MemoryIntent = Mutable` that never exceed the seal threshold) are **fully covered** by an exact backup. Their data lives entirely in HRA, and a `.hra` snapshot file is written for each such table at the backup checkpoint.
-- **Partially-flushed tables** (HRA tail present alongside committed `.hot` segments) are also fully covered: the `.hot` segment files are captured by the standard filesystem scan, and the HRA tail is captured by the snapshot mechanism. ⚠️ Until the **architecture review (0.3.0)** this held for the backup only: a restore did not catalogue the `.hot` files, and their rows were lost (see [Restore exact backup](#b-restore-exact-backup)).
-- `BackupFileType.HraSnapshot` manifest entries identify these files; they are content-addressed (SHA-256 + CRC-32) and deduplicated between incremental backup runs.
-
-### What is exempt
-
-- **`memory` tables** (the `memory` durability level, `MemoryOnly` before **Lead S26, 0.6.0**) produce no HRA snapshot. By design (ADR 0034), they write nothing to disk and lose their data on shutdown. They are invisible to backup and intentionally so.
-
-### Exact restore
-
-After blobs are downloaded, `RestoreEngine` writes a synthetic `clean_shutdown.marker` with `WalHeadPosition = 0` referencing the restored `.hra` files. When the engine opens the restored directory, `TryGracefulOpenAsync` detects the marker (both the marker's WAL head and the actual WAL head are 0 on a fresh restore) and loads the snapshots into HRA. The `.hra` files are consumed and deleted during open.
-
-### PITR restore
-
-For a `targetTime` restore, the HRA snapshot is the state at the backup WAL position — before the
-target. `RestoreEngine` **deletes** the restored `.hra` files and stages a `PITR_TARGET`; the next
-open replays `HraRowBatch` WAL through crash recovery to the last commit `<= targetTime`. No
-`clean_shutdown.marker` is written for the PITR path. (**BL-840, 0.3.0**) Both restore the backup's catalog image, so a
-restore onto a foreign empty target carries the Hot segment metadata too (before, only an in-place restore kept the live
-catalog's, BL-334).
-
-### Implementation reference
-
-| Component | Role |
-|---|---|
-| `IHraSnapshotProvider` / `CompactionWorker` | Writes `.hra` snapshots at backup checkpoint; cleans them up afterward |
-| `BackupEngine` | Calls `WriteBackupSnapshotsAsync` before WAL position is recorded; deletes snapshots in finally block |
-| `BackupManifestBuilder` | Includes explicit `HraBackupSnapshotRef` entries as `HraSnapshot` manifest entries; does **not** scan the filesystem for stray `.hra` files |
-| `RestoreEngine` | Exact restore: writes synthetic `clean_shutdown.marker`. PITR restore: deletes `.hra` files. |
-| `AoudaEngine.TryGracefulOpenAsync` | Loads `.hra` snapshots on graceful-open path (unchanged; WAL head = 0 on fresh restore satisfies existing check) |
-
-## 2.19 References
-
-- `docs/dev/Functionality-Document-Template.md`
-- `docs/dev/Functionality-HotCold-And-Memory.md`
-- `docs/dev/Getting-Started-Backup.md` ← new practical how-to guide
-- `docs/tasks/P4/P4-EpicD-Task1-BackupManifest-Report.md`
-- `docs/tasks/P4/P4-EpicD-Task2-ArchiveDestinationAbstraction-Report.md`
-- `docs/tasks/P4/P4-EpicD-Task3-IncrementalBackupEngine-Report.md`
-- `docs/tasks/P4/P4-EpicD-Task4-PointInTimeRestore-Report.md`
-- `docs/tasks/P4/P4-EpicD-Task5-BackupLifecycleManagement-Report.md`
-- `docs/tasks/P4/P4-EpicI-Task5-BackupIntegration-Report.md`
-- `docs/tasks/P4/P4-EpicI-Task6-PitrEnhancement-Report.md`
-- `docs/tasks/P24/P24-B-S3BackupProvider.md` ← P24-B task spec
-- `docs/BACKLOG-ARCHIVE.md` (BL-186)
-- `src/Aouda.Engine.Storage/Backup/*`
-- `src/Aouda.Engine.Storage/WalIntegration/Archive/*`
-- `src/Aouda.Engine.Wal/Retention/*`
-- `src/Aouda.Engine.Diagnostics/Perf.cs`
-- `src/Aouda.Server/Metrics/*`
-- `src/Aouda.Server/Health/BackupHealthCheck.cs`
-
-## 2.20 What is missing from this document?
-
-- ~~Final public backup/restore HTTP/SDK contract details~~ — ✅ Now implemented. See `docs/tasks/P16/P16-SA4-Backup-Restore-APIs.md` and `docs/dev/Functionality-Cloud-And-Hub.md` §1.5 for full API reference.
-- Cloud archive operational runbooks (destination implementations not shipped).
-- Production benchmark envelopes for very large backup catalogs and long PITR timelines.
-- Studio backup UI documentation now in `docs/dev/Functionality-Studio.md` §7.
+**Embedded**: `BackupEngine.CreateBackupAsync`, `RestoreEngine.RestoreAsync` (set `TargetTime`, then reopen — the replay happens on open) and
+`BackupLifecycleManager` are available to a host that embeds the engine.

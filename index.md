@@ -156,7 +156,7 @@ The compose file takes one declaration: an operator in a declaration file, `aoud
 Aouda has **two deployment modes** — the database engine is the same in both:
 
 - **Embedded** — engine runs inside your process, direct API calls, no network, ideal for tests, tools, and single-process apps
-- **Server** — standalone HTTP server, multiple clients, .NET + TypeScript + HTTP, replication, Studio management console
+- **Server** — standalone HTTP server, multiple clients, .NET + TypeScript + HTTP, Studio management console
 
 Aouda has **two independent auth systems**:
 

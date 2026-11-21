@@ -6,30 +6,16 @@ parent: "Guides"
 
 # Aouda Functionality: Write Path Durability
 
-Document status: Approved baseline
-Primary owner: Aouda maintainers
-Last updated: 2026-10-22
-
-Coverage phases: P0, P1, P6, P7
-Primary task folders: `docs/tasks/P6/`, `docs/tasks/P7/`
-Primary ADRs: `docs/decisions/0066-guarantee-levels-durability-validation-currency.md`, `docs/decisions/0003-write-ahead-log.md`, `docs/decisions/0005-persistence-policies.md`, `docs/decisions/0010-cluster-membership-replication.md`
-Related functionality docs: `docs/dev/Functionality-Overview.md`, `docs/dev/Functionality-RealTime-Streaming.md`, `docs/dev/Functionality-HotCold-And-Memory.md`, `docs/dev/Functionality-Auth-And-Authorization.md`
+Last updated: 2026-11-21 (Durability-1)
 
 ## Start Here
 
-If your question is "How durable are writes by default, and how do I change behavior?", start with:
-- [Durability levels](#durability-levels-lead-s26-060) — `strict`, `os`, `unlogged`, `memory`, and what each survives
-- `2.3 Defaults and zero-config behavior`
-- `2.10 Configuration and settings reference`
-- `2.11 API and CLI coverage reference`
-
-If your question is "What is implemented vs missing right now?", jump to:
-- `2.4 Availability status`
-- `2.5 Phase coverage matrix`
-- `2.6 Capability coverage matrix`
-- `2.11 API and CLI coverage reference` (including missing API matrix)
-- `2.15 Verification ledger`
-- `2.16 Test coverage matrix`
+- "What does each level survive, and what does it lose?" — [Durability levels](#durability-levels-lead-s26-060) and
+  [What each level loses](#what-each-level-loses)
+- "How do I change a level?" — [Changing a level](#changing-a-level)
+- "How do I get data back?" — [Backup and restore](backup.md)
+- "What is available, and what is not?" — `2.4 Availability status`
+- Defaults, configuration and troubleshooting — `2.3`, `2.10`, `2.14`
 
 ---
 
@@ -48,6 +34,30 @@ with no alias (see [Refusals](#refusals-of-the-retired-names)). There are four l
 
 `memory` is what used to be `MemoryOnly`; `unlogged` is what used to be `EnableWal = false`.
 
+### What each level loses
+
+What an operator can plan with. "Acknowledged" means the write was answered successfully. A cell says **what is lost**; where it says
+nothing is lost, a named test in the repository proves it.
+
+| Level | A process crash or `kill -9` | A power loss or a kernel crash | A lost disk |
+|---|---|---|---|
+| `strict` | **Nothing acknowledged is lost.** | **Nothing acknowledged is lost**: the frames are on disk before the write is visible or answered. | See below: the last backup, plus the WAL archive |
+| `os` | **Nothing acknowledged is lost**: the frames are in the operating system before the write is visible, and it keeps them when the process dies. | **Writes acknowledged in the last moments may be lost; what is left is a prefix of what was acknowledged** — never a later write without an earlier one, never half a statement, a bulk load kept whole or dropped whole and reported `lost`. How much is lost is the operating system's write-back, which Aouda does not bound. A `strict` table in an `os` database bounds it for itself: its acknowledgement syncs the log up to it, so every write acknowledged before it survives too (**BL-1175, BL-1660, BL-1701, next train**). | See below |
+| `unlogged` | A table that was not being changed keeps its flushed rows; rows only in memory are lost, whole statements at a time. A table that was part-way through an UPDATE, DELETE, MERGE or TRUNCATE is **emptied** ([below](#unlogged-after-a-crash-lead-s26c-060)). | Not stated beyond: the table may come back holding part of a statement. | Everything since the last backup; no point-in-time restore (there is no WAL) |
+| `memory` | Everything | Everything | Nothing was ever written; nothing is in a backup |
+
+- **A lost disk.** Restore the last backup ([Backup and restore](backup.md)). What you lose is everything since it — unless the **WAL archive**
+  is on and you restore to a point in time, when the newest commits missing are at most
+  `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (one minute). A database at `unlogged` or `memory` has no WAL, so
+  it has no point in time.
+- **A damaged log is never read partly.** The open of a WAL, a log manifest or any other versioned file that cannot be read in full is
+  **refused** with a coded error that names the file and both versions (`FILE_FORMAT_REFUSED`, `WAL_MANIFEST_REFUSED`; a start exits 78) — it
+  does not default a missing field or replay what it can. A write cut off by the loss (a torn tail) is trimmed, and everything before it is kept.
+- **The `os` power-loss statement is proved against a model of power loss**, not on a real disk. On a real disk the kernel can write some files
+  back out of order; one such case (an `os` mark or a load file reaching the disk ahead of the log) is an open card (BL-1705). If you cannot lose
+  an acknowledged write, use `strict`.
+- **Not stated.** No number of seconds or bytes is given for `os` after a power loss, and none for a lost disk without the archive: there is no bound to quote.
+
 ### The database's level
 
 A database's level is set where the database is created, and is read again at **every open**:
@@ -64,8 +74,7 @@ A database's level is set where the database is created, and is read again at **
 A database at `strict` or `os` has a WAL; one at `unlogged` or `memory` has none. `os` is a whole-database choice: the database
 has one WAL file, and it is written through or not as a whole.
 
-⚠️ **A database that has a WAL cannot be reopened at `unlogged` or `memory`.** That open is refused with an error, because it would
-ignore the writes the WAL holds. Moving a database from a level with a WAL to one without has no path yet (BL-1145).
+A database moves from a level with a WAL to one without at its next open, which retires the WAL: see [Changing a level](#changing-a-level).
 
 `GET /api/databases/{db}` reports the level as `options.durability` (a string; the boolean `options.enableWal` is gone).
 
@@ -76,15 +85,18 @@ A table may name its own level, or inherit the database's:
 - Declarative schema: `"durability": { "level": "unlogged" }` on the table ([Schema](schema.md)). Engine API:
   `TableDurabilityOptions.Level`. Omitted → the table inherits the database's level.
 - A table may name `strict`, `unlogged` or `memory`. **`os` is a database level only** — a table naming it is refused.
-- **`strict` on a table needs a database at `strict`**; it is refused in an `os`, `unlogged` or `memory` database.
+- **`strict` on a table is allowed in a database at `strict` or `os`** and refused in an `unlogged` or `memory` database (**BL-1175, next train**). In an
+  `os` database a `strict` acknowledgement is an `fsync` of the WAL up to that write's frame, shared by every write that commits at the same moment, so a `strict`
+  table keeps every acknowledged write through a power loss — and so does every `os` write acknowledged before it. It costs one `fsync` per commit group. An
+  `os` database syncs each 64 MB WAL segment once when it rotates away from it, and every segment once at open.
 - **A table's storage is fixed when it is made.** Changing a table to or from `memory` after creation is refused; `strict` ↔
   `unlogged` may be altered.
 - A table created while its database is at `memory` is a memory table — it records `memory`. A table that inherits from a database
   later reopened at `memory` reads as `unlogged`.
 
 `GET /api/databases/{db}/tables/{table}` reports `durability: { "level": "...", "source": "table" | "database" }`: the level the
-table's writes actually get, and where it came from. It is the effective level — a table that named `strict` in an `os` database reads
-`os`. `policy.residency.dataDurability` is gone.
+table's writes actually get, and where it came from. It is the effective level — a table that names `strict` in an `os` database reads
+`strict`, and a table that inherits an `os` database's level reads `os`. `policy.residency.dataDurability` is gone.
 
 ### `unlogged` after a crash (**Lead S26c, 0.6.0**)
 
@@ -101,19 +113,34 @@ a warning naming each table and its row count. A table without the mark keeps it
 lost, whole statements at a time. A clean close snapshots the table's in-memory rows, and the open after it keeps the table whole.
 Keep only data you can load again in an `unlogged` table. (Earlier versions of this page said flushed `unlogged` rows survive a
 crash. They could survive as part of a statement — an UPDATE's deletions without its new rows — which is why a table that was
-being changed is now emptied instead.) A `memory` table is empty after any restart, as it always was. A branch's `unlogged` tables
-do not have this rule yet (BL-1147).
+being changed is now emptied instead.) A `memory` table is empty after any restart, as it always was. The rule holds whatever
+level the table reads at the open (an `unlogged` database reopened at `strict` after a crash empties its flagged tables), and **a branch's `unlogged` tables
+follow it too** — a branch is at its parent's level (**BL-1147, next train**).
 
 The mark is not forced to disk, so the rule holds for a process crash or a kill, **not for a power loss**: after a power loss an
 `unlogged` table may come back holding part of a statement. And the rule is about the table, not about who wrote to it: a bulk load
 into an `unlogged` table is `strict`, but if the table carries the mark at a crash — another statement was changing it — the open
 empties it, the load's rows with it, although the load answered committed.
 
+### Changing a level
+
+(**BL-1145, BL-1152, next train**) A database's level is read at **every open**. A declared database changes level at its restart.
+
+- **From `strict` or `os` to `unlogged` or `memory`.** The open at the new level replays the WAL it finds, flushes every row into segments, closes
+  cleanly and **retires the WAL**; nothing the old level acknowledged is lost, and a later `strict` open does not replay it a second time. A
+  retirement cut by a crash is finished by the next open, at any level. A branch reopened this way retires its own WAL the same way (**BL-1145, next train**).
+- **What a retirement ends.** The database's **point-in-time window** ends at the change: a backup taken before it restores exactly, but not to a time after it, and
+  WAL not yet archived at the change is not archived. Replication history ends too (a replica sees a new epoch), and the database's materialized queries are rebuilt once.
+- **It is refused** (`WAL_RETIREMENT_REFUSED`, the WAL kept) when the flush cannot finish in time (5 minutes), when an `os` load has not been
+  promoted, or when the database requires every WAL segment archived before deletion (`RequireArchiveBeforeDelete`).
+- **A table's level.** `ALTER` between `unlogged` and a WAL level waits for the table's writes to settle (up to 60 seconds), flushes it, then changes; if it
+  cannot, it is refused as a retryable `409 WRITE_CONFLICT` naming the table, with nothing changed (**BL-1152, next train**). A table never moves to or from `memory`.
+
 ### Replication
 
-A table at `unlogged` or `memory` writes no WAL frames, so **a replica receives none of its inserts**; asking for per-table
-replication (`EnableReplication = true`) on such a table is refused. `strict` and `os` replicate as before — the level is the
-primary's promise to the writer, not the replica's.
+**Replication is not supported in any release of Aouda yet** ([Replication](replication.md)). A table at `unlogged` or `memory` writes no WAL
+frames, so a replica would receive none of its inserts; asking for per-table replication (`EnableReplication = true`) on such a table is
+refused. The level is the primary's promise to the writer: nothing here says a replica keeps what the primary does.
 
 ### Bulk loads
 
@@ -129,9 +156,10 @@ table's own level does not change it, so an `unlogged` table still gets a `stric
 Until the server has synced an `os` load in the background, every durable write on its database waits for it — and so does a job
 that follows it (`afterJobId`) at its commit, and the creation of a branch (**Lead group 6 review, 0.6.0**): neither may outlive
 a power loss that drops the load. **If that background sync fails**, every later durable write on the database is refused, naming the
-job, until the server is restarted; the restart verifies the job and keeps it whole or reports it lost. `strict` is refused
-in a database at `os` (its WAL is not written through), and `os` for a multi-table job, a table with vector columns, or an edge
-or vector table. A bulk load into a `memory` table is refused, naming the level — a load writes segment files, which a memory table never has. See
+job, until the server is restarted; the restart verifies the job and keeps it whole or reports it lost. `strict` is **allowed** in a database at `os` — a `strict` load there syncs the WAL up to its position before its commit record, so what a power loss leaves
+is a prefix of what was acknowledged (**BL-1175, BL-1660, next train**). An omitted level in an `os` database is `strict` when every table of the job names
+`strict`, else `os`. `os` is refused for a multi-table job, a table with vector columns, or an edge or vector table: the refusal says to name
+`durability: "strict"`. If an `os` load's background promotion fails, later loads are refused naming the job until a restart. A bulk load into a `memory` table is refused, naming the level — a load writes segment files, which a memory table never has. See
 [Bulk Load — a load's durability](bulk-load.md#a-loads-durability-strict-or-os-lead-s26c-060).
 
 ### Refusals of the retired names
@@ -150,8 +178,9 @@ There is no alias and no shim; each old name is refused where it would have been
 
 ### Persisted formats
 
-The catalog format is now **12** and the database registry format **3**. A data directory written by an earlier build is refused at
-open, naming the version found and the version expected. Aouda is pre-1.0: there is no migration.
+A data directory, a backup or a WAL file written by another format is **refused** at open, naming the file and both the version found and the
+version expected; there is no migration and no fallback reader. The current numbers and the exact lines a server prints are in
+[Upgrading](upgrading.md); to keep data across a format change, [`aouda dump` and `aouda load`](dump-load.md).
 
 ---
 
@@ -162,11 +191,11 @@ Aouda durability makes write outcomes explicit instead of implicit.
 - User problem solved:
   - "My process died; do I lose acknowledged writes?"
   - "Can I trade latency for stronger durability only when needed?"
-  - "Can primary writes wait for replica acknowledgement?"
 - Core outcomes:
   - Local crash durability with write-ahead logging (WAL).
   - Replay-driven recovery after kill/restart.
-  - Replication-aware write concern (`One`, `Majority`, `All`) with timeout policy.
+  - Write concern (`One`, `Majority`, `All`) with timeout policy. Only `One` is meaningful on a single node: replication is not supported, so
+    there is no replica to wait for.
   - Table-level and database-level durability policy layering — one level per database, optionally narrowed per table
     (**Lead S26, 0.6.0**; [Durability levels](#durability-levels-lead-s26-060)).
 - Non-goals (current implementation):
@@ -177,13 +206,13 @@ Aouda durability makes write outcomes explicit instead of implicit.
 ### Question -> section map
 
 - "What does each durability level survive?" -> [Durability levels](#durability-levels-lead-s26-060)
+- "What does each level lose?" -> [What each level loses](#what-each-level-loses)
 - "What are defaults?" -> `2.3`
-- "What is available today?" -> `2.4`, `2.5`, `2.6`
+- "What is available today?" -> `2.4`
 - "How does the write path work end-to-end?" -> `2.8`, `2.8.1`
 - "How do I configure server/db/table/per-write durability?" -> `2.10`
 - "Which API/client surfaces are wired or missing?" -> `2.11`
 - "How do I run this operationally?" -> `2.12`, `2.13`, `2.14`
-- "What tests prove this behavior?" -> `2.15`, `2.16`, `2.17`
 
 ### Role-based map
 
@@ -192,9 +221,9 @@ Aouda durability makes write outcomes explicit instead of implicit.
 - App developer:
   - `2.3`, `2.10`, `2.11`, `2.12`
 - SRE/operations:
-  - `2.13`, `2.14`, `2.15`
+  - `2.13`, `2.14`
 - Reviewer/auditor:
-  - `2.4`, `2.5`, `2.6`, `2.16`, `2.18`
+  - `2.4`, `2.18`
 
 ### Source map
 
@@ -258,9 +287,9 @@ When you do not set durability knobs explicitly:
   2. Table durability override (`TableDurabilityOptions`)
   3. Database options defaults
 - Guardrails (**Lead S26, 0.6.0**):
-  - A table naming `os` is refused (a database level only); a table naming `strict` is refused unless the database is at `strict`.
+  - A table naming `os` is refused (a database level only); a table naming `strict` is refused in an `unlogged` or `memory` database and allowed in an `os` one.
   - A change to or from `memory` after a table is created is refused.
-  - A database with a WAL cannot be reopened at `unlogged` or `memory` (BL-1145 for a path).
+  - A database with a WAL reopened at `unlogged` or `memory` retires its WAL at that open ([Changing a level](#changing-a-level)).
 
 ## 2.4 Availability status (implementation honesty)
 
@@ -269,54 +298,24 @@ When you do not set durability knobs explicitly:
 - Local durability via WAL append path for insert, update, and delete.
 - WAL replay and crash-safe recovery paths, including torn-tail repair.
 - Durable WAL checkpoints (`{db}/wal/CHECKPOINT`) that skip whole segment files below the redo horizon.
-- Streaming replication over WAL frames (multi-database aware protocol versions).
-- Write concern wait pipeline with quorum + timeout policies.
+- Write concern wait pipeline with quorum + timeout policies. (Replication is not supported, so there is no quorum beyond the node itself.)
 - Per-database durability level (`strict` / `os` / `unlogged` / `memory`) via server config, database API, embedded options, CLI
   and both SDKs (**Lead S26, 0.6.0**).
 - Per-table durability level (`strict` / `unlogged` / `memory`) via the declarative schema and the engine/catalog model, with
   inheritance and validation; reported by `GET .../tables/{table}` as `durability` (**Lead S26, 0.6.0**).
 - A bulk load's own level (`strict` / `os`) via `:begin`'s `options.durability`, both SDKs and the CLI (**Lead S26c, 0.6.0**).
+- `strict` tables and loads inside an `os` database, and a level change from a WAL level to `unlogged` / `memory` ([Changing a level](#changing-a-level)).
 - An `unlogged` table that was being changed emptied by an open that does not follow a clean close (**Lead S26c, 0.6.0**).
 - Health and metrics endpoints that expose key operational durability indicators.
 
 ### Planned / proposed
 
 - REST and SDK exposure for the remaining per-table durability controls (`EnableReplication`, `WriteConcern`, `WriteConcernTimeoutMs`, `OnWriteConcernTimeout`).
-- A path from a database level with a WAL (`strict`, `os`) to one without (`unlogged`, `memory`) — BL-1145.
 - Client SDK mutation APIs exposing `WriteConcern` and result `WriteConcernStatus`.
-- Full D.3 backup/restore durability scenario once the API surface exists.
 
-### Reserved / not yet wired
+### Not supported
 
-- Per-database checkpoint synchronization in replication.
-
-## 2.5 Phase coverage matrix
-
-| Phase | Scope | Status | Evidence |
-|---|---|---|---|
-| P0 | Durability bootstrap skeleton | Implemented | `docs/ROADMAP.md` |
-| P1 | WAL and recovery baseline | Implemented | `docs/ROADMAP.md`, WAL/replay test files |
-| P6 | Per-db and per-table durability controls, replication protocol, write concern | Partially implemented (API gaps remain) | `docs/tasks/P6/P6-EpicA-Task5-PerTableWalAndReplicationControl-Report.md`, `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`, `docs/tasks/P6/P6-EpicE-Task3-WriteConcernSynchronousReplication-Report.md` |
-| P7 | Durability scenarios in harness | Implemented with one scenario deferred | `docs/tasks/P7/P7-Task6-DurabilityScenarios-Report.md` |
-
-## 2.6 Capability coverage matrix
-
-| Capability | Status | Notes |
-|---|---|---|
-| WAL append and fsync path | Implemented | Production writer is `WalSegmentedLog` (`wal_%09d.log`). |
-| Insert/update WAL tagging with commit frame | Implemented | `TableAppender` emits begin/append/commit tags. |
-| Delete WAL durability | Implemented | Deletes are WAL-backed (BL-054). |
-| Crash recovery via WAL replay | Implemented | `WalReplayDriver` + storage tests/harness scenarios. |
-| Checkpoint-assisted replay | Implemented | `{db}/wal/CHECKPOINT` + skip of whole segments below `redoStartPosition`. |
-| Per-database durability level | Implemented (**Lead S26, 0.6.0**) | `DatabaseOptions.Durability`, config conversion/validation, create-database API, embedded, CLI, SDKs. |
-| Per-table durability level | Implemented (**Lead S26, 0.6.0**) | `TableDurabilityOptions.Level`, declarative schema `durability.level`; reported on table GET. Other per-table controls: engine/catalog only. |
-| Per-write write concern override | Implemented at protocol/server | `Messages.cs` fields + `TablesController` + `WriteConcernService`. |
-| C# SDK write concern mutation API | Missing | `RemoteTableQuery` does not expose write concern argument. |
-| TypeScript SDK write concern mutation API | Missing | `query-builder.ts` does not expose `writeConcern`. |
-| TypeScript mutation `writeConcernStatus` | Missing | `types.ts` lacks status field present in protocol/server results. |
-| Multi-database replication stream filtering | Implemented | v2/v3 protocol and per-database subscriptions. |
-| Per-table replication filtering in stream | Implemented at protocol level | v3 table subscription filters and server-side filtering counters. |
-| Per-database checkpoint sync for replication | Deferred | Explicitly deferred in P6 Epic E Task 1 report. |
+- Replication ([Replication](replication.md)).
 
 ## 2.7 Core concepts and mental model
 
@@ -404,6 +403,8 @@ Design characteristics:
 5. Queries after startup observe replayed state; scenario tests validate expected rows.
 
 ### Walk-through D: Replication ACK path for write concern
+
+_Replication is not supported in any release yet; this describes the code as it stands._
 
 1. Primary appends WAL frame, and stream server broadcasts per subscribed database.
 2. Secondary stream client receives frame and sends ACK.
@@ -575,6 +576,8 @@ Expected result:
 
 ### Scenario 2: Strong replication-aware writes
 
+_Replication is not supported in any release yet: on a single node only `One` can be satisfied. This scenario shows the shape of the request._
+
 1. Configure primary + secondaries with WAL streaming.
 2. Use `writeConcern = Majority` for inserts/updates.
 3. Observe successful writes only after required ACK threshold.
@@ -622,10 +625,10 @@ Operational guidance:
 ## 2.14 Troubleshooting by symptom
 
 - "Writes acknowledged but missing after crash"
-  - Check the table's effective level (`GET .../tables/{table}` → `durability.level`). Only `strict` survives a power loss; `os`
-    survives a process crash; `unlogged` keeps its flushed rows after a crash, or is emptied if it was being changed (**Lead
-    S26c, 0.6.0**); `memory` loses everything (**Lead S26, 0.6.0**).
-  - Check replay logs and crash safety tests for torn-tail repair behavior.
+  - Check the table's effective level (`GET .../tables/{table}` → `durability.level`) against [What each level loses](#what-each-level-loses):
+    `strict` loses nothing acknowledged; `os` loses nothing to a process crash and may lose its last acknowledged writes to a power loss;
+    `unlogged` keeps its flushed rows after a crash, or is emptied if it was being changed; `memory` loses everything.
+  - Check the server log of the open for a torn-tail repair, a refusal (`FILE_FORMAT_REFUSED`, `WAL_MANIFEST_REFUSED`) or a retirement.
 - "An `unlogged` table is empty after a restart" (**Lead S26c, 0.6.0**)
   - The open did not follow a clean close (a crash, a kill, a close whose snapshot failed, a restore) and the table was being
     changed at the time, so the server emptied it and logged a warning naming it and its row count. That is the level's contract
@@ -642,65 +645,24 @@ Operational guidance:
 - "Cannot configure per-table durability from REST"
   - A table's level goes in the declarative schema (`durability.level`). Replication and write concern overrides per table are a
     known API gap; engine/catalog support exists but public API is incomplete.
-- "A database refuses to open after I set `unlogged` or `memory`"
-  - It has a WAL (it was at `strict` or `os`); reopening it without one would ignore the writes the WAL holds. There is no path
-    yet (BL-1145) — open it at `strict` or `os`.
+- "A database refused to open after I set `unlogged` or `memory`" (`WAL_RETIREMENT_REFUSED`)
+  - The open retires the WAL it finds, and refused: its flush could not finish in 5 minutes, an `os` load is not promoted yet, or the database
+    requires its WAL archived before deletion. The WAL is kept; fix the cause and open again, or open it at `strict` or `os` ([Changing a level](#changing-a-level)).
 - "`400 INVALID_REQUEST` naming `durability` on database create"
   - The body sends `enableWal` or `dataDurability`, or a level spelled differently from `strict` / `os` / `unlogged` / `memory`
     (lower case).
 
-## 2.15 Verification ledger
-
-| Item | Type | Verified | Evidence |
-|---|---|---|---|
-| WAL write path + flush integration | Code audit | 2026-03-31 | `WalWriter.cs`, `WalFlushQueue.cs`, `TableAppender.cs`, `AoudaEngine.cs` |
-| Write concern resolution hierarchy | Code audit | 2026-03-31 | `WriteConcernService.cs`, `PendingWriteTracker.cs`, `TablesController.cs` |
-| Delete WAL/write concern limitation | Code audit | 2026-03-31 | `EngineDeleteResult.cs`, `AoudaEngine.DeleteRowsAsync` path |
-| Protocol support for write concern/status | Code audit | 2026-03-31 | `Aouda.Protocol/Messages.cs` |
-| C#/TS client write concern gaps | Code audit | 2026-03-31 | `RemoteTableQuery.cs`, `../aouda-client-ts/src/query-builder.ts`, `../aouda-client-ts/src/types.ts` |
-| Write concern unit tests | Executed | 2026-03-31 | `dotnet test tests/Aouda.Server.Tests --filter "FullyQualifiedName~WriteConcernServiceTests" --no-build` |
-| Pending write tracker tests | Executed | 2026-03-31 | `dotnet test tests/Aouda.Engine.Replication.Tests --filter "FullyQualifiedName~PendingWriteTrackerTests" --no-build` |
-| WAL recovery/crash tests | Executed | 2026-03-31 | `dotnet test tests/Aouda.Engine.Storage.Tests --filter "FullyQualifiedName~WalIntegrationTests|FullyQualifiedName~CrashSafetyTests|FullyQualifiedName~EndToEndRestartTests" --no-build` |
-| Harness durability scenarios | Task report audit | 2026-03-31 | `docs/tasks/P7/P7-Task6-DurabilityScenarios-Report.md` |
-
-## 2.16 Test coverage matrix
-
-| Area | Test file(s) | Coverage status | Notes |
-|---|---|---|---|
-| Write concern resolution and parsing | `tests/Aouda.Server.Tests/Services/WriteConcernServiceTests.cs` | Covered | Includes hierarchy and required ACK logic. |
-| Pending write waiting and timeout behavior | `tests/Aouda.Engine.Replication.Tests/Streaming/PendingWriteTrackerTests.cs` | Covered | Includes quorum, timeout, degrade/fail behavior. |
-| WAL integration and replay robustness | `tests/Aouda.Engine.Storage.Tests/WalIntegrationTests.cs` | Covered | Includes torn-tail repair and replay correctness. |
-| Crash safety and restart behavior | `tests/Aouda.Engine.Storage.Tests/CrashSafetyTests.cs`, `EndToEndRestartTests.cs` | Covered | Restart correctness validated. |
-| Durability E2E scenarios | `src/Aouda.TestHarness/Scenarios/Durability/*.cs` | Partially covered | D.1 and D.4 implemented; D.3 deferred. |
-| Durability levels (database, table, inheritance, refusals) | `tests/Aouda.Engine.Api.Tests/Lead/S26DurabilityLevelTests.cs`, `tests/Aouda.Server.Tests/Lead/S26DurabilityWireTests.cs`, `tests/Aouda.Embedded.Tests/S26EmbeddedDurabilityTests.cs`, `tests/Aouda.Engine.Schema.Tests/S26RetiredDurabilityFieldTests.cs` | Covered (**Lead S26, 0.6.0**) | |
-| Per-table replication / write concern via REST | N/A | Not covered (surface missing) | Model exists but API contract is incomplete. |
-
-## 2.17 Testing gaps and proposed tests
-
-- Add server API integration tests once per-table durability payload is exposed on create/update table endpoints.
-- Add SDK tests for C# and TS mutation write concern arguments once client surface is implemented.
-- Add TS client type tests for `writeConcernStatus` in mutation results.
-- Add per-database checkpoint sync tests when replication checkpoint synchronization ships.
-
 ## 2.18 Known gaps and undone work
 
 - Public REST/SDK surface for table replication and write concern controls is incomplete (a table's level is in the declarative schema).
-- No path from a database level with a WAL to one without (BL-1145).
 - C# and TypeScript clients do not yet expose per-write write concern arguments.
 - TypeScript client types do not include write concern status in mutation results.
-- Backup/restore D.3 scenario remains deferred pending API support.
-- Per-database checkpoint sync in replication is deferred.
+- Replication is not supported.
 
 ## 2.19 References
 
 - Roadmap and backlog:
-  - `docs/ROADMAP.md`
-  - `docs/BACKLOG.md`
-- Durability-related task reports:
-  - `docs/tasks/P6/P6-EpicA-Task5-PerTableWalAndReplicationControl-Report.md`
-  - `docs/tasks/P6/P6-EpicE-Task1-PerDatabaseWalReplication-Report.md`
-  - `docs/tasks/P6/P6-EpicE-Task3-WriteConcernSynchronousReplication-Report.md`
-  - `docs/tasks/P7/P7-Task6-DurabilityScenarios-Report.md`
+  - [Backup and restore](backup.md), [Replication](replication.md), [Upgrading](upgrading.md)
 - Engine/server code:
   - `src/Aouda.Engine.Api/AoudaEngine.cs`
   - `src/Aouda.Engine.Storage/Ingest/TableAppender.cs`
@@ -747,4 +709,3 @@ Operational guidance:
 
 - Full API payload examples for per-table replication / write concern create/update endpoints are intentionally absent because those endpoints are not fully exposed yet.
 - End-to-end SDK examples with explicit per-write concern are intentionally constrained to current shipped client APIs.
-- Per-database checkpoint sync operational guidance is deferred until implementation lands.
