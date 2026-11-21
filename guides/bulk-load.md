@@ -707,8 +707,8 @@ A load names its own level in `:begin`'s `options.durability` ([HTTP API](../ref
 
 Omitted, a load takes its database's level for a load: `os` in a database at `os`, `strict` everywhere else — except that in an `os`
 database a job whose **every table names `strict`** is `strict` too, because an `os` load into a `strict` table would keep less than
-the table's own writes do (**BL-1175, next train**). A table that inherits the database's level keeps the job at `os`. An `unlogged`
-table still gets a `strict` load. `strict` is what every load did before.
+the table's own writes do (**BL-1175, next train**). A table that inherits the database's level, or names `unlogged`, keeps the job at
+`os` there. Outside an `os` database an `unlogged` table still gets a `strict` load. `strict` is what every load did before.
 
 ```csharp
 var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { Durability = BulkLoadDurability.Os });

@@ -273,7 +273,7 @@ Vector columns (`DataType.Vector` / `DataType.MdVector`) are **column types**, n
 - **An inserted vector is found by `NearestNeighborsAsync` only after its buffer flushes** (BL-1728, open). The insert is acknowledged and
   durable — its frame is logged and replayed after a crash — but the search reads flushed vector segments only, not the write buffer, so a
   vector inserted a moment ago is not in its answer until the buffer flushes: the background pass's interval or row threshold, a clean
-  close, or a [backup](backup.md)'s seal. (The graph operators do read the buffered edges.)
+  close, a [backup](backup.md)'s seal, or a vector export (`aouda dump`). (The graph operators do read the buffered edges.)
 - **A flush that failed does not lose the buffer** (**BL-1630, BL-1534, next train**). A graceful restart after an edge or vector flush
   failed replays the WAL for those rows — the open is slower, nothing is lost; before, the clean-shutdown marker was written before the
   last flush and a failed one lost the buffered edges or vectors. An edge or vector flush takes its segment ids from the catalog's allocator

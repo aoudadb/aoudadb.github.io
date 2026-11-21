@@ -1108,7 +1108,11 @@ public static class BackupExamples
   a retry meets `409 BACKUP_IN_PROGRESS`. They are **not re-sent** after a lost answer (a repeat would take a second backup, or restore
   again over what was written after the first restore) — §8.
 - **`RemedyText`** is set on the exception of every `/admin/backup/*` error: the server's `remedy` string. `Remedy` stays the structured auth remedy.
-  A backup call can also meet `507 DISK_FULL` (an `AoudaException`) and `503 WAL_FAILED` (an `AoudaServiceUnavailableException`): the server applied nothing, but a write is re-sent only after the capacity refusals the client knows (`AoudaCapacityException`), so these two reach your code — retry after `RetryAfter` yourself.
+  A backup call can also meet `507 DISK_FULL` (an `AoudaException`) and `503 WAL_FAILED` (an `AoudaServiceUnavailableException`): the
+  server applied nothing, but `TriggerAsync`, `RestoreAsync` and `PruneAsync` are re-sent only after a refusal that proves "not applied"
+  (`AoudaCapacityException` — memory, WAL capacity, `429 SERVER_AT_CAPACITY` — or `AoudaServerStartingException`) or a connection that
+  never opened, so these two reach your code: retry after `RetryAfter` yourself. `SetScheduleAsync` and `SetRetentionAsync` replace the
+  whole value and are re-sent after any transient failure, these two included.
 - **After a restore, discard the consistency token this client holds.** A restore rewinds the node; a token from before it is ahead of
   the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a new client.
 

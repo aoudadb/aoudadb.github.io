@@ -825,7 +825,7 @@ try {
 
 `bulkLoad` (and `bulkLoadJobs`) take `durability?: 'strict' | 'os'`, sent as `:begin`'s `options.durability`, and the handle's
 `durability` says the level the job committed at (`BulkLoadDurability`; an outcome read from `:status` carries it too). Omitted, the load
-takes the database's level for a load: `'os'` in a database at `os` (`'strict'` when every table of the job names `strict`), `'strict'` everywhere else.
+takes the database's level for a load: `'os'` in a database at `os` (`'strict'` when every table of the job names `strict`; **BL-1175, next train**), `'strict'` everywhere else.
 
 ```typescript
 const handle = await client.table('trades').bulkLoad(batches, { durability: 'os' });
@@ -1565,10 +1565,15 @@ try {
   call keeps the client's default. A call that times out may still be running on the server — a retry meets `409 BACKUP_IN_PROGRESS`.
 - **`remedyText`** is set on the `AoudaApiError` of every `/admin/backup/*` error (`BACKUP_ERROR_CODES` is the closed list;
   `isBackupErrorCode` narrows). It is a different member from `remedy`, which stays the structured auth remedy of a `403`.
-  A backup call can also meet `DISK_FULL` (507) and `WAL_FAILED` (503): the server applied nothing, but the client re-sends a write only after the capacity refusals it knows (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`), so these two reach your code — retry after `Retry-After` yourself.
+  A backup call can also meet `DISK_FULL` (507) and `WAL_FAILED` (503): the server applied nothing, but with a `retryPolicy` set (the
+  default is none) the client re-sends `trigger`, `restore` and `prune` only after a refusal that proves "not applied" — `503`
+  `MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, `SERVER_STARTING`, `SETUP_REQUIRED`, `429 SERVER_AT_CAPACITY` — or a connection that
+  never opened, so these two reach your code: retry after `Retry-After` yourself. `setSchedule` and `setRetention` replace the whole value,
+  so a repeat changes nothing, and they are re-sent after any transient failure, these two included.
 - **After a restore, discard the consistency token your data clients hold.** A restore rewinds the node; a token from before it is
   ahead of the node, and every read carrying it answers `409 TOKEN_UNSATISFIED` until it is discarded. Create a fresh client, or
-  stop passing the old token (the client has no call that clears its token store). Studio does this after a restore it ran.
+  stop passing the old token — `AoudaClient` has no call that clears its token store; a `MemoryConsistencyTokenStore` you passed as
+  `consistencyTokenStore` can `forget(database)`. Studio discards its data clients after a restore it ran.
 
 ### Configuration (P16)
 
