@@ -34,8 +34,8 @@ realtime API-key re-check that is `BL-1001` today, BL-1498). Every other mention
 A line of a released section that says the work is NOT shipped (`not yet shipped`, `unreleased`, `next train`, `planned`) does
 not count: the 0.13.0 section names BL-1380 that way.
 
-`_ALLOW` names a card whose released mention is a slice, not the whole card. BL-1463 and BL-1464 shipped Declare's slices in
-0.14.0; the access-model cut is the rest of those cards and is still `next train`. Remove an id from that set in the same commit
+`_ALLOW` names a card whose released mention is not the fix: a slice of the card, or a known-issue note about the defect the card now
+fixes (BL-1020, BL-1035, BL-1099, BL-1101 and BL-1104: the 0.4.0 - 0.6.0 sections name them as open). Remove an id from that set in the same commit
 that replaces its markers with the version. Exit status 1 when a marker is stale, 0 otherwise.
 """
 
@@ -61,7 +61,10 @@ _VERSION_HEADING = re.compile(r"^(#{1,6})[ \t]+v?(\d+\.\d+\.\d+)\b")
 _ANY_HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+train|planned|not\s+shipped", re.IGNORECASE)
 # A released mention of these is a slice. The rest of the card may still say `next train`.
-_ALLOW = set()  # BL-1463 / BL-1464 shipped fully in 0.16.0
+# Correctness-Hardening: five cards whose released changelog mention is the open defect, not the fix (0.4.0 "are BL-1020", 0.5.0
+# "(BL-1026 / BL-1035; answers stay correct)", 0.6.0 "reaches no database (BL-1099)", "still stores an absent cell as null - BL-1104",
+# "restarted ... BL-1101's"). The fixes are unreleased: remove an id here in the same commit that turns its markers into the version.
+_ALLOW = {"BL-1020", "BL-1035", "BL-1099", "BL-1101", "BL-1104"}
 
 
 @dataclass(frozen=True)
