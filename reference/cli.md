@@ -200,6 +200,12 @@ Every verb takes `-s, --server <url>` (default `AOUDA_SERVER` / `AOUDA_URL`), `-
 `restore --to` also takes `--archive <destination>` (with `--target-time`: the WAL archive's destination when it is not `--from`),
 `--s3-endpoint <url>` (an S3-compatible endpoint, path-style) and `--s3-region <region>`.
 
+A restore checks every blob against its key as it reads it: a blob that does not match refuses it with `BACKUP_BLOB_DAMAGED` (exit 1),
+naming the file and the set, and `verified yes` on a restore that completed means every blob matched (**BL-1739, next train**). With
+`--target-time`, every database's archive window is checked before anything is written: `PITR_WINDOW_UNAVAILABLE` leaves `--to` as it was
+(**BL-1740, next train**). A restore that stops part-way leaves the database it stopped in refusing to open (`RESTORE_INCOMPLETE`) — delete
+the directory and restore again.
+
 ```text
 $ aouda backup list
 ID                                 CREATED                            COMPLETE  PITR  BYTES  DATABASES

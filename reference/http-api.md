@@ -3771,11 +3771,12 @@ Every error the backup controller raises is a JSON body with `error` (the messag
 | `BACKUP_ENGINE_NOT_READY` | 503 | the engine is not initialised yet |
 | `BACKUP_REQUEST_INVALID` | 400 | restore with neither `backupId` nor `targetTime` |
 | `BACKUP_TARGET_TIME_INVALID` | 400 | `targetTime` in the future, or at or before the set's cut; or the set is exact-restore-only (a member recorded no WAL root) |
-| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window; found after the member's files were replaced, so that member is part-restored (BL-1740) |
+| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window; every member's window is checked before any engine stops, so nothing was changed (**BL-1740, next train**) |
 | `PITR_BULK_LOAD_UNAVAILABLE` | 409 | a bulk load committed before the target has no files in the store or the archive |
 | `PITR_KEYLESS_DELETE_UNRESOLVED` | 409 | a delete of a keyless table's row that the restore cannot apply (**BL-1624, next train**) |
 | `PITR_FAILED` | 500 | staging or replay failed; the database is quarantined (`POST /api/databases/{db}/unquarantine` after the cause is fixed) |
 | `BACKUP_RESTORE_FAILED` | 500 | any other failure in a restore |
+| `BACKUP_BLOB_DAMAGED` | 409 | restore: a blob of the set or the WAL archive does not match its key (its SHA-256 or its length); the message names the file, the database and the set, and the members already restored. Nothing was written under that file's name; the database the restore stopped in is quarantined with `RESTORE_INCOMPLETE` until a restore of it completes (**BL-1739, next train**) |
 | `BACKUP_FAILED` | 500 | a backup or prune failed for another reason; no set was committed |
 | `BACKUP_SCHEDULE_INVALID` | 400 | `PUT schedule` with a cron expression that is not five fields |
 | `BACKUP_RETENTION_INVALID` | 400 | `PUT retention` out of range, or `prune` with no policy saved |
@@ -3983,13 +3984,13 @@ PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044
 |--------|------|
 | 400 Bad Request | `BACKUP_REQUEST_INVALID` (neither field); `BACKUP_TARGET_TIME_INVALID` (`targetTime` in the future, or at or before the set's cut — the message names both instants — or the set is exact-restore-only); `BACKUP_MANIFEST_REFUSED` or `BACKUP_SET_REFUSED` (another format); `BACKUP_DESTINATION_UNAVAILABLE` (a member's backup cannot be read) |
 | 404 Not Found | `BACKUP_NOT_FOUND`: the set does not exist at the destination, or no complete set lies at or before `targetTime` |
-| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
+| 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `BACKUP_BLOB_DAMAGED` (**BL-1739, next train**); `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
 | 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. `BACKUP_RESTORE_FAILED` for any other failure |
 | 503 Service Unavailable | `BACKUP_ENGINE_NOT_READY`; `BACKUP_DESTINATION_UNAVAILABLE` |
 
-The 400s, the 404 and the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE` are decided before any engine stops; the `PITR_*` codes and the 500s come after a member's files were replaced. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on is part-restored. Fix the cause the `remedy` names, then restore again — for `PITR_WINDOW_UNAVAILABLE`, to a target inside the window or exactly.
+The 400s, the 404, the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE`, and `PITR_WINDOW_UNAVAILABLE` (**BL-1740, next train**) are decided before any engine stops: nothing was changed. `BACKUP_BLOB_DAMAGED`, the other `PITR_*` codes and the 500s come after a member's files were changed. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on holds `restore.incomplete` and is quarantined with `RESTORE_INCOMPLETE` — it is not opened on a mixture of its old files and the backup's — until a restore of it completes, which clears the quarantine (**BL-1739, BL-1740, next train**). Fix the cause the `remedy` names, then restore again.
 
-**`integrityVerified: false` in a 200** means a restored file did not match its SHA-256: the restore wrote it and opened the database anyway (BL-1739). Treat that restore as failed and restore another set.
+**`integrityVerified` is always `true` in a 200** (**BL-1739, next train**): every blob is checked against its SHA-256 and length as it is read, before the file gets its name, and a mismatch refuses the restore with `BACKUP_BLOB_DAMAGED`. The field stays for now and will be removed.
 
 #### `POST /admin/backup/prune`
 
