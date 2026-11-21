@@ -557,6 +557,7 @@ What it shares with C#, and what changed for it in the same session:
   **Lead S22, 0.6.0**, the SDK's own recovery does, safely: after a lost connection, a timeout or a `503` it asks the server
   where the job is (a `:begin` with the job's key) and sends the same body again, up to 4 times; the server skips the frames it
   holds, so a body sent twice is applied once — as the C# SDK has done since Lead S21a.
+- (**BL-1347, next train**) A failed or aborted job's `idempotencyKey` stays reserved for its beginner for the idempotency window (`IdempotencyWindowMinutes`) after its session is swept: another credential presenting it is `403 AUTH_POLICY_DENIED`. A restart forgets the reservation, as it forgets the session.
 - **A failed load leaves the job open; the same call with the same `idempotencyKey` resumes it** from `:begin`'s `nextSequence`
   (**Lead S22, 0.6.0**; it was `resumeFromRow`, gone): the bodies the server holds are not sent, and the rows of the frames
   skipped are checked against the server's count, so a load framed differently is refused `BULK_LOAD_CURSOR_MISMATCH` instead of

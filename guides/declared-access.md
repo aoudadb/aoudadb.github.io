@@ -63,6 +63,16 @@ A server must always keep an operator: a principal of the server auth database t
 role grants it) and has a credential. A start or reload that would leave none is refused (`SERVER_HAS_NO_OPERATOR`) and changes
 nothing. A server that has never been set up and declares no operator starts in setup mode.
 
+(**BL-1720, next train**) The rule counts the credentials the converge keeps, not the ones it is about to delete: removing the operator's last key from the file is refused (`SERVER_HAS_NO_OPERATOR`), as removing the operator is.
+
+## After a backup restore
+
+A restore brings back the auth database as it was when the backup was taken, and the node converges the declared access section onto it. When that converge is refused (a runtime principal or role holds a declared name, or a store rule refused a write), **what the file removed is still removed** where the node writes: the file's removals of a principal, a role or a credential are applied, and a disable or a narrowing waits for the next converge. `GET /ready` reports `access_converge_failed` (subject: the auth database) until a converge completes, which a reload does (**BL-1596, next train**). A removal that would leave the server auth database with no operator is left out whole, and a removal the store refuses is skipped while the rest go on.
+
+## OIDC trusts and the issuer's key source
+
+An issuer has one key source. When a declared OIDC trust names another key source than a runtime trust of the same issuer, the declared trust wins, and the plan, the start and the reload report the warning `OIDC_TRUST_JWKS_CONFLICT` (ADR 0071 `D-18`); delete the runtime trust, or declare the trust with the issuer's key source (**BL-1602, next train**).
+
 ## Replication
 
 Only a node that accepts writes converges. A replica checks the section (an error still refuses its start) and writes nothing; a
