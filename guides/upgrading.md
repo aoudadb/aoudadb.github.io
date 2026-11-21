@@ -180,7 +180,7 @@ loses, level changes, backups that need no quiesce, retention, restore to a new 
 | Line | Meaning |
 |---|---|
 | `DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<file>` | the first line of every refused start: the catalog root, or a file of the directory, is of another format or damaged; exit 78 |
-| `FILE_FORMAT_REFUSED: kind=<kind> found=<n or the reason> expected=<m> path=<file>` | a versioned file is damaged or of another version; the file is named. At a start it is the **second** line, under `DATA_DIRECTORY_FORMAT_REFUSED` naming the same file; exit 78 |
+| `FILE_FORMAT_REFUSED: kind=<kind> found=<n or the reason> expected=<m> path=<file>` | a versioned file is damaged or of another version; the file is named. At a start it is the **second** line, under `DATA_DIRECTORY_FORMAT_REFUSED` naming the same file; exit 78. A **damaged** WAL segment (`kind=wal-segment` with `found=checksum mismatch`, `length mismatch`, `truncated` or `missing`) is that database's, not the data directory's: the database stays quarantined and the server starts (**BL-1741, next train**) |
 | `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> …` | not a start: a **read** of a cold segment whose column file is missing or short is refused (HTTP 500 `INTERNAL_ERROR`; this line is in the server log) instead of answered with nulls; restore the database from a backup |
 
 ## What every release's notes carry
