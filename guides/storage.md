@@ -212,7 +212,7 @@ If you run server defaults and do not set per-database overrides:
 | Stable server/database/table storage layout | Yes | No | No | `StorageConstants.cs`, layout classes, P6 Task4 report | Table-name path model is active |
 | Catalog snapshot durability (`catalog.json`) | Yes | No | No | `CatalogStore.cs`, catalog tests | Atomic temp-write + move |
 | WAL append durability and replay | Yes | No | No | `WalWriter.cs`, replay/bootstrap paths, restart tests | Core durability path shipped |
-| Per-table durability level | Yes | No | No | P6 Task5 report, `AoudaEngine` durability resolution, Lead S26 | (**Lead S26, 0.6.0**) A table names `strict`, `unlogged` or `memory`, or inherits the database's level; `strict` needs a `strict` database, `os` is a database level only |
+| Per-table durability level | Yes | No | No | P6 Task5 report, `AoudaEngine` durability resolution, Lead S26 | (**Lead S26, 0.6.0**) A table names `strict`, `unlogged` or `memory`, or inherits the database's level; `strict` needs a database with a WAL (`strict` or `os`; **BL-1175, next train**), `os` is a database level only |
 | Per-database WAL replication framing | Yes | No | No | P6 EpicE Task1 report, replication streaming code | v2 frame model with DB tagging |
 | Hot segment file persistence and restart hot-load | Yes | No | No | P3 Task7 report + bugfix report, hot persistence tests | Type-complete persistence added |
 | WAL slot lifecycle management (`system/replication/backup/archive`) | Yes | No | No | ADR 0016 + P4 Epic I + BL-186 S05 | Retention boundaries consumer-aware. Archive slot is created when archiving is configured |
@@ -705,8 +705,8 @@ Steps:
 
 Expected result checks:
 - `durable_db` emits WAL writes; `ephemeral_db` does not.
-- A table naming `strict` in `ephemeral_db` is rejected (`strict` needs a `strict` database).
-- Reopening `durable_db` at `unlogged` is refused: it has a WAL, and the open would ignore the writes it holds (BL-1145).
+- A table naming `strict` in `ephemeral_db` is rejected (`strict` needs a database with a WAL: `strict` or `os`).
+- Reopening `durable_db` at `unlogged` replays and flushes its WAL, then retires it (**BL-1145, next train**); it is refused (`WAL_RETIREMENT_REFUSED`) only when that cannot finish.
 - Replication filtering follows effective table/database durability settings.
 
 ### Scenario 3: Engine-level backup + exact restore validation
@@ -781,7 +781,7 @@ Suggested tuning sequence:
 | A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#10-errors)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | The table's effective level is `unlogged` or `memory` (its own, or the database's) | Check `GET .../tables/{table}` → `durability` (`level`, `source`) and the database's `options.durability` (**Lead S26, 0.6.0**) |
-| Database refuses to open after its `Durability` was set to `unlogged` or `memory` | It has a WAL from an earlier open at `strict` or `os`; opening it without one would ignore the writes the WAL holds (**Lead S26, 0.6.0**) | Open it at `strict` or `os`; there is no path to a level without a WAL yet (BL-1145) |
+| Database refuses to open after its `Durability` was set to `unlogged` or `memory`: `WAL_RETIREMENT_REFUSED` | (**BL-1145, next train**) The open at a level without a WAL replays and flushes the WAL it finds, then retires it; it refuses, keeping the WAL, when (among others) the flush cannot finish in time, an `os` load has not been promoted, a bulk load or an edge or vector buffer is still owed to the WAL, the WAL archive cannot take every frame, or `RequireArchiveBeforeDelete` is set | Fix what the message names and open again — the next open tries again — or open it at `strict` or `os` ([Changing a level](write-durability.md#changing-a-level)) |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
 | Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
 | An `Error` log line `[SegmentScrubber] corrupt page: table …, segment …, column …`, and reads of that table failing with a corruption error (**BL-815, 0.3.0**) | A cold page changed on disk after it was written (a media error, or something other than Aouda wrote to the data directory) | Check the disk. Restore the table from a backup or re-sync it from a replica. The line repeats every 24 hours until the segment is replaced |

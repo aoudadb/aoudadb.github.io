@@ -70,6 +70,8 @@ _ALLOW = {
     "BL-1145",  # a level move to `unlogged` / `memory`: 0.6.0 says it has no path yet
     "BL-1147",  # a branch's `unlogged` tables: 0.6.0 says they do not have the rule yet
     "BL-1485",  # a PITR across a created table: 0.14.0 lists it as a known issue
+    "BL-558",   # keyed-delete replay multiplicity: 0.1.31 shipped the first half; Durability-1 S05 closes the rest
+    "BL-787",   # the WAL ladder: 0.3.0 shipped the derived cap; Durability-1 S11 closes the residual (maintenance at T27)
 }
 
 

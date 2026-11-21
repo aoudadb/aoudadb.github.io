@@ -1927,7 +1927,7 @@ await client.branches.delete("feature-x");
 
 ### Backup and Restore
 
-- **[Backup and Restore](backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). REST and TypeScript client APIs for exact restore and point-in-time recovery. Retention and GC.
+- **[Backup and Restore](backup.md)** — Incremental backups to local filesystem or S3 (including S3-compatible services such as MinIO and LocalStack). One set per backup (every database, no quiesce), exact and point-in-time restore, a retention policy and prune (none by default), the `aouda backup` CLI, and both SDKs (**Durability-1, next train**). Replication is not supported yet: run one node and rely on backups ([Restore to a new host](../guides/restore-to-a-new-host.md)).
 
 ### Authentication & Authorization
 

@@ -130,10 +130,10 @@ What a write survives is one level per database, optionally narrowed per table. 
 | Value | Default | Allowed | Key |
 |---|---|---|---|
 | Database durability | **`strict`** — WAL frames written through (fsync) before a write is visible; survives a power loss. Server and embedded alike | `strict`, `os`, `unlogged`, `memory` | `POST /api/databases` `durability`; `databases.<db>.durability` in `aouda.json` (**BL-1463, 0.16.0**); embedded `AoudaEmbeddedOptions.Durability` / `Aouda:Durability`; `aouda databases create --durability` |
-| Bulk-load durability (**Lead S26c, 0.6.0**) | **inherits** the database's level for a load: `strict`; `os` in a database at `os` (an `unlogged` table still gets `strict`) | `strict`, `os` — `strict` not in an `os` database; `os` not for a multi-table job, a table with vector columns, or an edge or vector table | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
-| Table durability | **inherits** the database's level | `strict` (only in a `strict` database), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
+| Bulk-load durability (**Lead S26c, 0.6.0**) | **inherits** the database's level for a load: `strict` (an `unlogged` table included); `os` in a database at `os`, unless every table of the job names `strict` (**BL-1175, next train**) | `strict`, `os` — `os` not for a multi-table job, a table with vector columns, or an edge or vector table (such a job in an `os` database names `strict`) | `:begin` `options.durability`; `BulkLoadOptions.Durability`; `@aouda/client` `durability`; CLI `--durability` |
+| Table durability | **inherits** the database's level | `strict` (in a database with a WAL: `strict` or `os`; **BL-1175, next train**), `unlogged`, `memory`; `os` is a database level only | Declarative schema `"durability": { "level": … }`; engine `TableDurabilityOptions.Level` |
 
-The database's level is read at every open; one with a WAL (`strict`, `os`) cannot be reopened at `unlogged` or `memory`. A table's
+The database's level is read at every open; one with a WAL (`strict`, `os`) reopened at `unlogged` or `memory` flushes everything and **retires its WAL** at that open — refused (`WAL_RETIREMENT_REFUSED`) when it cannot finish ([Changing a level](write-durability.md#changing-a-level); **BL-1145, next train**). A table's
 change to or from `memory` after creation is refused. These replace `enableWal` / `EnableWal` (default `true`), `dataDurability`
 (`DiskBacked`) and `durability.walEnabled`, which are now refused by name. (**Lead S26c, 0.6.0**) An open that does not
 follow a clean close empties an `unlogged` table that was being changed ([`unlogged` after a crash](write-durability.md#unlogged-after-a-crash-lead-s26c-060)).
@@ -152,7 +152,7 @@ and [Storage](storage.md) (walk-through D).
 | `T24` — segment size | `clamp(T23 / 16, 8 MB, 64 MB)` | Fixed at open. |
 | `T25` — force checkpoint | `0.70 × T23` | Also the WAL debt's soft line for the ingest stall curve. Moves with `T23`. |
 | `T26` — run retention now | `0.85 × T23` | Moves with `T23`. |
-| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate — (**BL-956, 0.4.0**) at most 30 s, 10 s before any reclaim is measured. Moves with `T23`. |
+| `T27` — refuse source writes | `0.95 × T23` | `503 WAL_CAPACITY_EXCEEDED` + `Retry-After` from the measured reclaim rate — (**BL-956, 0.4.0**) at most 30 s, 10 s before any reclaim is measured. Moves with `T23`. (**BL-787, next train**) A **source** write, a bulk-load commit and a DDL frame are refused here; a materialized result's maintenance (its derived writes) is admitted up to `T23`, and at `T23` everything but a checkpoint frame is refused. A rebuild's build writes are not admitted: a rebuild still waits. |
 | `T28` — `MaxSlotWalKeepBytes` | `clamp(T23 / 2, 128 MB, 2 GiB)` | Fixed at open: a slot lagging further behind the head is invalidated. |
 
 (**BL-787, 0.3.0**) Each crossing of `T25`, `T26` and `T27`, in either direction, and the end of a refuse episode (its

@@ -452,7 +452,7 @@ _Replication is not supported in any release yet; this describes the code as it 
 | `OnWriteConcernTimeout` | enum | yes | `Fail`, `Degrade`, `DegradeAndLog`, `null` | Timeout behavior override. `null` inherits the database default. Same semantics as the database-level setting. |
 
 Validation and invariants:
-- Table `Level = Strict` is invalid unless the database is at `strict`; `Level = Os` is always invalid (**Lead S26, 0.6.0**).
+- Table `Level = Strict` is invalid unless the database has a WAL (`strict` or `os`; **BL-1175, next train**); `Level = Os` is always invalid (**Lead S26, 0.6.0**).
 - Effective write concern configuration resolves per write, then table, then database.
 
 ### Per-write request knobs
@@ -600,7 +600,7 @@ Expected result:
 1. Create the database at `durability: "os"`.
 2. Give one table `"durability": { "level": "unlogged" }` in the declarative schema; leave another without a level.
 3. `GET .../tables/{table}`: the first reads `{ "level": "unlogged", "source": "table" }`, the second `{ "level": "os", "source": "database" }`.
-4. Attempt invalid config: a table naming `strict` (needs a `strict` database) or `os` (a database level only).
+4. Attempt invalid config: a table naming `strict` (needs a database with a WAL — `strict` or `os`) or `os` (a database level only).
 
 Expected result:
 - Valid overrides apply; invalid override is rejected.

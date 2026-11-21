@@ -1473,12 +1473,17 @@ prepared (the result's prior state read back) is handled the same way; it used t
 reads of it threw and nothing cleared it.
 
 (**BL-884, 0.3.0**) **A rebuild refused by a full WAL is behind and requeued, never `Error`.** When the log is at its
-refusal line (`T27`), a build's or a deferred pass's writes are refused like any source write. That used to put the query in
+refusal line (`T27`), a rebuild's build writes are refused like any source write. That used to put the query in
 `Error` (reads threw, routing dropped it, nothing cleared it), where a memory refusal of the same write was a deferral. Both are
 capacity refusals now: the query stays readable and behind, and its rebuild is requeued. A WAL-refused rebuild waits for the
 log to fall back under `T26` before it runs again, and does not double its memory ask. A **create** whose first build is
 refused this way (memory or WAL) succeeds: the definition is durable, so the query exists behind and is built once there is
 room — it used to answer `503` and leave the query in `Error`, so the retry was refused as "already exists".
+
+(**BL-787, next train**) A result's ordinary
+**maintenance** — the apply of a source's change, a deferred pass — is no longer refused there: its derived writes are admitted up to
+`MaxWalBytes`, so a result that is behind at a full WAL catches up by its apply, checkpoints, and releases the WAL it was pinning,
+without a rebuild; only a rebuild still waits.
 
 (**BL-785, 0.3.0**) The same holds when a [deferred pass](#deferred-loads) is refused memory part-way
 through writing a query. The query is deferred, not rebuilt in the same pass: it stays readable and stale, and later
