@@ -6,6 +6,9 @@ parent: "Deployment"
 
 # Kubernetes Helm Deployment Guide
 
+{: .warning }
+**Replication is not supported in any release of Aouda yet.** A replica cannot catch up after a disconnect, keeps streamed rows only in memory, and a primary's election and failover are not proven; run one node per database and protect data with [backups](../guides/backup.md). This page describes the code as it stands.
+
 This guide describes how to deploy Aouda to Kubernetes using the official chart at `charts/aouda-cluster/`.
 
 ## Prerequisites
@@ -106,6 +109,8 @@ helm uninstall aouda --namespace aouda
 
 ### Cluster Size and Storage
 
+Keep `replicaCount=1`: more than one replica is not supported, and is not a way to get high availability. The example below shows the chart value for reference only.
+
 ```bash
 helm upgrade --install aouda ./charts/aouda-cluster \
   --namespace aouda --create-namespace \
@@ -115,6 +120,8 @@ helm upgrade --install aouda ./charts/aouda-cluster \
 ```
 
 ### Enable Witness (Arbiter)
+
+Chart reference only: a witness only matters with more than one replica, which is not supported.
 
 ```bash
 helm upgrade --install aouda ./charts/aouda-cluster \
@@ -223,6 +230,6 @@ helm template aouda charts/aouda-cluster --set witness.enabled=true --set studio
 
 ## Notes
 
-- `replicaCount=1` runs Aouda in standalone mode (no replica-set env vars).
-- Witness is for election quorum and stores no data.
+- `replicaCount=1` runs Aouda in standalone mode (no replica-set env vars). This is the only supported setting.
+- Witness is for election quorum and stores no data; it has no purpose on a single node.
 - Ingress/TLS/cert-manager are intentionally out of scope for this chart version. If you add an Ingress or cloud load balancer in front of the Service, configure [trusted proxies](reverse-proxy.md) on Aouda — otherwise per-IP rate limits, lockout attribution, and audit-log client IPs are the proxy's address.

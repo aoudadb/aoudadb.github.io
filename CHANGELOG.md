@@ -13,6 +13,17 @@ Public, user-facing release notes. Engine phase status lives in the server
 
 ## Unreleased
 
+Single-node durability, backup and restore (Durability-1). Each paragraph is marked `next train` until the release it ships in; the replication pages change the day they are written.
+
+- **[Backup and restore](guides/backup.md) says what a backup and a restore do (BL-1440, BL-1485, BL-337, BL-1635, next train).** A backup needs no quiesced database: writers wait for its fence for at most 5 seconds and are never failed by it. A point-in-time restore keeps the rows that were in a write buffer when the backup ran, returns one row per key across a table created after the backup, lands on a commit boundary and refuses a target before the backup. Retention has **no default**: nothing is pruned until you save a policy. The page no longer contradicts itself about scheduling, no longer lists the BL-1485 "known issue", and its coverage matrices that cited internal reports are one short capability table.
+- **New: [Restore to a new host](guides/restore-to-a-new-host.md) (BL-334, BL-1636, next train).** The runbook: a fresh server pointed at the destination, or `aouda backup restore <id> --to <dir> --from <destination>` offline; exact or to a time; what it refuses (`BACKUP_MANIFEST_REFUSED`, `PITR_WINDOW_UNAVAILABLE`, …); a restored copy must archive to its own destination while its source runs.
+- **New: [Dump and load](guides/dump-load.md) (Durability-1 S13, next train).** `aouda dump` and `aouda load` are how data crosses a data-directory format change. A dump is not a backup, holds secret-class values, and does not carry passwords or branches.
+- **[CLI reference](reference/cli.md): `aouda backup`, `aouda dump`, `aouda load` (Durability-1 S12, S13, next train).** Every verb, flag and exit status.
+- **[HTTP API](reference/http-api.md#backup-and-restore-admin-routes): the backup routes match the server (BL-1637, BL-1635, BL-335, next train).** Added `GET /admin/backup/{id}`, `POST /admin/backup/prune`, `GET` / `PUT /admin/backup/retention`; `list` has `complete` and `members`; restore answers `notInSet` and `branches`; every error has a code and a string `remedy`. **Fixed: the trigger answers `202`, not `200`, and S3 destinations are supported** (only `azure://` and `gcs://` are refused); both were wrong before.
+- **[Write durability](guides/write-durability.md) states what each level loses (next train).** A table gives, per level, what a process crash, a power loss and a lost disk lose; a damaged log is refused, never read partly. A `strict` table may live in an `os` database (BL-1175), and a database's level can move to `unlogged` / `memory`, which retires its WAL and ends its point-in-time window (BL-1145). The page no longer quotes format numbers.
+- **[Upgrading](guides/upgrading.md): formats 18, 19 and 20, and the way across (next train).** Format 20 refuses a 19 directory (`DATA_DIRECTORY_FORMAT_REFUSED: found=19 expected=20`); backup format 4 refuses a version-3 backup; the WAL archive manifest 2 refuses an older archive. The procedure is `aouda dump` on the old build and `aouda load` on the new.
+- **Replication is plainly not supported (fixed).** [Replication](guides/replication.md), [Single-node deployment](guides/single-node-deployment.md), [Cloud and Hub](guides/cloud-hub.md) and [Kubernetes](deployment/kubernetes.md) carry one banner without a release number, and the promises of failover, high availability and a "zero-config cluster" are gone. Every `strict` bulk load now writes its frames, so the `EmitFramesOnSingleNode` setting and its page rows are gone (BL-1118, next train).
+
 ## 0.16.0 — 2026-11-18
 
 Server **0.16.0** / `@aouda/client` **0.16.0** / `Aouda.Client` **0.16.0** / Studio **0.16.0**. Data-directory format **19**; replication protocol **6**. Principals train (ADR 0071).
@@ -705,7 +716,7 @@ Docs for **server 0.4.0** (LoadSpeed, NativeClients, the 0.4.0 integration's sec
 - **A point-in-time restore needs the backup's WAL-root incarnation (BL-980, LoadSpeed K42; breaking).** A backup that records
   none — one of a database without a WAL, or one taken by an older build — is refused for a point-in-time restore instead of
   having its epoch inferred from the archive; an exact restore of it is unchanged. A WAL root whose `wal.manifest.json` has no
-  root id (only a build before BL-330 / BL-438 wrote one) is refused when it opens. [Backup — PITR](guides/backup.md#c-pitr-http-or-engine).
+  root id (only a build before BL-330 / BL-438 wrote one) is refused when it opens. [Backup — PITR](guides/backup.md#4-what-a-point-in-time-restore-returns).
 - **Auth databases and tokens from an older build are not upgraded (BL-980, LoadSpeed K41; breaking).** Pre-1.0 nothing is
   kept compatible. An application database's access tokens must carry its URL issuer, `{base}/api/databases/{db}`; the default
   issuer `"aouda"` is no longer accepted beside it (a token carrying it is `401` — sign in again). `"aouda"` stays the issuer

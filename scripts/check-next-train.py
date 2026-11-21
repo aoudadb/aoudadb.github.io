@@ -61,7 +61,16 @@ _VERSION_HEADING = re.compile(r"^(#{1,6})[ \t]+v?(\d+\.\d+\.\d+)\b")
 _ANY_HEADING = re.compile(r"^(#{1,6})[ \t]+\S")
 _NOT_SHIPPED = re.compile(r"not\s+yet\s+(?:shipped|released)|unreleased|next\s+train|planned|not\s+shipped", re.IGNORECASE)
 # A released mention of these is a slice. The rest of the card may still say `next train`.
-_ALLOW = set()  # BL-1463 / BL-1464 shipped fully in 0.16.0
+_ALLOW = {
+    # Durability-1: cards whose released-changelog mention is an older, open note, not the fix this train ships. Remove each id in the
+    # same commit that replaces its markers with the version (dev/Release-And-Version-Bump.md section 2).
+    "BL-332",   # Studio's point-in-time restore: Studio 0.0.22 shipped the exact-restore page only
+    "BL-1010",  # a backup at WAL position 0: 0.4.0 made it exact-restore-only
+    "BL-1133",  # frameless multi-table loads: 0.6.0 names the gap
+    "BL-1145",  # a level move to `unlogged` / `memory`: 0.6.0 says it has no path yet
+    "BL-1147",  # a branch's `unlogged` tables: 0.6.0 says they do not have the rule yet
+    "BL-1485",  # a PITR across a created table: 0.14.0 lists it as a known issue
+}
 
 
 @dataclass(frozen=True)

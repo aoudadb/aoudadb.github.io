@@ -174,13 +174,13 @@ If you run server defaults and do not set per-database overrides:
     `Archive.Enabled` + destination).
   - Retention worker infrastructure implemented and running. **Archive worker runs** when archive
     is configured — see `2.8.1` Walk-through D and
-    [Backup and restore §2.4](backup.md#24-availability-status).
+    [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
 - Backup/restore engines:
   - `BackupEngine`, `RestoreEngine`, and `BackupLifecycleManager` implemented and tested, for **exact** restore and **PITR**.
   - **Point-in-time recovery (PITR) is implemented.** Replay is the crash-recovery path, at
     transaction-commit granularity, reachable over HTTP and both SDKs. The local window is a
     write-volume bound (`MaxSlotWalKeepBytes`), not a duration. See
-    [Backup and restore §2.4](backup.md#24-availability-status).
+    [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
 
 ### Planned / proposed
 
@@ -275,7 +275,7 @@ If you run server defaults and do not set per-database overrides:
   - A cold segment whose footer is another version fails the read that reaches it with
     `SegmentFormatUnsupportedException`, naming the table, the segment and the version — never an empty read. A 0.2.x
     **backup** does not get that far: the restore refuses it as backup format 1 or 2 (**BL-840, 0.3.0**), before it
-    touches the target ([Backup](backup.md#214-troubleshooting-by-symptom)).
+    touches the target ([Backup](backup.md#10-errors)).
   - Rows a 0.2.x or older build left under a table's `data/_delta/` are not read by this build (above) — the export
     taken with the older build is what carries them over.
   - A primary and its replicas must run the same build ([Replication](replication.md#27-core-concepts-and-mental-model)).
@@ -523,7 +523,7 @@ is set (standalone `Aouda:Archive`, or a replica-set Backup node's `ThisNode.Arc
 `RequireArchiveBeforeDelete = true` is rejected at startup unless archive is enabled and destinationed.
 
 The local PITR window remains write volume even when archiving is off. Archiving extends recovery
-beyond that bound. See [Backup and restore §2.4](backup.md#24-availability-status).
+beyond that bound. See [Backup and restore §1](backup.md#1-what-is-and-is-not-available).
 
 Observability: archive cycle, bytes, and error counters are on `GET /api/metrics` (`WalMetrics`);
 `WalArchiveHealthCheck` degrades when archiving is configured but the worker has not completed a cycle.
@@ -718,7 +718,7 @@ Steps:
 1. Use `BackupEngine.CreateBackupAsync(...)` for full backup.
 2. Apply additional writes and run incremental backup.
 3. Use `RestoreEngine.RestoreAsync(...)` (or `POST /admin/backup/restore/{id}`) for an exact restore,
-   or pass `targetTime` for PITR (see [Backup and restore](backup.md#24-availability-status)).
+   or pass `targetTime` for PITR (see [Backup and restore](backup.md#1-what-is-and-is-not-available)).
 
 Expected result checks:
 - Incremental manifest marks unchanged files as not new.
@@ -778,14 +778,14 @@ Suggested tuning sequence:
 |---|---|---|
 | Data path exists but DB cannot open | Invalid/partial directory state or config mismatch | Check server startup logs, validate `DataPath`, verify required DB subdirectories |
 | `CatalogFormatException` at open: "catalog root declares format version N; this build reads format version 12 only" (6 in 0.3.0, 10 in 0.5.0; 12 since **Lead S26, 0.6.0**) | The directory was written by another build: 0.2.x wrote 4, development builds after 0.2.0 wrote 5, 0.5.0 wrote 10, a newer build writes more (**architecture review, RR-A2-4, 0.3.0**). A shard or journal naming another version under the root's format is corruption, not version skew | Export with the build that wrote it and load into a fresh data directory with this build; see [Upgrading from 0.2.x](#27-core-concepts-and-mental-model) |
-| A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#214-troubleshooting-by-symptom)) | Export with the build that wrote it, and reload |
+| A read fails with `SegmentFormatUnsupportedException` naming a segment | That segment was written by another build — files copied into the data directory by hand (a 0.2.x backup is refused at restore, [Backup](backup.md#10-errors)) | Export with the build that wrote it, and reload |
 | Table create fails for valid schema but path error appears | Table name rejected by `TablePathValidator` constraints | Use directory-safe table name (no separators/reserved chars) |
 | WAL file not growing for a table | The table's effective level is `unlogged` or `memory` (its own, or the database's) | Check `GET .../tables/{table}` → `durability` (`level`, `source`) and the database's `options.durability` (**Lead S26, 0.6.0**) |
 | Database refuses to open after its `Durability` was set to `unlogged` or `memory` | It has a WAL from an earlier open at `strict` or `os`; opening it without one would ignore the writes the WAL holds (**Lead S26, 0.6.0**) | Open it at `strict` or `os`; there is no path to a level without a WAL yet (BL-1145) |
 | Replication lag remains high on one DB | Secondary subscription/filter or checkpoint limitations | Inspect `/admin/replication/topology` and `/admin/replication/coverage` |
 | Cannot perform backup via HTTP | Destination not configured, or not authorized | Configure `Archive.Destination` (or per-request destination); call `POST /admin/backup/trigger` |
 | An `Error` log line `[SegmentScrubber] corrupt page: table …, segment …, column …`, and reads of that table failing with a corruption error (**BL-815, 0.3.0**) | A cold page changed on disk after it was written (a media error, or something other than Aouda wrote to the data directory) | Check the disk. Restore the table from a backup or re-sync it from a replica. The line repeats every 24 hours until the segment is replaced |
-| Restore refused: "backup format version N; this build restores format version 3 only" (**BL-840, 0.3.0**) | The backup was taken by an older build (format 1 or 2), whose catalog copy lacks keys, partitioning and nullability. Nothing was restored | Restore it with the build that took it; then take a new backup with this build. See [Backup](backup.md#b-restore-exact-backup) |
+| Restore refused: "backup format version N; this build restores format version 3 only" (**BL-840, 0.3.0**) | The backup was taken by an older build (format 1 or 2), whose catalog copy lacks keys, partitioning and nullability. Nothing was restored | Restore it with the build that took it; then take a new backup with this build. See [Backup](backup.md#3-restore) |
 | Open refused: "WAL frame … (… format 1) at position …: this build replays … in format 2 … only" (**BL-823, BL-837, BL-923, 0.3.0**) | The log holds, past its checkpoint, a frame an older build wrote and this build no longer replays: an edge insert (`EdgeInsert`, tag 40 → `EdgeInsertV2`), a vector insert (`VectorInsert` → `VectorInsertV2`), or a keyed delete / merge / delete by identity (`HraRowDelete` 23 → 70, `MergeBatch` 66 → 71, `HraRowDeleteById` 67 → 72). It happens only when the older build stopped **without** a clean close while such writes were not yet checkpointed | Open the database once with the build that wrote it and close it cleanly — its rows, edges and vectors are then in segments and the frame is not replayed — then open it with this build. Or restore from a backup taken by this build. A cleanly closed database is unaffected |
 | Open refused with a `JsonException` loading an empty `wal/slots.json` after a clean close, or over an empty materialized-query `definition.json` after two coalescing-window changes at once or a cancelled one | Fixed (**BL-933, BL-935, 0.3.0**): two writers' saves of one file could overlap through a shared temp file and leave it empty. Every file an open reads is now written whole (its own temp file, fsync, rename, directory fsync), one writer at a time | Upgrade. A database already left that way: restore from a backup. An empty or unreadable slot file is still refused at open — it is a bug if it happens, not a state to tolerate |
 | PITR target fails | Window closed (write volume since last backup, or archive gap); backup not PITR-eligible (`walPosition` 0); or target at/before backup `createdUtc` | Take a newer backup, enable archiving, or pick a later `targetTime`. Exact restore (no `targetTime`) is unaffected |
