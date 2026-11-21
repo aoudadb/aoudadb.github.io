@@ -157,7 +157,7 @@ refused with a line that names it, and the procedure is the dump.
 | What | Before | Now | What the old file gets |
 |---|---|---|---|
 | Data-directory format | 19 | **20** | `DATA_DIRECTORY_FORMAT_REFUSED: found=19 expected=20 path=<catalog root file>`; `aouda start` exits 78 |
-| Backup manifest | 3 | **4** (the redo-start position, the durability level, the branches) | a version-3 backup is listed (`pitrEligible: false`) and refused at restore: `BACKUP_MANIFEST_REFUSED: found=3 expected=4 backup=<id> path=<manifest>`. Restore it with the build that took it, or take a new backup after the upgrade |
+| Backup manifest | 3 | **4** (the redo-start position, the durability level, the branches) | a version-3 backup is listed (`pitrEligible: false`, `complete: false`) and refused at restore, before anything is written: a set taken before this release has no set record, so the refusal is `409 BACKUP_SET_INCOMPLETE` (a version-3 manifest under a set record would be `BACKUP_MANIFEST_REFUSED: found=3 expected=4 backup=<id> path=<manifest>`). Restore it with the build that took it, or take a new backup after the upgrade |
 | Server backup set | none | a set record written last | a set taken before has no record: listed `complete: false`, restore is `409 BACKUP_SET_INCOMPLETE`. Take a new backup |
 | WAL archive manifest | 1 | **2** (each entry names its WAL root) | `FILE_FORMAT_REFUSED: kind=wal-archive-manifest found=1 expected=2 path=<destination>:<key>`. Point the server at a **new destination** and take a new backup. A backup or WAL archived by an older build cannot be restored to a point in time by this one; while the archive refuses, the archive worker logs it on every pass and the local WAL is kept (nothing is lost, the disk grows) |
 | `wal.manifest.json`, a pending restore, a replica's `catalog.chk` and every other versioned file | read tolerantly | refused when damaged or of another version | `FILE_FORMAT_REFUSED: kind=<kind> found=<n or the reason> expected=<m> path=<file>` or `WAL_MANIFEST_REFUSED`, `PITR_TARGET_REFUSED`; a start over such a directory exits 78 |
@@ -177,11 +177,11 @@ loses, level changes, backups that need no quiesce, retention, restore to a new 
 
 ### Other refusals
 
-| First line | Meaning |
+| Line | Meaning |
 |---|---|
-| `DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<file>` | the catalog root, or a file of the directory, is of another format; exit 78 |
-| `FILE_FORMAT_REFUSED: kind=<kind> found=<n \| bad magic \| truncated \| missing \| crc \| unreadable> expected=<m> path=<file>` | a versioned file is damaged or of another version; the file is named; exit 78 |
-| `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> …` | not a start: a **read** of a cold segment whose column file is missing or short is refused (HTTP 500, logged) instead of answered with nulls; restore the database from a backup |
+| `DATA_DIRECTORY_FORMAT_REFUSED: found=<n> expected=<m> path=<file>` | the first line of every refused start: the catalog root, or a file of the directory, is of another format or damaged; exit 78 |
+| `FILE_FORMAT_REFUSED: kind=<kind> found=<n or the reason> expected=<m> path=<file>` | a versioned file is damaged or of another version; the file is named. At a start it is the **second** line, under `DATA_DIRECTORY_FORMAT_REFUSED` naming the same file; exit 78 |
+| `COLD_SEGMENT_UNREADABLE: table=<id> segment=<id> file=<path> …` | not a start: a **read** of a cold segment whose column file is missing or short is refused (HTTP 500 `INTERNAL_ERROR`; this line is in the server log) instead of answered with nulls; restore the database from a backup |
 
 ## What every release's notes carry
 

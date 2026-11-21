@@ -16,7 +16,7 @@ databases, no branches. To protect data from a failed disk use [backups](backup.
 ## The procedure
 
 1. **Stop the writers.** A database that is written while it is dumped fails the dump (`DUMP_WRITES_DURING_DUMP`): every table is
-   read again at the end and its consistency token compared.
+   read again at the end and its row count and digest compared with what was written.
 2. **Dump from the old server**, running its own build, with an operator key. Use the `aouda` of a build that has `dump` (the new one):
 
    ```bash
@@ -44,8 +44,8 @@ databases, no branches. To protect data from a failed disk use [backups](backup.
    is loaded and the dump's declaration is left for you to adopt: it prints the step (adopt `<dump>/declaration/aouda.json`, then
    `aouda reload`). **Run `load` again to resume** — a table that is already loaded is skipped (`already loaded shop.orders: 3 rows`).
 
-   A declaration that cannot be planned clean against the target (it prints the findings) ends with **exit 1** after the data is loaded and
-   verified. On a server started with `--dev-admin` that is always so (a development flag may not coexist with a declared credential): pass
+   A declaration that cannot be planned clean against the target (it prints the findings and `the data is loaded; …`) ends with the plan's
+   status — **exit 1**, or 69 / 77 if the plan could not run or its key was refused — after the data is loaded and verified. On a server started with `--dev-admin` that is always so (a development flag may not coexist with a declared credential): pass
    `--no-declaration` there.
 6. Tell the people who had a password to **set it again**: passwords are not carried.
 
@@ -100,7 +100,10 @@ touches has rows), `LOAD_AUTH_DATABASE_MISSING` (a dumped database is linked to 
 with the dump's declaration first), `LOAD_VERIFY_FAILED` (a loaded table's count or digest differs — the table is named), `LOAD_MQ_NOT_READY`.
 A table with a **server-time or identity column** is loaded with its stamps as dumped (**BL-1644, next train**): that needs the **server operator's** key
 (`LOAD_RESTORE_REQUIRES_OPERATOR`, exit 77, nothing written), and the audit log records `bulk_load_restore`. Tables with a `unique` or `references` column, edge tables and
-vector columns are **inserted, not bulk-loaded**, so they are not atomic: if a load of one fails part-way, drop and re-create that table and load again.
+vector columns are **inserted, not bulk-loaded**, so they are not atomic: if a load of one fails part-way, truncate that table and load again.
+Two such tables are refused with `LOAD_TABLE_UNSUPPORTED`, because the insert path would change what they hold: one that also has a server-time or
+identity column (refused before the first write; load the others with `--tables`), and one with a write-time computed column (refused when
+`load` reaches it, after the tables before it were loaded).
 
 ## Memory, time and secrets
 

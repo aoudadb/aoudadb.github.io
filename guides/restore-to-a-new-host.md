@@ -6,7 +6,7 @@ parent: "Guides"
 
 # Restore to a new host
 
-(**BL-334, BL-1636, BL-403, next train**) The host that ran Aouda is gone — a failed disk, a lost virtual machine — and the backups are in a
+(**BL-334, BL-1636, next train**; the `aouda backup` command **Durability-1 S12, next train**) The host that ran Aouda is gone — a failed disk, a lost virtual machine — and the backups are in a
 destination you can still reach: a directory or an S3 bucket. This page brings the data back on another host. Run it once, on a
 spare host, **before** you need it: an untested restore is a hope.
 
@@ -14,8 +14,9 @@ What you need:
 
 - **The destination** (the backup destination, and the WAL archive's if it is a different one) readable from the new host.
 - **The same build that took the backup, or a newer one that reads the same backup format.** A backup carries its own format version
-  (the current one is 4). A build that reads another version refuses the backup before it writes anything:
-  `BACKUP_MANIFEST_REFUSED: found=3 expected=4 backup=<id> path=<manifest>`. Restore that backup with the build that took it.
+  (the current one is 4). A build that reads another version refuses the backup before it writes anything: a set taken before this
+  release has no set record (`BACKUP_SET_INCOMPLETE`), and a manifest of another version is `BACKUP_MANIFEST_REFUSED`, naming both
+  versions. Restore that backup with the build that took it.
 - **What is not in a backup**: the declaration file (`aouda.json`) and keys set in the environment. Carry them separately; the data
   directory does not hold them. See [Backup and restore](backup.md#31-what-a-restore-does-not-bring-back).
 - **An empty data directory** on the new host.
@@ -87,14 +88,15 @@ Principals and keys of the auth database come back with it (they are the lost ho
 
 | You see | Meaning | Do |
 |---|---|---|
-| `BACKUP_MANIFEST_REFUSED: found=3 expected=4 …` | The backup is of another format | Restore it with the build that took it, or restore a newer backup |
-| `BACKUP_SET_INCOMPLETE` | A database of the set has no manifest, or the set has no completion record | Restore another set |
-| `PITR_WINDOW_UNAVAILABLE` | The archive does not cover the time between the backup and the target | A later target is not better: pick one inside the window, restore exactly, or point `--archive` at the archive's destination |
+| `BACKUP_MANIFEST_REFUSED: found=<n> expected=4 …` | A member's manifest is of another format | Restore it with the build that took it, or restore a newer backup |
+| `BACKUP_SET_INCOMPLETE` | A database of the set has no manifest, or the set has no completion record (every set taken before this release) | Restore another set |
+| `PITR_WINDOW_UNAVAILABLE` | The archive does not cover the time between the backup and the target. The check runs after the files were written: the database named is part-restored (BL-1740) | A later target is not better: pick one inside the window, restore exactly, or point `--archive` at the archive's destination |
 | `PITR_BULK_LOAD_UNAVAILABLE` | A bulk load committed before the target has no files in the store or the archive | Restore to before the load's commit (the message names the job), or from a later backup |
-| `BACKUP_TARGET_TIME_INVALID` | The target is before the backup, or in the future | Pick a target after the set's cut |
+| `BACKUP_TARGET_TIME_INVALID` | The target is at or before the backup, or in the future; or the set is exact-restore-only (a database without a WAL) | Pick a target after the set's cut, or restore exactly |
 | exit 78 | The `--to` directory is not empty | Use an empty one |
+| `integrityVerified: false` (or `verified no`) in a successful result | A restored file does not match its hash; the restore wrote it anyway (BL-1739) | Treat the restore as failed: restore another set |
 
-Each of these carries a one-line `remedy` in the message. A directory a failed offline point-in-time restore left behind holds a partial
+Over HTTP each refusal carries a one-line `remedy` field beside the message; the CLI prints it after the message. A directory a failed offline point-in-time restore left behind holds a partial
 restore and **no registry**: nothing in it is opened by a start. Delete it and restore again.
 
 ## What not to do

@@ -50,11 +50,16 @@ nothing is lost, a named test in the repository proves it.
   is on and you restore to a point in time, when the newest commits missing are at most
   `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (one minute). A database at `unlogged` or `memory` has no WAL, so
   it has no point in time.
-- **A damaged log is never read partly.** The open of a WAL, a log manifest or any other versioned file that cannot be read in full is
-  **refused** with a coded error that names the file and both versions (`FILE_FORMAT_REFUSED`, `WAL_MANIFEST_REFUSED`; a start exits 78) — it
-  does not default a missing field or replay what it can. A write cut off by the loss (a torn tail) is trimmed, and everything before it is kept.
+- **A damaged control file is refused, not read partly.** A log manifest, a pending restore's control file, a write-buffer snapshot, the
+  clean-shutdown marker or another versioned file that is damaged or of another version is **refused** with a coded error that names the file
+  and both versions (`FILE_FORMAT_REFUSED`, `WAL_MANIFEST_REFUSED`; a start exits 78) — no missing field is defaulted.
+- **A damaged WAL frame ends the replay there.** A write cut off by the loss (a torn tail) is trimmed and everything before it is kept. The
+  same holds for a frame that fails its checksum in the middle of the log: the open replays up to it, logs a warning and opens with that
+  prefix — frames after it are not replayed, and in the segment being written they are trimmed (BL-1741). A segment the log manifest names
+  but that is missing fails the open.
 - **The `os` power-loss statement is proved against a model of power loss**, not on a real disk. On a real disk the kernel can write some files
-  back out of order; one such case (an `os` mark or a load file reaching the disk ahead of the log) is an open card (BL-1705). If you cannot lose
+  back out of order; one such case (an `os` mark or a load file reaching the disk ahead of the log) is an open card (BL-1705): it can keep
+  an UPDATE's delete of the old row and lose the new row — half a statement, which the model does not show. If you cannot lose
   an acknowledged write, use `strict`.
 - **Not stated.** No number of seconds or bytes is given for `os` after a power loss, and none for a lost disk without the archive: there is no bound to quote.
 
@@ -129,12 +134,15 @@ empties it, the load's rows with it, although the load answered committed.
 - **From `strict` or `os` to `unlogged` or `memory`.** The open at the new level replays the WAL it finds, flushes every row into segments, closes
   cleanly and **retires the WAL**; nothing the old level acknowledged is lost, and a later `strict` open does not replay it a second time. A
   retirement cut by a crash is finished by the next open, at any level. A branch reopened this way retires its own WAL the same way (**BL-1145, next train**).
-- **What a retirement ends.** The database's **point-in-time window** ends at the change: a backup taken before it restores exactly, but not to a time after it, and
-  WAL not yet archived at the change is not archived. Replication history ends too (a replica sees a new epoch), and the database's materialized queries are rebuilt once.
-- **It is refused** (`WAL_RETIREMENT_REFUSED`, the WAL kept) when the flush cannot finish in time (5 minutes), when an `os` load has not been
-  promoted, or when the database requires every WAL segment archived before deletion (`RequireArchiveBeforeDelete`).
+- **What a retirement ends.** The database's **point-in-time window** ends at the change: a backup taken before it restores exactly, but not to a time after it. A database
+  that archives its WAL archives every written segment before the WAL is deleted, so a time before the change stays reachable. Replication history ends too (a replica sees a new epoch), and the database's materialized queries are rebuilt once.
+- **It is refused** (`WAL_RETIREMENT_REFUSED`, the WAL kept; the next open tries again) when the flush cannot finish in time (5 minutes), when an
+  `os` load has not been promoted, when the close after the flush still owes the WAL something (a bulk load not catalogued, an edge or vector
+  buffer), when the WAL archive cannot take every frame (an unreachable destination), or when the database requires every WAL segment
+  archived before deletion (`RequireArchiveBeforeDelete`).
 - **A table's level.** `ALTER` between `unlogged` and a WAL level waits for the table's writes to settle (up to 60 seconds), flushes it, then changes; if it
-  cannot, it is refused as a retryable `409 WRITE_CONFLICT` naming the table, with nothing changed (**BL-1152, next train**). A table never moves to or from `memory`.
+  cannot, the change is refused as a retryable write conflict naming the table, with the table unchanged (**BL-1152, next train**). In a
+  schema apply that change is reported `Failed` in the apply's result (the request itself answers 200); retry the apply. A table never moves to or from `memory`.
 
 ### Replication
 
@@ -144,8 +152,9 @@ refused. The level is the primary's promise to the writer: nothing here says a r
 
 ### Bulk loads
 
-A bulk load writes segment files, not WAL frames, and has a level of its own: `strict` or `os` (**Lead S26c, 0.6.0**), `:begin`'s
-`options.durability`. Omitted, it takes the database's level for a load — `os` in a database at `os`, `strict` everywhere else; a
+A bulk load writes segment files — a `strict` load in a database with a WAL also logs its commit in WAL frames, an `os` load does not — and
+has a level of its own: `strict` or `os` (**Lead S26c, 0.6.0**), `:begin`'s `options.durability`. Omitted, it takes the database's level for
+a load — `os` in a database at `os` (`strict` when every table of the job names `strict`, below), `strict` everywhere else; a
 table's own level does not change it, so an `unlogged` table still gets a `strict` load.
 
 | Load level | Before the job is visible | Survives a process crash | Survives a power loss |
@@ -426,7 +435,7 @@ _Replication is not supported in any release yet; this describes the code as it 
 
 | Setting | Scope | Type | Default | Allowed values | Notes |
 |---|---|---|---|---|---|
-| `Durability` | Database | string | `strict` | `strict`, `os`, `unlogged`, `memory` | (**Lead S26, 0.6.0**) The database's durability level, read at every open. A database with a WAL cannot be reopened at `unlogged` or `memory`. `EnableWal` and `DataDurability` are refused at startup, naming `Durability`. |
+| `Durability` | Database | string | `strict` | `strict`, `os`, `unlogged`, `memory` | (**Lead S26, 0.6.0**) The database's durability level, read at every open. A database with a WAL reopened at `unlogged` or `memory` retires its WAL at that open ([Changing a level](#changing-a-level)). `EnableWal` and `DataDurability` are refused at startup, naming `Durability`. |
 | `ReplicationMode` | Database default | enum string | `Replicate` | `Replicate`, `DoNotReplicate` | Whether this database participates in WAL streaming replication. |
 | `WriteConcern` | Database default | enum string | `One` | `One`, `Majority`, `All` | `One` = primary ACK only (async replication); `Majority` = quorum of replicas; `All` = every configured replica must ACK. |
 | `WriteConcernTimeoutMs` | Database default | int | `5000` | `>=100` | Milliseconds to wait for replica ACKs before applying the timeout behavior. Validator enforces minimum of 100ms. |
@@ -436,7 +445,7 @@ _Replication is not supported in any release yet; this describes the code as it 
 
 | Property | Type | Nullable | Allowed values | Meaning |
 |---|---|---|---|---|
-| `Level` | enum | yes | `Strict`, `Unlogged`, `Memory`, `null` | (**Lead S26, 0.6.0**) This table's durability level. `null` inherits the database's. `Os` is refused (a database level only); `Strict` needs a database at `strict`; a change to or from `Memory` after creation is refused. |
+| `Level` | enum | yes | `Strict`, `Unlogged`, `Memory`, `null` | (**Lead S26, 0.6.0**) This table's durability level. `null` inherits the database's. `Os` is refused (a database level only); `Strict` needs a database with a WAL (`strict` or `os`); a change to or from `Memory` after creation is refused. |
 | `EnableReplication` | bool | yes | `true`, `false`, `null` | Whether this table's WAL frames are included in the replication stream. `null` inherits the database default. `true` is refused when the database has no WAL or the table's level is `Unlogged` or `Memory` (no frames to stream). |
 | `WriteConcern` | enum | yes | `One`, `Majority`, `All`, `null` | Write concern override for this table. `null` inherits the database default. Same semantics as the database-level setting. |
 | `WriteConcernTimeoutMs` | int | yes | `>=100`, `null` | Timeout override in milliseconds. `null` inherits the database default. |

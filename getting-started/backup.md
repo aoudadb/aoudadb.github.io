@@ -16,10 +16,10 @@ For what a backup holds, what a restore returns, retention and the error codes, 
 
 Aouda uses **incremental, content-addressable backups**:
 
-1. The server takes one **fence** — a cut that a transaction in its commit section finishes before. Writers wait for it (at most 5 seconds) and are never failed by it, so **a backup needs no quiesced database** (**BL-337, next train**).
+1. The server takes one **fence** — a cut that a transaction in its commit section finishes before. Writers wait for it (the fence waits at most 5 seconds for commits in flight and is held at most 5 more) and are never failed by it, so **a backup needs no quiesced database** (**BL-337, next train**).
 2. For every database, a manifest is built — it lists every file and its SHA256 hash — and only blobs whose hash has not been uploaded before are written to the destination.
 3. The manifests are written per database and a **set record** is written last: a backup is one set of every database, and a set is complete only when its record is there.
-4. Restore verifies SHA256 hashes by default. A restore returns the backup exactly, or — with a `targetTime` — the last transaction that committed at or before that instant. Rows that were only in a write buffer when the backup ran come back too (**BL-1440, next train**).
+4. Restore verifies SHA256 hashes by default, after the files are written: a mismatch is reported as `integrityVerified: false` in a successful response, not refused — treat that restore as failed (BL-1739). A restore returns the backup exactly, or — with a `targetTime` — the last transaction that committed at or before that instant. Rows that were only in a write buffer when the backup ran come back too (**BL-1440, next train**).
 
 The same model works for both local and S3 destinations — only the destination implementation changes.
 
@@ -197,8 +197,8 @@ if (restoreResult is RestoreBackupResult.Success s)
 > and [HTTP API](../reference/http-api.md#post-adminbackuprestoreid).
 
 > **Restore with the build that took the backup.** A backup carries its own format (version 4 now). A build restores one version: a backup of
-> another version is listed but refused at restore, naming both versions
-> (`BACKUP_MANIFEST_REFUSED: found=3 expected=4 backup=<id> path=<manifest>`), before anything is written. Restore it with the build that took it, or take a
+> another version is listed but refused at restore, before anything is written. A set taken before this release has no set record, so the
+> refusal is `BACKUP_SET_INCOMPLETE` (409); a set whose manifest is of another version is `BACKUP_MANIFEST_REFUSED` (400), naming both versions. Restore it with the build that took it, or take a
 > new backup after the upgrade. See [Backup and Restore](../guides/backup.md#11-formats-and-upgrading).
 
 ---
@@ -330,9 +330,10 @@ The test suite creates a fresh bucket per test run, exercises the full `IArchive
 | `AmazonServiceException` on first S3 operation | Invalid bucket, wrong region, or missing credentials | Verify bucket name and `Region`; check IAM permissions; set `AccessKeyId` / `SecretAccessKey` for explicit credentials |
 | `NoSuchBucket` | Bucket does not exist | Create the bucket first; Aouda does not create buckets automatically |
 | Timeout connecting to MinIO | Wrong `ServiceUrl` or container not running | Check `ServiceUrl` and `ForcePathStyle: true` |
-| Restore hash mismatch | Corrupted blob in S3 | Run `RestoreEngine.VerifyBackupAsync`; re-run backup to upload a fresh set |
+| Restore answers `integrityVerified: false` | A blob in the destination is damaged; the restore wrote it anyway (BL-1739) | Treat the restore as failed: restore another set, then take a new backup |
 | `PITR_WINDOW_UNAVAILABLE` (409) | The local WAL and the archive do not reach back to the backup's replay position, or the backup predates an exact restore and the archive has no WAL for it | Pick a target inside the window, take a newer backup, enable archiving, or restore exactly (no `targetTime`) |
-| `BACKUP_MANIFEST_REFUSED` (400) | The backup is of another format (3, not 4) | Restore it with the build that took it, or take a new backup |
+| `BACKUP_SET_INCOMPLETE` (409) on a set taken before this release | The set has no completion record (and its manifest is format 3, not 4) | Restore it with the build that took it, or take a new backup |
+| `BACKUP_MANIFEST_REFUSED` (400) | A member's manifest is of another format | Restore it with the build that took it, or take a new backup |
 | `BACKUP_DESTINATION_UNAVAILABLE` (503) for `azure://` or `gcs://` | Azure and Google Cloud Storage are not supported | Use `s3://` or a local path |
 
 ---

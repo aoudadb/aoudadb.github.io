@@ -35,7 +35,7 @@
 - [Policy](https://aoudadb.github.io/auth/authorization/): statements, six actions, resources, `where`, embargo, `execute`, public reach, grant only what you hold
 - [Credentials](https://aoudadb.github.io/auth/credentials/): `aouda_<id>_<secret>`, stored keys, derived keys, OIDC, limited keys, sessions, revocation
 - [whoami and remedy](https://aoudadb.github.io/auth/whoami/): `GET /api/auth/whoami` and every refusal code
-- [CLI](https://aoudadb.github.io/reference/cli/): `keys new`, `keys new-root`, `keys derive`, `whoami`, `login --oidc`, `policy explain`, `plan`, `backup` (create, list, show, restore, prune, retention; offline `restore --to`; **BL-403, next train**), `dump`, `load` (**Durability-1 S13, next train**)
+- [CLI](https://aoudadb.github.io/reference/cli/): `keys new`, `keys new-root`, `keys derive`, `whoami`, `login --oidc`, `policy explain`, `plan`, `backup` (create, list, show, restore, prune, retention; offline `restore --to`; **Durability-1 S12, next train**), `dump`, `load` (**Durability-1 S13, next train**)
 - [Moving from 0.14](https://aoudadb.github.io/auth/migrating-from-0-14/): what each removed input now gets
 - [Setup and flows](https://aoudadb.github.io/auth/setup/): signup, sign-in, password reset, MFA
 - [Client integration](https://aoudadb.github.io/auth/client-integration/): one credential, `whoami`, acting for a person

@@ -3723,7 +3723,7 @@ those details with the resource mode.
 ### Backup and restore admin routes
 
 All routes live under `/admin/backup/`. Like every `/admin/*` route they need `admin` on the server auth database (**BL-1466, 0.13.1**; see [Auth Enforcement Rules](#auth-enforcement-rules)).
-A backup is one **set**: every database of the server, the auth database first, committed by a set record written last (**BL-1637, next train**). Every example below is a response captured from a running server; ids are shortened.
+A backup is one **set**: every database of the server, the auth database first, committed by a set record written last (**BL-1637, next train**). Every example below is a response captured from a running server, trimmed where an array repeats (a `pitr` entry per member).
 
 #### Summary
 
@@ -3742,7 +3742,7 @@ A backup is one **set**: every database of the server, the auth database first, 
 
 #### The error envelope
 
-Every error from these routes is a JSON body with `error` (the message), a `code` from the list below, `details` (or `null`) and **`remedy`, a string that says what to do** (**BL-1637, next train**; `remedy` on these routes is a string, not the object other routes use). A message that carries a database name or a path is redacted where it names a key-shaped value (**BL-1607, next train**).
+Every error the backup controller raises is a JSON body with `error` (the message), a `code` from the list below, `details` (or `null`) and **`remedy`, a string that says what to do** (**BL-1637, next train**; `remedy` on these routes is a string, not the object other routes use). Two kinds of error on these routes do not come from it: a refused key (401 / 403) has the authentication envelope (`error` is the code, `remedy` an object), and a capacity refusal (`MEMORY_BUDGET_EXCEEDED`, `WAL_CAPACITY_EXCEEDED`, 503) has the server's general one. A message that carries a database name or a path is redacted where it names a key-shaped value (**BL-1607, next train**).
 
 ```json
 {"error":"Backup 'nope' not found.","code":"BACKUP_NOT_FOUND","details":null,"requestId":null,"remedy":"List the backups (GET /admin/backup/list) and name a set that is listed, or a target time after a complete set's cut."}
@@ -3750,16 +3750,16 @@ Every error from these routes is a JSON body with `error` (the message), a `code
 
 | Code | Status | Raised by |
 |------|--------|-----------|
-| `BACKUP_IN_PROGRESS` | 409 | trigger, prune: another backup, restore, prune or declaration reload is running |
+| `BACKUP_IN_PROGRESS` | 409 | trigger, restore, prune: another backup, restore or prune is running; restore also while a declaration reload runs |
 | `BACKUP_NOT_FOUND` | 404 | `{id}`, restore: no such set, or no complete set at or before `targetTime` |
 | `BACKUP_SET_INCOMPLETE` | 409 | restore: the set has no completion record, or a member has no manifest |
 | `BACKUP_SET_REFUSED` | 400 | restore: the set record is of another version or damaged |
-| `BACKUP_MANIFEST_REFUSED` | 400 | restore: a member's manifest is of another backup format (`found=3 expected=4 backup=<id> path=<manifest>`) |
-| `BACKUP_DESTINATION_UNAVAILABLE` | 400 / 503 | an `azure://` or `gcs://` destination, a provider that is not registered, a destination that cannot be reached |
+| `BACKUP_MANIFEST_REFUSED` | 400 | restore: a member's manifest is of another backup format (`found=<n> expected=4 backup=<id> path=<manifest>`). A set taken before this release has no set record and gets `BACKUP_SET_INCOMPLETE` first |
+| `BACKUP_DESTINATION_UNAVAILABLE` | 400 / 503 | 503: an `azure://` or `gcs://` destination, a provider that is not registered, a destination that cannot be reached; 400: restore, a member's backup cannot be read |
 | `BACKUP_ENGINE_NOT_READY` | 503 | the engine is not initialised yet |
 | `BACKUP_REQUEST_INVALID` | 400 | restore with neither `backupId` nor `targetTime` |
-| `BACKUP_TARGET_TIME_INVALID` | 400 | `targetTime` in the future, or at or before the set's cut |
-| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window |
+| `BACKUP_TARGET_TIME_INVALID` | 400 | `targetTime` in the future, or at or before the set's cut; or the set is exact-restore-only (a member recorded no WAL root) |
+| `PITR_WINDOW_UNAVAILABLE` | 409 | the local WAL and the archive do not cover the window; found after the member's files were replaced, so that member is part-restored (BL-1740) |
 | `PITR_BULK_LOAD_UNAVAILABLE` | 409 | a bulk load committed before the target has no files in the store or the archive |
 | `PITR_KEYLESS_DELETE_UNRESOLVED` | 409 | a delete of a keyless table's row that the restore cannot apply (**BL-1624, next train**) |
 | `PITR_FAILED` | 500 | staging or replay failed; the database is quarantined (`POST /api/databases/{db}/unquarantine` after the cause is fixed) |
@@ -3969,13 +3969,15 @@ PITR stops at the last transaction whose `TxCommit` is `<= targetTime` (ADR 0044
 
 | Status | When |
 |--------|------|
-| 400 Bad Request | `BACKUP_REQUEST_INVALID` (neither field); `BACKUP_TARGET_TIME_INVALID` (`targetTime` in the future, or at or before the set's cut — the message names both instants); `BACKUP_MANIFEST_REFUSED` or `BACKUP_SET_REFUSED` (another format) |
+| 400 Bad Request | `BACKUP_REQUEST_INVALID` (neither field); `BACKUP_TARGET_TIME_INVALID` (`targetTime` in the future, or at or before the set's cut — the message names both instants — or the set is exact-restore-only); `BACKUP_MANIFEST_REFUSED` or `BACKUP_SET_REFUSED` (another format); `BACKUP_DESTINATION_UNAVAILABLE` (a member's backup cannot be read) |
 | 404 Not Found | `BACKUP_NOT_FOUND`: the set does not exist at the destination, or no complete set lies at or before `targetTime` |
 | 409 Conflict | `BACKUP_IN_PROGRESS`; `BACKUP_SET_INCOMPLETE`; `PITR_WINDOW_UNAVAILABLE` (the WAL archive does not reach back to the set's replay position, or a PITR from a set that predates an exact restore has no archive); `PITR_BULK_LOAD_UNAVAILABLE`; `PITR_KEYLESS_DELETE_UNRESOLVED` |
 | 500 Internal Server Error | `PITR_FAILED`: staging or replay failed (**BL-980, 0.4.0**) — among them a replay that meets a WAL frame or catalog-DDL record this build does not read; the body names the database. A failed replay quarantines that database; retry via `POST /api/databases/{db}/unquarantine`. `BACKUP_RESTORE_FAILED` for any other failure |
 | 503 Service Unavailable | `BACKUP_ENGINE_NOT_READY`; `BACKUP_DESTINATION_UNAVAILABLE` |
 
-A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` and those databases are at the restore; run the restore again.
+The 400s, the 404 and the 409s `BACKUP_IN_PROGRESS` and `BACKUP_SET_INCOMPLETE` are decided before any engine stops; the `PITR_*` codes and the 500s come after a member's files were replaced. A restore over several databases that fails part-way stops there: the message ends `Databases already restored: <names>.` (or `No databases were restored.`) and those databases are at the restore; the database it failed on is part-restored. Fix the cause the `remedy` names, then restore again — for `PITR_WINDOW_UNAVAILABLE`, to a target inside the window or exactly.
+
+**`integrityVerified: false` in a 200** means a restored file did not match its SHA-256: the restore wrote it and opened the database anyway (BL-1739). Treat that restore as failed and restore another set.
 
 #### `POST /admin/backup/prune`
 
@@ -4013,7 +4015,7 @@ The saved policy (**BL-1635, next train**), persisted in the server's settings. 
 | `keepDays` | int? (≥ 1) | Keep the sets of the last N days |
 | `pitrWindow` | duration? (`d.hh:mm:ss`, > 0) | Keep what a point-in-time restore to any instant of this window needs |
 
-`PUT` saves the **whole** policy: a term not given is not kept, and all `null` clears it. `400 BACKUP_RETENTION_INVALID` names the field in `details` (`"keepLast must be at least 1."`). Retention runs after every successful scheduled backup and on `prune`.
+`PUT` saves the **whole** policy: a term not given is not kept, and all `null` clears it. `400 BACKUP_RETENTION_INVALID` names the field in `details` (`"keepLast"`) and the rule in `error` (`"keepLast must be at least 1."`). Retention runs after every successful scheduled backup and on `prune`.
 
 #### `GET /admin/backup/schedule`
 

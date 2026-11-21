@@ -171,7 +171,7 @@ It does not know a runtime principal (it names `aouda whoami` and `aouda plan --
 
 ## `backup`
 
-(**BL-403, next train**) `aouda backup` takes, lists, shows, restores and prunes the server's backup sets and reads or sets the retention policy. It
+(**Durability-1 S12, next train**) `aouda backup` takes, lists, shows, restores and prunes the server's backup sets and reads or sets the retention policy. It
 calls the admin API ([HTTP API](http-api.md#backup-and-restore-admin-routes)) with an operator key; `restore --to` needs no server. Concepts:
 [Backup and restore](../guides/backup.md).
 
@@ -203,16 +203,23 @@ Every verb takes `-s, --server <url>` (default `AOUDA_SERVER` / `AOUDA_URL`), `-
 ```text
 $ aouda backup list
 ID                                 CREATED                            COMPLETE  PITR  BYTES  DATABASES
-backup-2026-11-21-150259-e1638d21  2026-11-21T15:02:59.4266741+00:00  yes       yes   87871  _serverauth, _settings, shop
+backup-2026-11-21-150851-4bccdc05  2026-11-21T15:08:51.8031954+00:00  yes       yes   87867  _serverauth, _settings, shop
 
-$ aouda backup restore --target-time 2026-11-21T15:03:16Z
-restored backup set backup-2026-11-21-150259-e1638d21 to 2026-11-21T15:03:16+00:00
-files        53 (87871 bytes read)
+$ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z
+restored backup set backup-2026-11-21-150851-4bccdc05 to 2026-11-21T15:09:01+00:00
+files        53 (87867 bytes read)
 verified     yes
-pitr         shop: 2 transactions, 3 rows replayed, last commit 2026-11-21T15:03:14.6919619+00:00
+pitr         _serverauth: 11 transactions, 13 rows replayed, last commit 2026-11-21T15:08:46.8577356+00:00
+pitr         _settings: 0 transactions, 0 rows replayed
+pitr         shop: 3 transactions, 3 rows replayed, last commit 2026-11-21T15:08:52.6389213+00:00
 
-$ aouda backup restore backup-2026-11-21-150259-e1638d21 --to /srv/aouda-data --from /backups/aouda
-restored backup set backup-2026-11-21-150259-e1638d21 into /srv/aouda-data
+$ aouda backup restore backup-2026-11-21-150851-4bccdc05 --target-time 2026-11-21T15:09:01Z --to /srv/aouda-data --from /backups/aouda
+restored backup set backup-2026-11-21-150851-4bccdc05 into /srv/aouda-data, staged to 2026-11-21T15:09:01.0000000+00:00 (replayed when the directory is first started)
+files        53 (87867 bytes read)
+verified     yes
+database     _serverauth (Strict, auth)
+database     _settings (Strict)
+database     shop (Strict)
 start it with: aouda start --data-path /srv/aouda-data
 ```
 
@@ -244,7 +251,9 @@ touches; [`aouda load`](#load) reads it. A dump is **not a backup** and holds se
 (**Durability-1 S13, next train**) `aouda load` loads a directory `aouda dump` wrote into a server of this or another version: databases, schema, rows
 (each table verified by row count and digest), materialized queries, then the dump's declaration planned against the server. Run it again to resume:
 a table already loaded is skipped. Exit `0` done, `2` done with the declaration left to adopt, `1` refused or failed, `64` misuse, `69` unreachable, `77` the key
-refused (and a table with a stamp column needs the server operator's key, `LOAD_RESTORE_REQUIRES_OPERATOR`).
+refused (and a table with a stamp column needs the server operator's key, `LOAD_RESTORE_REQUIRES_OPERATOR`). When the data is loaded and only the
+declaration's plan fails, `load` ends with the plan's own status (`1`, `69` or `77`) after the line `the data is loaded; …`: read that line before
+concluding nothing was written.
 
 | Flag | Meaning |
 |---|---|

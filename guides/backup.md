@@ -28,7 +28,7 @@ says what a backup holds, what a restore returns, what happens to retention, and
 | Restore onto a new host from the destination alone | Available (**BL-334, next train**) |
 | Schedule (cron) | Available |
 | Retention policy (`keepLast`, `keepDays`, `pitrWindow`) and `aouda backup prune` | Available; **none by default** (**BL-1635, next train**) |
-| `aouda backup` command line | Available (**BL-403, next train**) |
+| `aouda backup` command line | Available (**Durability-1 S12, next train**) |
 | Branches in a backup and in an exact restore | Available (**BL-335, next train**); a PITR drops them |
 | Encryption of a backup | Not provided: it is the destination's (§9) |
 | Azure Blob Storage and Google Cloud Storage destinations | Not supported (`azure://`, `gcs://` are refused) |
@@ -45,9 +45,10 @@ says what a backup holds, what a restore returns, what happens to retention, and
 - **Incremental by default.** Files are stored by SHA-256, so an unchanged file is stored once. An incremental backup records its base;
   `--full` uploads everything again. If the newest base is of an older backup format, the backup is taken in full.
 - **It needs no quiesced database.** A backup under write load restores exactly. It takes one **fence** — a cut that a transaction in
-  its commit section finishes before — and writers wait for it; they are never failed by it. The wait is bounded at **5 seconds**; in
-  this release's tests, with writes running, the longest hold measured was about 65 ms (**BL-337, next train**). A backup that cannot
-  take the fence in time fails with `BACKUP_FENCE_TIMEOUT` (HTTP 503); retry it.
+  its commit section finishes before — and writers wait for it; they are never failed by it. The fence waits at most **5 seconds** for the commits in flight and is then held
+  at most another 5 seconds while the cut is taken, so a writer waits at most about 10 seconds (**BL-337, next train**). The hold grows with
+  the buffered rows to capture; it has not been measured at production scale (BL-1642). A backup that cannot take or hold the fence in
+  time fails with `BACKUP_FENCE_TIMEOUT` (HTTP 503); retry it, and if it keeps failing, look for a long write that holds a commit section.
 - **Rows in a write buffer are in the backup.** A row that was only in memory (the table's write buffer, or an edge or vector buffer)
   at the cut is written into the backup, and a point-in-time restore replays the log **from the redo-start position**, an earlier position than
   the cut, so that row comes back too (**BL-1440, next train**). Before this release a PITR dropped those rows.
@@ -69,8 +70,11 @@ server on it with `aouda start --data-path <dir>`.
 - **The first open after an exact restore takes longer**: it flushes the restored write buffers so the restored rows are durable
   (**BL-1625, next train**). A crash before it finishes loses nothing; the next open does it again.
 - **A restore syncs what it wrote** before it reports success (**BL-1687, next train**).
-- A restore **refuses** a backup of another format, a damaged file, or a set that is not complete. It tells you why before it touches
-  the target.
+- A restore **refuses** a set that is not complete, a set record or manifest of another format, a target time it cannot serve and a backup it
+  cannot read, before it stops anything. Two checks come **after** the target has been replaced: the files' SHA-256 hashes, and a
+  point-in-time restore's archive window (§4.1). A hash that does not match is reported, not refused: the response says
+  `integrityVerified: false` and the database is opened on what was written — **treat that restore as failed** and restore again from
+  another set (BL-1739). A refused window leaves the database it was restoring part-restored (BL-1740): restore again.
 
 **Point-in-time restore** — see §4.
 
@@ -79,8 +83,6 @@ server on it with `aouda start --data-path <dir>`.
 - Anything outside the data directory: the declaration file (`aouda.json`) and keys set in the environment. Carry them as you do for
   any server.
 - A database the set did not contain.
-- Edge and vector data that a backup taken before this release did not hold; such a backup restores its vector columns unsearchable —
-  take a new backup.
 
 After a restore the server reconciles declared databases as it does at any start.
 
@@ -91,7 +93,7 @@ instant** (`targetTime`).
 
 - **Commit boundaries.** The log carries the time a transaction committed, nothing finer. A restore never lands in the middle of a
   transaction.
-- **Rows buffered at the backup come back** (§2), whether their table existed at the backup or was created after it (**BL-1440, next train**).
+- **Rows buffered at the backup come back** (§2), and so do the buffered rows of tables created after it (**BL-1440, next train**).
 - **Tables created after the backup come back** through any route — REST, a table an insert inferred, an edge table or a vector column,
   schema apply, Embedded — with one row per key; a materialized query defined after the backup comes back, rebuilt. Before this release a
   PITR across a created table could show two versions of an updated row, and a [formula](formulas.md) database then refused to open
@@ -107,8 +109,10 @@ instant** (`targetTime`).
   the database stays quarantined until a new restore — to an earlier target or from a later backup. Give the table a primary key and every
   target is exact (**BL-1624, next train**).
 - **Edge and vector writes** made after the target and before the next row commit are restored (a known limit, BL-1726).
-- **A target earlier than the backup** is refused (`BACKUP_TARGET_TIME_INVALID`, 400), naming both instants; so is a target in the future.
-- **Without a `backupId`** the newest complete set that lies wholly at or before the target is chosen; `404` when there is none.
+- **A target at or before the backup** is refused (`BACKUP_TARGET_TIME_INVALID`, 400), naming both instants; so is a target in the future,
+  and a set that is exact-restore-only (§4.1).
+- **Without a `backupId`** the newest complete set that lies wholly at or before the target is chosen; `404` when there is none. If that set
+  is exact-restore-only the restore is refused; an older set is not tried.
 
 ### 4.1 What a PITR needs
 
@@ -117,7 +121,8 @@ instant** (`targetTime`).
   (**BL-1010, next train**).
 - **WAL that covers the window.** The local WAL since the backup — bounded by write volume, not by days (`MaxSlotWalKeepBytes`) — or,
   past that, the **WAL archive** (`Aouda:Archive`, §6). A restore whose archive does not reach back to the backup's replay position is
-  refused with `PITR_WINDOW_UNAVAILABLE` (409), never restored short (**BL-334, next train**).
+  refused with `PITR_WINDOW_UNAVAILABLE` (409), never restored short (**BL-334, next train**). The check runs after the database's
+  files were replaced, so that database is left part-restored: restore it again, exactly or to a target inside the window (BL-1740).
 - **The WAL-root incarnation the backup was taken in.** An exact restore starts a new incarnation, so a PITR from a backup that
   predates it needs the archive, or a backup taken after the restore.
 - **The archive's RPO for a host loss** is `Aouda:Archive:MaxUnarchivedSeconds` (default 60 seconds) plus one archive check (a minute):
@@ -145,7 +150,7 @@ Backups and the archive grow until you prune them. **There is no default policy:
 |---|---|
 | `keepLast` | the newest N sets |
 | `keepDays` | the sets of the last N days |
-| `pitrWindow` | what a PITR to any instant of this window needs: the newest complete set at or before `now − window`, and everything after it |
+| `pitrWindow` | one base for a PITR to any instant of the window: the newest complete set at or before `now − window`. The sets after it are kept only if another term or the floor keeps them; the archive keeps the WAL from the base's redo-start |
 
 - **The unit is the set**: a set is kept or deleted whole, and a kept set keeps its incremental bases.
 - **The floor**: the newest complete, restorable set is always kept, whatever the policy says.
@@ -225,7 +230,7 @@ curl -s -X PUT http://localhost:5000/admin/backup/schedule -H "Authorization: Be
 
 ## 7. The command line and the API
 
-`aouda backup` takes the server from `--server` / `AOUDA_SERVER` and an operator key from `AOUDA_TOKEN` (or `--token`; an argument shows in the process list) (**BL-403, next train**).
+`aouda backup` takes the server from `--server` / `AOUDA_SERVER` and an operator key from `AOUDA_TOKEN` (or `--token`; an argument shows in the process list) (**Durability-1 S12, next train**).
 Exit statuses: 0 done, 1 refused or failed, 64 misuse, 69 server unreachable or 5xx, 77 key refused, 78 (offline restore) the directory is not empty.
 
 ```bash
@@ -304,7 +309,8 @@ shows an S3 credential in a log, an error or a CLI line, and a database name tha
 
 ## 10. Errors
 
-Every `/admin/backup/*` error carries a `code`, a `message` and a string `remedy` (**BL-1637, next train**). The ones you will meet:
+Every error the backup routes raise is a JSON body with `error` (the message), `code` and a string `remedy` (**BL-1637, next train**); a
+refused key (401 / 403) has the authentication envelope instead. The ones you will meet:
 
 | Symptom | Code and status | What to do |
 |---|---|---|
@@ -312,11 +318,12 @@ Every `/admin/backup/*` error carries a `code`, a `message` and a string `remedy
 | The backup could not take its fence | `BACKUP_FENCE_TIMEOUT` 503 | Retry; a less loaded server takes it |
 | A buffer could not be sealed for the backup | `BACKUP_BUFFERS_UNSEALED` 503 | Retry |
 | A branch could not be captured | `BACKUP_BRANCH_UNAVAILABLE` 409 | Repair or delete the branch the message names, retry |
-| Restore of a backup taken by another build | `BACKUP_MANIFEST_REFUSED` 400 | The first line is `found=3 expected=4 backup=<id> path=<manifest>`. Restore it with the build that took it, or take a new backup after the upgrade |
+| Restore of a set taken before this release | `BACKUP_SET_INCOMPLETE` 409: the set has no completion record | Restore it with the build that took it, or take a new backup after the upgrade |
+| A set whose manifest is of another version | `BACKUP_MANIFEST_REFUSED` 400, `found=<n> expected=4 backup=<id> path=<manifest>` | Restore it with the build that took it |
 | Restore of a set one database failed | `BACKUP_SET_INCOMPLETE` 409 | Restore another set; a prune removes it |
 | A set record of another version | `BACKUP_SET_REFUSED` 400 | Restore with the build that took it |
-| A target before the backup, or in the future | `BACKUP_TARGET_TIME_INVALID` 400 | Pick a target after the set's last cut |
-| The archive does not cover the window | `PITR_WINDOW_UNAVAILABLE` 409 | Pick a target inside the window, restore exactly, or point `--archive` at the archive's destination |
+| A target at or before the backup, or in the future; or a PITR of an exact-restore-only set | `BACKUP_TARGET_TIME_INVALID` 400 | Pick a target after the set's last cut, or restore the set exactly |
+| The archive does not cover the window | `PITR_WINDOW_UNAVAILABLE` 409 | The database named was left part-restored: pick a target inside the window, restore exactly, or point `--archive` at the archive's destination |
 | A bulk load committed before the target is not in the store | `PITR_BULK_LOAD_UNAVAILABLE` 409 | Restore before the load's commit (the message names the job) or from a later backup |
 | A keyless delete the restore cannot apply | `PITR_KEYLESS_DELETE_UNRESOLVED` 409 | Restore to before the instant named, or from a later backup |
 | A damaged pending restore (`PITR_TARGET`) | `PITR_TARGET_REFUSED` | Run the restore again |
@@ -324,14 +331,15 @@ Every `/admin/backup/*` error carries a `code`, a `message` and a string `remedy
 | A damaged versioned file | `FILE_FORMAT_REFUSED`, start exits 78 | The file is named; restore from a backup |
 | A read meets a cold segment whose column file is missing or short | `COLD_SEGMENT_UNREADABLE`, HTTP 500, logged | The read is refused, not answered with nulls; restore from a backup |
 | `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |
-| A restore failed part-way over several databases | the message ends `Databases already restored: …` | Restore again; those databases are already at the restore |
+| A restore failed part-way over several databases | the message ends `Databases already restored: …` | Restore again once the cause is fixed; those databases are already at the restore |
+| A restored file does not match its hash | the response has `integrityVerified: false` (a success status) | Treat the restore as failed; restore another set (BL-1739) |
 | An S3 error on first use | `AmazonServiceException` in the log | Check the bucket, the region and the credential chain |
 
 ## 11. Formats and upgrading
 
 A backup carries its own format (`manifest.json`, version **4**). A build reads one version: a version-3 backup is **listed**
-(`pitrEligible: false`) but cannot be restored by a version-4 build —
-`BACKUP_MANIFEST_REFUSED: found=3 expected=4 backup=<id> path=<manifest>` — and there is no converter. Restore it with the build that took it, or take
+(`pitrEligible: false`, `complete: false`) but cannot be restored by a version-4 build — a set taken before this release has no set
+record, so a restore answers `BACKUP_SET_INCOMPLETE` (409) — and there is no converter. Restore it with the build that took it, or take
 a new backup after upgrading; the first incremental backup after an upgrade is taken full. A data-directory format bump is crossed with
 `aouda dump` and `aouda load`: [Upgrading](upgrading.md). A backup from 0.2.x or earlier (format 1 or 2) is refused the same way.
 
