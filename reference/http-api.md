@@ -912,6 +912,35 @@ The endpoint performs a fast foreground switch, then returns `204`. All cleanup 
 
 ---
 
+#### `POST /api/databases/{db}/quarantine`
+
+Takes a database out of service on purpose. Returns `204 No Content`; the database stops being served and the decision is persisted: a restart keeps it quarantined. Needs `manage` on that database. The declaration does not declare quarantine: it is operator state. A database the server itself quarantined (a failed open, a failed point-in-time restore, a restore that did not complete) is in the same state; `GET /api/databases/{name}` shows it.
+
+| Status | Code | Condition |
+|--------|------|-----------|
+| `404` | `DATABASE_NOT_FOUND` | Database does not exist |
+| `400` | `INVALID_REQUEST` | The request was refused as invalid (the message says why) |
+
+---
+
+#### `POST /api/databases/{db}/unquarantine`
+
+Clears the quarantine and reopens the database: `204 No Content` when it opens. Needs `manage` on that database. Fix the cause first: the reopen runs the same checks as any open, so a database that was quarantined for a reason that still holds is refused again and **stays quarantined**.
+
+| Query parameter | Default | Meaning |
+|---|---|---|
+| `salvagePastCorruptWal` | `false` | Open past a damaged write-ahead-log frame: the damaged frame is skipped by its length and the frames after it are applied; **the skipped frame's writes are lost**. The choice is logged and counted. Leave it `false` unless the message of the refusal told you to and you accept the loss (the alternative is a restore from a backup) |
+
+| Status | Code | Condition |
+|--------|------|-----------|
+| `404` | `DATABASE_NOT_FOUND` | Database does not exist |
+| `400` | `INVALID_REQUEST` | The request was refused as invalid (the message says why) |
+| `503` | `LEGACY_WAL_PRESENT` | A leftover `insert.wal` from an older layout is in the database; it is refused again and the database stays quarantined |
+| `503` | `RESTORE_INCOMPLETE` | A restore of this database did not complete; it stays quarantined until a restore of it completes (**BL-1739, next train**) |
+| `503` | `DATABASE_QUARANTINED` | The reopen was refused again and the database stays quarantined; the message says why. For a damaged WAL segment it is the coded refusal `FILE_FORMAT_REFUSED: kind=wal-segment`, naming the segment and the position and the way on: `salvagePastCorruptWal=true`, or a restore (**BL-1741, next train**) |
+
+---
+
 
 
 #### `POST /api/databases/{db}/query`
