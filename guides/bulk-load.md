@@ -121,6 +121,32 @@ Access is a principal's statements. The credential is an `aouda_` key or a sessi
 
 **Frames.** Every `strict` load writes its WAL frames — one table or several, `skipReplication` included (no replica fetches it); there is no setting that elides them (**BL-1118, next train**). An `os` load and a load into a database without a WAL write none. A point-in-time restore brings back a `strict` load committed before its target ([Backup and restore](backup.md#4-what-a-point-in-time-restore-returns)).
 
+### Frames and a multi-table load
+
+A load's commit point is its closing frame when it writes frames (every `strict` load in a database with a WAL), and its catalog
+record when it does not. A multi-table load is atomic either way (**BL-1133, next train**):
+
+- **With frames** — one closing frame names every table's segments; a crash before it leaves none of the job, a crash after it
+  leaves all of it. `skipReplication` changes nothing here: it means no replica fetches the job, not that it writes no frame.
+- **Without frames** — a `strict` job in a database with no WAL (`unlogged` or `memory`). The job writes one catalog record per
+  table, in turn, behind a marker file that is durable before the first. If the process dies between two of them, the next open
+  finds the marker and **drops the whole job** — every segment it wrote, in every table — and `GET .../bulk-load/{jobId}` answers
+  `state: "lost"`, `errorCode: "BULK_LOAD_LOST"`. Its idempotency key no longer names a commit, so **load it again with the same
+  key**. (An `os` job loads one table, so it never needs this.)
+- **A table that was sent no row.** A committed multi-table job that sent one of its tables nothing is answered `committed` after a
+  restart, and its idempotency key still names the commit (**BL-1714, next train**); a retry with the key answers
+  `alreadyCompleted: true` instead of loading again.
+
+### A committed job the catalog has not recorded yet
+
+The catalog write that records a committed job's segments can fail after the job is committed — a full disk, an I/O error. The job
+is then **committed but not catalogued**: its rows are not visible, and the WAL it needs is held. The server retries the write
+in the background, one second apart at first, then 2, 4, … up to 30 seconds, **until it lands** — no restart is needed — and
+then makes the job visible and releases the WAL (**BL-836, next train**). Until it lands, a graceful shutdown does not write its clean-shutdown marker, and a restart
+catalogues the job from its closing frame instead. A fault that never clears holds the WAL for as long as it lasts: the server logs
+a warning for the first failed retry and every tenth after it, naming the job.
+
+
 ---
 
 ## 2.4 Availability status
@@ -319,7 +345,7 @@ difference is *when* the work is paid — per load, or once for many — not how
 | Segment-level WAL frame (`BulkSegmentCommitted`) | Yes | No | No | `WalTag.cs`, `WalPayloads.Encode/TryDecodeBulkSegmentCommitted` | Includes per-file BLAKE3 bytes. |
 | Closing-frame atomic commit (`BulkLoadCommitted`) | Yes | No | No | `WalPayloads.Encode/TryDecodeBulkLoadCommitted`, coordinator commit path | Job-level atomic close unit. |
 | Abort frame (`BulkLoadAborted`) | Yes | No | No | `WalPayloads.Encode/TryDecodeBulkLoadAborted`, watchdog/force-abort paths | Used by watchdog and operator abort. |
-| Multi-table atomic bulk load | Yes | No | No | `AoudaEngine.BulkLoadAsync` (`AdditionalTables`), controller `_table` checks | Requires a `_table` discriminator column in the append body. |
+| Multi-table atomic bulk load | Yes | No | No | `AoudaEngine.BulkLoadAsync` (`AdditionalTables`), controller `_table` checks | Requires a `_table` discriminator column in the append body. Atomic in both ways a job can commit: one closing frame in a database with a WAL, and, in a database without one, a per-job marker that makes the next open drop a half-committed job whole ([Frames and a multi-table load](#frames-and-a-multi-table-load)) (**BL-1133, next train**). |
 | Lock conflict policy (`Block`/`FailFast`) | Yes | No | No | `BulkLoadOptions`, `TableLoadLockManager`, controller errors | Exposed to client/CLI. |
 | Durable cursor contract (`rowsDurablyCommitted`) | Yes | Yes | No | Protocol DTOs + controller/client code | Server session cursor is updated at commit; append-time cursor granularity is incomplete in Stage 1. |
 | Resume watchdog lifecycle | Yes | No | No | `BulkLoadResumeWatchdog`, lifecycle tests | Default resume window 5 minutes. |
@@ -679,8 +705,10 @@ A load names its own level in `:begin`'s `options.durability` ([HTTP API](../ref
 | `strict` | Every segment file, its directory and the job's commit record are fsynced | Committed | Committed |
 | `os` | The files are written and renamed, and the commit record written, without fsync | Committed | Kept whole, or dropped whole and reported `lost` — never half |
 
-Omitted, a load takes its database's level for a load: `os` in a database at `os`, `strict` everywhere else. A table's own level
-does not change it — an `unlogged` table still gets a `strict` load. `strict` is what every load did before.
+Omitted, a load takes its database's level for a load: `os` in a database at `os`, `strict` everywhere else — except that in an `os`
+database a job whose **every table names `strict`** is `strict` too, because an `os` load into a `strict` table would keep less than
+the table's own writes do (**BL-1175, next train**). A table that inherits the database's level keeps the job at `os`. An `unlogged`
+table still gets a `strict` load. `strict` is what every load did before.
 
 ```csharp
 var handle = await client.BulkLoadAsync("trades", batches, new BulkLoadOptions { Durability = BulkLoadDurability.Os });
@@ -712,16 +740,20 @@ In `Aouda.Client`, `BulkLoadOptions.Durability` is a `BulkLoadDurability?` (`Str
   load pays up front.
 - ⚠️ **If the background sync fails, the database stops taking durable writes.** Every later insert, update, delete, merge, pass and
   checkpoint on it is refused, naming the job, until the server is restarted; the restart verifies the job and keeps it whole or
-  reports it lost. Meanwhile `:status` still answers the job committed at `os`.
+  reports it lost. A **load's commit** is refused the same way, naming the failed job (**BL-1153, next train**). Meanwhile
+  `:status` still answers the job committed at `os`.
 - **An `os` load writes no WAL frame.** Bulk loads are not replicated anyway (**BL-1116**), and on a replica an `os` load's
   consistency token can read as covered without its rows (**BL-1162**): read an `os` load's rows on the primary.
 - **Refused at `:begin`**, `400 BULK_LOAD_INVALID_OPTIONS`, the message naming the level:
   - any other value — `unlogged` and `memory` are table and database levels, not a load's, and names are case-sensitive;
-  - `strict` in a database at `os` (its WAL is not written through);
   - `os` for a job of several tables, or for a table with vector columns, or an edge or vector table.
 
-  So a multi-table load into an `os` database is refused whatever it asks for, and so is a load into a table with vector columns,
-  or an edge or vector table, there.
+  **`strict` is allowed in a database at `os`** (**BL-1175, BL-1146, next train**): the load writes its frames through, and a
+  `strict` acknowledgement syncs the WAL up to its position first, so a power loss keeps the load and every write acknowledged
+  before it, or neither — a prefix of what was acknowledged. A multi-table load, an edge-table load and a load into a table with
+  vector columns in an `os` database therefore **have a level they may use**: name `durability: "strict"` (omitted, they inherit
+  `os` and are refused, and the message ends "Name durability 'strict' to load …"). A bulk load of a table with vector columns
+  fails at every level for now (BL-1248).
 - **Reported:** `:begin` answers `durability`, the level the job will commit at (for a replayed completed job, the level it
   committed at); `:commit` always answers it, an `accepted` answer included; `GET {jobId}` and `:list` give each job's, omitted
   when it is unknown — an accepted job lost before its commit point.
@@ -824,7 +856,7 @@ column; a window inside an `OR` reads as before. A keyed table's bulk-loaded seg
 sidecars — the index and keymap other writers already built — shortly after the commit, so a uniqueness
 check that has to consult one stays cheap.
 
-On top of segment shape, this engine also removes a per-segment fixed cost that shape alone cannot: on a database that does not replicate (`ReplicationMode: DoNotReplicate`, the [single-node profile](single-node-deployment.md)), `LogShipSegments`'s default no longer re-reads and BLAKE3-hashes every written segment file or appends a WAL frame for it. ⚠️ (**BL-1118**) A database left at the default `Replicate` still writes the frames on a server with no replica — the switch is the database's replication mode, not a detected topology — and a multi-table load writes them everywhere; the frames cost about 4 ms a job (Lead `S20b`). Measured on the first worked row above collapsed to `Auto`/16 buckets (250 partitions × 40 rows, 16 sealed segments): `finalizeMs` dropped from 13 ms to 0 ms and `walMs` from 2 ms to 0 ms (`walPosition` becomes `-1` — the same shape `SkipReplication` already used). See [Single-Node Deployment](single-node-deployment.md) for the durability trade-off that default makes.
+A load's per-segment fixed cost is what it costs on any database with a WAL: every `strict` load re-reads and BLAKE3-hashes each written segment file and appends a `BulkSegmentCommitted` frame for it, whatever the database's replication mode (**BL-1118, next train**) — a point-in-time restore replays the WAL over a backup, so a load with no frames was invisible to it. Lead `S20b` measured the frames at about 4 ms a job and about 1 % of a load. A job that writes none is an `os` load and a load into a database without a WAL (its `walPosition` is `-1`). See [Single-Node Deployment](single-node-deployment.md).
 
 For the engineering detail behind these triggers and the ingest buffer budget's own formula, see the private companion guide `docs/dev/BulkLoad-Ingest-Sizing-Guide.md` in the engine repository.
 
@@ -997,7 +1029,7 @@ Tests: `BulkLoadWatchdogLifecycleTests`, `BulkLoadListRouteTests` (`force-abort`
 | `BulkLoadOptions.LockAcquisitionTimeout` | `TimeSpan` | `30s` | positive duration | Engine/API | Lock wait bound. |
 | `BulkLoadOptions.BulkLoadResumeWindow` | `TimeSpan?` | `null` (watchdog default) | positive duration | Engine/API | Per-job override for watchdog timeout. |
 | `BulkLoadOptions.IdentityInsert` | bool | `false` | `true/false` | Engine/API/client / HTTP `:begin` options | When `true`, identity-insert for the whole job (Bond `isAutoIncrementDisabled: true`). Counter floor applied only after successful commit. |
-| `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, 0.6.0**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-060). `strict` in an `os` database, and `os` for a multi-table job, a table with vector columns, or an edge or vector table, are refused `400 BULK_LOAD_INVALID_OPTIONS`. |
+| `BulkLoadOptions.Durability` / `options.durability` | `BulkLoadDurability?` / string | `null`: the database's level for a load (`os` in an `os` database, else `strict`) | `Strict`, `Os` / `"strict"`, `"os"` | Client / HTTP `:begin` options / CLI `--durability` | (**Lead S26c, 0.6.0**) The load's own level; see [A load's durability](#a-loads-durability-strict-or-os-lead-s26c-060). `os` for a multi-table job, a table with vector columns, or an edge or vector table, is refused `400 BULK_LOAD_INVALID_OPTIONS`; `strict` is allowed in an `os` database (**BL-1175, next train**). |
 | `applyTransforms` / `preTransformed` | bool | unset | exactly one when the table has derived columns, checks, or transforms | HTTP `:begin` / client / CLI | Neither flag → `BULK_LOAD_TRANSFORM_INTENT_REQUIRED`. A table with a server-time column takes **only** `applyTransforms` (`preTransformed` → `BULK_LOAD_SERVER_TIME_REQUIRES_TRANSFORMS`), and an identity column is refused the same way (`preTransformed` → `400 BULK_LOAD_IDENTITY_REQUIRES_TRANSFORMS`) (**BL-1278, BL-1170, 0.9.0**). The whole job — every `:append` of the session — is stamped with **one** reading taken when the job starts (**NativeClients, 0.4.0**). See [Insert-time transforms](insert-transforms.md#bulk-load-is-loud) and [server-time stamps](insert-transforms.md#server-time-stamp-servertime). |
 | `Aouda:BulkLoad:MaxRowsPerAppend` | int | `100000` | `>0` | Server config | Per-append HTTP cap. |
 | `Aouda:BulkLoad:MaxQueuedAppendBytes` | long | `67108864` | `>0` | Server config | Byte bound on a job's queue of decoded rows, charged to the governor (**IngestAtSpeed S10, 0.1.40**). |
@@ -1336,7 +1368,7 @@ Both thresholds are configurable (`Aouda:BulkLoad:JobShapeWarnSegmentThreshold`,
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | "Bulk load is not supported for table '…' at durability 'memory'" (**Lead S26, 0.6.0**) | The table's durability level is `memory` (no data files) — `MemoryOnly` before | Load into a table at another level; a table cannot be altered to or from `memory` after it is created. |
-| `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, 0.6.0**) | The level is not `strict` or `os` (lower case); `strict` in a database at `os`; or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into a table with vector columns or an edge or vector table, has no level it may use in an `os` database. |
+| `400 BULK_LOAD_INVALID_OPTIONS` on `:begin`, the message naming a durability level (**Lead S26c, 0.6.0**) | The level is not `strict` or `os` (lower case); or `os` for a multi-table job, a table with vector columns, or an edge or vector table | Send `strict` or `os`, or omit it. A multi-table load, or a load into an edge or vector table, needs `durability: "strict"` in an `os` database (omitted, it inherits `os`). |
 | `GET {jobId}` answers `lost` with `durability: "os"` (**Lead S26c, 0.6.0**) | The server lost power before it had synced the job; at the next open its files did not match its commit record, so it was dropped whole | Load it again with the same idempotency key: it no longer names a commit. |
 | `BulkLoadInvalidOptions` on begin with `skipReplication` | Multi-node safety/policy check failed | Use `logShipSegments` or explicit bypass where allowed. |
 | `BulkLoadMissingDiscriminator` during append | Multi-table load row missing `_table` | Give every row a `_table` value within the declared table set. |

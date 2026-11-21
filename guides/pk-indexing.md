@@ -183,7 +183,18 @@ Invariants:
 - A key names one logical row on a `Strict` table only (**BL-791, 0.3.0**). On `Recent` and `BestEffort` a table can hold
   two live rows with one key, and a DELETE or UPDATE removes exactly the rows its `where` matched: `DELETE … WHERE V = 10` over
   `(Id 1, V 10)` and `(Id 1, V 20)` removes the first only, and `DELETE … WHERE Id = 1` removes both. (Before, it also removed
-  every copy of a matched key held in a segment.) On a `Strict` table a key cannot have two live copies, and the behaviour is unchanged.
+  every copy of a matched key held in a segment.) On a `Strict` table a key is meant to have one live copy, and an insert or upsert keeps it so. A table **switched to
+  `Strict` while it holds a key twice keeps both copies** until a keyed DELETE or UPDATE collapses them: the next DELETE or UPDATE
+  of that key removes **every** live copy that existed when it committed, live and after a crash or a point-in-time restore
+  (**BL-1628, BL-558, next train**; before, a `DELETE … WHERE Id = 4` answered success and the row stayed readable). The ALTER does not
+  refuse a table that holds duplicates (BL-1674). Under `BestEffort` an UPDATE or DELETE applies to **every** live copy its `where` matches — a
+  `where` on the key alone matches all of them — in every tier, and a crash replays exactly that (**BL-557**, proved by
+  `Durability1S09BestEffortEveryCopyTests`; the rule above is unchanged).
+- **Changing a table's mode away from `Strict` is safe under writes** (**BL-939, next train**): the ALTER waits for the table's writes in
+  flight (up to 60 s), flushes the table, then switches — and is refused (a retryable conflict, nothing changed) if the writes do not
+  finish or the flush fails. A DELETE, UPDATE or MERGE that was admitted under the old mode and could not be named in the log
+  is answered `409 WRITE_CONFLICT` ("… logged ids are not known …"; nothing applied; retry). A schema apply reports such a refused
+  change as a **failed apply entry** with the message, not as an HTTP error.
 - Crash recovery honours the same rule (**BL-823, 0.3.0**). On `Recent` and `BestEffort` tables a DELETE, UPDATE or upsert logs
   the rows it marked — a buffered row by its logged id, a sealed one by segment and row — and the replay after a crash marks exactly
   those copies. Before, the log held only keys, so with two live copies of a key, deleting or updating one of them (or upserting the

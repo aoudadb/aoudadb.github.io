@@ -785,7 +785,7 @@ The namespaces match exactly what the engine uses internally, so code written ag
 | `CreateTable` | No | A table exists in desired but not in actual. |
 | `AddColumn` | No | A column exists in desired table but not in actual. |
 | `UpdatePolicy` | No | The `storageTemperature` in the table's `policy` changed. |
-| `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies. |
+| `UpdateDurability` | No | The `level` (or `replicationFactor`) in the table's `durability` changed (**Lead S26, 0.6.0**: `level` replaces `walEnabled`). A change to or from `memory` is refused — a table's storage is fixed when it is made; `strict` ↔ `unlogged` applies, after the table's writes settle (up to 60 s) and it is flushed — otherwise it is refused as a retryable conflict and reported `Failed` in the apply's result (**BL-1152, next train**). |
 | `UpdateSettings` | No | The database-level `settings.durability` (its `replicationFactor`) changed. |
 | `UpdateColumnAutoIncrement` | No | The `autoIncrement` flag on an existing integer column changed. Counted in `DiffSummary.ColumnsAltered`. |
 | `UpdateColumnType` | No | Logical type change (Tier 1 instant widen or Tier 2 validated conversion). May schedule a background `ColumnRewrite` job. |
@@ -1094,7 +1094,7 @@ with the list above (**BL-1460, 0.14.0**: the JSON Schema offered it and the rea
 
 | Field | JSON key | Type | Default | Notes |
 |---|---|---|---|---|
-| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database is at `strict`; a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-060). The retired `walEnabled` is a validation error naming `durability.level`. |
+| `level` | `level` | `string` | `null` (inherit) | (**Lead S26, 0.6.0**) The table's durability level: `"strict"`, `"unlogged"` or `"memory"`; omitted or `null` = inherit the database's level. `"os"` is refused (a database level only); `"strict"` is refused unless the database has a WAL (`strict` or `os`; in an `os` database a `strict` table's writes are synced to the WAL up to each commit — **BL-1175, next train**); a change to or from `"memory"` after the table exists is refused. A table created while its database is at `memory` records `memory`. See [Write Path Durability](write-durability.md#durability-levels-lead-s26-060). The retired `walEnabled` is a validation error naming `durability.level`. |
 | `replicationFactor` | `replicationFactor` | `int` | `null` (inherit) | Replication factor. Note: changing this via schema apply is currently skipped by the apply engine (see `ApplyStatus.Skipped`). Allowed values: non-negative integer, or `null` (inherit database default). |
 
 #### SchemaSettings (value of `settings`)

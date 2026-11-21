@@ -349,8 +349,8 @@ Named queries and named mutations live in `aouda.schema.json`. Identity is the *
 | Catalog | `schema.export()` — name, deprecated, table, projection, cost `1+joinCount` |
 | Test | Name-only `namedQueries.execute` / `batch` (cap 32) / `namedMutations.execute`. Deprecation is a warning, not a failure. Mutations always run as **invoker** (no definer / `runAs`). |
 | Author | Structured wizard (table, projection, AND where, joins ≤ 3, required limit cap). Identifier positions are dropdowns — parameters cannot name tables, columns, or operators. Persist via export → patch map → diff → apply. |
-| Edit | Starts from the stored definition and writes back every member you do not change exactly as stored; saving without edits sends the stored definition unchanged. A member the wizard has no field for (`count`, `aggregates`, `groupBy`, `perKey`, `orderByChoices`, `freshness`, `batchParam`), or cannot show exactly (a where with `or` / `groups` / `ignoreCase` / `whenParamPresent`, a join's `where` or multi-column keys, a nested expression, more than one sort column, a parameter's `serverTime`), is listed under **Kept exactly as stored** with its JSON and is read-only there: change it in the schema file and apply it. (**BL-1470, next train**) |
-| Parameter **required** | Ticked by default, as the server reads an omitted `required` as `true`; unticking writes `"required": false`. (**BL-1470, next train**) |
+| Edit | Starts from the stored definition and writes back every member you do not change exactly as stored; saving without edits sends the stored definition unchanged. A member the wizard has no field for (`count`, `aggregates`, `groupBy`, `perKey`, `orderByChoices`, `freshness`, `batchParam`), or cannot show exactly (a where with `or` / `groups` / `ignoreCase` / `whenParamPresent`, a join's `where` or multi-column keys, a nested expression, more than one sort column, a parameter's `serverTime`), is listed under **Kept exactly as stored** with its JSON and is read-only there: change it in the schema file and apply it. (**BL-1470, 0.16.0**) |
+| Parameter **required** | Ticked by default, as the server reads an omitted `required` as `true`; unticking writes `"required": false`. (**BL-1470, 0.16.0**) |
 | Generate Types | Optional Args/Row types. Execute and subscribe use the schema name as a string. |
 
 SQL-ish authoring (ADR 0040 D-24) is not in Studio. Full contract: [Named queries](named-queries.md).
@@ -389,8 +389,29 @@ Per-node detail page (clickable from topology):
 
 ## 7) Backup Management
 
+The **Backups** page (`/admin/backups`). Released Studio (0.16.0) restores an exact backup only and has none of the rows marked
+**next train** below (**BL-332, next train**); the server's own point-in-time restore is available over HTTP, both SDKs and
+`aouda backup restore` today ([Backup and restore](backup.md)).
+
 | Feature | UI |
 |---------|-----|
+| Trigger backup | Button; the answer names the backup and how long it took. A call that times out is shown as "may still be running", never as failed |
+| Available backups | Table of backup **sets** (one set covers every database, the auth database first): id, state badge — `complete`, `incomplete` (a member failed; **not restorable**: "take a new backup") or `refused` (the reason, with any database name masked if it is key-shaped) — a `PITR base` / `no PITR` badge, the databases it holds, a **Restore** button (exact restore; never offered for an incomplete or refused set) and a **Detail** row (**BL-332, next train**) |
+| Set detail | Per database: the cut time (UTC), the redo-start position `R` and the WAL position `P`, the manifest and whether the database is a point-in-time base; members with no manifest and manifests the set record does not name are listed (**BL-332, next train**) |
+| Restore | Select backup → confirmation → progress indicator. The confirmation says: every database is replaced and restarted; anything committed after the backup is discarded; **users, roles and keys return to that time too — a key created after it stops working**; the page reloads its data. Nothing is sent until the box is ticked and **Restore** pressed |
+| Point-in-time restore | A **base backup** (the default: the newest backup at or before the target, chosen by the server, or a specific one) and a **target time**, with its UTC equivalent shown; the page states the window — from the oldest backup that can be a base to now — and the server refuses a time its WAL archive cannot reach. A target before the chosen backup is refused before anything is sent. The same confirmation, saying "after the target". A restore lands on a commit boundary ([what a point-in-time restore returns](backup.md#4-what-a-point-in-time-restore-returns)) (**BL-332, next train**) |
+| Schedule | Cron expression, destination and incremental flag, saved with `PUT /admin/backup/schedule` — it keeps the retention policy (**BL-332, next train**) |
+| Retention | Keep last N backups, keep N days, PITR window (whole days). **Save replaces the whole policy**; with none, "every backup is kept" — nothing is pruned by default. The newest restorable backup is always kept, and so is any backup the point-in-time window still needs (**BL-332, next train**) |
+| Prune | **Preview** first (nothing deleted): each backup's outcome and the rule that decided it, and per database the backups and blobs deleted and bytes reclaimed; then a confirmed **Prune**, which shows what the server *actually* deleted (it computes the plan again when it executes) (**BL-332, next train**) |
+| Restore onto a new server | Static help, no control: the server does not restore into another directory over HTTP. Start a fresh server with the same archive destination and restore the set from this page, or restore offline with `aouda backup restore <set id> --from <destination> --to <empty data dir>`. S3 credentials are the server's configuration and are never shown (**BL-332, next train**); see [Restore to a new host](restore-to-a-new-host.md) |
+| Errors | Every backup error is shown with its code, its message and the server's `remedy` text, with Retry where retrying helps (**BL-332, next train**) |
+
+Studio's AI tools and the MCP `aouda_backup_restore` tool restore an **exact** backup only; point-in-time restore, retention and prune are
+operator acts and are not offered to an agent. After a restore Studio discards its data clients' consistency tokens: a token from before
+the restore is ahead of the rewound node, and every read carrying it would answer `409 TOKEN_UNSATISFIED` until it is discarded
+(**BL-332, next train**).
+
+---------|-----|
 | Trigger backup | Button: full or incremental |
 | List backups | Table with ID, type, timestamp, size, status |
 | Restore | Select backup → confirmation → progress indicator |
