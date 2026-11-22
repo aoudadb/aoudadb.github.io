@@ -92,7 +92,7 @@ A limited key is how a backend acts for one call without holding the user's pass
 
 `POST /api/databases/{db}/auth/signin` and `POST /api/auth/signin` exchange a password for a session (access token and refresh token). `POST …/auth/refresh` rotates the refresh token and keeps the assurance level the session was minted with.
 
-The sign-in body may include `databases`: the session is then limited to those databases, the same narrowing as a limited key. An omitted `databases` means **no limit**. It does not mean a default list derived from a role.
+The sign-in body may include `databases`: the session is then limited to those databases, the same narrowing as a limited key. An omitted `databases` means **no limit**. It does not mean a default list derived from a role. No limit is written on the access token as `aud: ["*"]` (see [What a session token carries](reference.md#what-a-session-token-carries)).
 
 A session's `whoami` credential is `type: session`, with `signedInWith` (`password` or `oidc`), `aal`, and for OIDC the `issuer` and `subject`.
 
