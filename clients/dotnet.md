@@ -288,6 +288,12 @@ parameter is bound to the column of the same name (**BL-1390, 0.11.0**; see [Get
 Query results arrive as column-batch frames and are read into typed columns; the values are the ones the JSON answer would
 give.
 
+**Combinations the builder refuses before sending anything** (`InvalidOperationException`; each would otherwise have asked the server for something it cannot carry, and answered something else):
+
+- `SelectExpr` with a join, in either order — a joined query computes no column (**Correctness-Hardening S08, next train**). A join whose two key columns can never compare surfaces as an `AoudaException` with `ErrorCode` `JOIN_KEY_TYPE_MISMATCH` and `StatusCode` 400.
+- `DeleteAsync`, `UpdateAsync`, `SubscribeAsync` and `TruncateAsync` on a query narrowed by `LatestPerKey` / `FirstPerKey`, `Join` / `JoinWhere`, an aggregate, `GroupBy` or `Distinct`; a `Skip` on a delete or an update; a `Limit` on an update; and `TruncateAsync` with a `Where`, a `Limit` or a `Skip` — the wire carries only the `Where` conditions (and a delete's `OrderBy` / `Limit`), so these used to act on every row the filter matched (**BL-857, next train**).
+- A collection passed to the single-row overload of `InsertAsync` (`InsertAsync(new[] { entity })`): pass the collection to the many-rows overload. Dictionary rows given to the single-entity overload are inserted as rows (**BL-1242, next train**).
+
 Predicates, operators and pagination: [Getting Started: Working with data](../getting-started/index.md#5-working-with-data)
 and the [Query guide](../guides/query.md). Named queries: [Named queries](../guides/named-queries.md).
 

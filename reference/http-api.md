@@ -107,6 +107,8 @@ An unlinked database on the data plane is governed by `_serverauth`. Its anonymo
 
 Both listeners. Never `403`. Optional query `database` keeps statements whose resource is `*`, names that database, or begins with it. `server` is not filtered out by a database name.
 
+(**BL-1611, next train**) A `?database=` that no auth database governs (only possible on a server with no server auth database) has no `anonymous`: `401 AUTH_CREDENTIAL_MISSING`. On the admin listener, a path the server does not serve answers a presented credential's own refusal, and a credential that resolves gets an empty `404` (**BL-1613, next train**).
+
 No credential on the admin listener: `401 AUTH_CREDENTIAL_MISSING` with remedy `sign-in`. No credential on the data plane with `?database=`: `200` as that database's `anonymous`, `"credential": null`, and **no** `remedy` member. No credential on the data plane without `database`: `400 INVALID_REQUEST`.
 
 ```json
@@ -215,9 +217,11 @@ Open sockets end as [Revocation](../auth/credentials.md#revocation) describes: o
 | `POST` | `/api/databases/{db}/auth/signin` | `{ "email", "password", "databases"? }` | A token pair. Omitted `databases` means the session has no database limit. |
 | `POST` | `/api/auth/signin` | the same | A `_serverauth` principal. |
 | `POST` | `…/auth/refresh` | the refresh token | A new pair at the same `aal`. |
-| `POST` | `…/auth/signout` | | Revokes the session. |
+| `POST` | `…/auth/signout` | | Revokes the session. Idempotent: repeating it with the same token answers `200` again (**BL-1019, next train**). |
 
 A session token carries `iss`, `sub` (the principal id), `email`, `sid`, `aal`, `exp`, `iat`, `jti`, and `aud` from its limit. The library may also write `nbf`. It does not carry a role list or a permission list.
+
+(**BL-1019, next train**) A password change (`PUT …/auth/password`) that answers `503` or `409` changed nothing: the old password still signs in. An administrator's `DELETE /api/auth/admin/sessions/{id}` ends a session by its id whether or not it still has a row (`204`); `404` only when neither a session row nor a refresh family has that id.
 
 Password reset and MFA stay on the routes in [Setup and flows](../auth/setup.md). The admin path segment `users/{id}` takes the principal's id.
 
@@ -489,7 +493,7 @@ table", since 0.9.0). The `error` names the column, its type and the clause: `AR
 | `PARTITION_KEY_FIXED` | 400 | (**BL-1199, 0.9.0**) A table's partition key is fixed when the table is created. Refused: dropping (`DELETE …/columns/{c}`) or renaming (`PATCH …/columns/{c}` with `newName`) a partition-key column, and a schema document (`POST …/schema/apply`, its dry run, or a branch merge) that changes a table's `partitionKey` or a column's `partitionFunction`, or drops, renames or adds a key column. The message names every reason; nothing was applied. Drop and re-create the table to change its key. Before, schema apply ran the column changes and returned a warning beside the result, and the column routes applied them |
 | `DATABASE_NOT_FOUND` | 404 | The specified database does not exist |
 | `DATABASE_EXISTS` | 409 | A database with the specified name already exists |
-| `BRANCH_EXISTS` | 409 | A branch with the specified name already exists |
+| `BRANCH_EXISTS` | 409 | A branch with the specified name already exists, compared without regard to case (**BL-1341, next train**) |
 | `MERGE_CONFLICT` | 409 | Branch merge has conflicts that must be resolved or forced |
 | `NOT_FOUND` | 404 | Generic not-found (used when a more specific code is not available) |
 | `PARTITION_FILTER_REQUIRED` | 400 | Query on a partitioned table is missing the required partition key filter. `crossPartitionAccess` waives it and nothing else; on the data-plane listener it is not accepted and the guard decides (**BL-1227, 0.9.0**) |
@@ -531,7 +535,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `AUTH_KEY_ROUTE_MISMATCH` | 403 | Not produced (**BL-1464, 0.16.0**). See [the auth error envelope](#auth-error-envelope). |
 | `AUTH_INVALID_CREDENTIALS` | 401 | Signin credentials are invalid (wrong password or non-existent email) |
 | `AUTH_ACCOUNT_LOCKED` | 423 | Account is temporarily locked due to too many failed attempts. `Retry-After` header is set. |
-| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh presented for a principal an administrator disabled. The body is the auth payload and includes `suggestion` (not the remedy envelope). That principal's access token is `401 AUTH_CREDENTIAL_REVOKED`. Disabling the principal ends its open sessions |
+| `AUTH_ACCOUNT_DISABLED` | 423 | A refresh presented with the newest, unexpired refresh token of a family of a principal an administrator disabled (a rotated or expired token is `401 AUTH_REFRESH_TOKEN_INVALID`; **BL-1002, next train**). The body is the auth payload and includes `suggestion` (not the remedy envelope). That principal's access token is `401 AUTH_CREDENTIAL_REVOKED`. Disabling the principal ends its open sessions |
 | `AUTH_RATE_LIMITED` | 429 | Too many auth requests — rate limit exceeded. `Retry-After` header is set. |
 | `RELOAD_REFUSED` | 422 | (**BL-1427, 0.14.0**) `POST /api/admin/reload`: the declaration has an `error` finding (what the next start would refuse); nothing was changed. The body is the plan with every finding |
 | `RELOAD_PARTIAL` | 207 | (**BL-1427, 0.14.0**) A reload stopped part-way (`failedStep`); the steps before it are applied, `/ready` says `reload_failed`. Reload again |
@@ -572,7 +576,7 @@ Auth errors use the `AuthErrorPayload` shape (see [Auth Error Responses](#auth-e
 | `SCHEMA_UNKNOWN_MEMBER` | 400 | (**BL-1460, 0.14.0**) A schema document (`schema/apply`, `schema/diff`, their request bodies, a schema file read by the CLI or at start, an `--env` overlay) has a member the format does not have, or a known member in another case: member names are case-sensitive. Nothing is applied. `error` names every such member with its JSON pointer and, when one is close, the member meant: `unknown member 'nulable' at /tables/orders/columns/status; did you mean 'nullable'?`. At most 20 are listed, then `and N more.`; a name over 64 characters is cut to 64 plus `…` and gets no suggestion. Fix: rename or remove the member. Before, it was dropped without a word |
 | `SCHEMA_OVERLAY_MEMBER_NOT_ALLOWED` | — | (**BL-1460, 0.14.0**) An environment overlay (`<base>.<env>.json`) carries a member the merge does not apply: anything but `$schema`, `extends`, `settings.durability` and an existing table's `policy` and `durability`. Raised where an overlay is read (`aouda plan`, the CLI's `--env`, the start's `SchemaEnvironment`), not by an HTTP endpoint; `aouda plan` and the start report it as the finding `SCHEMA_OVERLAY_INVALID` ([Declaration Finding Codes](plan-codes.md)). Fix: move the member to the base file. Before, it was dropped |
 | `EXPRESSION_OVERFLOW` | 400 | (**BL-1481, 0.15.0**) A `setExpr`, or a derived column's expression, overflowed 64-bit integer or 18-digit decimal arithmetic for a row; nothing written |
-| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp) |
+| `TRANSFORM_DERIVED_READONLY` | 400 | Caller supplied a value for a derived column (including an identity or server-time stamp). At `…/bulk-load/:append`, also when `set-identity` was removed from a table's transform since `:begin` and a frame carries a value in such a column (**BL-1579, next train**) |
 
 #### State Errors (4xx)
 
@@ -655,6 +659,10 @@ or a heap exhaustion was `INVALID_REQUEST`, a refused snapshot `SNAPSHOT_FAILED`
 | `NAMED_QUERY_PROJECTION_REQUIRED` | 400 (schema apply) | Named query omitted `select` / `selectExpr` |
 | `NAMED_QUERY_PROJECTION_STAR` | 400 (schema apply) | `select: ["*"]` is refused |
 | `NAMED_QUERY_TOO_MANY_JOINS` | 400 (schema apply) | Join count exceeds cap (default 3) |
+| `NAMED_QUERY_COLUMN_INVALID` | 400 (schema apply) | (**BL-997, BL-857, next train**) A column a definition names cannot execute: a joined definition's `select`, `orderBy` or `orderByChoices` must be written `Table.Column`; names are case-sensitive and checked against the table the clause binds to (the base `where` the base table, `joins[i].where` its join's); a sort column must be of a type the engine orders (not `Bool`, `Guid`, `Float32` or `Byte`). The message names the clause and the spelling to use. |
+| `JOIN_KEY_TYPE_MISMATCH` | 400 | (**Correctness-Hardening S08, next train**) A join's two key columns have types that can never compare (see the Join Clause). Also raised by `schema apply` for a named query, and by a named-query subscribe as an `error` message. Join on comparable types, or store the key in one type on both tables. |
+| `MATERIALIZED_QUERY_NEEDS_SOURCE_KEY` | — (schema apply) | (**BL-1326, next train**) A primary-key change would leave a `topNPerGroup` materialized query without a source key. In schema apply it is a `Failed` entry whose `reason` starts with the code. No retry satisfies it: drop the named `topNPerGroup` queries first, or keep a primary key. |
+| `BRANCH_TABLE_UNAVAILABLE` | 409 | (**BL-1333, next train**) A branch query or insert named a table the database dropped (or, for a materialized query's result, rebuilt into a new table) after the branch was created. Create a new branch to read the current table; the branch's other tables answer as before. |
 | `NAMED_QUERY_COST_EXCEEDED` | 400 (schema apply) | Persist-time cost `1 + joins` exceeds cap (default 8) |
 | `NAMED_QUERY_SUBSCRIBE_REQUIRED` | WS error | Data-plane `subscribe` without a named-query `"name"`. By design: the data-plane cannot compose a query (ADR 0040 C-2). Subscribe by name, or send the table subscription (`target` + `filter`) to the **admin** listener with a credential whose statements allow it |
 | `NAMED_QUERY_SUBSCRIBE_FILTER` | WS error | Subscribe-by-name also sent a client `filter` |
@@ -1126,6 +1134,8 @@ storing a definition that could never execute.
 | `where` | object | No | A filter on the joined table, in the `where` format; its column names are that table's, and its values are read with that table's culture (a slash date on its `Date` column is read the way a `where` on that table reads it). It applies to the joined table's rows before they join (**BL-818, 0.3.0**). |
 
 For single-column equality joins, use `leftColumn` + `rightColumn`. For multi-column equality joins, use `leftColumns` + `rightColumns` (same length). `"cross"` join requires neither.
+
+(**Correctness-Hardening S08, next train**) **Join keys of two numeric types join by value**: an `Int32` key meets a `Double` `2.0`, an `Int64` a `Decimal(p,s)` `2.00`, an `Int64` a `UInt64` of the same value. Two key types that can never compare — a string with a number, a `Timestamp` with a `Date`, a `Guid` with a string, a `Bool` with a number, a `Double` / `Float32` with a `Decimal(p,s)` — are refused `400 JOIN_KEY_TYPE_MISMATCH`, naming both columns and their types, when the query is built and again when it runs. A key column that does not exist, or is not a visible column (an aggregate result's hidden state column), is refused as an unknown column. `selectExpr` cannot be combined with `joins` (`400 INVALID_REQUEST`): a joined query computes no column.
 
 **The query's `where` filters the base table; a join's `where` filters its joined table.** A joined row the join's `where`
 rejects takes part in no match: an inner or cross join drops it, a left join answers the base row with `null` in that table's
@@ -2049,7 +2059,7 @@ not stamp identity, so a stamp column is not filled before that check. A refusal
 changes `storageTemperature` or `retention` answer `400 DECLARATIVE_SCHEMA_DDL_FORBIDDEN`. A `PUT …/policy` that restates the current
 temperature and changes only `memoryRowCap`, `targetMemoryBytes`, `memoryFilter` or `hotOnlyBackstop` is served, because the schema file
 declares no residency. A table created by `POST …/tables` is not affected. `InferenceMode` decides only what an insert into a
-missing table does: `Off` and `On` answer `404`, and `Extend` creates the table.
+missing table does: `Off` and `On` answer `404`, and `Extend` creates the table. Creating the table needs an unconditional `write` on it: a `write` with a `where` is `403 AUTH_POLICY_DENIED` and nothing is created (**BL-1578, next train**).
 
 #### `GET /api/tables`
 
@@ -3227,7 +3237,7 @@ Each operation must specify either (`set` or `setExpr`) or `delete: true`, not b
 
 The query endpoint accepts an optional `selectExpr` field alongside (or instead of) the
 standard `select` field. Computed columns are evaluated server-side and appended to the
-result — they are never stored.
+result — they are never stored. Not with `joins` (**Correctness-Hardening S08, next train**): the query is refused `400 INVALID_REQUEST`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3575,6 +3585,7 @@ During a start-time schema apply (**BL-1462, 0.14.0**):
 | `database_pending` | A database in the declaration file (`aouda.json`) does not exist yet. | the database |
 | `database_not_open` | A database in the declaration file is registered and not open (failed to open, or quarantined by something other than an operator). | the database |
 | `database_reconcile_failed` | The reconcile of the declared databases after a restore was refused; the server keeps running. | the database, when one is named |
+| `access_converge_failed` | (**BL-1596, next train**) The declared access section could not be converged after the last restore. Where the node writes, what the declaration file removed (a principal, a role, a credential) is removed and the rest waits. Cleared by the next converge that completes (a reload or a restore). | the auth database |
 | `reload_failed` | (**BL-1427, 0.14.0**) The last `POST /api/admin/reload` stopped part-way; the steps before it are applied. Cleared by the next reload that completes; a refused reload adds none. | the entry (a database, role or key name), when one is named |
 | `schema_pending` | A declared database's `SchemaFile` has not been applied yet (**BL-1406, 0.11.0**). | the database |
 | `schema_applying` | (**BL-1462, 0.14.0**) The start-time apply is applying this declared database's `SchemaFile` now. `progress.done` is the declared databases with a schema file whose apply has finished, `progress.total` all of them; the ones not reached yet are each `schema_pending`. Databases are applied one at a time, in name order. | the database |

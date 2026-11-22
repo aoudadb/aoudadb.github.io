@@ -142,13 +142,14 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
     },
     "equity.stockOverview": {
       "table": "Position",
-      "select": ["ticker", "qty", "bid", "ask"],
+      "select": ["Position.ticker", "Position.qty", "EquityQuote.bid", "EquityQuote.ask"],
       "limit": 500,
       "joins": [
         {
           "table": "EquityQuote",
           "type": "inner",
-          "on": { "and": [{ "column": "ticker", "op": "eq", "right": "ticker" }] }
+          "leftColumn": "ticker",
+          "rightColumn": "ticker"
         }
       ],
       "where": {
@@ -184,6 +185,7 @@ Named queries live in `aouda.schema.json` next to tables. They are **per-databas
 
 Notes:
 
+- (**BL-997, BL-857, next train**) A **joined** definition writes its `select`, `orderBy` and `orderByChoices` as `Table.Column`, as the join's result names its columns; column names are case-sensitive. `schema apply` checks every column a definition names the way the engine reads it at execute — against the table its clause binds to, a join's table and key columns existing and comparable (`JOIN_KEY_TYPE_MISMATCH`), and a sort column of a type the engine orders — and refuses what cannot execute with `NAMED_QUERY_COLUMN_INVALID`, naming the clause and the spelling to use. A joined parameter is typed by its own table's column.
 - `equity.stockOverview` does **not** select `internalSpread`. Column exposure is the projection. A later commit that adds `internalSpread` to `select` is an access-surface **widening** — [CI will fail `--access`](../auth/authorization.md#audit).
 - Parameter types are inherited from the compared column. Declare `min` / `max` / `enum` / `maxLength` / `maxItems` / `required` on top. **`required` defaults to `true` when omitted** — `"status": { "enum": […] }` alone is still a required param. Write `"required": false` explicitly for optional args (and always when pairing with `whenParamPresent`).
 Access is a principal's statements. The credential is an `aouda_` key or a session; `GET /api/auth/whoami` names the principal (**BL-1464, 0.16.0**).

@@ -83,6 +83,8 @@ A statement on a resource the principal's auth database does not govern is refus
 
 A missing attribute, a value that cannot be bound, or several values under a scalar operator match no row.
 
+(**BL-1580, BL-1562, BL-1301, next train**) A `write` statement's `where` is decided on the row **as stored** — after defaults are filled and a derived `Decimal` is rounded — and an upsert that replaces a row is decided on the row it commits, under the commit, so a concurrent writer cannot slip a replaced row past it. A **formula row** (an `Expression` column's row) is admitted only by a statement whose `where` does not name the column it computes from; every refusal is `403 AUTH_ROW_DENIED` with remedy `none`. A multi-row upsert refused under a concurrent writer may have written its other rows (BL-1716).
+
 An update's scope is the `write` statement's `where` alone. `returning` shows only rows the caller's `read` admits: a row the write touched and the read does not admit is omitted from the response, not returned under another principal's eyes.
 
 ## Embargo
