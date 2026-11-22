@@ -82,6 +82,19 @@ server on it with `aouda start --data-path <dir>`.
   embedded open throws — until a restore of it completes (**BL-1739, BL-1740, next train**). A refused blob, a cancellation or a crash
   part-way therefore never leaves the old database's catalog over the backup's files: run the restore again, or restore another set.
 
+- **A failed restore does not take the operator's sign-in.** The server's auth database (`_serverauth`, and every other auth database in
+  the set) is restored **last**, into a copy beside it, and swapped in by rename only once every other member has restored. A restore
+  that fails — a full disk, a damaged blob, in any member or in the auth database itself — leaves it as it was: the operator's key still
+  signs in, a restart opens it, and the restore can be run again. The data member a failed restore stopped in still refuses to open
+  until a restore of it completes (above). A crash during the swap is finished by the next start: the old auth database before the
+  swap's commit, the restored one from it — never neither (**BL-1761, next train**).
+- **A restore checks the space first.** Before anything stops, it compares what it will write — every member's backed-up files, the copy
+  each auth database is restored into, the WAL a point-in-time restore stages — plus a margin of 16 MiB and 5 % with the free space of
+  the data directory's volume, and refuses `507 DISK_FULL` (with `Retry-After`) naming both numbers when it does not fit; nothing is
+  changed. The offline `aouda backup restore --to` asks the same before it creates the directory (`DISK_FULL`, exit 1). What an in-place
+  restore deletes first is **not** counted: a disk with less free space than the backup needs space freed first, or an offline restore
+  onto another volume (**BL-1761, next train**).
+
 **Point-in-time restore** — see §4.
 
 ### 3.1 What a restore does not bring back
@@ -316,7 +329,8 @@ shows an S3 credential in a log, an error or a CLI line, and a database name tha
 ## 10. Errors
 
 Every error the backup routes raise is a JSON body with `error` (the message), `code` and a string `remedy` (**BL-1637, next train**); a
-refused key (401 / 403) has the authentication envelope instead. The ones you will meet:
+refused key (401 / 403) has the authentication envelope instead, and a `507 DISK_FULL` (a backup's or a restore's) the capacity envelope:
+`error`, `code` and `details`, with `Retry-After`. The ones you will meet:
 
 | Symptom | Code and status | What to do |
 |---|---|---|
@@ -338,7 +352,8 @@ refused key (401 / 403) has the authentication envelope instead. The ones you wi
 | A damaged WAL frame that is not a crash's torn tail, or a missing WAL segment | `FILE_FORMAT_REFUSED: kind=wal-segment`; the database stays quarantined, the server and its other databases run (**BL-1741, next train**) | The segment and the position are named; restore from a backup, or `unquarantine?salvagePastCorruptWal=true` to skip the frame and lose its writes |
 | A read meets a cold segment whose column file is missing or short | `COLD_SEGMENT_UNREADABLE`, HTTP 500, logged | The read is refused, not answered with nulls; restore from a backup |
 | `azure://` or `gcs://` | `BACKUP_DESTINATION_UNAVAILABLE` 503 | Use `s3://` or a path |
-| A restore failed part-way over several databases | the message ends `Databases already restored: …` | Restore again once the cause is fixed; those databases are already at the restore |
+| A restore failed part-way over several databases | the message ends `Databases already restored: …`, and says the auth databases were not changed (**BL-1761, next train**) | Restore again once the cause is fixed; those databases are already at the restore, and the operator is still signed in |
+| The data volume cannot hold the restore | `DISK_FULL` 507 + `Retry-After`, naming the bytes needed and free; offline, `DISK_FULL` and exit 1 (**BL-1761, next train**) | Nothing was changed: free space (or restore offline onto a larger volume) and retry |
 | A blob of the set or the WAL archive does not match its key | `BACKUP_BLOB_DAMAGED` 409, naming the file and the set | Restore another set: the destination's copy is damaged. The database the restore stopped in refuses to open until a restore of it completes (**BL-1739, next train**) |
 | A database whose restore did not complete | `RESTORE_INCOMPLETE`: the database is quarantined (an embedded open throws; an unquarantine answers 503 `RESTORE_INCOMPLETE`) | Run the restore again, or restore another set; a restore that completes clears it (**BL-1739, BL-1740, next train**) |
 | An S3 error on first use | `AmazonServiceException` in the log | Check the bucket, the region and the credential chain |
